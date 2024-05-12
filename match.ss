@@ -55,6 +55,38 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                             (process-pattern #'rest #'pat1 body fk)
                                             fk))
                        (#,fk)))]
+              [#()
+               #`(if (and (vector? expr-id) (fx= 0 (vector-length expr-id)))
+                     #,body
+                     (#,fk))]
+              ;; `pats` has at least one pattern
+              [#(pats ...)
+               #`(if (vector? expr-id)
+                     #,(with-syntax ([(vlen) (generate-temporaries '(vlen))])
+                         #`(let ([vlen (vector-length expr-id)])
+                             (if (fx= 0 vlen)
+                                 (#,fk)
+                                 #,(let loop ([veci 0] [pats #'(pats ...)])
+                                     (with-syntax ([vi (datum->syntax #'expr-id veci)])
+                                       (syntax-case pats ()
+                                         ;; here we use list pattern for ease of looping
+                                         [()
+                                          #`(if (fx= vi vlen)
+                                                #,body
+                                                (#,fk))]
+                                         [(pat dots)
+                                          (eq? (datum dots) '...)
+                                          #'not-impl]
+                                         [(pat0 dots pat1)
+                                          (eq? (datum dots) '...)
+                                          #'not-impl]
+                                         [(pat0 pat1 ...)
+                                          (with-syntax ([(vitem) (generate-temporaries '(vitem))])
+                                            #`(let ([vitem (vector-ref expr-id vi)])
+                                                #,(process-pattern #'vitem #'pat0
+                                                                  (loop (add1 veci) (cdr pats))
+                                                                  fk)))]))))))
+                     (#,fk))]
               [lit
                (literal? #'lit)
                #`(if (equal? lit expr-id) #,body (#,fk))]
@@ -90,7 +122,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                 #`(let match-loop ([v e])
                     #,(generate-skeleton #'v (cons #'cl0 #'(cl* ...)) #'(begin e0 e* ...))))]
         [(k e cl0 cl* ...)
-         (begin (printf "1~n")
+         (begin (printf "2~n")
                 #'(let ([v e])
                     (match v cl0 cl* ...
                            [else (errorf 'match "no match found for: " v)])))]
