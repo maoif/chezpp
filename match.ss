@@ -92,7 +92,10 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                #`(if (equal? lit expr-id) #,body (#,fk))]
               [under
                (equal? (datum under) '_)
-               body]))))
+               body]
+              [sym
+               (identifier? #'sym)
+               #`(if (eq? 'sym expr-id) #,body (#,fk))]))))
       (define process-clause
         (lambda (expr-id cl fk)
           ;;(printf "process-clause ~s ~s ~s~n" expr-id cl fk)

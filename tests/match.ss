@@ -47,6 +47,10 @@
        [(_ ,x _ _) x]
        [else #t])
 
+     (equal? 'x
+             (match '(unquote x)
+               [(unquote ,y) y]))
+
 
      ;; TODO guards
 
