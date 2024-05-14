@@ -60,7 +60,47 @@
 
 
 ;;;; list with ellipses
+(mat list-with-ellipses-in-the-end
+     (match '(1)
+       [(,a ...) #t]
+       [else #f])
 
+     (equal? '(1 2 3)
+             (match '(1 2 3)
+               [(,a ...) a]
+               [else #f]))
+
+     (equal? '(2 3)
+             (match '(1 2 3)
+               [(,a ,b ...) b]
+               [else #f]))
+
+     (equal? '(1 2 3 4)
+             (match '((1 11) (2 22) (3 33) (4 44))
+               [((,a ,b) ...) a]))
+
+     (equal? '(11 22 33 44)
+             (match '((1 11) (2 22) (3 33) (4 44))
+               [((,a ,b) ...) b]))
+
+     (equal? '((1 11) (2 22) (3 33) (4 44))
+             (match '((1 11) (2 22) (3 33) (4 44))
+               [((,a ...) ...) a]))
+
+     )
+
+(mat list-with-ellipses-in-the-middle
+
+     (equal? '(4 44)
+             (match '((1 11) (2 22) (3 33) (4 44))
+               [((,a ...) ... ,b) b]))
+
+     ;; full match after ...
+     (equal? '()
+             (match '((1 11) (2 22) (3 33) (4 44))
+               [((,a ...) ... ,b ,c ,d ,e) a]))
+
+     )
 
 ;;;; vector
 

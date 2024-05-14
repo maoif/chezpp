@@ -32,6 +32,13 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                 (char? p)))))
       (define process-pattern
         (lambda (expr-id pat body fk)
+          (define extract-pat-vars
+            (lambda (pat)
+              (let loop ([pat pat] [patvars '()])
+                (syntax-case pat (unquote)
+                  [,var (identifier? #'var) (cons #'var patvars)]
+                  [(pat0 . pat1) (loop #'pat0 (loop #'pat1 patvars))]
+                  [_ patvars]))))
           ;;(printf "process-pattern ~s ~s ~s ~s~n" expr-id pat body fk)
           (with-syntax ([expr-id expr-id])
             (syntax-case pat (unquote)
@@ -40,12 +47,50 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                #`(let ([var expr-id]) #,body)]
               [()
                #`(if (null? expr-id) #,body (#,fk))]
+              ;; ... in the end
               [(pat dots)
                (eq? (datum dots) '...)
-               #'not-impl]
+               #`(if (pair? expr-id)
+                     ;; Get all pat vars in `pat`,
+                     ;; iterate through the input list, for each item,
+                     ;; destructure it and accumulate matched components in `bindings ...`.
+                     #,(with-syntax ([(patvars ...) (extract-pat-vars #'pat)])
+                         (with-syntax ([(bindings ...) (generate-temporaries #'(patvars ...))]
+                                       [(iter first rest) (generate-temporaries '(iter first rest))])
+                           #`(let iter ([ls expr-id] [bindings '()] ...)
+                               (cond
+                                [(null? ls)
+                                 (let ([patvars (reverse bindings)] ...)
+                                   #,body)]
+                                [(pair? ls)
+                                 (let ([first (car ls)] [rest (cdr ls)])
+                                   #,(process-pattern #'first #'pat
+                                                      #'(iter rest (cons patvars bindings) ...)
+                                                      fk))]
+                                [else (#,fk)]))))
+                     (#,fk))]
+              ;; ... in the middle, prefer `pat1`
               [(pat0 dots . pat1)
                (eq? (datum dots) '...)
-               #'not-impl]
+               (with-syntax ([(patvars ...) (extract-pat-vars #'pat0)])
+                 (with-syntax ([(bindings ...) (generate-temporaries #'(patvars ...))]
+                               [(iter ls first rest new-fk) (generate-temporaries '(iter ls first rest new-fk))])
+                   #`(let iter ([ls expr-id] [bindings '()] ...)
+                       (let ([new-fk (lambda ()
+                                       ;; give up one item in the list to be matched against `pat0`
+                                       (if (pair? ls)
+                                           (let ([first (car ls)] [rest (cdr ls)])
+                                             #,(process-pattern #'first #'pat0
+                                                                #'(iter rest (cons patvars bindings) ...)
+                                                                fk))
+                                           (#,fk)))])
+                         ;; Match the input directly with `pat1` first, if it matches,
+                         ;; `pat0` or all pats vars inside `pat0` is '().
+                         ;; If the input fails to match `pat1`, call `new-fk`,
+                         #,(process-pattern #'ls #'pat1
+                                            #`(let ([patvars (reverse bindings)] ...)
+                                                #,body)
+                                            #'new-fk)))))]
               ;; encapsulates (pat ...), (pat . pat), (pat ... . pat)
               [(pat0 . pat1)
                (with-syntax ([(first rest) (generate-temporaries '(first rest))])
