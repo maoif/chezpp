@@ -6,16 +6,11 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
 |#
 
 
-(library (eXtra match)
+(library (chezpp match)
   (export match ;; mlambda mcase-lambda mlet mletrec mlet* mletrec*
           ;; match-record match-datatype
           )
-
-
-
-  (import (chezscheme)
-          ;;(eXtra internal)
-          )
+  (import (chezscheme))
 
 
   ;; match interface
@@ -129,8 +124,8 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                           (with-syntax ([(vitem) (generate-temporaries '(vitem))])
                                             #`(let ([vitem (vector-ref expr-id vi)])
                                                 #,(process-pattern #'vitem #'pat0
-                                                                  (loop (add1 veci) (cdr pats))
-                                                                  fk)))]))))))
+                                                                   (loop (add1 veci) (cdr pats))
+                                                                   fk)))]))))))
                      (#,fk))]
               [lit
                (literal? #'lit)
@@ -173,7 +168,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
          (begin (printf "2~n")
                 #'(let ([v e])
                     (match v cl0 cl* ...
-                           [else (errorf 'match "no match found for: " v)])))]
+                           [else (errorf 'match "no match found")])))]
         [_ (syntax-error 'match "bad match form")])))
 
 
