@@ -12,6 +12,18 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
           )
   (import (chezscheme))
 
+  (define subvector->list
+    (lambda (vec start)
+      (let ([len (vector-length vec)]
+            [ls (list (vector-ref vec start))])
+        ;; no need to do error tests
+        (let loop ([next ls]
+                   [i (add1 start)])
+          (if (fx= i len)
+              ls
+              (let ([item (list (vector-ref vec i))])
+                (set-cdr! next item)
+                (loop item (add1 i))))))))
 
   ;; match interface
   (define-syntax match
@@ -33,6 +45,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                 (syntax-case pat (unquote)
                   [,var (identifier? #'var) (cons #'var patvars)]
                   [(pat0 . pat1) (loop #'pat0 (loop #'pat1 patvars))]
+                  [#(pat0 pat1 ...) (loop #'pat0 (loop #'(pat1 ...) patvars))]
                   [_ patvars]))))
           ;;(printf "process-pattern ~s ~s ~s ~s~n" expr-id pat body fk)
           (with-syntax ([expr-id expr-id])
@@ -116,10 +129,36 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                                 (#,fk))]
                                          [(pat dots)
                                           (eq? (datum dots) '...)
-                                          #'not-impl]
-                                         [(pat0 dots pat1)
+                                          (with-syntax ([(patvars ...) (extract-pat-vars #'pat)])
+                                            (with-syntax ([(bindings ...) (generate-temporaries #'(patvars ...))]
+                                                          [(i viter vitem) (generate-temporaries '(i viter vitem))])
+                                              #`(let viter ([i vi] [bindings '()] ...)
+                                                  (if (fx= i vlen)
+                                                      (let ([patvars (reverse bindings)] ...)
+                                                        #,body)
+                                                      (let ([vitem (vector-ref expr-id i)])
+                                                        #,(process-pattern #'vitem #'pat
+                                                                           #'(viter (add1 i) (cons patvars bindings) ...)
+                                                                           fk))))))]
+                                         ;; note: here `.` is restored
+                                         [(pat0 dots . pat1)
                                           (eq? (datum dots) '...)
-                                          #'not-impl]
+                                          (with-syntax ([(patvars ...) (extract-pat-vars #'pat0)])
+                                            (with-syntax ([(bindings ...) (generate-temporaries #'(patvars ...))]
+                                                          [(ls iter new-fk) (generate-temporaries '(ls iter new-fk))])
+                                              ;; Turn the rest of the vector into a list and proceeed as in `(pat0 dots . pat1)`.
+                                              #`(let iter ([ls (subvector->list expr-id vi)] [bindings '()] ...)
+                                                  (let ([new-fk (lambda ()
+                                                                  (if (pair? ls)
+                                                                      (let ([first (car ls)] [rest (cdr ls)])
+                                                                        #,(process-pattern #'first #'pat0
+                                                                                           #'(iter rest (cons patvars bindings) ...)
+                                                                                           fk))
+                                                                      (#,fk)))])
+                                                    #,(process-pattern #'ls #'pat1
+                                                                       #`(let ([patvars (reverse bindings)] ...)
+                                                                           #,body)
+                                                                       #'new-fk)))))]
                                          [(pat0 pat1 ...)
                                           (with-syntax ([(vitem) (generate-temporaries '(vitem))])
                                             #`(let ([vitem (vector-ref expr-id vi)])
