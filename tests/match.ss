@@ -178,6 +178,23 @@
      )
 
 
+(mat simple-box
+
+     (equal? 1
+             (match (box 1)
+               [,($b ,a) a]))
+
+     (equal? (box 222)
+             (match (box (box 222))
+               [,($b ,a) a]))
+
+     (equal? 222
+             (match (box (box 222))
+               [,($b ,($box ,a)) a]))
+
+     )
+
+
 ;;;; record
 
 

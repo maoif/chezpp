@@ -37,6 +37,51 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                 (pair? p)
                 (string? p)
                 (char? p)))))
+      (define back-ref-id?
+        (lambda (id)
+          (and (identifier? id)
+               (char=? #\? (string-ref (symbol->string (syntax->datum id)) 0)))))
+      (define regex-prefix?
+        (lambda (p)
+          (let ([p (syntax->datum p)])
+            (or (eq? p '$r) (eq? p '$regex)))))
+      (define box-prefix?
+        (lambda (p)
+          (let ([p (syntax->datum p)])
+            (or (eq? p '$b) (eq? p '$box)))))
+      (define record-prefix?
+        (lambda (p)
+          (let ([p (syntax->datum p)])
+            (or (eq? p '$rec) (eq? p '$record)))))
+      (define datatype-prefix?
+        (lambda (p)
+          (let ([p (syntax->datum p)])
+            (or (eq? p '$data) (eq? p '$datatype)))))
+      (define handle-box
+        (lambda (expr-id pat body fk)
+          (syntax-case pat (unquote)
+            [(,bref)
+             (back-ref-id? #'bref)
+             #'not-impl]
+            [(pat)
+             #`(if (box? #,expr-id)
+                   #,(with-syntax ([(bval) (generate-temporaries '(bval))])
+                       #`(let ([bval (unbox #,expr-id)])
+                           #,(process-pattern #'bval #'pat body fk)))
+                   (#,fk))]
+            [(,bref pat)
+             (identifier? #'bref)
+             #'not-impl]
+            [_ (syntax-error pat "match: invalid box pattern:")])))
+      (define handle-record
+        (lambda (expr-id pat body fk)
+          (syntax-error 'match "Not impl")))
+      (define handle-datatype
+        (lambda (expr-id pat body fk)
+          (syntax-error 'match "Not impl")))
+      (define handle-regex
+        (lambda (expr-id pat body fk)
+          (syntax-error 'match "Not impl")))
       (define process-pattern
         (lambda (expr-id pat body fk)
           (define extract-pat-vars
@@ -55,6 +100,18 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                #`(let ([var expr-id]) #,body)]
               [()
                #`(if (null? expr-id) #,body (#,fk))]
+              [,(?prefix special-pats ...)
+               (box-prefix? #'?prefix)
+               (handle-box #'expr-id #'(special-pats ...) body fk)]
+              [,(?prefix special-pats ...)
+               (record-prefix? #'?prefix)
+               (handle-record #'expr-id #'(special-pats ...) body fk)]
+              [,(?prefix special-pats ...)
+               (datatype-prefix? #'?prefix)
+               (handle-datatype #'expr-id #'(special-pats ...) body fk)]
+              [,(?prefix special-pats ...)
+               (regex-prefix? #'?prefix)
+               (handle-regex #'expr-id #'(special-pats ...) body fk)]
               ;; ... in the end
               [(pat dots)
                (eq? (datum dots) '...)
