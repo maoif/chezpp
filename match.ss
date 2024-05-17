@@ -33,8 +33,6 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
           (let ([p (syntax->datum lit)])
             (or (number? p)
                 (boolean? p)
-                (vector? p)
-                (pair? p)
                 (string? p)
                 (char? p)))))
       (define back-ref-id?
