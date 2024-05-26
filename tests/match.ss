@@ -1,5 +1,12 @@
 (import (chezpp match))
 
+(mat else-clause
+
+     (match 1
+       [else #t])
+
+     )
+
 
 ;;;; simple list
 

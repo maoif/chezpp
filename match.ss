@@ -253,11 +253,11 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                   #`(let ([fk (lambda () #,(loop (cdr cl*)))])
                       #,(process-clause expr-id (car cl*) #'fk)))))))
       (syntax-case stx (else)
-        [(k e cl0 cl* ... [else e0 e* ...])
+        [(k e cl* ... [else e0 e* ...])
          ;; `match-loop` used for catamorphism
          (begin (printf "1~n")
                 #`(let match-loop ([v e])
-                    #,(generate-skeleton #'v (cons #'cl0 #'(cl* ...)) #'(begin e0 e* ...))))]
+                    #,(generate-skeleton #'v #'(cl* ...) #'(begin e0 e* ...))))]
         [(k e cl0 cl* ...)
          (begin (printf "2~n")
                 #'(let ([v e])
