@@ -56,7 +56,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
           (let ([p (syntax->datum p)])
             (or (eq? p '$data) (eq? p '$datatype)))))
       (define handle-box
-        (lambda (expr-id pat body fk)
+        (lambda (rho expr-id pat body fk)
           (syntax-case pat (unquote)
             [(,bref)
              (back-ref-id? #'bref)
@@ -65,7 +65,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
              #`(if (box? #,expr-id)
                    #,(with-syntax ([(bval) (generate-temporaries '(bval))])
                        #`(let ([bval (unbox #,expr-id)])
-                           #,(process-pattern #'bval #'pat body fk)))
+                           #,(process-pattern rho #'bval #'pat body fk)))
                    (#,fk))]
             [(,bref pat)
              (identifier? #'bref)
@@ -81,7 +81,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
         (lambda (expr-id pat body fk)
           (syntax-error 'match "Not impl")))
       (define process-pattern
-        (lambda (expr-id pat body fk)
+        (lambda (rho expr-id pat body fk)
           (define extract-pat-vars
             (lambda (pat)
               (let loop ([pat pat] [patvars '()])
@@ -100,13 +100,13 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                #`(if (null? expr-id) #,body (#,fk))]
               [,(?prefix special-pats ...)
                (box-prefix? #'?prefix)
-               (handle-box #'expr-id #'(special-pats ...) body fk)]
+               (handle-box rho #'expr-id #'(special-pats ...) body fk)]
               [,(?prefix special-pats ...)
                (record-prefix? #'?prefix)
-               (handle-record #'expr-id #'(special-pats ...) body fk)]
+               (handle-record rho #'expr-id #'(special-pats ...) body fk)]
               [,(?prefix special-pats ...)
                (datatype-prefix? #'?prefix)
-               (handle-datatype #'expr-id #'(special-pats ...) body fk)]
+               (handle-datatype rho #'expr-id #'(special-pats ...) body fk)]
               [,(?prefix special-pats ...)
                (regex-prefix? #'?prefix)
                (handle-regex #'expr-id #'(special-pats ...) body fk)]
@@ -127,7 +127,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                    #,body)]
                                 [(pair? ls)
                                  (let ([first (car ls)] [rest (cdr ls)])
-                                   #,(process-pattern #'first #'pat
+                                   #,(process-pattern rho #'first #'pat
                                                       #'(iter rest (cons patvars bindings) ...)
                                                       fk))]
                                 [else (#,fk)]))))
@@ -143,14 +143,14 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                        ;; give up one item in the list to be matched against `pat0`
                                        (if (pair? ls)
                                            (let ([first (car ls)] [rest (cdr ls)])
-                                             #,(process-pattern #'first #'pat0
+                                             #,(process-pattern rho #'first #'pat0
                                                                 #'(iter rest (cons patvars bindings) ...)
                                                                 fk))
                                            (#,fk)))])
                          ;; Match the input directly with `pat1` first, if it matches,
                          ;; `pat0` or all pats vars inside `pat0` is '().
                          ;; If the input fails to match `pat1`, call `new-fk`,
-                         #,(process-pattern #'ls #'pat1
+                         #,(process-pattern rho #'ls #'pat1
                                             #`(let ([patvars (reverse bindings)] ...)
                                                 #,body)
                                             #'new-fk)))))]
@@ -159,8 +159,8 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                (with-syntax ([(first rest) (generate-temporaries '(first rest))])
                  #`(if (pair? expr-id)
                        (let ([first (car expr-id)] [rest (cdr expr-id)])
-                         #,(process-pattern #'first #'pat0
-                                            (process-pattern #'rest #'pat1 body fk)
+                         #,(process-pattern rho #'first #'pat0
+                                            (process-pattern rho #'rest #'pat1 body fk)
                                             fk))
                        (#,fk)))]
               [#()
@@ -192,7 +192,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                                       (let ([patvars (reverse bindings)] ...)
                                                         #,body)
                                                       (let ([vitem (vector-ref expr-id i)])
-                                                        #,(process-pattern #'vitem #'pat
+                                                        #,(process-pattern rho #'vitem #'pat
                                                                            #'(viter (add1 i) (cons patvars bindings) ...)
                                                                            fk))))))]
                                          ;; note: here `.` is restored
@@ -206,18 +206,18 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                                   (let ([new-fk (lambda ()
                                                                   (if (pair? ls)
                                                                       (let ([first (car ls)] [rest (cdr ls)])
-                                                                        #,(process-pattern #'first #'pat0
+                                                                        #,(process-pattern rho #'first #'pat0
                                                                                            #'(iter rest (cons patvars bindings) ...)
                                                                                            fk))
                                                                       (#,fk)))])
-                                                    #,(process-pattern #'ls #'pat1
+                                                    #,(process-pattern rho #'ls #'pat1
                                                                        #`(let ([patvars (reverse bindings)] ...)
                                                                            #,body)
                                                                        #'new-fk)))))]
                                          [(pat0 pat1 ...)
                                           (with-syntax ([(vitem) (generate-temporaries '(vitem))])
                                             #`(let ([vitem (vector-ref expr-id vi)])
-                                                #,(process-pattern #'vitem #'pat0
+                                                #,(process-pattern rho #'vitem #'pat0
                                                                    (loop (add1 veci) (cdr pats))
                                                                    fk)))]))))))
                      (#,fk))]
@@ -231,33 +231,35 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                (identifier? #'sym)
                #`(if (eq? 'sym expr-id) #,body (#,fk))]))))
       (define process-clause
-        (lambda (expr-id cl fk)
+        (lambda (rho expr-id cl fk)
           ;;(printf "process-clause ~s ~s ~s~n" expr-id cl fk)
           (syntax-case cl (guard)
             [(pat (guard guard-e* ...) e0 e* ...)
-             (process-pattern expr-id #'pat
+             (process-pattern rho expr-id #'pat
                               #`(if (and guard-e* ...)
                                     (begin e0 e* ...)
                                     ;; call fail continuation
                                     (#,fk))
                               fk)]
             [(pat e0 e* ...)
-             (process-clause expr-id #'[pat (guard #t) e0 e* ...] fk)])))
+             (process-clause rho expr-id #'[pat (guard #t) e0 e* ...] fk)])))
       (define generate-skeleton
-        (lambda (expr-id cl* fk)
+        (lambda (rho expr-id cl* fk)
           ;;(printf "generate-skeleton: ~s ~s ~s~n" expr-id cl* fk)
           (let loop ([cl* cl*])
             (if (null? cl*)
                 fk
                 (with-syntax ([(fk) (generate-temporaries '(fk))])
                   #`(let ([fk (lambda () #,(loop (cdr cl*)))])
-                      #,(process-clause expr-id (car cl*) #'fk)))))))
+                      #,(process-clause rho expr-id (car cl*) #'fk)))))))
       (syntax-case stx (else)
         [(k e cl* ... [else e0 e* ...])
          ;; `match-loop` used for catamorphism
          (begin (printf "1~n")
-                #`(let match-loop ([v e])
-                    #,(generate-skeleton #'v #'(cl* ...) #'(begin e0 e* ...))))]
+                ;; `rho`: compile-time environment
+                (lambda (rho)
+                  #`(let match-loop ([v e])
+                      #,(generate-skeleton rho #'v #'(cl* ...) #'(begin e0 e* ...)))))]
         [(k e cl0 cl* ...)
          (begin (printf "2~n")
                 #'(let ([v e])
