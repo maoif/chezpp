@@ -163,7 +163,7 @@
               [mkdt (construct-datatype-name #'dt "mk-" #'dt)]
               [(dtuid vuids ...) (gen-uids #'dt #'(variant0 variants ...))]
               [(vnames ...) (gen-vnames #'dt #'(variant0 variants ...))]
-              [(mkvariants ...) (datum->syntax #'dt (map car (syntax->datum #'(variant0 variants ...))))]
+              [((mkvariants . _) ...) #'(variant0 variants ...)]
               ;; $datatype-dt-variant?
               [(variants? ...) (gen-vnames? #'dt #'(variant0 variants ...))]
               ;; ((mutability name getter ?setter) ...) ...
