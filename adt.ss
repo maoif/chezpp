@@ -188,7 +188,7 @@
 
                (define-syntax match-dt
                  (syntax-rules ()
-                   [(k e cl* (... ...)) (match-datatype dt e cl* (... ...))]))
+                   [(k e cl* (... ...)) ($match-datatype match-dt dt e cl* (... ...))]))
 
                ;; TODO match-dt!
                #;
@@ -294,7 +294,7 @@
 
                (define-syntax match-dt
                  (syntax-rules ()
-                   [(k e cl* (... ...)) (match-record dtname e cl* (... ...))]))))]
+                   [(k e cl* (... ...)) ($match-record match-dt dtname e cl* (... ...))]))))]
         [(k dt (fld fld* ...))
          (identifier? #'dt)
          (with-syntax ([dt? ($construct-name #'dt #'dt "?")])

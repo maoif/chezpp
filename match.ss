@@ -10,7 +10,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
 
 (library (chezpp match)
   (export match ;; mlambda mcase-lambda mlet mletrec mlet* mletrec*
-          match-record match-datatype match-box
+          $match-record $match-datatype match-record match-datatype match-box
           )
   (import (chezscheme)
           (chezpp vector)
@@ -424,25 +424,25 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
   (define-syntax match-box
     (lambda (stx)
       (define transform-clause
-        (lambda (cl)
+        (lambda (who cl)
           (syntax-case cl ()
             [[pat e e* ...]
              #`[,($box pat)
                 e e* ...]]
-            [_ (syntax-error cl "invalid clause for " (symbol->string 'match-box))])))
+            [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
       (syntax-case stx (else)
         [(k e cl* ... [else body body* ...])
-         (with-syntax ([(cls ...) (map transform-clause #'(cl* ...))])
+         (with-syntax ([(cls ...) (map transform-clause #'k #'(cl* ...))])
            #'(match e cls ... [else body body* ...]))]
         [(k e cl cl* ...)
-         #'(match-box e cl cl* ...
-                      [else (errorf 'match-record "no match found")])])))
+         #'(match-box k e cl cl* ...
+                      [else (errorf 'k "no match found")])])))
 
   ;; TODO correct name (macro and dt name) in error report (in adt)
-  (define-syntax match-record
+  (define-syntax $match-record
     (lambda (stx)
       (define transform-clause
-        (lambda (dt cl)
+        (lambda (who dt cl)
           (syntax-case cl ()
             ;; single named match
             [[(field pat) e e* ...]
@@ -452,32 +452,41 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
             [[(pat pat* ...) e e* ...]
              #`[,($record #,dt pat pat* ...)
                 e e* ...]]
-            [_ (syntax-error cl "invalid clause for " (symbol->string 'match-record))])))
+            [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
       (syntax-case stx (else)
-        [(k dt e cl* ... [else body body* ...])
-         (with-syntax ([(cls ...) (map (lambda (cl) (transform-clause #'dt cl)) #'(cl* ...))])
+        [(k who dt e cl* ... [else body body* ...])
+         (with-syntax ([(cls ...) (map (lambda (cl) (transform-clause #'who #'dt cl)) #'(cl* ...))])
            #'(match e cls ... [else body body* ...]))]
-        [(k dt e cl cl* ...)
-         #'(match-record dt e cl cl* ...
-                         [else (errorf 'match-record "no match found")])])))
+        [(k who dt e cl cl* ...)
+         #'($match-record who dt e cl cl* ...
+                          [else (errorf 'who "no match found")])]
+        [(k who . bla) (syntax-error stx "bad " (symbol->string (datum who)) " form:")])))
 
-  (define-syntax match-datatype
+  (define-syntax $match-datatype
     (lambda (stx)
       (define transform-clause
-        (lambda (dt cl)
+        (lambda (who dt cl)
           (syntax-case cl ()
             [[(variant pat pats ...) e e* ...]
              #`[,($datatype #,dt variant pat pats ...)
                 e e* ...]]
-            [_ (syntax-error cl "invalid clause for " (symbol->string 'match-datatype))])))
+            [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
       (syntax-case stx (else)
-        [(k dt e cl* ... [else body body* ...])
-         (with-syntax ([(cl* ...) (map (lambda (cl) (transform-clause #'dt cl)) #'(cl* ...))])
+        [(k who dt e cl* ... [else body body* ...])
+         (with-syntax ([(cl* ...) (map (lambda (cl) (transform-clause #'who #'dt cl)) #'(cl* ...))])
            #'(match e cl* ... [else body body* ...]))]
-        [(k dt e cl cl* ...)
-         #'(match-datatype dt e cl cl* ...
-                           [else (errorf 'k "no match found")])]
-        [_ (syntax-error stx "bad " (symbol->string 'k) " form:")])))
+        [(k who dt e cl cl* ...)
+         #'($match-datatype who dt e cl cl* ...
+                            [else (errorf 'who "no match found")])]
+        [(k who . bla) (syntax-error stx "bad " (symbol->string (datum who)) " form:")])))
+
+  (define-syntax match-record
+    (syntax-rules ()
+      [(k e cl* ...) ($match-record match-record e cl* ...)]))
+
+  (define-syntax match-datatype
+    (syntax-rules ()
+      [(k e cl* ...) ($match-datatype match-datatype e cl* ...)]))
 
 
   )
