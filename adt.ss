@@ -12,6 +12,8 @@
       (define construct-datatype-name
         (lambda (template-identifier . args)
           (apply $construct-name (append (list template-identifier "$datatype-") args))))
+      (define get-vname
+        (lambda (v) (if (symbol? v) v (car v))))
       (trace-define check-datatype-name
         (lambda (n)
           ;; TODO
@@ -37,12 +39,10 @@
           (let* ([dt (syntax->datum dt)]
                  [dt? (syntax->datum dt?)]
                  [variants (syntax->datum variants)]
-                 [names `(,dt ,dt? ,@(map (lambda (v)
-                                            (if (symbol? v) v (car v)))
-                                          variants))])
+                 [names `(,dt ,dt? ,@(map get-vname variants))])
             (unless (unique? names)
               (syntax-error names "names are not unique in datatype definition:")))))
-      (define gen-dtuid-str
+      (define gen-dtuid
         (lambda (dt variants)
           (let* ([dtname (symbol->string (syntax->datum dt))]
                  ;; transform variant defs like `[variant (f0 mutable) (f1 pred mutable) f2]`
@@ -50,39 +50,34 @@
                  [variant->string (lambda (variant)
                                     (apply string-append
                                            (map (lambda (v)
-                                                  (symbol->string (if (symbol? v) v (car v))))
+                                                  (symbol->string (get-vname v)))
                                                 variant)))]
                  [bigname (apply string-append dtname
-                                 (map variant->string variants))]
+                                 (map variant->string (syntax->datum variants)))]
                  [h (string-hash bigname)])
-            (string-append bigname "-" (number->string h)))))
-      (define gen-uids
-        (lambda (dt variants)
+            (datum->syntax dt (string->symbol (string-append bigname "-" (number->string h)))))))
+      (define gen-vuids
+        (lambda (dt dtuid variants)
           (let* ([variants (syntax->datum variants)]
-                 [dtuidstr (gen-dtuid-str dt variants)])
+                 [dtuidstr (symbol->string (syntax->datum dtuid))])
             (datum->syntax
              dt
-             (cons (string->symbol dtuidstr)
-                   (map
-                    (lambda (variant)
-                      (string->symbol
-                       (string-append dtuidstr "-" (symbol->string (car variant)))))
-                    variants))))))
+             (map (lambda (v)
+                    (string->symbol
+                     (string-append dtuidstr "-" (symbol->string (get-vname v)))))
+                  variants)))))
       (define gen-vnames
         (lambda (dt variants)
           (map
            (lambda (vname)
              (construct-datatype-name dt dt "-" vname))
-           (map car (syntax->datum variants)))))
-      (define gen-mkvariants
-        (lambda (variants)
-          (map car (syntax->datum variants))))
+           (map get-vname (syntax->datum variants)))))
       (define gen-vnames?
         (lambda (dt variants)
           (map
            (lambda (vname)
              (construct-datatype-name dt dt "-" vname "?"))
-           (map car (syntax->datum variants)))))
+           (map get-vname (syntax->datum variants)))))
       (define handle-vfields
         (lambda (dt variants)
           (map
@@ -146,6 +141,17 @@
                                                      'vname 'fid #,arg))]
                                       [_ (f (cdr vfields) (cdr a*))]))))))))]))
            variants)))
+      (define classify-variants
+        (lambda (variants)
+          (let loop ([variants variants] [singletons '()] [others '()])
+            (if (null? variants)
+                (list (reverse singletons) (reverse others))
+                (let ([variant (car variants)])
+                  (syntax-case variant ()
+                    [(vname)
+                     (loop (cdr variants) (cons #'vname singletons) others)]
+                    [(vname vfields ...)
+                     (loop (cdr variants) singletons (cons variant others))]))))))
 
       (syntax-case stx ()
         [(_ dt dt? variant0 variants ...)
@@ -158,64 +164,50 @@
          ;; TODO check uniqueness of names
          ;; names starting with $datatype are for internal use
          (with-syntax
-             (
+             ([dtuid (gen-dtuid #'dt #'(variant0 variants ...))]
               ;; $datatype-mk-dt
               [mkdt (construct-datatype-name #'dt "mk-" #'dt)]
-              [(dtuid vuids ...) (gen-uids #'dt #'(variant0 variants ...))]
-              [(vnames ...) (gen-vnames #'dt #'(variant0 variants ...))]
-              [((mkvariants . _) ...) #'(variant0 variants ...)]
-              ;; $datatype-dt-variant?
-              [(variants? ...) (gen-vnames? #'dt #'(variant0 variants ...))]
-              ;; ((mutability name getter ?setter) ...) ...
-              ;; getter: dt-variant-field
-              ;; setter: dt-variant-field-set!
-              [((vfields ...) ...) (handle-vfields #'dt #'(variant0 variants ...))]
-              [(protocols ...) (gen-protocols #'(variant0 variants ...))]
+              [((singletons ...) (mvariants ...)) (classify-variants #'(variant0 variants ...))]
               [match-dt  ($construct-name #'dt "match-" #'dt)]
               [match-dt! ($construct-name #'dt "match-" #'dt "!")])
-           #`(begin
-               (define-record-type (dt mkdt dt?)
-                 (nongenerative dtuid))
-               (define-record-type (vnames mkvariants variants?)
-                 (nongenerative vuids)
-                 (parent dt)
-                 (sealed #t)
-                 ;; TODO when vfields is '(), make a singleton
-                 (fields vfields ...)
-                 ;; need protocol to do type checking
-                 (protocol protocols))
-               ...
+           (with-syntax ([(suids ...) (gen-vuids #'dt #'dtuid #'(singletons ...))]
+                         [(muids ...) (gen-vuids #'dt #'dtuid #'(mvariants ...))]
+                         [(mksingletons ...) (generate-temporaries #'(singletons ...))]
+                         [((mkvariants . _) ...) #'(mvariants ...)]
+                         ;; $datatype-dt-variant
+                         [(snames ...) (gen-vnames #'dt #'(singletons ...))]
+                         [(mnames ...) (gen-vnames #'dt #'(mvariants ...))]
+                         ;; $datatype-dt-variant?
+                         [(singletons? ...) (gen-vnames? #'dt #'(singletons ...))]
+                         [(mvariants? ...)  (gen-vnames? #'dt #'(mvariants ...))]
+                         ;; ((mutability name getter ?setter) ...) ...
+                         ;; getter: dt-variant-field
+                         ;; setter: dt-variant-field-set!
+                         [((vfields ...) ...) (handle-vfields #'dt #'(mvariants ...))]
+                         [(protocols ...) (gen-protocols #'(mvariants ...))])
+             #`(begin
+                 (define-record-type (dt mkdt dt?)
+                   (nongenerative dtuid))
+                 (define-record-type (mnames mkvariants mvariants?)
+                   (nongenerative muids)
+                   (parent dt)
+                   (sealed #t)
+                   (fields vfields ...)
+                   ;; need protocol to do type checking
+                   (protocol protocols))
+                 ...
+                 (define-record-type (snames mksingletons singletons?)
+                   (nongenerative suids)
+                   (parent dt)
+                   (sealed #t)
+                   (fields))
+                 ...
+                 (define singletons (mksingletons))
+                 ...
 
-               (define-syntax match-dt
-                 (syntax-rules ()
-                   [(k e cl* (... ...)) ($match-datatype match-dt dt e cl* (... ...))]))
-
-               ;; TODO match-dt!
-               #;
-               (define-syntax match-dt!
-                 (lambda (stx)
-                   (define transform-clause
-                     (lambda (cl)
-                       (syntax-case cl ()
-                         [[(variant . pats) e e* (... ...)]
-                          (memv #'variant '(vnames ...))
-                          #`[,($datatype dt variant pats)
-                             e e* (... ...)]]
-                         [_ (if (memv #'variant '(vnames ...))
-                                (syntax-error cl "invalid clause for " (symbol->string 'match-dt))
-                                (syntax-error 'variant "invalid variant name for "
-                                              (symbol->string 'dt) ":"))])))
-                   (syntax-case stx (else)
-                     [(k e cl* (... ...) [else body body* (... ...)])
-                      (begin (printf "~a 1~n" 'match-dt) #t)
-                      (with-syntax ([(cl* (... ...)) (map transform-clause #'(cl* (... ...)))])
-                        #'(match e cl* (... ...) [else body body* (... ...)]))]
-                     [(k e cl cl* (... ...))
-                      (begin (printf "~a 2~n" 'match-dt) #t)
-                      #'(match-dt e cl cl* (... ...)
-                                  [else (errorf 'match-dt "no match found")])]
-                     [_ (syntax-error stx "bad " (symbol->string 'match-dt) " form:")])))
-               ))]
+                 (define-syntax match-dt
+                   (syntax-rules ()
+                     [(k e cl* (... ...)) ($match-datatype match-dt dt e cl* (... ...))])))))]
         [(_ dt variant0 variants ...)
          (check-datatype-name #'dt)
          (with-syntax ([dt? ($construct-name #'dt #'dt "?")])

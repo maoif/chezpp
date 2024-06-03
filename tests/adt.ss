@@ -26,27 +26,26 @@
 
      (begin
        (datatype Tree [Nil] [Node val (left Tree?) (right Tree?)])
-       (define nil (Nil))
        #t)
 
      ;; match by position
      (eq? 'val
-          (match-Tree (Node 'val (Nil) (Nil))
+          (match-Tree (Node 'val Nil Nil)
                       [(Node ,x _ _) x]))
 
      ;; match by name
      (equal? 2
-             (match-Tree (Node '(1 2 3) (Nil) (Nil))
+             (match-Tree (Node '(1 2 3) Nil Nil)
                          [(Node (val (_ ,x _))) x]))
 
      (eq? 42
-          (match-Tree (Node 42 nil nil)
+          (match-Tree (Node 42 Nil Nil)
                       [(Node (val ,v)) v]))
-     (eq? nil
-          (match-Tree (Node 42 nil nil)
+     (eq? Nil
+          (match-Tree (Node 42 Nil Nil)
                       [(Node (right ,v)) v]))
-     (equal? (list 42 nil)
-             (match-Tree (Node 42 nil nil)
+     (equal? (list 42 Nil)
+             (match-Tree (Node 42 Nil Nil)
                          [(Node ,v _ ,y) (list v y)]))
 
      )
