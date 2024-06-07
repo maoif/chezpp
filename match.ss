@@ -103,7 +103,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                  (<= (length pats) (vector-length fld*))
                  ;; TODO check names are unique
                  ;; check if each pat has right field names
-                 (andmap (lambda (pat) (printf "~a ~a~n" pat fld*) (vmemq (car pat) fld*)) pats)))))
+                 (andmap (lambda (pat) (vmemq (car pat) fld*)) pats)))))
       (define by-name-datatype-pats?
         (lambda (rho variant pats)
           (by-name-record-pats? rho variant pats)))
@@ -185,6 +185,11 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
       (define handle-datatype
         (lambda (rho expr-id pat body fk)
           (syntax-case pat ()
+            ;; singletons
+            [(dt singleton) (identifier? #'singleton)
+             #`(if (eq? #,expr-id singleton)
+                   #,body
+                   (#,fk))]
             [(dt variant . rest)
              ;; name of dt is dt,
              ;; name of variant is $datatype-dt-varaint
@@ -470,7 +475,16 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
             [[(variant pat pats ...) e e* ...]
              #`[,($datatype #,dt variant pat pats ...)
                 e e* ...]]
-            [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
+            ;; singletons
+            [[(singleton) e e* ...]
+             (identifier? #'singleton)
+             #`[,($datatype #,dt singleton)
+                e e* ...]]
+            [[singleton e e* ...]
+             (identifier? #'singleton)
+             #`[,($datatype #,dt singleton)
+                e e* ...]]
+            [_ (syntax-error cl "3 invalid clause for " (symbol->string (syntax->datum who)))])))
       (syntax-case stx (else)
         [(k who dt e cl* ... [else body body* ...])
          (with-syntax ([(cl* ...) (map (lambda (cl) (transform-clause #'who #'dt cl)) #'(cl* ...))])

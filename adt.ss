@@ -207,7 +207,33 @@
 
                  (define-syntax match-dt
                    (syntax-rules ()
-                     [(k e cl* (... ...)) ($match-datatype match-dt dt e cl* (... ...))])))))]
+                     [(k e cl* (... ...)) ($match-datatype match-dt dt e cl* (... ...))]))
+
+                 (define-syntax match-dt!
+                   (lambda (stx)
+                     (define check
+                       (lambda (cl*)
+                         (let ([vrts  (map (lambda (cl)
+                                                 (syntax-case cl ()
+                                                   [(pat . e*)
+                                                    (syntax-case #'pat ()
+                                                      [(variant . rest) #'variant]
+                                                      [singleton (identifier? #'singleton) #'singleton]
+                                                      [_ (syntax-error cl "invalid clause for " (symbol->string 'match-dt!))])]
+                                                   [_ (syntax-error cl "invalid clause for " (symbol->string 'match-dt!))]))
+                                               cl*)])
+                           (or (andmap (lambda (v) (memq v (syntax->datum vrts))) '(singletons ... mkvariants ...))
+                               ;; TODO list unwritten variants?
+                               (syntax-error cl* "incomplete variants for " (symbol->string 'match-dt!))))))
+                     (syntax-case stx (else)
+                       [(k e cl* (... ...) [else body body* (... ...)])
+                        #'($match-datatype match-dt! dt e cl* (... ...)
+                                           [else body body* (... ...)])]
+                       [(k e cl cl* (... ...))
+                        (check #'(cl cl* (... ...)))
+                        #'(match-dt! e cl cl* (... ...)
+                                     [else (errorf 'k "no match found")])]
+                       [_ (syntax-error stx "bad " (symbol->string 'match-dt!) " form:")]))))))]
         [(_ dt variant0 variants ...)
          (check-datatype-name #'dt)
          (with-syntax ([dt? ($construct-name #'dt #'dt "?")])

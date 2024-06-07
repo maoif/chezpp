@@ -1,5 +1,6 @@
 (import (chezpp adt)
-        (chezpp match))
+        (chezpp match)
+        (chezpp string))
 
 ;; TODO how to detect syntax error?
 
@@ -47,6 +48,16 @@
      (equal? (list 42 Nil)
              (match-Tree (Node 42 Nil Nil)
                          [(Node ,v _ ,y) (list v y)]))
+     (eq? 'nil
+          (match-Tree! Nil
+                       [(Node (val ,v)) v]
+                       [Nil 'nil]))
+     (string-contains?
+      (condition-message
+       (guard (e [#t e])
+         (expand '(match-Tree! Nil
+                               [(Node (val ,v)) v]))))
+      "incomplete variants for")
 
      )
 
