@@ -1,5 +1,6 @@
 (library (chezpp string)
-  (export string-for-each/i string-startswith? string-endswith?)
+  (export string-for-each/i string-startswith? string-endswith?
+          string-search string-search-all string-contains?)
   (import (chezscheme)
           (chezpp internal)
           (chezpp utils))
@@ -39,16 +40,31 @@
       [(str) (todo)]
       [(str c) (todo)]))
 
-  #|doc
 
-  |#
-  (define string-replace
-    (lambda (str old-char new-char)
-      (todo)))
+  ;; currently use brute force
+  ;; TODO: Knuth-Morris-Pratt or Boyer-Moore?
+  ;; Search for `target` from position `start` in `str`,
+  ;; return the index if there's a match, or #f.
+  ;; No error checking here.
+  (define $string-search
+    (lambda (str target start)
+      (let ([slen (string-length str)] [tlen (string-length target)])
+        (define str=?
+          (lambda (i)
+            (let loop ([i i] [j 0])
+              (or (fx= j tlen)
+                  (and (char=? (string-ref str i) (string-ref target j))
+                       (loop (add1 i) (add1 j)))))))
+        (cond [(fx> (fx+ start tlen) slen) #f]
+              [(fx= (fx+ start tlen) slen) (and (str=? start) start)]
+              [else (let ([end (fx- slen tlen)])
+                      (let loop ([i start])
+                        (if (fx> i end)
+                            #f
+                            (if (str=? i)
+                                i
+                                (loop (add1 i))))))]))))
 
-  (define string-replace!
-    (lambda (str old-char new-char)
-      (todo)))
 
   #|doc
   Returns the index of the first occurrence of the target in str.
@@ -56,7 +72,11 @@
   |#
   (define string-search
     (lambda (str target)
-      (todo)))
+      (pcheck ([string? str])
+              (let ([target (pcase target
+                                   [string? target]
+                                   [char? (string target)])])
+                ($string-search str target 0)))))
 
   #|
   Returns a list of indices for all occurrences of the target in str.
@@ -64,27 +84,44 @@
   |#
   (define string-search-all
     (lambda (str target)
-      (todo)))
+      (pcheck ([string? str])
+              (let* ([target (pcase target
+                                    [string? target]
+                                    [char? (string target)])]
+                     [end (- (string-length str)
+                             (string-length target))])
+                (cond [(string=? "" target) '(0)]
+                      [(< end 0) #f]
+                      [(= end 0) (and (string=? str target) '(0))]
+                      [else (let loop ([i 0] [res '()])
+                              (if (< end i)
+                                  (and (not (null? res)) (reverse res))
+                                  (let ([j ($string-search str target i)])
+                                    (if j
+                                        (loop (add1 j) (cons j res))
+                                        (and (not (null? res)) (reverse res))))))])))))
 
-  ;; Knuth-Morris-Pratt or Boyer-Moore?
+  #|doc
+  Checks whether `str` contains the list of strings in `s`.
+  |#
   (define string-contains?
     (lambda (str . s)
       (pcheck ([string? str])
               (if (null? s)
                   #t
-                  (let ([ss (map (lambda (s)
-                                   (pcase s
-                                          [string? s]
-                                          [char? (string s)]))
-                                 s)]
-                        [slen (string-length str)])
-                    (andmap (lambda (s)
-                              ;; add break in for-eaches?
-                              (string-for-each/i
-                               (lambda (i c)
-                                 (todo))
-                               str))
-                            ss))))))
+                  (let* ([ss (map (lambda (s)
+                                    (pcase s
+                                           [string? s]
+                                           [char? (string s)]))
+                                  s)]
+                         [slen (string-length str)]
+                         [contains1? (lambda (s)
+                                       (let ([patlen (string-length s)])
+                                         (cond
+                                          [(> patlen slen) #f]
+                                          [(= patlen slen) (string=? s str)]
+                                          [else (and ($string-search str s 0) #t)])))])
+                    (andmap contains1? ss))))))
 
   (define string-startswith?
     (lambda (str prefix)
