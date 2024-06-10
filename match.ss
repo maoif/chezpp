@@ -11,6 +11,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
 (library (chezpp match)
   (export match ;; mlambda mcase-lambda mlet mletrec mlet* mletrec*
           $match-record $match-datatype match-record match-datatype match-box
+          mlambda mlambda+ mlet mlet*
           )
   (import (chezscheme)
           (chezpp vector)
@@ -501,6 +502,53 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
   (define-syntax match-datatype
     (syntax-rules ()
       [(k e cl* ...) ($match-datatype match-datatype e cl* ...)]))
+
+  (define-syntax mlambda
+    (lambda (stx)
+      (syntax-case stx ()
+        [(k cl cl* ...)
+         #'(lambda (arg)
+             (match arg cl cl* ...
+                    [else (errorf 'k "no match found")]))]
+        [_ (syntax-error stx "bad form:")])))
+
+  (define-syntax $mlambda+
+    (lambda (stx)
+      (syntax-case stx ()
+        [(k who cl cl* ...)
+         #'(lambda arg
+             (match arg cl cl* ...
+                    [else (errorf 'who "no match found")]))]
+        [_ (syntax-error stx "bad form:")])))
+
+  (define-syntax mlambda+
+    (syntax-rules ()
+      [(k cl cl* ...) ($mlambda+ mlambda+ cl cl* ...)]))
+
+  (define-syntax mlet
+    (lambda (stx)
+      (syntax-case stx ()
+        [(k () e0 e* ...) #'(let () e0 e* ...)]
+        [(k ([pat* rhs*] ...) e0 e* ...)
+         #'(($mlambda+ mlet
+                       [(pat* ...) e0 e* ...])
+            rhs* ...)]
+        [_ (syntax-error stx "bad form:")])))
+
+  (define-syntax mlet*
+    (lambda (stx)
+      (syntax-case stx (else)
+        [(k () e0 e* ...) #'(let () e0 e* ...)]
+        [(k ([pat* rhs*] ...) e0 e* ...)
+         (trace-let loop ([pat* #'(pat* ...)] [rhs* #'(rhs* ...)])
+           (if (null? pat*)
+               #'(begin e0 e* ...)
+               #`(match #,(car rhs*)
+                   [#,(car pat*) #,(loop (cdr pat*) (cdr rhs*))]
+                   ;; TODO when k is not quoted, the error is "bad form" below,
+                   ;; which is not quite precise
+                   [else (errorf 'k "no match found")])))]
+        [_ (syntax-error stx "bad form:")])))
 
 
   )

@@ -202,6 +202,74 @@
      )
 
 
+(mat mlambda
+
+     (begin
+       (define fact
+         (mlambda
+          [0 1]
+          [,n (* n (fact (sub1 n)))]))
+       (define rev
+         (mlambda
+          [() '()]
+          [(,a) `(,a)]
+          [(,a ,b . ,ls) (append (rev ls) (list b a))]))
+       #t)
+
+     (= 1 (fact 0))
+     (= 6 (fact 3))
+     (= 5040 (fact 7))
+
+     (equal? (reverse '()) (rev '()))
+     (equal? (reverse '(1)) (rev '(1)))
+     (equal? (reverse (iota 10)) (rev (iota 10)))
+
+     )
+
+
+(mat mlambda+
+
+     (begin
+       ;; (snoc 2 '(1)) => '(1 2)
+       (define snoc
+         (mlambda+
+          [(,x ())
+           `(,x)]
+          [(,x (,a . ,b))
+           (cons a (snoc x b))]))
+       #t)
+
+     (equal? '(0)     (snoc 0 '()))
+     (equal? '(1 0)   (snoc 0 '(1)))
+     (equal? '(1 2 0) (snoc 0 '(1 2)))
+
+
+     )
+
+
+(mat mlet
+
+     (equal?
+      '((1 2 3) (1 4 9) (name age) ("jack" 16) box)
+      (mlet ([((,x . ,y) ...) '((1 . 1) (2 . 4) (3 . 9))]
+             [((,head ,body) ...) '((name "jack") (age 16))]
+             [,($b ,b) (box 'box)])
+            (list x y head body b)))
+
+     )
+
+
+(mat mlet*
+
+     (equal?
+      (mlet* ([(,a ,b) '(1 2)]
+              [(,x ,y ...) `(22 33 ,a ,b)])
+             (list a b x y))
+      '(1 2 22 (33 1 2)))
+
+     )
+
+
 ;;;; record
 
 
