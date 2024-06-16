@@ -302,6 +302,9 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
               [,var
                (identifier? #'var)
                #`(let ([var expr-id]) #,body)]
+              [`var
+               (identifier? #'var)
+               #`(if (equal? var expr-id) #,body (#,fk))]
               [()
                #`(if (null? expr-id) #,body (#,fk))]
               [,(?prefix special-pats ...)

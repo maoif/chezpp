@@ -316,6 +316,22 @@
      )
 
 
+(mat non-linearity
+
+     (match '(a b c c b a)
+       [(,x ,y ,z `z `y `x) #t]
+       [else #f])
+
+
+     (let ([x 42])
+       (match (list 42 '(a b) x '(a b))
+         [(`x ,y `x `y) #t]
+         [else #f]))
+
+
+     )
+
+
 ;;;; record
 
 
