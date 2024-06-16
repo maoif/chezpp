@@ -1,4 +1,5 @@
-(import (chezpp match))
+(import (chezpp match)
+        (chezpp string))
 
 (mat else-clause
 
@@ -266,6 +267,51 @@
               [(,x ,y ...) `(22 33 ,a ,b)])
              (list a b x y))
       '(1 2 22 (33 1 2)))
+
+     )
+
+
+(mat regex
+
+     (equal? '("ababab" "ab" "ab" "ab")
+             (match "ababababab"
+               [,($regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1) (2 ,x2) (3 ,x3))
+                (list all x1 x2 x3)]))
+
+     (string-contains?
+      (condition-message
+       (guard (e [#t e])
+         (expand '(match "ababababab"
+                    [,($regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1)
+                              (-2 ,x2) ;; error
+                              (3 ,x3) (4 ,x4))
+                     (list all x1 x2 x3 x4)]))))
+      "invalid regex pattern:")
+
+     (string-contains?
+      (condition-message
+       (guard (e [#t e])
+         (expand '(match "ababababab"
+                    [,($regex "(ab)(ab)(ab)"
+                              (0 (,a ,b)) ;; error
+                              (1 ,x1) (2 ,x2) (3 ,x3) (4 ,x4))
+                     (list all x1 x2 x3 x4)]))))
+      "only one pattern variable is allowed in regex pattern:")
+
+     (string-contains?
+      (condition-message
+       (guard (e [#t e])
+         (match "ababababab"
+           [,($regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1) (2 ,x2) (3 ,x3) (4 ,x4))
+            (list all x1 x2 x3 x4)])))
+      "invalid index number or name for regex")
+
+     (equal? '("jack" "male" "16" "jack-16-male")
+             (match "jack-16-male"
+               [,($regex '(: (=> name (+ any)) "-" (=> age (+ any)) "-" (=> sex (+ any)))
+                         (0 ,all)
+                         (name ,n) (sex ,s) (age ,a))
+                (list n s a all)]))
 
      )
 

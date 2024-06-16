@@ -10,11 +10,12 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
 
 (library (chezpp match)
   (export match ;; mlambda mcase-lambda mlet mletrec mlet* mletrec*
-          $match-record $match-datatype match-record match-datatype match-box
+          $match-record $match-datatype match-record match-datatype match-box match-string
           mlambda mlambda+ mlet mlet*
           )
   (import (chezscheme)
           (chezpp vector)
+          (chezpp irregex)
           (chezpp internal))
 
   (define subvector->list
@@ -239,7 +240,52 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
             [_ (syntax-error pat "match: invalid datatype pattern:")])))
       (define handle-regex
         (lambda (expr-id pat body fk)
-          (syntax-error 'match "Not impl")))
+          (define handle-rest
+            (lambda (expr-id regex rest body fk)
+              (syntax-case rest ()
+                [()
+                 (with-syntax ([(m) (generate-temporaries '(m))])
+                   #`(let ([m (irregex-search #,regex #,expr-id)])
+                       (if m
+                           #,body
+                           (#,fk))))]
+                ;; TODO check for duplicate numbers and names?
+                ;; by number or by name
+                [((n* v*) ...)
+                 (and (andmap (lambda (n) (or (and (integer? n) (>= n 0))
+                                              (symbol? n)))
+                              (syntax->datum #'(n* ...)))
+                      (andmap (lambda (v)
+                                (syntax-case v ()
+                                  [,v (identifier? #'v) #t]
+                                  [_ (syntax-error pat "only one pattern variable is allowed in regex pattern: ")]))
+                              #'(v* ...)))
+                 (with-syntax ([(m) (generate-temporaries '(m))])
+                   #`(let ([m (irregex-search #,regex #,expr-id)])
+                       (if m
+                           #,(let loop ([n* #'(n* ...)]
+                                        [v* (map (lambda (v) (syntax-case v () [,var #'var])) #'(v* ...))])
+                               (if (null? n*)
+                                   body
+                                   #`(if (irregex-match-valid-index? m '#,(car n*))
+                                         (let ([#,(car v*) (irregex-match-substring m '#,(car n*))])
+                                           #,(loop (cdr n*) (cdr v*)))
+                                         (errorf 'match "invalid index number or name for regex: ~a" #,(car n*)))))
+                           (#,fk))))]
+                [_ (syntax-error pat "match: invalid regex pattern:")])))
+          (syntax-case pat ()
+            ;; TODO reg is a var ref
+            [(reg . rest)
+             (let ([reg (syntax->datum #'reg)])
+               (or (string? reg) (list reg)))
+             ;; how to directly embed the compiled regex obj?
+             (with-syntax ([(regex) (generate-temporaries '(regex))])
+               #`(let ([regex (irregex reg)])
+                   #,(handle-rest expr-id #'regex #'rest body fk)))]
+            [(reg . rest)
+             ;; `reg` could be arbitrary expression, check whether it evals to string/reg
+             (todo)]
+            [_ (syntax-error pat "match: invalid regex pattern:")])))
       (define process-pattern
         (lambda (rho expr-id pat body fk)
           (define extract-pat-vars
@@ -502,6 +548,19 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
   (define-syntax match-datatype
     (syntax-rules ()
       [(k e cl* ...) ($match-datatype match-datatype e cl* ...)]))
+
+  (define-syntax match-string
+    (lambda (stx)
+      (syntax-case stx (else)
+        [(k str [(reg* pat** ...) . (e** ...)] ... [else el* ...])
+         #'(match str
+             [,($regex reg* pat** ...) e** ...] ...
+             [else el* ...])]
+        [(k str [(reg* pat** ...) . (e** ...)] ...)
+         #'(match str
+             [,($regex reg* pat** ...) e** ...]
+             ...)]
+        [_ (syntax-error stx "bad match-string form:")])))
 
   (define-syntax mlambda
     (lambda (stx)
