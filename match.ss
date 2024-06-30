@@ -298,7 +298,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                   [_ patvars]))))
           ;;(printf "process-pattern ~s ~s ~s ~s~n" expr-id pat body fk)
           (with-syntax ([expr-id expr-id])
-            (syntax-case pat (unquote)
+            (syntax-case pat (unquote quasiquote)
               [,var
                (identifier? #'var)
                #`(let ([var expr-id]) #,body)]
