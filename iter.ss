@@ -1,0 +1,454 @@
+(library (chezpp iter)
+  (export range
+          list->iter vector->iter
+          iter->list
+
+          get-iter iter-end iter-end? iter-next! iter-reset!
+          iter-for-each iter-map iter-filter iter-take iter-drop iter-fold
+          iter-append iter-zip
+
+          iter-sum iter-product iter-avg
+          iter-fxsum iter-fxproduct iter-fxavg
+          iter-flsum iter-flproduct iter-flavg
+          iter-max iter-min)
+  (import (chezscheme)
+          (chezpp list)
+          (chezpp utils)
+          (chezpp internal)
+          (chezpp control))
+
+  (define-record-type ($iter mk-$iter $iter?)
+    (fields (immutable next!-proc) (immutable reset!-proc) (immutable fini-proc) (mutable ops))
+    (opaque #t)
+    (sealed #t)
+    (protocol (lambda (p)
+                (case-lambda
+                  [(next!-proc reset!-proc fini-proc)
+                   (pcheck ([procedure? next!-proc reset!-proc fini-proc])
+                           (p next!-proc reset!-proc fini-proc (make-list-builder)))]
+                  [(next!-proc reset!-proc)
+                   (pcheck ([procedure? next!-proc reset!-proc])
+                           (p next!-proc reset!-proc void (make-list-builder)))]))))
+  (define iter-end (mk-$iter void void))
+  (define iter-end? (sect eq? _ iter-end))
+  ;; Get the next item from the iterator,
+  ;; also run the item through the ops pipeline, if any.
+  (define iter-next!
+    (lambda (iter)
+      (pcheck ([$iter? iter])
+              (let ([ops (($iter-ops iter))])
+                (if (null? ops)
+                    (($iter-next!-proc iter))
+                    (let iter-loop ()
+                      (let ([x (($iter-next!-proc iter))])
+                        (if (eq? x iter-end)
+                            x
+                            (let op-loop ([op* ops] [x x])
+                              (if (null? op*)
+                                  x
+                                  (let* ([ty (caar op*)]
+                                         [proc (cdar op*)])
+                                    (case ty
+                                      [proc (op-loop (cdr op*) (proc x))]
+                                      [filter (if (proc x)
+                                                  (op-loop (cdr op*) x)
+                                                  (iter-loop))]))))))))))))
+  (define iter-reset!
+    (lambda (iter)
+      (pcheck ([$iter? iter])
+              (($iter-reset!-proc iter))
+              ($iter-ops-set! iter (make-list-builder)))))
+  (define iter-ops-add!
+    (lambda (iter op)
+      (($iter-ops iter) op)))
+
+  ;; TODO
+  ;; (list->iter ls start stop) (list->iter ls start stop step)
+  (define list->iter
+    (lambda (val)
+      (pcheck-list (val)
+                   (let ([v val])
+                     (mk-$iter
+                      (lambda ()
+                        (if (null? v)
+                            iter-end
+                            (let ([next (car v)])
+                              (cdr! v)
+                              next)))
+                      (lambda () (set! v val)))))))
+
+  (define vector->iter
+    (lambda (vec)
+      (pcheck-vector (vec)
+                     (let ([len (vector-length vec)] [i 0])
+                       (mk-$iter
+                        (lambda ()
+                          (if (fx= i len)
+                              iter-end
+                              (let ([next (vector-ref vec i)])
+                                (incr! i)
+                                next)))
+                        (lambda () (set! i 0)))))))
+
+  (define hashtable->iter
+    (lambda (val)
+      ;; return (values iter-end #f) when reaching end
+      (pcheck-hashtable (val)
+                        (todo 'hashtable->iter))))
+
+  (define string->iter
+    (lambda (val)
+      (pcheck-string (val)
+                     (let ([len (string-length val)] [i 0])
+                       (mk-$iter
+                        (lambda ()
+                          (if (fx= i len)
+                              iter-end
+                              (let ([next (string-ref val i)])
+                                (incr! i)
+                                next)))
+                        (lambda () (set! i 0)))))))
+
+  (define port->iter
+    (lambda (port)
+      (pcheck-binary-port (port)
+                          (todo))))
+  (define port-bytes->iter
+    (lambda (port)
+      (pcheck-binary-port (port)
+                          (todo))))
+  (define port-lines->iter
+    (lambda (port)
+      (pcheck-textual-port (port)
+                           (todo))))
+  (define port-chars->iter
+    (lambda (port)
+      (pcheck-textual-port (port)
+                           (todo))))
+  (define port-data->iter
+    (lambda (port)
+      (pcheck-textual-port (port)
+                           (todo))))
+
+  (define file->iter
+    (lambda (file)
+      (todo)))
+  (define file-bytes->iter
+    (lambda (file)
+      (todo)))
+  (define file-lines->iter
+    (lambda (file)
+      (todo)))
+  (define file-chars->iter
+    (lambda (file)
+      (todo)))
+  (define file-data->iter
+    (lambda (file)
+      (todo)))
+
+  (define iter-table '())
+
+  (define add-for-iter-type!
+    (lambda (pred iter-gen)
+      (pcheck-proc (pred iter-gen)
+                   (set! iter-table (cons (cons pred iter-gen) iter-table)))))
+
+  (define get-iter
+    (lambda (who val)
+      (if ($iter? val)
+          val
+          (cond [(list? val) (list->iter val)]
+                [(vector? val) (vector->iter val)]
+                [(string? val) (string->iter val)]
+                [(hashtable? val) (hashtable->iter val)]
+                [else (let loop ([table iter-table])
+                        (if (null? table)
+                            (errorf who "cannot be iterated: ~a" val)
+                            (if ((caar table) val)
+                                ((cdar table) val)
+                                (loop (cdr table)))))]))))
+
+  #|doc
+  Returns a number iterator.
+  |#
+  (define range
+    (case-lambda
+      [(stop) (range 0 stop 1)]
+      [(start stop) (range start stop 1)]
+      [(start stop step)
+       (let ([val start])
+         (mk-$iter
+          (lambda ()
+            (if (>= val stop)
+                iter-end
+                (let ([n (+ val step)] [v val])
+                  ;; TODO optimize this update
+                  (set! val n)
+                  v)))
+          (lambda () (set! val start))))]))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   iterator operations
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  (define all-iters? (lambda (x*) (andmap $iter? x*)))
+
+
+;;; intermediate ops
+;;; op types:
+;;; - proc:   processes the item and returns a result for later processing
+;;; - filter: processes the item and returns a boolean indicating
+;;;           whether the item will be used for later processing
+;;; Intermediate ops always return an iterator.
+
+  (define iter-map
+    (lambda (proc iter)
+      (pcheck ([$iter? iter] [procedure? proc])
+              (iter-ops-add! iter (cons 'proc proc))
+              iter)))
+  (define iter-filter
+    (lambda (proc iter)
+      (pcheck ([$iter? iter] [procedure? proc])
+              (iter-ops-add! iter (cons 'filter proc))
+              iter)))
+  (define iter-take
+    (lambda (n iter)
+      (pcheck ([$iter? iter] [fixnum? n])
+              (if (>= n 0)
+                  (begin (iter-ops-add! iter (cons 'filter
+                                                   (let ([n n])
+                                                     (lambda (x)
+                                                       (if (= n 0)
+                                                           #f
+                                                           (begin (set! n (fx- n 1))
+                                                                  #t))))))
+                         iter)
+                  (errorf 'iter-take "item count must be positive: ~a" n)))))
+  ;; take consecutive items that satisfies `pred`
+  (define iter-take-while
+    (lambda (pred iter)
+      (pcheck ([$iter? iter] [procedure? pred])
+              (iter-ops-add! iter (cons 'filter (let ([rest-bad? #f])
+                                                  (lambda (x)
+                                                    (if rest-bad?
+                                                        #f
+                                                        (if (pred x)
+                                                            #t
+                                                            (begin (set! rest-bad? #t)
+                                                                   #f)))))))
+              iter)))
+  (define iter-drop
+    (lambda (n iter)
+      (pcheck ([$iter? iter] [fixnum? n])
+              (if (>= n 0)
+                  (begin (iter-ops-add! iter (cons 'filter
+                                                   (let ([n n])
+                                                     (lambda (x)
+                                                       (if (= n 0)
+                                                           #t
+                                                           (begin (set! n (fx- n 1))
+                                                                  #f))))))
+                         iter)
+                  (errorf 'iter-take "item count must be positive: ~a" n)))))
+  ;; drop consecutive items that satisfies `pred`
+  (define iter-drop-while
+    (lambda (pred iter)
+      (pcheck ([$iter? iter] [procedure? pred])
+              (iter-ops-add! iter (cons 'filter (let ([rest-good? #f])
+                                                  (lambda (x)
+                                                    (if rest-good?
+                                                        #t
+                                                        (if (pred x)
+                                                            #f
+                                                            (begin (set! rest-good? #t)
+                                                                   #t)))))))
+              iter)))
+
+  ;; (iter-append (a0 a1 ...) (b0 b1 ...)) ->
+  ;; (a0 a1 ... b0 b1 ...)
+  (define iter-append
+    (lambda (iter . iter*)
+      (pcheck ([$iter? iter])
+              (if (null? iter*)
+                  iter
+                  (pcheck ([all-iters? iter*])
+                          (let ([it iter] [it-rest iter*])
+                            (mk-$iter
+                             (lambda () (let loop ()
+                                          (let ([x (iter-next! it)])
+                                            (if (iter-end? x)
+                                                (if (null? it-rest)
+                                                    iter-end
+                                                    (begin (set! it (car it-rest))
+                                                           (set! it-rest (cdr it-rest))
+                                                           (loop)))
+                                                x))))
+                             (lambda ()
+                               (set! it iter)
+                               (set! it-rest iter*)
+                               (for-each iter-reset! (cons iter iter*))))))))))
+  ;; (iter-zip (a0 a1 ...) (b0 b1 ...)) ->
+  ;; ((a0 b0) (a1 b1) ...)
+  (define iter-zip
+    (lambda (iter . iter*)
+      (pcheck ([$iter? iter])
+              (if (null? iter*)
+                  iter
+                  (pcheck ([all-iters? iter*])
+                          (let ([iter* (cons iter iter*)])
+                            (mk-$iter
+                             (lambda () (let ([v* (map iter-next! iter*)])
+                                          (if (memq iter-end v*)
+                                              iter-end
+                                              v*)))
+                             (lambda () (for-each iter-reset! iter*)))))))))
+  ;; (iter-interleave (a0 a1 ...) (b0 b1 ...)) ->
+  ;; (a0 b0 a1 b1 ...)
+  (define iter-interleave
+    (lambda (iter . iter*)
+      (pcheck ([$iter? iter])
+              (if (null? iter*)
+                  iter
+                  (pcheck ([all-iters? iter*])
+                          (let* ([iter* (cons iter iter*)]
+                                 [it* iter*])
+                            (mk-$iter
+                             ;; TODO how to decide iter-end?
+                             (lambda () (todo))
+                             (lambda () (for-each iter-reset! iter*)))))
+                  ))))
+  ;; iter of iters -> iter
+  (define iter-concat
+    (lambda (iter)
+      (todo)))
+  ;; remove duplicates
+  (define iter-distinct
+    (lambda (proc iter)
+      (todo)))
+  (define iter-sorted
+    (lambda (proc iter)
+      (todo)))
+
+;;; terminal ops
+
+  (define iter-for-each
+    (lambda (proc iter)
+      (pcheck ([$iter? iter] [procedure? proc])
+              (let iter-loop ()
+                (let ([x (iter-next! iter)])
+                  (unless (eq? x iter-end)
+                    (begin (proc x)
+                           (iter-loop))))))))
+  (define iter-fold
+    (lambda (proc acc iter)
+      (let iter-loop ([acc acc])
+        (let ([x (iter-next! iter)])
+          (if (eq? x iter-end)
+              acc
+              (iter-loop (proc acc x)))))))
+
+  (define iter-max
+    (case-lambda
+      [(iter) (iter-max > iter)]
+      [(f iter) (iter-fold (lambda (acc x) (if acc (if (f x acc) x acc) x)) #f iter)]))
+  (define iter-min
+    (case-lambda
+      [(iter) (iter-min < iter)]
+      [(f iter) (iter-fold (lambda (acc x) (if acc (if (f x acc) x acc) x)) #f iter)]))
+  (define iter-avg
+    (lambda (iter)
+      (let loop ([i 0] [sum 0])
+        (let ([x (iter-next! iter)])
+          (if (iter-end? x)
+              (if (= i 0) #f (/ sum i))
+              (loop (add1 i) (+ x sum)))))))
+  (define iter-sum
+    (lambda (iter)
+      (iter-fold (lambda (acc x) (+ acc x)) 0 iter)))
+  (define iter-product
+    (lambda (iter)
+      (iter-fold (lambda (acc x) (* acc x)) 1 iter)))
+
+  (define iter-fxmax
+    (lambda (iter)
+      (iter-max fx> iter)))
+  (define iter-fxmin
+    (lambda (iter)
+      (iter-min fx< iter)))
+  (define iter-fxavg
+    (lambda (iter)
+      (let loop ([i 0] [sum 0])
+        (let ([x (iter-next! iter)])
+          (if (iter-end? x)
+              (if (fx= i 0) #f (fx/ sum i))
+              (loop (add1 i) (fx+ x sum)))))))
+  (define iter-fxsum
+    (lambda (iter)
+      (iter-fold (lambda (acc x) (fx+ acc x)) 0 iter)))
+  (define iter-fxproduct
+    (lambda (iter)
+      (iter-fold (lambda (acc x) (fx* acc x)) 1 iter)))
+
+  (define iter-flmax
+    (lambda (iter)
+      (iter-max fl> iter)))
+  (define iter-flmin
+    (lambda (iter)
+      (iter-min fl< iter)))
+  (define iter-flavg
+    (lambda (iter)
+      (let loop ([i 0] [sum 0.0])
+        (let ([x (iter-next! iter)])
+          (if (iter-end? x)
+              (if (fx= i 0) #f (fl/ sum (inexact i)))
+              (loop (add1 i) (fl+ x sum)))))))
+  (define iter-flsum
+    (lambda (iter)
+      (iter-fold (lambda (acc x) (fl+ acc x)) 0.0 iter)))
+  (define iter-flproduct
+    (lambda (iter)
+      (iter-fold (lambda (acc x) (fl* acc x)) 1.0 iter)))
+
+  ;; TODO type-specialized ops
+
+
+;;; conversions
+
+  (define iter->list
+    (lambda (iter)
+      (pcheck ([$iter? iter])
+              (let ([lb (make-list-builder)])
+                (let iter-loop ()
+                  (let ([x (iter-next! iter)])
+                    (if (eq? x iter-end)
+                        (lb)
+                        (begin (lb x)
+                               (iter-loop)))))))))
+  (define iter->vector
+    (lambda (iter)
+      (todo)))
+  (define iter->dynvec
+    (lambda (iter)
+      (todo)))
+
+
+
+  #|doc
+  Build iterator pipeline.
+  For the sake of extensibility, iter ops should take the iter argument last,
+  so `iter>>>` can expand properly.
+  |#
+  (define-syntax iter>>>
+    (lambda (stx)
+      (syntax-case stx ()
+        [(k iter op ops ...)
+         (todo)])))
+
+
+
+
+
+  )
