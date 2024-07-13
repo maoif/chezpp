@@ -5,7 +5,7 @@
 
           get-iter iter-end iter-end? iter-next! iter-reset!
           iter-for-each iter-map iter-filter iter-take iter-drop iter-fold
-          iter-append iter-zip
+          iter-append iter-zip iter-interleave
 
           iter-sum iter-product iter-avg
           iter-fxsum iter-fxproduct iter-fxavg
@@ -13,6 +13,7 @@
           iter-max iter-min)
   (import (chezscheme)
           (chezpp list)
+          (chezpp vector)
           (chezpp utils)
           (chezpp internal)
           (chezpp control))
@@ -378,12 +379,29 @@
                   iter
                   (pcheck ([all-iters? iter*])
                           (let* ([iter* (cons iter iter*)]
-                                 [it* iter*])
+                                 [itvec (list->vector iter*)]
+                                 [len (length iter*)]
+                                 [idx 0])
                             (mk-$iter
-                             ;; TODO how to decide iter-end?
-                             (lambda () (todo))
-                             (lambda () (for-each iter-reset! iter*)))))
-                  ))))
+                             (lambda ()
+                               (let loop ([i idx])
+                                 (if (vandmap iter-end? itvec)
+                                     iter-end
+                                     (if (fx>= i len)
+                                         (loop 0)
+                                         (let ([it (vector-ref itvec i)])
+                                           (if (iter-end? it)
+                                               (loop (add1 i))
+                                               (let ([x (iter-next! it)])
+                                                 (if (eq? x iter-end)
+                                                     (begin (vector-set! itvec i iter-end)
+                                                            (loop (add1 i)))
+                                                     (begin (set! idx (add1 i))
+                                                            x)))))))))
+                             (lambda ()
+                               (for-each iter-reset! iter*)
+                               (set! itvec (list->vector iter*))
+                               (set! idx 0)))))))))
   ;; iter of iters -> iter
   (define iter-concat
     (lambda (iter)

@@ -103,6 +103,28 @@
                (iter->list (iter-zip (iter-take 3 (iter-filter odd? (iter-map (sect expt _ 2) it)))
                                      (iter-take 3 (iter-filter even? (iter-map (sect expt _ 2) it1)))))))
 
+     ;; iter-interleave
+     ;; same length
+     (equal? '(1 0 3 2 5 4 7 6 9 8 11 10 13 12 15 14 17 16 19 18)
+             (let ([it1 (range 20)]
+                   [it2 (range 20)])
+               (iter->list (iter-interleave (iter-filter odd? it1)
+                                            (iter-filter even? it2)))))
+     ;; one shorter
+     (equal? '(1 0 3 2 5 4 7 6 9 8 10 12 14 16 18)
+             (let ([it1 (range 10)]
+                   [it2 (range 20)])
+               (iter->list (iter-interleave (iter-filter odd? it1)
+                                            (iter-filter even? it2)))))
+     (equal? '(1 0 -20.0 3 2 -17.0 5 4 -14.0 7 6 -11.0 9 8 -8.0 10 -5.0 12
+                 -2.0 14 1.0 16 4.0 18 7.0 10.0 13.0 16.0 19.0)
+             (let ([it1 (range 10)]
+                   [it2 (range 20)]
+                   [it3 (range -20.0 20.0 3)])
+               (iter->list (iter-interleave (iter-filter odd? it1)
+                                            (iter-filter even? it2)
+                                            it3))))
+
      (= 6
         (iter-fold (lambda (acc x) (+ acc x)) 0 (range 4)))
 
