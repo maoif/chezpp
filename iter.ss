@@ -1,6 +1,6 @@
 (library (chezpp iter)
   (export range
-          list->iter vector->iter
+          list->iter vector->iter string->iter
           iter->list
 
           get-iter iter-end iter-end? iter-next! iter-reset!
@@ -62,33 +62,78 @@
     (lambda (iter op)
       (($iter-ops iter) op)))
 
-  ;; TODO
-  ;; (list->iter ls start stop) (list->iter ls start stop step)
   (define list->iter
-    (lambda (val)
-      (pcheck-list (val)
-                   (let ([v val])
-                     (mk-$iter
-                      (lambda ()
-                        (if (null? v)
-                            iter-end
-                            (let ([next (car v)])
-                              (cdr! v)
-                              next)))
-                      (lambda () (set! v val)))))))
+    (case-lambda
+      [(val)
+       (pcheck-list (val)
+                    (let ([v val])
+                      (mk-$iter
+                       (lambda ()
+                         (if (null? v)
+                             iter-end
+                             (let ([next (car v)])
+                               (cdr! v)
+                               next)))
+                       (lambda () (set! v val)))))]
+      [(val stop)
+       (pcheck-list (val) (list->iter val 0 stop 1))]
+      [(val start stop)
+       (pcheck-list (val) (list->iter val start stop 1))]
+      [(val start stop step)
+       ;; TODO handle start < stop and step < 0
+       (pcheck ([list? val] [integer? start stop step])
+               ;; run to the start first
+               (let ([val (let loop ([v val] [c start])
+                            (cond [(null? v) '()]
+                                  [(fx= c 0) v]
+                                  [else (loop (cdr v) (sub1 c))]))])
+                 (let ([i start] [v val])
+                   (mk-$iter
+                    (lambda ()
+                      (if (or (null? v) (fx>= i stop))
+                          iter-end
+                          (let ([res (car v)])
+                            (let loop ([v1 v] [c step])
+                              (cond [(null? v1)
+                                     (set! v '())]
+                                    [(fx= c 0)
+                                     (set! i (fx+ i step))
+                                     (set! v v1)]
+                                    [else (loop (cdr v1) (sub1 c))]))
+                            res)))
+                    (lambda () (set! i start) (set! v val))))))]))
 
   (define vector->iter
-    (lambda (vec)
-      (pcheck-vector (vec)
-                     (let ([len (vector-length vec)] [i 0])
-                       (mk-$iter
-                        (lambda ()
-                          (if (fx= i len)
-                              iter-end
-                              (let ([next (vector-ref vec i)])
-                                (incr! i)
-                                next)))
-                        (lambda () (set! i 0)))))))
+    (case-lambda
+      [(val)
+       (pcheck-vector (val)
+                      (let ([len (vector-length val)] [i 0])
+                        (mk-$iter
+                         (lambda ()
+                           (if (fx= i len)
+                               iter-end
+                               (let ([next (vector-ref val i)])
+                                 (incr! i)
+                                 next)))
+                         (lambda () (set! i 0)))))]
+      [(val stop)
+       (pcheck-vector (val) (vector->iter val 0 stop 1))]
+      [(val start stop)
+       (pcheck-vector (val) (vector->iter val start stop 1))]
+      [(val start stop step)
+       (pcheck ([vector? val] [integer? start stop step])
+               ;; TODO handle start < stop and step < 0
+               (let* ([i start]
+                      [vlen (vector-length val)]
+                      [stop (if (fx>= stop vlen) vlen stop)])
+                 (mk-$iter
+                  (lambda ()
+                    (if (fx>= i stop)
+                        iter-end
+                        (let ([v (vector-ref val i)])
+                          (set! i (fx+ i step))
+                          v)))
+                  (lambda () (set! i start)))))]))
 
   (define hashtable->iter
     (lambda (val)
@@ -97,17 +142,36 @@
                         (todo 'hashtable->iter))))
 
   (define string->iter
-    (lambda (val)
-      (pcheck-string (val)
-                     (let ([len (string-length val)] [i 0])
-                       (mk-$iter
-                        (lambda ()
-                          (if (fx= i len)
-                              iter-end
-                              (let ([next (string-ref val i)])
-                                (incr! i)
-                                next)))
-                        (lambda () (set! i 0)))))))
+    (case-lambda
+      [(val)
+       (pcheck-string (val)
+                      (let ([len (string-length val)] [i 0])
+                        (mk-$iter
+                         (lambda ()
+                           (if (fx= i len)
+                               iter-end
+                               (let ([next (string-ref val i)])
+                                 (incr! i)
+                                 next)))
+                         (lambda () (set! i 0)))))]
+      [(val stop)
+       (pcheck-string (val) (string->iter val 0 stop 1))]
+      [(val start stop)
+       (pcheck-string (val) (string->iter val start stop 1))]
+      [(val start stop step)
+       (pcheck ([string? val] [integer? start stop step])
+               ;; TODO handle start < stop and step < 0
+               (let* ([i start]
+                      [vlen (string-length val)]
+                      [stop (if (fx>= stop vlen) vlen stop)])
+                 (mk-$iter
+                  (lambda ()
+                    (if (fx>= i stop)
+                        iter-end
+                        (let ([v (string-ref val i)])
+                          (set! i (fx+ i step))
+                          v)))
+                  (lambda () (set! i start)))))]))
 
   (define port->iter
     (lambda (port)

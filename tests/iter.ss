@@ -35,6 +35,39 @@
      (equal? '(1 3 5 7 9) (nums 1 10 2))
      (equal? '(0.0 0.5 1.0 1.5) (nums 0.0 2.0 0.5))
 
+     ;; conversions
+     (eq? iter-end (iter-next! (list->iter '())))
+     (eq? iter-end (iter-next! (list->iter '(1 2) 0 0)))
+     (eq? iter-end (iter-next! (list->iter '(1 2 3) 3 0)))
+
+     (eq? iter-end (iter-next! (vector->iter '#())))
+     (eq? iter-end (iter-next! (vector->iter '#(1 2) 0 0)))
+     (eq? iter-end (iter-next! (vector->iter '#(1 2 3) 3 0)))
+
+     (eq? iter-end (iter-next! (string->iter "")))
+     (eq? iter-end (iter-next! (string->iter "123" 0 0)))
+     (eq? iter-end (iter-next! (string->iter "1234" 3 0)))
+
+     (equal? (iter->list (range 0 100 5))
+             (iter->list (list->iter (iota 100) 0 100 5)))
+     (equal? (nums 0 100 2)
+             (iter->list (list->iter (iota 100) 0 100 2)))
+     (equal? (nums 1 100 2)
+             (iter->list (list->iter (iota 100) 1 100 2)))
+
+     (equal? (iter->list (range 0 100 5))
+             (iter->list (vector->iter (list->vector (iota 100)) 0 100 5)))
+     (equal? (nums 0 100 2)
+             (iter->list (vector->iter (list->vector (iota 100)) 0 100 2)))
+     (equal? (nums 1 100 2)
+             (iter->list (vector->iter (list->vector (iota 100)) 1 100 2)))
+
+     (let ([s "abc123345jskljdla"])
+       (equal? (string->list s) (iter->list (string->iter s))))
+     (let ([s "abc123345jskljdla"])
+       (equal? (iter->list (list->iter (string->list s) 1 30 3))
+               (iter->list (string->iter s 1 30 3))))
+
      )
 
 
