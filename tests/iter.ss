@@ -167,3 +167,104 @@
      )
 
 
+(mat iter-ports/files
+
+     ;; port->iter
+     (let* ([ls (iter->list (iter-zip (range 100)
+                                      (range 100)
+                                      (range 100)))]
+            [str* (map (lambda (x) (format "~a~n" x)) ls)]
+            [file (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))])
+       (call-with-output-file file
+         (lambda (p)
+           (let loop ([str* str*])
+             (unless (null? str*)
+               (put-string p (car str*))
+               (loop (cdr str*))))))
+       (let ([res (call-with-input-file file
+                    (lambda (p)
+                      (let ([s (iter->list (iter-map (lambda (x) (format "~a~n" x))
+                                                     (port->iter p)))])
+                        (equal? str* s))))])
+         (delete-file file)
+         res))
+     ;;port-chars->iter
+     (let* ([ls (iter->list (iter-zip (range 100)
+                                      (range 100)
+                                      (range 100)))]
+            [str (format "~a" ls)]
+            [file (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))])
+       (call-with-output-file file
+         (lambda (p)
+           (put-string p str)))
+       (let ([res (call-with-input-file file
+                    (lambda (p)
+                      (let ([s (iter->list (port-chars->iter p))])
+                        (equal? str (apply string s)))))])
+         (delete-file file)
+         res))
+     ;; port-data->iter
+     (let* ([ls (iter->list (iter-zip (range 100)
+                                      (range 100)
+                                      (range 100)))]
+            [file (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))])
+       (call-with-output-file file
+         (lambda (p)
+           (let loop ([ls ls])
+             (unless (null? ls)
+               (put-datum p (car ls))
+               (loop (cdr ls))))))
+       (let ([res (call-with-input-file file
+                    (lambda (p)
+                      (let ([s (iter->list (port-data->iter p))])
+                        (equal? ls s))))])
+         (delete-file file)
+         res))
+
+
+     ;; file->iter
+     (let* ([ls (iter->list (iter-zip (range 100)
+                                      (range 100)
+                                      (range 100)))]
+            [str* (map (lambda (x) (format "~a~n" x)) ls)]
+            [file (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))])
+       (call-with-output-file file
+         (lambda (p)
+           (let loop ([str* str*])
+             (unless (null? str*)
+               (put-string p (car str*))
+               (loop (cdr str*))))))
+       (let ([res (let ([s (iter->list (iter-map (lambda (x) (format "~a~n" x))
+                                                 (file->iter file)))])
+                    (equal? str* s))])
+         (delete-file file)
+         res))
+     ;;file-chars->iter
+     (let* ([ls (iter->list (iter-zip (range 100)
+                                      (range 100)
+                                      (range 100)))]
+            [str (format "~a" ls)]
+            [file (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))])
+       (call-with-output-file file
+         (lambda (p)
+           (put-string p str)))
+       (let ([res (let ([s (iter->list (file-chars->iter file))])
+                    (equal? str (apply string s)))])
+         (delete-file file)
+         res))
+     ;; file-data->iter
+     (let* ([ls (iter->list (iter-zip (range 100)
+                                      (range 100)
+                                      (range 100)))]
+            [file (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))])
+       (call-with-output-file file
+         (lambda (p)
+           (let loop ([ls ls])
+             (unless (null? ls)
+               (put-datum p (car ls))
+               (loop (cdr ls))))))
+       (let ([res (equal? ls (iter->list (file-data->iter file)))])
+         (delete-file file)
+         res))
+
+     )

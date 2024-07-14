@@ -1,6 +1,8 @@
 (library (chezpp iter)
   (export range
           list->iter vector->iter string->iter
+          port->iter port-lines->iter port-chars->iter port-data->iter
+          file->iter file-lines->iter file-chars->iter file-data->iter
           iter->list
 
           get-iter iter-end iter-end? iter-next! iter-reset!
@@ -174,42 +176,70 @@
                           v)))
                   (lambda () (set! i start)))))]))
 
+
+;;;; ports are opened and closed by the caller
+
+  (define define-textual-port->iter
+    (lambda (who get-proc)
+      (lambda (port)
+        (pcheck-open-textual-port
+         (port)
+         (mk-$iter
+          (lambda () (let ([x (get-proc port)])
+                       (if (eof-object? x)
+                           iter-end
+                           x)))
+          (lambda () (set-port-position! port 0))
+          (lambda () (close-port port)))))))
   (define port->iter
-    (lambda (port)
-      (pcheck-binary-port (port)
-                          (todo))))
+    (define-textual-port->iter 'port->iter get-line))
+  (define port-lines->iter
+    (define-textual-port->iter 'port-lines->iter get-line))
+  (define port-chars->iter
+    (define-textual-port->iter 'port-chars->iter get-char))
+  (define port-data->iter
+    (define-textual-port->iter 'port-data->iter get-datum))
+
   (define port-bytes->iter
     (lambda (port)
-      (pcheck-binary-port (port)
-                          (todo))))
-  (define port-lines->iter
-    (lambda (port)
-      (pcheck-textual-port (port)
-                           (todo))))
-  (define port-chars->iter
-    (lambda (port)
-      (pcheck-textual-port (port)
-                           (todo))))
-  (define port-data->iter
-    (lambda (port)
-      (pcheck-textual-port (port)
-                           (todo))))
+      (pcheck-open-binary-port
+       (port)
+       (let ([port (open-file-input-port port)])
+         (mk-$iter
+          (lambda () (let ([x (get-u8 port)])
+                       (if (eof-object? x)
+                           iter-end
+                           x)))
+          (lambda () (set-port-position! port 0))
+          (lambda () (close-port port)))))))
 
+
+
+;;;; files are opened by iter, and closed in fini!
+
+  (define define-file->iter
+    (lambda (who open-proc get-proc)
+      (lambda (file)
+        (pcheck-file (file)
+                     (let ([port (open-proc file)])
+                       (mk-$iter
+                        (lambda () (let ([x (get-proc port)])
+                                     (if (eof-object? x)
+                                         iter-end
+                                         x)))
+                        (lambda () (set-port-position! port 0))
+                        (lambda () (close-port port))))))))
+  ;; the same as `file-lines->iter`
   (define file->iter
-    (lambda (file)
-      (todo)))
+    (define-file->iter 'file->iter open-input-file get-line))
   (define file-bytes->iter
-    (lambda (file)
-      (todo)))
+    (define-file->iter 'file-bytes->iter open-file-input-port get-u8))
   (define file-lines->iter
-    (lambda (file)
-      (todo)))
+    (define-file->iter 'file-lines->iter open-input-file get-line))
   (define file-chars->iter
-    (lambda (file)
-      (todo)))
+    (define-file->iter 'file-chars->iter open-input-file get-char))
   (define file-data->iter
-    (lambda (file)
-      (todo)))
+    (define-file->iter 'file-data->iter open-input-file get-datum))
 
   (define iter-table '())
 
