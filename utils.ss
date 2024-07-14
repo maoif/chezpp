@@ -1,6 +1,9 @@
 (library (chezpp utils)
   (export pcase pcheck pcheck-pair pcheck-list pcheck-string pcheck-char pcheck-proc
           pcheck-hashtable pcheck-vector pcheck-port pcheck-binary-port pcheck-textual-port
+          pcheck-open-port pcheck-open-binary-port pcheck-open-textual-port
+          pcheck-file pcheck-directory pcheck-symlink
+          pcheck-fxvector pcheck-flvector
           incr! decr! add1! sub1!
           cons! cdr!
           id)
@@ -84,6 +87,10 @@
                     #'(pcheck ([pred id id* (... ...)])
                               e e* (... ...))]))))])))
 
+  (define open-port? (lambda (p) (and (port? p) (not (port-closed? p)))))
+  (define open-textual-port? (lambda (p) (and (textual-port? p) (not (port-closed? p)))))
+  (define open-binary-port?  (lambda (p) (and (binary-port? p) (not (port-closed? p)))))
+
   (gen-pcheck proc procedure?)
   (gen-pcheck pair pair?)
   (gen-pcheck list list?)
@@ -91,6 +98,8 @@
   (gen-pcheck fixnum fixnum?)
   (gen-pcheck flonum flonum?)
   (gen-pcheck vector vector?)
+  (gen-pcheck fxvector fxvector?)
+  (gen-pcheck flvector flvector?)
   (gen-pcheck symbol symbol?)
   (gen-pcheck char char?)
   (gen-pcheck string string?)
@@ -98,6 +107,12 @@
   (gen-pcheck port port?)
   (gen-pcheck binary-port binary-port?)
   (gen-pcheck textual-port textual-port?)
+  (gen-pcheck open-port open-port?)
+  (gen-pcheck open-binary-port open-binary-port?)
+  (gen-pcheck open-textual-port open-textual-port?)
+  (gen-pcheck file file-regular?)
+  (gen-pcheck directory file-directory?)
+  (gen-pcheck symlink file-symbolic-link?)
 
 
   (define-syntax incr!
