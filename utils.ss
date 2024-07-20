@@ -3,9 +3,11 @@
           pcheck-hashtable pcheck-vector pcheck-port pcheck-binary-port pcheck-textual-port
           pcheck-open-port pcheck-open-binary-port pcheck-open-textual-port
           pcheck-file pcheck-directory pcheck-symlink
-          pcheck-fxvector pcheck-flvector
-          incr! decr! add1! sub1!
+          pcheck-fxvector pcheck-flvector pcheck-natural
+          incr! decr! add1! sub1! fx+! fx-! fx*! fx/!
           cons! cdr!
+          natural?
+          neq? neqv? nequal?
           id)
   (import (chezscheme)
           (chezpp internal))
@@ -91,12 +93,15 @@
   (define open-textual-port? (lambda (p) (and (textual-port? p) (not (port-closed? p)))))
   (define open-binary-port?  (lambda (p) (and (binary-port? p) (not (port-closed? p)))))
 
+  (define natural? (lambda (n) (and (integer? n) (>= n 0))))
+
   (gen-pcheck proc procedure?)
   (gen-pcheck pair pair?)
   (gen-pcheck list list?)
   (gen-pcheck number number?)
   (gen-pcheck fixnum fixnum?)
   (gen-pcheck flonum flonum?)
+  (gen-pcheck natural natural?)
   (gen-pcheck vector vector?)
   (gen-pcheck fxvector fxvector?)
   (gen-pcheck flvector flvector?)
@@ -135,6 +140,30 @@
     (syntax-rules ()
       [(_ n) (decr! n)]))
 
+  (define-syntax fx+!
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ n x ...) (identifier? #'n)
+         #'(set! n (fx+ n x ...))])))
+
+  (define-syntax fx-!
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ n x ...) (identifier? #'n)
+         #'(set! n (fx- n x ...))])))
+
+  (define-syntax fx*!
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ n x ...) (identifier? #'n)
+         #'(set! n (fx* n x ...))])))
+
+  (define-syntax fx/!
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ n x ...) (identifier? #'n)
+         #'(set! n (fx/ n x ...))])))
+
   (define-syntax cons!
     (lambda (stx)
       (syntax-case stx ()
@@ -146,5 +175,16 @@
       (syntax-case stx ()
         [(_ v) (identifier? #'v)
          #'(set! v (cdr v))])))
+
+
+  (define-syntax neq?
+    (syntax-rules ()
+      [(_ e* ...) (not (eq? e* ...))]))
+  (define-syntax neqv?
+    (syntax-rules ()
+      [(_ e* ...) (not (eqv? e* ...))]))
+  (define-syntax nequal?
+    (syntax-rules ()
+      [(_ e* ...) (not (equal? e* ...))]))
 
   )
