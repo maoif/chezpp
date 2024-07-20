@@ -78,20 +78,21 @@
       (trace-define generate-outer-loop
         (lambda (acc-e* ?for-index cl* brk ?fini e)
           (with-syntax ([((acc-var* ...) (acc-e* ...)) (parse-acc-clauses acc-e*)]
-                        [((get-iters ((iter-v iter-v* ...) idx clause-loops)) ...)
+                        [(([iter-vars iter-inits] ((iter-v iter-v* ...) idx clause-loops)) ...)
                          (parse-clauses cl*)]
                         [(for-loop) (generate-temporaries '(for-loop))])
             (if ?for-index
-                #`(let (get-iters ... idx ...)
+                #`(let ([iter-vars iter-inits] ... idx ...)
                     (let for-loop ([#,?for-index 0] [acc-var* acc-e*] ...)
                       (let*-values ([(iter-v iter-v* ...) clause-loops] ...)
                         ;; test the 1st variable in each binding for iter-end
                         (if (or #,brk (ormap iter-end? (list iter-v ...)))
                             ;; TODO how to restrict the scope of fini-e?
-                            #,(if ?fini
-                                  ?fini
-                                  ;; also valid then no acc is present
-                                  #'(values acc-var* ...))
+                            (begin (iter-finalize! iter-vars) ...
+                                   #,(if ?fini
+                                         ?fini
+                                         ;; also valid then no acc is present
+                                         #'(values acc-var* ...)))
                             #,(let ([nacc (length #'(acc-var* ...))])
                                 (cond [(= 0 nacc)
                                        #`(begin #,e (for-loop (add1 #,?for-index)))]
@@ -101,13 +102,14 @@
                                       [else (with-syntax ([(v* ...) (generate-temporaries (iota nacc))])
                                               #`(let-values ([(v* ...) #,e])
                                                   (for-loop (add1 #,?for-index) v* ...)))]))))))
-                #`(let (get-iters ...)
+                #`(let ([iter-vars iter-inits] ...)
                     (let for-loop ([acc-var* acc-e*] ...)
                       (let*-values ([(iter-v iter-v* ...) clause-loops] ...)
                         (if (or #,brk (ormap iter-end? (list iter-v ...)))
-                            #,(if ?fini
-                                  ?fini
-                                  #'(values acc-var* ...))
+                            (begin (iter-finalize! iter-vars) ...
+                                   #,(if ?fini
+                                         ?fini
+                                         #'(values acc-var* ...)))
                             #,(let ([nacc (length #'(acc-var* ...))])
                                 (cond [(= 0 nacc)
                                        #`(begin #,e (for-loop))]
@@ -207,9 +209,10 @@
                         (let outer-loop ([?for-index 0] [acc-var* acc-e*] ...)
                           (let-values ([(iter-v0 iter-v0* ...) clause-loop0])
                             (if (iter-end? iter-v0)
-                                #,(if ?fini
-                                      ?fini
-                                      #'(values acc-var* ...))
+                                (begin (iter-finalize! iter-vars) ...
+                                       #,(if ?fini
+                                             ?fini
+                                             #'(values acc-var* ...)))
                                 #,(let gen-nests ([itervar*  (cdr #'(iter-vars ...))]
                                                   [iterv*    #'((iter-v iter-v* ...) ...)]
                                                   [cl-loop*  #'(clause-loops ...)]
@@ -217,9 +220,10 @@
                                     (with-syntax ([(for-loop) (generate-temporaries '(for-loop))])
                                       (if (null? iterv*)
                                           #`(if #,brk
-                                                #,(if ?fini
-                                                      ?fini
-                                                      #'(values acc-var* ...))
+                                                (begin (iter-finalize! iter-vars) ...
+                                                       #,(if ?fini
+                                                             ?fini
+                                                             #'(values acc-var* ...)))
                                                 ;; run innermost loop
                                                 #,(let ([nacc (length #'(acc-var* ...))])
                                                     (cond [(= 0 nacc)
@@ -241,9 +245,10 @@
                       (let outer-loop ([acc-var* acc-e*] ...)
                         (let-values ([(iter-v0 iter-v0* ...) clause-loop0])
                           (if (iter-end? iter-v0)
-                              #,(if ?fini
-                                    ?fini
-                                    #'(values acc-var* ...))
+                              (begin (iter-finalize! iter-vars) ...
+                                     #,(if ?fini
+                                           ?fini
+                                           #'(values acc-var* ...)))
                               #,(let gen-nests ([itervar*  (cdr #'(iter-vars ...))]
                                                 [iterv*    #'((iter-v iter-v* ...) ...)]
                                                 [cl-loop*  #'(clause-loops ...)]
@@ -251,9 +256,10 @@
                                   (with-syntax ([(for-loop) (generate-temporaries '(for-loop))])
                                     (if (null? iterv*)
                                         #`(if #,brk
-                                              #,(if ?fini
-                                                    ?fini
-                                                    #'(values acc-var* ...))
+                                              (begin (iter-finalize! iter-vars) ...
+                                                     #,(if ?fini
+                                                           ?fini
+                                                           #'(values acc-var* ...)))
                                               #,(let ([nacc (length #'(acc-var* ...))])
                                                   (cond [(= 0 nacc)
                                                          #`(begin #,e (#,prev-loop))]

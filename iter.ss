@@ -5,7 +5,8 @@
           file->iter file-lines->iter file-chars->iter file-data->iter
           iter->list
 
-          get-iter iter-end iter-end? iter-next! iter-reset!
+          get-iter iter-end iter-end? iter-next! iter-reset! iter-finalize!
+          (rename ($iter-finalized? iter-finalized?))
           iter-for-each iter-map iter-filter iter-take iter-drop iter-fold
           iter-append iter-zip iter-interleave
 
@@ -21,17 +22,17 @@
           (chezpp control))
 
   (define-record-type ($iter mk-$iter $iter?)
-    (fields (immutable next!-proc) (immutable reset!-proc) (immutable fini-proc) (mutable ops))
+    (fields (immutable next!-proc) (immutable reset!-proc) (immutable fini-proc) (mutable ops) (mutable finalized?))
     (opaque #t)
     (sealed #t)
     (protocol (lambda (p)
                 (case-lambda
                   [(next!-proc reset!-proc fini-proc)
                    (pcheck ([procedure? next!-proc reset!-proc fini-proc])
-                           (p next!-proc reset!-proc fini-proc (make-list-builder)))]
+                           (p next!-proc reset!-proc fini-proc (make-list-builder) #f))]
                   [(next!-proc reset!-proc)
                    (pcheck ([procedure? next!-proc reset!-proc])
-                           (p next!-proc reset!-proc void (make-list-builder)))]))))
+                           (p next!-proc reset!-proc void (make-list-builder) #f))]))))
   (define iter-end (mk-$iter void void))
   (define iter-end? (sect eq? _ iter-end))
   ;; Get the next item from the iterator,
@@ -59,8 +60,17 @@
   (define iter-reset!
     (lambda (iter)
       (pcheck ([$iter? iter])
-              (($iter-reset!-proc iter))
-              ($iter-ops-set! iter (make-list-builder)))))
+              (if ($iter-finalized? iter)
+                  (errorf 'iter-reset! "finalized iterator cannot be reset!")
+                  (begin (($iter-reset!-proc iter))
+                         ($iter-ops-set! iter (make-list-builder)))))))
+  (define iter-finalize!
+    (lambda (iter)
+      (pcheck ([$iter? iter])
+              (if ($iter-finalized? iter)
+                  (errorf 'iter-finalize! "iterator is already finalized")
+                  (begin (($iter-fini-proc iter))
+                         ($iter-finalized?-set! iter #t))))))
   (define iter-ops-add!
     (lambda (iter op)
       (($iter-ops iter) op)))
@@ -299,6 +309,14 @@
 ;;;           whether the item will be used for later processing
 ;;; Intermediate ops always return an iterator.
 
+  (define iter-copy
+    (lambda (iter)
+      (pcheck ([$iter? iter])
+              (if ($iter-finalized? iter)
+                  (errorf 'iter-copy "cannot copy a finalized iterator")
+                  (let ([new (mk-$iter ($iter-next!-proc iter) ($iter-reset!-proc iter)
+                                       ($iter-fini-proc iter)   ($iter-ops iter))])
+                    new)))))
   (define iter-map
     (lambda (proc iter)
       (pcheck ([$iter? iter] [procedure? proc])
@@ -451,15 +469,17 @@
       (pcheck ([$iter? iter] [procedure? proc])
               (let iter-loop ()
                 (let ([x (iter-next! iter)])
-                  (unless (eq? x iter-end)
-                    (begin (proc x)
-                           (iter-loop))))))))
+                  (if (eq? x iter-end)
+                      (iter-finalize! iter)
+                      (begin (proc x)
+                             (iter-loop))))))))
   (define iter-fold
     (lambda (proc acc iter)
       (let iter-loop ([acc acc])
         (let ([x (iter-next! iter)])
           (if (eq? x iter-end)
-              acc
+              (begin (iter-finalize! iter)
+                     acc)
               (iter-loop (proc acc x)))))))
 
   (define iter-max
@@ -536,7 +556,8 @@
                 (let iter-loop ()
                   (let ([x (iter-next! iter)])
                     (if (eq? x iter-end)
-                        (lb)
+                        (begin (iter-finalize! iter)
+                               (lb))
                         (begin (lb x)
                                (iter-loop)))))))))
   (define iter->vector

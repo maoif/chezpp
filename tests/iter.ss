@@ -167,6 +167,28 @@
      )
 
 
+(mat iter-finalize
+
+
+     (let* ([it (range 10)]
+            [ls (iter->list it)])
+       (and (equal? ls (iota 10))
+            (iter-finalized? it)))
+
+     (let* ([it (range 10)]
+            [i 0])
+       (iter-for-each (lambda (x) (incr! i)) it)
+       (and (iter-end? (iter-next! it))
+            (iter-finalized? it)
+            (= i 10)))
+
+     (error? (let ([r (range 10)])
+               (iter->list r)
+               (iter-finalize! r)))
+
+     )
+
+
 (mat iter-ports/files
 
      ;; port->iter
@@ -266,5 +288,8 @@
        (let ([res (equal? ls (iter->list (file-data->iter file)))])
          (delete-file file)
          res))
+
+
+
 
      )
