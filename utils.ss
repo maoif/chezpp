@@ -2,13 +2,18 @@
   (export pcase pcheck pcheck-pair pcheck-list pcheck-string pcheck-char pcheck-proc
           pcheck-hashtable pcheck-vector pcheck-port pcheck-binary-port pcheck-textual-port
           pcheck-open-port pcheck-open-binary-port pcheck-open-textual-port
+          pcheck-input-binary-port  pcheck-input-textual-port
+          pcheck-output-binary-port pcheck-output-textual-port
           pcheck-file pcheck-directory pcheck-symlink
           pcheck-fxvector pcheck-flvector pcheck-natural
           incr! decr! add1! sub1! fx+! fx-! fx*! fx/!
           cons! cdr!
           natural?
           neq? neqv? nequal?
-          id)
+          id bool
+          define-who trace-define-who
+
+          random-char random-string random-symbol random-datum random-list random-box)
   (import (chezscheme)
           (chezpp internal))
 
@@ -93,6 +98,12 @@
   (define open-textual-port? (lambda (p) (and (textual-port? p) (not (port-closed? p)))))
   (define open-binary-port?  (lambda (p) (and (binary-port? p) (not (port-closed? p)))))
 
+  ;; just by default test for openness
+  (define input-binary-port?   (lambda (p) (and (not (port-closed? p)) (input-port? p) (binary-port? p))))
+  (define input-textual-port?  (lambda (p) (and (not (port-closed? p)) (input-port? p) (textual-port? p))))
+  (define output-binary-port?  (lambda (p) (and (not (port-closed? p)) (output-port? p) (binary-port? p))))
+  (define output-textual-port? (lambda (p) (and (not (port-closed? p)) (output-port? p) (textual-port? p))))
+
   (define natural? (lambda (n) (and (integer? n) (>= n 0))))
 
   (gen-pcheck proc procedure?)
@@ -109,12 +120,21 @@
   (gen-pcheck char char?)
   (gen-pcheck string string?)
   (gen-pcheck hashtable hashtable?)
+
   (gen-pcheck port port?)
+  (gen-pcheck input-port input-port?)
+  (gen-pcheck output-port output-port?)
   (gen-pcheck binary-port binary-port?)
   (gen-pcheck textual-port textual-port?)
   (gen-pcheck open-port open-port?)
   (gen-pcheck open-binary-port open-binary-port?)
   (gen-pcheck open-textual-port open-textual-port?)
+
+  (gen-pcheck input-binary-port   input-binary-port?)
+  (gen-pcheck input-textual-port  input-textual-port?)
+  (gen-pcheck output-binary-port  output-binary-port?)
+  (gen-pcheck output-textual-port output-textual-port?)
+
   (gen-pcheck file file-regular?)
   (gen-pcheck directory file-directory?)
   (gen-pcheck symlink file-symbolic-link?)
@@ -186,5 +206,189 @@
   (define-syntax nequal?
     (syntax-rules ()
       [(_ e* ...) (not (equal? e* ...))]))
+
+
+  (define bool
+    (lambda (x) (if x #t #f)))
+
+
+  ;; same in list.ss, to avoid cyclic dependency
+  (define make-list-builder
+    (lambda args
+      (let ([res args])
+        (let ([current-cell (if (null? res)
+                                (cons #f '())
+                                (let loop ([res res])
+                                  (if (null? (cdr res))
+                                      res
+                                      (loop (cdr res)))))]
+              [next-cell (cons #f '())])
+          (define add-item!
+            (lambda (item)
+              (if (null? res)
+                  (begin (set-car! current-cell item)
+                         (set! res current-cell))
+                  (begin
+                    (set-car! next-cell item)
+                    (set-cdr! current-cell next-cell)
+                    (set! current-cell next-cell)
+                    (set! next-cell (cons #f '()))))))
+          (rec lb
+            (case-lambda
+              [() res]
+              [(x) (add-item! x)]
+              [x* (for-each lb x*)]))))))
+
+
+  ;; from ChezScheme cmacros.ss
+  (define-syntax define-who
+    (lambda (x)
+      (syntax-case x ()
+        [(k (id . args) b1 b2 ...)
+         #'(k id (lambda args b1 b2 ...))]
+        [(k #(prefix id) e)
+         (and (identifier? #'prefix) (identifier? #'id))
+         (with-implicit (k who)
+           (with-syntax ([ext-id ($construct-name #'id #'prefix #'id)])
+             #'(define ext-id (let ([who 'id]) (rec id e)))))]
+        [(k id e)
+         (identifier? #'id)
+         (with-implicit (k who)
+           #'(define id (let ([who 'id]) e)))])))
+
+  (define-syntax trace-define-who
+    (lambda (x)
+      (syntax-case x ()
+        [(k (id . args) b1 b2 ...)
+         #'(k id (lambda args b1 b2 ...))]
+        [(k id e)
+         (identifier? #'id)
+         (with-implicit (k who)
+           #'(trace-define id (let ([who 'id]) e)))])))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   random data generators
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  (define $rand (lambda (lb ub) (fx+ lb (random (fx- ub lb)))))
+  (define $range-error (lambda (who x y) (errorf who "invalid range: ~a ~b" x y)))
+
+  #|doc
+  Generate a random character.
+  By default, the character is between ASCII whitespace to ~.
+  Pass `lb` (lower bound) and/or `ub` (upper bound) to specify a custom character range.
+  |#
+  (define-who random-char
+    (case-lambda
+      [()   (random-char #\space #\~)]
+      [(ub) (random-char #\nul ub)]
+      [(lb ub)
+       (pcheck-char (lb ub)
+                    (when (char>=? lb ub) ($range-error who lb ub))
+                    (let ([n ($rand (char->integer lb)
+                                    (char->integer ub))])
+                      (integer->char n)))]))
+
+  #|doc
+  Generate a random string.
+  By default, the string length is between 0 ~ 10;
+  the characters are generated using the default `random-char`.
+  Pass `lb` (lower bound) and/or `ub` (upper bound) to specify a custom string length.
+  Pass `r` to specify a custom character generator procedure.
+  |#
+  (define-who random-string
+    (case-lambda
+      [()   (random-string (lambda () (random-char)) 0 10)]
+      [(ub) (random-string (lambda () (random-char)) 0 ub)]
+      [(lb ub) (random-string (lambda () (random-char)) lb ub)]
+      ;; r: random char generator
+      [(r lb ub)
+       (pcheck-natural
+        (lb ub)
+        (when (>= lb ub) ($range-error who lb ub))
+        (let* ([len ($rand lb ub)]
+               [s (make-string len)])
+          (let loop ([i 0])
+            (if (fx= i len)
+                s
+                (begin (string-set! s i (r))
+                       (loop (add1 i)))))))]))
+
+  (define $random-symbol (lambda (rs) (string->symbol (rs))))
+
+  #|doc
+  Generate a random symbol.
+  By default, the symbol name length is between 1 ~ 10;
+  the symbol string is generated using the default `random-string`.
+  Pass `lb` (lower bound) and/or `ub` (upper bound) to specify a custom symbol name length.
+  Pass `r` to specify a custom string generator procedure.
+  |#
+  (define-who random-symbol
+    (case-lambda
+      [()   ($random-symbol (lambda () (random-string 1 10)))]
+      [(ub) ($random-symbol (lambda () (random-string 1 ub)))]
+      [(lb ub) ($random-symbol (lambda () (random-string lb ub)))]
+      ;; r: random string generator
+      [(r lb ub)
+       (pcheck-natural
+        (lb ub)
+        (when (>= lb ub) ($range-error who lb ub))
+        ($random-symbol (lambda () (random-string r lb ub))))]))
+
+  #|doc
+  Generate a random datum, i.e., a value of either a fixnum, flonum, char, string, or symbol.
+  The range of fixnum is from 0 to the most-positive fixnum.
+  The range of flonum is from 0.0 to 999999.999.
+  Other types of values are generated using the respective default generators.
+  |#
+  (define-who random-datum
+    (lambda ()
+      (case (random 5)
+        [0 (random (most-positive-fixnum))]
+        [1 (random 999999.999)]
+        [2 (random-char)]
+        [3 (random-string)]
+        [4 (random-symbol)])))
+
+  #|doc
+  Generate a random list.
+  By default, the list length is between 0 ~ 10;
+  the list items are generated using `random-datum`.
+  Pass `lb` (lower bound) and/or `ub` (upper bound) to specify a custom list length.
+  Pass `r` to specify a list item generator procedure.
+  |#
+  (define-who random-list
+    (case-lambda
+      [()
+       (random-list (lambda () (random-datum)) 0 10)]
+      [(ub)
+       (random-list (lambda () (random-datum)) 0 ub)]
+      [(lb ub)
+       (random-list (lambda () (random-datum)) lb ub)]
+      [(r lb ub)
+       (pcheck-natural
+        (lb ub)
+        (when (>= lb ub) ($range-error who lb ub))
+        (let ([lb (make-list-builder)] [len ($rand lb ub)])
+          (let loop ([i 0])
+            (if (fx= i len)
+                (lb)
+                (begin (lb (r))
+                       (loop (add1 i)))))))]))
+
+  #|doc
+  Generate a random box.
+  By default, the boxed value is generated using `random-datum`.
+  Pass `r` to specify a custom boxed value generator procedure.
+  |#
+  (define-who random-box
+    (case-lambda
+      [()  (box (random-datum))]
+      [(r) (box (r))]))
+
+  ;; TODO move random-vector here
 
   )
