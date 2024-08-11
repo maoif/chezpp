@@ -3,7 +3,7 @@
           unique? unique
           list-last
           make-list-builder
-          zip
+          zip snoc!
           nums)
   (import (chezscheme)
           (chezpp utils)
@@ -298,6 +298,21 @@
   (define zip
     (lambda (ls1 ls2 . ls*)
       (apply map list ls1 ls2 ls*)))
+
+
+  #|doc
+  Imperatively append a value to the list.
+  |#
+  (define snoc!
+    (lambda (ls x)
+      (pcheck-list (ls)
+                   (if (null? ls)
+                       (list x)
+                       (let loop ([l ls])
+                         (if (null? (cdr l))
+                             (begin (set-cdr! l (list x))
+                                    ls)
+                             (loop (cdr l))))))))
 
 
   #|doc
