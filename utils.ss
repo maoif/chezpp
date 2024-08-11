@@ -6,6 +6,7 @@
           pcheck-output-binary-port pcheck-output-textual-port
           pcheck-file pcheck-directory pcheck-symlink
           pcheck-fxvector pcheck-flvector pcheck-natural
+          unreachable!
           incr! decr! add1! sub1! fx+! fx-! fx*! fx/!
           cons! cdr!
           natural?
@@ -70,7 +71,7 @@
          (all-ids? #'((x x* ...) ...))
          (let loop ([preds #'(pred ...)] [id** #'((x x* ...) ...)])
            (if (null? preds)
-               #`(begin e e* ...)
+               #`(let () e e* ...)
                (with-syntax ([pred (car preds)] [ids (car id**)]
                              [(p) (generate-temporaries '(p))])
                  #`(let ([p pred])
