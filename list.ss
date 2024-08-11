@@ -270,13 +270,15 @@
       [(ls) (unique equal? ls)]
       [(eq ls)
        (pcheck ([list? ls] [procedure? eq])
-               (let loop ([ls ls] [res '()])
-                 (if (null? ls)
-                     res
-                     (let ([item (car ls)])
-                       (if (memp (lambda (x) (eq x item)) (cdr ls))
-                           (loop (cdr ls) res)
-                           (loop (cdr ls) (cons item res)))))))]))
+               (let ([lb (make-list-builder)])
+                 (let loop ([ls ls] )
+                   (if (null? ls)
+                       (lb)
+                       (let ([item (car ls)])
+                         (if (memp (lambda (x) (eq x item)) (cdr ls))
+                             (loop (cdr ls))
+                             (begin (lb item)
+                                    (loop (cdr ls)))))))))]))
 
 
   #|doc
