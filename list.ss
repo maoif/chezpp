@@ -251,8 +251,8 @@
   |#
   (define unique?
     (case-lambda
-      [(ls) (unique? ls equal?)]
-      [(ls eq)
+      [(ls) (unique? equal? ls)]
+      [(eq ls)
        (pcheck ([list? ls] [procedure? eq])
                (let loop ([ls ls])
                  (if (null? ls)
@@ -267,8 +267,8 @@
   |#
   (define unique
     (case-lambda
-      [(ls) (unique ls equal?)]
-      [(ls eq)
+      [(ls) (unique equal? ls)]
+      [(eq ls)
        (pcheck ([list? ls] [procedure? eq])
                (let loop ([ls ls] [res '()])
                  (if (null? ls)
