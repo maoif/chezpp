@@ -141,6 +141,15 @@
   (gen-pcheck symlink file-symbolic-link?)
 
 
+  (define unreachable!
+    (case-lambda
+      [() (raise-continuable (condition (make-error)
+                                        (make-message-condition "Should not reach here!")))]
+      [(who) (raise-continuable (condition (make-error)
+                                           (make-who-condition who)
+                                           (make-message-condition "Should not reach here!")))]))
+
+
   (define-syntax incr!
     (lambda (stx)
       (syntax-case stx ()
