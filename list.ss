@@ -4,7 +4,12 @@
           list-last
           make-list-builder
           zip snoc!
-          nums)
+          nums
+
+          list+ listp+ listq+ listv+
+          list- listp- listq- listv-
+          list& listp& listq& listv&
+          list^ listp^ listq^ listv^)
   (import (chezscheme)
           (chezpp utils)
           (chezpp internal))
@@ -358,6 +363,127 @@
                (lb)
                (begin (lb n)
                       (loop (+ n step))))))]))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   set operations
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  ;; By default use eqv? for comparison.
+  ;; All take varargs.
+
+  (define-syntax define-list-set-ops
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ (p-p p-eqv p-eq p-equal) (name w p l l*) body)
+         #'(begin
+             (define name
+               (lambda (w p l l*)
+                 (pcheck ([procedure? p] [list? l] [all-lists? l*])
+                         body)))
+             (define-who p-p
+               (lambda (pred ls . ls*)
+                 (name who pred ls ls*)))
+             (define-who p-eqv
+               (lambda (ls . ls*)
+                 (name who eqv? ls ls*)))
+             (define-who p-eq
+               (lambda (ls . ls*)
+                 (name who eq? ls ls*)))
+             (define-who p-equal
+               (lambda (ls . ls*)
+                 (name who equal? ls ls*))))])))
+
+  #|doc
+  Test whether given lists are equal sets.
+  |#
+  (define-list-set-ops (listp=? list=? listq=? listv=?)
+    ($listp=? who pred ls ls*)
+    (todo))
+
+  #|doc
+  Test whether given lists are proper subsets.
+  |#
+  (define-list-set-ops (listp<? list<? listq<? listv<?)
+    ($listp<? who pred ls ls*)
+    (todo))
+
+  #|doc
+  Test whether given lists are subsets.
+  |#
+  (define-list-set-ops (listp<=? list<=? listq<=? listv<=?)
+    ($listp<=? who pred ls ls*)
+    (todo))
+
+  #|doc
+  Test whether given lists are proper supersets.
+  |#
+  (define-list-set-ops (listp>? list>? listq>? listv>?)
+    ($listp>? who pred ls ls*)
+    (todo))
+
+  #|doc
+  Test whether given lists are supersets.
+  |#
+  (define-list-set-ops (listp>=? list>=? listq>=? listv>=?)
+    ($listp>=? who pred ls ls*)
+    (todo))
+
+  #|doc
+  Calculate the union of the list items.
+  |#
+  (define-list-set-ops (listp+ list+ listq+ listv+)
+    ($listp+ who pred ls ls*)
+    (if (null? ls*)
+        (unique pred ls)
+        (let* ([l (list-copy ls)]
+               [l (apply append! l ls*)])
+          (unique pred l))))
+
+  #|doc
+  Calculate the difference of the list items.
+  If only `ls` is given, it is returned unchanged.
+  No check of duplication is performed.
+  |#
+  (define-list-set-ops (listp- list- listq- listv-)
+    ($listp- who pred ls ls*)
+    (if (null? ls*)
+        ls
+        (let ([ls* (apply listp+ pred ls*)]
+              [lb (make-list-builder)])
+          (for-each (lambda (x) (when (not (memp (lambda (y) (pred x y)) ls*))
+                                  (lb x)))
+                    ls)
+          (lb))))
+
+  #|doc
+  Calculate the intersection of the list items.
+  |#
+  (define-list-set-ops (listp& list& listq& listv&)
+    ($listp& who pred ls ls*)
+    (if (null? ls*)
+        ls
+        (let ([lb (make-list-builder)]
+              [ls* (cons ls ls*)])
+          ;; compare items in each list with those in all other lists
+          (let loop ([a* ls*])
+            (if (null? a*)
+                (lb)
+                (let ([a (car a*)])
+                  (let cmp ([b* ls*])
+                    (todo)))
+                )))))
+
+  #|doc
+  Calculate the symmetric difference of the list items.
+  |#
+  (define-list-set-ops (listp^ list^ listq^ listv^)
+    ($listp^ who pred ls ls*)
+    ;; (- (+ ls ls*) (& ls*))
+    (todo))
 
 
 
