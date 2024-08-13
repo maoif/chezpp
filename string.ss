@@ -1,9 +1,11 @@
 (library (chezpp string)
   (export string-for-each/i string-startswith? string-endswith?
-          string-search string-search-all string-contains?)
+          string-search string-search-all string-contains?
+          string-split string-trim string-trim-left string-trim-right)
   (import (chezscheme)
           (chezpp internal)
-          (chezpp utils))
+          (chezpp utils)
+          (chezpp list))
 
   (define check-length
     (lambda (who . strs)
@@ -30,15 +32,99 @@
                                                  (apply p i (map (lambda (s) (string-ref s i)) strs))
                                                  (loop (add1 i)))))))))])))
 
-
-  (define string-split
+  #|doc
+  Split a string into a list of substrings, using `delim` as delimiter.
+  `delim` can be either a character or a non-empty string.
+  |#
+  (define-who string-split
     (lambda (str delim)
-      (todo)))
+      (pcheck-string
+       (str)
+       (cond [(equal? str "") '("")]
+             [(string? delim)
+              (let ([dlen (string-length delim)] [len (string-length str)])
+                (case dlen
+                  [0 (errorf who "empty delimiter")]
+                  [1 (string-split str (string-ref delim 0))]
+                  [else (let ([i* (string-search-all str delim)])
+                          (if i*
+                              (let loop ([i* i*] [res '()] [lefti 0])
+                                (if (null? i*)
+                                    (if (fx= lefti len)
+                                        ;; align with delim being char case:
+                                        ;; add empty string when `delim` is on the side
+                                        (reverse (cons "" res))
+                                        (reverse (cons (substring str lefti len) res)))
+                                    (let ([i (car i*)])
+                                      (loop (cdr i*) (cons (substring str lefti i) res) (fx+ i dlen)))))
+                              (list str)))]))]
+             [(char? delim)
+              (let ([lb (make-list-builder)] [len (string-length str)])
+                (let loop-next ([leftcur 0])
+                  (let loop ([i leftcur])
+                    (if (fx= i len)
+                        (begin (lb (substring str leftcur i))
+                               (lb))
+                        (if (char=? (string-ref str i) delim)
+                            (begin (lb (substring str leftcur i))
+                                   (loop-next (add1 i)))
+                            (loop (add1 i)))))))]
+             [else (errorf who "invalid delimiter: ~a" delim)]))))
 
-  (define string-trim
+
+  (define $string-trim
+    (lambda (who str c left? right?)
+      (pcheck ([string? str] [char? c])
+              (let* ([len (string-length str)]
+                     [lefti (if left?
+                                (let lp ([i 0])
+                                  ;; in case `str` consists entirely of `c`
+                                  (if (fx< i len)
+                                      (if (char=? c (string-ref str i))
+                                          (lp (add1 i))
+                                          i)
+                                      len))
+                                0)]
+                     [righti (if right?
+                                 (let lp ([i (sub1 len)])
+                                   ;; ditto
+                                   (if (fx>= i 0)
+                                       (if (char=? c (string-ref str i))
+                                           (lp (sub1 i))
+                                           (add1 i))
+                                       0))
+                                 len)])
+                (if (fx<= lefti righti)
+                    (substring str lefti righti)
+                    "")))))
+
+
+  #|doc
+  Trim the characters on both sides of the given `str`.
+  If the character `c` to be trimmed is not given, it is #\space by default.
+  |#
+  (define-who string-trim
     (case-lambda
-      [(str) (todo)]
-      [(str c) (todo)]))
+      [(str) (string-trim str #\space)]
+      [(str c) ($string-trim who str c #t #t)]))
+
+
+  #|doc
+  Similar to `string-trim`, but only trim the left-hand side.
+  |#
+  (define-who string-trim-left
+    (case-lambda
+      [(str) (string-trim-left str #\space)]
+      [(str c) ($string-trim who str c #t #f)]))
+
+
+  #|doc
+  Similar to `string-trim`, but only trim the right-hand side.
+  |#
+  (define-who string-trim-right
+    (case-lambda
+      [(str) (string-trim-right str #\space)]
+      [(str c) ($string-trim who str c #f #t)]))
 
 
   ;; currently use brute force

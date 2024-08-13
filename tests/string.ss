@@ -58,3 +58,49 @@
      (not (string-endswith? "qwe" "wE"))
 
      )
+
+
+(mat string-split
+
+     ;; type error
+     (error? (string-split #\a #\a))
+     (error? (string-split "string" 1))
+
+     ;; empty string
+     (equal? '("") (string-split "" "foo"))
+     (equal? '("") (string-split "" ""))
+     (equal? '("") (string-split "" #\?))
+
+     ;; delimiter on the side of the string
+     (equal? '("" "quick" "fat" "fox" "") (string-split "@quick@fat@fox@" #\@))
+     (equal? '("quick" "fat" "fox" "") (string-split "quick@fat@fox@" #\@))
+     (equal? '("" "quick" "fat" "fox") (string-split "@quick@fat@fox" #\@))
+
+     (equal? '("" "quick" "fat" "fox" "") (string-split "@@quick@@fat@@fox@@" "@@"))
+     (equal? '("quick" "fat" "fox" "") (string-split "quick@@fat@@fox@@" "@@"))
+     (equal? '("" "quick" "fat" "fox") (string-split "@@quick@@fat@@fox" "@@"))
+
+
+     (equal? '("Lorem" "Ipsum" "is" "simply" "dummy" "text" "of" "the" "printing" "and" "typesetting" "industry")
+             (string-split "Lorem Ipsum is simply dummy text of the printing and typesetting industry" #\space))
+
+     )
+
+
+(mat string-trim
+
+     (error? (string-trim 123))
+     (error? (string-trim "  123  " 123))
+
+     (equal? "" (string-trim ""))
+     (equal? "" (string-trim "   "))
+
+     (equal? "x" (string-trim "x"))
+     (equal? "x" (string-trim "  x"))
+     (equal? "x" (string-trim "x  "))
+
+     (equal? "xyz" (string-trim "xyz"))
+     (equal? "xyz" (string-trim "  xyz"))
+     (equal? "xyz" (string-trim "xyz  "))
+
+     )
