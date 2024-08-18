@@ -80,7 +80,7 @@
                              (loop (cdr preds) (cdr id**))
                              #`(if (p #,(car id*))
                                    #,(f (cdr id*))
-                                   (errorf 'k "failed ~a ~a: ~a" 'k 'pred '#,(car id*)))))))))]
+                                   (errorf 'k "failed ~a ~a: ~a, value: ~a" 'k 'pred '#,(car id*) #,(car id*)))))))))]
         [_ (syntax-error stx "invalid pcheck form:")])))
 
   (define-syntax gen-pcheck
