@@ -10,7 +10,16 @@
           put-u16 put-u32 put-u64 put-s16 put-s32 put-s64
 
           GET-U16 GET-U32 GET-U64 GET-S16 GET-S32 GET-S64
-          PUT-U16 PUT-U32 PUT-U64 PUT-S16 PUT-S32 PUT-S64)
+          PUT-U16 PUT-U32 PUT-U64 PUT-S16 PUT-S32 PUT-S64
+
+          make-path
+
+          file-stat file-type file-mode file-size file-size-h
+          file-access-time file-modification-time file-change-time file-creation-time
+          file-inode file-blocks file-nlinks file-owner file-group
+          file-dev-major file-dev-minor
+
+          file-readable? file-writable? file-executable? file-hidden? file-special? same-file? same-file-contents?)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils)
@@ -324,7 +333,7 @@
     (lambda (path u8vec)
       ($write-u8vec who path 'append u8vec)))
 
-
+  
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;;   get/put operations on ports
@@ -613,5 +622,307 @@
                     (if (null? pp)
                         res
                         (path-build res (loop (car pp) (cdr pp)))))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   file info
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;; file stats
+
+  (define-record-type $file-stat
+    (nongenerative)
+    (fields (immutable type   file-stat-type)
+            (immutable mode   file-stat-mode)
+            (immutable inode  file-stat-inode)
+            (immutable owner  file-stat-owner)
+            (immutable group  file-stat-group)
+            (immutable nlinks file-stat-nlinks)
+            (immutable size   file-stat-size)
+            (immutable blocks file-stat-blocks)
+            (immutable dev-major file-stat-dev-major)
+            (immutable dev-minor file-stat-dev-minor)
+            ;;(immutable attributes  file-stat-attributes)
+            (immutable access-time       file-stat-access-time)
+            (immutable modification-time file-stat-modification-time)
+            (immutable change-time       file-stat-change-time)
+            (immutable creation-time     file-stat-creation-time)))
+
+  (define *file-types* '((#o140000 . FT_socket)
+                         (#o120000 . FT_symlink)
+                         (#o100000 . FT_regular)
+                         (#o60000  . FT_block)
+                         (#o40000  . FT_dir)
+                         (#o20000  . FT_chardev)
+                         (#o10000  . FT_fifo)))
+
+  (define-who file-type->symbol
+    (lambda (t)
+      (let ([s (assoc t *file-types*)])
+        (if s (cdr s) (errorf who "invalid file type: ~a" t)))))
+
+  (define $statx
+    (let ([ffi-statx (foreign-procedure "chezpp_statx" (string boolean) scheme-object)])
+      (lambda (who path follow-link?)
+        (pcheck ([(lambda (x) (file-exists? x follow-link?)) path] [boolean? follow-link?])
+                (let ([x (ffi-statx path follow-link?)])
+                  (if (vector? x)
+                      x
+                      ($err-file who path x)))))))
+  ;; stx_attributes, stx_mnt_id, etc, are left out
+  (define $statx-type (lambda (v) (vector-ref v 0)))
+  (define $statx-mode (lambda (v) (vector-ref v 1)))
+  (define $statx-uid  (lambda (v) (vector-ref v 3)))
+  (define $statx-gid  (lambda (v) (vector-ref v 4)))
+  (define $statx-nlinks (lambda (v) (vector-ref v 2)))
+  (define $statx-inode  (lambda (v) (vector-ref v 13)))
+  (define $statx-size   (lambda (v) (vector-ref v 14)))
+  (define $statx-blocks (lambda (v) (vector-ref v 15)))
+  (define $statx-atime  (lambda (v) (let ([t (vector-ref v 5)])
+                                      (and t (make-time 'time-utc (vector-ref v 6) t)))))
+  (define $statx-ctime  (lambda (v) (let ([t (vector-ref v 7)])
+                                      (and t (make-time 'time-utc (vector-ref v 8) t)))))
+  (define $statx-mtime  (lambda (v) (let ([t (vector-ref v 9)])
+                                      (and t (make-time 'time-utc (vector-ref v 10) t)))))
+  (define $statx-btime  (lambda (v) (let ([t (vector-ref v 11)])
+                                      (and t (make-time 'time-utc (vector-ref v 12) t)))))
+  (define $statx-dev-major (lambda (v) (vector-ref v 16)))
+  (define $statx-dev-minor (lambda (v) (vector-ref v 17)))
+
+  (define-who file-stat
+    (case-lambda [(path)
+                  (file-stat path #t)]
+                 [(path follow-link?)
+                  (let* ([v ($statx who path follow-link?)]
+                         [type ($statx-type v)]
+                         [mode ($statx-mode v)]
+                         [uid  ($statx-uid v)]
+                         [gid  ($statx-gid v)]
+                         [nlinks ($statx-nlinks v)]
+                         [inode  ($statx-inode v)]
+                         [size   ($statx-size v)]
+                         [blocks ($statx-blocks v)]
+                         [atime ($statx-atime v)]
+                         [ctime ($statx-ctime v)]
+                         [mtime ($statx-mtime v)]
+                         [btime ($statx-btime v)]
+                         [dev-major ($statx-dev-major v)]
+                         [dev-minor ($statx-dev-minor v)])
+                    (make-$file-stat
+                     type mode inode uid gid nlinks size blocks dev-major dev-minor
+                     atime mtime ctime btime))]))
+
+
+  (define-who file-access-time
+    (case-lambda [(path)
+                  ($statx-atime ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-atime ($statx who path follow-link?))]))
+  (define-who file-modification-time
+    (case-lambda [(path)
+                  ($statx-mtime ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-mtime ($statx who path follow-link?))]))
+  (define-who file-change-time
+    (case-lambda [(path)
+                  ($statx-ctime ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-ctime ($statx who path follow-link?))]))
+  (define-who file-creation-time
+    (case-lambda [(path)
+                  ($statx-btime ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-btime ($statx who path follow-link?))]))
+  (define-who file-type
+    (case-lambda [(path)
+                  (file-type->symbol ($statx-type ($statx who path #t)))]
+                 [(path follow-link?)
+                  (file-type->symbol ($statx-type ($statx who path follow-link?)))]))
+  (define-who file-mode
+    (case-lambda [(path)
+                  ($statx-mode ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-mode ($statx who path follow-link?))]))
+  (define-who file-inode
+    (case-lambda [(path)
+                  ($statx-inode ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-inode ($statx who path follow-link?))]))
+  (define-who file-nlinks
+    (case-lambda [(path)
+                  ($statx-nlinks ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-nlinks ($statx who path follow-link?))]))
+  (define-who file-dev-major
+    (case-lambda [(path)
+                  ($statx-dev-major ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-dev-major ($statx who path follow-link?))]))
+  (define-who file-dev-minor
+    (case-lambda [(path)
+                  ($statx-dev-minor ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-dev-minor ($statx who path follow-link?))]))
+  (define-who file-blocks
+    (case-lambda [(path)
+                  ($statx-blocks ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-blocks ($statx who path follow-link?))]))
+  ;; this is implemented using port above
+  #;
+  (define-who file-size
+  (case-lambda [(path)
+  ($statx-size ($statx who path #t))]
+  [(path follow-link?)
+  ($statx-size ($statx who path follow-link?))]))
+
+  (define-who file-owner
+    (case-lambda [(path)
+                  ($statx-uid ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-uid ($statx who path follow-link?))]))
+  (define-who file-group
+    (case-lambda [(path)
+                  ($statx-gid ($statx who path #t))]
+                 [(path follow-link?)
+                  ($statx-gid ($statx who path follow-link?))]))
+
+
+  (define $file-size
+    (lambda (who path)
+      ;; dir and regular files are both OK
+      (pcheck ([file-exists? path])
+              (call-with-port (open-file-input-port path)
+                (lambda (p) (file-length p))))))
+
+  (define-who file-size
+    (lambda (path) ($file-size who path)))
+
+  #|doc
+  Return a human-readable string of the file size.
+  |#
+  (define-who file-size-h
+    (lambda (path)
+      (define 1K 1024)
+      (define 1M (fx* 1K 1024))
+      (define 1G (fx* 1M 1024))
+      (let ([size ($file-size who path)])
+        (cond [(fx< size 1K) (format "~,2f B" size)]
+              [(fx< size 1M) (format "~,2f KiB" (inexact (/ size 1K)))]
+              [(fx< size 1G) (format "~,2f MiB" (inexact (/ size 1M)))]
+              [else (format "~,2f GiB" (inexact (/ size 1G)))]))))
+
+
+  (define-who file-readable?
+    (case-lambda [(path) (file-readable? path #t)]
+                 [(path follow-link?)
+                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
+                          (let ([m (get-mode path follow-link?)])
+                            (fxlogbit? 8 m)))]))
+  (define-who file-writable?
+    (case-lambda [(path) (file-writable? path #t)]
+                 [(path follow-link?)
+                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
+                          (let ([m (get-mode path follow-link?)])
+                            (fxlogbit? 7 m)))]))
+  (define-who file-executable?
+    (case-lambda [(path) (file-executable? path #t)]
+                 [(path follow-link?)
+                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
+                          (let ([m (get-mode path follow-link?)])
+                            (fxlogbit? 6 m)))]))
+
+  (define-who file-hidden?
+    (case-lambda [(path) (file-hidden? path #t)]
+                 [(path follow-link?)
+                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
+                          (cond
+                           [(unix?)
+                            (let ([path (let ([p (if (and follow-link? (file-symbolic-link? path)) (readlink2 path #t) path)])
+                                          (if (file-directory? p follow-link?)
+                                              (path-last (path-parent (string-append p (string (directory-separator)))))
+                                              (path-last p)))])
+                              (and (not (string=? path ".")) (not (string=? path ".."))
+                                   (char=? #\. (string-ref path 0))))]
+                           [else (todo who)]))]))
+
+  #|doc
+  A file is special if it is either a socket, a block/character device, or a FIFO.
+  |#
+  (define-who file-special?
+    (case-lambda
+      [(path) (file-special? path #t)]
+      [(path follow-link?)
+       (pcheck ([string? path] [(lambda (x) (file-exists? x follow-link?)) path])
+               (let ([t (file-type path follow-link?)])
+                 (bool (memq t '(FT_socket FT_block FT_chardev FT_fifo)))))]))
+
+
+  #|doc
+  Test whether the two paths, `path1` and `path2`, refer to the same file.
+
+  On Linux, this procedure compares the files' inodes and their filesystem IDs.
+  |#
+  (define-who same-file?
+    (case-lambda
+      [(path1 path2) (same-file? path1 path2 #t)]
+      [(path1 path2 follow-link?)
+       (pcheck ([string? path1 path2] [(lambda (x) (file-exists? x follow-link?)) path1 path2])
+               (let* ([st1 (file-stat path1 follow-link?)]
+                      [st2 (file-stat path2 follow-link?)]
+                      [inode1 (file-stat-inode st1)]
+                      [major1 (file-stat-dev-major st1)]
+                      [minor1 (file-stat-dev-minor st1)]
+                      [inode2 (file-stat-inode st2)]
+                      [major2 (file-stat-dev-major st2)]
+                      [minor2 (file-stat-dev-minor st2)])
+                 (and (= inode1 inode2) (= major1 major2) (= minor1 minor2))))]))
+
+
+  #|doc
+  Test whether two files have the same content.
+  `path1` and `path2` must point to regular files. File contents are compared byte by byte.
+  Symlinks are always followed.
+  |#
+  (define-who same-file-contents?
+    (lambda (path1 path2)
+      (pcheck ([string? path1 path2])
+              (if (and (file-regular? path1 #t) (file-regular? path2 #t))
+                  (call-with-port (open-file-input-port path1)
+                    (lambda (p1)
+                      (call-with-port (open-file-input-port path2)
+                        (lambda (p2)
+                          (and (fx= (file-length p1) (file-length p2))
+                               (let loop ()
+                                 (let ([b1 (get-u8 p1)] [b2 (get-u8 p2)])
+                                   (if (eof-object? b1)
+                                       #t
+                                       (if (fx= b1 b2) (loop) #f)))))))))
+                  #f))))
+
+
+
+
+  (record-writer (type-descriptor $file-stat)
+                 (lambda (r p wr)
+                   (display "#[stat " p)
+                   (newline p)
+                   (display (format "~ttype:  ~a~n" (file-type->symbol (file-stat-type r))) p)
+                   (display (format "~tmode:  #o~a ~a~n" (number->string (file-stat-mode r) 8) (file-mode->symbols (file-stat-mode r))) p)
+                   (display (format "~towner: ~a~n" (file-stat-owner r)) p)
+                   (display (format "~tgroup: ~a~n" (file-stat-group r)) p)
+                   (display (format "~tinode: ~a~n" (file-stat-inode r)) p)
+                   (display (format "~tnlinks: ~a~n" (file-stat-nlinks r)) p)
+                   (display (format "~tsize:   ~a~n" (file-stat-size r)) p)
+                   (display (format "~tblocks: ~a~n" (file-stat-blocks r)) p)
+                   (display (format "~tdev-major: ~a~n" (file-stat-dev-major r)) p)
+                   (display (format "~tdev-minor: ~a~n" (file-stat-dev-minor r)) p)
+                   (display (format "~tatime: ~a~n" (file-stat-access-time r)) p)
+                   (display (format "~tmtime: ~a~n" (file-stat-modification-time r)) p)
+                   (display (format "~tctime: ~a~n" (file-stat-change-time r)) p)
+                   (display (format "~tbtime: ~a" (file-stat-creation-time r)) p)
+                   (display "]" p)))
 
   )

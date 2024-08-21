@@ -499,3 +499,24 @@
      ;; TODO test multi-thread
 
      )
+
+
+(mat file-stat
+
+     (error? (file-stat "/dev/xxxx"))
+
+     (file-readable? "/proc/meminfo")
+     (not (file-writable? "/proc/meminfo"))
+     (file-executable? "/usr/bin/bash")
+     (if (file-exists? "~/.bashrc") (file-hidden? "~/.bashrc") #t)
+     (if (file-exists? "~/.bash_profile") (file-hidden? "~/.bash_profile") #t)
+
+     (file-special? "/dev/tty")
+     (file-special? "/dev/zero")
+     (file-special? "/dev/random")
+     (file-special? "/dev/null")
+
+     (eq? 'FT_chardev (file-type "/dev/zero"))
+     (eq? 'FT_chardev (file-type "/dev/random"))
+     (eq? 'FT_chardev (file-type "/dev/null"))
+     )
