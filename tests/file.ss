@@ -1,7 +1,8 @@
 (import (chezpp file)
         (chezpp control)
         (chezpp string)
-        (chezpp utils))
+        (chezpp utils)
+        (chezpp os))
 
 
 (define $random-file (lambda () (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))))
@@ -24,6 +25,7 @@
      (error? (read-chars  "bla.bla"))
      (error? (read-data   "bla.bla"))
      (error? (read-datum  "bla.bla"))
+     (error? (read-datum-fasl  "bla.bla"))
 
      ;; type errors
      (error? (write-lines  "bla.bla" (map (lambda (x) (random-char)) (iota 100))))
@@ -31,6 +33,7 @@
      (error? (write-chars  "bla.bla" (random-box)))
      (error? (write-data   "bla.bla" #f))
      (error? (write-datum  "bla.bla" (make-eq-hashtable)))
+     (error? (write-u8vec "path" 123))
 
 
 ;;; normal IO
@@ -166,6 +169,26 @@
                    (lambda () (delete-file file)))))
              (iota 10))
 
+     ;; u8vec
+     (let ([data (random-u8vec 1024 2048)]
+           [file ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-u8vec file data)
+           (equal? data
+                   (read-u8vec file)))
+         (lambda () (delete-file file))))
+     (let ([data (random-u8vec 2048 4096)]
+           [file ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-u8vec file data)
+           (equal? data
+                   (read-u8vec file)))
+         (lambda () (delete-file file))))
+
 
 ;;; truncate
 
@@ -263,6 +286,28 @@
                              (read-datum-fasl file)))
                    (lambda () (delete-file file)))))
              (iota 10))
+
+     ;; u8vec
+     (let ([data (random-u8vec 1024 2048)]
+           [file ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-u8vec! file data)
+           (write-u8vec! file data)
+           (equal? data
+                   (read-u8vec file)))
+         (lambda () (delete-file file))))
+     (let ([data (random-u8vec 2048 4096)]
+           [file ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-u8vec! file data)
+           (write-u8vec! file data)
+           (equal? data
+                   (read-u8vec file)))
+         (lambda () (delete-file file))))
 
 
 ;;; append
@@ -363,6 +408,32 @@
                              (read-data-fasl file)))
                    (lambda () (delete-file file)))))
              (iota 10))
+
+     ;; u8vec
+     (let ([data (random-u8vec 1024 2048)]
+           [file ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-u8vec>> file data)
+           (write-u8vec>> file data)
+           (let* ([len (bytevector-length data)] [d (make-bytevector (* 2 len))])
+             (bytevector-copy! data 0 d 0 len)
+             (bytevector-copy! data 0 d len len)
+             (equal? d (read-u8vec file))))
+         (lambda () (delete-file file))))
+     (let ([data (random-u8vec 2048 4096)]
+           [file ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-u8vec>> file data)
+           (write-u8vec>> file data)
+           (let* ([len (bytevector-length data)] [d (make-bytevector (* 2 len))])
+             (bytevector-copy! data 0 d 0 len)
+             (bytevector-copy! data 0 d len len)
+             (equal? d (read-u8vec file))))
+         (lambda () (delete-file file))))
 
      )
 

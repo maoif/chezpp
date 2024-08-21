@@ -1,21 +1,63 @@
 #!chezscheme
 
 (library (chezpp file)
-  (export read-lines read-string read-chars read-data read-datum read-data-fasl read-datum-fasl
-          write-lines write-string write-chars write-data write-datum write-data-fasl write-datum-fasl
-          write-lines! write-string! write-chars! write-data! write-datum! write-data-fasl! write-datum-fasl!
-          write-lines>> write-string>> write-chars>> write-data>> write-datum>> write-data-fasl>> write-datum-fasl>>
+  (export read-lines read-string read-chars read-data read-datum read-data-fasl read-datum-fasl read-u8vec
+          write-lines write-string write-chars write-data write-datum write-data-fasl write-datum-fasl write-u8vec
+          write-lines! write-string! write-chars! write-data! write-datum! write-data-fasl! write-datum-fasl! write-u8vec!
+          write-lines>> write-string>> write-chars>> write-data>> write-datum>> write-data-fasl>> write-datum-fasl>> write-u8vec>>
 
           get-u16 get-u32 get-u64 get-s16 get-s32 get-s64
           put-u16 put-u32 put-u64 put-s16 put-s32 put-s64
 
           GET-U16 GET-U32 GET-U64 GET-S16 GET-S32 GET-S64
           PUT-U16 PUT-U32 PUT-U64 PUT-S16 PUT-S32 PUT-S64)
-  (import (chezscheme)
+  (import (chezpp chez)
           (chezpp internal)
           (chezpp utils)
           (chezpp list)
           (chezpp io))
+
+
+  (define-condition-type &i/o-file-not-regular &i/o-filename
+    make-i/o-file-not-regular-error i/o-file-not-regular-error?)
+  (define-condition-type &i/o-file-not-directory &i/o-filename
+    make-i/o-file-not-directory-error i/o-file-not-directory-error?)
+
+  (define $err-file
+    (case-lambda
+      [(who msg)
+       (raise (condition (make-who-condition who) (make-message-condition msg)))]
+      [(who x msg)
+       (cond [(condition? x)
+              (raise (condition (make-who-condition who) x (make-message-condition msg)))]
+             [(string? x)
+              (raise (condition (make-who-condition who) (make-i/o-filename-error x) (make-message-condition msg)))]
+             [else (assert-unreachable)])]))
+
+  (define $err-file-not-regular
+    (lambda (who p)
+      ($err-file who (make-i/o-file-not-regular-error p)
+                 (format "file is not regular: ~a" p))))
+  (define $err-file-not-directory
+    (lambda (who p)
+      ($err-file who (make-i/o-file-not-directory-error p)
+                 (format "file is not directory: ~a" p))))
+  (define $err-file-exists
+    (lambda (who p)
+      ($err-file who (make-i/o-file-already-exists-error p)
+                 (format "file already exists: ~a" p))))
+  (define $err-directory-exists
+    (lambda (who p)
+      ($err-file who (make-i/o-file-already-exists-error p)
+                 (format "directory already exists: ~a" p))))
+  (define $err-file-not-found
+    (lambda (who p)
+      ($err-file who (make-i/o-file-does-not-exist-error p)
+                 (format "file not found: ~a" p))))
+
+  (define $err-bad-write-mode
+    (lambda (who mode)
+      (errorf who "unknown write mode: ~a, should be one of '(error truncate append)" mode)))
 
 
 
@@ -97,19 +139,16 @@
        (path)
        (call-with-port (open-file-input-port path)
          (lambda (p) (fasl-read p))))))
+  (define read-u8vec
+    (lambda (path)
+      (pcheck-file
+       (path)
+       (call-with-port (open-file-input-port path)
+         (lambda (p) (get-bytevector-all p))))))
 
   (define all-strings? (lambda (x) (andmap string? x)))
   (define all-chars?   (lambda (x) (andmap char? x)))
 
-  (define $bad-file
-    (lambda (who p)
-      (errorf who "existing file is not regular: ~a" p)))
-  (define $file-exists-error
-    (lambda (who p)
-      (errorf who "file already exists: ~a" p)))
-  (define $bad-write-mode
-    (lambda (who mode)
-      (errorf who "unknown write mode: ~a, should be one of '(error truncate append)" mode)))
 
   ;; mode when file exists: 'error, 'truncate, 'append
   (define $write-helper
@@ -119,17 +158,17 @@
                                 (case mode
                                   [truncate (file-options replace)]
                                   [append   (file-options no-truncate no-fail append)]
-                                  [else ($bad-write-mode who mode)])
+                                  [else ($err-bad-write-mode who mode)])
                                 (file-options))])
                     (call-with-port (open-file-output-port path op (buffer-mode block)
                                                            (if bin? #f (current-transcoder)))
                       (lambda (p) (writer p)))))])
         (if (file-exists? path)
             (if (eq? mode 'error)
-                ($file-exists-error who path)
+                ($err-file-exists who path)
                 (if (file-regular? path)
                     (go mode)
-                    ($bad-file who path)))
+                    ($err-file-not-regular who path)))
             ;; feel free to write
             (go #f)))))
 
@@ -200,6 +239,12 @@
     (lambda (who path mode datum)
       (let ([do-write (lambda (p) (fasl-write datum p))])
         ($write-helper who path mode #t do-write))))
+  (define $write-u8vec
+    (lambda (who path mode u8vec)
+      (pcheck-bytevector
+       (u8vec)
+       (let ([do-write (lambda (p) (put-bytevector p u8vec))])
+         ($write-helper who path mode #t do-write)))))
 
   ;; error by default when file already exist
   (define-who write-lines
@@ -223,6 +268,9 @@
   (define-who write-datum-fasl
     (lambda (path datum)
       ($write-datum-fasl who path 'error datum)))
+  (define-who write-u8vec
+    (lambda (path u8vec)
+      ($write-u8vec who path 'error u8vec)))
 
   ;; truncate by default
   (define-who write-lines!
@@ -246,6 +294,9 @@
   (define-who write-datum-fasl!
     (lambda (path datum)
       ($write-datum-fasl who path 'truncate datum)))
+  (define-who write-u8vec!
+    (lambda (path u8vec)
+      ($write-u8vec who path 'truncate u8vec)))
 
   ;; append by default
   (define-who write-lines>>
@@ -269,8 +320,11 @@
   (define-who write-datum-fasl>>
     (lambda (path datum)
       ($write-datum-fasl who path 'append datum)))
+  (define-who write-u8vec>>
+    (lambda (path u8vec)
+      ($write-u8vec who path 'append u8vec)))
 
-
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;;   get/put operations on ports
