@@ -594,4 +594,24 @@
   (define PUT-S64 (lambda (p n) (put-s64 p n 'big)))
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   path utilities
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  #|doc
+  Build paths. A multi-arity variant of builtin `path-build`.
+  |#
+  (define make-path
+    (lambda (p . p*)
+      (pcheck ([string? p] [(lambda (x) (andmap string? x)) p*])
+              (if (null? p*)
+                  p
+                  (let loop ([res p] [pp p*])
+                    (if (null? pp)
+                        res
+                        (path-build res (loop (car pp) (cdr pp)))))))))
+
   )
