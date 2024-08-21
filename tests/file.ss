@@ -520,3 +520,37 @@
      (eq? 'FT_chardev (file-type "/dev/random"))
      (eq? 'FT_chardev (file-type "/dev/null"))
      )
+
+
+(mat file-chmod
+
+     (error? (file-mode->symbols ""))
+     (error? (file-mode->symbols #o77771))
+
+     (equal? '((su sg t) (r w x) (r w x) (r w x)) (file-mode->symbols #o7777))
+     (equal? '((su sg) (r w) (r w) (r w)) (file-mode->symbols #o6666))
+     (equal? '((t) (x) (x) (x)) (file-mode->symbols #o1111))
+     (equal? '(() (r w) (r w) (r)) (file-mode->symbols #o664))
+
+
+     (error? (symbols->file-mode '()))
+     (error? (symbols->file-mode '() '()))
+     (error? (symbols->file-mode '() '() '()))
+     (error? (symbols->file-mode '() '() '() '(s)))
+     (error? (symbols->file-mode '() '() '() 123))
+     (error? (symbols->file-mode '() '() '(a) '()))
+     (error? (symbols->file-mode '() '(bla) '() '()))
+     (error? (symbols->file-mode '(a) '() '() '()))
+     (error? (symbols->file-mode '() '() '(r r) '()))
+     (error? (symbols->file-mode '() '() '() '(r x x)))
+     (error? (symbols->file-mode '(t t) '() '() '()))
+
+     (= 0 (symbols->file-mode '() '() '() '()))
+     (= #o400 (symbols->file-mode '() '(r) '() '()))
+     (= #o444 (symbols->file-mode '() '(r) '(r) '(r)))
+     (= #o1111 (symbols->file-mode '(t) '(x) '(x) '(x)))
+     (= #o421 (symbols->file-mode '() '(r) '(w) '(x)))
+     (= #o5562 (symbols->file-mode '(t su) '(x r) '(w r) '(w)))
+     (= #o7777 (symbols->file-mode '(su sg t) '(r w x) '(r w x) '(r w x)))
+
+     )

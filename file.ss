@@ -19,8 +19,12 @@
           file-inode file-blocks file-nlinks file-owner file-group
           file-dev-major file-dev-minor
 
-          file-readable? file-writable? file-executable? file-hidden? file-special? same-file? same-file-contents?)
+          file-readable? file-writable? file-executable? file-hidden? file-special? same-file? same-file-contents?
+
+          file-mode->symbols symbols->file-mode
+          file-chmod file-chmod-s file-chmod-u file-chmod-g file-chmod-o file-chmod-a)
   (import (chezpp chez)
+          (chezpp private os)
           (chezpp internal)
           (chezpp utils)
           (chezpp list)
@@ -902,6 +906,175 @@
                                        (if (fx= b1 b2) (loop) #f)))))))))
                   #f))))
 
+
+
+;;;; file modes
+
+  (define $mode-num? (lambda (x) (and (fixnum? x) (fx<= 0 x #b111111111111))))
+  (define $valid-mode-sym?  (lambda (x) (memq x '(r w x))))
+  (define $valid-smode-sym? (lambda (x) (memq x '(su sg t))))
+
+  (define $valid-modes?
+    (lambda (m) (and (list? m) (andmap $valid-mode-sym? m) (unique? m))))
+  (define $valid-smodes?
+    (lambda (m) (and (list? m) (andmap $valid-smode-sym? m) (unique? m))))
+
+  (define file-mode->symbols
+    (lambda (mode)
+      (pcheck ([$mode-num? mode])
+              (let* ([ss '((su . 11) (sg . 10) (t . 9))]
+                     [us '((r . 8) (w . 7) (x . 6))]
+                     [gs '((r . 5) (w . 4) (x . 3))]
+                     [os '((r . 2) (w . 1) (x . 0))]
+                     [scanX (lambda (xs)
+                             (lambda (m)
+                               (fold-left
+                                (lambda (m p) (if (fxlogbit? (cdr p) mode)
+                                                  (snoc! m (car p))
+                                                  m))
+                                m xs)))]
+                     [s (scanX ss)]
+                     [u (scanX us)]
+                     [g (scanX gs)]
+                     [o (scanX os)])
+                `(,(s '()) ,(u '()) ,(g '()) ,(o '()))))))
+  (define symbols->file-mode
+    (lambda (smode umode gmode omode)
+      (pcheck ([list? smode umode gmode omode]
+               [$valid-smodes? smode]
+               [$valid-modes? umode gmode omode])
+              (let* ([ss '((t . 9) (sg . 10) (su . 11))]
+                     [us '((x . 6) (w . 7) (r . 8))]
+                     [gs '((x . 3) (w . 4) (r . 5))]
+                     [os '((x . 0) (w . 1) (r . 2))]
+                     [scanX (lambda (mode xs)
+                             (lambda (m)
+                               (fold-left
+                                (lambda (m s) (if (memq s (map car xs))
+                                                  (fxlogbit1 (cdr (assoc s xs)) m)
+                                                  m))
+                                m mode)))]
+                     ;; scan symbols in each type of mode and set the bits
+                     [s (scanX smode ss)]
+                     [u (scanX umode us)]
+                     [g (scanX gmode gs)]
+                     [o (scanX omode os)])
+                (o (g (u (s 0))))))))
+
+
+  (define $file-chmod
+    (case-lambda
+      ;; numeric or symbolic for user mode
+      [(who path mode)
+       (cond [($mode-num? mode)
+              (chmod path mode)]
+             [(list? mode)
+              ($file-chmod who path '() mode '() '())]
+             [else (errorf who "invalid file mode: ~a" mode)])]
+      [(who path umode gmode)
+       ($file-chmod who path '() umode gmode '())]
+      [(who path umode gmode omode)
+       ($file-chmod who path '() umode gmode omode)]
+      [(who path smode umode gmode omode)
+       (pcheck ([file-exists? path]
+                [list? smode umode gmode omode])
+               (let* ([m (get-mode path #t)]
+                      [sm (file-mode->symbols m)]
+                      [filter-mode (lambda (mode i)
+                                     (if mode
+                                         (if (null? mode)
+                                             mode
+                                             (record-case mode
+                                               [+ d* (list+ (list-ref sm i) d*)]
+                                               [- d* (list- (list-ref sm i) d*)]
+                                               [else mode]))
+                                         (list-ref sm i)))]
+                      [s (filter-mode smode 0)]
+                      [u (filter-mode umode 1)]
+                      [g (filter-mode gmode 2)]
+                      [o (filter-mode omode 3)])
+                 (pcheck ([$valid-smodes? s]
+                          [$valid-modes? u g o])
+                         (chmod path (symbols->file-mode s u g o)))))]))
+
+
+  #|doc
+  Change the permission bits of a file.
+
+  If `path` is a symlink, it is always dereferenced.
+
+  If only one mode is given, it can be either in numerical form (as returned by `get-mode`),
+  or in symbolic form (see below).
+  In the former case, it specifies all modes at once.
+  In the latter, it specifies the user mode to be modified.
+
+  If more than one mode is given, they must be in symbolic form.
+  If two modes are given, they represent user mode and group mode;
+  If three modes are given, they represent user mode, group mode and others mode;
+  If four modes are given, they represent special mode, user mode, group mode, and others mode.
+
+  Special modes are set-user-ID, set-group-ID and sticky bit.
+
+
+  Symbolic Permission Form:
+
+  For user, group and others bits, the symbolic form supports specifying permission
+  bits in a list of symbols consisting of 'r, 'w, and 'x.
+  For example, '(r) means setting the (say, user's) bits to read only;
+  and '(r w x) sets all bits.
+
+  Set-user-ID, set-group-ID and sticky bit are represented as 'su, 'sg and 't, respectively.
+  If mode is '(), all bits are cleared; if mode is #f, all bits are left unchanged.
+  Each symbol in the list can only appear once. They order of symbols is unimportant.
+
+  Adding or Subtracting Bits:
+
+  In addition to the above way of specifying all bits to be set using the symbolic form,
+  one can also add '+ and '- in front of the list to only add to or subtract from the file's
+  bits the given bits.
+  For example, '(- x) removes the execution bit; '(+ w x) adds the write and execution bit.
+  Nothing happens when trying to remove a bit that's not set or
+  when trying to add a bit that already exists.
+  |#
+  (define-who file-chmod
+    (lambda (path mode . rest)
+      (apply $file-chmod who path mode rest)))
+
+  #|doc
+  Change the special mode only.
+  `mode` must be in symbolic form.
+  |#
+  (define-who file-chmod-s
+    (lambda (path mode)
+      ($file-chmod who mode #f #f #f)))
+  #|doc
+  Change user mode only.
+  `mode` must be in symbolic form.
+  |#
+  (define-who file-chmod-u
+    (lambda (path mode)
+      ($file-chmod who #f mode #f #f)))
+  #|doc
+  Change group mode only.
+  `mode` must be in symbolic form.
+  |#
+  (define-who file-chmod-g
+    (lambda (path mode)
+      ($file-chmod who #f #f mode #f)))
+  #|doc
+  Change others mode only.
+  `mode` must be in symbolic form.
+  |#
+  (define-who file-chmod-o
+    (lambda (path mode)
+      ($file-chmod who #f #f #f mode)))
+  #|doc
+  Change all modes except the special mode.
+  `mode` must be in symbolic form.
+  |#
+  (define-who file-chmod-a
+    (lambda (path mode)
+      ($file-chmod who #f mode mode mode)))
 
 
 
