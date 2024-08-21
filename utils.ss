@@ -5,7 +5,7 @@
           pcheck-input-binary-port  pcheck-input-textual-port
           pcheck-output-binary-port pcheck-output-textual-port
           pcheck-file pcheck-directory pcheck-symlink
-          pcheck-fxvector pcheck-flvector pcheck-natural
+          pcheck-fxvector pcheck-flvector pcheck-bytevector pcheck-natural
           unreachable!
           incr! decr! add1! sub1! fx+! fx-! fx*! fx/!
           cons! cdr!
@@ -118,6 +118,7 @@
   (gen-pcheck vector vector?)
   (gen-pcheck fxvector fxvector?)
   (gen-pcheck flvector flvector?)
+  (gen-pcheck bytevector bytevector?)
   (gen-pcheck symbol symbol?)
   (gen-pcheck char char?)
   (gen-pcheck string string?)
