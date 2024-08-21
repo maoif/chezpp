@@ -14,7 +14,8 @@
           id bool
           define-who trace-define-who
 
-          random-char random-string random-symbol random-datum random-list random-box)
+          random-char random-string random-symbol random-datum random-list random-box
+          random-bytevector random-u8vec)
   (import (chezscheme)
           (chezpp internal))
 
@@ -284,7 +285,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
   (define $rand (lambda (lb ub) (fx+ lb (random (fx- ub lb)))))
-  (define $range-error (lambda (who x y) (errorf who "invalid range: ~a ~b" x y)))
+  (define $range-error (lambda (who x y) (errorf who "invalid range: ~a ~a" x y)))
 
   #|doc
   Generate a random character.
@@ -398,6 +399,24 @@
     (case-lambda
       [()  (box (random-datum))]
       [(r) (box (r))]))
+
+  (define $random-bytevector
+    (case-lambda
+      [(who)    ($random-bytevector who 0 10)]
+      [(who lb) ($random-bytevector who lb 10)]
+      [(who lb ub)
+       (pcheck-natural
+        (lb ub)
+        (when (>= lb ub) ($range-error who lb ub))
+        (let* ([len ($rand lb ub)] [u8vec (make-bytevector len 0)])
+          (let loop ([i 0])
+            (if (fx= i len)
+                u8vec
+                (begin (bytevector-u8-set! u8vec i (random 256))
+                       (loop (add1 i)))))))]))
+
+  (define-who random-bytevector (lambda args (apply $random-bytevector who args)))
+  (define-who random-u8vec (lambda args (apply $random-bytevector who args)))
 
   ;; TODO move random-vector here
 
