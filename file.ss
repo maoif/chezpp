@@ -22,7 +22,11 @@
           file-readable? file-writable? file-executable? file-hidden? file-special? same-file? same-file-contents?
 
           file-mode->symbols symbols->file-mode
-          file-chmod file-chmod-s file-chmod-u file-chmod-g file-chmod-o file-chmod-a)
+          file-chmod file-chmod-s file-chmod-u file-chmod-g file-chmod-o file-chmod-a
+
+          readlink readlink2
+          file-link file-symlink file-link! file-symlink!
+          file-touch file-touch-atime file-touch-mtime)
   (import (chezpp chez)
           (chezpp private os)
           (chezpp internal)
@@ -1075,6 +1079,259 @@
   (define-who file-chmod-a
     (lambda (path mode)
       ($file-chmod who #f mode mode mode)))
+
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   filesystem utilities
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  ;; Some procedures only need the presence of the symlink per se, not its target.
+  (define file-exists?-no-follow (lambda (path) (file-exists? path #f)))
+  (define $touch-empty-file (lambda (path) (call-with-port (open-file-output-port path) (lambda (x) (void)))))
+
+
+  (define $readlink
+    (let ([ffi (let ([ffi-readlink (foreign-procedure "chezpp_readlink" (string) scheme-object)])
+                 (lambda (who path)
+                   (let ([x (ffi-readlink path)])
+                     (if (vector? x)
+                         ($err-file who path (vector-ref x 0))
+                         x))))])
+      (case-lambda
+        [(who path) ($readlink path #f)]
+        [(who path recursive?)
+         ;; we don't care about whether the link is dangling or not
+         (pcheck ([file-exists?-no-follow path] [file-symbolic-link? path])
+                 (let loop ([path path])
+                   (let* ([ln (ffi who path)]
+                          [target (path-build (path-parent path) ln)])
+                     (if (file-symbolic-link? target)
+                         (if recursive?
+                             (loop target)
+                             ln)
+                         (if recursive?
+                             (values ln (path-parent path))
+                             ln)))))])))
+
+
+  #|doc
+  Return the content of a symbolic link.
+
+  If `recursive?`, then the dereference continues until a non-symlink target is met,
+  and *both* the target and the link's parent directory is returned.
+
+  Otherwise the first symlink content is returned.
+  |#
+  (define-who readlink
+    (case-lambda [(path) ($readlink who path #f)]
+                 [(path recursive?) ($readlink who path recursive?)]))
+
+  #|doc
+  Similar to `readlink`, with the difference being if `recursive?`,
+  the return value is the path built with link's parent directory and the symlink content.
+  |#
+  (define-who readlink2
+    (case-lambda [(path) ($readlink who path #f)]
+                 [(path recursive?)
+                  (if recursive?
+                      (let-values ([(ln pdir) ($readlink who path #t)])
+                        (path-build pdir ln))
+                      ($readlink who path #f))]))
+
+
+
+;;;; soft and hard links
+
+  (define $link/copy-helper
+    (lambda (who link/copy-what overwrite?)
+      (lambda (src dest)
+        (if (file-exists? dest #f)
+            (let ([overwrite/error
+                   (lambda (dest)
+                     (if (file-exists? dest #f)
+                         (if overwrite?
+                             ;; `dest` is file or symlink to file
+                             ;; If `dest` is symlink, always overwrite the symlink itself.
+                             ;; This is different from `cp` semantics,
+                             ;; but it matches `ln` semantics.
+                             (begin (delete-file dest)
+                                    (link/copy-what src dest))
+                             ($err-file-exists who dest))
+                         (link/copy-what src dest)))])
+              (if (file-directory? dest #t)
+                  (let ([newd (path-build dest (path-last src))])
+                    (if (file-directory? newd #t)
+                        ($err-directory-exists who newd)
+                        (overwrite/error newd)))
+                  (overwrite/error dest)))
+            (link/copy-what src dest)))))
+
+  ;; Symlinks can also have hard links.
+  (define $file-link
+    (lambda (who src dest overwrite?)
+      (let* ([$link (let ([ffi (foreign-procedure "chezpp_link" (string string) scheme-object)])
+                      (lambda (src dest)
+                        (let ([x (ffi src dest)])
+                          (when (string? x)
+                            ($err-file who x)))))]
+             [link ($link/copy-helper who $link overwrite?)])
+        (link src dest))))
+
+  ;; TODO use macro in the following?
+  #|doc
+  Create a hard link from `src` to `dest`.
+
+  Symlinks are followed recursively if `follow-link?` is #t.
+  |#
+  (define-who file-link
+    (case-lambda [(src dest) (file-link src dest #t)]
+                 [(src dest follow-link?)
+                  (pcheck ([string? src dest] [boolean? follow-link?]
+                           [(lambda (x) (file-exists? x follow-link?)) src])
+                          (if (file-symbolic-link? src)
+                              (if follow-link?
+                                  ($file-link who (readlink2 src #t) dest #f)
+                                  ($file-link who src dest #f))
+                              ($file-link who src dest #f)))]))
+
+
+  #|doc
+  Similar to `file-link`, but if `dest` already exists, it is overwritten.
+  |#
+  (define-who file-link!
+    (case-lambda [(src dest) (file-link! src dest #t)]
+                 [(src dest follow-link?)
+                  (pcheck ([string? src dest] [boolean? follow-link?]
+                           [(lambda (x) (file-exists? x follow-link?)) src])
+                          (if (file-symbolic-link? src)
+                              (if follow-link?
+                                  ($file-link who (readlink2 src #t) dest #t)
+                                  ($file-link who src dest #t))
+                              ($file-link who src dest #t)))]))
+
+
+  (define $file-symlink
+    (lambda (who src dest overwrite?)
+      (let* ([$symlink (let ([ffi (foreign-procedure "chezpp_symlink" (string string) scheme-object)])
+                         (lambda (src dest)
+                           (let ([x (ffi src dest)])
+                             (when (string? x)
+                               ($err-file who x)))))]
+             [link ($link/copy-helper who $symlink overwrite?)])
+        (link src dest))))
+
+
+  #|doc
+  Create a symbolic link from `src` to `dest`.
+  `src` must be a string and is written as is to `dest` as the symlink content.
+  |#
+  (define-who file-symlink
+    (lambda (src dest)
+      (pcheck ([string? src dest])
+              ($file-symlink who src dest #f))))
+
+
+  #|doc
+  Similar to `file-symlink`, but if `dest` already exists, it is overwritten.
+  |#
+  (define-who file-symlink!
+    (lambda (src dest)
+      (pcheck ([string? src dest])
+              ($file-symlink who src dest #t))))
+
+
+
+  (define $touch (foreign-procedure "chezpp_touch" (string ptr ptr boolean) scheme-object))
+  (define $time->vec (lambda (t) (vector (time-nanosecond t) (time-second t))))
+  (define $file-touch
+    (lambda (who path atime mtime follow-link? force?)
+      (pcheck ([boolean? follow-link? force?])
+              (define (check-time t)
+                (when t
+                  (unless (eq? 'time-utc (time-type t))
+                    (errorf who "invalid time type ~a of ~a (should be 'time-utc)" (time-type t) t))))
+              (check-time atime) (check-time mtime)
+
+              (let* ([atime (if atime ($time->vec atime) #f)] [mtime (if mtime ($time->vec mtime) #f)]
+                     [force-or-not (lambda (dest)
+                                     (if force?
+                                         (begin ($touch-empty-file dest)
+                                                ($touch dest atime mtime #t))
+                                         ($err-file-not-found who dest)))])
+                (if (file-exists? path #f)
+                    (if (file-symbolic-link? path)
+                        (if follow-link?
+                            ;; need to make up the correct target path
+                            (let ([dest (readlink2 path #t)])
+                              (if (file-exists? dest #f)
+                                  ($touch dest atime mtime #f)
+                                  (force-or-not dest)))
+                            ($touch path atime mtime #f))
+                        ($touch path atime mtime #f))
+                    (force-or-not path))))))
+
+
+  ;; how to convert arbirary time to epoch time?
+  #|doc
+  Change the last access and modification times of a file to `time`.
+  `time` is the UTC time type ('time-utc) as can be made by `make-time`.
+  By default, it is the current time as returned by `(current-time)`.
+
+  If `force?`, then if the file does not exist, an empty file with the same name is created.
+  Otherwise, it is an error if the file does not exist.
+
+  If `follow-link?` is #f and `path` is a symlink, then `file-touch` updates the timestamps
+  of the symlink, rather those of the file the symlink points to.
+  |#
+  (define-who file-touch
+    (case-lambda
+      [(path)
+       (file-touch path (current-time) #t #t)]
+      [(path time)
+       (file-touch path time #t #t)]
+      [(path time force?)
+       (file-touch path time #t force?)]
+      [(path time follow-link? force?)
+       ($file-touch who path time time follow-link? force?)]))
+
+
+  #|doc
+  Similar to `file-touch`, but updates last access time only.
+  The other one is left unchanged.
+  |#
+  (define-who file-touch-atime
+    (case-lambda
+      [(path)
+       (file-touch-atime path (current-time) #t #t)]
+      [(path time)
+       (file-touch-atime path time #t #t)]
+      [(path time force?)
+       (file-touch-atime path time #t force?)]
+      [(path time follow-link? force?)
+       ($file-touch who path time #f follow-link? force?)]))
+
+
+  #|doc
+  Similar to `file-touch`, but updates last modification time only.
+  The other one is left unchanged.
+  |#
+  (define-who file-touch-mtime
+    (case-lambda
+      [(path)
+       (file-touch-mtime path (current-time) #t #t)]
+      [(path time)
+       (file-touch-mtime path time #t #t)]
+      [(path time force?)
+       (file-touch-mtime path time #t force?)]
+      [(path time follow-link? force?)
+       ($file-touch who path #f time follow-link? force?)]))
+
+
 
 
 

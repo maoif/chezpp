@@ -15,7 +15,10 @@
 // If the function returns other Scheme objects, ditto.
 
 ptr chezpp_statx(const char *path, int follow_link);
-
+ptr chezpp_readlink(const char *path);
+ptr chezpp_link(const char *src, const char *dest);
+ptr chezpp_symlink(const char *src, const char *dest);
+ptr chezpp_touch(const char *path, ptr atime, ptr mtime, int follow_link);
 
 
 ptr chezpp_statx(const char *path, int follow_link) {
@@ -81,3 +84,70 @@ ptr chezpp_statx(const char *path, int follow_link) {
   return v;
 }
 
+ptr chezpp_readlink(const char *path) {
+  char *p = expand_pathname(path);
+  char link[PATH_MAX];
+  memset(link, 0, sizeof(link));
+  if (readlink(p, link, sizeof(link)) == -1) {
+    return errno_str_vector();
+  }
+
+  free(p);
+
+
+  return Sstring(link);
+}
+
+ptr chezpp_link(const char *src, const char *dest) {
+  char *s = expand_pathname(src);
+  char *d = expand_pathname(dest);
+  if (link(s, d) == -1) {
+    return errno_str();
+  }
+
+  free(s);
+  free(d);
+
+  return Strue;
+}
+
+ptr chezpp_symlink(const char *src, const char *dest) {
+  char *s = expand_pathname(src);
+  char *d = expand_pathname(dest);
+  if (symlink(s, d) == -1) {
+    return errno_str();
+  }
+
+  free(s);
+  free(d);
+
+  return Strue;
+}
+
+ptr chezpp_touch(const char *path, ptr atime, ptr mtime, int follow_link) {
+  char *p = expand_pathname(path);
+  struct timespec ts[2];
+
+  // times are #f if left unchanged
+  if (atime == Sfalse) {
+    ts[0].tv_nsec = UTIME_OMIT;
+  } else {
+    ts[0].tv_nsec = Sinteger_value(Svector_ref(atime, 0));
+    ts[0].tv_sec = Sinteger_value(Svector_ref(atime, 1));
+  }
+
+  if (mtime == Sfalse) {
+    ts[1].tv_nsec = UTIME_OMIT;
+  } else {
+    ts[1].tv_nsec = Sinteger_value(Svector_ref(mtime, 0));
+    ts[1].tv_sec = Sinteger_value(Svector_ref(mtime, 1));
+  }
+
+  if (utimensat(AT_FDCWD, p, ts, follow_link ? 0 : AT_SYMLINK_NOFOLLOW)) {
+    return errno_str();
+  }
+
+  free(p);
+
+  return Strue;
+}
