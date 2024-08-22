@@ -1513,7 +1513,60 @@
        ($file-touch who path #f time follow-link? force?)]))
 
 
+  #|doc
+  `define-file-tree` defines two procedures that, when called with a valid path `pdir`,
+  will create a file tree rooted at `pdir`.
+  The first procedure, named `create-<tree-name>`, operates in non-overwrite mode:
+  if the target file tree exists, it raises an error.
+  If you want to overwrite the file tree when it exists, use the second procedure: `create-<tree-name>!`.
 
+  An error is raised if parent of `pdir` does not exist.
+
+  The current implementation supports creating directories, symbolic links,
+  textual files, binary files in ChezScheme fasl format, and raw binary files
+  consisting of data from bytevectors.
+  Permission bits (mode) of each kind of file can be set individually.
+  They can be in either octal mode or symbolic mode.
+  If mode is not given, default mode is applied.
+  Owner and group of files are the effective user and group of the process.
+
+  Symlink source, `<link-src>`, is written as is, to the symlink file.
+  To avoid dangling symlink error, make sure the source file already exists.
+
+  Macro syntax:
+
+  ```
+  (define-file-tree <tree-name> <decl>*)
+
+  <decl> := <dir-decl> | <file-decl>
+
+  <dir-decl> := (dir <name>)
+             |  (dir <name> <mode>)
+             |  (dir <name> <decl>+)
+             |  (dir <name> <mode> <decl>*)
+
+  <file-decl> := (file <name>)
+              |  (file <name> <mode>)
+              |  (file <name> <file-type-decl>)
+              |  (file <name> <mode> <file-type-decl>)
+              |  (symlink <link-src> <link-target>)
+
+  <file-type-decl> := <reg-file-decl> | <symlink-decl> |  ...
+
+  <reg-file-decl> := (text <expr>)
+                  |  (lines <expr>)
+                  |  (fasl <expr>)
+                  |  (raw  <expr>)
+
+  <symlink-decl> := (symlink <link-src>)
+
+  <name> := <string>
+  <link-src> := <string>
+  <link-target> := <string>
+  <mode> := (mode <m>)
+  <m> := <octal-mode> | <symbolic-mode>
+  ```
+  |#
   (define-syntax define-file-tree
     (lambda (stx)
       (define parse-file-type-decl
