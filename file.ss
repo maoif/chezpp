@@ -26,7 +26,9 @@
 
           readlink readlink2
           file-link file-symlink file-link! file-symlink!
-          file-touch file-touch-atime file-touch-mtime)
+          file-touch file-touch-atime file-touch-mtime
+
+          walk-files file-find file-find-all file-map file-for-each print-file-tree)
   (import (chezpp chez)
           (chezpp private os)
           (chezpp internal)
@@ -1089,6 +1091,183 @@
 ;;;   filesystem utilities
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+  #|doc
+  Traverse the filesystem tree rooted at `path`.
+  This is similar to Python's os.walk() method.
+
+  For every directory `pdir` encounterd, `proc` is applied to three values:
+  1. pdir
+  2. the list of all directories under `pdir`
+  3. the list of all other files under `pdir`.
+
+  All paths in the above values are relative to `path`.
+  Calling `cd` or `current-directory` to change the current directory inside `proc`
+  results in unspecified behavior.
+
+  If `follow-link?` is #f (the default), symlinks to directories are not followed
+  and are therefore regarded as files.
+
+  If `top-down?` is #t (the default), the tree is travaled in a top-down manner,
+  descending into each directory as deep as possible.
+  `proc` in this case is called before any of the subdirectories are visited in 2.
+
+  If `top-down?` is #f, `walk-files` calls `proc` after all of the subdirectories are visited in 2,
+  hence in a bottom-up manner.
+
+  In top-down mode, one can set entries in 2 to #f to disable the visit of the corresponding entries.
+  In bottom-up mode, this behavior has no effect.
+  |#
+  (define-who walk-files
+    (case-lambda
+      [(proc path)
+       (walk-files proc path #f #t)]
+      [(proc path follow-link?)
+       (walk-files proc path follow-link? #t)]
+      [(proc path follow-link? top-down?)
+       (pcheck ([procedure? proc] [string? path] [boolean? follow-link? top-down?])
+               (define dir? (lambda (x)  (file-directory? x follow-link?)))
+               (unless (file-directory? path) ($err-file-not-directory who path))
+               (if top-down?
+                   (let loop ([dir path])
+                     ;; `directory-list` result is relative to `dir`
+                     (let ([fs (map! (lambda (x) (path-build dir x)) (directory-list dir))])
+                       (let-values ([(dirs files) (partition dir? fs)])
+                         (if (proc dir dirs files)
+                             ;; visit each dir in `dirs`
+                             (let lp ([ds dirs])
+                               (unless (null? ds)
+                                 ;; user can modify `dirs` to control whether a dir should be visited
+                                 (if (car ds)
+                                     (if (loop (car ds))
+                                         (lp (cdr ds))
+                                         #f)
+                                     (lp (cdr ds)))))
+                             #f))))
+                   (let loop ([dir path])
+                     ;; `directory-list` result is relative to `dir`
+                     (let ([fs (map! (lambda (x) (path-build dir x)) (directory-list dir))])
+                       (let-values ([(dirs files) (partition dir? fs)])
+                         (if (null? dirs)
+                             (proc dir dirs files)
+                             ;; there's no way to control the traversal by modifying `dirs` here
+                             (let lp ([ds dirs])
+                               (if (null? ds)
+                                   (proc dir dirs files)
+                                   (if (loop (car ds))
+                                       (lp (cdr ds))
+                                       #f)))))))))]))
+
+  #|doc
+  Print the file tree rooted at `path`.
+  `path` must be a valid directory.
+  |#
+  (define print-file-tree
+    (lambda (path)
+      (pcheck-directory (path)
+                        (walk-files (lambda (pdir dirs files)
+                                      (printf "~a:~n" pdir)
+                                      (printf "  ~a~n" dirs)
+                                      (printf "  ~a~n" files)
+                                      (newline))
+                                    path))))
+
+
+  #|doc
+  Find file using a predicate.
+  Return the path of the first found file,
+  or #f if no matching file is found.
+  |#
+  (define-who file-find
+    (case-lambda
+      [(pred path) (file-find pred path #f)]
+      [(pred path follow-link?)
+       (let ([res #f])
+         (walk-files (lambda (dir dirs files)
+                       (let lp1 ([ds dirs])
+                         (if (null? ds)
+                             (let lp2 ([fs files])
+                               (unless (null? fs)
+                                 (if (pred (car fs))
+                                     (begin (set! res (car fs))
+                                            ;; use #f to end the walk
+                                            #f)
+                                     (lp2 (cdr fs)))))
+                             (if (pred (car ds))
+                                 (begin (set! res (car ds))
+                                        #f)
+                                 (lp1 (cdr ds))))))
+                     path follow-link?)
+         res)]))
+
+  ;; TODO lazy (iter/stream) file-find-all
+  #|doc
+  Like `file-find`, but return a list of all found file.
+
+  `follow-link?` determines whether `file-find*` descends into a symlink
+  if it is a directory.
+  |#
+  (define-who file-find-all
+    (case-lambda
+      [(pred path) (file-find-all pred path #f)]
+      [(pred path follow-link?)
+       (let ([lb (make-list-builder)])
+         (walk-files (lambda (dir dirs files)
+                       (let lp1 ([ds dirs])
+                         (if (null? ds)
+                             (let lp2 ([fs files])
+                               (unless (null? fs)
+                                 (when (pred (car fs))
+                                   (lb (car fs)))
+                                 (lp2 (cdr fs))))
+                             (begin (when (pred (car ds))
+                                      (lb (car ds)))
+                                    (lp1 (cdr ds))))))
+                     path follow-link?)
+         (lb))]))
+
+
+  #|doc
+  Map `proc` over all files found under `path`, recursively,
+  the result of `proc` is collected into a list and returned.
+  |#
+  (define file-map
+    (case-lambda
+      [(proc path) (file-map proc path #f)]
+      [(proc path follow-link?)
+       (let ([lb (make-list-builder)])
+         (walk-files (lambda (dir dirs files)
+                       (let lp1 ([ds dirs])
+                         (if (null? ds)
+                             (let lp2 ([fs files])
+                               (unless (null? fs)
+                                 (lb (proc (car fs)))
+                                 (lp2 (cdr fs))))
+                             (begin (lb (proc (car ds)))
+                                    (lp1 (cdr ds))))))
+                     path follow-link?)
+         (lb))]))
+
+
+  #|doc
+  Apply `proc` over all files found under `path`, recursively.
+  This procedure is for effect only.
+  |#
+  (define file-for-each
+    (case-lambda
+      [(proc path) (file-for-each proc path #f)]
+      [(proc path follow-link?)
+       (walk-files (lambda (dir dirs files)
+                     (let lp1 ([ds dirs])
+                       (if (null? ds)
+                           (let lp2 ([fs files])
+                             (unless (null? fs)
+                               (proc (car fs))
+                               (lp2 (cdr fs))))
+                           (begin (proc (car ds))
+                                  (lp1 (cdr ds))))))
+                   path follow-link?)]))
 
   ;; Some procedures only need the presence of the symlink per se, not its target.
   (define file-exists?-no-follow (lambda (path) (file-exists? path #f)))
