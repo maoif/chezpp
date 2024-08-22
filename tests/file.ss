@@ -554,3 +554,82 @@
      (= #o7777 (symbols->file-mode '(su sg t) '(r w x) '(r w x) '(r w x)))
 
      )
+
+
+(mat define-file-tree
+
+     (begin (define testsrc1 "test src 1")
+            (define testsrc2 "test src 2")
+            (define lines (map (lambda (x) (random-string)) (iota 10)))
+            (define-file-tree fstree
+              ;; write-string, write-string!
+              (file "README.md" (text "This is a fancy project."))
+              ;; mkdir
+              (dir "src"
+                   ;; write-string(!), file-chmod
+                   (file "src1.ss" (mode #o777) (text "somestring"))
+                   ;; write-datum-fasl(!)
+                   (file "src2.ss" (fasl '(a list of symbols)))
+                   (dir "native"
+                        ;; empty file, file-touch
+                        (file "runtime.c")
+                        (file "ranstr" (lines lines))))
+              (dir "tests" (mode #o777)
+                   (file "test1.ss" (text testsrc1))
+                   (file "test2.ss" (text testsrc2))
+                   ;; file-symlink(!)
+                   (file "src1" (symlink "../src/src1.ss"))
+                   ;; link to link, simpler syntax
+                   (symlink "src1" "src1.ln")))
+
+            (when (file-directory? "./fstree")
+              (file-removetree "./fstree"))
+
+            #t)
+
+     (begin (create-fstree "./fstree")
+            #t)
+
+     (file-directory? "./fstree")
+     (file-directory? "./fstree/src")
+     (file-directory? "./fstree/src/native")
+     (file-directory? "./fstree/tests")
+
+     (file-regular? "./fstree/README.md")
+     (file-regular? "./fstree/src/src1.ss")
+     (file-regular? "./fstree/src/src2.ss")
+     (file-regular? "./fstree/src/native/runtime.c")
+     (file-regular? "./fstree/src/native/ranstr")
+     (file-regular? "./fstree/tests/test1.ss")
+     (file-regular? "./fstree/tests/test2.ss")
+
+     (file-symbolic-link? "./fstree/tests/src1")
+     (file-symbolic-link? "./fstree/tests/src1.ln")
+     (string=? "../src/src1.ss" (readlink "./fstree/tests/src1"))
+     (string=? "src1" (readlink "./fstree/tests/src1.ln"))
+
+     (string=? "This is a fancy project." (read-string "./fstree/README.md"))
+
+     (string=? "somestring" (read-string "./fstree/src/src1.ss"))
+     (= #o777 (get-mode "./fstree/src/src1.ss"))
+     (string=? "somestring" (read-string "./fstree/tests/src1"))
+     (string=? "somestring" (read-string "./fstree/tests/src1.ln"))
+
+     (equal? '(a list of symbols)
+             (read-datum-fasl "./fstree/src/src2.ss"))
+
+     (equal? lines (read-lines "./fstree/src/native/ranstr"))
+     (equal? testsrc1 (read-string "./fstree/tests/test1.ss"))
+     (equal? testsrc2 (read-string "./fstree/tests/test2.ss"))
+
+
+     ;; file already exists
+     (error? (create-fstree "./fstree"))
+
+     (begin (create-fstree! "./fstree")
+            #t)
+
+     (file-removetree "./fstree")
+     (not (file-exists? "./fstree"))
+     (not (file-directory? "./fstree"))
+     )

@@ -28,7 +28,9 @@
           file-link file-symlink file-link! file-symlink!
           file-touch file-touch-atime file-touch-mtime
 
-          walk-files file-find file-find-all file-map file-for-each print-file-tree)
+          walk-files file-find file-find-all file-map file-for-each print-file-tree
+
+          define-file-tree)
   (import (chezpp chez)
           (chezpp private os)
           (chezpp internal)
@@ -1512,7 +1514,151 @@
 
 
 
+  (define-syntax define-file-tree
+    (lambda (stx)
+      (define parse-file-type-decl
+        (lambda (who overwrite? pdir path decl)
+          (syntax-case decl ()
+            [(ty e)
+             (eq? 'text (datum ty))
+             #`(let ([v e])
+                 (if (string? v)
+                     #,(if overwrite?
+                           #`(write-string! #,path v)
+                           #`(write-string  #,path v))
+                     (errorf '#,who "fail to write text file: ~a, not a string: ~a" #,path v)))]
+            [(ty e)
+             (eq? 'lines (datum ty))
+             #`(let ([v e])
+                 (if (list? v)
+                     #,(if overwrite?
+                           #`(write-lines! #,path v)
+                           #`(write-lines  #,path v))
+                     (errorf '#,who "fail to write text file: ~a, not a list of strings: ~a" #,path v)))]
+            [(ty e)
+             (eq? 'fasl (datum ty))
+             #`(let ([v e])
+                 #,(if overwrite?
+                       #`(write-datum-fasl! #,path v)
+                       #`(write-datum-fasl  #,path v)))]
+            [(ty e)
+             (eq? 'raw (datum ty))
+             #`(let ([v e])
+                 (if (bytevector? v)
+                     #,(if overwrite?
+                           #`(write-u8vec! #,path v)
+                           #`(write-u8vec  #,path v))
+                     (errorf '#,who "fail to write raw file: ~a, not a bytevector: ~a" #,path v)))]
+            [(ty e)
+             (eq? 'symlink (datum ty))
+             #`(let ([v e])
+                 (if (string? v)
+                     #,(if overwrite?
+                           #`(file-symlink! v #,path)
+                           #`(file-symlink  v #,path))
+                     (errorf '#,who "fail to create symlink at ~a, not a valid path: ~a" #,path v)))]
+            [_ (syntax-violation 'define-file-tree
+                                 "invalid file type:" decl)])))
+      (define parse-file-decl
+        (lambda (who overwrite? pdir decl)
+          (syntax-case decl ()
+            [(name . rest)
+             (with-syntax ([(p) (generate-temporaries '(p))])
+               #`(let ([n name])
+                   (if (string? n)
+                       (let ([p (path-build #,pdir n)])
+                         #,(syntax-case #'rest ()
+                             ;; files without contents are always touched
+                             [() #'(file-touch p (current-time) #t)]
+                             [((mode m m* ...))
+                              (eq? 'mode (datum mode))
+                              #`(begin (file-touch p (current-time) #t)
+                                       (file-chmod p m m* ...))]
+                             [((mode m m* ...) type-decl)
+                              (eq? 'mode (datum mode))
+                              #`(begin #,(if overwrite?
+                                             (parse-file-type-decl who #t pdir #'p #'type-decl)
+                                             (parse-file-type-decl who #f pdir #'p #'type-decl))
+                                       (file-chmod p m m* ...))]
+                             [(type-decl)
+                              (if overwrite?
+                                  (parse-file-type-decl who #t pdir #'p #'type-decl)
+                                  (parse-file-type-decl who #f pdir #'p #'type-decl))]
+                             [_ (syntax-violation 'define-file-tree
+                                                  "invalid file declaration:" #'rest)]))
+                       (errorf '#,who "not a valid path: ~a" n))))]
+            [_ (syntax-violation 'define-file-tree
+                                 "invalid file declaration:" decl)])))
+      (define parse-dir-decl
+        (lambda (who overwrite? pdir decl)
+          (syntax-case decl ()
+            [(name . rest)
+             (with-syntax ([(p) (generate-temporaries '(p))])
+               #`(let ([n name])
+                   (if (string? n)
+                       (let ([p (path-build #,pdir n)])
+                         #,(syntax-case #'rest ()
+                             [() (if overwrite? #'(mkdirs p) #'(mkdir p))]
+                             [((mode m m* ...))
+                              (eq? 'mode (datum mode))
+                              #`(begin #,(if overwrite? #'(mkdirs p) #'(mkdir p))
+                                       (file-chmod p m m* ...))]
+                             [((mode m m* ...) decl* ...)
+                              (eq? 'mode (datum mode))
+                              #`(begin #,(if overwrite? #'(mkdirs p) #'(mkdir p))
+                                       (file-chmod p m m* ...)
+                                       #,(parse-decls overwrite? who #'p #'(decl* ...)))]
+                             [(decl* ...)
+                              #`(begin #,(if overwrite? #'(mkdirs p) #'(mkdir p))
+                                       #,(parse-decls overwrite? who #'p #'(decl* ...)))]
+                             [_ (syntax-violation 'define-file-tree
+                                                  "invalid directory declaration:" #'rest)]))
+                       (errorf '#,who "not a valid path: ~a" n))))]
+            [_ (syntax-violation 'define-file-tree
+                                 "invalid directory declaration:" decl)])))
+      (define parse-decls
+        (lambda (overwrite? who pdir decl*)
+          #`(begin #,@(map (lambda (decl)
+                             (syntax-case decl ()
+                               [(file . rest)
+                                (eq? 'file (datum file))
+                                (parse-file-decl who overwrite? pdir #'rest)]
+                               [(dir  . rest)
+                                (eq? 'dir (datum dir))
+                                (parse-dir-decl who overwrite? pdir #'rest)]
+                               [(symlink src path)
+                                (eq? 'symlink (datum symlink))
+                                #`(let ([s src] [p path])
+                                    (unless (string? s)
+                                      (errorf '#,who "fail to create symlink at ~a, source not valid: ~a" p s))
+                                    (unless (string? p)
+                                      (errorf '#,who "fail to create symlink at ~a, target not valid: ~a" p p))
+                                    (let ([target (path-build #,pdir p)])
+                                      #,(if overwrite?
+                                            #'(file-symlink! s target)
+                                            #'(file-symlink  s target))))]
+                               [_ (syntax-violation 'define-file-tree
+                                                    "invalid file/directory declaration:" decl)]))
+                           decl*))))
+      (syntax-case stx ()
+        [(k tree-name decl* ...)
+         (with-syntax ([(pdir $mk) (generate-temporaries '(pdir $mk))]
+                       [mk  ($construct-name #'k "create-" #'tree-name)]
+                       [mk! ($construct-name #'k "create-" #'tree-name "!")])
+           #`(begin
+               (define $mk
+                 (lambda (who pdir ow?)
+                   (pcheck ([string? pdir] [boolean? ow?])
+                           (if (file-exists? pdir)
+                               (unless (file-directory? pdir)
+                                 ($err-file-exists who pdir))
+                               (mkdir pdir))
+                           (if ow?
+                               #,(parse-decls #t #'mk  #'pdir #'(decl* ...))
+                               #,(parse-decls #f #'mk! #'pdir #'(decl* ...))))))
 
+               (define-who mk  (lambda (pdir) ($mk who pdir #f)))
+               (define-who mk! (lambda (pdir) ($mk who pdir #t)))))])))
 
   (record-writer (type-descriptor $file-stat)
                  (lambda (r p wr)
