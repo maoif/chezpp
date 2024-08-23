@@ -30,6 +30,8 @@
 
           walk-files file-find file-find-all file-map file-for-each print-file-tree
 
+          file-copymode file-copymeta
+
           define-file-tree)
   (import (chezpp chez)
           (chezpp private os)
@@ -1511,6 +1513,47 @@
        (file-touch-mtime path time #t force?)]
       [(path time follow-link? force?)
        ($file-touch who path #f time follow-link? force?)]))
+
+
+
+;;;; copies and moves
+
+  #|doc
+  Copy the permission bits from `src` to `dest`.
+
+  If `src` or `dest` is a symlink, it is always dereferenced.
+  |#
+  (define-who file-copymode
+    (lambda (src dest)
+      (pcheck ([string? src dest] [file-exists? src dest])
+              (let ([m (get-mode src #t)])
+                (chmod dest m)))))
+
+
+  #|doc
+  Copy the metadata (permission bits, last access time, last modification time) from `src` to `dest`.
+
+  If `follow-link?` is #f and `src` is a symlink, the metadata excluding the permission bits
+  of the symlink per se is copied. Permission bits are copied from the symlink target.
+
+  If `dest` is a symlink, it is always dereferenced.
+  |#
+  (define-who file-copymeta
+    (case-lambda
+      [(src dest) (file-copymeta src dest #t #t)]
+      [(src dest follow-link-src? follow-link-dest?)
+       (pcheck ([string? src dest] [boolean? follow-link-src? follow-link-dest?]
+                [(lambda (x) (file-exists? x follow-link-src?)) src]
+                [(lambda (x) (file-exists? x follow-link-dest?)) dest])
+               (let* ([m (get-mode src #t)]
+                      [st (file-stat src follow-link-src?)]
+                      [atime (file-stat-access-time st)]
+                      [mtime (file-stat-modification-time st)])
+                 ;; TODO xattrs
+                 (when (and (file-exists? dest #t) follow-link-dest?)
+                   ;; if `dest` is a symlink, changing its own mode has no effect
+                   (chmod dest m))
+                 ($file-touch who dest atime mtime follow-link-dest? #f)))]))
 
 
   #|doc
