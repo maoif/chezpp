@@ -633,3 +633,249 @@
      (not (file-exists? "./fstree"))
      (not (file-directory? "./fstree"))
      )
+
+
+(mat file-touch
+
+     (begin (define dir "./touch_test")
+            (define atdir (lambda (x) (path-build dir x)))
+            (when (file-directory? dir) (file-removetree dir))
+
+            (define-file-tree tree
+              (dir "d1"
+                   (file "f1")
+                   (dir "d2"
+                        (symlink "../f1" "ln1")
+                        (symlink "ln1" "ln2"))))
+            (create-tree dir)
+            #t)
+
+     (error? (file-touch 'bla))
+     ;; path not exist
+     (error? (file-touch "a/b/c/d"))
+
+     (let ([at1 (file-access-time (atdir "d1/f1"))]
+           [mt1 (file-modification-time (atdir "d1/f1"))])
+       (file-touch (atdir "d1/f1"))
+       (let ([at2 (file-access-time (atdir "d1/f1"))]
+             [mt2 (file-modification-time (atdir "d1/f1"))])
+         (and (time<? at1 at2) (time<? mt1 mt2))))
+
+     ;; create file
+     (not (file-exists? (atdir "d1/f2")))
+     (begin (file-touch (atdir "d1/f2"))
+            (file-exists? (atdir "d1/f2")))
+
+     ;; path is symlink, follow
+     (let ([time (current-time)])
+       (file-touch (atdir "d1/d2/ln1") time #t #f)
+       (let ([at2 (file-access-time (atdir "d1/f1"))]
+             [mt2 (file-modification-time (atdir "d1/f1"))])
+         (and (time=? time at2) (time=? time mt2))))
+
+     (let ([time (current-time)])
+       (file-touch (atdir "d1/d2/ln2") time #t #f)
+       (let ([at2 (file-access-time (atdir "d1/f1"))]
+             [mt2 (file-modification-time (atdir "d1/f1"))])
+         (and (time=? time at2) (time=? time mt2))))
+
+     ;; path is symlink, not follow
+     (let ([time (current-time)])
+       (file-touch (atdir "d1/d2/ln1") time #f #f)
+       (let ([at2 (file-access-time (atdir "d1/d2/ln1") #f)]
+             [mt2 (file-modification-time (atdir "d1/d2/ln1") #f)])
+         (and (time=? time at2) (time=? time mt2))))
+
+
+     ;; path is dir
+     (let ([time (current-time)])
+       (file-touch (atdir "d1") time)
+       (let ([at2 (file-access-time (atdir "d1"))]
+             [mt2 (file-modification-time (atdir "d1"))])
+         (and (time=? time at2) (time=? time mt2))))
+
+     (file-removetree dir))
+
+
+
+(mat readlink
+
+     (begin (define dir "./readlink_test")
+            (when (file-directory? dir) (file-removetree dir))
+
+            (define-file-tree tree
+              (dir "d1"
+                   (file "f1")
+                   (dir "d2"
+                        (dir "d3"
+                             (symlink "../../f1" "ln1")
+                             (symlink "ln1"      "ln2")
+                             (symlink "ln2"      "ln3")))))
+            (define d1d2d3 (lambda (x) (path-build dir (path-build "d1/d2/d3" x))))
+
+            #t)
+
+     (begin (create-tree dir)
+            (file-directory? dir))
+     (file-symbolic-link? (d1d2d3 "ln1"))
+     (file-symbolic-link? (d1d2d3 "ln2"))
+     (file-symbolic-link? (d1d2d3 "ln3"))
+
+     (error? (readlink 123))
+
+     ;; non-rec
+     (string=? "../../f1" (readlink (d1d2d3 "ln1")))
+     (string=? "ln1" (readlink (d1d2d3 "ln2")))
+     (string=? "ln2" (readlink (d1d2d3 "ln3")))
+
+     ;; rec
+     (same-file? (path-build dir "d1/f1") (readlink2 (d1d2d3 "ln2") #t))
+     (same-file? (path-build dir "d1/f1") (readlink2 (d1d2d3 "ln3") #t))
+
+     (let-values ([(ln pdir) (readlink (d1d2d3 "ln3") #t)])
+       (and (string=? ln "../../f1") (string=? pdir (path-build dir "d1/d2/d3"))))
+
+     (file-removetree dir))
+
+
+(mat file-link
+
+     (begin (define dir "link_test")
+            (define atdir (lambda (x) (path-build dir x)))
+            (when (file-directory? dir) (file-removetree dir))
+
+            (define testsrc1 "test src 1")
+            (define testsrc2 "test src 2")
+            (define lines (map (lambda (x) (random-string)) (iota 10)))
+
+            (define-file-tree fstree
+              (file "README.md" (text "This is a fancy project."))
+              (dir "src"
+                   (file "src1.ss" (mode #o777) (text "somestring"))
+                   (file "src2.ss" (fasl '(a list of symbols)))
+                   (symlink "../tests" "tests")
+                   (dir "native"
+                        (file "runtime.c")
+                        (file "ranstr" (lines lines))))
+              (dir "tests" (mode #o777)
+                   (file "test1.ss" (text testsrc1))
+                   (file "test2.ss" (text testsrc2))
+                   (file "src1" (symlink "../src/src1.ss"))
+                   (symlink "src1" "src1.ln")))
+
+            #t)
+
+     (begin (create-fstree dir) #t)
+
+     ;; src==dest
+
+     ;; src is regular file
+     (= 1 (file-nlinks (atdir "src/src1.ss")))
+     (begin (file-link (atdir "src/src1.ss") (atdir "src/src1.cp"))
+            #t)
+     (file-exists? (atdir "src/src1.cp"))
+     (= 2 (file-nlinks (atdir "src/src1.ss")))
+     (= 2 (file-nlinks (atdir "src/src1.cp")))
+
+     ;; src is symlink
+     (begin (file-link (atdir "tests/src1") (atdir "src1.cp"))
+            #t)
+     (file-exists? (atdir "src1.cp"))
+     (= 3 (file-nlinks (atdir "src/src1.ss")))
+     (= 3 (file-nlinks (atdir "src1.cp")))
+
+     ;; dest is file
+     (error? (file-link (atdir "tests/src1") (atdir "src1.cp")))
+     (not (error? (file-link! (atdir "tests/src1") (atdir "src1.cp"))))
+
+     ;; dest is dir
+     (error? (file-link (atdir "src") (atdir "src1")))
+     (error? (file-link (atdir "tests1") (atdir "tests1")))
+
+     ;; dest is symlink to file
+     (begin (file-link (atdir "tests/src1") (atdir "tests/src2"))
+            (= 4 (file-nlinks (atdir "tests/src2"))))
+     (begin (file-link (atdir "tests/src1.ln") (atdir "tests/src3"))
+            (= 5 (file-nlinks (atdir "tests/src3"))))
+
+     ;; dest is symlink to file (not follow)
+     (begin (file-link (atdir "tests/src1.ln") (atdir "tests/src2.ln") #f)
+            (= 2
+               (file-nlinks (atdir "tests/src1.ln") #f)
+               (file-nlinks (atdir "tests/src2.ln") #f)))
+     (string=? (readlink (atdir "tests/src1.ln"))
+               (readlink (atdir "tests/src2.ln")))
+
+     ;; dest is symlink to dir
+     (error? (file-link (atdir "src/tests") (atdir "tests1")))
+
+     ;; path starting with ~ (test expand_pathname() in libchezpp)
+
+     (file-removetree dir))
+
+
+(mat file-symlink
+
+     (begin (define dir "symlink_test")
+            (define atdir (lambda (x) (path-build dir x)))
+            (when (file-directory? dir) (file-removetree dir))
+
+            (define lines (map (lambda (x) (random-string)) (iota 10)))
+            (define-file-tree fstree
+              (file "README.md" (text "This is a fancy project."))
+              (dir "src"
+                   (file "src1.ss" (mode #o777) (text (random-string 50 100)))
+                   (file "src2.ss" (fasl (random-list 20 40)))
+                   (symlink "../tests" "tests")
+                   (dir "native"
+                        (file "runtime.c")
+                        (file "ranstr" (lines lines))))
+              (dir "tests" (mode #o777)
+                   (file "test1.ss" (text (random-string 50 100)))
+                   (file "test2.ss" (text (random-string 50 100)))
+                   (file "src1" (symlink "../src/src1.ss"))
+                   (symlink "src1" "src1.ln")
+                   (symlink "../src/native" "native")))
+
+            #t)
+
+     (begin (create-fstree dir) #t)
+
+
+     ;; src==dest
+
+     ;; src is regular file
+     (begin (file-symlink "src/src1.ss" (atdir "src1"))
+            (string=? "src/src1.ss" (readlink (atdir "src1"))))
+     (string=? (read-string (atdir "src1")) (read-string (atdir "src/src1.ss")))
+
+     (begin (file-symlink "src1" (atdir "tests/src2"))
+            (and (string=? "src1" (readlink (atdir "tests/src2")))
+                 (string=? (read-string (atdir "tests/src1")) (read-string (atdir "tests/src2")))))
+
+     ;; dest is file
+     (error? (file-symlink "src/src1.ss" (atdir "src1")))
+     (error? (file-symlink "src/src1.ss" (atdir "src/src2.ss")))
+
+     (begin (file-symlink! "src1.ss" (atdir "src/src2.ss"))
+            (string=? (read-string (atdir "src/src1.ss")) (read-string (atdir "src/src2.ss"))))
+
+     ;; dest is dir
+     (begin (file-symlink "tests/test1.ss" dir)
+            (and (file-symbolic-link? (atdir "test1.ss"))
+                 (string=? (read-string (atdir "test1.ss")) (read-string (atdir "tests/test1.ss")))))
+
+     ;; dest is symlink to file
+     (error? (file-symlink "../src/src1.ss" (atdir "tests/test1.ss")))
+     (begin (file-symlink! "../src/src1.ss" (atdir "tests/test1.ss"))
+            (string=? (read-string (atdir "src/src1.ss")) (read-string (atdir "tests/test1.ss"))))
+
+     ;; dest is symlink to dir
+     (begin (file-symlink "../../README.md" (atdir "tests/native"))
+            (and (string=? "../../README.md" (readlink (atdir "tests/native/README.md")))
+                 (string=? (read-string (atdir "README.md")) (read-string (atdir "tests/native/README.md")))))
+
+     ;; path starting with ~
+
+     (file-removetree dir)
+     )
