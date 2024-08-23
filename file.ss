@@ -30,7 +30,7 @@
 
           walk-files file-find file-find-all file-map file-for-each print-file-tree
 
-          file-copymode file-copymeta
+          file-copymode file-copymeta copy-port file-copy file-copy!
 
           define-file-tree)
   (import (chezpp chez)
@@ -1554,6 +1554,98 @@
                    ;; if `dest` is a symlink, changing its own mode has no effect
                    (chmod dest m))
                  ($file-touch who dest atime mtime follow-link-dest? #f)))]))
+
+
+  (define $copy-port
+    (lambda (who pin pout)
+      (pcheck ([input-port? pin] [output-port? pout])
+              (pcheck-open-port (pin pout)
+                                (cond
+                                 [(and (binary-port? pin) (binary-port? pout))
+                                  (let loop ()
+                                    (let ([x (get-u8 pin)])
+                                      (unless (eof-object? x)
+                                        (put-u8 pout x)
+                                        (loop))))
+                                  (flush-output-port pout)]
+                                 [(and (textual-port? pin) (textual-port? pout))
+                                  (let loop ()
+                                    (let ([x (get-char pin)])
+                                      (unless (eof-object? x)
+                                        (put-char pout x)
+                                        (loop))))
+                                  (flush-output-port pout)]
+                                 [else (errorf who "ports do not have the same type")])))))
+
+
+  #|doc
+  Copy data from input port `pin` to output port `pout`.
+  `pin` and `pout` must be either both binary port or both textual port.
+
+  `copy-port` does not automatically close the ports.
+  |#
+  (define-who copy-port
+    (lambda (pin pout)
+      ($copy-port who pin pout)))
+
+
+  (define $file-copy
+    (lambda (who src dest overwrite?)
+      ;; `src` can only be regular or symlink
+      (let ([copy-file ($link/copy-helper who (lambda (src dest)
+                                                (call-with-port (open-file-input-port src)
+                                                  (lambda (pin)
+                                                    (call-with-port (open-file-output-port dest)
+                                                      (lambda (pout)
+                                                        ($copy-port who pin pout))))))
+                                          overwrite?)]
+            [copy-link ($link/copy-helper who file-symlink overwrite?)])
+        (cond
+         [(file-symbolic-link? src)
+          ;; readlink src, and reshape `dest`
+          (let ([ln (readlink src)] [dest (if (file-directory? dest #t)
+                                              (let ([newd (path-build dest (path-last src))])
+                                                (if (file-directory? newd #t)
+                                                    ($err-directory-exists who newd)
+                                                    newd))
+                                              dest)])
+            (copy-link ln dest))]
+         [(file-regular? src #f)
+          (copy-file src dest)]
+         [else (unreachable! who)]))))
+
+
+  #|doc
+  Copy a single regular file from `src` to `dest`.
+
+  `follow-link?`: copy the symlink per se or copy the file it points to (default: #t).
+  |#
+  (define-who file-copy
+    (case-lambda
+      [(src dest) (file-copy src dest #t)]
+      [(src dest follow-link?)
+       (pcheck ([string? src dest] [boolean? follow-link?]
+                [(lambda (x) (file-exists? x follow-link?)) src])
+               (if (file-symbolic-link? src)
+                   (let ([src (if follow-link? (readlink2 src #t) src)])
+                     ($file-copy who src dest #f))
+                   ($file-copy who src dest #f)))]))
+
+
+  #|doc
+  Similar to `file-copy`, but overwrites `dest` if it exists.
+  |#
+  (define-who file-copy!
+    (case-lambda
+      [(src dest) (file-copy! src dest #t)]
+      [(src dest follow-link?)
+       (pcheck ([string? src dest] [boolean? follow-link?]
+                [(lambda (x) (file-exists? x follow-link?)) src])
+               (if (file-symbolic-link? src)
+                   (let ([src (if follow-link? (readlink2 src #t) src)])
+                     ($file-copy who src dest #t))
+                   ($file-copy who src dest #t)))]))
+
 
 
   #|doc
