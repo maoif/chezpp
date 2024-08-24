@@ -33,7 +33,10 @@
           file-copymode file-copymeta copy-port file-copy file-copy!
           file-copytree file-move file-removetree
 
-          define-file-tree)
+          define-file-tree
+
+          make-i/o-file-not-regular-error   i/o-file-not-regular-error?
+          make-i/o-file-not-directory-error i/o-file-not-directory-error?)
   (import (chezpp chez)
           (chezpp private os)
           (chezpp internal)
