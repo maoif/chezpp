@@ -31,6 +31,7 @@
           walk-files file-find file-find-all file-map file-for-each print-file-tree
 
           file-copymode file-copymeta copy-port file-copy file-copy!
+          file-copytree file-move file-removetree
 
           define-file-tree)
   (import (chezpp chez)
@@ -1646,6 +1647,106 @@
                      ($file-copy who src dest #t))
                    ($file-copy who src dest #t)))]))
 
+
+
+  #|doc
+  Copy a directory recursively from `src` to `dest`.
+
+  It is an error if `src` is not a directory.
+  If `src` is a symlink, it is dereferenced automatically.
+
+  `dest` has to exist as a directory or its parent directory has to exist.
+  In the former case, contents in `src` are copied under `dest`;
+  in the latter case, a new directory with the same basename as that of `src`
+  is created under `dest`, then contents in `src` are copied under the new directory.
+  Symlinks are always followed in the process.
+
+  `copy` is a procedure used to copy individual files.
+  It is `file-copy` with `follow-link?` set to #f by default.
+  |#
+  (define-who file-copytree
+    (case-lambda
+      [(src dest)
+       (file-copytree src dest (lambda (src dest) (file-copy src dest #f)))]
+      [(src dest copy)
+       (pcheck ([string? src dest] [file-directory? src] [procedure? copy])
+               (let* ([relativize (lambda (path)
+                                    (let loop ([parts '()] [path path])
+                                      (if (string=? path src)
+                                          (if (null? parts)
+                                              path
+                                              (apply make-path parts))
+                                          (loop (cons (path-last path) parts) (path-parent path)))))]
+                      [do-copytree (lambda (dest)
+                                     (walk-files (lambda (dir dirs files)
+                                                   ;; paths are relative to `src`
+                                                   (for-each (lambda (d)
+                                                               (let ([newd (path-build dest (relativize d))])
+                                                                 (mkdir newd)))
+                                                             dirs)
+                                                   (for-each (lambda (f)
+                                                               (let ([newd (path-build dest (relativize f))])
+                                                                 (copy f newd)))
+                                                             files))
+                                                 src #f #t))])
+                 (if (file-directory? dest #t)
+                     (do-copytree dest)
+                     ;; TODO (path-parent dest) is brittle
+                     (if (file-directory? (path-parent dest) #t)
+                         (begin
+                           ;; TODO handle error?
+                           (mkdir dest)
+                           (do-copytree dest))
+                         (errorf who "destination's parent directory doesn't exist: ~a" (path-parent dest))))))]))
+
+
+  #|doc
+  Move a single file or directory from `src` to `dest`.
+
+  `copy` is the procedure used to copy individual files.
+  It is `file-copy` with `follow-link?` set to #f by default.
+  |#
+  (define-who file-move
+    (case-lambda
+      [(src dest)
+       (file-move src dest (lambda (src dest) (file-copy src dest #f)))]
+      [(src dest copy)
+       (pcheck ([string? src dest] [file-exists? src] [procedure? copy])
+               (if (file-directory? src)
+                   (begin (file-copytree src dest copy)
+                          (file-removetree src))
+                   (begin (copy src dest)
+                          (delete-file src))))]))
+
+
+  #|doc
+  Remove a directory, recursively.
+  It is an error if `path` is not a directory.
+
+  If `error?`, an error condition is raised when the procedure fails to remove
+  a file or directory.
+  Otherwise, no error condition is raised and the procedure tries to remove
+  as many files and directories as possible.
+
+  Use `delete-file` or `delete-directory` to remove a single file or directory.
+  |#
+  (define-who file-removetree
+    (case-lambda
+      [(path) (file-removetree path #f)]
+      [(path err?)
+       (pcheck ([file-exists? path] [file-directory? path])
+               (if (file-exists? path)
+                   (if (file-directory? path)
+                       (guard (e [(error? e) (if err? (raise e) #f)])
+                         (walk-files (lambda (dir dirs files)
+                                       (for-each (lambda (x) (delete-file x err?)) files)
+                                       ;; normally, directories in `dirs` are guaranteed to be empty
+                                       (for-each (lambda (x) (delete-directory x err?)) dirs))
+                                     path #f #f)
+                         (delete-directory path err?)
+                         #t)
+                       (when err? ($err-file-not-directory who path)))
+                   (when err? ($err-file-not-found who path))))]))
 
 
   #|doc
