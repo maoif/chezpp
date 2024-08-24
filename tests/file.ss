@@ -879,3 +879,319 @@
 
      (file-removetree dir)
      )
+
+
+(mat file-copy
+
+     (begin (define dir "copy_test")
+            (define atdir (lambda (x) (path-build dir x)))
+            (when (file-directory? dir) (file-removetree dir))
+
+            (define lines (map (lambda (x) (random-string)) (iota 10)))
+            (define-file-tree fstree
+              (file "README.md" (text "This is a fancy project."))
+              (dir "src"
+                   (file "src1.ss" (mode #o777) (text (random-string 50 100)))
+                   (file "src2.ss" (fasl (random-list 20 40)))
+                   (symlink "../tests" "tests")
+                   (dir "native"
+                        (file "runtime.c")
+                        (file "ranstr" (lines lines))))
+              (dir "tests" (mode #o777)
+                   (file "big" (fasl (random-list 99999 999999)))
+                   (file "test1.ss" (text (random-string 50 100)))
+                   (file "test2.ss" (text (random-string 50 100)))
+                   (file "src1" (symlink "../src/src1.ss"))
+                   (symlink "src1" "src1.ln")
+                   (symlink "../src/native" "native")))
+
+            #t)
+
+     (begin (create-fstree dir) #t)
+
+     ;; src==dest
+
+     ;; src is regular file
+     (begin (file-copy (atdir "README.md") (atdir "src/md"))
+            (and (file-exists? (atdir "src/md"))
+                 (string=? (read-string (atdir "README.md")) (read-string (atdir "src/md")))))
+     (begin (file-copy (atdir "src/src2.ss") (atdir "tests/src2.ss"))
+            (and (file-exists? (atdir "tests/src2.ss"))
+                 (equal? (read-datum-fasl (atdir "src/src2.ss")) (read-datum-fasl (atdir "tests/src2.ss")))))
+
+     ;; src is special file
+     (error? (file-copy "/dev/tty" (atdir "tty")))
+
+     ;; src is symlink to file
+     (begin (file-copy (atdir "tests/src1") (atdir "src1"))
+            (string=? (read-string (atdir "src1")) (read-string (atdir "tests/src1"))))
+     (begin (file-copy (atdir "tests/src1.ln") (atdir "src11"))
+            (string=? (read-string (atdir "src11")) (read-string (atdir "tests/src1.ln"))))
+
+     ;; src is symlink to file, no follow
+     (begin (file-copy (atdir "tests/src1") (atdir "src1.ln") #f)
+            (and (file-symbolic-link? (atdir "src1.ln"))
+                 (string=? "../src/src1.ss" (readlink (atdir "src1.ln")))))
+
+     ;; dest is file
+     (error? (file-copy (atdir "README.md") (atdir "tests/test2.ss")))
+     (error? (file-copy (atdir "tests/test2.ss") (atdir "README.md")))
+
+     (not (error? (file-copy! (atdir "README.md") (atdir "tests/test2.ss"))))
+     (string=? (read-string (atdir "README.md")) (read-string (atdir "tests/test2.ss")))
+
+
+     ;; dest is dir
+     (begin (file-copy (atdir "README.md") (atdir "src/native"))
+            (file-exists? (atdir "src/native/README.md")))
+     (string=? (read-string (atdir "README.md")) (read-string (atdir "src/native/README.md")))
+
+     ;; dest is symlink to file
+     (error? (file-copy (atdir "README.md") (atdir "tests/src1")))
+     (begin (file-copy! (atdir "README.md") (atdir "tests/src1"))
+            (file-regular? (atdir "tests/src1")))
+     (string=? (read-string (atdir "README.md")) (read-string (atdir "tests/src1")))
+
+     ;; dest is symlink to dir
+     (begin (file-copy (atdir "README.md") (atdir "src/tests"))
+            (and (file-exists? (atdir "src/tests/README.md"))
+                 (file-exists? (atdir "tests/README.md"))))
+     (string=? (read-string (atdir "README.md")) (read-string (atdir "tests/README.md")))
+
+     ;; big file
+     (begin (file-copy (atdir "tests/big") (atdir "src"))
+            (file-regular? (atdir "src/big")))
+     (equal? (read-datum-fasl (atdir "src/big")) (read-datum-fasl (atdir "tests/big")))
+
+     ;; path starting with ~
+
+     (file-removetree dir)
+     )
+
+
+(mat file-copymode
+
+     (begin (define dir "copymode_test")
+            (define atdir (lambda (x) (path-build dir x)))
+            (when (file-directory? dir) (file-removetree dir))
+
+            (define-file-tree fstree
+              (file "README.md" (text "This is a fancy project."))
+              (dir "src"
+                   (file "src1.ss" (mode #o777) (text (random-string 50 100)))
+                   (file "src2.ss" (mode '(r w x) '(w x) '(r x)) (fasl (random-list 20 40)))
+                   (symlink "../tests" "tests")
+                   (dir "native"
+                        (file "runtime.c")))
+              (dir "tests" (mode #o777)
+                   (file "test1.ss" (text (random-string 50 100)))
+                   (file "test2.ss" (text (random-string 50 100)))
+                   (file "src1" (symlink "../src/src1.ss"))
+                   (symlink "src1" "src1.ln")
+                   (symlink "../src/native" "native")))
+
+            #t)
+
+     (not (file-directory? dir))
+     (begin (create-fstree dir) #t)
+
+     (= #o777 (get-mode (atdir "src/src1.ss")))
+     (begin (file-copymode (atdir "src/src2.ss") (atdir "src/src1.ss"))
+            (= (symbols->file-mode '() '(r w x) '(w x) '(r x)) (get-mode (atdir "src/src1.ss"))))
+
+     (= #o777 (get-mode (atdir "tests")))
+     (begin (file-copymode (atdir "src") (atdir "tests"))
+            (= (get-mode (atdir "src")) (get-mode (atdir "tests"))))
+
+     (not (= #o777 (get-mode (atdir "tests/native") #t)))
+     (begin (file-copymode (atdir "src/src2.ss") (atdir "tests/native"))
+            (= (get-mode (atdir "src/src2.ss")) (get-mode (atdir "src/native"))))
+
+     (file-removetree dir))
+
+
+(mat file-copymeta
+
+     (begin (define dir "copymeta_test")
+            (define atdir (lambda (x) (path-build dir x)))
+            (when (file-directory? dir) (file-removetree dir))
+
+            (define-file-tree fstree
+              (file "README.md" (text "This is a fancy project."))
+              (dir "src"
+                   (file "src1.ss" (mode #o777) (text (random-string 50 100)))
+                   (file "src2.ss" (mode '(r w x) '(w x) '(r x)) (fasl (random-list 20 40)))
+                   (symlink "../tests" "tests")
+                   (dir "native"
+                        (file "runtime.c")))
+              (dir "tests" (mode #o777)
+                   (file "test1.ss" (text (random-string 50 100)))
+                   (file "test2.ss" (text (random-string 50 100)))
+                   (file "src1" (symlink "../src/src1.ss"))
+                   (symlink "src1" "src1.ln")
+                   (symlink "../src/native" "native")))
+
+            #t)
+
+     (not (file-directory? dir))
+     (begin (create-fstree dir) #t)
+
+     ;; times of files above may all be the same...
+     (let* ([5s (make-time 'time-utc 0 5)]
+            [newt (time-difference (file-access-time (atdir "src/src1.ss")) 5s)])
+       (set-time-type! newt 'time-utc)
+       (file-touch-atime (atdir "tests/test1.ss") newt)
+       (file-touch-mtime (atdir "tests/test1.ss") newt)
+       #t)
+
+     ;; compare atime, mtime and mode
+     (let ([mode1  (get-mode (atdir "src/src1.ss"))]
+           [atime1 (file-access-time (atdir "src/src1.ss"))]
+           [mtime1 (file-modification-time (atdir "src/src1.ss"))]
+           [mode2  (get-mode (atdir "tests/test1.ss"))]
+           [atime2 (file-access-time (atdir "tests/test1.ss"))]
+           [mtime2 (file-modification-time (atdir "tests/test1.ss"))])
+       (and (not (= mode1 mode2))
+            (not (time=? atime1 atime2))
+            (not (time=? mtime1 mtime2))))
+     (begin (file-copymeta (atdir "src/src1.ss") (atdir "tests/test1.ss"))
+            (let ([mode1  (get-mode (atdir "src/src1.ss"))]
+                  [atime1 (file-access-time (atdir "src/src1.ss"))]
+                  [mtime1 (file-modification-time (atdir "src/src1.ss"))]
+                  [mode2  (get-mode (atdir "tests/test1.ss"))]
+                  [atime2 (file-access-time (atdir "tests/test1.ss"))]
+                  [mtime2 (file-modification-time (atdir "tests/test1.ss"))])
+              (and (= mode1 mode2)
+                   (time=? atime1 atime2)
+                   (time=? mtime1 mtime2))))
+
+     ;; TODO src/dest are symlinks
+
+     (file-removetree dir)
+     )
+
+
+(mat file-copytree
+
+     (begin (define dir "copy_test")
+            (define dir1 "./copy_test1")
+
+            (define atdir  (lambda (x) (path-build dir  x)))
+            (define atdir1 (lambda (x) (path-build dir1 x)))
+
+            (when (file-directory? dir) (file-removetree dir))
+            (when (file-directory? dir1) (file-removetree dir1))
+
+            (define lines (map (lambda (x) (random-string)) (iota 10)))
+            (define-file-tree fstree
+              (file "README.md" (text "This is a fancy project."))
+              (dir "src"
+                   (file "src1.ss" (mode #o777) (text (random-string 50 100)))
+                   (file "src2.ss" (fasl (random-list 20 40)))
+                   (symlink "../tests" "tests")
+                   (dir "native"
+                        (file "runtime.c")
+                        (file "ranstr" (lines lines))))
+              (dir "tests" (mode #o777)
+                   (file "big" (fasl (random-list 99999 999999)))
+                   (file "test1.ss" (text (random-string 50 100)))
+                   (file "test2.ss" (text (random-string 50 100)))
+                   (file "src1" (symlink "../src/src1.ss"))
+                   (symlink "src1" "src1.ln")
+                   (symlink "../src/native" "native")))
+
+            #t)
+
+     (begin (create-fstree dir) #t)
+
+     (begin (file-copytree dir dir1)
+            #t)
+
+     (same-file-contents? (atdir "README.md") (atdir1 "README.md"))
+     (same-file-contents? (atdir "README.md") (atdir1 "README.md"))
+     (same-file-contents? (atdir "src/src1.ss") (atdir1 "src/src1.ss"))
+     (same-file-contents? (atdir "src/src2.ss") (atdir1 "src/src2.ss"))
+     (same-file-contents? (atdir "src/native/ranstr") (atdir1 "src/native/ranstr"))
+     (same-file-contents? (atdir "tests/big") (atdir1 "tests/big"))
+     (same-file-contents? (atdir "tests/test1.ss") (atdir1 "tests/test1.ss"))
+     (same-file-contents? (atdir "tests/test2.ss") (atdir1 "tests/test2.ss"))
+     (same-file-contents? (atdir "tests/src1") (atdir1 "tests/src1"))
+     (same-file-contents? (atdir "tests/src1.ln") (atdir1 "tests/src1.ln"))
+     (same-file-contents? (atdir "tests/native/runtime.c") (atdir1 "tests/native/runtime.c"))
+
+     (file-symbolic-link? (atdir1 "src/tests"))
+     (file-symbolic-link? (atdir1 "tests/src1.ln"))
+     (file-symbolic-link? (atdir1 "tests/native"))
+     (string=? "../src/native" (readlink (atdir1 "tests/native")))
+
+     ;; TODO another copy function, dest exists
+
+     (file-removetree dir)
+     (file-removetree dir1))
+
+
+(mat file-move
+
+     (begin (define dir "move_test")
+            (define dir1 "./move_test1")
+
+            (define atdir  (lambda (x) (path-build dir  x)))
+            (define atdir1 (lambda (x) (path-build dir1 x)))
+
+            (when (file-directory? dir) (file-removetree dir))
+            (when (file-directory? dir1) (file-removetree dir1))
+
+            (define big (random-list 99999 999999))
+            (define lines (map (lambda (x) (random-string)) (iota 10)))
+            (define str (random-string 50 100))
+            (define-file-tree fstree
+              (file "README.md" (text "This is a fancy project."))
+              (dir "src"
+                   (file "src1.ss" (mode #o777) (text (random-string 50 100)))
+                   (file "src2.ss" (text str))
+                   (symlink "../tests" "tests")
+                   (dir "native"
+                        (file "runtime.c")
+                        (file "ranstr" (lines lines))))
+              (dir "tests" (mode #o777)
+                   (file "big" (fasl big))
+                   (file "test1.ss" (text (random-string 50 100)))
+                   (file "test2.ss" (text "str"))
+                   (file "src1" (symlink "../src/src1.ss"))
+                   (symlink "src1" "src1.ln")
+                   (symlink "../src/native" "native")))
+
+            #t)
+
+     (begin (create-fstree dir) #t)
+
+     ;; move files
+     (begin (file-move (atdir "README.md") (atdir "src"))
+            (string=? "This is a fancy project." (read-string (atdir "src/README.md"))))
+     (not (file-exists? (atdir "README.md")))
+
+     (begin (file-move (atdir "tests/big") (atdir "src/big1"))
+            (equal? big (read-datum-fasl (atdir "src/big1"))))
+     (not (file-exists? (atdir "tests/big")))
+
+     (error? (file-move (atdir "src/src2.ss") (atdir "tests/test2.ss")))
+     ;; overwrite
+     (not (error? (file-move (atdir "src/src2.ss") (atdir "tests/test2.ss") file-copy!)))
+     (file-exists? (atdir "tests/test2.ss"))
+     (not (file-exists? (atdir "src/src2.ss")))
+     (equal? str (read-string (atdir "tests/test2.ss")))
+
+     ;; move tree
+     (begin (file-move dir dir1)
+            (not (file-directory? dir)))
+     (file-directory? (atdir1 "src"))
+     (file-directory? (atdir1 "tests"))
+     (file-directory? (atdir1 "src/native"))
+
+     (file-exists? (atdir1 "tests/test2.ss"))
+     (equal? str (read-string (atdir1 "tests/test2.ss")))
+     (equal? big (read-datum-fasl (atdir1 "src/big1")))
+
+
+     (file-removetree dir1)
+     )
