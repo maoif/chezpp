@@ -33,7 +33,7 @@
           file-copymode file-copymeta copy-port file-copy file-copy!
           file-copytree file-move file-removetree
 
-          define-file-tree
+          mkdirs define-file-tree
 
           make-i/o-file-not-regular-error   i/o-file-not-regular-error?
           make-i/o-file-not-directory-error i/o-file-not-directory-error?)
@@ -1750,6 +1750,28 @@
                          #t)
                        (when err? ($err-file-not-directory who path)))
                    (when err? ($err-file-not-found who path))))]))
+
+
+  #|doc
+  Create directory; also create all intermediate directories as needed.
+  |#
+  (define-who mkdirs
+    (case-lambda
+      [(path) (mkdirs path #o777)]
+      [(path mode)
+       (pcheck-string (path)
+                      (if (file-exists? path)
+                          (unless (file-directory? path)
+                            ($err-file-exists who path))
+                          (let ([path (string-append path (string (directory-separator)))])
+                            (let loop ([first (path-first path)] [rest (path-rest path)])
+                              (if (file-exists? first)
+                                  (unless (file-directory? first)
+                                    ($err-file-not-directory who first))
+                                  (mkdir first mode))
+                              (unless (string=? "" rest)
+                                (loop (path-build first (path-first rest)) (path-rest rest)))))))]))
+
 
 
   #|doc
