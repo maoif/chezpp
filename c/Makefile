@@ -9,7 +9,7 @@ DEBUG_CFLAGS = -fPIC -Wall -Wextra -g
 DEBUG_LDFLAGS = -shared
 
 # Source files
-SRCS = common.c file.c
+SRCS = common.c file.c os.c
 
 # Object files
 OBJS = $(SRCS:.c=.o)
