@@ -1,7 +1,9 @@
 (library (chezpp os)
   (export sleep milisleep nanosleep
 
-          unix? windows? darwin?)
+          unix? windows? darwin?
+
+          os-error?)
   (import (chezpp chez)
           (chezpp private os)
           (chezpp internal)
