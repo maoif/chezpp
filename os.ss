@@ -4,6 +4,8 @@
           unix? windows? darwin?
 
           getuser getgroup user-exists? group-exists?
+          unix-user-name unix-user-passwd unix-user-uid unix-user-gid unix-user-gecos unix-user-dir unix-user-shell
+          unix-group-name unix-group-passwd unix-group-gid unix-group-mems
           uid->user user->uid gid->group group->gid
           get-user-dir get-user-shell get-user-group
           getuid getgid geteuid getegid
