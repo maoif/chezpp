@@ -21,12 +21,14 @@ ptr chezpp_symlink(const char *src, const char *dest);
 ptr chezpp_touch(const char *path, ptr atime, ptr mtime, int follow_link);
 
 
+
 ptr chezpp_statx(const char *path, int follow_link) {
   char *p = expand_pathname(path);
 
   struct statx res;
   int op = follow_link ? 0 : AT_SYMLINK_NOFOLLOW;
   if (statx(AT_FDCWD, p, op, STATX_BASIC_STATS | STATX_BTIME, &res) == -1) {
+    free(p);
     return errno_str();
   }
 
@@ -89,6 +91,7 @@ ptr chezpp_readlink(const char *path) {
   char link[PATH_MAX];
   memset(link, 0, sizeof(link));
   if (readlink(p, link, sizeof(link)) == -1) {
+    free(p);
     return errno_str_vector();
   }
 
@@ -102,6 +105,8 @@ ptr chezpp_link(const char *src, const char *dest) {
   char *s = expand_pathname(src);
   char *d = expand_pathname(dest);
   if (link(s, d) == -1) {
+    free(s);
+    free(d);
     return errno_str();
   }
 
@@ -115,6 +120,8 @@ ptr chezpp_symlink(const char *src, const char *dest) {
   char *s = expand_pathname(src);
   char *d = expand_pathname(dest);
   if (symlink(s, d) == -1) {
+    free(s);
+    free(d);
     return errno_str();
   }
 
@@ -144,6 +151,7 @@ ptr chezpp_touch(const char *path, ptr atime, ptr mtime, int follow_link) {
   }
 
   if (utimensat(AT_FDCWD, p, ts, follow_link ? 0 : AT_SYMLINK_NOFOLLOW)) {
+    free(p);
     return errno_str();
   }
 
