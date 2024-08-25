@@ -8,6 +8,9 @@
           get-user-dir get-user-shell get-user-group
           getuid getgid geteuid getegid
 
+          fork vfork
+          getpid gettid getppid
+
           os-error?)
   (import (chezpp chez)
           (chezpp private os)
@@ -201,5 +204,43 @@
   ;; Return the effective group ID of the calling process.
   (define getegid (foreign-procedure "chezpp_getegid" () int))
 
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   processes
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+  (define-who fork
+    (let ([ffi (foreign-procedure "chezpp_fork" () ptr)])
+      (lambda ()
+        (let ([x (ffi)])
+          (if (string? x)
+              ($err-os who x)
+              x)))))
+  (define-who vfork
+    (let ([ffi (foreign-procedure "chezpp_vfork" () ptr)])
+      (lambda ()
+        (let ([x (ffi)])
+          (if (string? x)
+              ($err-os who x)
+              x)))))
+
+  #|doc
+  Get the process identifier.
+  |#
+  (define getpid get-process-id)
+
+  #|doc
+  Get the thread identifier.
+  |#
+  (define gettid get-thread-id)
+
+  #|doc
+  Get parent process identifier.
+  |#
+  (define getppid (foreign-procedure "chezpp_getppid" () int))
 
   )

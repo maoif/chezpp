@@ -17,6 +17,10 @@ int chezpp_getgid();
 int chezpp_geteuid();
 int chezpp_getegid();
 
+ptr chezpp_fork();
+ptr chezpp_vfork();
+int chezpp_getppid();
+
 
 //=======================================================================
 //
@@ -107,3 +111,31 @@ int chezpp_geteuid() { return geteuid(); }
 
 int chezpp_getegid() { return geteuid(); }
 
+
+
+
+//=======================================================================
+//
+// processes
+//
+//=======================================================================
+
+int chezpp_getppid() { return getppid(); }
+
+ptr chezpp_fork() {
+  int res = fork();
+  if (res == -1) {
+    return errno_str();
+  }
+
+  return Sfixnum(res);
+}
+
+ptr chezpp_vfork() {
+  int res = vfork();
+  if (res == -1) {
+    return errno_str();
+  }
+
+  return Sfixnum(res);
+}
