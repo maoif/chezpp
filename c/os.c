@@ -20,6 +20,7 @@ int chezpp_getegid();
 ptr chezpp_fork();
 ptr chezpp_vfork();
 int chezpp_getppid();
+ptr chezpp_shared_object_list();
 
 
 //=======================================================================
@@ -138,4 +139,19 @@ ptr chezpp_vfork() {
   }
 
   return Sfixnum(res);
+}
+
+static int shared_object_list_callback(struct dl_phdr_info *info, size_t size, void *data) {
+  ptr *objs_addr = (ptr *)data;
+  ptr objects = *objs_addr;
+  *objs_addr = Scons(Sstring(info->dlpi_name), objects);
+
+  return 0;
+}
+
+ptr chezpp_shared_object_list() {
+  ptr objs = Snil;
+  dl_iterate_phdr(shared_object_list_callback, &objs);
+  
+  return objs;
 }

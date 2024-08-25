@@ -10,6 +10,7 @@
 
           fork vfork
           getpid gettid getppid
+          shared-object-list
 
           os-error?)
   (import (chezpp chez)
@@ -242,5 +243,18 @@
   Get parent process identifier.
   |#
   (define getppid (foreign-procedure "chezpp_getppid" () int))
+
+
+  #|doc
+  Return the list of all shared objects currently loaded,
+  in the order in which they were loaded.
+  |#
+  (define-who shared-object-list
+    (let ([ffi (foreign-procedure "chezpp_shared_object_list" () ptr)])
+      (lambda ()
+        (let* ([x (ffi)] [rx (reverse x)]
+               ;; skip the process image
+               [res (if (string=? "" (car rx)) (cdr rx) rx)])
+          res))))
 
   )
