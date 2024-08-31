@@ -1,5 +1,5 @@
 (library (chezpp internal)
-  (export todo $construct-name)
+  (export todo $construct-name flag->mask)
   (import (chezscheme))
 
 
@@ -20,6 +20,20 @@
                           x
                           (symbol->string (syntax->datum x))))
                     args))))))
+
+  ;; for utils: define-flags
+  (define flag->mask
+    (lambda (m e)
+      (cond
+       [(fixnum? m) m]
+       [(and (symbol? m) (assq m e)) => cdr]
+       [(and (list? m) (eq? (car m) 'or))
+        (let f ((ls (cdr m)))
+          (if (null? ls)
+              0
+              (fxlogor (flag->mask (car ls) e) (f (cdr ls)))))]
+       ;; TODO better error report
+       [else (errorf 'flag->mask "invalid mask ~s" m)])))
 
 
   )

@@ -11,11 +11,13 @@
           cons! cdr!
           natural?
           neq? neqv? nequal?
-          id bool
+          id bool octal hex bin
           define-who trace-define-who
 
           random-char random-string random-symbol random-datum random-list random-box
-          random-bytevector random-u8vec)
+          random-bytevector random-u8vec
+
+          define-flags flag-any-set? flag-all-set? flag-set flag-reset)
   (import (chezscheme)
           (chezpp internal))
 
@@ -224,6 +226,20 @@
     (lambda (x) (if x #t #f)))
 
 
+  (define octal
+    (case-lambda
+      [(n) (octal n #t)]
+      [(n readable?) (string-append (if readable? "#o" "0o") (number->string n 8))]))
+  (define hex
+    (case-lambda
+      [(n) (hex n #t)]
+      [(n readable?) (string-append (if readable? "#x" "0x") (number->string n 16))]))
+  (define bin
+    (case-lambda
+      [(n) (bin n #t)]
+      [(n readable?) (string-append (if readable? "#b" "0b") (number->string n 2))]))
+
+
   ;; same in list.ss, to avoid cyclic dependency
   (define make-list-builder
     (lambda args
@@ -420,5 +436,66 @@
   (define-who random-u8vec (lambda args (apply $random-bytevector who args)))
 
   ;; TODO move random-vector here
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   bit mask/flags
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  ;; taken from ChezScheme cmacros.ss
+  (define-syntax define-flags
+    (lambda (exp)
+      (define mask-environment
+        (lambda (flags masks)
+          (let f ([flags flags] [masks masks] [e '()])
+            (if (null? flags)
+                e
+                (let ([mask (flag->mask (car masks) e)])
+                  (f (cdr flags) (cdr masks)
+                     (cons `(,(car flags) . ,mask) e)))))))
+      (syntax-case exp ()
+        [(_k name (flag mask) ...)
+         (with-syntax ([env (datum->syntax #'_k
+                                           (mask-environment
+                                            (datum (flag ...))
+                                            (datum (mask ...))))]
+                       [->symbols ($construct-name #'_k #'name "->symbols")])
+           #'(begin
+               (define-syntax name
+                 (lambda (x)
+                   (syntax-case x ()
+                     ((_k flags (... ...))
+                      (datum->syntax #'_k
+                                     (flag->mask `(or ,@(datum (flags (... ...)))) 'env))))))
+               (define ->symbols
+                 (lambda (flags)
+                   (let loop ([e 'env] [res '()])
+                     (if (null? e)
+                         res
+                         (if (flag-any-set? (cdar e) flags)
+                             (loop (cdr e) (cons (caar e) res))
+                             (loop (cdr e) res))))))))])))
+
+  (define-syntax flag-any-set?
+    (syntax-rules ()
+      ((_ mask x)
+       (not (fx= (fxlogand mask x) 0)))))
+
+  (define-syntax flag-all-set?
+    (syntax-rules ()
+      ((_ mask x)
+       (let ((m mask)) (fx= (fxlogand m x) m)))))
+
+  (define-syntax flag-set
+    (syntax-rules ()
+      ((_ mask x)
+       (fxlogor mask x))))
+
+  (define-syntax flag-reset
+    (syntax-rules ()
+      ((_ mask x)
+       (fxlogand (fxlognot mask) x))))
 
   )
