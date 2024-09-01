@@ -1195,3 +1195,46 @@
 
      (file-removetree dir1)
      )
+
+
+(mat fswatcher
+
+     ;; file
+     (begin (define f1 ($random-file))
+            (define fsw1 (make-fswatcher))
+            (define t1)
+            (define RW
+              (lambda ()
+                (let loop ([n 10])
+                  (if (fx> n 0)
+                      (begin (write-datum>> f1 #\A)
+                             (milisleep 50)
+                             (loop (sub1 n)))
+                      (delete-file f1)))))
+            (set! t1 (fork-thread RW))
+            ;; make sure the file is created
+            (milisleep 20)
+            (fswatcher-add! fsw1 f1)
+            (define Next!
+              (lambda ()
+                (let loop ([n 20])
+                  (when (fx> n 0)
+                    (let ([res (fswatcher-next! fsw1)])
+                      (let ([mask (vector-ref res 1)])
+                        (if (flag-any-set? (fswatcher-mask FSW_delete_self) mask)
+                            #t
+                            (and (string=? f1 (vector-ref res 0)) (loop (sub1 n))))))))))
+            #t)
+     (Next!)
+     (begin (thread-join t1)
+            (close-fswatcher fsw1)
+            #t)
+
+
+
+     ;; files
+
+
+
+     ;; dir
+     )

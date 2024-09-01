@@ -35,6 +35,9 @@
 
           mkdirs define-file-tree
 
+          fswatcher-mask fswatcher-mask->symbols fswatcher-error?
+          make-fswatcher close-fswatcher fswatcher-add! fswatcher-remove! fswatcher-next!
+
           make-i/o-file-not-regular-error   i/o-file-not-regular-error?
           make-i/o-file-not-directory-error i/o-file-not-directory-error?)
   (import (chezpp chez)
@@ -1973,6 +1976,194 @@
 
                (define-who mk  (lambda (pdir) ($mk who pdir #f)))
                (define-who mk! (lambda (pdir) ($mk who pdir #t)))))])))
+
+
+
+
+;;;; filesystem watcher
+
+  (define-condition-type &fswatcher-error &i/o-filename make-fswatcher-error fswatcher-error?)
+
+  (define $err-fswatcher-error
+    (lambda (who x)
+      (raise (condition (make-who-condition who) (make-fswatcher-error x) (make-message-condition x)))))
+
+  (define $fsw-init
+    (let ([ffi (foreign-procedure "chezpp_fswatcher_init" (boolean) ptr)])
+      (lambda (who block?)
+        (let ([x (ffi block?)])
+          (if (string? x)
+              ($err-fswatcher-error who x)
+              x)))))
+  (define $fsw-close
+    (let ([ffi (foreign-procedure "chezpp_fswatcher_close" (int) ptr)])
+      (lambda (who fswid)
+        (let ([x (ffi fswid)])
+          (if (string? x)
+              ($err-fswatcher-error who x)
+              x)))))
+  (define $fsw-add!
+    (let ([ffi (foreign-procedure "chezpp_fswatcher_add" (int string int) ptr)])
+      (lambda (who fswid path events)
+        (let ([x (ffi fswid path events)])
+          (if (string? x)
+              ($err-fswatcher-error who x)
+              x)))))
+  (define $fsw-remove!
+    (let ([ffi (foreign-procedure "chezpp_fswatcher_remove" (int int) ptr)])
+      (lambda (who fswid fid)
+        (let ([x (ffi fswid fid)])
+          (if (string? x)
+              ($err-fswatcher-error who x)
+              x)))))
+  (define $fsw-next!
+    (let ([ffi (foreign-procedure "chezpp_fswatcher_next" (int) ptr)])
+      (lambda (who fswid)
+        (let ([x (ffi fswid)])
+          (if (string? x)
+              ($err-fswatcher-error who x)
+              x)))))
+
+
+  #|doc
+  Filesystem events bitmask that can be given to `fswatcher-add!` or returned by `fswatcher-next!`.
+  Use expressions like `(fswatcher-mask FSW_access FSW_modify)` to make the right bitmask.
+  |#
+  (define-flags fswatcher-mask
+    (FSW_access        #x00000001)
+    (FSW_modify        #x00000002)
+    (FSW_attrib        #x00000004)
+    (FSW_close_write   #x00000008)
+    (FSW_close_nowrite #x00000010)
+    (FSW_open          #x00000020)
+    (FSW_moved_from    #x00000040)
+    (FSW_moved_to      #x00000080)
+    (FSW_create        #x00000100)
+    (FSW_delete        #x00000200)
+    (FSW_delete_self   #x00000400)
+    (FSW_move_self     #x00000800)
+    (FSW_unmount       #x00002000)
+    (FSW_overflow      #x00004000)
+    (FSW_ignored       #x00008000)
+    (FSW_onlydir       #x01000000)
+    (FSW_dont_follow   #x02000000)
+    (FSW_excl_unlink   #x04000000)
+    (FSW_mask_create   #x10000000)
+    (FSW_mask_add      #x20000000)
+    (FSW_isdir         #x40000000)
+    (FSW_oneshot       #x80000000)
+    (FSW_close         (or FSW_close_write FSW_close_nowrite))
+    (FSW_move          (or FSW_moved_from  FSW_moved_to))
+    (FSW_all           (or FSW_access FSW_modify FSW_attrib FSW_close FSW_open FSW_move FSW_create FSW_delete FSW_delete_self FSW_move_self)))
+
+  ;; TODO record-writer?
+  (define-record-type $fswatcher
+    (nongenerative) (sealed #t) (opaque #t)
+    ;; paths: a hashtable
+    (fields (mutable open?) (immutable id) (immutable paths)))
+
+
+  #|doc
+  Create a new filesystem watcher object.
+  If `block?` is #f and if there's current no events available,
+  `fswatcher-next!` returns #f immediately.
+  |#
+  (define-who make-fswatcher
+    (case-lambda
+      [() (make-fswatcher #t)]
+      [(block?)
+       (pcheck ([boolean? block?])
+               (let ([id ($fsw-init who block?)])
+                 (make-$fswatcher #t id (make-eqv-hashtable))))]))
+
+
+  #|doc
+  Close the given fswatcher object.
+  |#
+  (define-who close-fswatcher
+    (lambda (fsw)
+      (pcheck ([$fswatcher? fsw] [$fswatcher-open? fsw])
+              ($fsw-close who ($fswatcher-id fsw))
+              ($fswatcher-open?-set! fsw #f))))
+
+
+  #|doc
+  Add a new path to the watch list of the fswatcher object.
+  If `path` is a directory, it is not watched recursively.
+  If multiple paths that point to the same file are given, only the first path is recorded and
+  will be returned by `fswatcher-next!` when events are triggered by the file.
+
+  The default set of events for a file is:
+  (fswatcher-mask FSW_access FSW_open FSW_modify FSW_close FSW_delete_self)
+
+  The default set of events for a directory is:
+  (fswatcher-mask FSW_access FSW_open FSW_modify FSW_close FSW_create FSW_delete FSW_delete_self FSW_excl_unlink)
+  |#
+  (define-who fswatcher-add!
+    (case-lambda
+      [(fsw path)
+       (pcheck ([$fswatcher? fsw] [$fswatcher-open? fsw] [string? path])
+               (cond [(file-directory? path)
+                      (fswatcher-add! fsw path
+                                      (fswatcher-mask FSW_access FSW_open FSW_modify FSW_close FSW_create FSW_delete FSW_delete_self FSW_excl_unlink))]
+                     [(file-exists? path)
+                      (fswatcher-add! fsw path
+                                      (fswatcher-mask FSW_access FSW_open FSW_modify FSW_close FSW_delete_self))]
+                     [else ($err-file-not-found who path)]))]
+      [(fsw path events)
+       (pcheck ([$fswatcher? fsw] [$fswatcher-open? fsw]
+                [string? path] [file-exists? path] [natural? events])
+               (let* ([fid ($fsw-add! who ($fswatcher-id fsw) path events)]
+                      [ht ($fswatcher-paths fsw)])
+                 (unless (hashtable-contains? ht fid)
+                   (hashtable-set! ht fid path))))]))
+
+
+  #|doc
+  Return the next available filesystem event of the fswatcher object.
+  The return value is a vector consisting of three values:
+  1. the path of the file/dir that triggered the event,
+  2. the bitmask describing the event,
+  3. the name of the file, if any.
+
+  TODO timeout for non-blocking case
+  |#
+  (define-who fswatcher-next!
+    (case-lambda
+      [(fsw) (fswatcher-next! fsw 0)]
+      [(fsw timeout)
+       ;; TODO handle timeout
+       (pcheck ([$fswatcher? fsw] [$fswatcher-open? fsw] [natural? timeout])
+               (let ([res ($fsw-next! who ($fswatcher-id fsw))]
+                     [ht ($fswatcher-paths fsw)])
+                 ;; res: (vector fid mask ?name) -> (vector path event-symbols ?name)
+                 (vector-set! res 0 (hashtable-ref ht (vector-ref res 0) #f))
+                 ;;(vector-set! res 1 (fswatcher-mask->symbols (vector-ref res 1)))
+                 res))]))
+
+
+  #|doc
+  Remove the given path from the watch list of the fswatcher object.
+  `path` must be a valid path that has been added to the watch list of the fswatcher object already.
+  |#
+  (define-who fswatcher-remove!
+    (lambda (fsw path)
+      (pcheck ([$fswatcher? fsw] [$fswatcher-open? fsw] [string? path])
+              (let ([ht ($fswatcher-paths fsw)])
+                (let-values ([(k* v*) (hashtable-entries ht)])
+                  (let ([len (vector-length v*)])
+                    (let loop ([i 0])
+                      (if (fx= i len)
+                          ($err-fswatcher-error who (format "invalid path: ~a" path))
+                          (if (string=? path (vector-ref v* i))
+                              (let ([fid (vector-ref k* i)])
+                                (when ($fsw-remove! who ($fswatcher-id fsw) fid)
+                                  (hashtable-delete! ht fid)))
+                              (loop (add1 i)))))))))))
+
+
+
+
 
   (record-writer (type-descriptor $file-stat)
                  (lambda (r p wr)

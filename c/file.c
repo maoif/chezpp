@@ -3,6 +3,7 @@
 #include "common.h"
 
 #include <sys/stat.h>
+#include <sys/inotify.h>
 #include <fcntl.h>
 
 
@@ -20,6 +21,11 @@ ptr chezpp_link(const char *src, const char *dest);
 ptr chezpp_symlink(const char *src, const char *dest);
 ptr chezpp_touch(const char *path, ptr atime, ptr mtime, int follow_link);
 
+ptr chezpp_fswatcher_init(int block);
+ptr chezpp_fswatcher_close(int fsw);
+ptr chezpp_fswatcher_add(int fsw, const char *path, int mask);
+ptr chezpp_fswatcher_remove(int fsw, int id);
+ptr chezpp_fswatcher_next(int fsw);
 
 
 ptr chezpp_statx(const char *path, int follow_link) {
@@ -158,4 +164,70 @@ ptr chezpp_touch(const char *path, ptr atime, ptr mtime, int follow_link) {
   free(p);
 
   return Strue;
+}
+
+ptr chezpp_fswatcher_init(int block) {
+  int res = inotify_init1(IN_CLOEXEC | (block ? 0 : IN_NONBLOCK));
+  if (res == -1) {
+    return errno_str();
+  }
+
+  return Sfixnum(res);
+}
+
+ptr chezpp_fswatcher_close(int fsw) {
+  if (close(fsw) == -1) {
+    return errno_str();
+  }
+
+  return Strue;
+}
+
+ptr chezpp_fswatcher_add(int fsw, const char *path, int mask) {
+  char *p = expand_pathname(path);
+  int fid = inotify_add_watch(fsw, p, mask);
+  if (fid == -1) {
+    free(p);
+    return errno_str();
+  }
+
+  free(p);
+
+  return Sfixnum(fid);
+}
+
+ptr chezpp_fswatcher_remove(int fsw, int fid) {
+  if (inotify_rm_watch(fsw, fid) == -1) {
+    return errno_str();
+  }
+
+  return Strue;
+}
+
+ptr chezpp_fswatcher_next(int fsw) {
+  int len;
+  const struct inotify_event *event;
+  // just enough to read one event
+  char buf[sizeof(struct inotify_event) + NAME_MAX + 1]
+    __attribute__ ((aligned(__alignof__(struct inotify_event))));
+  memset(buf, 0, sizeof(buf));
+
+  len = read(fsw, buf, sizeof(buf));
+  if (len == -1 && errno != EAGAIN) {
+    return errno_str();
+  }
+
+  // non-blocking with no events
+  if (len <= 0) return Sfalse;
+
+  // TODO check for event queue overflow
+  event = (const struct inotify_event *)buf;
+  ptr v = Smake_vector(3, Sfalse);
+  Svector_set(v, 0, Sfixnum(event->wd));
+  Svector_set(v, 1, Sfixnum(event->mask));
+  if (event->len > 0) {
+    Svector_set(v, 2, Sstring(event->name));
+  }
+
+  return v;
 }
