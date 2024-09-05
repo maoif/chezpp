@@ -10,9 +10,9 @@
 
   (define-syntax forever
     (lambda (stx)
-      (syntax-case stx (index)
+      (syntax-case stx ()
         [(k (index i) e e* ...)
-         (identifier? #'i)
+         (and (eq? 'index (datum index)) (identifier? #'i))
          (with-implicit (k break)
            #'(call/1cc
               (lambda (break)
