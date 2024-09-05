@@ -1,7 +1,8 @@
 (library (chezpp control)
   (export forever
-          compose >>>
-          sect sect+)
+          compose compose1 >>> >>>1
+          sect sect+
+          let/cc let/1cc)
   (import (chezscheme)
           (chezpp utils)
           (chezpp internal)
@@ -27,19 +28,93 @@
                   (begin e e* ...)
                   (loop)))))])))
 
-  (define compose
+
+  #|doc
+  Return the composed procedure P of given procedures p1, p2, p3, ..., such that
+  (P x) = (p1 (p2 (p3 (... x))))
+
+  Procedures are required to produce as many values as the preceding procedures consume.
+  The number of return values is determined by the first procedure (i.e., the last procedure applied).
+  |#
+  (define-who compose
     (lambda (proc . proc*)
       (pcheck-proc (proc)
                    (if (null? proc*)
                        proc
                        (if (andmap procedure? proc*)
-                           (todo)
-                           (errorf 'compose "arguments contain non-procedure(s)"))))))
+                           (let ([p* (cons proc proc*)])
+                             (lambda args
+                               (let loop ([p* p*])
+                                 (if (null? p*)
+                                     (apply values args)
+                                     ;; recurse to the last proc first
+                                     (call-with-values (lambda () (loop (cdr p*)))
+                                       (car p*))))))
+                           (errorf who "arguments contain non-procedure(s)"))))))
 
-  ;; pipeline
-  (define >>>
-    (lambda (arg proc . proc*)
-      ((apply compose proc proc*) (list arg))))
+
+  #|doc
+  Similar to `compose`, but only one value is passed among the procedures.
+  The output arity of the first procedure and the input arity of
+  the last procedure are unrestricted, though.
+
+  This is generally faster than `compose`.
+  |#
+  (define-who compose1
+    (lambda (proc . proc*)
+      (pcheck-proc (proc)
+                   (if (null? proc*)
+                       proc
+                       (if (andmap procedure? proc*)
+                           (let* ([ps (cons proc proc*)]
+                                  [p* (list-head ps (sub1 (length ps)))]
+                                  [p1 (list-ref ps (sub1 (length ps)))])
+                             (lambda args
+                               (let loop ([p* p*])
+                                 (if (null? p*)
+                                     (apply p1 args)
+                                     ((car p*) (loop (cdr p*)))))))
+                           (errorf who "arguments contain non-procedure(s)"))))))
+
+
+  #|doc
+  Pipe the value `v` through the procedures, and return the value
+  returned by the last procedure.
+
+  The first procedure should be able to take one argument;
+  Each procedure should consume as many values as its proceeding procedure returns.
+  |#
+  (define-who >>>
+    (lambda (v proc . proc*)
+      (pcheck-proc (proc)
+                   (if (null? proc*)
+                       (proc v)
+                       (if (andmap procedure? proc*)
+                           (let loop ([p* (reverse proc*)])
+                             (if (null? p*)
+                                 (proc v)
+                                 (call-with-values (lambda () (loop (cdr p*)))
+                                   (car p*))))
+                           (errorf who "arguments contain non-procedure(s)"))))))
+
+
+  #|doc
+  Similar to `>>>`, with the difference that all but the last procedure should return
+  one value only.
+
+  This is generally faster than `>>>`.
+  |#
+  (define-who >>>1
+    (lambda (v proc . proc*)
+      (pcheck-proc (proc)
+                   (if (null? proc*)
+                       (proc v)
+                       (if (andmap procedure? proc*)
+                           (let loop ([p* proc*] [res (proc v)])
+                             (if (null? (cdr p*))
+                                 ((car p*) res)
+                                 (loop (cdr p*) ((car p*) res))))
+                           (errorf who "arguments contain non-procedure(s)"))))))
 
 
   (define-syntax $sect
@@ -105,6 +180,22 @@
   (define-syntax sect+
     (syntax-rules ()
       [(_ proc e e* ...) ($sect #t proc e e* ...)]))
+
+
+  (define-syntax let/cc
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ k e e* ...)
+         (identifier? #'k)
+         #'(call/cc (lambda (k) e e* ...))])))
+
+
+  (define-syntax let/1cc
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ k e e* ...)
+         (identifier? #'k)
+         #'(call/1cc (lambda (k) e e* ...))])))
 
 
   )
