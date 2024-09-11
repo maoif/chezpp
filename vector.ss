@@ -7,6 +7,8 @@
           fxvector-map/i fxvector-for-each/i fxvector-map! fxvector-map!/i
           flvector-map/i flvector-for-each/i flvector-map! flvector-map!/i
 
+          vslice fxvslice flvslice
+
           vormap vandmap vexists vfor-all
           fxvormap fxvandmap fxvexists fxvfor-all
           flvormap flvandmap flvexists flvfor-all
@@ -86,6 +88,7 @@
   ;; - all-which?: all-vecs?, all-fxvecs, ...
   ;; - procname: this procedure name. Given `foo`, defines `vfoo`, `fxvfoo` and `flvfoo`, if all flags are given.
   ;;             If the given name starts with `v`, e.g, `vfoo`, then the names are still as the above.
+  ;; - thisproc: bound to the current procedure, used for recursive call
   ;; - t+, t-, t*, t/: fx+, fx-, ..., in the case of fxv
   ;; - t+id t*id: the identity element in the additive/multiplicative group of fixnums/flonums
   ;; - t> t<: fx>, fx< in the case of fxv
@@ -111,7 +114,7 @@
         [(k (ty* ...) name [args body body* ...] ...)
          (and (identifier? #'name) (valid-ty*? (datum (ty* ...))))
          (let-values ([(pv? pfxv? pflv?) (handle-ty* (datum (ty* ...)))])
-           (with-implicit (k v v? vmake vref vset! vlength vpcheck vcheck-length all-which? procname
+           (with-implicit (k v v? vmake vref vset! vlength vpcheck vcheck-length all-which? procname thisproc
                              t+ t- t* t/ t+id t*id t> t<)
              #`(begin
                  #,(if pv?
@@ -133,7 +136,8 @@
                              (let-syntax ([vpcheck (syntax-rules () [(_ e* (... ...)) (pcheck-vector e* (... ...))])])
                                (define name
                                  (case-lambda
-                                   [args body body* ...] ...)))))
+                                   [args body body* ...] ...))
+                               (define thisproc name))))
                        ;; to create a proper definition context
                        #'(define dummy0 'dummy))
                  #,(if pfxv?
@@ -158,7 +162,8 @@
                              (let-syntax ([vpcheck (syntax-rules () [(_ e* (... ...)) (pcheck-fxvector e* (... ...))])])
                                (define name
                                  (case-lambda
-                                   [args body body* ...] ...)))))
+                                   [args body body* ...] ...))
+                               (define thisproc name))))
                        #'(define dummy1 'dummy))
                  #,(if pflv?
                        (with-syntax ([name (get-name 'flv #'name)])
@@ -182,7 +187,8 @@
                              (let-syntax ([vpcheck (syntax-rules () [(_ e* (... ...)) (pcheck-flvector e* (... ...))])])
                                (define name
                                  (case-lambda
-                                   [args body body* ...] ...)))))
+                                   [args body body* ...] ...))
+                               (define thisproc name))))
                        #'(define dummy2 'dummy)))))]
         [(k (ty* ...) (name . args) body* ...)
          (and (identifier? #'name) (valid-ty*? (datum (ty* ...))))
@@ -203,6 +209,7 @@
                                      [vcheck-length check-length]
                                      [all-which? all-vecs?]
                                      [procname 'name]
+                                     [thisproc name]
                                      [t+ +] [t- -] [t* *] [t/ /] [t+id 0] [t*id 1]
                                      [t> >] [t< <])
                                  ;; this piece of syntax needs care
@@ -223,6 +230,7 @@
                                      [vcheck-length check-fxlength]
                                      [all-which? all-fxvecs?]
                                      [procname 'name]
+                                     [thisproc name]
                                      [t+ fx+] [t- fx-] [t* fx*] [t/ fx/] [t+id 0] [t*id 1]
                                      [t> fx>] [t< fx<])
                                  (let-syntax ([vpcheck (syntax-rules () [(_ e* (... ...)) (pcheck-fxvector e* (... ...))])])
@@ -241,6 +249,7 @@
                                      [vcheck-length check-fllength]
                                      [all-which? all-flvecs?]
                                      [procname 'name]
+                                     [thisproc name]
                                      [t+ fl+] [t- fl-] [t* fl*] [t/ fl/] [t+id 0.0] [t*id 1.0]
                                      [t> fl>] [t< fl<])
                                  (let-syntax ([vpcheck (syntax-rules () [(_ e* (... ...)) (pcheck-flvector e* (... ...))])])
@@ -806,12 +815,48 @@
                               (loop (add1 i))))))))])
 
 
+  #|doc
+  Return a slice, or subvector of the original vector.
+
+  Meanings of `start`, `end` and `step` are the same as in list:slice.
+
+  If the indices are out of range in any way, an empty vector is returned.
+  |#
   (define-vector-procedure (v fxv flv) slice
-    [(vec) (vpcheck (vec) vec)]
-    [(vec end) (vpcheck (vec) (procname vec 0 end 1))]
-    [(vec start end) (vpcheck (vec) (procname vec start end 1))]
+    [(vec end) (thisproc vec 0 end 1)]
+    [(vec start end) (thisproc vec start end 1)]
     [(vec start end step)
-     (todo 'procname)])
+     (vpcheck (vec)
+              (pcheck ([fixnum? start end step])
+                      (when (fx= step 0) (errorf procname "step cannot be 0"))
+                      (let* ([len (vlength vec)]
+                             [s (let ([s (if (fx>= start 0) start (fx+ len start))])
+                                  (cond [(fx< s 0) 0]
+                                        [(fx> s len) (fx1- len)]
+                                        [else s]))]
+                             [e (let ([e (if (fx>= end 0) end (fx+ len end))])
+                                  (cond [(fx<= e -1) -1]
+                                        [(fx>= e len) len]
+                                        [else e]))])
+                        (if (fx= len 0)
+                            (vmake 0)
+                            (cond [(and (fx< s e) (fx> step 0))
+                                   (let ([newv (vmake (ceiling (/ (fx- e s) step)))])
+                                     ;; forward
+                                     (let loop ([s s] [i 0])
+                                       (if (fx>= s e)
+                                           newv
+                                           (begin (vset! newv i (vref vec s))
+                                                  (loop (fx+ s step) (fx1+ i))))))]
+                                  [(and (fx> s e) (fx< step 0))
+                                   (let ([newv (vmake (ceiling (/ (fx- e s) step)))])
+                                     ;; backward
+                                     (let loop ([s s] [i 0])
+                                       (if (fx<= s e)
+                                           newv
+                                           (begin (vset! newv i (vref vec s))
+                                                  (loop (fx+ s step) (fx1+ i))))))]
+                                  [else (vmake 0)])))))])
 
 
   (define-vector-procedure (v fxv flv)

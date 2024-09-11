@@ -475,3 +475,75 @@
        (= (apply min l) (flvmin v)))
 
      )
+
+
+(mat vslice
+
+     (equal? '#() (vslice '#() 1))
+     (equal? '#() (vslice '#() 0))
+     (equal? '#() (vslice '#() -1))
+     (equal? '#() (vslice '#() 3 1))
+     (equal? '#() (vslice '#(1) 0 1 -1))
+
+     (equal? '#(1) (vslice '#(1) 0 1))
+     (equal? '#(1) (vslice '#(1) 1))
+     (equal? '#(1) (vslice '#(1) 2))
+     (equal? '#(1) (vslice '#(1) 3))
+     (equal? '#(1) (vslice '#(1) 2 -4 -4))
+
+     (equal? '#() (vslice '#(1) 2 -4))
+     (equal? '#() (vslice '#(1) 1 5))
+     (equal? '#() (vslice '#(1) 3 0 3))
+
+     (begin (define vec '#(0 1 2 3 4 5 6 7 8 9))
+            #t)
+
+     (equal? '#(8 5 2)
+             (vslice vec 8 0 -3))
+     (equal? '#(9 6 3)
+             (vslice vec 9 0 -3))
+
+     ;; positive index, forward
+     (equal? '#(0 1 2 3 4)
+             (vslice vec 5))
+     (equal? '#(0 2 4 6 8)
+             (vslice vec 0 9 2))
+     (equal? '#(2 5 8)
+             (vslice vec 2 9 3))
+
+     ;; positive index, backward
+     (equal? '#(3 2)
+             (vslice vec 3 1 -1))
+     (equal? '#(8 6 4)
+             (vslice vec 8 2 -2))
+     (equal? '#(9 6 3)
+             (vslice vec 9 1 -3))
+     (equal? '#(9 5)
+             (vslice vec 9 1 -4))
+     (equal? '#(9 5 1)
+             (vslice vec 9 0 -4))
+
+     ;; negative index, forward
+     (equal? '#(0 1 2 3 4)
+             (vslice vec -5))
+     (equal? (list->vector (iota 9))
+             (vslice vec -1))
+     (equal? '#(5 6 7 8)
+             (vslice vec -5 -1))
+     (equal? '#(9)
+             (vslice vec -1 -2 -1))
+     (equal? '#(1 2 3 4 5 6 7 8)
+             (vslice vec -9 -1))
+     (equal? '#(1 4 7)
+             (vslice vec -9 -1 3))
+
+     ;; negative index, backward
+     (equal? '#(9 8 7 6)
+             (vslice vec -1 -5 -1))
+     (equal? '#(9 7 5 3)
+             (vslice vec -1 -9 -2))
+     (equal? '#(8 4)
+             (vslice vec -2 -9 -4))
+     (equal? '#(1)
+             (vslice '#(1) -1 -2 -1))
+     )
