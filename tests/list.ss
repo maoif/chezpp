@@ -172,3 +172,82 @@
              (fold-right/i (lambda (i x acc) (cons x acc)) '() (iota 10)))
 
      )
+
+
+(mat slice
+
+
+     (equal? '() (slice '() 1))
+     (equal? '() (slice '() 0))
+     (equal? '() (slice '() -1))
+     (equal? '() (slice '() 3 1))
+     (equal? '() (slice '(1) 0 1 -1))
+
+     (equal? '(1) (slice '(1) 1))
+     (equal? '(1) (slice '(1) 2))
+     (equal? '(1) (slice '(1) 3))
+     (equal? '(1) (slice '(1) 2 -4 -4))
+
+     (equal? '() (slice '(1) 2 -4))
+     (equal? '() (slice '(1) 1 5))
+     (equal? '() (slice '(1) 3 0 3))
+
+     (begin (define ls (iota 10))
+            #t)
+
+
+     (equal? '(8 5 2)
+             (slice ls 8 0 -3))
+     (equal? '(9 6 3)
+             (slice ls 9 0 -3))
+
+     ;; positive index, forward
+     (equal? '(0 1 2 3 4)
+             (slice ls 5))
+     (equal? '(0 2 4 6 8)
+             (slice ls 0 9 2))
+     (equal? '(2 5 8)
+             (slice ls 2 9 3))
+
+     ;; positive index, backward
+     (equal? '(3 2)
+             (slice ls 3 1 -1))
+     (equal? '(8 6 4)
+             (slice ls 8 2 -2))
+     (equal? '(9 6 3)
+             (slice ls 9 1 -3))
+     (equal? '(9 5)
+             (slice ls 9 1 -4))
+     (equal? '(9 5 1)
+             (slice ls 9 0 -4))
+
+     ;; negative index, forward
+     (equal? '(0 1 2 3 4)
+             (slice ls -5))
+     (equal? (iota 9)
+             (slice ls -1))
+     (equal? '(5 6 7 8)
+             (slice ls -5 -1))
+     (equal? '(9)
+             (slice ls -1 -2 -1))
+     (equal? '(1 2 3 4 5 6 7 8)
+             (slice ls -9 -1))
+     (equal? '(1 4 7)
+             (slice ls -9 -1 3))
+
+     ;; negative index, backward
+     (equal? '(9 8 7 6)
+             (slice ls -1 -5 -1))
+     (equal? '(9 7 5 3)
+             (slice ls -1 -9 -2))
+     (equal? '(8 4)
+             (slice ls -2 -9 -4))
+     ;; single item
+     (equal? '(1)
+             (slice '(1) -1 -2 -1))
+
+
+     ;; errors
+     (error? (slice 42))
+     (error? (slice (iota 10) 1 7 0))
+     )

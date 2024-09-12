@@ -4,7 +4,7 @@
           list-last
           make-list-builder
           zip snoc!
-          nums
+          nums slice
 
           list+ listp+ listq+ listv+
           list- listp- listq- listv-
@@ -363,6 +363,67 @@
                (lb)
                (begin (lb n)
                       (loop (+ n step))))))]))
+
+
+  #|doc
+  Return a slice, or sublist of the original list.
+  `start` and `end` specify the first and last item, respectively.
+  `step` is the amount by which `start` is incremented every time an item is selected.
+
+  By default, `start` is 0, and `step` is 1.
+  `step` can be either positive or negative. If it is negative, items are selected backwards.
+  It is an error if `step` is 0.
+
+  If the indices are out of range in any way, an empty list is returned.
+  |#
+  (define-who slice
+    (case-lambda
+      [(ls end) (slice ls 0 end 1)]
+      [(ls start end) (slice ls start end 1)]
+      [(ls start end step)
+       (pcheck ([list? ls] [fixnum? start end step])
+               (when (fx= step 0) (errorf who "step cannot be 0"))
+               (let* ([len (length ls)]
+                      ;; inclusive
+                      [s (let ([s (if (fx>= start 0) start (fx+ len start))])
+                           (cond [(fx< s 0) 0]
+                                 [(fx> s len) (fx1- len)]
+                                 [else s]))]
+                      ;; exclusive
+                      [e (let ([e (if (fx>= end 0) end (fx+ len end))])
+                           (cond [(fx<= e -1) -1]
+                                 [(fx>= e len) len]
+                                 [else e]))])
+                 ;;(printf "~a: s: ~a, e: ~a, step: ~a~n" who s e step)
+                 (if (fx= len 0)
+                     '()
+                     (cond [(and (fx< s e) (fx> step 0))
+                            ;; get to index s first
+                            (let ([lb (make-list-builder)])
+                              (let loop ([i 0] [ls ls])
+                                (if (fx= i s)
+                                    (let loop ([s s] [ls ls])
+                                      (lb (car ls))
+                                      (let next ([s s] [ls ls] [k step])
+                                        (cond [(or (fx>= s e) (null? ls)) (lb)]
+                                              [(fx= k 0)      (loop s ls)]
+                                              [else           (next (fx1+ s) (cdr ls) (fx1- k))])))
+                                    (loop (fx1+ i) (cdr ls)))))]
+                           [(and (fx> s e) (fx< step 0))
+                            (let ([last (fx+ s (fx* step (fx1- (ceiling (/ (fx- s e) (fx- step))))))])
+                              (let loop ([i 0] [ls ls])
+                                (if (fx= i last)
+                                    ;; build the result from last to first
+                                    (let loop ([e i] [ls ls] [res (list (car ls))])
+                                      (if (fx= s e)
+                                          res
+                                          (let next ([e e] [ls ls] [k step])
+                                            (cond [(fx> e s) res]
+                                                  [(fx= e s) (cons (car ls) res)]
+                                                  [(fx= k 0) (loop e ls (cons (car ls) res))]
+                                                  [else      (next (fx1+ e) (cdr ls) (fx1+ k))]))))
+                                    (loop (fx1+ i) (cdr ls)))))]
+                           [else '()]))))]))
 
 
 
