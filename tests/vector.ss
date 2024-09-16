@@ -547,3 +547,147 @@
      (equal? '#(1)
              (vslice '#(1) -1 -2 -1))
      )
+
+
+(mat copy!
+
+     (begin (define v (make-vector 10 #t))
+            (define fxv (make-fxvector 10 0))
+            (define flv (make-flvector 10 0.0))
+            #t)
+
+     ;; errors
+     (error? (vcopy! 42 42 42 42))
+     (error? (vcopy! v -1 v 0  3))
+     (error? (vcopy! v 0  v -1 3))
+     (error? (vcopy! v 11 v 0  3))
+     (error? (vcopy! v 0  v 11 3))
+     (error? (vcopy! v 1  v 0  10))
+     (error? (vcopy! v 0  v 9  3))
+
+     (error? (fxvcopy! 42 42 42 42))
+     (error? (fxvcopy! fxv -1 fxv 0  3))
+     (error? (fxvcopy! fxv 0  fxv -1 3))
+     (error? (fxvcopy! fxv 11 fxv 0  3))
+     (error? (fxvcopy! fxv 0  fxv 11 3))
+     (error? (fxvcopy! fxv 1  fxv 0  10))
+     (error? (fxvcopy! fxv 0  fxv 9  3))
+
+     (error? (flvcopy! 42 42 42 42))
+     (error? (flvcopy! flv -1 flv 0  3))
+     (error? (flvcopy! flv 0  flv -1 3))
+     (error? (flvcopy! flv 11 flv 0  3))
+     (error? (flvcopy! flv 0  flv 11 3))
+     (error? (flvcopy! flv 1  flv 0  10))
+     (error? (flvcopy! flv 0  flv 9  3))
+
+
+
+;;;; same vector
+
+     ;; disjoint, left to right
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 0 v 3 3)
+       (println v)
+       (equal? '#(0 1 2 0 1 2 6 7 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 0 v 5 3)
+       (println v)
+       (equal? '#(0 1 2 3 4 0 1 2 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 0 v 5 5)
+       (println v)
+       (equal? '#(0 1 2 3 4 0 1 2 3 4) v))
+
+     ;; disjoint, right to left
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 5 v 0 3)
+       (println v)
+       (equal? '#(5 6 7 3 4 5 6 7 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 3 v 0 3)
+       (println v)
+       (equal? '#(3 4 5 3 4 5 6 7 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 5 v 0 5)
+       (println v)
+       (equal? '#(5 6 7 8 9 5 6 7 8 9) v))
+
+     ;; overlapping, left to right
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 0 v 2 3)
+       (println v)
+       (equal? '#(0 1 0 1 2 5 6 7 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 0 v 0 5)
+       (println v)
+       (equal? '#(0 1 2 3 4 5 6 7 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 0 v 1 5)
+       (println v)
+       (equal? '#(0 0 1 2 3 4 6 7 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 0 v 3 5)
+       (println v)
+       (equal? '#(0 1 2 0 1 2 3 4 8 9) v))
+
+     ;; overlapping , right to left
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 2 v 0 3)
+       (println v)
+       (equal? '#(2 3 4 3 4 5 6 7 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 2 v 0 5)
+       (println v)
+       (equal? '#(2 3 4 5 6 5 6 7 8 9) v))
+
+     (let ([v (apply vector (iota 10))])
+       (println v)
+       (vcopy! v 5 v 3 5)
+       (println v)
+       (equal? '#(0 1 2 5 6 7 8 9 8 9) v))
+
+
+
+;;;; different vector
+     (let ([v (apply vector (iota 10))]
+           [vv (make-vector 10 #f)])
+       (vcopy! v 0 vv 0 3)
+       (equal? '#(0 1 2) (vslice vv 0 3)))
+
+     (let ([v (apply vector (iota 10))]
+           [vv (make-vector 10 #f)])
+       (vcopy! v 0 vv 0 5)
+       (equal? '#(0 1 2 3 4) (vslice vv 0 5)))
+
+     (let ([v (apply vector (iota 10))]
+           [vv (make-vector 10 #f)])
+       (vcopy! v 0 vv 3 5)
+       (equal? '#(#f #f #f 0 1 2 3 4) (vslice vv 0 8)))
+
+     (let ([v (apply vector (iota 10))]
+           [vv (make-vector 10 #f)])
+       (vcopy! v 2 vv 0 5)
+       (equal? '#(2 3 4 5 6) (vslice vv 0 5)))
+
+     )
