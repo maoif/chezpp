@@ -587,89 +587,64 @@
 
      ;; disjoint, left to right
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 0 v 3 3)
-       (println v)
        (equal? '#(0 1 2 0 1 2 6 7 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 0 v 5 3)
-       (println v)
        (equal? '#(0 1 2 3 4 0 1 2 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 0 v 5 5)
-       (println v)
        (equal? '#(0 1 2 3 4 0 1 2 3 4) v))
 
      ;; disjoint, right to left
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 5 v 0 3)
-       (println v)
        (equal? '#(5 6 7 3 4 5 6 7 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 3 v 0 3)
-       (println v)
        (equal? '#(3 4 5 3 4 5 6 7 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 5 v 0 5)
-       (println v)
        (equal? '#(5 6 7 8 9 5 6 7 8 9) v))
 
      ;; overlapping, left to right
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 0 v 2 3)
-       (println v)
        (equal? '#(0 1 0 1 2 5 6 7 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 0 v 0 5)
-       (println v)
        (equal? '#(0 1 2 3 4 5 6 7 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 0 v 1 5)
-       (println v)
        (equal? '#(0 0 1 2 3 4 6 7 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 0 v 3 5)
-       (println v)
        (equal? '#(0 1 2 0 1 2 3 4 8 9) v))
 
      ;; overlapping , right to left
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 2 v 0 3)
-       (println v)
        (equal? '#(2 3 4 3 4 5 6 7 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 2 v 0 5)
-       (println v)
        (equal? '#(2 3 4 5 6 5 6 7 8 9) v))
 
      (let ([v (apply vector (iota 10))])
-       (println v)
        (vcopy! v 5 v 3 5)
-       (println v)
        (equal? '#(0 1 2 5 6 7 8 9 8 9) v))
 
 
 
 ;;;; different vector
+
      (let ([v (apply vector (iota 10))]
            [vv (make-vector 10 #f)])
        (vcopy! v 0 vv 0 3)
