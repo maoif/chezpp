@@ -251,3 +251,29 @@
      (error? (slice 42))
      (error? (slice (iota 10) 1 7 0))
      )
+
+
+(mat zip!
+
+     (error? (zip!))
+     (error? (zip! 1))
+     (error? (zip! '()))
+     (error? (zip! '() '(1)))
+
+     (equal? '() (zip! '() '()))
+
+     (let* ([ls1 (iota 10)]
+            [ls2 (iota 10)]
+            [ls (zip! ls1 ls2)])
+       (and (equal? (zip ls2 ls2)
+                    ls)
+            (eq? ls ls1)))
+
+     (let* ([ls1 (iota 10)]
+            [ls2 (iota 10)]
+            [ls (zip! ls1 ls2 ls2 ls2 ls2)])
+       (and (equal? (zip ls2 ls2 ls2 ls2 ls2)
+                    ls)
+            (eq? ls ls1)))
+
+     )

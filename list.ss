@@ -3,7 +3,7 @@
           unique? unique
           list-last
           make-list-builder
-          zip snoc!
+          zip zip! snoc!
           nums slice
 
           list+ listp+ listq+ listv+
@@ -303,6 +303,32 @@
   (define zip
     (lambda (ls1 ls2 . ls*)
       (apply map list ls1 ls2 ls*)))
+
+
+  #|doc
+  Similar to `zip`, but the zip result is stored directly in `ls1`,
+  which is also the return value.
+  |#
+  (define-who zip!
+    (case-lambda
+      [(ls1 ls2)
+       (pcheck-list (ls1 ls2)
+                    (check-length who ls1 ls2)
+                    (let ([ls ls1])
+                      (let loop ([ls1 ls1] [ls2 ls2])
+                        (if (null? ls1)
+                            ls
+                            (begin (set-car! ls1 (list (car ls1) (car ls2)))
+                                   (loop (cdr ls1) (cdr ls2)))))))]
+      [(ls1 ls2 . ls*)
+       (pcheck ([list? ls1 ls2] [all-lists? ls*])
+               (apply check-length who ls1 ls2 ls*)
+               (let ([ls ls1])
+                 (let loop ([ls1 ls1] [ls2 ls2] [ls* ls*])
+                   (if (null? ls1)
+                       ls
+                       (begin (set-car! ls1 (apply list (car ls1) (car ls2) (map car ls*)))
+                              (loop (cdr ls1) (cdr ls2) (map cdr ls*)))))))]))
 
 
   #|doc
