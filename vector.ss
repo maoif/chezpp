@@ -24,6 +24,8 @@
           vreverse fxvreverse flvreverse
           vreverse! fxvreverse! flvreverse!
           vzip fxvzip flvzip vzipv fxvzipv flvzipv
+          vshuffle  fxvshuffle  flvshuffle
+          vshuffle! fxvshuffle! flvshuffle!
 
           vcopy fxvcopy flvcopy
           vcopy! fxvcopy! flvcopy! u8vcopy! vector-copy! fxvector-copy! flvector-copy!
@@ -954,16 +956,43 @@
   (define-vector-procedure (v fxv flv)
     (shuffle vec)
     (vpcheck (vec)
-             (todo)))
+             (let* ([len (vlength vec)]
+                    [newv (vmake len)])
+               (define swap!
+                 (lambda (i j)
+                   (let ([x (vref newv i)] [y (vref newv j)])
+                     (vset! newv i y) (vset! newv j x))))
+               (let loop ([i 0])
+                 (unless (fx= i len)
+                   (vset! newv i (vref vec i))
+                   (loop (fx1+ i))))
+               (cond [(>= len 3)
+                      (let loop ([i (fx1- len)])
+                        (unless (fx= i 0)
+                          (swap! i (random i))
+                          (loop (fx1- i))))]
+                     [(= len 2) (swap! 0 1)])
+               newv)))
 
 
   #|doc
   Shuffle the vector in place.
   |#
+  ;; Fisher–Yates shuffle
   (define-vector-procedure (v fxv flv)
     (shuffle! vec)
     (vpcheck (vec)
-             (todo)))
+             (define swap!
+               (lambda (i j)
+                 (let ([x (vref vec i)] [y (vref vec j)])
+                   (vset! vec i y) (vset! vec j x))))
+             (let ([len (vlength vec)])
+               (cond [(>= len 3)
+                      (let loop ([i (fx1- len)])
+                        (unless (fx= i 0)
+                          (swap! i (random i))
+                          (loop (fx1- i))))]
+                     [(= len 2) (swap! 0 1)]))))
 
 
   #|doc
