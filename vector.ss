@@ -992,7 +992,8 @@
                         (unless (fx= i 0)
                           (swap! i (random i))
                           (loop (fx1- i))))]
-                     [(= len 2) (swap! 0 1)]))))
+                     [(= len 2) (swap! 0 1)]))
+             vec))
 
 
   #|doc
