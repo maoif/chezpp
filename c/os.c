@@ -22,6 +22,8 @@ ptr chezpp_vfork();
 int chezpp_getppid();
 ptr chezpp_shared_object_list();
 
+int chezpp_get_ncores();
+
 
 //=======================================================================
 //
@@ -154,4 +156,22 @@ ptr chezpp_shared_object_list() {
   dl_iterate_phdr(shared_object_list_callback, &objs);
   
   return objs;
+}
+
+
+//=======================================================================
+//
+// system info
+//
+//=======================================================================
+
+
+int chezpp_get_ncores() {
+  long num_cores = sysconf(_SC_NPROCESSORS_ONLN); 
+  if (num_cores == -1) {
+    // just return a fallback value
+    return 1;
+  }
+
+  return (int) num_cores;
 }

@@ -2,6 +2,8 @@
   (export sleep milisleep nanosleep
 
           unix? windows? darwin?
+          uname hostname
+          current-processor-count
 
           getuser getgroup user-exists? group-exists?
           unix-user-name unix-user-passwd unix-user-uid unix-user-gid unix-user-gecos unix-user-dir unix-user-shell
@@ -17,6 +19,7 @@
           os-error?)
   (import (chezpp chez)
           (chezpp private os)
+          (chezpp file)
           (chezpp internal)
           (chezpp utils))
 
@@ -58,6 +61,20 @@
                             ($sleep (make-time 'time-duration nsec sec)))
                           ($sleep (make-time 'time-duration t 0))))))
 
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   system info
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+  #|doc
+  Return the number of available logical processors.
+  |#
+  (define current-processor-count
+    (foreign-procedure "chezpp_get_ncores" () int))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
