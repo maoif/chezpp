@@ -2,8 +2,8 @@
   (export sleep milisleep nanosleep
 
           unix? windows? darwin?
-          uname hostname
-          current-processor-count
+          hostname
+          cpu-arch cpu-count
 
           getuser getgroup user-exists? group-exists?
           unix-user-name unix-user-passwd unix-user-uid unix-user-gid unix-user-gecos unix-user-dir unix-user-shell
@@ -71,10 +71,24 @@
 
 
   #|doc
+  Return the hostname of the current operating system.
+  |#
+  (define hostname
+    (foreign-procedure "chezpp_hostname" () ptr))
+
+
+  #|doc
+  Return the name of the instruction set architecture (ISA) of the current processor.
+  |#
+  (define cpu-arch
+    (foreign-procedure "chezpp_cpu_arch" () ptr))
+
+
+  #|doc
   Return the number of available logical processors.
   |#
-  (define current-processor-count
-    (foreign-procedure "chezpp_get_ncores" () int))
+  (define cpu-count
+    (foreign-procedure "chezpp_cpu_count" () int))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

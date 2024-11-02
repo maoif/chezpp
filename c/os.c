@@ -5,6 +5,9 @@
 #include <grp.h>
 #include <pwd.h>
 #include <link.h>
+#include <string.h>
+#include <sys/utsname.h>
+
 
 
 ptr chezpp_getpwnam(const char *name);
@@ -22,7 +25,9 @@ ptr chezpp_vfork();
 int chezpp_getppid();
 ptr chezpp_shared_object_list();
 
-int chezpp_get_ncores();
+ptr chezpp_hostname();
+ptr chezpp_cpu_arch();
+int chezpp_cpu_count();
 
 
 //=======================================================================
@@ -166,7 +171,25 @@ ptr chezpp_shared_object_list() {
 //=======================================================================
 
 
-int chezpp_get_ncores() {
+ptr chezpp_hostname() {
+  struct utsname sysinfo;
+  if (uname(&sysinfo) == 0) {
+    return Sstring(sysinfo.nodename);
+  }
+  return errno_str_vector();
+}
+
+
+ptr chezpp_cpu_arch() {
+  struct utsname sysinfo;
+  if (uname(&sysinfo) == 0) {
+    return Sstring(sysinfo.machine);
+  }
+  return errno_str_vector();
+}
+
+
+int chezpp_cpu_count() {
   long num_cores = sysconf(_SC_NPROCESSORS_ONLN); 
   if (num_cores == -1) {
     // just return a fallback value
