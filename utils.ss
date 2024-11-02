@@ -9,7 +9,7 @@
           unreachable!
           incr! decr! add1! sub1! fx+! fx-! fx*! fx/!
           cons! cdr!
-          natural?
+          natural? positive-natural?
           neq? neqv? nequal?
           id bool octal hex bin
           define-who trace-define-who
@@ -109,6 +109,7 @@
   (define output-textual-port? (lambda (p) (and (not (port-closed? p)) (output-port? p) (textual-port? p))))
 
   (define natural? (lambda (n) (and (integer? n) (>= n 0))))
+  (define positive-natural? (lambda (n) (and (natural? n) (positive? n))))
 
   (gen-pcheck proc procedure?)
   (gen-pcheck pair pair?)
