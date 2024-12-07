@@ -36,7 +36,9 @@
           u8array-for-each-rev u8array-for-each/i-rev
           u8array-fold-left u8array-fold-left/i u8array-fold-right u8array-fold-right/i
 
-          array->list fxarray->list u8array->list)
+          array->list fxarray->list u8array->list
+          array->vector fxarray->fxvector u8array->u8vector
+          vector->array fxvector->fxarray u8vector->u8array)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp list)
@@ -662,6 +664,8 @@
 
   #|doc
   Return whether the array contains the given item.
+  If it does, the procedure returns the index of the given item;
+  otheriwse it returns #f.
   Items are compared using `equal?`.
   |#
   (define-array-procedure (a fxa u8a)
@@ -673,13 +677,14 @@
                  (if (fx= i len)
                      #f
                      (if (equal? v (vref vec i))
-                         #t
+                         i
                          (loop (fx1+ i))))))))
 
 
   #|doc
-  Return whether the array contains the given item.
-  Items are compared using the given procedure `=?`, hence "/p" in the name.
+  Return whether the array contains an item that satisfies the predicate `=?`.
+  If it does, the procedure returns the index of the given item;
+  otheriwse it returns #f.
   |#
   (define-array-procedure (a fxa u8a)
     (contains/p? =? arr)
@@ -689,7 +694,7 @@
                  (if (fx= i len)
                      #f
                      (if (=? (vref vec i))
-                         #t
+                         i
                          (loop (fx1+ i))))))))
 
 
@@ -1276,19 +1281,46 @@
 
 
   #|doc
-  Convert a vector to an array.
+  Convert a vector `vec` to an array.
   |#
   (define-who vector->array
     (lambda (vec)
-      (todo)))
+      (pcheck ([vector? vec])
+              (let* ([len (vector-length vec)]
+                     [arr (make-array len)])
+                (let loop ([i 0])
+                  (if (fx= i len)
+                      arr
+                      (begin (array-set! arr i (vector-ref vec i))
+                             (loop (fx1+ i)))))))))
 
+  #|doc
+  Convert a fxvector `vec` to a fxarray.
+  |#
   (define-who fxvector->fxarray
     (lambda (vec)
-      (todo)))
+      (pcheck ([fxvector? vec])
+              (let* ([len (fxvector-length vec)]
+                     [arr (make-fxarray len)])
+                (let loop ([i 0])
+                  (if (fx= i len)
+                      arr
+                      (begin (fxarray-set! arr i (fxvector-ref vec i))
+                             (loop (fx1+ i)))))))))
 
+  #|doc
+  Convert a bytevector/u8vector `vec` to a u8array.
+  |#
   (define-who u8vector->u8array
     (lambda (vec)
-      (todo)))
+      (pcheck ([bytevector? vec])
+              (let* ([len (bytevector-length vec)]
+                     [arr (make-u8array len)])
+                (let loop ([i 0])
+                  (if (fx= i len)
+                      arr
+                      (begin (u8array-set! arr i (bytevector-u8-ref vec i))
+                             (loop (fx1+ i)))))))))
 
 
   #|doc
@@ -1306,19 +1338,48 @@
                             (loop (fx1+ i))))))))
 
 
+  #|doc
+  Convert an array `arr` into a vector.
+  |#
   (define-who array->vector
     (lambda (arr)
-      (todo)))
+      (pcheck ([array? arr])
+              (let* ([len (array-length arr)]
+                     [vec (make-vector len)])
+                (let loop ([i 0])
+                  (if (fx= i len)
+                      vec
+                      (begin (vector-set! vec i (array-ref arr i))
+                             (loop (fx1+ i)))))))))
 
 
+  #|doc
+  Convert a fxarray `arr` into a fxvector.
+  |#
   (define-who fxarray->fxvector
     (lambda (arr)
-      (todo)))
+      (pcheck ([fxarray? arr])
+              (let* ([len (fxarray-length arr)]
+                     [vec (make-fxvector len)])
+                (let loop ([i 0])
+                  (if (fx= i len)
+                      vec
+                      (begin (fxvector-set! vec i (fxarray-ref arr i))
+                             (loop (fx1+ i)))))))))
 
-
+  #|doc
+  Convert a u8array `arr` into a bytevector.
+  |#
   (define-who u8array->u8vector
     (lambda (arr)
-      (todo)))
+      (pcheck ([u8array? arr])
+              (let* ([len (u8array-length arr)]
+                     [vec (make-bytevector len)])
+                (let loop ([i 0])
+                  (if (fx= i len)
+                      vec
+                      (begin (bytevector-u8-set! vec i (u8array-ref arr i))
+                             (loop (fx1+ i)))))))))
 
 
   (define-syntax gen-array-record-writer
