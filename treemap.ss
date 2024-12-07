@@ -154,6 +154,12 @@
   #|doc
   Return the the list of all key/value pairs in the treemap such that
   for each pair of key and value, (pred key value) returns #t.
+
+  By default the items satisfying `pred` are returned in a list.
+
+  If `collect` is given, it is applied to every key and value pair that satisfies `pred`
+  in the treemap. This is useful when collecting the desired key and value pairs in custom
+  data structures.
   |#
   (define-who treemap-search*
     (case-lambda
