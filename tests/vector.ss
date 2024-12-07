@@ -666,3 +666,37 @@
        (equal? '#(2 3 4 5 6) (vslice vv 0 5)))
 
      )
+
+
+(mat *vfilter
+
+     (error? (vfilter))
+     (error? (fxvfilter))
+     (error? (flvfilter))
+
+     (error? (vfilter   'bla))
+     (error? (fxvfilter 'bla))
+     (error? (flvfilter 'bla))
+
+     (error? (vfilter   'bla (vector)))
+     (error? (fxvfilter 'bla (fxvector)))
+     (error? (flvfilter 'bla (flvector)))
+
+     (error? (vfilter   (lambda (x) #t) 42))
+     (error? (fxvfilter (lambda (x) #t) 42))
+     (error? (flvfilter (lambda (x) #t) 42))
+
+     (let* ([v (random-vector 1000)] [ls (vector->list v)])
+       (equal? (vfilter odd? v)
+               (list->vector (filter odd? ls))))
+
+     (let* ([v (random-fxvector 1000)] [ls (fxvector->list v)])
+       (equal? (fxvfilter odd? v)
+               (list->fxvector (filter odd? ls))))
+
+     (let* ([v (random-flvector 1000)] [ls (flvector->list v)] [r (random 99999)]
+            [pred (lambda (x) (< x r))])
+       (equal? (flvfilter pred v)
+               (list->flvector (filter pred ls))))
+
+     )

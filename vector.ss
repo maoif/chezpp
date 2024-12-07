@@ -8,6 +8,7 @@
           flvector-map/i flvector-for-each/i flvector-map! flvector-map!/i
 
           vslice fxvslice flvslice
+          vfilter fxvfilter flvfilter
 
           vormap vandmap vexists vfor-all
           fxvormap fxvandmap fxvexists fxvfor-all
@@ -994,6 +995,48 @@
                           (loop (fx1- i))))]
                      [(= len 2) (swap! 0 1)]))
              vec))
+
+
+  (define-vector-procedure (v fxv flv)
+    (filter pred vec)
+    (vpcheck (vec)
+             (pcheck ([procedure? pred])
+                     ;; use a bitvec to record index of nice items
+                     (let* ([len (vlength vec)]
+                            [bitvec (make-bytevector (add1 (div len 8)) 0)])
+                       (define setbit!
+                         (lambda (x)
+                           (let-values ([(i1 i2) (div-and-mod x 8)])
+                             (let ([v (bytevector-u8-ref bitvec i1)])
+                               (bytevector-u8-set! bitvec i1 (logbit1 i2 v))))))
+                       (define bitset?
+                         (lambda (x)
+                           (let-values ([(i1 i2) (div-and-mod x 8)])
+                             (let ([v (bytevector-u8-ref bitvec i1)])
+                               (logbit? i2 v)))))
+                       (define popcount
+                         (lambda ()
+                           (let loop ([i 0] [p 0])
+                             (if (fx= i (bytevector-length bitvec))
+                                 p
+                                 (loop (fx1+ i)
+                                       (+ p (fxpopcount (bytevector-u8-ref bitvec i))))))))
+                       (let loop ([i 0])
+                         (if (fx= i len)
+                             ;; fill newvec
+                             (let ([newvec (vmake (popcount))])
+                               (let lp ([i 0] [j 0])
+                                 (if (fx= i len)
+                                     newvec
+                                     (if (bitset? i)
+                                         (begin
+                                           (vset! newvec j (vref vec i))
+                                           (lp (fx1+ i) (fx1+ j)))
+                                         (lp (fx1+ i) j)))))
+                             (begin
+                               (when (pred (vref vec i))
+                                 (setbit! i))
+                               (loop (fx1+ i)))))))))
 
 
   #|doc
