@@ -341,11 +341,11 @@
 
      (let* ([ls (iota 10)]
             [dl (apply dlist ls)])
-       (andmap (lambda (x) (dlist-contains? dl x)) ls))
+       (bool (andmap (lambda (x) (dlist-contains? dl x)) ls)))
 
      (let* ([ls (random-list 20 30)]
             [dl (apply dlist ls)])
-       (andmap (lambda (x) (dlist-contains? dl x)) ls))
+       (bool (andmap (lambda (x) (dlist-contains? dl x)) ls)))
      )
 
 
@@ -356,8 +356,8 @@
 
      (let* ([ls (iota 10)]
             [dl (apply dlist ls)])
-       (and (dlist-contains/p? odd? dl)
-            (dlist-contains/p? even? dl)))
+       (bool (and (dlist-contains/p? odd? dl)
+                  (dlist-contains/p? even? dl))))
 
      )
 
@@ -630,6 +630,39 @@
        (dlist-slice! dl -1 -2 -1)
        (equal? ls
                (dlist->list dl)))
+
+     )
+
+
+(mat dlist-stack-ops
+
+     (error? (dlist-pop! (dlist)))
+     (error? (dlist-pop-back! (dlist)))
+
+     (let* ([ls (iota 100)] [dl (dlist)])
+       (for-each (lambda (x) (dlist-push! dl x)) ls)
+       (equal? (dlist->list dl) (reverse ls)))
+
+     (let* ([ls (iota 100)] [dl (dlist)])
+       (for-each (lambda (x) (dlist-push! dl x)) ls)
+       (equal? (let loop ([res '()])
+                 (if (dlist-empty? dl)
+                     res
+                     (loop (cons (dlist-pop! dl) res))))
+               ls))
+
+
+     (let* ([ls (iota 100)] [dl (dlist)])
+       (for-each (lambda (x) (dlist-push-back! dl x)) ls)
+       (equal? (dlist->list dl) ls))
+
+     (let* ([ls (iota 100)] [dl (dlist)])
+       (for-each (lambda (x) (dlist-push-back! dl x)) ls)
+       (equal? (let loop ([res '()])
+                 (if (dlist-empty? dl)
+                     res
+                     (loop (cons (dlist-pop-back! dl) res))))
+               ls))
 
      )
 

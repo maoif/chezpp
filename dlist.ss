@@ -7,6 +7,8 @@
           dlist-append dlist-append!
           dlist-slice dlist-slice!
 
+          dlist-push! dlist-pop! dlist-push-back! dlist-pop-back!
+
           dlist-map dlist-map/i dlist-map! dlist-map/i!
           dlist-for-each dlist-for-each/i
           dlist-map-rev dlist-map/i-rev dlist-for-each-rev dlist-for-each/i-rev
@@ -311,6 +313,8 @@
 
   #|doc
   Return whether the dlist contains the given item.
+  If it does, the procedure returns the index of the given item;
+  otheriwse it returns #f.
   Items are compared using `equal?`.
   |#
   (define-who dlist-contains?
@@ -318,29 +322,30 @@
       (pcheck ([dlist? dl])
               (if (fx= 0 (dlist-length dl))
                   #f
-                  (let loop ([n (dlist-first dl)])
+                  (let loop ([i 0] [n (dlist-first dl)])
                     (if (null-dnode? n)
                         #f
                         (if (equal? v (dnode-value n))
-                            #t
-                            (loop (dnode-right n)))))))))
+                            i
+                            (loop (fx1+ i) (dnode-right n)))))))))
 
 
   #|doc
-  Return whether the dlist contains the given item.
-  Items are compared using the given procedure `=?`, hence "/p" in the name.
+  Return whether the dlist contains an item that satisfies the predicate `=?`.
+  If it does, the procedure returns the index of the given item;
+  otheriwse it returns #f.
   |#
   (define-who dlist-contains/p?
     (lambda (=? dl)
       (pcheck ([dlist? dl] [procedure? =?])
               (if (fx= 0 (dlist-length dl))
                   #f
-                  (let loop ([n (dlist-first dl)])
+                  (let loop ([i 0] [n (dlist-first dl)])
                     (if (null-dnode? n)
                         #f
                         (if (=? (dnode-value n))
-                            #t
-                            (loop (dnode-right n)))))))))
+                            i
+                            (loop (fx1+ i) (dnode-right n)))))))))
 
 
   #|doc
@@ -558,6 +563,55 @@
   (define-who dlist-sort!
     (lambda (dl <)
       (todo)))
+
+
+
+;;;; stack ops
+
+
+  #|doc
+  Add the item `v` to the front of the dlist `dl`.
+  |#
+  (define-who dlist-push!
+    (lambda (dl v)
+      (pcheck ([dlist? dl]) (dlist-add! dl 0 v))))
+
+
+  #|doc
+  Remove the first item from the dlist `dl` and return it.
+  It is an error if the dlist is empty.
+  |#
+  (define-who dlist-pop!
+    (lambda (dl)
+      (pcheck ([dlist? dl])
+              (if (fx= 0 (dlist-length dl))
+                  (errorf who "dlist is empty")
+                  (let ([v (dlist-ref dl 0)])
+                    (dlist-delete! dl 0)
+                    v)))))
+
+
+  #|doc
+  Add the item `v` to the back of the dlist `dl`.
+  |#
+  (define-who dlist-push-back!
+    (lambda (dl v) (pcheck ([dlist? dl]) (dlist-add! dl v))))
+
+
+  #|doc
+  Remove the last item from the dlist `dl` and return it.
+  It is an error if the dlist is empty.
+  |#
+  (define-who dlist-pop-back!
+    (lambda (dl)
+      (pcheck ([dlist? dl])
+              (let* ([len (dlist-length dl)] [i (fx1- len)])
+                (if (fx= 0 len)
+                    (errorf who "dlist is empty")
+                    (let ([v (dlist-ref dl i)])
+                      (dlist-delete! dl i)
+                      v))))))
+
 
 
 
