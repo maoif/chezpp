@@ -2,6 +2,7 @@
   (export array make-array array? array-length array-empty?
           array-ref array-add! array-delete! array-set! array-clear!
           array-slice array-slice! array-copy!
+          array-push! array-pop! array-push-back! array-pop-back!
           array-filter array-filter! array-partition
           array-append array-append!
           array-reverse array-reverse!
@@ -15,6 +16,7 @@
           fxarray make-fxarray fxarray? fxarray-length fxarray-empty?
           fxarray-ref fxarray-add! fxarray-delete! fxarray-set! fxarray-clear!
           fxarray-slice fxarray-slice! fxarray-copy!
+          fxarray-push! fxarray-pop! fxarray-push-back! fxarray-pop-back!
           fxarray-filter fxarray-filter! fxarray-partition
           fxarray-append fxarray-append!
           fxarray-reverse fxarray-reverse!
@@ -27,6 +29,7 @@
           u8array make-u8array u8array? u8array-length u8array-empty?
           u8array-ref u8array-add! u8array-delete! u8array-set! u8array-clear!
           u8array-slice u8array-slice! u8array-copy!
+          u8array-push! u8array-pop! u8array-push-back! u8array-pop-back!
           u8array-filter u8array-filter! u8array-partition
           u8array-append u8array-append!
           u8array-reverse u8array-reverse!
@@ -420,7 +423,7 @@
                            [else (assert-unreachable)])]
              [cap (vlength vec)]
              [newvec (vmake (fx* (if (fx= cap 0) *mincap* cap) (array-incr-factor arr)) 0)])
-        (printf "growing array from ~a to ~a~n" cap (vlength newvec))
+        ;;(printf "growing array from ~a to ~a~n" cap (vlength newvec))
         (vcopy! vec 0 newvec 0 len)
         (array-vec-set! arr newvec))))
 
@@ -803,6 +806,68 @@
   (define-array-procedure (a fxa u8a)
     (sort! arr <)
     (todo))
+
+
+
+  #|doc
+  Add the item `v` to the front of the array `arr`.
+  |#
+  (define-array-procedure (a fxa u8a)
+    (push! arr v)
+    (apcheck (arr)
+             (aval? v)
+             (let* ([len (alength arr)] [vec (array-vec arr)] [cap (vlength vec)])
+               (when (fx= len cap) ($grow-array! arr))
+               (vcopy! (array-vec arr) 0 (array-vec arr) 1 len)
+               (vset! (array-vec arr) 0 v)
+               (array-length-set! arr (fx1+ len)))))
+
+
+  #|doc
+  Remove the first item from the array `arr` and return it.
+  It is an error if the array is empty.
+  |#
+  (define-array-procedure (a fxa u8a)
+    (pop! arr)
+    (apcheck (arr)
+             (let ([len (alength arr)])
+               (if (fx= len 0)
+                   (errorf who "array is empty")
+                   (let* ([len (alength arr)] [vec (array-vec arr)]
+                          [v (vref vec 0)])
+                     (vcopy! vec 1 vec 0 (fx1- len))
+                     (array-length-set! arr (fx1- len))
+                     v)))))
+
+
+  #|doc
+  Add the item `v` to the back of the array `arr`.
+  |#
+  (define-array-procedure (a fxa u8a)
+    (push-back! arr v)
+    (apcheck (arr)
+             (aval? v)
+             (let* ([len (alength arr)] [vec (array-vec arr)] [cap (vlength vec)])
+               (when (fx= len cap) ($grow-array! arr))
+               (vset! (array-vec arr) len v)
+               (array-length-set! arr (fx1+ len)))))
+
+
+  #|doc
+  Remove the last item from the array `arr` and return it.
+  It is an error if the array is empty.
+  |#
+  (define-array-procedure (a fxa u8a)
+    (pop-back! arr)
+    (apcheck (arr)
+             (let ([len (alength arr)])
+               (if (fx= len 0)
+                   (errorf who "array is empty")
+                   (let* ([len (alength arr)] [vec (array-vec arr)]
+                          [v (vref vec (fx1- len))])
+                     (array-length-set! arr (fx1- len))
+                     v)))))
+
 
 
 
