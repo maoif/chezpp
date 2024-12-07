@@ -297,6 +297,95 @@
      )
 
 
+(mat fxarray-copy!
+
+
+;;;; same fxarray
+
+     ;; disjoint, left to right
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 0 arr 3 3)
+       (equal? (fxarray 0 1 2 0 1 2 6 7 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 0 arr 5 3)
+       (equal? (fxarray 0 1 2 3 4 0 1 2 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 0 arr 5 5)
+       (equal? (fxarray 0 1 2 3 4 0 1 2 3 4) arr))
+
+     ;; disjoint, right to left
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 5 arr 0 3)
+       (equal? (fxarray 5 6 7 3 4 5 6 7 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 3 arr 0 3)
+       (equal? (fxarray 3 4 5 3 4 5 6 7 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 5 arr 0 5)
+       (equal? (fxarray 5 6 7 8 9 5 6 7 8 9) arr))
+
+     ;; overlapping, left to right
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 0 arr 2 3)
+       (equal? (fxarray 0 1 0 1 2 5 6 7 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 0 arr 0 5)
+       (equal? (fxarray 0 1 2 3 4 5 6 7 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 0 arr 1 5)
+       (equal? (fxarray 0 0 1 2 3 4 6 7 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 0 arr 3 5)
+       (equal? (fxarray 0 1 2 0 1 2 3 4 8 9) arr))
+
+     ;; overlapping , right to left
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 2 arr 0 3)
+       (equal? (fxarray 2 3 4 3 4 5 6 7 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 2 arr 0 5)
+       (equal? (fxarray 2 3 4 5 6 5 6 7 8 9) arr))
+
+     (let ([arr (apply fxarray (iota 10))])
+       (fxarray-copy! arr 5 arr 3 5)
+       (equal? (fxarray 0 1 2 5 6 7 8 9 8 9) arr))
+
+
+
+;;;; different fxarray
+
+     (let ([arr (apply fxarray (iota 10))]
+           [arr1 (make-fxarray 10 -1)])
+       (fxarray-copy! arr 0 arr1 0 3)
+       (equal? (fxarray 0 1 2 -1 -1 -1 -1 -1 -1 -1) arr1))
+
+     (let ([arr (apply fxarray (iota 10))]
+           [arr1 (make-fxarray 10 -1)])
+       (fxarray-copy! arr 0 arr1 0 5)
+       (equal? (fxarray 0 1 2 3 4 -1 -1 -1 -1 -1) arr1))
+
+     (let ([arr (apply fxarray (iota 10))]
+           [arr1 (make-fxarray 10 -1)])
+       (fxarray-copy! arr 0 arr1 3 5)
+       (equal? (fxarray -1 -1 -1 0 1 2 3 4 -1 -1) arr1))
+
+     (let ([arr (apply fxarray (iota 10))]
+           [arr1 (make-fxarray 10 -1)])
+       (fxarray-copy! arr 2 arr1 0 5)
+       (equal? (fxarray 2 3 4 5 6 -1 -1 -1 -1 -1) arr1))
+
+
+     )
+
+
 (mat array<->vector
 
      (error? (array->vector))
