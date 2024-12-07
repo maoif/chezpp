@@ -863,6 +863,9 @@
                                   [else (vmake 0)])))))])
 
 
+  #|doc
+  Return a newly allocated vector consisting of the items of `vec` in reverse order.
+  |#
   (define-vector-procedure (v fxv flv)
     (reverse vec)
     (vpcheck (vec)
@@ -874,6 +877,9 @@
                             (loop (add1 i))))))))
 
 
+  #|doc
+  Reverse the items in the vector in place, then return the vector.
+  |#
   (define-vector-procedure (v fxv flv)
     (reverse! vec)
     (vpcheck (vec)
@@ -887,7 +893,8 @@
                               [right (vref vec righti)])
                          (vset! vec i right)
                          (vset! vec righti left)
-                         (loop (add1 i))))))))))
+                         (loop (add1 i)))))))
+               vec)))
 
 
   #|doc
@@ -997,6 +1004,11 @@
              vec))
 
 
+  #|doc
+  The procedure applies `pred` to each element of the  vector `vec` and
+  returns a new vector of the same type consisting of the elements of `vec`
+  for which `pred` returned a true value.
+  |#
   (define-vector-procedure (v fxv flv)
     (filter pred vec)
     (vpcheck (vec)
@@ -1098,8 +1110,15 @@
 
 
   #|doc
-  Copy items from `src` from indices src-start, ..., src-start + k - 1
+  Copy items in `src` from indices src-start, ..., src-start + k - 1
   to consecutive indices in `tgt` starting at `tgt-start`.
+
+  `src` and `tgt` must be vectors of the same type, and `tgt` must be mutable.
+  `src-start`, `tgt-start`, and `k` must be exact nonnegative integers.
+  The sum of `src-start` and `k` must not exceed the length of `src`,
+  and the sum of `tgt-start` and `k` must not exceed the length of `tgt`.
+
+  `src` and `tgt` may or may not be the same vector.
   |#
   (define-vector-procedure (v fxv flv)
     (copy! src src-start tgt tgt-start k)

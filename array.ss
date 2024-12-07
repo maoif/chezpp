@@ -759,6 +759,17 @@
              (todo who))])
 
 
+  #|doc
+  Copy items in `src` from indices src-start, ..., src-start + k - 1
+  to consecutive indices in `tgt` starting at `tgt-start`.
+
+  `src` and `tgt` must be arrays of the same type.
+  `src-start`, `tgt-start`, and `k` must be exact nonnegative integers.
+  The sum of `src-start` and `k` must not exceed the length of `src`,
+  and the sum of `tgt-start` and `k` must not exceed the length of `tgt`.
+
+  `src` and `tgt` may or may not be the same array.
+  |#
   (define-array-procedure (a fxa u8a)
     (copy! src src-start tgt tgt-start k)
     (apcheck (src tgt)
