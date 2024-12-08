@@ -34,6 +34,8 @@
           vextreme fxvextreme flvextreme
           vmax vmin fxvmax fxvmin flvmax flvmin
           vavg fxvavg flvavg
+          viota fxviota
+          vnums fxvnums flvnums
 
           random-vector random-fxvector random-flvector)
   (import (chezscheme)
@@ -1154,6 +1156,75 @@
                       (unless (fx= k 0)
                         (vset! tgt j (vref src i))
                         (loop (fx1+ i) (fx1+ j) (fx1- k)))))))))
+
+
+  #|doc
+  Similar to `iota`, generate a vector of the corresponding type
+  consisting of integers from 0 to n-1.
+  |#
+  (define-vector-procedure (v fxv)
+    (iota n)
+    (pcheck ([natural? n])
+            (let ([v (vmake n)])
+              (let loop ([i 0])
+                (if (fx= i n)
+                    v
+                    (begin (vset! v i i)
+                           (loop (fx1+ i))))))))
+
+
+  #|doc
+  Generate a vector of the corresponding type consisting of integers
+  start, start+step*1, start+step*2, ...
+
+  `start`, `stop` and `step` must be integers that meet the following requirements:
+  If `start` is less than `stop`, then `step` must be greater than 0,
+  in which case the sequence terminates when the value is greater than or equal to `stop`;
+  If `start` is greater than `stop`, then `step` must be less than 0,
+  in which case the sequence terminates when the value is less than or equal to `stop`.
+  |#
+  (define-vector-procedure (v fxv) nums
+    [(stop) (thisproc 0 stop 1)]
+    [(start stop) (thisproc start stop 1)]
+    [(start stop step)
+     (pcheck ([integer? start stop step])
+             (if (or (and (<= start stop) (> step 0))
+                     (and (>= start stop) (< step 0)))
+                 (let* ([len (ceiling (/ (fx- stop start) step))]
+                        [vec (vmake len 0)])
+                   (let loop ([i 0] [x start])
+                     (if (fx= i len)
+                         vec
+                         (begin (vset! vec i x)
+                                (loop (fx1+ i) (+ x step))))))
+                 (errorf procname "invalid range: ~a, ~a, ~a" start stop step)))])
+
+
+  #|doc
+  Generate a flvector consisting of flonums
+  start, start+step*1, start+step*2, ...
+
+  `start`, `stop` and `step` must be flonums that meet the following requirements:
+  If `start` is less than `stop`, then `step` must be greater than 0,
+  in which case the sequence terminates when the value is greater than or equal to `stop`;
+  If `start` is greater than `stop`, then `step` must be less than 0,
+  in which case the sequence terminates when the value is less than or equal to `stop`.
+  |#
+  (define-vector-procedure (flv) nums
+    [(stop) (thisproc 0 stop 1)]
+    [(start stop) (thisproc start stop 1)]
+    [(start stop step)
+     (pcheck ([flonum? start stop step])
+             (if (or (and (<= start stop) (> step 0.0))
+                     (and (>= start stop) (< step 0.0)))
+                 (let* ([len (flonum->fixnum (ceiling (/ (- stop start) step)))]
+                        [vec (vmake len 0.0)])
+                   (let loop ([i 0] [x start])
+                     (if (fx= i len)
+                         vec
+                         (begin (vset! vec i x)
+                                (loop (fx1+ i) (+ x step))))))
+                 (errorf procname "invalid range: ~a, ~a, ~a" start stop step)))])
 
 
   ;; aliases

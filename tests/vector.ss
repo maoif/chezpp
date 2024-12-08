@@ -700,3 +700,77 @@
                (list->flvector (filter pred ls))))
 
      )
+
+
+(mat *viota
+
+     (error? (viota 'x))
+     (error? (viota #f))
+
+     (error? (fxviota 'x))
+     (error? (fxviota #f))
+
+     (equal? (vector->list (viota 10)) (iota 10))
+     (equal? (vector->list (viota 100)) (iota 100))
+
+     (equal? (fxvector->list (fxviota 10)) (iota 10))
+     (equal? (fxvector->list (fxviota 100)) (iota 100))
+     )
+
+
+(mat *vnums
+
+     (error? (vnums 'x 'x 'x))
+     (error? (vnums 0 10  -1))
+     (error? (vnums 0 -10 1))
+
+     (error? (fxvnums 'x 'x 'x))
+     (error? (fxvnums 0 10  -1))
+     (error? (fxvnums 0 -10 1))
+
+     (equal? (vnums 0 10) (viota 10))
+     (equal? (fxvnums 0 10) (fxviota 10))
+
+     ;; v
+     (equal? (vnums 0 100 2)
+             (list->vector (nums 0 100 2)))
+     (equal? (vnums 0 100 4)
+             (list->vector (nums 0 100 4)))
+     (equal? (vnums 50 100 4)
+             (list->vector (nums 50 100 4)))
+     (equal? (vnums 0 -100 -2)
+             (list->vector (nums 0 -100 -2)))
+     (equal? (vnums 0 -100 -4)
+             (list->vector (nums 0 -100 -4)))
+     (equal? (vnums -50 -100 -4)
+             (list->vector (nums -50 -100 -4)))
+
+     ;; fx
+     (equal? (fxvnums 0 100 2)
+             (list->fxvector (nums 0 100 2)))
+     (equal? (fxvnums 0 100 4)
+             (list->fxvector (nums 0 100 4)))
+     (equal? (fxvnums 50 100 4)
+             (list->fxvector (nums 50 100 4)))
+     (equal? (fxvnums 0 -100 -2)
+             (list->fxvector (nums 0 -100 -2)))
+     (equal? (fxvnums 0 -100 -4)
+             (list->fxvector (nums 0 -100 -4)))
+     (equal? (fxvnums -50 -100 -4)
+             (list->fxvector (nums -50 -100 -4)))
+
+     ;; fl
+     (equal? (flvnums 0.0 100.2 2.5)
+             (list->flvector (nums 0.0 100.2 2.5)))
+     (equal? (flvnums 0.0 100.0 4.0)
+             (list->flvector (nums 0.0 100.0 4.0)))
+     (equal? (flvnums 50.0 100.0 4.0)
+             (list->flvector (nums 50.0 100.0 4.0)))
+     (equal? (flvnums 0.0 -100.7 -2.7)
+             (list->flvector (nums 0.0 -100.7 -2.7)))
+     (equal? (flvnums 0.0 -100.3 -4.3)
+             (list->flvector (nums 0.0 -100.3 -4.3)))
+     (equal? (flvnums -50.0 -100.0 -4.0)
+             (list->flvector (nums -50.0 -100.0 -4.0)))
+
+     )
