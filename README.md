@@ -14,3 +14,9 @@ Functionalities:
 - string: more string operations
 - utils: miscellaneous useful procedures like type checking and random data generator
 - vector: more vector/fxvector/flvector operations
+- data structures:
+  - array: dynamic vector
+  - dlist: doubly-linked list
+  - hashset: unordered set using hash function
+  - treemap: ordered map based on reb-black tree
+  - treeset: ordered set based on reb-black tree
