@@ -1,11 +1,27 @@
 (import (chezpp hashset)
         (chezpp list)
-        (chezpp vector))
+        (chezpp vector)
+        (chezpp utils))
+
+(define v10000  (fxvshuffle! (fxviota 10000)))
+(define v100000 (fxvshuffle! (fxviota 100000)))
 
 
-;; TODO add, clear, delete
-;; TODO eq,eqv,symbol hashset
+(mat hashset-basics
 
+     (hashset-empty? (hashset))
+     (hashset-empty? (make-eq-hashset))
+     (hashset-empty? (make-eqv-hashset))
+     (hashset-empty? (make-symbol-hashset))
+
+     (let ([hs (apply hashset (iota 100))])
+       (= 100 (hashset-size hs)))
+
+     (let ([hs (apply hashset (iota 100))])
+       (hashset-clear! hs)
+       (= 0 (hashset-size hs)))
+
+     )
 
 
 (mat hashset-equal?
@@ -16,41 +32,144 @@
      (not (equal? (apply hashset (iota 20))
                   (apply hashset (iota 10))))
 
-     (let ([ts1 (make-hashset)] [ts2 (make-hashset)])
-       (fxvfor-each (lambda (x) (treeset-add! ts1 x)) v100000)
-       (fxvfor-each (lambda (x) (treeset-add! ts2 x)) (fxvshuffle! v100000))
-       (equal? ts1 ts1))
-
+     (let ([hs1 (make-hashset)] [hs2 (make-hashset)])
+       (fxvfor-each (lambda (x) (hashset-add! hs1 x)) v100000)
+       (fxvfor-each (lambda (x) (hashset-add! hs2 x)) (fxvshuffle! v100000))
+       (equal? hs1 hs1))
 
      )
 
 
+(mat hashset-delete!
+
+     (let ([hs (make-hashset)])
+       (fxvfor-each (lambda (x) (hashset-add! hs x)) v10000)
+       (fxvfor-each (lambda (x) (when (odd? x) (hashset-delete! hs x))) v10000)
+       (and (= (hashset-size hs) (fx/ (fxvector-length v10000) 2))
+            (fxvandmap (lambda (x)
+                         (if (even? x) (hashset-contains? hs x) (not (hashset-contains? hs x))))
+                       v10000)))
+
+     (let ([hs (make-hashset)])
+       (fxvfor-each (lambda (x) (hashset-add! hs x)) v100000)
+       (fxvfor-each (lambda (x) (when (odd? x) (hashset-delete! hs x))) v100000)
+       (and (= (hashset-size hs) (fx/ (fxvector-length v100000) 2))
+            (fxvandmap (lambda (x)
+                         (if (even? x) (hashset-contains? hs x) (not (hashset-contains? hs x))))
+                       v100000)))
+     )
+
+
 (mat hashset-contains?
-     #t)
+
+     (error? (hashset-contains? 'bla 'bla))
+
+     (let ([hs1 (apply hashset (iota 10))])
+       (bool (andmap (lambda (x) (hashset-contains? hs1 x)) (iota 10))))
+
+     (let ([hs1 (hashset 10 11 12)])
+       (not (hashset-contains? hs1 1)))
+
+     )
 
 
 (mat hashset-contains/p?
-     #t)
+
+     (error? (hashset-contains/p? 'bla 'bla))
+     (error? (hashset-contains/p? (hashset) 'bla))
+
+     (let ([hs1 (hashset 10 11 12)])
+       (and (hashset-contains/p? hs1 odd?)
+            (hashset-contains/p? hs1 even?)))
+
+     (let ([hs1 (hashset 2 4 6 8)])
+       (not (hashset-contains/p? hs1 odd?)))
+
+     )
 
 
 (mat hashset-search
-     #t)
+
+     (error? (hashset-search 'bla 'bla))
+     (error? (hashset-search (hashset) 'bla))
+
+     (let ([hs1 (hashset 10 11 12)])
+       (and (= 11 (hashset-search hs1 odd?))
+            (= 10 (hashset-search hs1 even?))))
+
+     (let ([hs1 (hashset 0 2 4 6)])
+       (not (hashset-search hs1 odd?)))
+
+     )
 
 
 (mat hashset-search*
-     #t)
+
+     (error? (hashset-search* 'bla 'bla))
+     (error? (hashset-search* (hashset) 'bla))
+
+     (let ([hs (apply hashset (nums 0 100))])
+       (and (equal? (hashset-search* hs odd?)
+                    (nums 1 100 2))
+            (equal? (hashset-search* hs even?)
+                    (nums 0 100 2))))
+
+
+     (error? (hashset-search* 'bla 'bla 'bla))
+     (error? (hashset-search* (hashset) odd? 'bla))
+
+     (let ([hs (apply hashset (nums 0 100))]
+           [hs1 (hashset)] [hs2 (hashset)])
+       (hashset-search* hs odd? (lambda (x) (hashset-add! hs1 x)))
+       (hashset-search* hs even? (lambda (x) (hashset-add! hs2 x)))
+       (and (equal? hs1 (apply hashset (nums 1 100 2)))
+            (equal? hs2 (apply hashset (nums 0 100 2)))))
+
+     )
 
 
 (mat hashset-filter
-     #t)
+
+     (error? (hashset-filter))
+     (error? (hashset-filter 'bla 'bla))
+     (error? (hashset-filter (hashset) 42))
+     (error? (hashset-filter 42 (hashset)))
+
+     (let ([hs (apply hashset (nums 0 100))])
+       (equal? (hashset-filter odd? hs)
+               (apply hashset (nums 1 100 2))))
+
+     )
 
 
 (mat hashset-filter!
-     #t)
+
+     (error? (hashset-filter!))
+     (error? (hashset-filter! 'bla 'bla))
+     (error? (hashset-filter! (hashset) 42))
+     (error? (hashset-filter! 42 (hashset)))
+
+     (let* ([hs (apply hashset (nums 0 100))]
+            [hs1 (hashset-filter! odd? hs)])
+       (and (equal? hs1 (apply hashset (nums 1 100 2)))
+            (eq? hs hs1)))
+
+     )
 
 
 (mat hashset-partition
-     #t)
+
+     (error? (hashset-partition))
+     (error? (hashset-partition 'bla 'bla))
+     (error? (hashset-partition (hashset) 42))
+     (error? (hashset-partition 42 (hashset)))
+
+     (let* ([hs (apply hashset (nums 0 100))])
+       (let-values ([(T F) (hashset-partition odd? hs)])
+         (and (equal? T (apply hashset (nums 1 100 2)))
+              (equal? F (apply hashset (nums 0 100 2))))))
+
+     )
 
 
 (mat hashset-map
