@@ -4,6 +4,7 @@
 
           treeset-contains? treeset-contains/p?
           treeset-filter treeset-filter! treeset-partition
+          treeset-search treeset-search*
 
           treeset-successor treeset-predecessor
           treeset-min treeset-max
@@ -12,6 +13,8 @@
           treeset-for-each treeset-for-each/i
           treeset-fold-left treeset-fold-left/i
           treeset-fold-right treeset-fold-right/i
+
+          treeset+ treeset- treeset& treeset^
 
           treeset->list list->treeset
           treeset->vector vector->treeset)
@@ -125,6 +128,37 @@
 
 
   #|doc
+  Return the 1st item in the treeset `ts` that satisfies the predicate `pred`.
+  If no such item exists, #f is returned.
+  |#
+  (define-who treeset-search
+    (lambda (ts pred)
+      (pcheck ([treeset? ts] [procedure? pred])
+              (K? (rbtree-search who ts (lambda (k v) (pred k)))))))
+
+
+  #|doc
+  Return the the list of items in the treeset `ts` that satify the predicate `pred`.
+
+  By default the items satisfying `pred` are returned in a list.
+
+  If `collect` is given, it is applied to every item that satisfies `pred`
+  in the treeset. This is useful when collecting the desired items in custom
+  data structures.
+  |#
+  (define-who treeset-search*
+    (case-lambda
+      [(ts pred)
+       (pcheck ([treeset? ts] [procedure? pred])
+               (let ([lb (make-list-builder)])
+                 (rbtree-visit who (lambda (k v) (when (pred k) (lb k))) ts)
+                 (lb)))]
+      [(ts pred collect)
+       (pcheck ([treeset? ts] [procedure? pred collect])
+               (rbtree-visit who (lambda (k v) (when (pred k) (collect k))) ts))]))
+
+
+  #|doc
   Return the successor of `v` in the treeset `ts`.
 
   If the successor of `v` does not exist, #f is returned.
@@ -197,9 +231,9 @@
 
 
   #|doc
-  Apply `pred` to every item in `tm` and return two values,
-  the first one a treemap of the keys/values of `tm` for which `(pred k v)` returns #t,
-  the second one a treemap of the keys/values of `tm` for which `(pred k v)` returns #f.
+  Apply `pred` to every item in treeset `ts` and return two values,
+  the first one a treemap of the keys/values of `ts` for which `(pred k v)` returns #t,
+  the second one a treemap of the keys/values of `ts` for which `(pred k v)` returns #f.
   |#
   (define-who treeset-partition
     (lambda (pred ts)
@@ -221,47 +255,108 @@
 
 
   #|doc
-  Union.
+  Compute the union of the treesets, i.e., the treeset that contains all items
+  in all the given treesets.
+  If only one treeset is given, it is returned immediately.
+
+  The `=?` and `<?` procedures of the returned treeset is taken from the first input treeset.
   |#
   (define-who treeset+
     (lambda (ts . ts*)
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (todo)))))
+                  (pcheck ([all-treesets? ts*])
+                          (let ([newts (make-treeset (rbtree-=? ts) (rbtree-<? ts))])
+                            (for-each (lambda (ts)
+                                        (rbtree-visit who
+                                                      (lambda (k v)
+                                                        (rbtree-set! who newts k V))
+                                                      ts))
+                                      (cons ts ts*))
+                            newts))))))
 
 
   #|doc
-  Difference.
+  Compute the difference of the treesets, i.e., the treeset that contains those items
+  that are in the first treeset, but are not in the rest of the treesets.
+  If only one treeset is given, it is returned immediately.
+
+  The `=?` and `<?` procedures of the returned treeset is taken from the first input treeset.
   |#
   (define-who treeset-
     (lambda (ts . ts*)
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (todo)))))
+                  (pcheck ([all-treesets? ts*])
+                          (let ([newts (make-treeset (rbtree-=? ts) (rbtree-<? ts))])
+                            (rbtree-visit who (lambda (k v) (rbtree-set! who newts k V)) ts)
+                            (for-each (lambda (ts)
+                                        (rbtree-visit who
+                                                      (lambda (k v)
+                                                        (when (rbtree-contains? who newts k)
+                                                          (rbtree-delete! who newts k)))
+                                                      ts))
+                                      ts*)
+                            newts))))))
 
 
   #|doc
-  Intersection.
+  Compute the intersection of the treesets, i.e., the treeset whose items are contained
+  in all given treesets.
+  If only one treeset is given, it is returned immediately.
+
+  The `=?` and `<?` procedures of the returned treeset is taken from the first input treeset.
   |#
   (define-who treeset&
     (lambda (ts . ts*)
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (todo)))))
+                  (pcheck ([all-treesets? ts*])
+                          (let ([newts (apply treeset+ ts ts*)] [lb (make-list-builder)])
+                            (rbtree-visit who
+                                          (lambda (k v)
+                                            (unless (andmap (lambda (ts) (rbtree-contains? who ts k))
+                                                            (cons ts ts*))
+                                              (lb k)))
+                                          newts)
+                            (for-each (lambda (k) (rbtree-delete! who newts k)) (lb))
+                            newts))))))
 
 
   #|doc
-  Disjoint union.
+  Compute the symmetric difference of the treesets, i.e., the difference of the union
+  and the intersection of the treesets.
+  If only one treeset is given, it is returned immediately.
+
+  The `=?` and `<?` procedures of the returned treeset is taken from the first input treeset.
   |#
   (define-who treeset^
     (lambda (ts . ts*)
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (todo)))))
+                  (let ([newts (make-treeset (rbtree-=? ts) (rbtree-<? ts))]
+                        [lb (make-list-builder)])
+                    ;; union
+                    (for-each (lambda (ts)
+                                (rbtree-visit who
+                                              (lambda (k v)
+                                                (rbtree-set! who newts k V))
+                                              ts))
+                              (cons ts ts*))
+                    ;; intersect
+                    (rbtree-visit who
+                                  (lambda (k v)
+                                    (when (andmap (lambda (ts) (rbtree-contains? who ts k))
+                                                  (cons ts ts*))
+                                      (lb k)))
+                                  newts)
+                    ;; diff
+                    (for-each (lambda (k) (rbtree-delete! who newts k)) (lb))
+                    newts)))))
 
 
 ;;;; imperative versions
@@ -300,7 +395,7 @@
 
 
   #|doc
-  Disjoint union.
+  symmetric difference
   |#
   (define-who treeset^!
     (lambda (ts . ts*)
