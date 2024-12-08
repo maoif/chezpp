@@ -1,5 +1,6 @@
 (library (chezpp hashset)
-  (export hashset hashset? make-hashset make-eq-hashset make-eqv-hashset
+  (export hashset hashset? hashset-empty? hashset-clear!
+          make-hashset make-eq-hashset make-eqv-hashset make-symbol-hashset
           hashset-add! hashset-delete! hashset-size hashset-contains? hashset-contains/p?
           hashset-filter hashset-filter! hashset-partition
           hashset-search hashset-search*
@@ -82,8 +83,8 @@
   |#
   (define make-symbol-hashset
     (case-lambda
-      [()  (mk-hashset (make-hashtable symbol-hash)   'others)]
-      [(k) (mk-hashset (make-hashtable symbol-hash k) 'others)]))
+      [()  (mk-hashset (make-hashtable symbol-hash symbol=?)   'others)]
+      [(k) (mk-hashset (make-hashtable symbol-hash symbol=? k) 'others)]))
 
 
   #|doc
@@ -94,6 +95,15 @@
       (let ([hs (make-eqv-hashset (length args))])
         (for-each (lambda (x) (hashset-add! hs x)) args)
         hs)))
+
+
+  #|doc
+  Return whether the hashset is empty.
+  |#
+  (define-who hashset-empty?
+    (lambda (hs)
+      (pcheck ([hashset? hs])
+              (= 0 (hashtable-size (hashset-ht hs))))))
 
 
   #|doc
@@ -251,7 +261,7 @@
                                   (lb (vector-ref v* i)))
                                 (loop (fx1+ i))))))))]
       [(hs pred collect)
-       (pcheck ([hashset? hs] [procedure? pred])
+       (pcheck ([hashset? hs] [procedure? pred collect])
                (let* ([ht (hashset-ht hs)] [v* (hashtable-keys ht)])
                  (let loop ([i 0])
                    (unless (fx= i (vector-length v*))
