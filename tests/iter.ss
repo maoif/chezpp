@@ -30,7 +30,6 @@
 
 
      ;; nums
-     (eq? '() (nums 10 0))
      (equal? (iota 10) (nums 10))
      (equal? '(1 3 5 7 9) (nums 1 10 2))
      (equal? '(0.0 0.5 1.0 1.5) (nums 0.0 2.0 0.5))

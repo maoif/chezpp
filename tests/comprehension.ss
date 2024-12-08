@@ -8,7 +8,7 @@
 
      ;; `for` returns void
      (eq? (void)
-          (for ([i (nums 10 2)])
+          (for ([i '()])
             #t))
 
      ;; single clause
