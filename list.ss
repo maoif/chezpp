@@ -378,17 +378,31 @@
               [x* (for-each lb x*)]))))))
 
 
-  (define nums
+  #|doc
+  Generate a list of of numbers: start, start+step*1, start+step*2, ...
+
+  `start`, `stop` and `step` must be numbers that meet the following requirements:
+  If `start` is less than `stop`, then `step` must be greater than 0,
+  in which case the sequence terminates when the value is greater than or equal to `stop`;
+  If `start` is greater than `stop`, then `step` must be less than 0,
+  in which case the sequence terminates when the value is less than or equal to `stop`.
+  |#
+  (define-who nums
     (case-lambda
       [(stop) (nums 0 stop 1)]
       [(start stop) (nums start stop 1)]
       [(start stop step)
-       (let ([lb (make-list-builder)])
-         (let loop ([n start])
-           (if (>= n stop)
-               (lb)
-               (begin (lb n)
-                      (loop (+ n step))))))]))
+       (pcheck ([number? start stop step])
+               (let ([stop? (cond
+                             [(and (<= start stop) (> step 0)) >=]
+                             [(and (>= start stop) (< step 0)) <=]
+                             [else (errorf who "invalid range: ~a, ~a, ~a" start stop step)])])
+                 (let ([lb (make-list-builder)])
+                   (let loop ([n start])
+                     (if (stop? n stop)
+                         (lb)
+                         (begin (lb n)
+                                (loop (+ n step))))))))]))
 
 
   #|doc
