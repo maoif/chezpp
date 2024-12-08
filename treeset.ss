@@ -433,9 +433,11 @@
                (rbtree-map1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
                (rbtree-map1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
                (apply rbtree-map1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0 ts*))]))
 
 
@@ -446,9 +448,11 @@
                (rbtree-map/i1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
                (rbtree-map/i1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
                (apply rbtree-map/i1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0 ts*))]))
 
 
@@ -459,9 +463,11 @@
                (rbtree-for-each1 who proc ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
                (rbtree-for-each1 who proc ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
                (apply rbtree-for-each1 who proc ts0 ts*))]))
 
 
@@ -472,9 +478,11 @@
                (rbtree-for-each/i1 who proc ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
                (rbtree-for-each/i1 who proc ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
                (apply rbtree-for-each/i1 who proc ts0 ts*))]))
 
 
@@ -488,9 +496,11 @@
                (rbtree-fold-left1 who proc acc ts0))]
       [(proc acc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
                (rbtree-fold-left1 who proc acc ts0 ts1))]
       [(proc acc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
                (apply rbtree-fold-left1 who proc acc ts0 ts*))]))
 
 
@@ -501,9 +511,11 @@
                (rbtree-fold-left/i1 who proc acc ts0))]
       [(proc acc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
                (rbtree-fold-left/i1 who proc acc ts0 ts1))]
       [(proc acc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
                (apply rbtree-fold-left/i1 who proc acc ts0 ts*))]))
 
 
@@ -514,9 +526,11 @@
                (rbtree-fold-right1 who proc acc ts0))]
       [(proc acc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
                (rbtree-fold-right1 who proc acc ts0 ts1))]
       [(proc acc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
                (apply rbtree-fold-right1 who proc acc ts0 ts*))]))
 
 
@@ -527,9 +541,11 @@
                (rbtree-fold-right/i1 who proc acc ts0))]
       [(proc acc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
                (rbtree-fold-right/i1 who proc acc ts0 ts1))]
       [(proc acc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
                (apply rbtree-fold-right/i1 who proc acc ts0 ts*))]))
 
 
