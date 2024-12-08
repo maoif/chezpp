@@ -169,7 +169,7 @@
                  (rbtree-visit who (lambda (k v) (when (pred k v) (lb (cons k v)))) tm)
                  (lb)))]
       [(tm pred collect)
-       (pcheck ([treemap? tm] [procedure? pred])
+       (pcheck ([treemap? tm] [procedure? pred collect])
                (rbtree-visit who (lambda (k v) (when (pred k v) (collect k v))) tm))]))
 
 

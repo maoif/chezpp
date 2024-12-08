@@ -155,7 +155,36 @@
 
 
 (mat treemap-search*
-     #t)
+
+     (error? (treemap-search* 'bla 'bla))
+     (error? (treemap-search* (treemap = <) 'bla))
+
+     (begin (define n100 (iota 100))
+            (define evens (nums 0 100 2))
+            (define odds  (nums 1 100 2))
+            (define pn100 (zip n100 n100))
+            (define pevens (zip evens evens))
+            (define podds  (zip odds odds))
+            #t)
+
+     (let ([tm (apply treemap = < pn100)])
+       (and (equal? (treemap-search* tm (lambda (k v) (odd? k)))
+                    podds)
+            (equal? (treemap-search* tm (lambda (k v) (even? k)))
+                    pevens)))
+
+
+     (error? (treemap-search* 'bla 'bla 'bla))
+     (error? (treemap-search* (treemap = <) odd? 'bla))
+
+     (let ([tm (apply treemap = < pn100)]
+           [tm1 (treemap = <)] [tm2 (treemap = <)])
+       (treemap-search* tm (lambda (k v) (odd? k))  (lambda (k v) (treemap-set! tm1 k v)))
+       (treemap-search* tm (lambda (k v) (even? k)) (lambda (k v) (treemap-set! tm2 k v)))
+       (and (equal? tm1 (apply treemap = < podds))
+            (equal? tm2 (apply treemap = < pevens))))
+
+     )
 
 
 (mat treemap-contains?
