@@ -294,3 +294,43 @@
      (equal? (nums 0 -5 -0.5) '(0 -0.5 -1.0 -1.5 -2.0 -2.5 -3.0 -3.5 -4.0 -4.5))
 
      )
+
+
+(mat list-last
+
+     (error? (list-last 1))
+     (error? (list-last '()))
+
+     (equal? 1 (list-last '(1)))
+     (equal? 1 (list-last '(2 1)))
+     (equal? 1 (list-last '(3 2 1)))
+
+     )
+
+
+(mat list-set!
+
+     (error? (list-set! '()))
+     (error? (list-set! '(1) -1 0))
+     (error? (list-set! '(1) 1  0))
+     (error? (list-set! '(1 2) 2 0))
+
+     (let ([ls (iota 5)])
+       (list-set! ls 4 55)
+       (println ls)
+       (equal? ls '(0 1 2 3 55)))
+
+     (let ([ls (list 1 2 3)])
+       (list-set! ls 0 11)
+       (list-set! ls 2 33)
+       (println ls)
+       (equal? ls '(11 2 33)))
+
+     ;; literal list not equal
+     (let ([ls '(1 2 3)])
+       (list-set! ls 0 11)
+       (list-set! ls 2 33)
+       (not (equal? ls '(11 2 33))))
+
+
+     )

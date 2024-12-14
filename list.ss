@@ -1,7 +1,7 @@
 (library (chezpp list)
   (export map! map/i map!/i for-each/i fold-left/i fold-right/i
           unique? unique
-          list-last
+          list-last list-set!
           make-list-builder
           zip zip! snoc!
           nums slice
@@ -298,6 +298,22 @@
                          (if (null? (cdr ls))
                              (car ls)
                              (loop (cdr ls))))))))
+
+
+  #|doc
+  Imperatively store the value `v` into list `ls` at index `i`.
+  It is an error if `i` is not a valid index of `ls`.
+  |#
+  (define-who list-set!
+    (lambda (ls i v)
+      (pcheck ([list? ls] [natural? i])
+              (let ([len (length ls)])
+                (when (>= i len)
+                  (errorf who "~a is not a valid index for ~a" i ls))
+                (let loop ([ls ls] [n 0])
+                  (if (fx= n i)
+                      (set-car! ls v)
+                      (loop (cdr ls) (fx1+ n))))))))
 
 
   (define zip
