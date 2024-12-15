@@ -138,25 +138,81 @@
 (mat array-contains?
 
 
-     #t)
+     (error? (array-contains? 42 42))
+     (error? (array-contains? (array)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (bool (andmap (lambda (x) (array-contains? arr x)) ls)))
+
+     (let* ([ls (random-list 20 30)]
+            [arr (apply array ls)])
+       (bool (andmap (lambda (x) (array-contains? arr x)) ls)))
+
+     )
 
 
 (mat array-contains/p?
 
+     (error? (array-contains/p? = 42))
+     (error? (array-contains/p? odd? (array)))
 
-     #t)
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (bool (and (array-contains/p? arr odd?)
+                  (array-contains/p? arr even?))))
+
+     )
 
 
 (mat array-search
 
+     (error? (array-search 42 42))
+     (error? (array-search odd? (array)))
 
-     #t)
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (and (= 0 (array-search arr even?))
+            (= 1 (array-search arr odd?))))
+
+     (let ([arr (array "1" "11" "111" "1111")])
+       (and (string=? "1"   (array-search arr (lambda (x) (= 1 (string-length x)))))
+            (string=? "111" (array-search arr (lambda (x) (= 3 (string-length x)))))
+            (string=? "11"  (array-search arr (lambda (x) (<= 2 (string-length x)))))))
+
+     )
 
 
 (mat array-search*
 
+     (error? (array-search* 42 42))
+     (error? (array-search* odd? (array)))
 
-     #t)
+
+     (let ([arr (array "1" "11" "111" "1111")])
+       (and (equal? '("1")
+                    (array-search* arr (lambda (x) (= 1 (string-length x)))))
+            (equal? '("111")
+                    (array-search* arr (lambda (x) (= 3 (string-length x)))))
+            (equal? '("11" "111" "1111")
+                    (array-search* arr (lambda (x) (<= 2 (string-length x)))))))
+
+     ;; custom collector
+     (let ([arr (array "1" "11" "111" "1111")])
+       (and (equal? (array "1")
+                    (let ([col (array)])
+                      (array-search* arr (lambda (x) (= 1 (string-length x))) (lambda (x) (array-add! col x)))
+                      col))
+            (equal? (array "111")
+                    (let ([col (array)])
+                      (array-search* arr (lambda (x) (= 3 (string-length x))) (lambda (x) (array-add! col x)))
+                      col))
+            (equal? (array "11" "111" "1111")
+                    (let ([col (array)])
+                      (array-search* arr (lambda (x) (<= 2 (string-length x))) (lambda (x) (array-add! col x)))
+                      col))))
+
+     )
 
 
 (mat array-slice

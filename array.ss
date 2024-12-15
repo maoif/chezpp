@@ -4,6 +4,7 @@
           array-slice array-slice! array-copy!
           array-push! array-pop! array-push-back! array-pop-back!
           array-filter array-filter! array-partition
+          array-contains? array-contains/p? array-search array-search*
           array-append array-append!
           array-reverse array-reverse!
           array-map array-map/i array-map! array-map/i!
@@ -18,6 +19,7 @@
           fxarray-slice fxarray-slice! fxarray-copy!
           fxarray-push! fxarray-pop! fxarray-push-back! fxarray-pop-back!
           fxarray-filter fxarray-filter! fxarray-partition
+          fxarray-contains? fxarray-contains/p? fxarray-search fxarray-search*
           fxarray-append fxarray-append!
           fxarray-reverse fxarray-reverse!
           fxarray-map fxarray-map/i fxarray-map! fxarray-map/i!
@@ -31,6 +33,7 @@
           u8array-slice u8array-slice! u8array-copy!
           u8array-push! u8array-pop! u8array-push-back! u8array-pop-back!
           u8array-filter u8array-filter! u8array-partition
+          u8array-contains? u8array-contains/p? u8array-search u8array-search*
           u8array-append u8array-append!
           u8array-reverse u8array-reverse!
           u8array-map u8array-map/i u8array-map! u8array-map/i!
@@ -690,7 +693,7 @@
   otheriwse it returns #f.
   |#
   (define-array-procedure (a fxa u8a)
-    (contains/p? =? arr)
+    (contains/p? arr =?)
     (apcheck (arr)
              (let ([len (array-length arr)] [vec (array-vec arr)])
                (let loop ([i 0])
@@ -706,7 +709,7 @@
   If no such item is found, #f is returned.
   |#
   (define-array-procedure (a fxa u8a)
-    (search pred arr)
+    (search arr pred)
     (apcheck (arr)
              (let ([len (array-length arr)] [vec (array-vec arr)])
                (let loop ([i 0])
@@ -726,15 +729,15 @@
   The `collect` argument has the same semantics as in `dlist-search*`.
   |#
   (define-array-procedure (a fxa u8a) search*
-    [(pred arr)
+    [(arr pred)
      (apcheck (arr)
               (pcheck ([procedure? pred])
                       (let ([lb (make-list-builder)])
-                        (thisproc pred arr (lambda (x) (lb x)))
+                        (thisproc arr pred (lambda (x) (lb x)))
                         (lb))))]
-    [(pred arr collect)
+    [(arr pred collect)
      (apcheck (arr)
-              (pcheck ([pred collect])
+              (pcheck ([procedure? pred collect])
                       (let ([len (array-length arr)] [vec (array-vec arr)])
                         (let loop ([i 0])
                           (unless (fx= i len)

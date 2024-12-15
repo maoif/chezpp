@@ -336,7 +336,7 @@
   otheriwse it returns #f.
   |#
   (define-who dlist-contains/p?
-    (lambda (=? dl)
+    (lambda (dl =?)
       (pcheck ([dlist? dl] [procedure? =?])
               (if (fx= 0 (dlist-length dl))
                   #f
@@ -396,7 +396,7 @@
   If no such item is found, #f is returned.
   |#
   (define-who dlist-search
-    (lambda (pred dl)
+    (lambda (dl pred)
       (pcheck ([dlist? dl] [procedure? pred])
               (let loop ([n (dlist-first dl)])
                 (if (null-dnode? n)
@@ -418,10 +418,12 @@
   |#
   (define-who dlist-search*
     (case-lambda
-      [(pred dl) (let ([lb (make-list-builder)])
-                   (dlist-search* pred dl (lambda (x) (lb x)))
-                   (lb))]
-      [(pred dl collect)
+      [(dl pred)
+       (pcheck ([dlist? dl] [procedure? pred])
+               (let ([lb (make-list-builder)])
+                 (dlist-search* dl pred (lambda (x) (lb x)))
+                 (lb)))]
+      [(dl pred collect)
        (pcheck ([dlist? dl] [procedure? pred collect])
                (let loop ([n (dlist-first dl)])
                  (unless (null-dnode? n)
@@ -563,6 +565,22 @@
   (define-who dlist-sort!
     (lambda (dl <)
       (todo)))
+
+
+
+  (define-who dlist-iota
+    (lambda (n)
+      (pcheck ([natural? n])
+              (todo))))
+
+
+  (define-who dlist-nums
+    (case-lambda
+      [(stop) (dlist-nums 0 stop 1)]
+      [(start stop) (dlist-nums start stop 1)]
+      [(start stop step)
+       (pcheck ([number? start stop step])
+               (todo))]))
 
 
 

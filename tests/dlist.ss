@@ -351,13 +351,13 @@
 
 (mat dlist-contains/p?
 
-     (error? (dlist-contains/p? 42 =))
-     (error? (dlist-contains/p? (dlist) odd?))
+     (error? (dlist-contains/p? = 42))
+     (error? (dlist-contains/p? odd? (dlist)))
 
      (let* ([ls (iota 10)]
             [dl (apply dlist ls)])
-       (bool (and (dlist-contains/p? odd? dl)
-                  (dlist-contains/p? even? dl))))
+       (bool (and (dlist-contains/p? dl odd?)
+                  (dlist-contains/p? dl even?))))
 
      )
 
@@ -365,17 +365,17 @@
 (mat dlist-search
 
      (error? (dlist-search 42 42))
-     (error? (dlist-search (dlist) odd?))
+     (error? (dlist-search odd? (dlist)))
 
      (let* ([ls (iota 10)]
             [dl (apply dlist ls)])
-       (and (= 0 (dlist-search even? dl))
-            (= 1 (dlist-search odd? dl))))
+       (and (= 0 (dlist-search dl even?))
+            (= 1 (dlist-search dl odd?))))
 
      (let ([dl (dlist "1" "11" "111" "1111")])
-       (and (string=? "1" (dlist-search (lambda (x) (= 1 (string-length x))) dl))
-            (string=? "111" (dlist-search (lambda (x) (= 3 (string-length x))) dl))
-            (string=? "11" (dlist-search (lambda (x) (<= 2 (string-length x))) dl))))
+       (and (string=? "1"   (dlist-search dl (lambda (x) (= 1 (string-length x)))))
+            (string=? "111" (dlist-search dl (lambda (x) (= 3 (string-length x)))))
+            (string=? "11"  (dlist-search dl (lambda (x) (<= 2 (string-length x)))))))
 
      )
 
@@ -383,27 +383,30 @@
 (mat dlist-search*
 
      (error? (dlist-search* 42 42))
-     (error? (dlist-search* (dlist) odd?))
+     (error? (dlist-search* odd? (dlist)))
 
 
      (let ([dl (dlist "1" "11" "111" "1111")])
-       (and (equal? '("1") (dlist-search* (lambda (x) (= 1 (string-length x))) dl))
-            (equal? '("111") (dlist-search* (lambda (x) (= 3 (string-length x))) dl))
-            (equal? '("11" "111" "1111") (dlist-search* (lambda (x) (<= 2 (string-length x))) dl))))
+       (and (equal? '("1")
+                    (dlist-search* dl (lambda (x) (= 1 (string-length x)))))
+            (equal? '("111")
+                    (dlist-search* dl (lambda (x) (= 3 (string-length x)))))
+            (equal? '("11" "111" "1111")
+                    (dlist-search* dl (lambda (x) (<= 2 (string-length x)))))))
 
      ;; custom collector
      (let ([dl (dlist "1" "11" "111" "1111")])
        (and (equal? (dlist "1")
                     (let ([col (dlist)])
-                      (dlist-search* (lambda (x) (= 1 (string-length x))) dl (lambda (x) (dlist-add! col x)))
+                      (dlist-search* dl (lambda (x) (= 1 (string-length x))) (lambda (x) (dlist-add! col x)))
                       col))
             (equal? (dlist "111")
                     (let ([col (dlist)])
-                      (dlist-search* (lambda (x) (= 3 (string-length x))) dl (lambda (x) (dlist-add! col x)))
+                      (dlist-search* dl (lambda (x) (= 3 (string-length x))) (lambda (x) (dlist-add! col x)))
                       col))
             (equal? (dlist "11" "111" "1111")
                     (let ([col (dlist)])
-                      (dlist-search* (lambda (x) (<= 2 (string-length x))) dl (lambda (x) (dlist-add! col x)))
+                      (dlist-search* dl (lambda (x) (<= 2 (string-length x))) (lambda (x) (dlist-add! col x)))
                       col))))
 
      )
