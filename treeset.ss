@@ -121,7 +121,7 @@
   (define-who treeset-contains/p?
     (lambda (ts pred)
       (pcheck ([treeset? ts] [procedure? pred])
-              (rbtree-contains/p? who ts pred))))
+              (rbtree-contains/p? who ts (lambda (k v) (pred k))))))
 
 
   (define K? (lambda (n) (if (pair? n) (car n) n)))

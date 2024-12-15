@@ -117,12 +117,37 @@
      )
 
 
+(mat treeset-contains?
+
+     (error? (treeset-contains? 42))
+     (error? (treeset-contains? (treeset fx= fx<)))
+
+     (let ([tm (make-treeset fx= fx<)])
+       (fxvandmap (lambda (x)
+                    (treeset-add! tm x)
+                    (treeset-contains? tm x))
+                  v100000))
+
+     ;; incomparable value
+     (error? (let ([tm (make-treeset fx= fx<)])
+               (fxvandmap (lambda (x) (treeset-add! tm x)) v100)
+               (treeset-contains? tm 'x)))
+
+     )
+
+
 (mat treeset-contains/p?
-     #t)
 
+     (error? (treeset-contains/p? 42 42))
+     (error? (treeset-contains/p? (make-treeset fx= fx<)))
+     (error? (treeset-contains/p? (make-treeset fx= fx<) 42))
 
-(mat treeset-values
-     #t
+     (let ([ts (make-treeset fx= fx<)])
+       (fxvandmap (lambda (x)
+                    (treeset-add! ts x)
+                    (treeset-contains/p? ts (lambda (y) (= x y))))
+                  v10000))
+
      )
 
 
