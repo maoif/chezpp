@@ -334,3 +334,141 @@
 
 
      )
+
+
+(mat set-ops
+
+     ;; relations
+     (begin (define ls1 (iota 3))
+            (define ls2 (iota 5))
+            (define ls3 (iota 7))
+            #t)
+
+     (error? (list=?))
+     (list=? '())
+     (list=? '() '())
+     (list=? '() '() '())
+     (list=? ls1)
+     (list=? ls1 ls1)
+     (list=? ls1 '(1 2 0) '(0 0 1 1 2 2))
+     (not (list=? ls1 ls2))
+     (not (list=? ls1 ls2 ls3))
+
+     (error? (list<?))
+     (list<? '())
+     (not (list<? '() '()))
+     (not (list<? '() '() '()))
+     (list<? ls1)
+     (list<? ls1 ls2)
+     (list<? ls1 '(0 1 2 3 4 4 3 2 1))
+     (list<? ls1 ls2 ls3)
+     (not (list<? ls1 ls1))
+     (not (list<? ls1 ls2 ls2))
+     (not (list<? ls2 ls1))
+
+     (error? (list<=?))
+     (list<=? '())
+     (list<=? '() '())
+     (list<=? '() '() '())
+     (list<=? ls1)
+     (list<=? ls1 ls1)
+     (list<=? ls1 ls2)
+     (list<=? ls1 '(0 1 2 3 4 4 3 2 1))
+     (list<=? ls1 ls2 ls3)
+     (not (list<=? ls2 ls1))
+     (not (list<=? '(0 1 2 3 4 4 3 2 1) ls1))
+     (not (list<=? ls3 ls2 ls1))
+
+     (error? (list>?))
+     (list<=? '())
+     (list<=? '() '())
+     (list<=? '() '() '())
+     (list>? ls1)
+     (list>? ls2 ls1)
+     (list>? '(0 1 2 3 4 4 3 2 1) ls1)
+     (list>? ls3 ls2 ls1)
+     (not (list>? ls1 ls1))
+     (not (list>? ls1 ls2 ls2))
+     (not (list>? ls1 ls2))
+
+     (error? (list>=?))
+     (list>=? '())
+     (list>=? '() '())
+     (list>=? '() '() '())
+     (list>=? ls1)
+     (list>=? ls1 ls1)
+     (list>=? ls2 ls1)
+     (list>=? '(0 1 2 3 4 4 3 2 1) ls1)
+     (list>=? ls3 ls2 ls1)
+     (not (list>=? ls1 ls2))
+     (not (list>=? ls1 '(0 1 2 3 4 4 3 2 1)))
+     (not (list>=? ls1 '(0 1 2 3 4 4 3 2 1) ls1))
+     (not (list>=? ls1 ls2 ls3))
+
+
+     ;; union
+     (let ([ls1 (list 1 2 3 4 5 6)]
+           [ls2 (list 4 5 6 7 8 9)]
+           [ls3 (list 4 6 5 4 8 9)])
+       (list=? (list+ ls1 ls2 ls3)
+               (list 1 2 3 4 5 6 7 8 9)))
+
+     (let ([ls1 (apply list (nums 0  50))]
+           [ls2 (apply list (nums 30 80))]
+           [ls3 (apply list (nums 40 90))])
+       (list=? (apply list (nums 0 90))
+               (list+ ls1 ls2 ls3)))
+
+     ;; difference
+     (let ([ls1 (list 1 2 3 4 5 6)]
+           [ls2 (list 4 5 6 7 8 9)])
+       (list=? (list- ls1 ls2)
+               (list 1 2 3)))
+
+     (let ([ls1 (list 1 2 3 4 5 6)]
+           [ls2 (list 4 5 6 7 8 9)]
+           [ls3 (list 4 6 5 4 8 9 1)])
+       (list=? (list- ls1 ls2 ls3)
+               (list 2 3)))
+
+     (let ([ls1 (apply list (nums 0  50))]
+           [ls2 (apply list (nums 30 80))]
+           [ls3 (apply list (nums 40 90))])
+       (list=? (apply list (nums 0 30))
+               (list- ls1 ls2 ls3)))
+
+     ;; intersection
+     (let ([ls1 (list 1 2 3 4 5 6)]
+           [ls2 (list 4 5 6 7 8 9)]
+           [ls3 (list 4 6 5 4 8 9)])
+       (list=? (list& ls1 ls2 ls3)
+               (list 4 5 6)))
+
+     (let ([ls1 (apply list (nums 0  50))]
+           [ls2 (apply list (nums 30 80))]
+           [ls3 (apply list (nums 40 90))])
+       (list=? (apply list (nums 40 50))
+               (list& ls1 ls2 ls3)))
+
+     ;; symmetric difference
+     (let ([ls1 (list 1 2 3 4 5 6)]
+           [ls2 (list 4 5 6 7 8 9)])
+       (list=? (list^ ls1 ls2)
+               (list 1 2 3 7 8 9)))
+
+
+     ;; equations
+     (let ([ls1 (list 1 2 3 4 5 6)]
+           [ls2 (list 4 5 6 7 8 9)]
+           [ls3 (list 7 8 9 10 11 12 4 5 6)]
+           [ls4 (list 4 6 7 8 2 5)])
+       (println (list=? (append ls1 ls2 ls3 ls4) (list+ ls1 ls2 ls3 ls4)))
+       (list=? (list^ ls1 ls2 ls3 ls4)
+               (list- (list+ ls1 ls2 ls3 ls4) (list& ls1 ls2 ls3 ls4))))
+
+     (let* ([ls* (map (lambda (i) (random-list (lambda () (random 999)) 1000 2000)) (iota 10))]
+            [ls* (map (lambda (ls) (apply list ls)) ls*)])
+       (list=? (apply list^ ls*)
+               (list- (apply list+ ls*) (apply list& ls*))))
+
+     )

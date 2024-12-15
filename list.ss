@@ -6,6 +6,12 @@
           zip zip! snoc!
           nums slice
 
+          listp=? list=? listq=? listv=?
+          listp<? list<? listq<? listv<?
+          listp<=? list<=? listq<=? listv<=?
+          listp>? list>? listq>? listv>?
+          listp>=? list>=? listq>=? listv>=?
+
           list+ listp+ listq+ listv+
           list- listp- listq- listv-
           list& listp& listq& listv&
@@ -514,51 +520,96 @@
                (lambda (ls . ls*)
                  (name who equal? ls ls*))))])))
 
+  (define check-subsets
+    (lambda (ls* eq2)
+      (let ([ls1* (snoc! (list-copy (cdr ls*)) #f)])
+        ;; s1 s2 s3 s4 ->
+        ;; ls*:  s1 s2 s3 s4
+        ;; ls1*: s2 s3 s4 #f
+        (andmap (lambda (s1 s2)
+                  (if s2
+                      (andmap (lambda (x) (memp (lambda (y) (eq2 x y)) s2))
+                              s1)
+                      #t))
+                ls* ls1*))))
+
   #|doc
   Test whether given lists are equal sets.
   |#
   (define-list-set-ops (listp=? list=? listq=? listv=?)
-    ($listp=? who pred ls ls*)
-    (todo))
+    ($listp=? who eq2 ls ls*)
+    (if (null? ls*)
+        #t
+        (let* ([ls*  (map (lambda (ls) (unique eq2 ls)) (cons ls ls*))]
+               [len* (map length ls*)])
+          (if (apply = len*)
+              ;; If set1 and set2 have equal size, and set1 is subset of set2,
+              ;; then set1 == set2.
+              (check-subsets ls* eq2)
+              #f))))
 
   #|doc
   Test whether given lists are proper subsets.
   |#
   (define-list-set-ops (listp<? list<? listq<? listv<?)
-    ($listp<? who pred ls ls*)
-    (todo))
+    ($listp<? who eq2 ls ls*)
+    (if (null? ls*)
+        #t
+        (let* ([ls*  (map (lambda (ls) (unique eq2 ls)) (cons ls ls*))]
+               [len* (map length ls*)])
+          (if (apply < len*)
+              (check-subsets ls* eq2)
+              #f))))
 
   #|doc
   Test whether given lists are subsets.
   |#
   (define-list-set-ops (listp<=? list<=? listq<=? listv<=?)
-    ($listp<=? who pred ls ls*)
-    (todo))
+    ($listp<=? who eq2 ls ls*)
+    (if (null? ls*)
+        #t
+        (let* ([ls*  (map (lambda (ls) (unique eq2 ls)) (cons ls ls*))]
+               [len* (map length ls*)])
+          (if (apply <= len*)
+              (check-subsets ls* eq2)
+              #f))))
 
   #|doc
   Test whether given lists are proper supersets.
   |#
   (define-list-set-ops (listp>? list>? listq>? listv>?)
-    ($listp>? who pred ls ls*)
-    (todo))
+    ($listp>? who eq2 ls ls*)
+    (if (null? ls*)
+        #t
+        (let* ([ls* (reverse
+                     (map (lambda (ls) (unique eq2 ls)) (cons ls ls*)))]
+               [len* (map length ls*)])
+          (if (apply < len*)
+              (check-subsets ls* eq2)
+              #f))))
 
   #|doc
   Test whether given lists are supersets.
   |#
   (define-list-set-ops (listp>=? list>=? listq>=? listv>=?)
-    ($listp>=? who pred ls ls*)
-    (todo))
+    ($listp>=? who eq2 ls ls*)
+    (if (null? ls*)
+        #t
+        (let* ([ls* (reverse
+                     (map (lambda (ls) (unique eq2 ls)) (cons ls ls*)))]
+               [len* (map length ls*)])
+          (if (apply <= len*)
+              (check-subsets ls* eq2)
+              #f))))
 
   #|doc
   Calculate the union of the list items.
   |#
   (define-list-set-ops (listp+ list+ listq+ listv+)
-    ($listp+ who pred ls ls*)
+    ($listp+ who eq2 ls ls*)
     (if (null? ls*)
-        (unique pred ls)
-        (let* ([l (list-copy ls)]
-               [l (apply append! l ls*)])
-          (unique pred l))))
+        ls
+        (unique eq2 (apply append (cons ls ls*)))))
 
   #|doc
   Calculate the difference of the list items.
@@ -566,12 +617,12 @@
   No check of duplication is performed.
   |#
   (define-list-set-ops (listp- list- listq- listv-)
-    ($listp- who pred ls ls*)
+    ($listp- who eq2 ls ls*)
     (if (null? ls*)
         ls
-        (let ([ls* (apply listp+ pred ls*)]
+        (let ([ls* (apply listp+ eq2 ls*)]
               [lb (make-list-builder)])
-          (for-each (lambda (x) (when (not (memp (lambda (y) (pred x y)) ls*))
+          (for-each (lambda (x) (when (not (memp (lambda (y) (eq2 x y)) ls*))
                                   (lb x)))
                     ls)
           (lb))))
@@ -580,27 +631,38 @@
   Calculate the intersection of the list items.
   |#
   (define-list-set-ops (listp& list& listq& listv&)
-    ($listp& who pred ls ls*)
+    ($listp& who eq2 ls ls*)
     (if (null? ls*)
         ls
-        (let ([lb (make-list-builder)]
-              [ls* (cons ls ls*)])
-          ;; compare items in each list with those in all other lists
-          (let loop ([a* ls*])
-            (if (null? a*)
-                (lb)
-                (let ([a (car a*)])
-                  (let cmp ([b* ls*])
-                    (todo)))
-                )))))
+        (let* ([lb (make-list-builder)]
+               [ls* (cons ls ls*)]
+               ;; union
+               [u (unique eq2 (apply append ls*))])
+          (for-each (lambda (x)
+                      (when (andmap (lambda (ls) (memp (lambda (y) (eq2 x y)) ls))
+                                    ls*)
+                        (lb x)))
+                    u)
+          (lb))))
 
   #|doc
   Calculate the symmetric difference of the list items.
   |#
   (define-list-set-ops (listp^ list^ listq^ listv^)
-    ($listp^ who pred ls ls*)
+    ($listp^ who eq2 ls ls*)
     ;; (- (+ ls ls*) (& ls*))
-    (todo))
+    (if (null? ls*)
+        ls
+        (let* ([lb (make-list-builder)]
+               [ls* (cons ls ls*)]
+               ;; union
+               [u (unique eq2 (apply append ls*))])
+          (for-each (lambda (x)
+                      (unless (andmap (lambda (ls) (memp (lambda (y) (eq2 x y)) ls))
+                                      ls*)
+                        (lb x)))
+                    u)
+          (lb))))
 
 
 
