@@ -149,9 +149,19 @@
 
 (mat treemap-search
 
-     
+     (error? (treemap-search* 'bla 'bla))
+     (error? (treemap-search* (treemap = <) 'bla))
 
-     #t)
+     (let ([tm (make-treemap fx= fx<)])
+       (fxvandmap (lambda (x) (treemap-set! tm x x)) v100)
+       (equal? (treemap-search tm (lambda (k v) (= k 0)))
+               (cons 0 0)))
+
+     (let ([tm (apply treemap fx= fx< (map cons '(2 4 6 7) '(2 4 6 7)))])
+       (equal? (treemap-search tm (lambda (k v) (odd? k)))
+               (cons 7 7)))
+
+     )
 
 
 (mat treemap-search*
@@ -188,28 +198,91 @@
 
 
 (mat treemap-contains?
-     #t)
+
+     (error? (treemap-contains? 42))
+     (error? (treemap-contains? (make-treemap fx= fx<)))
+
+     (let ([tm (make-treemap fx= fx<)])
+       (fxvandmap (lambda (x)
+                    (treemap-set! tm x x)
+                    (treemap-contains? tm x))
+                  v100000))
+
+     ;; incomparable value
+     (error? (let ([tm (make-treemap fx= fx<)])
+               (fxvandmap (lambda (x) (treemap-set! tm x x)) v100)
+               (treemap-contains? tm 'x)))
+
+     )
 
 
 (mat treemap-contains/p?
-     #t)
+
+     (error? (treemap-contains/p? 42 42))
+     (error? (treemap-contains/p? (make-treemap fx= fx<)))
+     (error? (treemap-contains/p? (make-treemap fx= fx<) 42))
+
+     (let ([tm (make-treemap fx= fx<)])
+       (fxvandmap (lambda (x)
+                    (treemap-set! tm x x)
+                    (treemap-contains/p? tm (lambda (k v) (= k x))))
+                  v10000))
+
+     )
 
 
 (mat treemap-keys
 
-     #t
+     (error? (treemap-keys 42))
+     (error? (treemap-keys (make-treemap fx= fx<) 42))
+
+     (let ([tm (make-treemap fx= fx<)])
+       (fxvfor-each (lambda (x) (treemap-set! tm x x)) v10000)
+       (equal? (vector->list (treemap-keys tm)) (iota 10000)))
+
+     ;; custom collect
+     (let ([tm (make-treemap fx= fx<)] [tm1 (make-treemap fx= fx<)])
+       (fxvfor-each (lambda (x) (treemap-set! tm x x)) v10000)
+       (treemap-keys tm (lambda (k) (treemap-set! tm1 k k)))
+       (equal? tm tm1))
+
      )
 
 
 (mat treemap-values
 
-     #t
+     (error? (treemap-values 42))
+     (error? (treemap-values (make-treemap fx= fx<) 42))
+
+     (let ([tm (make-treemap fx= fx<)])
+       (fxvfor-each (lambda (x) (treemap-set! tm x x)) v10000)
+       (equal? (vector->list (treemap-values tm)) (iota 10000)))
+
+     ;; custom collect
+     (let ([tm (make-treemap fx= fx<)] [tm1 (make-treemap fx= fx<)])
+       (fxvfor-each (lambda (x) (treemap-set! tm x x)) v10000)
+       (treemap-values tm (lambda (k) (treemap-set! tm1 k k)))
+       (equal? tm tm1))
+
      )
 
 
 (mat treemap-cells
 
-     #t
+     (error? (treemap-cells 42))
+     (error? (treemap-cells (make-treemap fx= fx<) 42))
+
+     (let ([tm (make-treemap fx= fx<)] [ls10000 (iota 10000)])
+       (fxvfor-each (lambda (x) (treemap-set! tm x x)) v10000)
+       (equal? (vector->list (treemap-cells tm))
+               (map cons ls10000 ls10000)))
+
+     ;; custom collect
+     (let ([tm (make-treemap fx= fx<)] [ls10000 (iota 10000)] [tm1 (make-treemap fx= fx<)])
+       (fxvfor-each (lambda (x) (treemap-set! tm x x)) v10000)
+       (treemap-cells tm (lambda (k v) (treemap-set! tm1 k v)))
+       (equal? tm tm1))
+
      )
 
 
