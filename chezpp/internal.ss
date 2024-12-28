@@ -36,7 +36,17 @@
        [else (errorf 'flag->mask "invalid mask ~s" m)])))
 
 
-  ;; TODO search through paths
-  (load-shared-object "/home/maoif/SSD/Projects/chezpp/libchezpp.so")
 
+
+  (let loop ([paths `(,(path-build (current-directory) "libchezpp.so")
+                      "/lib/libchezpp.so"
+                      "/usr/lib/libchezpp.so"
+                      "/usr/local/lib/libchezpp.so")])
+    (if (null? paths)
+        (errorf 'chezpp-internal "failed to load libchezpp.so")
+        (if (file-regular? (car paths))
+            (with-exception-handler
+                (lambda (con) (loop (cdr paths)))
+              (lambda () (load-shared-object (car paths))))
+            (loop (cdr paths)))))
   )
