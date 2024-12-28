@@ -36,4 +36,7 @@
        [else (errorf 'flag->mask "invalid mask ~s" m)])))
 
 
+  ;; TODO search through paths
+  (load-shared-object "/home/maoif/SSD/Projects/chezpp/libchezpp.so")
+
   )

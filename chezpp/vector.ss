@@ -1053,6 +1053,27 @@
                                (loop (fx1+ i)))))))))
 
 
+  (define-vector-procedure (v fxv flv)
+    (partition pred vec)
+    (vpcheck (vec)
+             (pcheck ([procedure? pred])
+                     (todo))))
+
+
+  (define-vector-procedure (fxv flv)
+    (sort <? vec)
+    (vpcheck (vec)
+             (pcheck ([procedure? <?])
+                     (todo))))
+
+
+  (define-vector-procedure (fxv flv)
+    (sort! <? vec)
+    (vpcheck (vec)
+             (pcheck ([procedure? <?])
+                     (todo))))
+
+
   #|doc
   Return the index of the first vector item such that (proc item) => #t,
   otherwise return #f.
