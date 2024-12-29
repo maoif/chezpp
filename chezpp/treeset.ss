@@ -1,5 +1,5 @@
 (library (chezpp treeset)
-  (export make-treeset treeset treeset-empty? treeset-size
+  (export make-treeset treeset treeset? treeset-empty? treeset-size
           treeset-add! treeset-delete! treeset-clear!
 
           treeset-contains? treeset-contains/p?

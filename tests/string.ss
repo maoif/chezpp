@@ -1,4 +1,4 @@
-(import (chezpp string))
+(import (chezpp))
 
 
 (mat string-search

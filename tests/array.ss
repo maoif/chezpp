@@ -1,8 +1,4 @@
-(import (chezpp array)
-        (chezpp list)
-        (chezpp vector)
-        (chezpp control)
-        (chezpp utils))
+(import (chezpp))
 
 
 (mat array

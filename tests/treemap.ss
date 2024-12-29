@@ -1,7 +1,6 @@
-(import (chezpp treemap)
-        (chezpp list)
-        (chezpp vector)
-        (chezpp private rbtree))
+(import (chezpp))
+
+
 
 
 ;; TODO errors
@@ -17,7 +16,7 @@
 
 
 
-(mat rbtree-verify
+(mat $rbtree-verify
 
      (let ([tm (make-treemap fx= fx<)])
        (= 0 (treemap-size tm)))
@@ -26,7 +25,7 @@
      (let ([tm (make-treemap fx= fx<)])
        (fxvfor-each (lambda (x)
                       (treemap-set! tm x x)
-                      (rbtree-verify tm))
+                      ($rbtree-verify tm))
                     v10000)
        (and (= (treemap-size tm) (fxvector-length v10000))
             (fxvandmap (lambda (x) (= x (treemap-ref tm x))) v10000)))
@@ -35,7 +34,7 @@
        (fxvshuffle! v10000)
        (fxvfor-each (lambda (x)
                       (treemap-set! tm x x)
-                      (rbtree-verify tm))
+                      ($rbtree-verify tm))
                     v10000)
        (and (= (treemap-size tm) (fxvector-length v10000))
             (fxvandmap (lambda (x) (= x (treemap-ref tm x))) v10000)))
@@ -44,27 +43,27 @@
                            (let ([tm (make-treemap fx= fx<)])
                              (fxvfor-each (lambda (x)
                                             (treemap-set! tm x x)
-                                            (rbtree-verify tm))
+                                            ($rbtree-verify tm))
                                           v)
                              (fxvfor-each (lambda (x)
                                             (when (odd? x)
                                               (treemap-delete! tm x)
-                                              (rbtree-verify tm)))
+                                              ($rbtree-verify tm)))
                                           v)
                              (fxvfor-each (lambda (x)
                                             (when (odd? x)
                                               (treemap-set! tm x x)
-                                              (rbtree-verify tm)))
+                                              ($rbtree-verify tm)))
                                           v)
                              (fxvfor-each (lambda (x)
                                             (when (even? x)
                                               (treemap-delete! tm x)
-                                              (rbtree-verify tm)))
+                                              ($rbtree-verify tm)))
                                           v)
                              (fxvfor-each (lambda (x)
                                             (when (even? x)
                                               (treemap-set! tm x x)
-                                              (rbtree-verify tm)))
+                                              ($rbtree-verify tm)))
                                           v)
                              (and (= (treemap-size tm) (fxvector-length v))
                                   (fxvandmap (lambda (x) (= x (treemap-ref tm x))) v)))))

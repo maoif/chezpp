@@ -1,5 +1,5 @@
 (library (chezpp treemap)
-  (export make-treemap treemap treemap-empty?
+  (export make-treemap treemap treemap? treemap-empty?
           treemap-set! treemap-ref treemap-size
           treemap-delete! treemap-clear!
 
@@ -16,7 +16,9 @@
           treemap-fold-left treemap-fold-left/i
           treemap-fold-right treemap-fold-right/i
 
-          treemap->list hashtable->treemap)
+          treemap->list hashtable->treemap
+
+          $rbtree-verify)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils)

@@ -1,8 +1,5 @@
-(import (chezpp dlist)
-        (chezpp list)
-        (chezpp control)
-        (chezpp string)
-        (chezpp utils))
+(import (chezpp))
+
 
 
 (mat dlist

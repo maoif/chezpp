@@ -1,7 +1,5 @@
-(import (chezpp iter)
-        (chezpp control)
-        (chezpp string)
-        (chezpp utils))
+(import (chezpp))
+
 
 (mat iterators
 

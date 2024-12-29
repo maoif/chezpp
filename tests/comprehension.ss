@@ -1,8 +1,6 @@
-(import (chezpp comprehension)
-        (chezpp iter)
-        (chezpp string)
-        (chezpp utils)
-        (chezpp list))
+(import (chezpp))
+
+
 
 (mat for
 

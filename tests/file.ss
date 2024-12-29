@@ -1,8 +1,5 @@
-(import (chezpp file)
-        (chezpp control)
-        (chezpp string)
-        (chezpp utils)
-        (chezpp os))
+(import (chezpp))
+
 
 
 (define $random-file (lambda () (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))))

@@ -1,8 +1,5 @@
-(import (chezpp vector)
-        (chezpp list)
-        (chezpp control)
-        (chezpp string)
-        (chezpp utils))
+ (import (chezpp))
+
 
 (mat iterations
 

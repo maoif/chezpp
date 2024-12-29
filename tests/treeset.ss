@@ -1,7 +1,4 @@
-(import (chezpp treeset)
-        (chezpp list)
-        (chezpp vector)
-        (chezpp private rbtree))
+(import (chezpp))
 
 
 (define v100    (fxvshuffle! (fxviota 100)))

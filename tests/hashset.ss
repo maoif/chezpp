@@ -1,7 +1,6 @@
-(import (chezpp hashset)
-        (chezpp list)
-        (chezpp vector)
-        (chezpp utils))
+(import (chezpp))
+
+
 
 (define v10000  (fxvshuffle! (fxviota 10000)))
 (define v100000 (fxvshuffle! (fxviota 100000)))

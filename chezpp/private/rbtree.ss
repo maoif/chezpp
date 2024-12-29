@@ -20,7 +20,7 @@
 
           rbtree-visit rbtree-visit-preorder rbtree-visit-postorder rbtree-visit-inorder
 
-          rbtree-verify rbtree->dot)
+          $rbtree-verify rbtree->dot)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils))
@@ -1101,7 +1101,7 @@
   4. If a node is red, then both its children are black.
   5. For each node, all simple paths from the node to descendant leaves contain the same number of black nodes.
   |#
-  (define-who rbtree-verify
+  (define-who $rbtree-verify
     (lambda (rbt)
       (let ([root (rbtree-root rbt)] [=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)] [bhs '()])
         (unless (null-rbnode? root)

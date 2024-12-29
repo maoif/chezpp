@@ -1,6 +1,4 @@
-(import (chezpp control)
-        (chezpp string)
-        (chezpp utils))
+(import (chezpp))
 
 
 (mat compose
