@@ -442,7 +442,7 @@
          (case-lambda
            [(arr v) (pcheck ([a? arr]) (thisproc arr (array-length arr) v))]
            [(arr i v)
-            (pcheck ([a? arr] [natural? i]) (aval? v)
+            (pcheck ([a? arr] [natural? i] [aval? v])
                     (let* ([len (array-length arr)] [vec (array-vec arr)] [cap (vlength vec)])
                       (when (fx> i len) (errorf 'thisproc "index ~a out of range ~a" i len))
                       (when (fx= len cap) ($grow-array! arr))
