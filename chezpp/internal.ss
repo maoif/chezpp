@@ -38,7 +38,8 @@
 
 
 
-  (let loop ([paths `(,(path-build (current-directory) "libchezpp.so")
+  (let loop ([paths `(,(or (getenv "LIBCHEZPP") "")
+                      ,(path-build (current-directory) "libchezpp.so")
                       "/lib/libchezpp.so"
                       "/usr/lib/libchezpp.so"
                       "/usr/local/lib/libchezpp.so")])
