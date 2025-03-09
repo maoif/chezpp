@@ -442,3 +442,179 @@
 
      )
 
+
+(mat parser-combinators
+
+     (equal? '()
+             (runT (<many> (<char> #\a)) ""))
+     (equal? '(#\a #\a #\a)
+             (runT (<many> (<char> #\a)) "aaa"))
+     (equal? '(#\a #\a #\a)
+             (runT (<many> (<char> #\a)) "aaabbc"))
+
+     (equal? '()
+             (runT (<many> <item>) ""))
+     (equal? '(#\a #\b #\c)
+             (runT (<many> <item>) "abc"))
+
+     ;; error
+     (error? (runT (<some> (<char> #\a)) ""))
+
+     (equal? '(#\a)
+             (runT (<some> (<char> #\a)) "a"))
+     (equal? '(#\a #\a #\a)
+             (runT (<some> (<char> #\a)) "aaa"))
+     (equal? '(#\a #\a #\a)
+             (runT (<some> (<char> #\a)) "aaabbc"))
+
+     (error? (runT (<some> <item>) ""))
+     (equal? '(#\a #\b #\c)
+             (runT (<some> <item>) "abc"))
+
+
+     (equal? #\A (runT (</> <letter> <digit> <whitespace>) "A"))
+     (equal? #\0 (runT (</> <letter> <digit> <whitespace>) "0"))
+     (equal? #\space (runT (</> <letter> <digit> <whitespace>) " "))
+     ;; error
+     (error? (runT (</> <letter> <digit> <whitespace>) "!"))
+
+     (equal? '(#\d #\e #\f #\1 #\2 #\3 #\a #\b #\c)
+             (runT (<many> (</> <digit> <letter>)) "def123abc"))
+     (equal? '(#\d #\e #\f #\1 #\2 #\3 #\a #\b #\c)
+             (runT (<many> (</> <letter> <digit>)) "def123abc"))
+     (equal? '((#\d #\e #\f) (#\1 #\2 #\3) (#\a #\b #\c))
+             (runT (<many> (</> (<some> <digit>) (<some> <letter>))) "def123abc"))
+
+     (equal? '(#\A #\9 #\space)
+             (runT (<~> <letter> <digit> <whitespace>) "A9 "))
+     ;; error
+     (error? (runT (<~> <letter> <digit> <whitespace>) " A9 "))
+
+     (equal? '(#\space #\A #\9 #\space)
+             (runT (<~> <whitespace> <letter> (</> <digit> <upper>) <whitespace>)
+                   " A9 "))
+     (equal? '(#\space #\A #\U #\space)
+             (runT (<~> <whitespace> <letter> (</> <digit> <upper>) <whitespace>)
+                   " AU "))
+     ;; error
+     (error? (runT (<~> <whitespace> <letter> (</> <digit> <upper>) <whitespace>)
+                   " Aa "))
+
+     (equal? '((#\a #\b #\c) (#\space #\space))
+             (runT (<~> (<some> <letter>) (<many> <whitespace>)) "abc  "))
+
+     (equal? '(#\( #\( #\() (runT (<rep> (<char> #\() 3) "((("))
+     (equal? '(#\) #\) #\)) (runT (<rep> (<char> #\)) 3) ")))"))
+     (equal? '(#\a #\a #\a) (runT (<rep> (<char> #\a) 3) "aaaa"))
+     ;; error
+     (error? (runT (<rep> (<char> #\a) 3) "aa"))
+
+     (equal? #\a (runT (<~n> 0 <letter> <digit> <letter>) "a1c"))
+     (equal? #\1 (runT (<~n> 1 <letter> <digit> <letter>) "a1c"))
+     (equal? #\c (runT (<~n> 2 <letter> <digit> <letter>) "a1c"))
+     ;; error
+     (error? (runT (<~n> 0 <letter> <digit> <letter>) "a12"))
+     (error? (runT (<~n> 2 <letter> <digit> <letter>) "a12"))
+     (error? (runT (<~n> -1 <letter> <digit> <letter>) "a1c"))
+     (error? (runT (<~n> 3 <letter> <digit> <letter>) "a1c"))
+
+     (equal? #\c (runT (</> (<~n> 2 <letter> <digit> <letter>) (<~n> 2 <letter> <digit> <digit>)) "a1c"))
+     (equal? #\2 (runT (</> (<~n> 2 <letter> <digit> <letter>) (<~n> 2 <letter> <digit> <digit>)) "a12"))
+
+     ;; TODO <map>
+
+
+     (begin (define <word>
+              (<~> (<map>
+                    (lambda (val) (apply string val))
+                    (<some> <letter>))
+                   (<many> <whitespace>)))
+            (define <words>
+              (<~> (<many> <whitespace>) (<many> <word>)))
+            #t)
+
+     (equal? '(() (("this" (#\space))
+                   ("is" (#\space))
+                   ("a" (#\space))
+                   ("sentence" ())))
+             (runT <words> "this is a sentence"))
+     (equal? '(() (("this" (#\space))
+                   ("is" (#\space))
+                   ("a" (#\space))
+                   ("sentence" (#\space #\space))))
+             (runT <words> "this is a sentence  "))
+     (equal? '((#\space #\space)
+               (("this" (#\space))
+                ("is" (#\space))
+                ("a" (#\space))
+                ("sentence" ())))
+             (runT <words> "  this is a sentence"))
+     (equal? '((#\space #\space)
+               (("this" (#\space #\space))
+                ("is" (#\space #\space #\space))
+                ("a" (#\space #\space #\space))
+                ("sentence" (#\space #\space #\space))))
+             (runT <words> "  this  is   a   sentence   "))
+
+     (begin (define <anbncn>
+              (<bind> (<some> (<char> #\a))
+                      (lambda (val)
+                        (let ([count (length val)])
+                          (<~> (<result> val)
+                               (<rep> (<char> #\b) count)
+                               (<rep> (<char> #\c) count))))))
+            #t)
+     (equal? '((#\a) (#\b) (#\c))
+             (runT <anbncn> "abc"))
+     (equal? '((#\a #\a) (#\b #\b) (#\c #\c))
+             (runT <anbncn> "aabbcc"))
+     (equal? '((#\a #\a #\a) (#\b #\b #\b) (#\c #\c #\c))
+             (runT <anbncn> "aaabbbccc"))
+     ;; still ok
+     (equal? '((#\a) (#\b) (#\c))
+             (runT <anbncn> "abcc"))
+     ;; error
+     (error? (runT <anbncn> "aabc"))
+     (error? (runT <anbncn> "abbc"))
+
+     (begin (define (<onion> c)
+              (<bind> (<some> (<char> #\())
+                      (lambda (val)
+                        (let ([count (length val)])
+                          (<~n> 1
+                                (<result> val)
+                                (<char> c)
+                                (<rep> (<char> #\)) count))))))
+            #t)
+
+     (equal? #\x1f496 (runT (<onion> #\x1f496) "(((\x1f496;)))"))
+     (equal? #\a (runT (<onion> #\a) "(((a)))"))
+     ;; still ok
+     (equal? #\a (runT (<onion> #\a) "((a)))"))
+     ;; error
+     (error? (runT (<~> (<onion> #\a) <eof>) "((a)))"))
+     (error? (runT (<onion> #\a) "(((a))"))
+
+
+     (begin (define <lines>
+              (<map> (lambda (val)
+                       (map (lambda (c*) (apply string c*)) val))
+                     (<sep-by1> (<some> <letter>) (<char> #\newline))))
+            #t)
+
+     (equal? '("aa" "bb")
+             (runT <lines> "aa\nbb"))
+     (equal? '("aa" "bb")
+             (runT <lines> "aa\nbb\n"))
+     (equal? '("aa" "bb" "cc" "dd" "ff")
+             (runT <lines> "aa\nbb\ncc\ndd\nff"))
+     ;; error: no content
+     (error? (runT <lines> ""))
+     (error? (runT <lines> "\n"))
+     (error? (runT <lines> "\n\n\n"))
+
+     ;; TODO states <map-st> <bind-st>
+
+     ;; TODO [not]-followed-by
+
+     )
