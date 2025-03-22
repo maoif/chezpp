@@ -1256,6 +1256,7 @@
   (define vmap!/i vector-map!/i)
   (define vsort   vector-sort)
   (define vsort!  vector-sort!)
+  ;; TODO add wrapper check
   (define vfor-each   vector-for-each)
   (define vfor-each/i vector-for-each/i)
 
