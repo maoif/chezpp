@@ -31,6 +31,7 @@
           vcopy fxvcopy flvcopy
           vcopy! fxvcopy! flvcopy! u8vcopy! vector-copy! fxvector-copy! flvector-copy!
           vsum fxvsum flvsum
+          vproduct fxvproduct flvproduct
           vextreme fxvextreme flvextreme
           vmax vmin fxvmax fxvmin flvmax flvmin
           vavg fxvavg flvavg
