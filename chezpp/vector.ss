@@ -4,8 +4,8 @@
           flvmap flvmap/i flvmap! flvmap!/i flvfor-each flvfor-each/i
 
           vector-map/i vector-for-each/i vector-map! vector-map!/i
-          fxvector-map/i fxvector-for-each/i fxvector-map! fxvector-map!/i
-          flvector-map/i flvector-for-each/i flvector-map! flvector-map!/i
+          fxvector-map fxvector-map/i fxvector-for-each/i fxvector-map! fxvector-map!/i
+          flvector-map flvector-map/i flvector-for-each/i flvector-map! flvector-map!/i
 
           vslice fxvslice flvslice
           vfilter fxvfilter flvfilter
