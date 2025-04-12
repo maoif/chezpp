@@ -20,3 +20,36 @@ Functionalities:
   - hashset: unordered set using hash function
   - treemap: ordered map based on reb-black tree
   - treeset: ordered set based on reb-black tree
+- parser combinators:
+  - support both textual and binary parsers
+  - context-sensitive parsing using monadic `<bind>`
+  - simple csv, json5, xml parsers
+
+# Installation and Usage
+
+Build requirements:
+
+- gcc
+- make
+- ChezScheme
+
+Build:
+
+```
+git clone --depth=1 https://github.com/maoif/chezpp.git
+cd chezpp
+make
+```
+
+Run:
+
+```
+make run
+```
+
+Or launch `chez++` directly:
+
+```
+./chez++
+```
+
