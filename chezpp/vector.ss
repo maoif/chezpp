@@ -22,11 +22,17 @@
           fxvfold-left fxvfold-right fxvfold-left/i fxvfold-right/i
           flvfold-left flvfold-right flvfold-left/i flvfold-right/i
 
+          vscan-left-ex fxvscan-left-ex flvscan-left-ex
+          vscan-left-in fxvscan-left-in flvscan-left-in
+          vscan-right-ex fxvscan-right-ex flvscan-right-ex
+          vscan-right-in fxvscan-right-in flvscan-right-in
+
           vreverse fxvreverse flvreverse
           vreverse! fxvreverse! flvreverse!
           vzip fxvzip flvzip vzipv fxvzipv flvzipv
           vshuffle  fxvshuffle  flvshuffle
           vshuffle! fxvshuffle! flvshuffle!
+          vsorted? fxvsorted? flvsorted?
 
           vcopy fxvcopy flvcopy
           vcopy! fxvcopy! flvcopy! u8vcopy! vector-copy! fxvector-copy! flvector-copy!
@@ -436,6 +442,218 @@
                    (if (fx= i -1)
                        acc
                        (loop (sub1 i) (apply proc i `(,@(vecref* i) ,acc))))))))])
+
+
+  (define-vector-procedure (v fxv flv) scan-left-ex
+    [(proc acc vec0)
+     (pcheck ([procedure? proc] [v? vec0])
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (if (fx= l 0)
+                   res
+                   (begin
+                     (vset! res 0 acc)
+                     (let loop ([i 1] [acc acc])
+                       (if (fx= i l)
+                           res
+                           (let ([nacc (proc acc (vref vec0 (fx1- i)))])
+                             (vset! res i nacc)
+                             (loop (fx1+ i) nacc))))))))]
+    [(proc acc vec0 vec1)
+     (pcheck ([procedure? proc] [v? vec0 vec1])
+             (vcheck-length procname vec0 vec1)
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (if (fx= l 0)
+                   res
+                   (begin
+                     (vset! res 0 acc)
+                     (let loop ([i 1] [acc acc])
+                       (if (fx= i l)
+                           res
+                           (let ([nacc (proc acc (vref vec0 (fx1- i)) (vref vec1 (fx1- i)))])
+                             (vset! res i nacc)
+                             (loop (fx1+ i) nacc))))))))]
+    [(proc acc vec0 vec1 vec2)
+     (pcheck ([procedure? proc] [v? vec0 vec1 vec2])
+             (vcheck-length procname vec0 vec1 vec2)
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (if (fx= l 0)
+                   res
+                   (begin
+                     (vset! res 0 acc)
+                     (let loop ([i 1] [acc acc])
+                       (if (fx= i l)
+                           res
+                           (let ([nacc (proc acc (vref vec0 (fx1- i)) (vref vec1 (fx1- i)) (vref vec2 (fx1- i)))])
+                             (vset! res i nacc)
+                             (loop (fx1+ i) nacc))))))))]
+    [(proc acc vec0 . vecs)
+     (let* ([vec* (cons vec0 vecs)]
+            [vecref* (lambda (i) (map (lambda (v) (vref v i)) vec*))])
+       (pcheck ([procedure? proc]
+                [all-which? vec*])
+               (apply vcheck-length procname vec*)
+               (let* ([l (vlength vec0)] [res (vmake l)])
+                 (if (fx= l 0)
+                     res
+                     (begin
+                       (vset! res 0 acc)
+                       (let loop ([i 1] [acc acc])
+                         (if (fx= i l)
+                             res
+                             (let ([nacc (apply proc acc (vecref* (fx1- i)))])
+                               (vset! res i nacc)
+                               (loop (fx1+ i) nacc)))))))))])
+
+
+  (define-vector-procedure (v fxv flv) scan-right-ex
+    [(proc acc vec0)
+     (pcheck ([procedure? proc] [v? vec0])
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (if (fx= l 0)
+                   res
+                   (begin
+                     (vset! res 0 acc)
+                     (let loop ([i 1] [acc acc])
+                       (if (fx= i l)
+                           res
+                           (let ([nacc (proc (vref vec0 (fx- l i)) acc)])
+                             (vset! res i nacc)
+                             (loop (fx1+ i) nacc))))))))]
+    [(proc acc vec0 vec1)
+     (pcheck ([procedure? proc] [v? vec0 vec1])
+             (vcheck-length procname vec0 vec1)
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (if (fx= l 0)
+                   res
+                   (begin
+                     (vset! res 0 acc)
+                     (let loop ([i 1] [acc acc])
+                       (if (fx= i l)
+                           res
+                           (let ([nacc (proc (vref vec0 (fx- l i)) (vref vec1 (fx- l i)) acc)])
+                             (vset! res i nacc)
+                             (loop (fx1+ i) nacc))))))))]
+    [(proc acc vec0 vec1 vec2)
+     (pcheck ([procedure? proc] [v? vec0 vec1 vec2])
+             (vcheck-length procname vec0 vec1 vec2)
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (if (fx= l 0)
+                   res
+                   (begin
+                     (vset! res 0 acc)
+                     (let loop ([i 1] [acc acc])
+                       (if (fx= i l)
+                           res
+                           (let ([nacc (proc (vref vec0 (fx- l i)) (vref vec1 (fx- l i)) (vref vec2 (fx- l i)) acc)])
+                             (vset! res i nacc)
+                             (loop (fx1+ i) nacc))))))))]
+    [(proc acc vec0 . vecs)
+     (let* ([vec* (cons vec0 vecs)]
+            [vecref* (lambda (i) (map (lambda (v) (vref v i)) vec*))])
+       (pcheck ([procedure? proc]
+                [all-which? vec*])
+               (apply vcheck-length procname vec*)
+               (let* ([l (vlength vec0)] [res (vmake l)])
+                 (if (fx= l 0)
+                     res
+                     (begin
+                       (vset! res 0 acc)
+                       (let loop ([i 1] [acc acc])
+                         (if (fx= i l)
+                             res
+                             (let ([nacc (apply proc `(,@(vecref* (fx- l i)) ,acc))])
+                               (vset! res i nacc)
+                               (loop (fx1+ i) nacc)))))))))])
+
+
+  (define-vector-procedure (v fxv flv) scan-left-in
+    [(proc acc vec0)
+     (pcheck ([procedure? proc] [v? vec0])
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (let loop ([i 0] [acc acc])
+                 (if (fx= i l)
+                     res
+                     (let ([nacc (proc acc (vref vec0 i))])
+                       (vset! res i nacc)
+                       (loop (fx1+ i) nacc))))))]
+    [(proc acc vec0 vec1)
+     (pcheck ([procedure? proc] [v? vec0 vec1])
+             (vcheck-length procname vec0 vec1)
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (let loop ([i 0] [acc acc])
+                 (if (fx= i l)
+                     res
+                     (let ([nacc (proc acc (vref vec0 i) (vref vec1 i))])
+                       (vset! res i nacc)
+                       (loop (fx1+ i) nacc))))))]
+    [(proc acc vec0 vec1 vec2)
+     (pcheck ([procedure? proc] [v? vec0 vec1 vec2])
+             (vcheck-length procname vec0 vec1 vec2)
+             (let* ([l (vlength vec0)] [res (vmake l)])
+               (let loop ([i 0] [acc acc])
+                 (if (fx= i l)
+                     res
+                     (let ([nacc (proc acc (vref vec0 i) (vref vec1 i) (vref vec2 i))])
+                       (vset! res i nacc)
+                       (loop (fx1+ i) nacc))))))]
+    [(proc acc vec0 . vecs)
+     (let* ([vec* (cons vec0 vecs)]
+            [vecref* (lambda (i) (map (lambda (v) (vref v i)) vec*))])
+       (pcheck ([procedure? proc]
+                [all-which? vec*])
+               (apply vcheck-length procname vec*)
+               (let* ([l (vlength vec0)] [res (vmake l)])
+                 (let loop ([i 0] [acc acc])
+                   (if (fx= i l)
+                       res
+                       (let ([nacc (apply proc acc (vecref* i))])
+                         (vset! res i nacc)
+                         (loop (fx1+ i) nacc)))))))])
+
+
+  (define-vector-procedure (v fxv flv) scan-right-in
+    [(proc acc vec0)
+     (pcheck ([procedure? proc] [v? vec0])
+             (let* ([l-1 (fx1- (vlength vec0))] [res (vmake (fx1+ l-1))])
+               (let loop ([i 0] [acc acc])
+                 (if (fx> i l-1)
+                     res
+                     (let ([nacc (proc (vref vec0 (fx- l-1 i)) acc)])
+                       (vset! res i nacc)
+                       (loop (fx1+ i) nacc))))))]
+    [(proc acc vec0 vec1)
+     (pcheck ([procedure? proc] [v? vec0 vec1])
+             (vcheck-length procname vec0 vec1)
+             (let* ([l-1 (fx1- (vlength vec0))] [res (vmake (fx1+ l-1))])
+               (let loop ([i 0] [acc acc])
+                 (if (fx> i l-1)
+                     res
+                     (let ([nacc (proc (vref vec0 (fx- l-1 i)) (vref vec1 (fx- l-1 i)) acc)])
+                       (vset! res i nacc)
+                       (loop (fx1+ i) nacc))))))]
+    [(proc acc vec0 vec1 vec2)
+     (pcheck ([procedure? proc] [v? vec0 vec1 vec2])
+             (vcheck-length procname vec0 vec1 vec2)
+             (let* ([l-1 (fx1- (vlength vec0))] [res (vmake (fx1+ l-1))])
+               (let loop ([i 0] [acc acc])
+                 (if (fx> i l-1)
+                     res
+                     (let ([nacc (proc (vref vec0 (fx- l-1 i)) (vref vec1 (fx- l-1 i)) (vref vec2 (fx- l-1 i)) acc)])
+                       (vset! res i nacc)
+                       (loop (fx1+ i) nacc))))))]
+    [(proc acc vec0 . vecs)
+     (let* ([vec* (cons vec0 vecs)]
+            [vecref* (lambda (i) (map (lambda (v) (vref v i)) vec*))])
+       (pcheck ([procedure? proc]
+                [all-which? vec*])
+               (apply vcheck-length procname vec*)
+               (let* ([l-1 (fx1- (vlength vec0))] [res (vmake (fx1+ l-1))])
+                 (let loop ([i 0] [acc acc])
+                   (if (fx> i l-1)
+                       res
+                       (let ([nacc (apply proc `(,@(vecref* (fx- l-1 i)),acc))])
+                         (vset! res i nacc)
+                         (loop (fx1+ i) nacc)))))))])
 
 
   (define-vector-procedure (v fxv flv) andmap
@@ -1073,6 +1291,23 @@
     (vpcheck (vec)
              (pcheck ([procedure? <?])
                      (todo))))
+
+
+  #|doc
+  Check whether the given vector is sorted according to predicate `<?`.
+  |#
+  (define-vector-procedure (v fxv flv)
+    (sorted? <? vec)
+    (vpcheck (vec)
+             (pcheck ([procedure? <?])
+                     (let ([len (vlength vec)])
+                       (if (fx<= len 1)
+                           #t
+                           (let loop ([i 0])
+                             (if (fx= i (fx1- len))
+                                 #t
+                                 (and (<? (vref vec i) (vref vec (fx1+ i)))
+                                      (loop (fx1+ i))))))))))
 
 
   #|doc

@@ -771,3 +771,445 @@
              (list->flvector (nums -50.0 -100.0 -4.0)))
 
      )
+
+
+(mat *vsorted?
+
+     (error? (vsorted?))
+     (error? (vsorted? 1 (vector)))
+
+     (vsorted? <  '#())
+     (vsorted? <= '#())
+     (vsorted? >  '#())
+     (vsorted? < (viota 10))
+     (vsorted? <= (viota 10))
+     (not (vsorted? < (vreverse! (viota 10))))
+     (vsorted? > (vreverse! (viota 10)))
+
+     (error? (fxvsorted?))
+     (error? (fxvsorted? 1 (fxvector)))
+
+     (fxvsorted? fx<  '#vfx())
+     (fxvsorted? fx<= '#vfx())
+     (fxvsorted? fx>  '#vfx())
+     (fxvsorted? fx< (fxviota 10))
+     (fxvsorted? fx<= (fxviota 10))
+     (not (fxvsorted? fx< (fxvreverse! (fxviota 10))))
+     (fxvsorted? fx> (fxvreverse! (fxviota 10)))
+
+     (error? (flvsorted?))
+     (error? (flvsorted? 1 (flvector)))
+
+     (flvsorted? fl<  '#vfl())
+     (flvsorted? fl<= '#vfl())
+     (flvsorted? fl>  '#vfl())
+     (flvsorted? fl< (flvnums 0.0 20.0 2.2))
+     (flvsorted? fl<= (flvnums 0.0 20.0 2.2))
+     (not (flvsorted? fl< (flvreverse! (flvnums 0.0 20.0 2.2))))
+     (flvsorted? fl> (flvreverse! (flvnums 0.0 20.0 2.2)))
+     ;; type error
+     (error? (fxvsorted? fl> (flvnums 0.0 20.0 2.2)))
+
+     )
+
+
+(mat *vscan-left-ex
+
+     ;; arity
+     (error? (vscan-left-ex + 0))
+     ;; not vector
+     (error? (vscan-left-ex + 0 '()))
+     ;; not proc
+     (error? (vscan-left-ex 'bla 0 '#()))
+
+     (error? (fxvscan-left-ex + 0))
+     (error? (fxvscan-left-ex + 0 '()))
+     (error? (fxvscan-left-ex 'bla 0 '#()))
+     ;; not fxvector
+     (error? (fxvscan-left-ex + 0 '#()))
+
+     (error? (flvscan-left-ex + 0))
+     (error? (flvscan-left-ex + 0 '()))
+     (error? (flvscan-left-ex 'bla 0 '#()))
+     ;; not flvector
+     (error? (flvscan-left-ex + 0.0 '#()))
+
+;;;; vector
+;;; 1 arg
+     (equal? '#() (vscan-left-ex + 0 '#()))
+     (equal? '#(0 1 3 6)
+             (vscan-left-ex + 0 '#(1 2 3 4)))
+     (equal? '#(1 1 2 6) (vscan-left-ex * 1 '#(1 2 3 4)))
+
+;;; 2 args
+     (equal? '#() (vscan-left-ex + 0 '#() '#()))
+     (equal? '#(1 3 7 13)
+             (vscan-left-ex (lambda (acc x y) (+ acc x y))
+                            1 '#(1 2 3 4) '#(1 2 3 4)))
+
+;;; 3 args
+     (equal? '#() (vscan-left-ex + 0 '#() '#() '#()))
+     (equal? '#(1 4 10 19)
+             (vscan-left-ex (lambda (acc x y z) (+ acc x y z))
+                            1 '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4)))
+
+;;; more args
+     (equal? '#() (vscan-left-ex + 0 '#() '#() '#() '#() '#()))
+     (equal? '#(1 (1 1 1 1 1 1) ((1 1 1 1 1 1) 2 2 2 2 2)
+                  (((1 1 1 1 1 1) 2 2 2 2 2) 3 3 3 3 3))
+             (vscan-left-ex (lambda (acc . x*) (cons acc x*))
+                            1 '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4)))
+
+
+;;;; fxvector
+;;; 1 arg
+     (equal? '#vfx() (fxvscan-left-ex + 0 '#vfx()))
+     (equal? '#vfx(0 1 3 6)
+             (fxvscan-left-ex + 0 '#vfx(1 2 3 4)))
+     (equal? '#vfx(1 1 2 6) (fxvscan-left-ex * 1 '#vfx(1 2 3 4)))
+
+;;; 2 args
+     (equal? '#vfx() (fxvscan-left-ex + 0 '#vfx() '#vfx()))
+     (equal? '#vfx(1 3 7 13)
+             (fxvscan-left-ex (lambda (acc x y) (+ acc x y))
+                            1 '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+;;; 3 args
+     (equal? '#vfx() (fxvscan-left-ex + 0 '#vfx() '#vfx() '#vfx()))
+     (equal? '#vfx(1 4 10 19)
+             (fxvscan-left-ex (lambda (acc x y z) (+ acc x y z))
+                            1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+;;; more args
+     (equal? '#vfx() (fxvscan-left-ex + 0 '#vfx() '#vfx() '#vfx() '#vfx() '#vfx()))
+     (equal? '#vfx(1 6 16 31)
+             (fxvscan-left-ex (lambda (acc . x*) (+ acc (apply + x*)))
+                              1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+
+;;;; flvector
+;;; 1 arg
+     (equal? '#vfl() (flvscan-left-ex + 0.0 '#vfl()))
+     (equal? '#vfl(0.0 1.0 3.0 6.0)
+             (flvscan-left-ex + 0.0 '#vfl(1.0 2.0 3.0 4.0)))
+     (equal? '#vfl(1.0 1.0 2.0 6.0) (flvscan-left-ex * 1.0 '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; 2 args
+     (equal? '#vfl() (flvscan-left-ex + 0.0 '#vfl() '#vfl()))
+     (equal? '#vfl(1.0 3.0 7.0 13.0)
+             (flvscan-left-ex (lambda (acc x y) (+ acc x y))
+                              1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; 3 args
+     (equal? '#vfl() (flvscan-left-ex + 0.0 '#vfl() '#vfl() '#vfl()))
+     (equal? '#vfl(1.0 4.0 10.0 19.0)
+             (flvscan-left-ex (lambda (acc x y z) (+ acc x y z))
+                              1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; more args
+     (equal? '#vfl() (flvscan-left-ex + 0.0 '#vfl() '#vfl() '#vfl() '#vfl() '#vfl()))
+     (equal? '#vfl(1.0 6.0 16.0 31.0)
+             (flvscan-left-ex (lambda (acc . x*) (+ acc (apply + x*)))
+                              1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+     )
+
+
+(mat *vscan-left-in
+
+     (error? (vscan-left-in + 0))
+     (error? (vscan-left-in + 0 '()))
+     (error? (vscan-left-in 'bla 0 '#()))
+
+     (error? (fxvscan-left-in + 0))
+     (error? (fxvscan-left-in + 0 '()))
+     (error? (fxvscan-left-in 'bla 0 '#()))
+     ;; not fxvector
+     (error? (fxvscan-left-in + 0 '#()))
+
+     (error? (flvscan-left-in + 0))
+     (error? (flvscan-left-in + 0 '()))
+     (error? (flvscan-left-in 'bla 0 '#()))
+     ;; not flvector
+     (error? (flvscan-left-in + 0.0 '#()))
+
+;;;; vector
+;;; 1 arg
+     (equal? '#() (vscan-left-in + 0 '#()))
+     (equal? '#(1 3 6 10)
+             (vscan-left-in + 0 '#(1 2 3 4)))
+     (equal? '#(1 2 6 24) (vscan-left-in * 1 '#(1 2 3 4)))
+
+;;; 2 args
+     (equal? '#() (vscan-left-in + 0 '#() '#()))
+     (equal? '#(3 7 13 21)
+             (vscan-left-in (lambda (acc x y) (+ acc x y))
+                            1 '#(1 2 3 4) '#(1 2 3 4)))
+
+;;; 3 args
+     (equal? '#() (vscan-left-in + 0 '#() '#() '#()))
+     (equal? '#(4 10 19 31)
+             (vscan-left-in (lambda (acc x y z) (+ acc x y z))
+                            1 '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4)))
+
+;;; more args
+     (equal? '#() (vscan-left-in + 0 '#() '#() '#() '#() '#()))
+     (equal? '#((1 1 1 1 1 1) ((1 1 1 1 1 1) 2 2 2 2 2)
+                (((1 1 1 1 1 1) 2 2 2 2 2) 3 3 3 3 3)
+                ((((1 1 1 1 1 1) 2 2 2 2 2) 3 3 3 3 3) 4 4 4 4 4))
+             (vscan-left-in (lambda (acc . x*) (cons acc x*))
+                            1 '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4)))
+
+
+;;;; fxvector
+;;; 1 arg
+     (equal? '#vfx() (fxvscan-left-in + 0 '#vfx()))
+     (equal? '#vfx(1 3 6 10)
+             (fxvscan-left-in + 0 '#vfx(1 2 3 4)))
+     (equal? '#vfx(1 2 6 24) (fxvscan-left-in * 1 '#vfx(1 2 3 4)))
+
+;;; 2 args
+     (equal? '#vfx() (fxvscan-left-in + 0 '#vfx() '#vfx()))
+     (equal? '#vfx(3 7 13 21)
+             (fxvscan-left-in (lambda (acc x y) (+ acc x y))
+                              1 '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+;;; 3 args
+     (equal? '#vfx() (fxvscan-left-in + 0 '#vfx() '#vfx() '#vfx()))
+     (equal? '#vfx(4 10 19 31)
+             (fxvscan-left-in (lambda (acc x y z) (+ acc x y z))
+                              1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+;;; more args
+     (equal? '#vfx() (fxvscan-left-in + 0 '#vfx() '#vfx() '#vfx() '#vfx() '#vfx()))
+     (equal? '#vfx(6 16 31 51)
+             (fxvscan-left-in (lambda (acc . x*) (+ acc (apply + x*)))
+                              1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+
+;;;; flvector
+;;; 1 arg
+     (equal? '#vfl() (flvscan-left-in + 0.0 '#vfl()))
+     (equal? '#vfl(1.0 3.0 6.0 10.0)
+             (flvscan-left-in + 0.0 '#vfl(1.0 2.0 3.0 4.0)))
+     (equal? '#vfl(1.0 2.0 6.0 24.0) (flvscan-left-in * 1.0 '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; 2 args
+     (equal? '#vfl() (flvscan-left-in + 0.0 '#vfl() '#vfl()))
+     (equal? '#vfl(3.0 7.0 13.0 21.0)
+             (flvscan-left-in (lambda (acc x y) (+ acc x y))
+                              1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; 3 args
+     (equal? '#vfl() (flvscan-left-in + 0.0 '#vfl() '#vfl() '#vfl()))
+     (equal? '#vfl(4.0 10.0 19.0 31.0)
+             (flvscan-left-in (lambda (acc x y z) (+ acc x y z))
+                              1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; more args
+     (equal? '#vfl() (flvscan-left-in + 0.0 '#vfl() '#vfl() '#vfl() '#vfl() '#vfl()))
+     (equal? '#vfl(6.0 16.0 31.0 51.0)
+             (flvscan-left-in (lambda (acc . x*) (+ acc (apply + x*)))
+                              1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+     )
+
+
+(mat *vscan-right-ex
+
+     (error? (vscan-right-ex + 0))
+     (error? (vscan-right-ex + 0 '()))
+     (error? (vscan-right-ex 'bla 0 '#()))
+
+     (error? (fxvscan-right-ex + 0))
+     (error? (fxvscan-right-ex + 0 '()))
+     (error? (fxvscan-right-ex 'bla 0 '#()))
+     ;; not fxvector
+     (error? (fxvscan-right-ex + 0 '#()))
+
+     (error? (flvscan-right-ex + 0))
+     (error? (flvscan-right-ex + 0 '()))
+     (error? (flvscan-right-ex 'bla 0 '#()))
+     ;; not flvector
+     (error? (flvscan-right-ex + 0.0 '#()))
+
+;;;; vector
+;;; 1 arg
+     (equal? '#() (vscan-right-ex + 0 '#()))
+     (equal? '#(0 4 7 9)
+             (vscan-right-ex + 0 '#(1 2 3 4)))
+     (equal? '#(1 4 12 24) (vscan-right-ex * 1 '#(1 2 3 4)))
+
+;;; 2 args
+     (equal? '#() (vscan-right-ex + 0 '#() '#()))
+     (equal? '#(1 9 15 19)
+             (vscan-right-ex (lambda (acc x y) (+ acc x y))
+                             1 '#(1 2 3 4) '#(1 2 3 4)))
+
+;;; 3 args
+     (equal? '#() (vscan-right-ex + 0 '#() '#() '#()))
+     (equal? '#(1 13 22 28)
+             (vscan-right-ex (lambda (acc x y z) (+ acc x y z))
+                             1 '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4)))
+
+;;; more args
+     (equal? '#() (vscan-right-ex + 0 '#() '#() '#() '#() '#()))
+     (equal? '#(1 (4 4 4 4 4 1) (3 3 3 3 3 (4 4 4 4 4 1))
+                  (2 2 2 2 2 (3 3 3 3 3 (4 4 4 4 4 1))))
+             (vscan-right-ex (lambda (acc . x*) (cons acc x*))
+                             1 '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4)))
+
+
+;;;; fxvector
+;;; 1 arg
+     (equal? '#vfx() (fxvscan-right-ex + 0 '#vfx()))
+     (equal? '#vfx(0 4 7 9)
+             (fxvscan-right-ex + 0 '#vfx(1 2 3 4)))
+     (equal? '#vfx(1 4 12 24) (fxvscan-right-ex * 1 '#vfx(1 2 3 4)))
+
+;;; 2 args
+     (equal? '#vfx() (fxvscan-right-ex + 0 '#vfx() '#vfx()))
+     (equal? '#vfx(1 9 15 19)
+             (fxvscan-right-ex (lambda (acc x y) (+ acc x y))
+                               1 '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+;;; 3 args
+     (equal? '#vfx() (fxvscan-right-ex + 0 '#vfx() '#vfx() '#vfx()))
+     (equal? '#vfx(1 13 22 28)
+             (fxvscan-right-ex (lambda (acc x y z) (+ acc x y z))
+                               1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+;;; more args
+     (equal? '#vfx() (fxvscan-right-ex + 0 '#vfx() '#vfx() '#vfx() '#vfx() '#vfx()))
+     (equal? '#vfx(1 21 36 46)
+             (fxvscan-right-ex (lambda (acc . x*) (+ acc (apply + x*)))
+                               1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+
+;;;; flvector
+;;; 1 arg
+     (equal? '#vfl() (flvscan-right-ex + 0.0 '#vfl()))
+     (equal? '#vfl(0.0 4.0 7.0 9.0)
+             (flvscan-right-ex + 0.0 '#vfl(1.0 2.0 3.0 4.0)))
+     (equal? '#vfl(1.0 4.0 12.0 24.0) (flvscan-right-ex * 1.0 '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; 2 args
+     (equal? '#vfl() (flvscan-right-ex + 0.0 '#vfl() '#vfl()))
+     (equal? '#vfl(1.0 9.0 15.0 19.0)
+             (flvscan-right-ex (lambda (acc x y) (+ acc x y))
+                               1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; 3 args
+     (equal? '#vfl() (flvscan-right-ex + 0.0 '#vfl() '#vfl() '#vfl()))
+     (equal? '#vfl(1.0 13.0 22.0 28.0)
+             (flvscan-right-ex (lambda (acc x y z) (+ acc x y z))
+                               1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; more args
+     (equal? '#vfl() (flvscan-right-ex + 0.0 '#vfl() '#vfl() '#vfl() '#vfl() '#vfl()))
+     (equal? '#vfl(1.0 21.0 36.0 46.0)
+             (flvscan-right-ex (lambda (acc . x*) (+ acc (apply + x*)))
+                               1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+     )
+
+
+(mat *vscan-right-in
+
+     (error? (vscan-right-in + 0))
+     (error? (vscan-right-in + 0 '()))
+     (error? (vscan-right-in 'bla 0 '#()))
+
+     (error? (fxvscan-right-in + 0))
+     (error? (fxvscan-right-in + 0 '()))
+     (error? (fxvscan-right-in 'bla 0 '#()))
+     ;; not fxvector
+     (error? (fxvscan-right-in + 0 '#()))
+
+     (error? (flvscan-right-in + 0))
+     (error? (flvscan-right-in + 0 '()))
+     (error? (flvscan-right-in 'bla 0 '#()))
+     ;; not flvector
+     (error? (flvscan-right-in + 0.0 '#()))
+
+;;;; vector
+;;; 1 arg
+     (equal? '#() (vscan-right-in + 0 '#()))
+     (equal? '#(4 7 9 10)
+             (vscan-right-in + 0 '#(1 2 3 4)))
+     (equal? '#(4 12 24 24) (vscan-right-in * 1 '#(1 2 3 4)))
+
+;;; 2 args
+     (equal? '#() (vscan-right-in + 0 '#() '#()))
+     (equal? '#(9 15 19 21)
+             (vscan-right-in (lambda (acc x y) (+ acc x y))
+                             1 '#(1 2 3 4) '#(1 2 3 4)))
+
+;;; 3 args
+     (equal? '#() (vscan-right-in + 0 '#() '#() '#()))
+     (equal? '#(13 22 28 31)
+             (vscan-right-in (lambda (acc x y z) (+ acc x y z))
+                             1 '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4)))
+
+;;; more args
+     (equal? '#() (vscan-right-in + 0 '#() '#() '#() '#() '#()))
+     (equal? '#((4 4 4 4 4 1) (3 3 3 3 3 (4 4 4 4 4 1))
+                (2 2 2 2 2 (3 3 3 3 3 (4 4 4 4 4 1)))
+                (1 1 1 1 1 (2 2 2 2 2 (3 3 3 3 3 (4 4 4 4 4 1)))))
+             (vscan-right-in (lambda (acc . x*) (cons acc x*))
+                             1 '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4) '#(1 2 3 4)))
+
+
+;;;; fxvector
+;;; 1 arg
+     (equal? '#vfx() (fxvscan-right-in + 0 '#vfx()))
+     (equal? '#vfx(4 7 9 10)
+             (fxvscan-right-in + 0 '#vfx(1 2 3 4)))
+     (equal? '#vfx(4 12 24 24) (fxvscan-right-in * 1 '#vfx(1 2 3 4)))
+
+;;; 2 args
+     (equal? '#vfx() (fxvscan-right-in + 0 '#vfx() '#vfx()))
+     (equal? '#vfx(9 15 19 21)
+             (fxvscan-right-in (lambda (acc x y) (+ acc x y))
+                               1 '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+;;; 3 args
+     (equal? '#vfx() (fxvscan-right-in + 0 '#vfx() '#vfx() '#vfx()))
+     (equal? '#vfx(13 22 28 31)
+             (fxvscan-right-in (lambda (acc x y z) (+ acc x y z))
+                               1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+;;; more args
+     (equal? '#vfx() (fxvscan-right-in + 0 '#vfx() '#vfx() '#vfx() '#vfx() '#vfx()))
+     (equal? '#vfx(21 36 46 51)
+             (fxvscan-right-in (lambda (acc . x*) (+ acc (apply + x*)))
+                               1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+
+
+;;;; flvector
+;;; 1 arg
+     (equal? '#vfl() (flvscan-right-in + 0.0 '#vfl()))
+     (equal? '#vfl(4.0 7.0 9.0 10.0)
+             (flvscan-right-in + 0.0 '#vfl(1.0 2.0 3.0 4.0)))
+     (equal? '#vfl(4.0 12.0 24.0 24.0) (flvscan-right-in * 1.0 '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; 2 args
+     (equal? '#vfl() (flvscan-right-in + 0.0 '#vfl() '#vfl()))
+     (equal? '#vfl(9.0 15.0 19.0 21.0)
+             (flvscan-right-in (lambda (acc x y) (+ acc x y))
+                               1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; 3 args
+     (equal? '#vfl() (flvscan-right-in + 0.0 '#vfl() '#vfl() '#vfl()))
+     (equal? '#vfl(13.0 22.0 28.0 31.0)
+             (flvscan-right-in (lambda (acc x y z) (+ acc x y z))
+                               1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+;;; more args
+     (equal? '#vfl() (flvscan-right-in + 0.0 '#vfl() '#vfl() '#vfl() '#vfl() '#vfl()))
+     (equal? '#vfl(21.0 36.0 46.0 51.0)
+             (flvscan-right-in (lambda (acc . x*) (+ acc (apply + x*)))
+                               1.0 '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0) '#vfl(1.0 2.0 3.0 4.0)))
+
+
+     )
