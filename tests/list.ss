@@ -195,7 +195,7 @@
      (begin (define ls (iota 10))
             #t)
 
-
+c
      (equal? '(8 5 2)
              (slice ls 8 0 -3))
      (equal? '(9 6 3)
@@ -470,5 +470,215 @@
             [ls* (map (lambda (ls) (apply list ls)) ls*)])
        (list=? (apply list^ ls*)
                (list- (apply list+ ls*) (apply list& ls*))))
+
+     )
+
+
+(mat scan-left-ex
+
+     (error? (scan-left-ex +))
+     (error? (scan-left-ex + 0 #f))
+     (error? (scan-left-ex + 0 '() '() #f))
+     (error? (scan-left-ex + 0 '() '() '() #f))
+     (error? (scan-left-ex 'proc 0 #f))
+
+     (equal? '(0 1 3)
+             (scan-left-ex + 0 '(1 2 3)))
+
+     (equal? '(0 1 3 6 10 15)
+             (scan-left-ex + 0 '(1 2 3 4 5 6)))
+
+     (equal? '(1 1 2 6 24 120)
+             (scan-left-ex * 1 '(1 2 3 4 5 6)))
+
+     (equal? '(H (H 1)
+                 ((H 1) 2)
+                 (((H 1) 2) 3)
+                 ((((H 1) 2) 3) 4)
+                 (((((H 1) 2) 3) 4) 5))
+             (scan-left-ex list 'H '(1 2 3 4 5 6)))
+
+     (equal? '(H (H 1 a)
+                 ((H 1 a) 2 b)
+                 (((H 1 a) 2 b) 3 c)
+                 ((((H 1 a) 2 b) 3 c) 4 d) (((((H 1 a) 2 b) 3 c) 4 d) 5 e))
+             (scan-left-ex list 'H '(1 2 3 4 5 6) '(a b c d e f)))
+
+     (equal? '(H (H 1 a A)
+                 ((H 1 a A) 2 b B)
+                 (((H 1 a A) 2 b B) 3 c C)
+                 ((((H 1 a A) 2 b B) 3 c C) 4 d D)
+                 (((((H 1 a A) 2 b B) 3 c C) 4 d D) 5 e E))
+             (scan-left-ex list 'H '(1 2 3 4 5 6) '(a b c d e f) '(A B C D E F)))
+
+     (equal? '(H (H 1 a A 11)
+                 ((H 1 a A 11) 2 b B 22)
+                 (((H 1 a A 11) 2 b B 22) 3 c C 33)
+                 ((((H 1 a A 11) 2 b B 22) 3 c C 33) 4 d D 44)
+                 (((((H 1 a A 11) 2 b B 22) 3 c C 33) 4 d D 44) 5 e E 55))
+             (scan-left-ex list 'H
+                           '(1 2 3 4 5 6) '(a b c d e f)
+                           '(A B C D E F) '(11 22 33 44 55 66)))
+
+
+     )
+
+
+(mat scan-left-in
+
+     (error? (scan-left-in +))
+     (error? (scan-left-in + 0 #f))
+     (error? (scan-left-in + 0 '() '() #f))
+     (error? (scan-left-in + 0 '() '() '() #f))
+     (error? (scan-left-in 'proc 0 #f))
+
+     (equal? '(1 3 6)
+             (scan-left-in + 0 '(1 2 3)))
+
+     (equal? '(1 3 6 10 15 21)
+             (scan-left-in + 0 '(1 2 3 4 5 6)))
+
+     (equal? '(1 2 6 24 120 720)
+             (scan-left-in * 1 '(1 2 3 4 5 6)))
+
+     (equal? '((H 1)
+               ((H 1) 2)
+               (((H 1) 2) 3)
+               ((((H 1) 2) 3) 4)
+               (((((H 1) 2) 3) 4) 5)
+               ((((((H 1) 2) 3) 4) 5) 6))
+             (scan-left-in list 'H '(1 2 3 4 5 6)))
+
+     (equal? '((H 1 a)
+               ((H 1 a) 2 b)
+               (((H 1 a) 2 b) 3 c)
+               ((((H 1 a) 2 b) 3 c) 4 d)
+               (((((H 1 a) 2 b) 3 c) 4 d) 5 e)
+               ((((((H 1 a) 2 b) 3 c) 4 d) 5 e) 6 f))
+             (scan-left-in list 'H '(1 2 3 4 5 6) '(a b c d e f)))
+
+     (equal? '((H 1 a A)
+               ((H 1 a A) 2 b B)
+               (((H 1 a A) 2 b B) 3 c C)
+               ((((H 1 a A) 2 b B) 3 c C) 4 d D)
+               (((((H 1 a A) 2 b B) 3 c C) 4 d D) 5 e E)
+               ((((((H 1 a A) 2 b B) 3 c C) 4 d D) 5 e E) 6 f F))
+             (scan-left-in list 'H '(1 2 3 4 5 6) '(a b c d e f) '(A B C D E F)))
+
+     (equal? '((H 1 a A 11)
+               ((H 1 a A 11) 2 b B 22)
+               (((H 1 a A 11) 2 b B 22) 3 c C 33)
+               ((((H 1 a A 11) 2 b B 22) 3 c C 33) 4 d D 44)
+               (((((H 1 a A 11) 2 b B 22) 3 c C 33) 4 d D 44) 5 e E 55)
+               ((((((H 1 a A 11) 2 b B 22) 3 c C 33) 4 d D 44) 5 e E 55) 6 f F 66))
+             (scan-left-in list 'H
+                           '(1 2 3 4 5 6) '(a b c d e f)
+                           '(A B C D E F) '(11 22 33 44 55 66)))
+
+     )
+
+
+(mat scan-right-ex
+
+     (error? (scan-right-ex +))
+     (error? (scan-right-ex + 0 #f))
+     (error? (scan-right-ex + 0 '() '() #f))
+     (error? (scan-right-ex + 0 '() '() '() #f))
+     (error? (scan-right-ex 'proc 0 #f))
+
+
+     (equal? '(0 3 5)
+             (scan-right-ex + 0 '(1 2 3)))
+
+     (equal? '(0 6 11 15 18 20)
+             (scan-right-ex + 0 '(1 2 3 4 5 6)))
+
+     (equal? '(1 6 30 120 360 720)
+             (scan-right-ex * 1 '(1 2 3 4 5 6)))
+
+     (equal? '(H (6 H)
+                 (5 (6 H))
+                 (4 (5 (6 H)))
+                 (3 (4 (5 (6 H))))
+                 (2 (3 (4 (5 (6 H))))))
+             (scan-right-ex list 'H '(1 2 3 4 5 6)))
+
+     (equal? '(H (6 f H)
+                 (5 e (6 f H))
+                 (4 d (5 e (6 f H)))
+                 (3 c (4 d (5 e (6 f H))))
+                 (2 b (3 c (4 d (5 e (6 f H))))))
+             (scan-right-ex list 'H '(1 2 3 4 5 6) '(a b c d e f)))
+
+     (equal? '(H (6 f F H)
+                 (5 e E (6 f F H))
+                 (4 d D (5 e E (6 f F H)))
+                 (3 c C (4 d D (5 e E (6 f F H))))
+                 (2 b B (3 c C (4 d D (5 e E (6 f F H))))))
+             (scan-right-ex list 'H '(1 2 3 4 5 6) '(a b c d e f) '(A B C D E F)))
+
+     (equal? '(H (6 f F 66 H)
+                 (5 e E 55 (6 f F 66 H))
+                 (4 d D 44 (5 e E 55 (6 f F 66 H)))
+                 (3 c C 33 (4 d D 44 (5 e E 55 (6 f F 66 H))))
+                 (2 b B 22 (3 c C 33 (4 d D 44 (5 e E 55 (6 f F 66 H))))))
+             (scan-right-ex list 'H
+                            '(1 2 3 4 5 6) '(a b c d e f)
+                            '(A B C D E F) '(11 22 33 44 55 66)))
+
+     )
+
+
+(mat scan-right-in
+
+     (error? (scan-right-in +))
+     (error? (scan-right-in + 0 #f))
+     (error? (scan-right-in + 0 '() '() #f))
+     (error? (scan-right-in + 0 '() '() '() #f))
+     (error? (scan-right-in 'proc 0 #f))
+
+
+     (equal? '(3 5 6)
+             (scan-right-in + 0 '(1 2 3)))
+
+     (equal? '(6 11 15 18 20 21)
+             (scan-right-in + 0 '(1 2 3 4 5 6)))
+
+     (equal? '(6 30 120 360 720 720)
+             (scan-right-in * 1 '(1 2 3 4 5 6)))
+
+     (equal? '((6 H)
+               (5 (6 H))
+               (4 (5 (6 H)))
+               (3 (4 (5 (6 H))))
+               (2 (3 (4 (5 (6 H)))))
+               (1 (2 (3 (4 (5 (6 H)))))))
+             (scan-right-in list 'H '(1 2 3 4 5 6)))
+
+     (equal? '((6 f H)
+               (5 e (6 f H))
+               (4 d (5 e (6 f H)))
+               (3 c (4 d (5 e (6 f H))))
+               (2 b (3 c (4 d (5 e (6 f H)))))
+               (1 a (2 b (3 c (4 d (5 e (6 f H)))))))
+             (scan-right-in list 'H '(1 2 3 4 5 6) '(a b c d e f)))
+
+     (equal? '((6 f F H)
+               (5 e E (6 f F H))
+               (4 d D (5 e E (6 f F H)))
+               (3 c C (4 d D (5 e E (6 f F H))))
+               (2 b B (3 c C (4 d D (5 e E (6 f F H)))))
+               (1 a A (2 b B (3 c C (4 d D (5 e E (6 f F H)))))))
+             (scan-right-in list 'H '(1 2 3 4 5 6) '(a b c d e f) '(A B C D E F)))
+
+     (equal? '((6 f F 66 H)
+               (5 e E 55 (6 f F 66 H))
+               (4 d D 44 (5 e E 55 (6 f F 66 H)))
+               (3 c C 33 (4 d D 44 (5 e E 55 (6 f F 66 H))))
+               (2 b B 22 (3 c C 33 (4 d D 44 (5 e E 55 (6 f F 66 H)))))
+               (1 a A 11 (2 b B 22 (3 c C 33 (4 d D 44 (5 e E 55 (6 f F 66 H)))))))
+             (scan-right-in list 'H
+                            '(1 2 3 4 5 6) '(a b c d e f)
+                            '(A B C D E F) '(11 22 33 44 55 66)))
 
      )
