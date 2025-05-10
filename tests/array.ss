@@ -223,6 +223,35 @@
      #t)
 
 
+(mat array-copy
+
+     (error? (array-copy))
+     (error? (array-copy #f))
+
+     (error? (fxarray-copy))
+     (error? (fxarray-copy #f))
+
+     (error? (u8array-copy))
+     (error? (u8array-copy #f))
+
+     (let* ([arr (apply array (iota 10))]
+            [newarr (array-copy arr)])
+       (and (equal? arr newarr)
+            (not (eq? arr newarr))))
+
+     (let* ([arr (apply fxarray (iota 10))]
+            [newarr (fxarray-copy arr)])
+       (and (equal? arr newarr)
+            (not (eq? arr newarr))))
+
+     (let* ([arr (apply u8array (iota 10))]
+            [newarr (u8array-copy arr)])
+       (and (equal? arr newarr)
+            (not (eq? arr newarr))))
+
+     )
+
+
 (mat array-stack-ops
 
      (error? (array-pop! (array)))

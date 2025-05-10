@@ -1,7 +1,7 @@
 (library (chezpp array)
   (export array make-array array? array-length array-empty?
           array-ref array-add! array-delete! array-set! array-clear!
-          array-slice array-slice! array-copy!
+          array-slice array-slice! array-copy array-copy!
           array-push! array-pop! array-push-back! array-pop-back!
           array-filter array-filter! array-partition
           array-contains? array-contains/p? array-search array-search*
@@ -16,7 +16,7 @@
 
           fxarray make-fxarray fxarray? fxarray-length fxarray-empty?
           fxarray-ref fxarray-add! fxarray-delete! fxarray-set! fxarray-clear!
-          fxarray-slice fxarray-slice! fxarray-copy!
+          fxarray-slice fxarray-slice! fxarray-copy fxarray-copy!
           fxarray-push! fxarray-pop! fxarray-push-back! fxarray-pop-back!
           fxarray-filter fxarray-filter! fxarray-partition
           fxarray-contains? fxarray-contains/p? fxarray-search fxarray-search*
@@ -30,7 +30,7 @@
 
           u8array make-u8array u8array? u8array-length u8array-empty?
           u8array-ref u8array-add! u8array-delete! u8array-set! u8array-clear!
-          u8array-slice u8array-slice! u8array-copy!
+          u8array-slice u8array-slice! u8array-copy u8array-copy!
           u8array-push! u8array-pop! u8array-push-back! u8array-pop-back!
           u8array-filter u8array-filter! u8array-partition
           u8array-contains? u8array-contains/p? u8array-search u8array-search*
@@ -100,14 +100,15 @@
         [(k (ty* ...) name [args body body* ...] ...)
          (and (identifier? #'name) (valid-ty*? (datum (ty* ...))))
          (let-values ([(pa? pfxa? pu8a?) (handle-ty* (datum (ty* ...)))])
-           (with-implicit (k v v? vmake vref vset! vcopy! vlength vpcheck vcheck-length all-which? thisproc who
+           (with-implicit (k v v? vmake vref vset! vcopy vcopy! vlength vpcheck vcheck-length all-which? thisproc who
                              t+ t- t* t/ t+id t*id t> t<
-                             a amake aadd! a? avec alength avec-set! apcheck aval?)
+                             a amk amake aadd! a? avec alength avec-set! apcheck aval?)
              #`(begin
                  #,(if pa?
                        (with-syntax ([name (get-name 'a #'name)])
                          #`(module (name)
                              (define a         array)
+                             (define amk       mk-array)
                              (define amake     make-array)
                              (define aadd!     array-add!)
                              (define a?        array?)
@@ -122,6 +123,7 @@
                              (define vset! vector-set!)
                              (define vlength vector-length)
                              (define vcopy!  vector-copy!)
+                             (define vcopy   vector-copy)
                              ;;(define vcheck-length check-length)
                              (define all-which? all-arrays?)
                              (define who 'name)
@@ -141,6 +143,7 @@
                        (with-syntax ([name (get-name 'fxa #'name)])
                          #`(module (name)
                              (define a         fxarray)
+                             (define amk       mk-fxarray)
                              (define amake     make-fxarray)
                              (define aadd!     fxarray-add!)
                              (define a?        fxarray?)
@@ -155,6 +158,7 @@
                              (define vset! fxvector-set!)
                              (define vlength fxvector-length)
                              (define vcopy!  fxvcopy!)
+                             (define vcopy   fxvector-copy)
                              ;;(define vcheck-length check-fxlength)
                              (define all-which? all-fxarrays?)
                              (define who 'name)
@@ -176,6 +180,7 @@
                        (with-syntax ([name (get-name 'u8a #'name)])
                          #`(module (name)
                              (define a         u8array)
+                             (define amk       mk-u8array)
                              (define amake     make-u8array)
                              (define aadd!     u8array-add!)
                              (define a?        u8array?)
@@ -190,6 +195,7 @@
                              (define vset! bytevector-u8-set!)
                              (define vlength bytevector-length)
                              (define vcopy!  bytevector-copy!)
+                             (define vcopy   bytevector-copy)
                              ;;(define vcheck-length check-u8length)
                              (define all-which? all-u8arrays?)
                              (define who 'name)
@@ -211,15 +217,16 @@
         [(k (ty* ...) (name . args) body* ...)
          (and (identifier? #'name) (valid-ty*? (datum (ty* ...))))
          (let-values ([(pa? pfxa? pu8a?) (handle-ty* (datum (ty* ...)))])
-           (with-implicit (k v? vmake vref vset! vlength vcopy! vpcheck vcheck-length all-which? thisproc who
+           (with-implicit (k v? vmake vref vset! vlength vcopy vcopy! vpcheck vcheck-length all-which? thisproc who
                              t+ t- t* t/ t+id t*id t> t<
-                             a amake aadd! a? avec alength avec-set! apcheck aval?)
+                             a amk amake aadd! a? avec alength avec-set! apcheck aval?)
              #`(begin
                  #,(if pa?
                        (with-syntax ([name (get-name 'a #'name)])
                          #`(define name
                              (lambda args
                                (let ([a         array]
+                                     [amk       mk-array]
                                      [amake     make-array]
                                      [aadd!     array-add!]
                                      [a?        array?]
@@ -235,6 +242,7 @@
                                      [vset! vector-set!]
                                      [vlength vector-length]
                                      [vcopy!  vector-copy!]
+                                     [vcopy   vector-copy]
                                      ;;[vcheck-length check-length]
                                      [all-which? all-arrays?]
                                      [who 'name]
@@ -252,6 +260,7 @@
                          #`(define name
                              (lambda args
                                (let ([a         fxarray]
+                                     [amk       mk-fxarray]
                                      [amake     make-fxarray]
                                      [aadd!     fxarray-add!]
                                      [a?        fxarray?]
@@ -266,6 +275,7 @@
                                      [vset! fxvector-set!]
                                      [vlength fxvector-length]
                                      [vcopy!  fxvcopy!]
+                                     [vcopy   fxvector-copy]
                                      ;;[vcheck-length check-fxlength]
                                      [all-which? all-fxarrays?]
                                      [who 'name]
@@ -281,6 +291,7 @@
                          #`(define name
                              (lambda args
                                (let ([a         u8array]
+                                     [amk       mk-u8array]
                                      [amake     make-u8array]
                                      [aadd!     u8array-add!]
                                      [a?        u8array?]
@@ -295,6 +306,7 @@
                                      [vset! bytevector-u8-set!]
                                      [vlength bytevector-length]
                                      [vcopy!  bytevector-copy!]
+                                     [vcopy   bytevector-copy]
                                      ;;[vcheck-length check-u8length]
                                      [all-which? all-u8arrays?]
                                      [who 'name]
@@ -760,6 +772,17 @@
     [(arr start end step)
      (pcheck ([a? arr] [fixnum? start end step])
              (todo who))])
+
+
+  #|doc
+  Make a copy of the array `arr`.
+  |#
+  (define-array-procedure (a fxa u8a)
+    (copy arr)
+    (apcheck (arr)
+             (amk (vcopy (array-vec arr))
+                  (array-incr-factor arr)
+                  (array-length arr))))
 
 
   #|doc
