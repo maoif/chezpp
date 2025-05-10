@@ -195,7 +195,7 @@
      (begin (define ls (iota 10))
             #t)
 
-c
+
      (equal? '(8 5 2)
              (slice ls 8 0 -3))
      (equal? '(9 6 3)
