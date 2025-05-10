@@ -634,6 +634,19 @@
      )
 
 
+(mat dlist-copy
+
+     (error? (dlist-copy))
+     (error? (dlist-copy #f))
+
+     (let* ([dl (apply dlist (iota 10))]
+            [newdl (dlist-copy dl)])
+       (and (equal? dl newdl)
+            (not (eq? dl newdl))))
+
+     )
+
+
 (mat dlist-stack-ops
 
      (error? (dlist-pop! (dlist)))

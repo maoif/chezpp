@@ -5,7 +5,7 @@
           dlist-filter dlist-filter! dlist-partition
           dlist-contains? dlist-contains/p? dlist-search dlist-search*
           dlist-append dlist-append!
-          dlist-slice dlist-slice!
+          dlist-slice dlist-slice! dlist-copy
 
           dlist-push! dlist-pop! dlist-push-back! dlist-pop-back!
 
@@ -555,6 +555,20 @@
                                              (loop (fx1- i) L n1 (fx1+ step)))]
                                           [else (next (fx1- i) (dnode-left n1) (fx1+ k))])))
                                 (f (fx1+ i) (dnode-right n))))]))))]))
+
+
+  #|doc
+  Make a copy of the dlist `dl`.
+  |#
+  (define-who dlist-copy
+    (lambda (dl)
+      (pcheck ([dlist? dl])
+              (let ([newdl (make-dlist)])
+                (let loop ([n (dlist-first dl)])
+                  (if (null-dnode? n)
+                      newdl
+                      (begin (dlist-add! newdl (dnode-value n))
+                             (loop (dnode-right n)))))))))
 
 
   (define-who dlist-sort
