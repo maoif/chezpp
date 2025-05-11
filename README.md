@@ -20,6 +20,9 @@ Functionalities:
   - hashset: unordered set using hash function
   - treemap: ordered map based on reb-black tree
   - treeset: ordered set based on reb-black tree
+  - stack: Last-In-First-Out container
+  - queue: First-In-First-Out container
+  - heap: binary heap/priority queue
 - parser combinators:
   - support both textual and binary parsers
   - context-sensitive parsing using monadic `<bind>`
@@ -53,3 +56,22 @@ Or launch `chez++` directly:
 ./chez++
 ```
 
+
+# Test
+
+To test chezpp, make sure the library is already built, then `cd tests`.
+
+Run test of all libraries:
+
+```
+make test-all
+```
+
+Run test of some libraries by specifying the file name under `tests/`:
+
+```
+make test-some TEST=treemap
+
+# alternatively, you can specify more libraries
+make test-some TEST='treemap treeset'
+```
