@@ -127,7 +127,7 @@
   (define-who queue-contains?
     (lambda (q v)
       (pcheck ([queue? q])
-              (dlist-contains? (queue-dl q) v))))
+              (bool (dlist-contains? (queue-dl q) v)))))
 
 
   #|doc
@@ -138,7 +138,7 @@
   (define-who queue-contains/p?
     (lambda (q =?)
       (pcheck ([queue? q] [procedure? =?])
-              (dlist-contains/p? (queue-dl q) =?))))
+              (bool (dlist-contains/p? (queue-dl q) =?)))))
 
 
   #|doc
