@@ -9,6 +9,7 @@
           treeset-successor treeset-predecessor
           treeset-min treeset-max
 
+          treeset-andmap treeset-ormap
           treeset-map treeset-map/i
           treeset-for-each treeset-for-each/i
           treeset-fold-left treeset-fold-left/i
@@ -424,6 +425,36 @@
        (unless (null? x*)
          (unless (apply fx= (treeset-size x0) (map treeset-size x*))
            (errorf who "treesets are not of the same size")))]))
+
+
+  (define-who treeset-andmap
+    (case-lambda
+      [(proc ts0)
+       (pcheck ([procedure? proc] [treeset? ts0])
+               (rbtree-andmap1 who proc ts0))]
+      [(proc ts0 ts1)
+       (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
+               (rbtree-andmap1 who proc ts0 ts1))]
+      [(proc ts0 . ts*)
+       (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
+               (apply rbtree-andmap1 who proc ts0 ts*))]))
+
+
+  (define-who treeset-ormap
+    (case-lambda
+      [(proc ts0)
+       (pcheck ([procedure? proc] [treeset? ts0])
+               (rbtree-ormap1 who proc ts0))]
+      [(proc ts0 ts1)
+       (pcheck ([procedure? proc] [treeset? ts0 ts1])
+               (check-size who ts0 ts1)
+               (rbtree-ormap1 who proc ts0 ts1))]
+      [(proc ts0 . ts*)
+       (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
+               (apply check-size who ts0 ts*)
+               (apply rbtree-ormap1 who proc ts0 ts*))]))
 
 
   (define-who treeset-map

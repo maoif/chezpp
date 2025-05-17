@@ -248,6 +248,45 @@
      )
 
 
+(mat treeset-andmap
+
+     (error? (treeset-andmap 1))
+     (error? (treeset-andmap 1 (treeset = <)))
+     (error? (treeset-andmap (lambda (v) #t) 1))
+
+
+     (let* ([n* (nums 0 2 #e1e1000)]
+            [tm (apply treeset = < n*)])
+       (treeset-andmap (lambda (k) (even? k)) tm))
+
+     (let* ([n* (nums 1 2 #e1e1000)]
+            [tm (apply treeset = < n*)])
+       (treeset-andmap (lambda (k) (odd? k)) tm))
+
+     )
+
+
+(mat treeset-ormap
+
+     (error? (treeset-ormap 1))
+     (error? (treeset-ormap 1 (treeset = <)))
+     (error? (treeset-ormap (lambda (k) #t) 1))
+
+
+     (let* ([n* (nums 0 2 #e1e10000)]
+            [tm (apply treeset = < n*)])
+       (treeset-add! tm 5)
+       (treeset-ormap (lambda (k) (odd? k)) tm))
+
+     (let* ([n* (nums 1 2 #e1e10000)]
+            [tm (apply treeset = < n*)])
+       (treeset-add! tm 6)
+       (treeset-ormap (lambda (k) (even? k)) tm))
+
+
+     )
+
+
 (mat treeset-map
 
      (equal? (treeset-map id (treeset = <))

@@ -8,11 +8,13 @@
           rbtree-successor rbtree-predecessor
           rbtree-min rbtree-max
 
+          rbtree-andmap rbtree-ormap
           rbtree-map rbtree-map/i rbtree-map! rbtree-map/i!
           rbtree-for-each rbtree-for-each/i
           rbtree-fold-left rbtree-fold-left/i
           rbtree-fold-right rbtree-fold-right/i
 
+          rbtree-andmap1 rbtree-ormap1
           rbtree-map1 rbtree-map/i1
           rbtree-for-each1 rbtree-for-each/i1
           rbtree-fold-left1 rbtree-fold-left/i1
@@ -584,6 +586,56 @@
 
 ;;;; for treemap
 
+  (define rbtree-andmap
+    (case-lambda
+      [(who proc rbt0)
+       (let loop ([n (rbtree-root rbt0)])
+         (if (null-rbnode? n)
+             #t
+             (and (loop (L n))
+                  (proc (K n) (V n))
+                  (loop (R n)))))]
+      [(who proc rbt0 rbt1)
+       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+         (let loop ([n0 (iter0)] [n1 (iter1)])
+           (if (not (or n0 n1))
+               #t
+               (and (proc (K n0) (V n0) (K n1) (V n1))
+                    (loop (iter0) (iter1))))))]
+      [(who proc  rbt0 . rbt*)
+       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+         (let loop ([n0 (iter0)] [n* (map exe iter*)])
+           (if (not (or n0 (ormap id n*)))
+               #t
+               (and (apply proc (K n0) (V n0) (kv* n*))
+                    (loop (iter0) (map exe iter*))))))]))
+
+
+  (define rbtree-ormap
+    (case-lambda
+      [(who proc rbt0)
+       (let loop ([n (rbtree-root rbt0)])
+         (if (null-rbnode? n)
+             #f
+             (or (loop (L n))
+                 (proc (K n) (V n))
+                 (loop (R n)))))]
+      [(who proc rbt0 rbt1)
+       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+         (let loop ([n0 (iter0)] [n1 (iter1)])
+           (if (not (or n0 n1))
+               #f
+               (or (proc (K n0) (V n0) (K n1) (V n1))
+                   (loop (iter0) (iter1))))))]
+      [(who proc  rbt0 . rbt*)
+       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+         (let loop ([n0 (iter0)] [n* (map exe iter*)])
+           (if (not (or n0 (ormap id n*)))
+               #f
+               (or (apply proc (K n0) (V n0) (kv* n*))
+                   (loop (iter0) (map exe iter*))))))]))
+
+
   ;; newrbt: the new tree to be returned
   (define rbtree-map
     (case-lambda
@@ -846,6 +898,56 @@
 ;;;; for treeset (only keys)
 
   (define SV #f)
+
+
+  (define rbtree-andmap1
+    (case-lambda
+      [(who proc rbt0)
+       (let loop ([n (rbtree-root rbt0)])
+         (if (null-rbnode? n)
+             #t
+             (and (loop (L n))
+                  (proc (K n))
+                  (loop (R n)))))]
+      [(who proc rbt0 rbt1)
+       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+         (let loop ([n0 (iter0)] [n1 (iter1)])
+           (if (not (or n0 n1))
+               #t
+               (and (proc (K n0) (K n1))
+                    (loop (iter0) (iter1))))))]
+      [(who proc  rbt0 . rbt*)
+       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+         (let loop ([n0 (iter0)] [n* (map exe iter*)])
+           (if (not (or n0 (ormap id n*)))
+               #t
+               (and (apply proc (K n0) (k* n*))
+                    (loop (iter0) (map exe iter*))))))]))
+
+
+  (define rbtree-ormap1
+    (case-lambda
+      [(who proc rbt0)
+       (let loop ([n (rbtree-root rbt0)])
+         (if (null-rbnode? n)
+             #f
+             (or (loop (L n))
+                 (proc (K n))
+                 (loop (R n)))))]
+      [(who proc rbt0 rbt1)
+       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+         (let loop ([n0 (iter0)] [n1 (iter1)])
+           (if (not (or n0 n1))
+               #f
+               (or (proc (K n0) (K n1))
+                   (loop (iter0) (iter1))))))]
+      [(who proc  rbt0 . rbt*)
+       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+         (let loop ([n0 (iter0)] [n* (map exe iter*)])
+           (if (not (or n0 (ormap id n*)))
+               #f
+               (or (apply proc (K n0) (k* n*))
+                   (loop (iter0) (map exe iter*))))))]))
 
 
   (define rbtree-map1

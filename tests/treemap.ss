@@ -373,6 +373,44 @@
 ;; test index
 ;; TODO errors
 
+(mat treemap-andmap
+
+     (error? (treemap-andmap 1))
+     (error? (treemap-andmap 1 (treemap = <)))
+     (error? (treemap-andmap (lambda (k v) #t) 1))
+
+
+     (let* ([n* (nums 0 2 #e1e1000)]
+            [tm (apply treemap = < (map cons n* n*))])
+       (treemap-andmap (lambda (k v) (even? k)) tm))
+
+     (let* ([n* (nums 1 2 #e1e1000)]
+            [tm (apply treemap = < (map cons n* n*))])
+       (treemap-andmap (lambda (k v) (odd? k)) tm))
+
+     )
+
+
+(mat treemap-ormap
+
+     (error? (treemap-ormap 1))
+     (error? (treemap-ormap 1 (treemap = <)))
+     (error? (treemap-ormap (lambda (k v) #t) 1))
+
+
+     (let* ([n* (nums 0 2 #e1e10000)]
+            [tm (apply treemap = < (map cons n* n*))])
+       (treemap-set! tm 5 5)
+       (treemap-ormap (lambda (k v) (odd? k)) tm))
+
+     (let* ([n* (nums 1 2 #e1e10000)]
+            [tm (apply treemap = < (map cons n* n*))])
+       (treemap-set! tm 6 6)
+       (treemap-ormap (lambda (k v) (even? k)) tm))
+
+
+     )
+
 
 (mat treemap-map
 

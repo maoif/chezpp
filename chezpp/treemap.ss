@@ -11,6 +11,7 @@
           treemap-successor treemap-predecessor
           treemap-min treemap-max
 
+          treemap-andmap treemap-ormap
           treemap-map treemap-map/i treemap-map! treemap-map/i!
           treemap-for-each treemap-for-each/i
           treemap-fold-left treemap-fold-left/i
@@ -340,6 +341,36 @@
   ;; Procs in maps return two values.
   ;; procs should take twice as many args (k + v) as #trees.
   ;; All do inorder traversal.
+
+
+  (define-who treemap-andmap
+    (case-lambda
+      [(proc tm0)
+       (pcheck ([procedure? proc] [treemap? tm0])
+               (rbtree-andmap who proc tm0))]
+      [(proc tm0 tm1)
+       (pcheck ([procedure? proc] [treemap? tm0 tm1])
+               (check-size who tm0 tm1)
+               (rbtree-andmap who proc tm0 tm1))]
+      [(proc tm0 . tm*)
+       (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
+               (apply check-size who tm0 tm*)
+               (apply rbtree-andmap who proc tm0 tm*))]))
+
+
+  (define-who treemap-ormap
+    (case-lambda
+      [(proc tm0)
+       (pcheck ([procedure? proc] [treemap? tm0])
+               (rbtree-ormap who proc tm0))]
+      [(proc tm0 tm1)
+       (pcheck ([procedure? proc] [treemap? tm0 tm1])
+               (check-size who tm0 tm1)
+               (rbtree-ormap who proc tm0 tm1))]
+      [(proc tm0 . tm*)
+       (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
+               (apply check-size who tm0 tm*)
+               (apply rbtree-ormap who proc tm0 tm*))]))
 
 
   (define-who treemap-map
