@@ -5,6 +5,7 @@
           list-last list-set!
           make-list-builder
           zip zip! snoc!
+          list-sorted?
           nums slice
 
           listp=? list=? listq=? listv=?
@@ -367,6 +368,21 @@
                              (begin (set-cdr! l (list x))
                                     ls)
                              (loop (cdr l))))))))
+
+
+  #|doc
+  Check whether the given list `ls` is sorted according to predicate `<?`.
+  |#
+  (define-who list-sorted?
+    (lambda (<? ls)
+      (pcheck ([procedure? <?] [list? ls])
+              (if (null? ls)
+                  #t
+                  (let loop ([ls ls])
+                    (if (null? (cdr ls))
+                        #t
+                        (and (<? (car ls) (cadr ls))
+                             (loop (cdr ls)))))))))
 
 
   (define-who scan-left-ex

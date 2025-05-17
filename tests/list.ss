@@ -279,6 +279,25 @@
      )
 
 
+(mat list-sorted?
+
+     (error? (list-sorted? 1 '()))
+     (error? (list-sorted? < 1))
+
+     (list-sorted? < '())
+     (list-sorted? > '())
+     (list-sorted? < '(1))
+     (list-sorted? > '(1))
+
+     (list-sorted? < (iota 10))
+     (list-sorted? > (reverse (iota 10)))
+
+     (not (list-sorted? > (iota 10)))
+     (not (list-sorted? < (reverse (iota 10))))
+
+     )
+
+
 (mat nums
 
      (error? (nums 'x 'x 'x))
