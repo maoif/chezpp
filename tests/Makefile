@@ -1,7 +1,7 @@
 SRCS_TEST := adt.ss match.ss comprehension.ss control.ss os.ss iter.ss file.ss \
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
              hashset.ss treemap.ss treeset.ss \
-             bittree.ss \
+             bittree.ss bitvec.ss \
              concurrency.ss
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      := $(SRCS_TEST)
