@@ -6,7 +6,7 @@
           make-list-builder
           zip zip! snoc!
           list-sorted?
-          nums slice
+          map/iota nums slice
 
           listp=? list=? listq=? listv=?
           listp<? list<? listq<? listv<?
@@ -29,6 +29,17 @@
         (unless (apply fx= (map length ls*))
           (errorf who "lists are not of the same length")))))
   (define all-lists? (lambda (ls*) (andmap list? ls*)))
+
+
+  (define map/iota
+    (lambda (proc n)
+      (pcheck ([procedure? proc] [natural? n])
+              (let ([lb (make-list-builder)])
+                (let loop ([i 0])
+                  (if (= i n)
+                      (lb)
+                      (begin (lb (proc i))
+                             (loop (add1 i)))))))))
 
 
   #|doc

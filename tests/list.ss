@@ -253,6 +253,20 @@
      )
 
 
+(mat map/iota
+
+     (error? (map/iota add1 -1))
+     (error? (map/iota add1 3.14))
+
+     (equal? (map add1 (iota 0))
+             (map/iota add1 0))
+
+     (equal? (map add1 (iota 10))
+             (map/iota add1 10))
+
+     )
+
+
 (mat zip!
 
      (error? (zip!))
