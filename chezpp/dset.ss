@@ -110,4 +110,13 @@
                       (if (fx= i (node-parent n)) (add1 acc) acc))
                     0 (dset-vec ds))))
 
+
+  (record-writer (type-descriptor dset)
+                 (lambda (r p wr)
+                   (display "#[dset " p)
+                   (wr (dset-size r) p)
+                   (display "/" p)
+                   (wr (vector-length (dset-vec r)) p)
+                   (display "]" p)))
+
   )
