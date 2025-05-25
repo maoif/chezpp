@@ -647,6 +647,34 @@
      )
 
 
+(mat dlist-sorted?
+
+     (error? (dlist-sorted? #f (dlist)))
+     (error? (dlist-sorted? < '()))
+
+     (dlist-sorted? < (dlist))
+     (dlist-sorted? < (dlist 1))
+
+     (dlist-sorted? < (apply dlist (iota 10)))
+     (not (dlist-sorted? < (apply dlist (reverse (iota 10)))))
+
+     )
+
+
+(mat dlist-iota
+
+     (error? (dlist-iota -1))
+     (error? (dlist-iota -#f))
+
+     (equal? (apply dlist (iota 10))
+             (dlist-iota 10))
+
+     (equal? (dlist)
+             (dlist-iota 0))
+
+     )
+
+
 (mat dlist-stack-ops
 
      (error? (dlist-pop! (dlist)))

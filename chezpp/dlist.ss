@@ -14,6 +14,9 @@
           dlist-map-rev dlist-map/i-rev dlist-for-each-rev dlist-for-each/i-rev
           dlist-fold-left dlist-fold-left/i dlist-fold-right dlist-fold-right/i
 
+          dlist-sorted?
+          dlist-iota
+
           dlist->list list->dlist)
   (import (chezpp chez)
           (chezpp internal)
@@ -571,21 +574,47 @@
                              (loop (dnode-right n)))))))))
 
 
+  #|doc
+  Check whether the given dlist is sorted according to comparison procedure `<?`.
+  |#
+  (define-who dlist-sorted?
+    (lambda (<? dl)
+      (pcheck ([procedure? <?] [dlist? dl])
+              (let ([len (dlist-length dl)])
+                (if (fx<= len 1)
+                    #t
+                    (let loop ([curr (dlist-first dl)])
+                      (let ([next (dnode-right curr)])
+                        (if (null-dnode? next)
+                            #t
+                            (and (<? (dnode-value curr) (dnode-value next))
+                                 (loop next))))))))))
+
+
   (define-who dlist-sort
-    (lambda (dl <)
+    (lambda (<? dl)
       (todo)))
 
 
   (define-who dlist-sort!
-    (lambda (dl <)
+    (lambda (<? dl)
       (todo)))
 
 
-
+  #|doc
+  `n` must be a natural number.
+  This procedure creates a dlist that contains numbers ranging from 0 to n-1, inclusive.
+  This is similar to `iota` for lists.
+  |#
   (define-who dlist-iota
     (lambda (n)
       (pcheck ([natural? n])
-              (todo))))
+              (let ([dl (make-dlist)])
+                (let loop ([i 0])
+                  (if (= i n)
+                      dl
+                      (begin (dlist-add! dl i)
+                             (loop (add1 i)))))))))
 
 
   (define-who dlist-nums
