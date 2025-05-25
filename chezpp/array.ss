@@ -12,6 +12,7 @@
           array-map-rev array-map/i-rev
           array-for-each-rev array-for-each/i-rev
           array-fold-left array-fold-left/i array-fold-right array-fold-right/i
+          array-sorted?
 
 
           fxarray make-fxarray fxarray? fxarray-length fxarray-empty?
@@ -27,6 +28,7 @@
           fxarray-map-rev fxarray-map/i-rev
           fxarray-for-each-rev fxarray-for-each/i-rev
           fxarray-fold-left fxarray-fold-left/i fxarray-fold-right fxarray-fold-right/i
+          fxarray-sorted?
 
           u8array make-u8array u8array? u8array-length u8array-empty?
           u8array-ref u8array-add! u8array-delete! u8array-set! u8array-clear!
@@ -41,6 +43,7 @@
           u8array-map-rev u8array-map/i-rev
           u8array-for-each-rev u8array-for-each/i-rev
           u8array-fold-left u8array-fold-left/i u8array-fold-right u8array-fold-right/i
+          u8array-sorted?
 
           array->list fxarray->list u8array->list
           array->vector fxarray->fxvector u8array->u8vector
@@ -834,14 +837,30 @@
                                  (loop (fx1+ i) (fx1+ j) (fx1- k))))))))))
 
 
+  #|doc
+  Check whether the array is sorted according to the comparison procedure `<?`.
+  |#
+  (define-array-procedure (a fxa u8a)
+    (sorted? <? arr)
+    (apcheck (arr)
+             (pcheck ([procedure? <?])
+                     (let ([len (array-length arr)] [vec (array-vec arr)])
+                       (if (fx<= len 1)
+                           #t
+                           (let loop ([i 0])
+                             (if (fx= i (fx1- len))
+                                 #t
+                                 (and (<? (vref vec i) (vref vec (fx1+ i)))
+                                      (loop (fx1+ i))))))))))
+
 
   (define-array-procedure (a fxa u8a)
-    (sort arr <)
+    (sort <? arr)
     (todo))
 
 
   (define-array-procedure (a fxa u8a)
-    (sort! arr <)
+    (sort! <? arr)
     (todo))
 
 

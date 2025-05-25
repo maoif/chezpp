@@ -467,6 +467,60 @@
      )
 
 
+(mat *array-sorted?
+
+     (array-sorted? < (array))
+     (fxarray-sorted? < (fxarray))
+     (u8array-sorted? < (u8array))
+
+     (array-sorted? < (array 42))
+     (fxarray-sorted? < (fxarray 42))
+     (u8array-sorted? < (u8array 42))
+
+     (error? (array-sorted? 1 (array)))
+     (error? (fxarray-sorted? 1 (fxarray)))
+     (error? (u8array-sorted? 1 (u8array)))
+     (error? (array-sorted? 1 (array 42)))
+     (error? (fxarray-sorted? 1 (fxarray 42)))
+     (error? (u8array-sorted? 1 (u8array 42)))
+
+     (error? (array-sorted? < '()))
+     (error? (fxarray-sorted? < '()))
+     (error? (u8array-sorted? < '()))
+     (error? (array-sorted? < '()))
+     (error? (fxarray-sorted? < '()))
+     (error? (u8array-sorted? < '()))
+
+     (begin (define (test n)
+              (let ([arr (apply array (iota n))])
+                (and (array-sorted? < arr)
+                     (not (array-sorted? > arr)))))
+            (define (fxtest n)
+              (let ([arr (apply fxarray (iota n))])
+                (and (fxarray-sorted? < arr)
+                     (not (fxarray-sorted? > arr)))))
+            (define (u8test n)
+              (let ([arr (apply u8array (iota n))])
+                (and (u8array-sorted? < arr)
+                     (not (u8array-sorted? > arr)))))
+            #t)
+
+     (test 10)
+     (test 100)
+     (test 1000)
+
+     (fxtest 10)
+     (fxtest 100)
+     (fxtest 1000)
+
+     (u8test 10)
+     (u8test 100)
+     (u8test 255)
+
+
+     )
+
+
 (mat array<->vector
 
      (error? (array->vector))
