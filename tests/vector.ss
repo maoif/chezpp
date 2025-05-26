@@ -773,6 +773,32 @@
      )
 
 
+(mat *vpartition
+
+     (error? (vpartition   1 (vector)))
+     (error? (fxvpartition 1 (fxvector)))
+     (error? (flvpartition 1 (flvector)))
+
+     (error? (vpartition   odd? '()))
+     (error? (fxvpartition odd? '()))
+     (error? (flvpartition odd? '()))
+
+     (let-values ([(t f) (vpartition odd? (viota 20))])
+       (and (vandmap odd? t)
+            (vandmap even? f)
+            (= 20 (+ (vector-length t) (vector-length f)))))
+     (let-values ([(t f) (fxvpartition odd? (fxviota 20))])
+       (and (fxvandmap odd? t)
+            (fxvandmap even? f)
+            (= 20 (+ (fxvector-length t) (fxvector-length f)))))
+     (let-values ([(t f) (flvpartition odd? (list->flvector (map! inexact (iota 20))))])
+       (and (flvandmap odd? t)
+            (flvandmap even? f)
+            (= 20 (+ (flvector-length t) (flvector-length f)))))
+
+     )
+
+
 (mat *vsorted?
 
      (error? (vsorted?))

@@ -9,6 +9,7 @@
 
           vslice fxvslice flvslice
           vfilter fxvfilter flvfilter
+          vpartition fxvpartition flvpartition
 
           vormap vandmap vexists vfor-all
           fxvormap fxvandmap fxvexists fxvfor-all
@@ -1272,11 +1273,56 @@
                                (loop (fx1+ i)))))))))
 
 
+  #|doc
+  Apply the unary procedure `pred` to each element of the vector `vec`, and  return two values,
+  the first one a vector of the elements of `vec` for which `pred` returned a true value,
+  and the second a vector of the elements of `vec` for which `pred` returned #f.
+
+  The elements of the result vectors are in the same order as they appear in the input vector.
+  |#
   (define-vector-procedure (v fxv flv)
     (partition pred vec)
     (vpcheck (vec)
              (pcheck ([procedure? pred])
-                     (todo))))
+                     ;; use a bitvec to record index of nice items
+                     (let* ([len (vlength vec)]
+                            [bitvec (make-bytevector (add1 (div len 8)) 0)])
+                       (define setbit!
+                         (lambda (x)
+                           (let-values ([(i1 i2) (div-and-mod x 8)])
+                             (let ([v (bytevector-u8-ref bitvec i1)])
+                               (bytevector-u8-set! bitvec i1 (logbit1 i2 v))))))
+                       (define bitset?
+                         (lambda (x)
+                           (let-values ([(i1 i2) (div-and-mod x 8)])
+                             (let ([v (bytevector-u8-ref bitvec i1)])
+                               (logbit? i2 v)))))
+                       (define popcount
+                         (lambda ()
+                           (let loop ([i 0] [p 0])
+                             (if (fx= i (bytevector-length bitvec))
+                                 p
+                                 (loop (fx1+ i)
+                                       (+ p (fxpopcount (bytevector-u8-ref bitvec i))))))))
+                       (let loop ([i 0])
+                         (if (fx= i len)
+                             ;; fill newvec
+                             (let ([newvecT (vmake (popcount))]
+                                   [newvecF (vmake (- len (popcount)))])
+                               (let lp ([i 0] [jT 0] [jF 0])
+                                 (if (fx= i len)
+                                     (values newvecT newvecF)
+                                     (if (bitset? i)
+                                         (begin
+                                           (vset! newvecT jT (vref vec i))
+                                           (lp (fx1+ i) (fx1+ jT) jF))
+                                         (begin
+                                           (vset! newvecF jF (vref vec i))
+                                           (lp (fx1+ i) jT (fx1+ jF)))))))
+                             (begin
+                               (when (pred (vref vec i))
+                                 (setbit! i))
+                               (loop (fx1+ i)))))))))
 
 
   (define-vector-procedure (fxv flv)
