@@ -5,7 +5,7 @@
           dlist-filter dlist-filter! dlist-partition
           dlist-contains? dlist-contains/p? dlist-search dlist-search*
           dlist-append dlist-append!
-          dlist-slice dlist-slice! dlist-copy
+          dlist-slice dlist-slice! dlist-copy dlist-copy!
 
           dlist-push! dlist-pop! dlist-push-back! dlist-pop-back!
 
@@ -572,6 +572,68 @@
                       newdl
                       (begin (dlist-add! newdl (dnode-value n))
                              (loop (dnode-right n)))))))))
+
+
+  #|doc
+  Copy items in `src` from indices src-start, ..., src-start + k - 1
+  to consecutive indices in `tgt` starting at `tgt-start`.
+
+  `src` and `tgt` must be dlists.
+  `src-start`, `tgt-start`, and `k` must be exact nonnegative integers.
+  The sum of `src-start` and `k` must not exceed the length of `src`,
+  and the sum of `tgt-start` and `k` must not exceed the length of `tgt`.
+
+  `src` and `tgt` may or may not be the same dlist.
+  |#
+  (define-who dlist-copy!
+    (lambda (src src-start tgt tgt-start k)
+      (pcheck ([dlist? src tgt] [natural? src-start tgt-start k])
+              (let ([len1 (dlist-length src)]
+                    [len2 (dlist-length tgt)])
+                (define find-node
+                  (lambda (dl i)
+                    (let ([len (dlist-length dl)])
+                      ;; TODO check corner
+                      (if (< i (ash len -1))
+                          ;; left-to-right
+                          (let loop ([j 0] [n (dlist-first dl)])
+                            (if (= i j)
+                                n
+                                (loop (add1 j) (dnode-right n))))
+                          ;; right-to-left
+                          (let loop ([j (sub1 len)] [n (dlist-last dl)])
+                            (if (= i j)
+                                n
+                                (loop (sub1 j) (dnode-left n))))))))
+                (when (> (fx+ src-start k) len1)
+                  (errorf who "range ~a is too large in source dlist" k))
+                (when (> (fx+ tgt-start k) len2)
+                  (errorf who "range ~a is too large in target dlist" k))
+                (if (eq? src tgt)
+                    (let ([src-end (fx+ src-start k)] [tgt-end (fx+ tgt-start k)])
+                      (cond
+                       [(or
+                         ;; disjoint, left to right
+                         (fx<= src-end tgt-start)
+                         ;; disjoint, right to left
+                         (fx<= tgt-end src-start)
+                         ;; overlapping, right to left
+                         (fx<= tgt-start src-start))
+                        (let loop ([k k] [i (find-node src src-start)] [j (find-node tgt tgt-start)])
+                          (unless (fx= k 0)
+                            (dnode-value-set! j (dnode-value i))
+                            (loop (fx1- k) (dnode-right i) (dnode-right j))))]
+                       [(fx< src-start tgt-start)
+                        ;; overlapping, left to right, copy from last to first
+                        (let loop ([k k] [i (find-node src (fx1- src-end))] [j (find-node tgt (fx1- tgt-end))])
+                          (unless (fx= k 0)
+                            (dnode-value-set! j (dnode-value i))
+                            (loop (fx1- k) (dnode-left i) (dnode-left j))))]
+                       [else (assert-unreachable)]))
+                    (let loop ([k k] [i (find-node src src-start)] [j (find-node tgt tgt-start)])
+                      (unless (fx= k 0)
+                        (dnode-value-set! j (dnode-value i))
+                        (loop (fx1- k) (dnode-right i) (dnode-right j)))))))))
 
 
   #|doc

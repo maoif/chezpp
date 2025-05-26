@@ -647,6 +647,108 @@
      )
 
 
+(mat dlist-copy!
+
+     (error?
+      (let ([dl (apply dlist (iota 10))])
+        (dlist-copy! dl 0 dl 3 9)))
+     (error?
+      (let ([dl (apply dlist (iota 10))])
+        (dlist-copy! dl 3 dl 0 9)))
+     (error? (let ([dl (apply dlist (iota 10))])
+               (dlist-copy! dl 3 dl 0 -2)))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 3 dl 3 5)
+       (equal? dl (apply dlist (iota 10))))
+
+
+;;;; same dlist
+
+     ;; disjoint, left to right
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 0 dl 3 3)
+       (equal? (dlist 0 1 2 0 1 2 6 7 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 0 dl 5 3)
+       (equal? (dlist 0 1 2 3 4 0 1 2 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 0 dl 5 5)
+       (equal? (dlist 0 1 2 3 4 0 1 2 3 4) dl))
+
+     ;; disjoint, right to left
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 5 dl 0 3)
+       (equal? (dlist 5 6 7 3 4 5 6 7 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 3 dl 0 3)
+       (equal? (dlist 3 4 5 3 4 5 6 7 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 5 dl 0 5)
+       (equal? (dlist 5 6 7 8 9 5 6 7 8 9) dl))
+
+     ;; overlapping, left to right
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 0 dl 2 3)
+       (equal? (dlist 0 1 0 1 2 5 6 7 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 0 dl 0 5)
+       (equal? (dlist 0 1 2 3 4 5 6 7 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 0 dl 1 5)
+       (equal? (dlist 0 0 1 2 3 4 6 7 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 0 dl 3 5)
+       (equal? (dlist 0 1 2 0 1 2 3 4 8 9) dl))
+
+     ;; overlapping , right to left
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 2 dl 0 3)
+       (equal? (dlist 2 3 4 3 4 5 6 7 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 2 dl 0 5)
+       (equal? (dlist 2 3 4 5 6 5 6 7 8 9) dl))
+
+     (let ([dl (apply dlist (iota 10))])
+       (dlist-copy! dl 5 dl 3 5)
+       (equal? (dlist 0 1 2 5 6 7 8 9 8 9) dl))
+
+
+
+;;;; different dlist
+
+     (let ([dl (apply dlist (iota 10))]
+           [dl1 (make-dlist 10 #f)])
+       (dlist-copy! dl 0 dl1 0 3)
+       (equal? (dlist 0 1 2 #f #f #f #f #f #f #f) dl1))
+
+     (let ([dl (apply dlist (iota 10))]
+           [dl1 (make-dlist 10 #f)])
+       (dlist-copy! dl 0 dl1 0 5)
+       (equal? (dlist 0 1 2 3 4 #f #f #f #f #f) dl1))
+
+     (let ([dl (apply dlist (iota 10))]
+           [dl1 (make-dlist 10 #f)])
+       (dlist-copy! dl 0 dl1 3 5)
+       (equal? (dlist #f #f #f 0 1 2 3 4 #f #f) dl1))
+
+     (let ([dl (apply dlist (iota 10))]
+           [dl1 (make-dlist 10 #f)])
+       (dlist-copy! dl 2 dl1 0 5)
+       (equal? (dlist 2 3 4 5 6 #f #f #f #f #f) dl1))
+
+
+     )
+
+
 (mat dlist-sorted?
 
      (error? (dlist-sorted? #f (dlist)))
