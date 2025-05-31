@@ -1474,18 +1474,20 @@
   #|doc
   Check whether the given vector is sorted according to predicate `<?`.
   |#
-  (define-vector-procedure (v fxv flv)
-    (sorted? <? vec)
-    (vpcheck (vec)
-             (pcheck ([procedure? <?])
-                     (let ([len (vlength vec)])
-                       (if (fx<= len 1)
-                           #t
-                           (let loop ([i 0])
-                             (if (fx= i (fx1- len))
-                                 #t
-                                 (and (<? (vref vec i) (vref vec (fx1+ i)))
-                                      (loop (fx1+ i))))))))))
+  (define-vector-procedure (v fxv flv) sorted?
+    [(<? vec)
+     (vpcheck (vec)
+              (thisproc <? vec 0 (vlength vec)))]
+    [(<? vec stop)
+     (vpcheck (vec)
+              (thisproc <? vec 0 stop))]
+    [(<? vec start stop)
+     (vpcheck (vec)
+              (pcheck ([procedure? <?])
+                      (let ([len (vlength vec)])
+                        (if (fx<= len 1)
+                            #t
+                            ($sorted? vec <? start stop vref)))))])
 
 
   #|doc

@@ -899,31 +899,23 @@
      (test2 random-fxvector fx<= fxvsort fxvsorted?)
      (test2 random-flvector fl<= flvsort flvsorted?)
 
-     (begin (define $sorted?
-              (lambda (vec <? start stop vref)
-                (let loop ([i start])
-                  (if (fx= i (fx1- stop))
-                      #t
-                      (and (<? (vref vec i) (vref vec (fx1+ i)))
-                           (loop (fx1+ i)))))))
-            #t)
 
      ;; ranged, in place
-     (begin (define (test3 rand <? sort! vref)
+     (begin (define (test3 rand <? sort! vref sorted?)
               (andmap (lambda (bd)
                         (andmap (lambda (i)
                                   (let ([v (rand #e1e6 bd)]
                                         [mid (fx/ #e1e6 2)])
                                     (sort! <? v mid)
                                     (sort! <? v mid #e1e6)
-                                    (and ($sorted? v <? 0 mid vref)
-                                         ($sorted? v <? mid #e1e6 vref))))
+                                    (and (sorted? <? v 0 mid)
+                                         (sorted? <? v mid #e1e6))))
                                 (iota 3)))
                       '(100 1000 10000 100000)))
             #t)
-     (test3 random-vector   fx<= vsort!   vector-ref)
-     (test3 random-fxvector fx<= fxvsort! fxvector-ref)
-     (test3 random-flvector fl<= flvsort! flvector-ref)
+     (test3 random-vector   fx<= vsort!   vector-ref vsorted?)
+     (test3 random-fxvector fx<= fxvsort! fxvector-ref fxvsorted?)
+     (test3 random-flvector fl<= flvsort! flvector-ref flvsorted?)
 
      ;; ranged, return new
      (begin (define (test4 rand <? sort sorted?)
