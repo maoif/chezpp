@@ -521,6 +521,97 @@
      )
 
 
+(mat *array-sort
+
+     ;; bad <?
+     (error? (array-sort!   1 (array)))
+     (error? (fxarray-sort! 1 (fxarray)))
+     ;; not arrays
+     (error? (array-sort!   <= '(1 2 3)))
+     (error? (fxarray-sort! <= '(1 2 3)))
+     ;; bad range
+     (error? (array-sort!   <= (array) 3))
+     (error? (fxarray-sort! <= (fxarray) 3))
+     (error? (array-sort!   <= (array   2 2 2 2 2) 6 3))
+     (error? (fxarray-sort! <= (fxarray 2 2 2 2 2) 6 3))
+
+     ;; bad <?
+     (error? (array-sort   1 (array)))
+     (error? (fxarray-sort 1 (fxarray)))
+     ;; not arrays
+     (error? (array-sort   <= '(1 2 3)))
+     (error? (fxarray-sort <= '(1 2 3)))
+     ;; bad range
+     (error? (array-sort   <= (array) 3))
+     (error? (fxarray-sort <= (fxarray) 3))
+     (error? (array-sort   <= (array   2 2 2 2 2) 6 3))
+     (error? (fxarray-sort <= (fxarray 2 2 2 2 2) 6 3))
+
+
+     ;; full range, in place
+     (begin (define (test1 rand <? sort! sorted? v->a)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let* ([v (rand #e1e6 bd)] [arr (v->a v)])
+                                    (sort! <? arr)
+                                    (sorted? <? arr)))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test1 random-vector   fx<= array-sort!   array-sorted?   vector->array)
+     (test1 random-fxvector fx<= fxarray-sort! fxarray-sorted? fxvector->fxarray)
+
+
+     ;; full range, return new
+     (begin (define (test2 rand <? sort sorted? v->a)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let* ([v (rand #e1e6 bd)] [arr (v->a v)])
+                                    (sorted? <? (sort <? arr))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test2 random-vector   fx<= array-sort   array-sorted?   vector->array)
+     (test2 random-fxvector fx<= fxarray-sort fxarray-sorted? fxvector->fxarray)
+
+
+
+     ;; ranged, in place
+     (begin (define (test3 rand <? sort! sorted? v->a)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let* ([v (rand #e1e6 bd)]
+                                         [mid (fx/ #e1e6 2)]
+                                         [arr (v->a v)])
+                                    (sort! <? arr mid)
+                                    (sort! <? arr mid #e1e6)
+                                    (and (sorted? <? arr 0 mid)
+                                         (sorted? <? arr mid #e1e6))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test3 random-vector   fx<= array-sort!   array-sorted?   vector->array)
+     (test3 random-fxvector fx<= fxarray-sort! fxarray-sorted? fxvector->fxarray)
+
+
+     ;; ranged, return new
+     (begin (define (test4 rand <? sort sorted? v->a)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let* ([v (rand #e1e6 bd)]
+                                         [mid (fx/ #e1e6 2)]
+                                         [arr (v->a v)])
+                                    (and (sorted? <? (sort <? arr mid))
+                                         (sorted? <? (sort <? arr mid #e1e6)))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test4 random-vector   fx<= array-sort   array-sorted?   vector->array)
+     (test4 random-fxvector fx<= fxarray-sort fxarray-sorted? fxvector->fxarray)
+
+     )
+
+
 (mat array<->vector
 
      (error? (array->vector))
