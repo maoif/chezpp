@@ -33,6 +33,8 @@
           vzip fxvzip flvzip vzipv fxvzipv flvzipv
           vshuffle  fxvshuffle  flvshuffle
           vshuffle! fxvshuffle! flvshuffle!
+          vsort fxvsort flvsort
+          vsort! fxvsort! flvsort!
           vsorted? fxvsorted? flvsorted?
 
           vcopy fxvcopy flvcopy
@@ -1325,18 +1327,148 @@
                                (loop (fx1+ i)))))))))
 
 
-  (define-vector-procedure (fxv flv)
-    (sort <? vec)
-    (vpcheck (vec)
-             (pcheck ([procedure? <?])
-                     (todo))))
+  ;; right bounds are all exclusive
+  (define-syntax swap!
+    (syntax-rules ()
+      [(_ vec vref vset! i j)
+       (let ([t (vref vec i)])
+         (vset! vec i (vref vec j))
+         (vset! vec j t))]))
+
+  (define $sorted?
+    (lambda (vec <? start stop vref)
+      (let loop ([i start])
+        (if (fx= i (fx1- stop))
+            #t
+            (and (<? (vref vec i) (vref vec (fx1+ i)))
+                 (loop (fx1+ i)))))))
+
+  (define (insertion-sort! <? vec start stop vlength vref vset!)
+    (let lp1 ([i (fx1+ start)])
+      (when (fx< i stop)
+        (let lp2 ([j i])
+          (when (fx> j start)
+            (when (<? (vref vec j) (vref vec (fx1- j)))
+              (swap! vec vref vset! (fx1- j) j)
+              (lp2 (fx1- j)))))
+        (lp1 (fx1+ i)))))
+
+  ;; TODO optimize for duplicate values
+  (define (quick-sort! <? vec start stop vlength vref vset!)
+    (define (partition! lo hi)
+      (let ([pivot (vref vec (fx1- hi))])
+        (let loop ([i (fx1- lo)] [j lo])
+          (if (fx>= j (fx1- hi))
+              (begin (swap! vec vref vset! (fx1+ i) (fx1- hi))
+                     (fx1+ i))
+              (if (<? (vref vec j) pivot)
+                  (begin (swap! vec vref vset! (fx1+ i) j)
+                         (loop (fx1+ i) (fx1+ j)))
+                  (loop i (fx1+ j)))))))
+    (when (fx< start stop)
+      (let ([p (partition! start stop)])
+        (quick-sort! <? vec start    p    vlength vref vset!)
+        (quick-sort! <? vec (fx1+ p) stop vlength vref vset!))))
+
+  ;; TODO optimize
+  (define (merge-sort! <? vec start stop vlength vref vset! vmake vcopy!)
+    (define (merge! start mid stop)
+      (let* ([len (fx- stop start)]
+             [vtemp (vmake len)])
+        (let loop ([i start] [j mid] [k 0])
+          (cond [(fx= i mid)
+                 (let lp ([j j] [k k])
+                   (when (fx< j stop)
+                     (vset! vtemp k (vref vec j))
+                     (lp (fx1+ j) (fx1+ k))))]
+                [(fx= j stop)
+                 (let lp ([i i] [k k])
+                   (when (fx< i mid)
+                     (vset! vtemp k (vref vec i))
+                     (lp (fx1+ i) (fx1+ k))))]
+                [(<? (vref vec i) (vref vec j))
+                 (vset! vtemp k (vref vec i))
+                 (loop (fx1+ i) j (fx1+ k))]
+                [else
+                 (vset! vtemp k (vref vec j))
+                 (loop i (fx1+ j) (fx1+ k))]))
+        (vcopy! vtemp 0 vec start len)))
+    (define (msort! start stop)
+      (when (fx< (fx1+ start) stop) ;; exclude one item case
+        (if (fx<= (fx- stop start) 32)
+            (insertion-sort! <? vec start stop vlength vref vset!)
+            (let ([mid (fx+ start (fx/ (fx- stop start) 2))])
+              (msort! start mid)
+              (msort! mid stop)
+              (merge! start mid stop)))))
+    (msort! start stop))
 
 
-  (define-vector-procedure (fxv flv)
-    (sort! <? vec)
-    (vpcheck (vec)
-             (pcheck ([procedure? <?])
-                     (todo))))
+  #|doc
+  The `*vsort` procedures uses the binary comparison procedure `<?` to sort the vector `vec`.
+  If only two arguments are given, the entire vector is sorted;
+  If the `stop` argument is given, the range from 0 to `stop-1` in `vec` is sorted;
+  If both `start` and `stop` are given, the range from `start` to `stop-1` in `vec` is sorted.
+
+  `start` and `stop` must satisfy the requirement that `0 <= start <= stop <= length of vec`.
+
+  The `*vsort` procedures return the sorted vector or the subvector.
+  |#
+  (define-vector-procedure (v fxv flv) sort
+    [(<? vec)
+     (vpcheck (vec)
+              (thisproc <? vec 0 (vlength vec)))]
+    [(<? vec stop)
+     (vpcheck (vec)
+              (thisproc <? vec 0 stop))]
+    [(<? vec start stop)
+     (vpcheck (vec)
+              (pcheck ([procedure? <?] [natural? start stop])
+                      (let ([len (vlength vec)])
+                        (when (fx> stop len)
+                          (errorf procname "stop index ~a out of bound ~a" stop len))
+                        (when (fx> start stop)
+                          (errorf procname "start index ~a greater than stop index ~a" start stop))
+                        (let ([newv (vmake (fx- stop start))]
+                              [vcopy! (cond [(fxvector? vec) fxvcopy!]
+                                            [(flvector? vec) flvcopy!]
+                                            [else vcopy!])])
+                          (vcopy! vec start newv 0 (fx- stop start))
+                          (if (fx<= (vlength newv) 64)
+                              (insertion-sort! <? newv 0 (vlength newv) vlength vref vset!)
+                              (merge-sort!     <? newv 0 (vlength newv) vlength vref vset! vmake vcopy!))
+                          newv))))])
+
+
+  #|doc
+  The `*vsort!` procedures uses the binary comparison procedure `<?` to sort the vector `vec`, in place.
+  If only two arguments are given, the entire vector is sorted;
+  If the `stop` argument is given, the range from 0 to `stop-1` in `vec` is sorted;
+  If both `start` and `stop` are given, the range from `start` to `stop-1` in `vec` is sorted.
+
+  `start` and `stop` must satisfy the requirement that `0 <= start <= stop <= length of vec`.
+  |#
+  (define-vector-procedure (v fxv flv) sort!
+    [(<? vec)
+     (vpcheck (vec)
+              (thisproc <? vec 0 (vlength vec)))]
+    [(<? vec stop)
+     (vpcheck (vec)
+              (thisproc <? vec 0 stop))]
+    [(<? vec start stop)
+     (vpcheck (vec)
+              (pcheck ([procedure? <?] [natural? start stop])
+                      (let ([len (vlength vec)])
+                        (when (fx> stop len)
+                          (errorf procname "stop index ~a out of bound ~a" stop len))
+                        (when (fx> start stop)
+                          (errorf procname "start index ~a greater than stop index ~a" start stop))
+                        (let ([vcopy! (cond [(fxvector? vec) fxvcopy!]
+                                            [(flvector? vec) flvcopy!]
+                                            [else vcopy!])])
+                          (if (fx<= (vlength vec) 64)
+                              (insertion-sort! <? vec start stop vlength vref vset!)
+                              (merge-sort!     <? vec start stop vlength vref vset! vmake vcopy!))))))])
 
 
   #|doc
@@ -1535,8 +1667,8 @@
   (define vmap/i  vector-map/i)
   (define vmap!   vector-map!)
   (define vmap!/i vector-map!/i)
-  (define vsort   vector-sort)
-  (define vsort!  vector-sort!)
+  ;;(define vsort   vector-sort)
+  ;;(define vsort!  vector-sort!)
   ;; TODO add wrapper check
   (define vfor-each   vector-for-each)
   (define vfor-each/i vector-for-each/i)

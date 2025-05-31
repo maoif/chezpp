@@ -839,6 +839,110 @@
      )
 
 
+(mat *vsort
+     ;; bad <?
+     (error? (vsort!   1 (vector)))
+     (error? (fxvsort! 1 (fxvector)))
+     (error? (flvsort! 1 (flvector)))
+     ;; not vectors
+     (error? (vsort!   <= '(1 2 3)))
+     (error? (fxvsort! <= '(1 2 3)))
+     (error? (flvsort! <= '(1 2 3)))
+     ;; bad range
+     (error? (vsort!   <= (vector) 3))
+     (error? (fxvsort! <= (fxvector) 3))
+     (error? (flvsort! <= (flvector) 3))
+     (error? (vsort!   <= (vector   2 2 2 2 2) 6 3))
+     (error? (fxvsort! <= (fxvector 2 2 2 2 2) 6 3))
+     (error? (flvsort! <= (flvector 2.0 2.0 2.0 2.0) 6 3))
+
+     ;; bad <?
+     (error? (vsort   1 (vector)))
+     (error? (fxvsort 1 (fxvector)))
+     (error? (flvsort 1 (flvector)))
+     ;; not vectors
+     (error? (vsort   <= '(1 2 3)))
+     (error? (fxvsort <= '(1 2 3)))
+     (error? (flvsort <= '(1 2 3)))
+     ;; bad range
+     (error? (vsort   <= (vector) 3))
+     (error? (fxvsort <= (fxvector) 3))
+     (error? (flvsort <= (flvector) 3))
+     (error? (vsort   <= (vector   2 2 2 2 2) 6 3))
+     (error? (fxvsort <= (fxvector 2 2 2 2 2) 6 3))
+     (error? (flvsort <= (flvector 2.0 2.0 2.0 2.0) 6 3))
+
+     ;; full range, in place
+     (begin (define (test1 rand <? sort! sorted?)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let ([v (rand #e1e6 bd)])
+                                    (sort! <? v)
+                                    (sorted? <? v)))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test1 random-vector   fx<= vsort!   vsorted?)
+     (test1 random-fxvector fx<= fxvsort! fxvsorted?)
+     (test1 random-flvector fl<= flvsort! flvsorted?)
+
+     ;; full range, return new
+     (begin (define (test2 rand <? sort sorted?)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let ([v (rand #e1e6 bd)])
+                                    (sorted? <? (sort <? v))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test2 random-vector   fx<= vsort   vsorted?)
+     (test2 random-fxvector fx<= fxvsort fxvsorted?)
+     (test2 random-flvector fl<= flvsort flvsorted?)
+
+     (begin (define $sorted?
+              (lambda (vec <? start stop vref)
+                (let loop ([i start])
+                  (if (fx= i (fx1- stop))
+                      #t
+                      (and (<? (vref vec i) (vref vec (fx1+ i)))
+                           (loop (fx1+ i)))))))
+            #t)
+
+     ;; ranged, in place
+     (begin (define (test3 rand <? sort! vref)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let ([v (rand #e1e6 bd)]
+                                        [mid (fx/ #e1e6 2)])
+                                    (sort! <? v mid)
+                                    (sort! <? v mid #e1e6)
+                                    (and ($sorted? v <? 0 mid vref)
+                                         ($sorted? v <? mid #e1e6 vref))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test3 random-vector   fx<= vsort!   vector-ref)
+     (test3 random-fxvector fx<= fxvsort! fxvector-ref)
+     (test3 random-flvector fl<= flvsort! flvector-ref)
+
+     ;; ranged, return new
+     (begin (define (test4 rand <? sort sorted?)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let ([v (rand #e1e6 bd)]
+                                        [mid (fx/ #e1e6 2)])
+                                    (and (sorted? <? (sort <? v mid))
+                                         (sorted? <? (sort <? v mid #e1e6)))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test4 random-vector   fx<= vsort   vsorted?)
+     (test4 random-fxvector fx<= fxvsort fxvsorted?)
+     (test4 random-flvector fl<= flvsort flvsorted?)
+
+     )
+
+
 (mat *vscan-left-ex
 
      ;; arity
@@ -898,13 +1002,13 @@
      (equal? '#vfx() (fxvscan-left-ex + 0 '#vfx() '#vfx()))
      (equal? '#vfx(1 3 7 13)
              (fxvscan-left-ex (lambda (acc x y) (+ acc x y))
-                            1 '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+                              1 '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
 
 ;;; 3 args
      (equal? '#vfx() (fxvscan-left-ex + 0 '#vfx() '#vfx() '#vfx()))
      (equal? '#vfx(1 4 10 19)
              (fxvscan-left-ex (lambda (acc x y z) (+ acc x y z))
-                            1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
+                              1 '#vfx(1 2 3 4) '#vfx(1 2 3 4) '#vfx(1 2 3 4)))
 
 ;;; more args
      (equal? '#vfx() (fxvscan-left-ex + 0 '#vfx() '#vfx() '#vfx() '#vfx() '#vfx()))
