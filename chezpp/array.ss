@@ -11,6 +11,7 @@
           array-for-each array-for-each/i
           array-map-rev array-map/i-rev
           array-for-each-rev array-for-each/i-rev
+          array-andmap array-ormap
           array-fold-left array-fold-left/i array-fold-right array-fold-right/i
           array-sorted? array-sort array-sort!
 
@@ -27,6 +28,7 @@
           fxarray-for-each fxarray-for-each/i
           fxarray-map-rev fxarray-map/i-rev
           fxarray-for-each-rev fxarray-for-each/i-rev
+          fxarray-andmap fxarray-ormap
           fxarray-fold-left fxarray-fold-left/i fxarray-fold-right fxarray-fold-right/i
           fxarray-sorted? fxarray-sort fxarray-sort!
 
@@ -42,6 +44,7 @@
           u8array-for-each u8array-for-each/i
           u8array-map-rev u8array-map/i-rev
           u8array-for-each-rev u8array-for-each/i-rev
+          u8array-andmap u8array-ormap
           u8array-fold-left u8array-fold-left/i u8array-fold-right u8array-fold-right/i
           u8array-sorted? u8array-sort u8array-sort!
 
@@ -1029,7 +1032,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)]
                              [newarr (amake len0)]      [newvec (array-vec newarr)])
                         (let loop ([i 0])
@@ -1039,7 +1042,7 @@
                                      (loop (fx1+ i))))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)]
                     [newarr (amake len0)]      [newvec (array-vec newarr)])
                (let loop ([i 0])
@@ -1062,7 +1065,7 @@
                                      (loop (fx1+ i))))))))]
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
-             (check-length arr0 arr1)
+             (check-length who arr0 arr1)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)]
                     [newarr (amake len0)]      [newvec (array-vec newarr)])
                (let loop ([i 0])
@@ -1072,7 +1075,7 @@
                             (loop (fx1+ i)))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)]
                     [newarr (amake len0)]      [newvec (array-vec newarr)])
                (let loop ([i 0])
@@ -1097,7 +1100,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
                         (let loop ([i 0])
                           (if (fx= i len0)
@@ -1106,7 +1109,7 @@
                                      (loop (fx1+ i))))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([i 0])
                  (if (fx= i len0)
@@ -1128,7 +1131,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
                         (let loop ([i 0])
                           (if (fx= i len0)
@@ -1137,7 +1140,7 @@
                                      (loop (fx1+ i))))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([i 0])
                  (if (fx= i len0)
@@ -1158,7 +1161,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
                         (let loop ([i 0])
                           (unless (fx= i len0)
@@ -1166,7 +1169,7 @@
                             (loop (fx1+ i)))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([i 0])
                  (unless (fx= i len0)
@@ -1186,7 +1189,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
                         (let loop ([i 0])
                           (unless (fx= i len0)
@@ -1194,7 +1197,7 @@
                             (loop (fx1+ i)))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([i 0])
                  (unless (fx= i len0)
@@ -1218,7 +1221,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)]
                              [newarr (amake len0)]      [newvec (array-vec newarr)])
                         (let loop ([i (fx1- len0)] [j 0])
@@ -1228,7 +1231,7 @@
                                      (loop (fx1- i) (fx1+ j))))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)]
                     [newarr (amake len0)]      [newvec (array-vec newarr)])
                (let loop ([i (fx1- len0)] [j 0])
@@ -1252,7 +1255,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)]
                              [newarr (amake len0)]      [newvec (array-vec newarr)])
                         (let loop ([i (fx1- len0)] [j 0])
@@ -1262,7 +1265,7 @@
                                      (loop (fx1- i) (fx1+ j))))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)]
                     [newarr (amake len0)]      [newvec (array-vec newarr)])
                (let loop ([i (fx1- len0)] [j 0])
@@ -1284,7 +1287,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
                         (let loop ([i (fx1- len0)])
                           (unless (fx= i -1)
@@ -1292,7 +1295,7 @@
                             (loop (fx1- i)))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([i (fx1- len0)] [j 0])
                  (unless (fx= i -1)
@@ -1312,7 +1315,7 @@
     [(proc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
                         (let loop ([i (fx1- len0)])
                           (unless (fx= i -1)
@@ -1320,12 +1323,74 @@
                             (loop (fx1- i)))))))]
     [(proc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([i (fx1- len0)] [j 0])
                  (unless (fx= i -1)
                    (apply proc i (vref vec0 i) (map (lambda (x) (vref x i)) vec*))
                    (loop (fx1- i) (fx1+ j))))))])
+
+
+  (define-array-procedure (a fxa u8a) andmap
+    [(proc arr0)
+     (pcheck ([procedure? proc])
+             (apcheck (arr0)
+                      (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)])
+                        (let loop ([i 0])
+                          (if (fx= i len0)
+                              #t
+                              (and (proc (vref vec0 i))
+                                   (loop (fx1+ i))))))))]
+    [(proc arr0 arr1)
+     (pcheck ([procedure? proc])
+             (apcheck (arr0 arr1)
+                      (check-length who arr0 arr1)
+                      (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
+                        (let loop ([i 0])
+                          (if (fx= i len0)
+                              #t
+                              (and (proc (vref vec0 i) (vref vec1 i))
+                                   (loop (fx1+ i))))))))]
+    [(proc arr0 . arr*)
+     (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
+             (apply check-length who arr0 arr*)
+             (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
+               (let loop ([i 0])
+                 (if (fx= i len0)
+                     #t
+                     (and (apply proc (vref vec0 i) (map (lambda (x) (vref x i)) vec*))
+                          (loop (fx1+ i)))))))])
+
+
+  (define-array-procedure (a fxa u8a) ormap
+    [(proc arr0)
+     (pcheck ([procedure? proc])
+             (apcheck (arr0)
+                      (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)])
+                        (let loop ([i 0])
+                          (if (fx= i len0)
+                              #f
+                              (or (proc (vref vec0 i))
+                                  (loop (fx1+ i))))))))]
+    [(proc arr0 arr1)
+     (pcheck ([procedure? proc])
+             (apcheck (arr0 arr1)
+                      (check-length who arr0 arr1)
+                      (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
+                        (let loop ([i 0])
+                          (if (fx= i len0)
+                              #f
+                              (or (proc (vref vec0 i) (vref vec1 i))
+                                  (loop (fx1+ i))))))))]
+    [(proc arr0 . arr*)
+     (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
+             (apply check-length who arr0 arr*)
+             (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
+               (let loop ([i 0])
+                 (if (fx= i len0)
+                     #f
+                     (or (apply proc (vref vec0 i) (map (lambda (x) (vref x i)) vec*))
+                         (loop (fx1+ i)))))))])
 
 
 ;;;; folds
@@ -1344,7 +1409,7 @@
     [(proc acc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
                         (let loop ([acc acc] [i 0])
                           (if (fx= i len0)
@@ -1353,7 +1418,7 @@
                                     (fx1+ i)))))))]
     [(proc acc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([acc acc] [i 0])
                  (if (fx= i len0)
@@ -1375,7 +1440,7 @@
     [(proc acc arr0 arr1)
      (pcheck ([procedure? proc])
              (apcheck (arr0 arr1)
-                      (check-length arr0 arr1)
+                      (check-length who arr0 arr1)
                       (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec1 (array-vec arr1)])
                         (let loop ([acc acc] [i 0])
                           (if (fx= i len0)
@@ -1384,7 +1449,7 @@
                                     (fx1+ i)))))))]
     [(proc acc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([acc acc] [i 0])
                  (if (fx= i len0)
@@ -1414,7 +1479,7 @@
                                     (fx1- i)))))))]
     [(proc acc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([acc acc] [i (fx1- len0)])
                  (if (fx= i -1)
@@ -1444,7 +1509,7 @@
                                     (fx1- i)))))))]
     [(proc acc arr0 . arr*)
      (pcheck ([procedure? proc] [a? arr0] [all-which? arr*])
-             (apply check-length arr0 arr*)
+             (apply check-length who arr0 arr*)
              (let* ([len0 (array-length arr0)] [vec0 (array-vec arr0)] [vec* (map array-vec arr*)])
                (let loop ([acc acc] [i (fx1- len0)])
                  (if (fx= i -1)

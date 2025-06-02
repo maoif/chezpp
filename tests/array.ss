@@ -651,8 +651,30 @@
 (mat array-map
 
      ;; type error
+     (error? (array-map #f (array)))
+     (error? (array-map odd? (fxarray 1)))
+     (error? (fxarray-map odd? (array 1)))
+
+     (array-empty? (array-map   + (array)))
+     (array-empty? (fxarray-map + (fxarray)))
+     (array-empty? (u8array-map + (u8array)))
+
+     (array-empty? (array-map   + (array) (array)))
+     (array-empty? (fxarray-map + (fxarray) (fxarray)))
+     (array-empty? (u8array-map + (u8array) (u8array)))
+
+     (array-empty? (array-map   + (array) (array) (array) (array) (array)))
+     (array-empty? (fxarray-map + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (array-empty? (u8array-map + (u8array) (u8array) (u8array) (u8array) (u8array)))
+
      ;; length not equal
-     ;; proc arity error
+     (error? (array-map   + (array) (array 1)))
+     (error? (fxarray-map + (fxarray) (fxarray 1)))
+     (error? (u8array-map + (u8array) (u8array 1)))
+
+     (error? (array-map   + (array) (array 1) (array) (array 1 1) (array)))
+     (error? (fxarray-map + (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
+     (error? (u8array-map + (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
 
 
      ;; one array
@@ -688,6 +710,36 @@
 
 
 (mat array-map/i
+
+     ;; type error
+     (error? (array-map/i #f (array)))
+     (error? (array-map/i odd? (fxarray 1)))
+     (error? (fxarray-map/i odd? (array 1)))
+
+     ;; arity error
+     (error? (fxarray-map/i odd? (fxarray 1)))
+
+     (array-empty? (array-map/i   + (array)))
+     (array-empty? (fxarray-map/i + (fxarray)))
+     (array-empty? (u8array-map/i + (u8array)))
+
+     (array-empty? (array-map/i   + (array) (array)))
+     (array-empty? (fxarray-map/i + (fxarray) (fxarray)))
+     (array-empty? (u8array-map/i + (u8array) (u8array)))
+
+     (array-empty? (array-map/i   + (array) (array) (array) (array) (array)))
+     (array-empty? (fxarray-map/i + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (array-empty? (u8array-map/i + (u8array) (u8array) (u8array) (u8array) (u8array)))
+
+     ;; length not equal
+     (error? (array-map/i   + (array) (array 1)))
+     (error? (fxarray-map/i + (fxarray) (fxarray 1)))
+     (error? (u8array-map/i + (u8array) (u8array 1)))
+
+     (error? (array-map/i   + (array) (array 1) (array) (array 1 1) (array)))
+     (error? (fxarray-map/i + (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
+     (error? (u8array-map/i + (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+
 
      ;; one array
      (let* ([ls0 (iota 10)]
@@ -730,6 +782,33 @@
 
 (mat array-map!
 
+     ;; type error
+     (error? (array-map! #f (array)))
+     (error? (array-map! odd? (fxarray 1)))
+     (error? (fxarray-map! odd? (array 1)))
+
+     (array-empty? (array-map!   + (array)))
+     (array-empty? (fxarray-map! + (fxarray)))
+     (array-empty? (u8array-map! + (u8array)))
+
+     (array-empty? (array-map!   + (array) (array)))
+     (array-empty? (fxarray-map! + (fxarray) (fxarray)))
+     (array-empty? (u8array-map! + (u8array) (u8array)))
+
+     (array-empty? (array-map!   + (array) (array) (array) (array) (array)))
+     (array-empty? (fxarray-map! + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (array-empty? (u8array-map! + (u8array) (u8array) (u8array) (u8array) (u8array)))
+
+     ;; length not equal
+     (error? (array-map!   + (array) (array 1)))
+     (error? (fxarray-map! + (fxarray) (fxarray 1)))
+     (error? (u8array-map! + (u8array) (u8array 1)))
+
+     (error? (array-map!   + (array) (array 1) (array) (array 1 1) (array)))
+     (error? (fxarray-map! + (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
+     (error? (u8array-map! + (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+
+
      ;; one array
      (let* ([ls0 (iota 10)]
             [arr0 (apply array ls0)])
@@ -770,6 +849,35 @@
 
 
 (mat array-map/i!
+
+     ;; type error
+     (error? (array-map/i! #f (array)))
+     (error? (array-map/i! odd? (fxarray 1)))
+     (error? (fxarray-map/i! odd? (array 1)))
+
+     ;; arity error
+     (error? (fxarray-map/i! odd? (fxarray 1)))
+
+     (array-empty? (array-map/i!   + (array)))
+     (array-empty? (fxarray-map/i! + (fxarray)))
+     (array-empty? (u8array-map/i! + (u8array)))
+
+     (array-empty? (array-map/i!   + (array) (array)))
+     (array-empty? (fxarray-map/i! + (fxarray) (fxarray)))
+     (array-empty? (u8array-map/i! + (u8array) (u8array)))
+
+     (array-empty? (array-map/i!   + (array) (array) (array) (array) (array)))
+     (array-empty? (fxarray-map/i! + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (array-empty? (u8array-map/i! + (u8array) (u8array) (u8array) (u8array) (u8array)))
+
+     ;; length not equal
+     (error? (array-map/i!   + (array) (array 1)))
+     (error? (fxarray-map/i! + (fxarray) (fxarray 1)))
+     (error? (u8array-map/i! + (u8array) (u8array 1)))
+
+     (error? (array-map/i!   + (array) (array 1) (array) (array 1 1) (array)))
+     (error? (fxarray-map/i! + (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
+     (error? (u8array-map/i! + (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
 
      ;; one array
      (let* ([ls0 (iota 10)]
@@ -1045,6 +1153,137 @@
 
      )
 
+
+(mat array-andmap
+
+     (error? (array-andmap #f (array)))
+     (error? (array-andmap odd? (fxarray 1)))
+     (error? (fxarray-andmap odd? (array 1)))
+
+     (array-andmap   odd? (array))
+     (fxarray-andmap odd? (fxarray))
+     (u8array-andmap odd? (u8array))
+
+     (array-andmap   odd? (array) (array))
+     (fxarray-andmap odd? (fxarray) (fxarray))
+     (u8array-andmap odd? (u8array) (u8array))
+
+     (array-andmap   odd? (array) (array) (array) (array) (array))
+     (fxarray-andmap odd? (fxarray) (fxarray) (fxarray) (fxarray) (fxarray))
+     (u8array-andmap odd? (u8array) (u8array) (u8array) (u8array) (u8array))
+
+     (error? (array-andmap   odd? (array) (array 1)))
+     (error? (fxarray-andmap odd? (fxarray) (fxarray 1)))
+     (error? (u8array-andmap odd? (u8array) (u8array 1)))
+
+     (error? (array-andmap   odd? (array) (array 1) (array) (array 1 1) (array)))
+     (error? (fxarray-andmap odd? (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
+     (error? (u8array-andmap odd? (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+
+     ;; 1 arr
+     (begin (define (test1 arr-proc andmap-proc)
+              (let* ([n* (nums 1 100 2)]
+                     [arr0 (apply arr-proc n*)])
+                (andmap-proc odd? arr0)))
+            #t)
+
+     (test1 array   array-andmap)
+     (test1 fxarray fxarray-andmap)
+     (test1 u8array u8array-andmap)
+
+     ;; 2 arrs
+     (begin (define (test2 arr-proc andmap-proc)
+              (let* ([n* (nums 1 100 2)]
+                     [arr0 (apply arr-proc n*)]
+                     [arr1 (apply arr-proc n*)])
+                (andmap-proc = arr0 arr1)))
+            #t)
+     (test2 array   array-andmap)
+     (test2 fxarray fxarray-andmap)
+     (test2 u8array u8array-andmap)
+
+     ;; more arrs
+     (begin (define (test* arr-proc andmap-proc map-proc)
+              (let* ([n* (nums 1 50 2)]
+                     [arr0 (apply arr-proc n*)]
+                     [arr1 (apply arr-proc n*)]
+                     [arr2 (apply arr-proc n*)]
+                     [arr3 (map-proc + arr0 arr1 arr2)])
+                (andmap-proc (lambda (a b c d) (= d (+ a b c)))
+                             arr0 arr1 arr2 arr3)))
+            #t)
+     (test* array   array-andmap   array-map)
+     (test* fxarray fxarray-andmap fxarray-map)
+     (test* u8array u8array-andmap u8array-map)
+
+     )
+
+
+(mat array-ormap
+
+     (error? (array-ormap #f (array)))
+     (error? (array-ormap odd? (fxarray 1)))
+     (error? (fxarray-ormap odd? (array 1)))
+
+     (not (array-ormap   odd? (array)))
+     (not (fxarray-ormap odd? (fxarray)))
+     (not (u8array-ormap odd? (u8array)))
+
+     (not (array-ormap   odd? (array) (array)))
+     (not (fxarray-ormap odd? (fxarray) (fxarray)))
+     (not (u8array-ormap odd? (u8array) (u8array)))
+
+     (not (array-ormap   odd? (array) (array) (array) (array) (array)))
+     (not (fxarray-ormap odd? (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (not (u8array-ormap odd? (u8array) (u8array) (u8array) (u8array) (u8array)))
+
+     (error? (array-ormap   odd? (array) (array 1)))
+     (error? (fxarray-ormap odd? (fxarray) (fxarray 1)))
+     (error? (u8array-ormap odd? (u8array) (u8array 1)))
+
+     (error? (array-ormap   odd? (array) (array 1) (array) (array 1 1) (array)))
+     (error? (fxarray-ormap odd? (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
+     (error? (u8array-ormap odd? (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+
+
+     ;; 1 arr
+     (begin (define (test1 arr-proc ormap-proc)
+              (let* ([n* (snoc! (nums 1 100 2) 2)]
+                     [arr0 (apply arr-proc n*)])
+                (ormap-proc even? arr0)))
+            #t)
+
+     (test1 array   array-ormap)
+     (test1 fxarray fxarray-ormap)
+     (test1 u8array u8array-ormap)
+
+     ;; 2 arrs
+     (begin (define (test2 arr-proc ormap-proc)
+              (let* ([n* (nums 1 100 2)]
+                     [arr0 (apply arr-proc n*)]
+                     [arr1 (apply arr-proc n*)])
+                (ormap-proc (lambda (a b) (= (+ 49 49) (+ a b)))
+                            arr0 arr1)))
+            #t)
+     (test2 array   array-ormap)
+     (test2 fxarray fxarray-ormap)
+     (test2 u8array u8array-ormap)
+
+     ;; more arrs
+     (begin (define (test* arr-proc ormap-proc map-proc)
+              (let* ([n* (nums 1 50 2)]
+                     [arr0 (apply arr-proc n*)]
+                     [arr1 (apply arr-proc n*)]
+                     [arr2 (apply arr-proc n*)]
+                     [arr3 (apply arr-proc n*)])
+                (ormap-proc (lambda (a b c d) (= (+ 33 33 33 33) (+ a b c d)))
+                             arr0 arr1 arr2 arr3)))
+            #t)
+     (test* array   array-ormap   array-map)
+     (test* fxarray fxarray-ormap fxarray-map)
+     (test* u8array u8array-ormap u8array-map)
+
+     )
 
 
 (mat array-fold-left
