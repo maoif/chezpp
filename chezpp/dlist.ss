@@ -10,6 +10,7 @@
           dlist-push! dlist-pop! dlist-push-back! dlist-pop-back!
 
           dlist-map dlist-map/i dlist-map! dlist-map/i!
+          dlist-andmap dlist-ormap
           dlist-for-each dlist-for-each/i
           dlist-map-rev dlist-map/i-rev dlist-for-each-rev dlist-for-each/i-rev
           dlist-fold-left dlist-fold-left/i dlist-fold-right dlist-fold-right/i
@@ -916,6 +917,60 @@
                  (unless (null-dnode? n0)
                    (begin (apply proc i (dnode-value n0) (map dnode-value n*))
                           (loop (fx1+ i) (dnode-right n0) (map dnode-right n*))))))]))
+
+
+  (define-who dlist-andmap
+    (case-lambda
+      [(proc dl0)
+       (pcheck ([procedure? proc] [dlist? dl0])
+               (let loop ([n0 (dlist-first dl0)])
+                 (if (null-dnode? n0)
+                     #t
+                     (and (proc (dnode-value n0))
+                          (loop (dnode-right n0))))))]
+      [(proc dl0 dl1)
+       (pcheck ([procedure? proc] [dlist? dl0] [dlist? dl1])
+               (check-length who dl0 dl1)
+               (let loop ([n0 (dlist-first dl0)] [n1 (dlist-first dl1)])
+                 (if (null-dnode? n0)
+                     #t
+                     (and (proc (dnode-value n0) (dnode-value n1))
+                          (loop (dnode-right n0) (dnode-right n1))))))]
+      [(proc dl0 . dl*)
+       (pcheck ([procedure? proc] [dlist? dl0] [all-dlists? dl*])
+               (apply check-length who dl0 dl*)
+               (let loop ([n0 (dlist-first dl0)] [n* (map dlist-first dl*)])
+                 (if (null-dnode? n0)
+                     #t
+                     (and (apply proc (dnode-value n0) (map dnode-value n*))
+                          (loop (dnode-right n0) (map dnode-right n*))))))]))
+
+
+  (define-who dlist-ormap
+    (case-lambda
+      [(proc dl0)
+       (pcheck ([procedure? proc] [dlist? dl0])
+               (let loop ([n0 (dlist-first dl0)])
+                 (if (null-dnode? n0)
+                     #f
+                     (or (proc (dnode-value n0))
+                         (loop (dnode-right n0))))))]
+      [(proc dl0 dl1)
+       (pcheck ([procedure? proc] [dlist? dl0] [dlist? dl1])
+               (check-length who dl0 dl1)
+               (let loop ([n0 (dlist-first dl0)] [n1 (dlist-first dl1)])
+                 (if (null-dnode? n0)
+                     #f
+                     (or (proc (dnode-value n0) (dnode-value n1))
+                         (loop (dnode-right n0) (dnode-right n1))))))]
+      [(proc dl0 . dl*)
+       (pcheck ([procedure? proc] [dlist? dl0] [all-dlists? dl*])
+               (apply check-length who dl0 dl*)
+               (let loop ([n0 (dlist-first dl0)] [n* (map dlist-first dl*)])
+                 (if (null-dnode? n0)
+                     #f
+                     (or (apply proc (dnode-value n0) (map dnode-value n*))
+                         (loop (dnode-right n0) (map dnode-right n*))))))]))
 
 
 ;;;; reverse order

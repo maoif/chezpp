@@ -1208,6 +1208,95 @@
      )
 
 
+(mat dlist-andmap
+
+     (error? (dlist-andmap #f (dlist)))
+
+     (dlist-andmap odd? (dlist))
+     (dlist-andmap odd? (dlist) (dlist))
+     (dlist-andmap odd? (dlist) (dlist) (dlist) (dlist) (dlist))
+
+     (error? (dlist-andmap odd? (dlist) (dlist 1)))
+     (error? (dlist-andmap odd? (dlist) (dlist 1) (dlist) (dlist 1 1) (dlist)))
+
+     ;; 1 dl
+     (begin (define (test1 dl-proc andmap-proc)
+              (let* ([n* (nums 1 100 2)]
+                     [dl0 (apply dl-proc n*)])
+                (andmap-proc odd? dl0)))
+            #t)
+     (test1 dlist dlist-andmap)
+
+
+     ;; 2 dls
+     (begin (define (test2 dl-proc andmap-proc)
+              (let* ([n* (nums 1 100 2)]
+                     [dl0 (apply dl-proc n*)]
+                     [dl1 (apply dl-proc n*)])
+                (andmap-proc = dl0 dl1)))
+            #t)
+     (test2 dlist dlist-andmap)
+
+
+     ;; more dls
+     (begin (define (test* dl-proc andmap-proc map-proc)
+              (let* ([n* (nums 1 50 2)]
+                     [dl0 (apply dl-proc n*)]
+                     [dl1 (apply dl-proc n*)]
+                     [dl2 (apply dl-proc n*)]
+                     [dl3 (map-proc + dl0 dl1 dl2)])
+                (andmap-proc (lambda (a b c d) (= d (+ a b c)))
+                             dl0 dl1 dl2 dl3)))
+            #t)
+     (test* dlist dlist-andmap dlist-map)
+
+     )
+
+
+(mat dlist-ormap
+
+     (error? (dlist-ormap #f (dlist)))
+
+     (not (dlist-ormap odd? (dlist)))
+     (not (dlist-ormap odd? (dlist) (dlist)))
+     (not (dlist-ormap odd? (dlist) (dlist) (dlist) (dlist) (dlist)))
+
+     (error? (dlist-ormap odd? (dlist) (dlist 1)))
+     (error? (dlist-ormap odd? (dlist) (dlist 1) (dlist) (dlist 1 1) (dlist)))
+
+
+     ;; 1 dl
+     (begin (define (test1 dl-proc ormap-proc)
+              (let* ([n* (snoc! (nums 1 100 2) 2)]
+                     [dl0 (apply dl-proc n*)])
+                (ormap-proc even? dl0)))
+            #t)
+     (test1 dlist dlist-ormap)
+
+     ;; 2 dls
+     (begin (define (test2 dl-proc ormap-proc)
+              (let* ([n* (nums 1 100 2)]
+                     [dl0 (apply dl-proc n*)]
+                     [dl1 (apply dl-proc n*)])
+                (ormap-proc (lambda (a b) (= (+ 49 49) (+ a b)))
+                            dl0 dl1)))
+            #t)
+     (test2 dlist dlist-ormap)
+
+     ;; more dls
+     (begin (define (test* dl-proc ormap-proc map-proc)
+              (let* ([n* (nums 1 50 2)]
+                     [dl0 (apply dl-proc n*)]
+                     [dl1 (apply dl-proc n*)]
+                     [dl2 (apply dl-proc n*)]
+                     [dl3 (apply dl-proc n*)])
+                (ormap-proc (lambda (a b c d) (= (+ 33 33 33 33) (+ a b c d)))
+                            dl0 dl1 dl2 dl3)))
+            #t)
+     (test* dlist dlist-ormap dlist-map)
+
+     )
+
 
 (mat dlist-fold-left
 
