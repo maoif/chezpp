@@ -128,6 +128,23 @@
        (and (= 2 (array-length arr))
             (= 0 (array-ref arr 0))))
 
+     (let* ([n* (iota 100)]
+            [arr (apply array n*)])
+       (for-each (lambda (x)
+                   (array-delete! arr x))
+                 (reverse (nums 0 100 2)))
+       (equal? (apply array (nums 1 100 2))
+               arr))
+
+     (let* ([n* (iota 100)]
+            [arr (apply array n*)])
+       (andmap (lambda (x)
+                 (array-delete! arr x)
+                 (set! n* (remv x n*))
+                 (equal? n*
+                         (array->list arr)))
+               (reverse (nums 0 100 3))))
+
      )
 
 

@@ -528,7 +528,7 @@
                        (when (fx>= i len) (errorf who "index ~a out of range ~a" i len))
                        (cond [(fx= i 0) (vcopy! vec 1 vec 0 (fx- len 1))]
                              [(fx= i (fx1- len)) (void)]
-                             [else (vcopy! vec i vec (fx1- i) (fx- len i))])
+                             [else (vcopy! vec (fx1+ i) vec i (fx- len i 1))])
                        (array-length-set! arr (fx1- len))))))
 
   ;; TODO delete in range
