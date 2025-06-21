@@ -5,7 +5,7 @@
           list-last list-set!
           make-list-builder
           zip zip! snoc!
-          list-sorted?
+          list-sorted? list-cyclic?
           map/iota nums slice
 
           listp=? list=? listq=? listv=?
@@ -737,6 +737,26 @@
                                     (loop (fx1+ i) (cdr ls)))))]
                            [else '()]))))]))
 
+
+  #|doc
+  Check whether the list `ls` contains a cycle.
+  Note that `list-cyclic?` cares about cyclic "cdr pointers" only.
+  If the car field somewhere inside the list points back, it is not detected.
+  |#
+  (define-who list-cyclic?
+    (lambda (ls)
+      (if (null? ls)
+          #f
+          (pcheck ([pair? ls]) ;; Why using `list?` causes dead loop?
+                  ;; Floyd's tortoise and hare cycle-detecting algorithm.
+                  (let loop ([slow ls] [fast (cdr ls)])
+                    (if (eq? slow fast)
+                        #t
+                        (if (not (or (null? slow)
+                                     (null? fast)
+                                     (null? (cdr fast))))
+                            (loop (cdr slow) (cddr fast))
+                            #f)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

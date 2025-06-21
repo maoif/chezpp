@@ -312,6 +312,37 @@
      )
 
 
+(mat list-cyclic?
+
+     (not (list-cyclic? '()))
+     (not (list-cyclic? '(1)))
+
+     ;; not cdr ptr
+     (let ([ls '(1)])
+       (set-car! ls ls)
+       (not (list-cyclic? ls)))
+
+     ;; not cdr ptr
+     (let ([ls '(1 2)])
+       (set-car! ls ls)
+       (not (list-cyclic? ls)))
+
+     ;; not cdr ptr
+     (let ([ls '(1 2)])
+       (set-car! (cdr ls) ls)
+       (not (list-cyclic? ls)))
+
+     (let ([ls '(1 2)])
+       (set-cdr! (cdr ls) ls)
+       (list-cyclic? ls))
+
+     (let ([ls '(1 2 3 4 . #f)])
+       (set-cdr! (cdddr ls) (cdr ls))
+       (list-cyclic? ls))
+
+     )
+
+
 (mat nums
 
      (error? (nums 'x 'x 'x))
