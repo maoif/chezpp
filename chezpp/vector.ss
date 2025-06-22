@@ -1372,9 +1372,9 @@
 
   ;; TODO optimize
   (define (merge-sort! <? vec start stop vlength vref vset! vmake vcopy!)
+    (define vtemp (vmake (- stop start)))
     (define (merge! start mid stop)
-      (let* ([len (fx- stop start)]
-             [vtemp (vmake len)])
+      (let ([len (fx- stop start)])
         (let loop ([i start] [j mid] [k 0])
           (cond [(fx= i mid)
                  (let lp ([j j] [k k])
