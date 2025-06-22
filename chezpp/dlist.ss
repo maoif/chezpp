@@ -495,6 +495,8 @@
   Meanings of `start`, `end` and `step` are the same as in list:slice.
 
   If the indices are out of range in any way, this procedure has no effect on the dlist.
+
+  After the operation, `dl` is returned.
   |#
   (define-who dlist-slice!
     (case-lambda
@@ -558,7 +560,8 @@
                                              ;; continue from L, hence (fx1+ step)
                                              (loop (fx1- i) L n1 (fx1+ step)))]
                                           [else (next (fx1- i) (dnode-left n1) (fx1+ k))])))
-                                (f (fx1+ i) (dnode-right n))))]))))]))
+                                (f (fx1+ i) (dnode-right n))))]))
+                 dl))]))
 
 
   #|doc
