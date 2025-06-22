@@ -777,7 +777,7 @@
      )
 
 
-(mat nums
+(mat dlist-nums
 
      (error? (dlist-nums 'x 'x 'x))
      (error? (dlist-nums 0 10  -1))
