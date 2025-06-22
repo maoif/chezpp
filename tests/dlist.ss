@@ -777,6 +777,30 @@
      )
 
 
+(mat nums
+
+     (error? (dlist-nums 'x 'x 'x))
+     (error? (dlist-nums 0 10  -1))
+     (error? (dlist-nums 0 -10 1))
+
+     (equal? (dlist-nums 0 10)
+             (dlist-iota 10))
+     (equal? (dlist-nums 5 10)
+             (dlist 5 6 7 8 9))
+     (equal? (dlist-nums 5 15 3)
+             (dlist 5 8 11 14))
+     (equal? (dlist-nums 0 -10 -1)
+             (dlist 0 -1 -2 -3 -4 -5 -6 -7 -8 -9))
+     (equal? (dlist-nums 0 -10 -2)
+             (dlist 0 -2 -4 -6 -8))
+     (equal? (dlist-nums 0 5 0.5)
+             (dlist 0 0.5 1.0 1.5 2.0 2.5 3.0 3.5 4.0 4.5))
+     (equal? (dlist-nums 0 -5 -0.5)
+             (dlist 0 -0.5 -1.0 -1.5 -2.0 -2.5 -3.0 -3.5 -4.0 -4.5))
+
+     )
+
+
 (mat dlist-stack-ops
 
      (error? (dlist-pop! (dlist)))
