@@ -230,14 +230,227 @@
 
 (mat array-slice
 
+     (equal? '(1) (array->list (array-slice (array 1) 1)))
+     (equal? '(1) (array->list (array-slice (array 1) 2)))
+     (equal? '(1) (array->list (array-slice (array 1) 3)))
+     (equal? '(1) (array->list (array-slice (array 1) 2 -4 -4)))
+     (equal? '()  (array->list (array-slice (array 1) 0 1 -1)))
 
-     #t)
+     (equal? '() (array->list (array-slice (array 1) 2 -4)))
+     (equal? '() (array->list (array-slice (array 1) 1 5)))
+     (equal? '() (array->list (array-slice (array 1) 3 0 3)))
+
+     (begin (define ls (iota 10))
+            (define arr (apply array ls))
+            #t)
+
+
+     ;; positive index, forward
+     (equal? '(0 1 2 3 4)
+             (array->list (array-slice arr 5)))
+     (equal? '(0 2 4 6 8)
+             (array->list (array-slice arr 0 9 2)))
+     (equal? '(2 5 8)
+             (array->list (array-slice arr 2 9 3)))
+
+
+     ;; positive index, backward
+     (equal? '(3 2)
+             (array->list (array-slice arr 3 1 -1)))
+     (equal? '(8 6 4)
+             (array->list (array-slice arr 8 2 -2)))
+     (equal? '(9 6 3)
+             (array->list (array-slice arr 9 1 -3)))
+     (equal? '(9 5)
+             (array->list (array-slice arr 9 1 -4)))
+     (equal? '(9 5 1)
+             (array->list (array-slice arr 9 0 -4)))
+
+
+     ;; negative index, forward
+     (equal? '(0 1 2 3 4)
+             (array->list (array-slice arr -5)))
+     (equal? (iota 9)
+             (array->list (array-slice arr -1)))
+     (equal? '(5 6 7 8)
+             (array->list (array-slice arr -5 -1)))
+     (equal? '(9)
+             (array->list (array-slice arr -1 -2 -1)))
+     (equal? '(1 2 3 4 5 6 7 8)
+             (array->list (array-slice arr -9 -1)))
+     (equal? '(1 4 7)
+             (array->list (array-slice arr -9 -1 3)))
+
+
+     ;; negative index, backward
+     (equal? '(9 8 7 6)
+             (array->list (array-slice arr -1 -5 -1)))
+     (equal? '(9 7 5 3)
+             (array->list (array-slice arr -1 -9 -2)))
+     (equal? '(8 4)
+             (array->list (array-slice arr -2 -9 -4)))
+     (equal? '(1)
+             (array->list (array-slice (array 1) -1 -2 -1)))
+     )
 
 
 (mat array-slice!
 
+     (let ([arr (array 1)])
+       (array-slice! arr 1)
+       (equal? '(1) (array->list arr)))
+     (let ([arr (array 1)])
+       (array-slice! arr 2)
+       (equal? '(1) (array->list arr)))
+     (let ([arr (array 1)])
+       (array-slice! arr 3)
+       (equal? '(1) (array->list arr)))
+     (let ([arr (array 1)])
+       (array-slice! arr 2 -4 -4)
+       (equal? '(1) (array->list arr)))
 
-     #t)
+     ;; bad indices, so no effect
+     (let ([arr (array 1)])
+       (array-slice! arr 0 1 -1)
+       (displayln arr)
+       (equal? '(1) (array->list arr)))
+     (let ([arr (array 1)])
+       (array-slice! arr 2 -4)
+       (displayln arr)
+       (equal? '(1) (array->list arr)))
+     (let ([arr (array 1)])
+       (array-slice! arr 1 5)
+       (displayln arr)
+       (equal? '(1) (array->list arr)))
+     (let ([arr (array 1)])
+       (array-slice! arr 3 0 3)
+       (displayln arr)
+       (equal? '(1) (array->list arr)))
+
+
+     (let ([arr (array 1)])
+       (array-slice! arr 1)
+       (equal? '(1) (array->list arr)))
+     (let ([arr (array 1)])
+       (array-slice! arr 2)
+       (equal? '(1) (array->list arr)))
+     (let ([arr (array 1)])
+       (array-slice! arr 3)
+       (equal? '(1) (array->list arr)))
+
+     ;; positive index, forward
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr 5)
+       (equal? '(0 1 2 3 4)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr 0 9 2)
+       (equal? '(0 2 4 6 8)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr 2 9 3)
+       (equal? '(2 5 8)
+               (array->list arr)))
+
+     ;; positive index, backward
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr 3 1 -1)
+       (equal? '(3 2)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr 8 2 -2)
+       (equal? '(8 6 4)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr 9 1 -3)
+       (equal? '(9 6 3)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr 9 1 -4)
+       (equal? '(9 5)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr 9 0 -4)
+       (equal? '(9 5 1)
+               (array->list arr)))
+
+
+     ;; negative index, forward
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -5)
+       (equal? '(0 1 2 3 4)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -1)
+       (equal? (iota 9)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -5 -1)
+       (equal? '(5 6 7 8)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -1 -2 -1)
+       (equal? '(9)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -9 -1)
+       (equal? '(1 2 3 4 5 6 7 8)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -9 -1 3)
+       (equal? '(1 4 7)
+               (array->list arr)))
+
+
+     ;; negative index, backward
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -1 -5 -1)
+       (equal? '(9 8 7 6)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -1 -9 -2)
+       (equal? '(9 7 5 3)
+               (array->list arr)))
+
+     (let* ([ls (iota 10)]
+            [arr (apply array ls)])
+       (array-slice! arr -2 -9 -4)
+       (equal? '(8 4)
+               (array->list arr)))
+     (let* ([ls '(1)] [arr (apply array ls)])
+       (array-slice! arr -1 -2 -1)
+       (equal? ls
+               (array->list arr)))
+
+     )
 
 
 (mat array-copy

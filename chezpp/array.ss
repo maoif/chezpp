@@ -764,20 +764,97 @@
                               (loop (fx1+ i))))))))])
 
 
+  #|doc
+  Return a slice (sub-array) of the array `arr` specified by `start`, `end` and `step`.
+
+  Meanings of `start`, `end` and `step` are the same as in list:slice.
+
+  If the indices are out of range in any way, an empty array is returned.
+  |#
   (define-array-procedure (a fxa u8a) slice
     [(arr end) (thisproc arr 0 end 1)]
     [(arr start end) (thisproc arr start end 1)]
     [(arr start end step)
      (pcheck ([a? arr] [fixnum? start end step])
-             (todo who))])
+             (when (fx= step 0) (errorf who "step cannot be 0"))
+             (let* ([vec (array-vec arr)] [len (array-length arr)]
+                    [s (let ([s (if (fx>= start 0) start (fx+ len start))])
+                         (cond [(fx< s 0) 0]
+                               [(fx> s len) (fx1- len)]
+                               [else s]))]
+                    [e (let ([e (if (fx>= end 0) end (fx+ len end))])
+                         (cond [(fx<= e -1) -1]
+                               [(fx>= e len) len]
+                               [else e]))])
+               (if (fx= len 0)
+                   (amake 0)
+                   (let ([newv (cond [(and (fx< s e) (fx> step 0))
+                                      (let ([newv (vmake (ceiling (/ (fx- e s) step)))])
+                                        ;; forward
+                                        (let loop ([s s] [i 0])
+                                          (if (fx>= s e)
+                                              newv
+                                              (begin (vset! newv i (vref vec s))
+                                                     (loop (fx+ s step) (fx1+ i))))))]
+                                     [(and (fx> s e) (fx< step 0))
+                                      (let ([newv (vmake (ceiling (/ (fx- e s) step)))])
+                                        ;; backward
+                                        (let loop ([s s] [i 0])
+                                          (if (fx<= s e)
+                                              newv
+                                              (begin (vset! newv i (vref vec s))
+                                                     (loop (fx+ s step) (fx1+ i))))))]
+                                     [else (vmake 0)])])
+                     (amk newv (array-incr-factor arr) (vlength newv))))))])
 
 
+  #|doc
+  Imperatively slice the array `arr` to the range specified by `start`, `end` and `step`.
+
+  Meanings of `start`, `end` and `step` are the same as in list:slice.
+
+  If the indices are out of range in any way, this procedure has no effect on the array.
+
+  After the operation, `arr` is returned.
+  |#
   (define-array-procedure (a fxa u8a) slice!
     [(arr end) (thisproc arr 0 end 1)]
     [(arr start end) (thisproc arr start end 1)]
     [(arr start end step)
      (pcheck ([a? arr] [fixnum? start end step])
-             (todo who))])
+             (when (fx= step 0) (errorf who "step cannot be 0"))
+             (let* ([vec (array-vec arr)] [len (array-length arr)]
+                    [s (let ([s (if (fx>= start 0) start (fx+ len start))])
+                         (cond [(fx< s 0) 0]
+                               [(fx> s len) (fx1- len)]
+                               [else s]))]
+                    [e (let ([e (if (fx>= end 0) end (fx+ len end))])
+                         (cond [(fx<= e -1) -1]
+                               [(fx>= e len) len]
+                               [else e]))])
+               (when (fx> len 0)
+                 ;; TODO try to reuse `vec`
+                 (let ([newv (cond [(and (fx< s e) (fx> step 0))
+                                    (let ([newv (vmake (ceiling (/ (fx- e s) step)))])
+                                      ;; forward
+                                      (let loop ([s s] [i 0])
+                                        (if (fx>= s e)
+                                            newv
+                                            (begin (vset! newv i (vref vec s))
+                                                   (loop (fx+ s step) (fx1+ i))))))]
+                                   [(and (fx> s e) (fx< step 0))
+                                    (let ([newv (vmake (ceiling (/ (fx- e s) step)))])
+                                      ;; backward
+                                      (let loop ([s s] [i 0])
+                                        (if (fx<= s e)
+                                            newv
+                                            (begin (vset! newv i (vref vec s))
+                                                   (loop (fx+ s step) (fx1+ i))))))]
+                                   [else #f])])
+                   (when newv
+                     (array-vec-set!    arr newv)
+                     (array-length-set! arr (vlength newv)))))
+               arr))])
 
 
   #|doc
