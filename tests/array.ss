@@ -751,6 +751,70 @@
      )
 
 
+(mat array-iota
+
+     (error? (array-iota -1))
+     (error? (array-iota -#f))
+
+     ;; out of range
+     (error? (u8array-iota 500))
+
+     (equal? (apply array (iota 10))
+             (array-iota 10))
+     (equal? (array)
+             (array-iota 0))
+
+     (equal? (apply fxarray (iota 10))
+             (fxarray-iota 10))
+     (equal? (fxarray)
+             (fxarray-iota 0))
+
+     (equal? (apply u8array (iota 10))
+             (u8array-iota 10))
+     (equal? (u8array)
+             (u8array-iota 0))
+
+     )
+
+
+(mat array-nums
+
+     (error? (array-nums 'x 'x 'x))
+     (error? (array-nums 0 10  -1))
+     (error? (array-nums 0 -10 1))
+
+     (equal? (array-nums 0 10)
+             (array-iota 10))
+     (equal? (array-nums 5 10)
+             (array 5 6 7 8 9))
+     (equal? (array-nums 5 15 3)
+             (array 5 8 11 14))
+     (equal? (array-nums 0 -10 -1)
+             (array 0 -1 -2 -3 -4 -5 -6 -7 -8 -9))
+     (equal? (array-nums 0 -10 -2)
+             (array 0 -2 -4 -6 -8))
+
+     (equal? (fxarray-nums 0 10)
+             (fxarray-iota 10))
+     (equal? (fxarray-nums 5 10)
+             (fxarray 5 6 7 8 9))
+     (equal? (fxarray-nums 5 15 3)
+             (fxarray 5 8 11 14))
+     (equal? (fxarray-nums 0 -10 -1)
+             (fxarray 0 -1 -2 -3 -4 -5 -6 -7 -8 -9))
+     (equal? (fxarray-nums 0 -10 -2)
+             (fxarray 0 -2 -4 -6 -8))
+
+     (equal? (u8array-nums 0 10)
+             (u8array-iota 10))
+     (equal? (u8array-nums 5 10)
+             (u8array 5 6 7 8 9))
+     (equal? (u8array-nums 5 15 3)
+             (u8array 5 8 11 14))
+
+     )
+
+
 (mat *array-sort
 
      ;; bad <?

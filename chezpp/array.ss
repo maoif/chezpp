@@ -14,6 +14,7 @@
           array-andmap array-ormap
           array-fold-left array-fold-left/i array-fold-right array-fold-right/i
           array-sorted? array-sort array-sort!
+          array-iota array-nums
 
 
           fxarray make-fxarray fxarray? fxarray-length fxarray-empty?
@@ -31,6 +32,7 @@
           fxarray-andmap fxarray-ormap
           fxarray-fold-left fxarray-fold-left/i fxarray-fold-right fxarray-fold-right/i
           fxarray-sorted? fxarray-sort fxarray-sort!
+          fxarray-iota fxarray-nums
 
           u8array make-u8array u8array? u8array-length u8array-empty?
           u8array-ref u8array-add! u8array-delete! u8array-set! u8array-clear!
@@ -47,6 +49,7 @@
           u8array-andmap u8array-ormap
           u8array-fold-left u8array-fold-left/i u8array-fold-right u8array-fold-right/i
           u8array-sorted? u8array-sort u8array-sort!
+          u8array-iota u8array-nums
 
           array->list fxarray->list u8array->list
           array->vector fxarray->fxvector u8array->u8vector
@@ -1012,6 +1015,52 @@
                                             [else vsort!])]
                               [vec (array-vec arr)])
                           (vsort! <? vec start stop)))))])
+
+
+  #|doc
+  `n` must be a natural number.
+  This procedure creates an array that contains numbers ranging from 0 to n-1, inclusive.
+  This is similar to `iota` for lists.
+
+  Note that for u8arrays, it is an error if `n` exceeds 257.
+  |#
+  (define-array-procedure (a fxa u8a)
+    (iota n)
+    (pcheck ([natural? n])
+            (let ([v (vmake n)])
+              (let loop ([i 0])
+                (if (fx= i n)
+                    (amk v 2 n)
+                    (begin (vset! v i i)
+                           (loop (fx1+ i))))))))
+
+
+  #|doc
+  Generate an array of of numbers: start, start+step*1, start+step*2, ...
+
+  `start`, `stop` and `step` must be numbers that meet the following requirements:
+  If `start` is less than `stop`, then `step` must be greater than 0,
+  in which case the sequence terminates when the value is greater than or equal to `stop`;
+  If `start` is greater than `stop`, then `step` must be less than 0,
+  in which case the sequence terminates when the value is less than or equal to `stop`.
+
+  Note that for u8arrays, it is an error if the numbers contain values that are negative or greater than 256.
+  |#
+  (define-array-procedure (a fxa u8a) nums
+    [(stop) (thisproc 0 stop 1)]
+    [(start stop) (thisproc start stop 1)]
+    [(start stop step)
+     (pcheck ([integer? start stop step])
+             (if (or (and (<= start stop) (> step 0))
+                     (and (>= start stop) (< step 0)))
+                 (let* ([len (ceiling (/ (fx- stop start) step))]
+                        [vec (vmake len 0)])
+                   (let loop ([i 0] [x start])
+                     (if (fx= i len)
+                         (amk vec 2 len)
+                         (begin (vset! vec i x)
+                                (loop (fx1+ i) (+ x step))))))
+                 (errorf who "invalid range: ~a, ~a, ~a" start stop step)))])
 
 
   #|doc
