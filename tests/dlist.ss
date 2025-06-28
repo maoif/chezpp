@@ -47,7 +47,7 @@
      (error? (dlist-add! (dlist) -2 0))
 
      ;; front
-     (let ([dl (apply dlist (iota 5))])
+    (let ([dl (apply dlist (iota 5))])
        (dlist-add! dl 0 -1)
        (dlist-add! dl 0 -2)
        (dlist-add! dl 0 -3)
@@ -797,6 +797,13 @@
              (dlist 0 0.5 1.0 1.5 2.0 2.5 3.0 3.5 4.0 4.5))
      (equal? (dlist-nums 0 -5 -0.5)
              (dlist 0 -0.5 -1.0 -1.5 -2.0 -2.5 -3.0 -3.5 -4.0 -4.5))
+
+     (equal? (nums (most-positive-fixnum) (+ 5000 (most-positive-fixnum)) 333.14)
+             (dlist->list
+              (dlist-nums (most-positive-fixnum) (+ 5000 (most-positive-fixnum)) 333.14)))
+     (equal? (nums (most-positive-fixnum) (+ 50 (most-positive-fixnum)) 3.14)
+             (dlist->list
+              (dlist-nums (most-positive-fixnum) (+ 50 (most-positive-fixnum)) 3.14)))
 
      )
 
