@@ -742,6 +742,21 @@
      (equal? (vnums -50 -100 -4)
              (list->vector (nums -50 -100 -4)))
 
+     (equal? (nums -10 10.5 2.6)
+             (vector->list (vnums -10 10.5 2.6)))
+     (equal? (nums 10 -10.5 -2.6)
+             (vector->list (vnums 10 -10.5 -2.6)))
+
+     (equal? (nums
+              (most-positive-fixnum)  (+ 50  (most-positive-fixnum)) 3.14)
+             (vector->list (vnums
+                            (most-positive-fixnum) (+ 50  (most-positive-fixnum)) 3.14)))
+     (equal? (nums
+              (most-positive-fixnum) (+ 5000 (most-positive-fixnum)) 333.14)
+             (vector->list (vnums
+                            (most-positive-fixnum) (+ 5000 (most-positive-fixnum)) 333.14)))
+
+
      ;; fx
      (equal? (fxvnums 0 100 2)
              (list->fxvector (nums 0 100 2)))

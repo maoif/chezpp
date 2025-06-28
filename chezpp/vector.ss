@@ -1611,6 +1611,33 @@
 
 
   #|doc
+  Generate a vector of the corresponding type consisting of numbers
+  start, start+step*1, start+step*2, ...
+
+  `start`, `stop` and `step` must be numbers that meet the following requirements:
+  If `start` is less than `stop`, then `step` must be greater than 0,
+  in which case the sequence terminates when the value is greater than or equal to `stop`;
+  If `start` is greater than `stop`, then `step` must be less than 0,
+  in which case the sequence terminates when the value is less than or equal to `stop`.
+  |#
+  (define-vector-procedure (v) nums
+    [(stop) (thisproc 0 stop 1)]
+    [(start stop) (thisproc start stop 1)]
+    [(start stop step)
+     (pcheck ([number? start stop step])
+             (if (or (and (<= start stop) (> step 0))
+                     (and (>= start stop) (< step 0)))
+                 (let* ([len (exact (ceiling (/ (- stop start) step)))]
+                        [vec (vmake len 0)])
+                   (let loop ([i 0] [x start])
+                     (if (fx= i len)
+                         vec
+                         (begin (vset! vec i x)
+                                (loop (fx1+ i) (+ x step))))))
+                 (errorf procname "invalid range: ~a, ~a, ~a" start stop step)))])
+
+
+  #|doc
   Generate a vector of the corresponding type consisting of integers
   start, start+step*1, start+step*2, ...
 
@@ -1620,7 +1647,7 @@
   If `start` is greater than `stop`, then `step` must be less than 0,
   in which case the sequence terminates when the value is less than or equal to `stop`.
   |#
-  (define-vector-procedure (v fxv) nums
+  (define-vector-procedure (fxv) nums
     [(stop) (thisproc 0 stop 1)]
     [(start stop) (thisproc start stop 1)]
     [(start stop step)
