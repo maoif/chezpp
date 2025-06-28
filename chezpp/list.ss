@@ -665,16 +665,16 @@
       [(start stop) (nums start stop 1)]
       [(start stop step)
        (pcheck ([number? start stop step])
-               (let ([stop? (cond
-                             [(and (<= start stop) (> step 0)) >=]
-                             [(and (>= start stop) (< step 0)) <=]
-                             [else (errorf who "invalid range: ~a, ~a, ~a" start stop step)])])
-                 (let ([lb (make-list-builder)])
-                   (let loop ([n start])
-                     (if (stop? n stop)
-                         (lb)
-                         (begin (lb n)
-                                (loop (+ n step))))))))]))
+               (if (or (and (<= start stop) (> step 0))
+                       (and (>= start stop) (< step 0)))
+                   (let ([len (exact (ceiling (/ (- stop start) step)))]
+                         [lb (make-list-builder)])
+                     (let loop ([i 0] [n start])
+                       (if (fx= i len)
+                           (lb)
+                           (begin (lb n)
+                                  (loop (fx1+ i) (+ n step))))))
+                   (errorf who "invalid range: ~a, ~a, ~a" start stop step)))]))
 
 
   #|doc
