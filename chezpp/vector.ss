@@ -1473,6 +1473,10 @@
 
   #|doc
   Check whether the given vector is sorted according to predicate `<?`.
+  If `stop` is given, only the items with indices [0, stop) are checked;
+  If both `start` and `stop` are given, only the items with indices [start, stop) are checked.
+
+  `start` and `stop` must satisfy the requirement that `0 <= start <= stop <= length of vector`.
   |#
   (define-vector-procedure (v fxv flv) sorted?
     [(<? vec)
@@ -1483,8 +1487,12 @@
               (thisproc <? vec 0 stop))]
     [(<? vec start stop)
      (vpcheck (vec)
-              (pcheck ([procedure? <?])
+              (pcheck ([procedure? <?] [natural? start stop])
                       (let ([len (vlength vec)])
+                        (when (fx> stop len)
+                          (errorf procname "stop index ~a out of bound ~a" stop len))
+                        (when (fx> start stop)
+                          (errorf procname "start index ~a greater than stop index ~a" start stop))
                         (if (fx<= len 1)
                             #t
                             ($sorted? vec <? start stop vref)))))])

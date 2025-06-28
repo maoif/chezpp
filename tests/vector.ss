@@ -851,6 +851,22 @@
      ;; type error
      (error? (fxvsorted? fl> (flvnums 0.0 20.0 2.2)))
 
+     (error? (vsorted? < (vector 1 2 3 4) -1))
+     (error? (vsorted? < (vector 1 2 3 4) 0 5))
+     (error? (vsorted? < (vector 1 2 3 4) 4 2))
+
+     (error? (fxvsorted? < (fxvector 1 2 3 4) -1))
+     (error? (fxvsorted? < (fxvector 1 2 3 4) 0 5))
+     (error? (fxvsorted? < (fxvector 1 2 3 4) 4 2))
+
+     (error? (fxvsorted? < (flvector 1.0 2.0 3.0 4.0) -1))
+     (error? (fxvsorted? < (flvector 1.0 2.0 3.0 4.0) 0 5))
+     (error? (fxvsorted? < (flvector 1.0 2.0 3.0 4.0) 4 2))
+
+     (let ([vec (vector 9 8 7 1 2 3 4 0)])
+       (and (not (vsorted? < vec))
+            (vsorted? < vec 3 7)))
+
      )
 
 

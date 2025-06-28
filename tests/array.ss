@@ -721,6 +721,22 @@
      (error? (fxarray-sorted? < '()))
      (error? (u8array-sorted? < '()))
 
+     (error? (array-sorted? < (array 1 2 3 4) -1))
+     (error? (array-sorted? < (array 1 2 3 4) 0 5))
+     (error? (array-sorted? < (array 1 2 3 4) 4 2))
+
+     (error? (fxarray-sorted? < (fxarray 1 2 3 4) -1))
+     (error? (fxarray-sorted? < (fxarray 1 2 3 4) 0 5))
+     (error? (fxarray-sorted? < (fxarray 1 2 3 4) 4 2))
+
+     (error? (u8array-sorted? < (u8array 1 2 3 4) -1))
+     (error? (u8array-sorted? < (u8array 1 2 3 4) 0 5))
+     (error? (u8array-sorted? < (u8array 1 2 3 4) 4 2))
+
+     (let ([arr (array 9 8 7 1 2 3 4 0)])
+       (and (not (array-sorted? < arr))
+            (array-sorted? < arr 3 7)))
+
      (begin (define (test n)
               (let ([arr (apply array (iota n))])
                 (and (array-sorted? < arr)
