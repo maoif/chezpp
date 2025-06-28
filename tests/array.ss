@@ -794,6 +794,20 @@
      (equal? (array-nums 0 -10 -2)
              (array 0 -2 -4 -6 -8))
 
+     (equal? (nums -10 10.5 2.6)
+             (array->list (array-nums -10 10.5 2.6)))
+     (equal? (nums 10 -10.5 -2.6)
+             (array->list (array-nums 10 -10.5 -2.6)))
+
+     (equal? (nums
+              (most-positive-fixnum)  (+ 50  (most-positive-fixnum)) 3.14)
+             (array->list (array-nums
+                           (most-positive-fixnum) (+ 50  (most-positive-fixnum)) 3.14)))
+     (equal? (nums
+              (most-positive-fixnum) (+ 5000 (most-positive-fixnum)) 333.14)
+             (array->list (array-nums
+                           (most-positive-fixnum) (+ 5000 (most-positive-fixnum)) 333.14)))
+
      (equal? (fxarray-nums 0 10)
              (fxarray-iota 10))
      (equal? (fxarray-nums 5 10)

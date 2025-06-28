@@ -1045,8 +1045,25 @@
   in which case the sequence terminates when the value is less than or equal to `stop`.
 
   Note that for u8arrays, it is an error if the numbers contain values that are negative or greater than 256.
+  For fxarrays, the generated numbers must be fixnums.
   |#
-  (define-array-procedure (a fxa u8a) nums
+  (define-array-procedure (a) nums
+    [(stop) (thisproc 0 stop 1)]
+    [(start stop) (thisproc start stop 1)]
+    [(start stop step)
+     (pcheck ([number? start stop step])
+             (if (or (and (<= start stop) (> step 0))
+                     (and (>= start stop) (< step 0)))
+                 (let* ([len (exact (ceiling (/ (- stop start) step)))]
+                        [vec (vmake len 0)])
+                   (let loop ([i 0] [x start])
+                     (if (fx= i len)
+                         (amk vec 2 len)
+                         (begin (vset! vec i x)
+                                (loop (fx1+ i) (+ x step))))))
+                 (errorf who "invalid range: ~a, ~a, ~a" start stop step)))])
+
+  (define-array-procedure (fxa u8a) nums
     [(stop) (thisproc 0 stop 1)]
     [(start stop) (thisproc start stop 1)]
     [(start stop step)
