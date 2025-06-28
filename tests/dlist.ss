@@ -753,12 +753,101 @@
 
      (error? (dlist-sorted? #f (dlist)))
      (error? (dlist-sorted? < '()))
+     (error? (dlist-sorted? < (dlist) 1 2))
+     (error? (dlist-sorted? < (dlist 1 2 3) 0 4))
+
 
      (dlist-sorted? < (dlist))
      (dlist-sorted? < (dlist 1))
 
      (dlist-sorted? < (apply dlist (iota 10)))
      (not (dlist-sorted? < (apply dlist (reverse (iota 10)))))
+
+     (let ([dl (dlist 9 8 7 1 2 3 4 0)])
+       (and (not (dlist-sorted? < dl))
+            (dlist-sorted? < dl 3 7)))
+
+     )
+
+
+(mat dlist-sort!
+
+     ;; bad <?
+     (error? (dlist-sort! 1 (dlist)))
+     ;; not dlists
+     (error? (dlist-sort! <= '(1 2 3)))
+     ;; bad range
+     (error? (dlist-sort! <= (dlist) 3))
+     (error? (dlist-sort! <= (dlist 2 2 2 2 2) 6 3))
+
+     ;; full range, in place
+     (begin (define (test1 rand <? sort! sorted? v->dl)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let* ([v (rand #e1e6 bd)] [dl (v->dl v)])
+                                    (sort! <? dl)
+                                    (sorted? <? dl)))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test1 random-vector fx<= dlist-sort! dlist-sorted? vector->dlist)
+
+
+     ;; ranged, in place
+     (begin (define (test3 rand <? sort! sorted? v->dl)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let* ([v (rand #e1e6 bd)]
+                                         [mid (fx/ #e1e6 2)]
+                                         [dl (v->dl v)])
+                                    (sort! <? dl mid)
+                                    (sort! <? dl mid #e1e6)
+                                    (and (sorted? <? dl 0 mid)
+                                         (sorted? <? dl mid #e1e6))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test3 random-vector fx<= dlist-sort! dlist-sorted? vector->dlist)
+
+     )
+
+
+(mat dlist-sort
+
+     ;; bad <?
+     (error? (dlist-sort 1 (dlist)))
+     ;; not dlists
+     (error? (dlist-sort <= '(1 2 3)))
+     ;; bad range
+     (error? (dlist-sort <= (dlist) 3))
+     (error? (dlist-sort <= (dlist 2 2 2 2 2) 6 3))
+
+
+     ;; full range, return new
+     (begin (define (test2 rand <? sort sorted? v->dl)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let* ([v (rand #e1e6 bd)] [dl (v->dl v)])
+                                    (sorted? <? (sort <? dl))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test2 random-vector fx<= dlist-sort dlist-sorted? vector->dlist)
+
+
+     ;; ranged, return new
+     (begin (define (test4 rand <? sort sorted? v->dl)
+              (andmap (lambda (bd)
+                        (andmap (lambda (i)
+                                  (let* ([v (rand #e1e6 bd)]
+                                         [mid (fx/ #e1e6 2)]
+                                         [dl (v->dl v)])
+                                    (and (sorted? <? (sort <? dl mid))
+                                         (sorted? <? (sort <? dl mid #e1e6)))))
+                                (iota 3)))
+                      '(100 1000 10000 100000)))
+            #t)
+     (test4 random-vector fx<= dlist-sort dlist-sorted? vector->dlist)
 
      )
 

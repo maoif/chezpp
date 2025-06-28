@@ -15,7 +15,7 @@
           dlist-map-rev dlist-map/i-rev dlist-for-each-rev dlist-for-each/i-rev
           dlist-fold-left dlist-fold-left/i dlist-fold-right dlist-fold-right/i
 
-          dlist-sorted?
+          dlist-sorted? dlist-sort dlist-sort!
           dlist-iota dlist-nums
 
           dlist->list list->dlist
@@ -23,7 +23,8 @@
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils)
-          (chezpp list))
+          (chezpp list)
+          (chezpp vector))
 
 
   (define-record-type dnode
@@ -579,6 +580,23 @@
                              (loop (dnode-right n)))))))))
 
 
+  (define find-node
+    (lambda (dl i)
+      (let ([len (dlist-length dl)])
+        ;; TODO check corner
+        (if (< i (ash len -1))
+            ;; left-to-right
+            (let loop ([j 0] [n (dlist-first dl)])
+              (if (= i j)
+                  n
+                  (loop (add1 j) (dnode-right n))))
+            ;; right-to-left
+            (let loop ([j (sub1 len)] [n (dlist-last dl)])
+              (if (= i j)
+                  n
+                  (loop (sub1 j) (dnode-left n))))))))
+
+
   #|doc
   Copy items in `src` from indices src-start, ..., src-start + k - 1
   to consecutive indices in `tgt` starting at `tgt-start`.
@@ -595,21 +613,6 @@
       (pcheck ([dlist? src tgt] [natural? src-start tgt-start k])
               (let ([len1 (dlist-length src)]
                     [len2 (dlist-length tgt)])
-                (define find-node
-                  (lambda (dl i)
-                    (let ([len (dlist-length dl)])
-                      ;; TODO check corner
-                      (if (< i (ash len -1))
-                          ;; left-to-right
-                          (let loop ([j 0] [n (dlist-first dl)])
-                            (if (= i j)
-                                n
-                                (loop (add1 j) (dnode-right n))))
-                          ;; right-to-left
-                          (let loop ([j (sub1 len)] [n (dlist-last dl)])
-                            (if (= i j)
-                                n
-                                (loop (sub1 j) (dnode-left n))))))))
                 (when (> (fx+ src-start k) len1)
                   (errorf who "range ~a is too large in source dlist" k))
                 (when (> (fx+ tgt-start k) len2)
@@ -643,29 +646,105 @@
 
   #|doc
   Check whether the given dlist is sorted according to comparison procedure `<?`.
+  If `stop` is given, only the items with indices [0, stop) are checked;
+  If both `start` and `stop` are given, only the items with indices [start, stop) are checked.
+
+  `start` and `stop` must satisfy the requirement that `0 <= start <= stop <= length of dl`.
   |#
   (define-who dlist-sorted?
-    (lambda (<? dl)
-      (pcheck ([procedure? <?] [dlist? dl])
-              (let ([len (dlist-length dl)])
-                (if (fx<= len 1)
-                    #t
-                    (let loop ([curr (dlist-first dl)])
-                      (let ([next (dnode-right curr)])
-                        (if (null-dnode? next)
-                            #t
-                            (and (<? (dnode-value curr) (dnode-value next))
-                                 (loop next))))))))))
+    (case-lambda
+      [(<? dl)
+       (pcheck ([dlist? dl])
+               (dlist-sorted? <? dl 0 (dlist-length dl)))]
+      [(<? dl stop)
+       (pcheck ([dlist? dl])
+               (dlist-sorted? <? dl 0 stop))]
+      [(<? dl start stop)
+       (pcheck ([procedure? <?] [dlist? dl] [natural? start stop])
+               (let ([len (dlist-length dl)])
+                 (when (fx> stop len)
+                   (errorf who "stop index ~a out of bound ~a" stop len))
+                 (when (fx> start stop)
+                   (errorf who "start index ~a greater than stop index ~a" start stop))
+                 (if (fx<= len 1)
+                     #t
+                     (let loop ([i start] [curr (find-node dl start)])
+                       (if (fx= i (fx1- stop))
+                           #t
+                           (let ([next (dnode-right curr)])
+                             (if (null-dnode? next)
+                                 #t
+                                 (and (<? (dnode-value curr) (dnode-value next))
+                                      (loop (fx1+ i) next)))))))))]))
+
+  (define $dlist->vector
+    (lambda (dl start stop)
+      (let ([vec (make-vector (- stop start))])
+        (let loop ([i 0] [j start] [n (find-node dl start)])
+          (if (fx= j stop)
+              vec
+              (begin (vector-set! vec i (dnode-value n))
+                     (loop (fx1+ i) (fx1+ j) (dnode-right n))))))))
 
 
+  #|doc
+  The `dlist-sort` procedure uses the binary comparison procedure `<?` to sort the dlist `dl`.
+  If only two arguments are given, the entire dlist is sorted;
+  If the `stop` argument is given, the range from 0 to `stop-1` in `dl` is sorted;
+  If both `start` and `stop` are given, the range from `start` to `stop-1` in `dl` is sorted.
+
+  `start` and `stop` must satisfy the requirement that `0 <= start <= stop <= length of dl`.
+
+  The `dlist-sort` procedure returns the sorted dlist or the subdlist.
+  |#
   (define-who dlist-sort
-    (lambda (<? dl)
-      (todo)))
+    (case-lambda
+      [(<? dl)
+       (dlist-sort <? dl 0 (dlist-length dl))]
+      [(<? dl stop)
+       (dlist-sort <? dl 0 stop)]
+      [(<? dl start stop)
+       (pcheck ([dlist? dl] [procedure? <?] [natural? start stop])
+               (let ([len (dlist-length dl)])
+                 (when (fx> stop len)
+                   (errorf who "stop index ~a out of bound ~a" stop len))
+                 (when (fx> start stop)
+                   (errorf who "start index ~a greater than stop index ~a" start stop))
+                 ;; TODO optimize
+                 (cond
+                  [(fx= start stop)        (dlist)]
+                  [(fx= (fx1+ start) stop) (dlist-ref dl start)]
+                  [else (vector->dlist (vsort <? ($dlist->vector dl start stop)))])))]))
 
 
+  #|doc
+  The `dlist-sort!` procedure uses the binary comparison procedure `<?` to sort the dlist `dl`, in place.
+  If only two arguments are given, the entire dlist is sorted;
+  If the `stop` argument is given, the range from 0 to `stop-1` in `dl` is sorted;
+  If both `start` and `stop` are given, the range from `start` to `stop-1` in `dl` is sorted.
+
+  `start` and `stop` must satisfy the requirement that `0 <= start <= stop <= length of dl`.
+  |#
   (define-who dlist-sort!
-    (lambda (<? dl)
-      (todo)))
+    (case-lambda
+      [(<? dl)
+       (dlist-sort! <? dl 0 (dlist-length dl))]
+      [(<? dl stop)
+       (dlist-sort! <? dl 0 stop)]
+      [(<? dl start stop)
+       (pcheck ([dlist? dl] [procedure? <?] [natural? start stop])
+               (let ([len (dlist-length dl)])
+                 (when (fx> stop len)
+                   (errorf who "stop index ~a out of bound ~a" stop len))
+                 (when (fx> start stop)
+                   (errorf who "start index ~a greater than stop index ~a" start stop))
+                 (when (not (or (fx= start stop) (fx= (fx1+ start) stop)))
+                   ;; TODO optimize
+                   (let ([vec (vsort <? ($dlist->vector dl start stop))])
+                     (let loop ([i 0] [j start] [n (find-node dl start)])
+                       (when (fx< j stop)
+                         (dnode-value-set! n (vector-ref vec i))
+                         (loop (fx1+ i) (fx1+ j) (dnode-right n))))))))]))
 
 
   #|doc
