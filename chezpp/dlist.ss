@@ -18,7 +18,8 @@
           dlist-sorted?
           dlist-iota dlist-nums
 
-          dlist->list list->dlist)
+          dlist->list list->dlist
+          dlist->vector vector->dlist)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils)
@@ -1255,6 +1256,36 @@
     (lambda (ls)
       (pcheck-list (ls)
                    (apply dlist ls))))
+
+
+  #|doc
+  Convert a doubly-linked list to a vector.
+  |#
+  (define-who dlist->vector
+    (lambda (dl)
+      (pcheck ([dlist? dl])
+              (let ([len (dlist-length dl)])
+                (if (fx= len 0)
+                    (vector)
+                    (let ([vec (make-vector len)])
+                      (let loop ([i 0] [n (dlist-first dl)])
+                        (if (fx= i len)
+                            vec
+                            (begin (vector-set! vec i (dnode-value n))
+                                   (loop (fx1+ i) (dnode-right n)))))))))))
+
+
+  #|doc
+  Convert a vector to a doubly-linked list.
+  |#
+  (define-who vector->dlist
+    (lambda (vec)
+      (pcheck-vector (vec)
+                     (let ([dl (dlist)])
+                       (vector-for-each (lambda (x)
+                                          (dlist-add! dl x))
+                                        vec)
+                       dl))))
 
 
 

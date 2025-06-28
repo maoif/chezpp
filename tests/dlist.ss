@@ -1597,3 +1597,29 @@
                (apply fx+ (map fx+ ls0 ls0 ls0 ls0 ls0 ls0))))
 
      )
+
+
+(mat dlist->vector
+
+     (error? (dlist->vector #f))
+
+     (eq? '#() (dlist->vector (dlist)))
+     (equal? (viota 10)
+             (dlist->vector (dlist-iota 10)))
+     (equal? (vnums -10 10 2.5)
+             (dlist->vector (dlist-nums -10 10 2.5)))
+
+     )
+
+
+(mat vector->dlist
+
+     (error? (vector->dlist #f))
+
+     (equal? (dlist) (vector->dlist (vector)))
+     (equal? (dlist-iota 10)
+             (vector->dlist (viota 10)))
+     (equal? (dlist-nums -10 10 2.5)
+             (vector->dlist (vnums -10 10 2.5)))
+
+     )
