@@ -305,7 +305,7 @@
                        [proto (gen-protocol #'dt #'(fld fld* ...))]
                        [match-dt ($construct-name #'dt "match-" #'dt)])
            #`(begin
-               (define-record-type (dtname mkdt dt?)
+               (define-record-type (dtname mkdt pred)
                  (nongenerative uid)
                  (fields flds ...)
                  (protocol proto))

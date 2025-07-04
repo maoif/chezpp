@@ -69,6 +69,14 @@
        (record Person (name age sex))
        #t)
 
+     (Person? (Person "Jack" 16 'male))
+     (not (Person? 1))
+
+     (begin (record Dog A-Dog? (name age sex))
+            #t)
+     (A-Dog? (Dog "Furry" 3 'male))
+     (A-Dog? #f)
+
      (equal? "Jack"
              (match (Person "Jack" 16 'male)
                [,($rec Person (name ,x)) x]))
