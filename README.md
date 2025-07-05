@@ -32,7 +32,7 @@ Functionalities:
 
 Build requirements:
 
-- gcc
+- gcc/clang
 - make
 - ChezScheme
 
@@ -42,6 +42,12 @@ Build:
 git clone --depth=1 https://github.com/maoif/chezpp.git
 cd chezpp
 make
+```
+
+`gcc` is used by default. To use clang, set the `CC` variable:
+
+```
+make CC=clang
 ```
 
 Run:
@@ -55,6 +61,31 @@ Or launch `chez++` directly:
 ```
 ./chez++
 ```
+
+
+## Customize `scheme` executable path
+
+By default, the build system assumes ChezScheme is installed and the `scheme` command is available.
+If it is not the case, you have to provide the path to the `scheme` command when building chezpp:
+
+```
+make SCHEME=path/to/scheme/executable
+```
+
+
+## Install
+
+Other than running the `chez++` command directly after `make`, you can install chezpp to a given location
+by setting the `PREFIX` variable:
+
+```
+make install PREFIX=$PWD/install
+```
+
+The command above installs chezpp files under `install/`.
+You can run `chez++` by invoking `$PWD/install/bin/chez++`.
+The path given *must* be absolute.
+
 
 
 # Test
