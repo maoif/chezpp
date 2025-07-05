@@ -258,18 +258,28 @@
             (datum->syntax t
                            (string->symbol (string-append bigname "-" (number->string h)))))))
       (define handle-fields
-        (lambda (fields)
+        (lambda (dt fields)
           (map
            (lambda (field)
-             (syntax-case field (mutable)
+             (syntax-case field (mutable immutable)
                [fid
-                #'(immutable fid)]
-               [(fid mutable) (identifier? #'fid)
-                #'(mutable fid)]
-               [(fid pred) (identifier? #'fid)
-                #'(immutable fid)]
-               [(fid pred mutable) (identifier? #'fid)
-                #'(mutable fid)]
+                (identifier? #'fid)
+                #`(immutable fid
+                             #,($construct-name dt dt "-" #'fid))]
+               [(fid pred) ;; TODO check more about pred
+                (and (identifier? #'fid) (identifier? #'pred)
+                     (not (eq? 'mutable (datum fid))) (not (eq? 'immutable (datum fid))))
+                #`(immutable fid
+                             #,($construct-name dt dt "-" #'fid))]
+               [(immutable fid pred)
+                (and (identifier? #'fid) (identifier? #'pred))
+                #`(immutable fid
+                             #,($construct-name dt dt "-" #'fid))]
+               [(mutable fid pred)
+                (and (identifier? #'fid) (identifier? #'pred))
+                #`(mutable fid
+                           #,($construct-name dt dt "-" #'fid)
+                           #,($construct-name dt dt "-" #'fid "-set!-raw"))]
                [_ (syntax-error field "invalid record field definition:")]))
            fields)))
       (define gen-protocol
@@ -281,38 +291,78 @@
                       (if (null? fields)
                           #'(vcon args ...)
                           (let ([field (car fields)] [arg (car a*)])
-                            (syntax-case field (mutable)
-                              [(fid mutable) (identifier? #'fid)
-                               (f (cdr fields) (cdr a*))]
-                              [(fid pred) (identifier? #'fid)
+                            (syntax-case field (mutable immutable)
+                              ;; no guards below as it's checked in handle-fields
+                              [(fid pred)
                                #`(if (pred #,arg)
                                      #,(f (cdr fields) (cdr a*))
-                                     (errorf 'datatype "wrong argument type for record ~a, field ~a: ~a"
-                                             'dt 'fid #,arg))]
-                              [(fid pred mutable) (identifier? #'fid)
+                                     (errorf '#,dt "wrong argument type for field ~a: ~a"
+                                             'fid #,arg))]
+                              [(mutable fid pred)
                                #`(if (pred #,arg)
                                      #,(f (cdr fields) (cdr a*))
-                                     (errorf 'datatype "wrong argument type for record ~a, field ~a: ~a"
-                                             'dt 'fid #,arg))]
+                                     (errorf '#,dt "wrong argument type for field ~a: ~a"
+                                             'fid #,arg))]
+                              [(immutable fid pred)
+                               #`(if (pred #,arg)
+                                     #,(f (cdr fields) (cdr a*))
+                                     (errorf '#,dt "wrong argument type for field ~a: ~a"
+                                             'fid #,arg))]
                               [_ (f (cdr fields) (cdr a*))])))))))))
+      ;; make sure setters also have type checking, if given
+      (define gen-setter-wrappers
+        (lambda (dt fields flds)
+          (let loop ([fields fields] [flds flds] [wrappers '()])
+            (if (null? fields)
+                wrappers
+                (let ([w (syntax-case (car fields) (mutable)
+                           [(mutable fid getter raw-setter)
+                            (let ([setter ($construct-name dt dt "-" #'fid "-set!")])
+                              #`(define #,setter
+                                  (lambda (r v)
+                                    (if (#,(syntax-case (car flds) () [(_ _ pred) #'pred]) v)
+                                        (raw-setter r v)
+                                        (errorf '#,setter "wrong argument type for field ~a: ~a"
+                                                'fid v)))))]
+                           [_ #f])])
+                  (if w
+                      (loop (cdr fields) (cdr flds) (cons w wrappers))
+                      (loop (cdr fields) (cdr flds) wrappers)))))))
+      (define get-getters
+        (lambda (flds)
+          (fold-left (lambda (res fld)
+                       (syntax-case fld (mutable immutable)
+                         [(immutable _ getter) (cons #'getter res)]
+                         [(mutable _ getter _) (cons #'getter res)]))
+                     '() flds)))
+      (define get-setters
+        (lambda (dt flds)
+          (fold-left (lambda (res fld)
+                       (syntax-case fld (mutable immutable)
+                         [(mutable fid _ _) (cons ($construct-name dt dt "-" #'fid "-set!") res)]
+                         [_ res]))
+                     '() flds)))
       (syntax-case stx ()
         [(k dt pred (fld fld* ...))
          (andmap identifier? #'(dt pred))
-         (with-syntax ([dtname ($construct-name #'dt "$record-" #'dt)]
-                       [mkdt #'dt]
-                       [uid (gen-uid #'dt #'(fld fld* ...))]
-                       [(flds ...) (handle-fields #'(fld fld* ...))]
-                       [proto (gen-protocol #'dt #'(fld fld* ...))]
-                       [match-dt ($construct-name #'dt "match-" #'dt)])
-           #`(begin
-               (define-record-type (dtname mkdt pred)
-                 (nongenerative uid)
-                 (fields flds ...)
-                 (protocol proto))
-
-               (define-syntax match-dt
-                 (syntax-rules ()
-                   [(k e cl* (... ...)) ($match-record match-dt dtname e cl* (... ...))]))))]
+         (with-syntax ([mkdt #'dt]
+                       [dtname     ($construct-name #'dt "$record-" #'dt)]
+                       [match-dt   ($construct-name #'dt "match-" #'dt)]
+                       [uid        (gen-uid #'dt #'(fld fld* ...))]
+                       [(flds ...) (handle-fields #'dt #'(fld fld* ...))]
+                       [proto      (gen-protocol #'dt #'(fld fld* ...))])
+           (with-syntax ([(setter-wrappers ...) (gen-setter-wrappers #'dt #'(flds ...) #'(fld fld* ...))]
+                         [(getters ...) (get-getters #'(flds ...))]
+                         [(setters ...) (get-setters #'dt #'(flds ...))])
+             #`(module (dtname mkdt pred getters ... setters ... match-dt)
+                 (define-record-type (dtname mkdt pred)
+                   (nongenerative uid)
+                   (fields flds ...)
+                   (protocol proto))
+                 (begin setter-wrappers ...)
+                 (define-syntax match-dt
+                   (syntax-rules ()
+                     [(k e cl* (... ...)) ($match-record match-dt dtname e cl* (... ...))])))))]
         [(k dt (fld fld* ...))
          (identifier? #'dt)
          (with-syntax ([dt? ($construct-name #'dt #'dt "?")])
