@@ -1,4 +1,4 @@
-SRCS_TEST := adt.ss match.ss comprehension.ss control.ss os.ss iter.ss file.ss \
+SRCS_TEST := record.ss datatype.ss match.ss comprehension.ss control.ss os.ss iter.ss file.ss \
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
              hashset.ss treemap.ss treeset.ss \
              bittree.ss bitvec.ss dset.ss \
