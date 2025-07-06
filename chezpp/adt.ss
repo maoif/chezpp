@@ -1,12 +1,12 @@
 (library (chezpp adt)
   (export datatype record)
-  (import (chezscheme)
+  (import (chezpp chez)
           (chezpp match)
           (chezpp string)
           (chezpp list)
           (chezpp internal))
 
-  ;; TODO collaborate with match, type-case, etc.
+
   (define-syntax datatype
     (lambda (stx)
       (define construct-datatype-name
@@ -14,13 +14,13 @@
           (apply $construct-name (append (list template-identifier "$datatype-") args))))
       (define get-vname
         (lambda (v) (if (symbol? v) v (car v))))
-      (trace-define check-datatype-name
+      (define check-datatype-name
         (lambda (n)
           ;; TODO
           (if (identifier? #'n)
               #t
               (syntax-error n "bad datatype name:"))))
-      (trace-define check-pred-name
+      (define check-pred-name
         (lambda (n)
           (let ([p (syntax->datum n)])
             (if (symbol? p)
@@ -29,7 +29,7 @@
                       #t
                       (syntax-error p "bad datatype predicate name (should end with \"?\"): ")))
                 (syntax-error p "bad datatype predicate name (not a symbol): ")))))
-      (trace-define check-variant-name
+      (define check-variant-name
         (lambda (v)
           ;; TODO
           (let ([v (syntax->datum v)])
@@ -88,27 +88,29 @@
                 (let f ([vfields #'(vfields ...)] [field* '()])
                   (if (null? vfields)
                       (reverse field*)
-                      (syntax-case (car vfields) (mutable)
+                      (syntax-case (car vfields) (mutable immutable)
                         [fid
                          (identifier? #'fid)
                          (f (cdr vfields)
                             (cons #`(immutable fid #,($construct-name dt dt "-" #'vname "-" #'fid))
                                   field*))]
-                        [(fid mutable) (identifier? #'fid)
-                         (f (cdr vfields)
-                            (cons #`(mutable fid
-                                             #,($construct-name dt dt "-" #'vname "-" #'fid)
-                                             #,($construct-name dt dt "-" #'vname "-" #'fid "-set!"))
-                                  field*))]
-                        [(fid pred) (identifier? #'fid)
+                        [(fid pred) ;; TODO check more about pred
+                         (and (identifier? #'fid) (identifier? #'pred)
+                              (not (eq? 'mutable (datum fid))) (not (eq? 'immutable (datum fid))))
                          (f (cdr vfields)
                             (cons #`(immutable fid #,($construct-name dt dt "-" #'vname "-" #'fid))
                                   field*))]
-                        [(fid pred mutable) (identifier? #'fid)
+                        [(immutable fid pred)
+                         (and (identifier? #'fid) (identifier? #'pred))
+                         (f (cdr vfields)
+                            (cons #`(immutable fid #,($construct-name dt dt "-" #'vname "-" #'fid))
+                                  field*))]
+                        [(mutable fid pred)
+                         (and (identifier? #'fid) (identifier? #'pred))
                          (f (cdr vfields)
                             (cons #`(mutable fid
                                              #,($construct-name dt dt "-" #'vname "-" #'fid)
-                                             #,($construct-name dt dt "-" #'vname "-" #'fid "-set!"))
+                                             #,($construct-name dt dt "-" #'vname "-" #'fid "-set!-raw"))
                                   field*))]
                         [_ (syntax-error variant "invalid data variant definition:")])))]))
            variants)))
@@ -126,21 +128,74 @@
                               (if (null? vfields)
                                   #'(vcon args ...)
                                   (let ([field (car vfields)] [arg (car a*)])
-                                    (syntax-case field (mutable)
-                                      [(fid mutable) (identifier? #'fid)
+                                    (syntax-case field (mutable immutable)
+                                      [(fid mutable)
                                        (f (cdr vfields) (cdr a*))]
-                                      [(fid pred) (identifier? #'fid)
+                                      [(fid pred)
                                        #`(if (pred #,arg)
                                              #,(f (cdr vfields) (cdr a*))
-                                             (errorf 'datatype "wrong argument type for variant ~a, field ~a: ~a"
-                                                     'vname 'fid #,arg))]
-                                      [(fid pred mutable) (identifier? #'fid)
+                                             (errorf 'vname "wrong argument type for field ~a: ~a"
+                                                     'fid #,arg))]
+                                      [(mutable fid pred)
                                        #`(if (pred #,arg)
                                              #,(f (cdr vfields) (cdr a*))
-                                             (errorf 'datatype "wrong argument type for variant ~a, field ~a: ~a"
-                                                     'vname 'fid #,arg))]
+                                             (errorf 'vname "wrong argument type for field ~a: ~a"
+                                                     'fid #,arg))]
+                                      [(immutable fid pred)
+                                       #`(if (pred #,arg)
+                                             #,(f (cdr vfields) (cdr a*))
+                                             (errorf 'vname "wrong argument type for field ~a: ~a"
+                                                     'fid #,arg))]
                                       [_ (f (cdr vfields) (cdr a*))]))))))))]))
            variants)))
+      ;; make sure setters also have type checking, if given
+      (define gen-setter-wrappers
+        (lambda (dt variants* vfields*)
+          (let ([wrappers*
+                 (map (lambda (variant vfields)
+                        (syntax-case variant ()
+                          [(vname vflds ...)
+                           (fold-left (lambda (wrappers vfld vfield)
+                                        (syntax-case vfield (mutable)
+                                          [(mutable fid getter raw-setter)
+                                           (syntax-case vfld ()
+                                             [(mutable fid pred)
+                                              (let ([setter ($construct-name dt dt "-" #'vname "-" #'fid "-set!")])
+                                                (cons #`(define #,setter
+                                                          (lambda (r v)
+                                                            (if (pred v)
+                                                                (raw-setter r v)
+                                                                (errorf '#,setter "wrong argument type for field ~a: ~a"
+                                                                        'fid v))))
+                                                      wrappers))])]
+                                          [_ wrappers]))
+                                      '() #'(vflds ...) vfields)]))
+                      variants* vfields*)])
+            ;; flatten the list
+            (apply append wrappers*))))
+      (define get-getters
+        (lambda (vfields*)
+          (fold-left (lambda (res fields)
+                       (append (map (lambda (fld)
+                                      (syntax-case fld (mutable immutable)
+                                        [(immutable _ getter) #'getter]
+                                        [(mutable _ getter _) #'getter]))
+                                    fields)
+                               res))
+                     '() vfields*)))
+      (define get-setters
+        (lambda (dt variants)
+          (apply append
+                 (map (lambda (variant)
+                        (syntax-case variant ()
+                          [(vname vflds ...)
+                           (fold-left (lambda (res vfld)
+                                        (syntax-case vfld (mutable immutable)
+                                          ;; checks here omitted
+                                          [(mutable fid _) (cons ($construct-name dt dt "-" #'vname "-" #'fid "-set!") res)]
+                                          [_ res]))
+                                      '() #'(vflds ...))]))
+                      variants))))
       (define classify-variants
         (lambda (variants)
           (let loop ([variants variants] [singletons '()] [others '()])
@@ -152,7 +207,6 @@
                      (loop (cdr variants) (cons #'vname singletons) others)]
                     [(vname vfields ...)
                      (loop (cdr variants) singletons (cons variant others))]))))))
-
       (syntax-case stx ()
         [(_ dt dt? variant0 variants ...)
          (and (identifier? #'dt)
@@ -185,55 +239,60 @@
                          ;; setter: dt-variant-field-set!
                          [((vfields ...) ...) (handle-vfields #'dt #'(mvariants ...))]
                          [(protocols ...) (gen-protocols #'(mvariants ...))])
-             #`(begin
-                 (define-record-type (dt mkdt dt?)
-                   (nongenerative dtuid))
-                 (define-record-type (mnames mkvariants mvariants?)
-                   (nongenerative muids)
-                   (parent dt)
-                   (sealed #t)
-                   (fields vfields ...)
-                   ;; need protocol to do type checking
-                   (protocol protocols))
-                 ...
-                 (define-record-type (snames mksingletons singletons?)
-                   (nongenerative suids)
-                   (parent dt)
-                   (sealed #t)
-                   (fields))
-                 ...
-                 (define singletons (mksingletons))
-                 ...
-
-                 (define-syntax match-dt
-                   (syntax-rules ()
-                     [(k e cl* (... ...)) ($match-datatype match-dt dt e cl* (... ...))]))
-
-                 (define-syntax match-dt!
-                   (lambda (stx)
-                     (define check
-                       (lambda (cl*)
-                         (let ([vrts  (map (lambda (cl)
-                                                 (syntax-case cl ()
-                                                   [(pat . e*)
-                                                    (syntax-case #'pat ()
-                                                      [(variant . rest) #'variant]
-                                                      [singleton (identifier? #'singleton) #'singleton]
-                                                      [_ (syntax-error cl "invalid clause for " (symbol->string 'match-dt!))])]
-                                                   [_ (syntax-error cl "invalid clause for " (symbol->string 'match-dt!))]))
-                                               cl*)])
-                           (or (andmap (lambda (v) (memq v (syntax->datum vrts))) '(singletons ... mkvariants ...))
-                               ;; TODO list unwritten variants?
-                               (syntax-error cl* "incomplete variants for " (symbol->string 'match-dt!))))))
-                     (syntax-case stx (else)
-                       [(k e cl* (... ...) [else body body* (... ...)])
-                        #'($match-datatype match-dt! dt e cl* (... ...)
-                                           [else body body* (... ...)])]
-                       [(k e cl cl* (... ...))
-                        (check #'(cl cl* (... ...)))
-                        #'(match-dt! e cl cl* (... ...)
-                                     [else (errorf 'k "no match found")])]
-                       [_ (syntax-error stx "bad " (symbol->string 'match-dt!) " form:")]))))))]
+             (with-syntax ([(setter-wrappers ...) (gen-setter-wrappers #'dt #'(mvariants ...) #'((vfields ...) ...))]
+                           [(getters ...) (get-getters #'((vfields ...) ...))]
+                           [(setters ...) (get-setters #'dt #'(mvariants ...))])
+               #`(module (dt dt? mnames ... snames ...
+                             mkvariants ... mvariants? ... singletons ... singletons? ...
+                             getters ... setters ...
+                             match-dt match-dt!)
+                   (define-record-type (dt mkdt dt?)
+                     (nongenerative dtuid))
+                   (define-record-type (mnames mkvariants mvariants?)
+                     (nongenerative muids)
+                     (parent dt)
+                     (sealed #t)
+                     (fields vfields ...)
+                     ;; need protocol to do type checking
+                     (protocol protocols))
+                   ...
+                   (define-record-type (snames mksingletons singletons?)
+                     (nongenerative suids)
+                     (parent dt)
+                     (sealed #t)
+                     (fields))
+                   ...
+                   (define singletons (mksingletons))
+                   ...
+                   (begin setter-wrappers ...)
+                   (define-syntax match-dt
+                     (syntax-rules ()
+                       [(k e cl* (... ...)) ($match-datatype match-dt dt e cl* (... ...))]))
+                   (define-syntax match-dt!
+                     (lambda (stx)
+                       (define check
+                         (lambda (cl*)
+                           (let ([vrts  (map (lambda (cl)
+                                               (syntax-case cl ()
+                                                 [(pat . e*)
+                                                  (syntax-case #'pat ()
+                                                    [(variant . rest) #'variant]
+                                                    [singleton (identifier? #'singleton) #'singleton]
+                                                    [_ (syntax-error cl "invalid clause for " (symbol->string 'match-dt!))])]
+                                                 [_ (syntax-error cl "invalid clause for " (symbol->string 'match-dt!))]))
+                                             cl*)])
+                             (or (andmap (lambda (v) (memq v (syntax->datum vrts))) '(singletons ... mkvariants ...))
+                                 ;; TODO list unwritten variants?
+                                 (syntax-error cl* "incomplete variants for " (symbol->string 'match-dt!))))))
+                       (syntax-case stx (else)
+                         [(k e cl* (... ...) [else body body* (... ...)])
+                          #'($match-datatype match-dt! dt e cl* (... ...)
+                                             [else body body* (... ...)])]
+                         [(k e cl cl* (... ...))
+                          (check #'(cl cl* (... ...)))
+                          #'(match-dt! e cl cl* (... ...)
+                                       [else (errorf 'k "no match found")])]
+                         [_ (syntax-error stx "bad " (symbol->string 'match-dt!) " form:")])))))))]
         [(_ dt variant0 variants ...)
          (check-datatype-name #'dt)
          (with-syntax ([dt? ($construct-name #'dt #'dt "?")])
