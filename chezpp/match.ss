@@ -234,7 +234,8 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                           body
                                           (process-pattern rho (car fields) (car npats)
                                                            (loop (cdr fields) (cdr npats))
-                                                           fk)))))))]
+                                                           fk))))
+                                (#,fk))))]
                      [_ (syntax-error pat "match: invalid datatype pattern:")])
                    (syntax-error pat "match: invalid datatype pattern:")))]
             [_ (syntax-error pat "match: invalid datatype pattern:")])))
