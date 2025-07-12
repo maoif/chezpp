@@ -38,7 +38,7 @@
           vsorted? fxvsorted? flvsorted?
 
           vcopy fxvcopy flvcopy
-          vcopy! fxvcopy! flvcopy! u8vcopy! vector-copy! fxvector-copy! flvector-copy!
+          vcopy! fxvcopy! flvcopy! u8vcopy!
           vsum fxvsum flvsum
           vproduct fxvproduct flvproduct
           vextreme fxvextreme flvextreme
@@ -1557,53 +1557,6 @@
 
 
   #|doc
-  Copy items in `src` from indices src-start, ..., src-start + k - 1
-  to consecutive indices in `tgt` starting at `tgt-start`.
-
-  `src` and `tgt` must be vectors of the same type, and `tgt` must be mutable.
-  `src-start`, `tgt-start`, and `k` must be exact nonnegative integers.
-  The sum of `src-start` and `k` must not exceed the length of `src`,
-  and the sum of `tgt-start` and `k` must not exceed the length of `tgt`.
-
-  `src` and `tgt` may or may not be the same vector.
-  |#
-  (define-vector-procedure (v fxv flv)
-    (copy! src src-start tgt tgt-start k)
-    (pcheck ([v? src tgt] [natural? src-start tgt-start k])
-            (let ([len1 (vlength src)] [len2 (vlength tgt)])
-              (when (> (fx+ src-start k) len1)
-                (errorf procname "range ~a is too large in source vector" k))
-              (when (> (fx+ tgt-start k) len2)
-                (errorf procname "range ~a is too large in target vector" k))
-              (when (fx> k 0)
-                (if (eq? src tgt)
-                    (let ([src-end (fx+ src-start k)] [tgt-end (fx+ tgt-start k)])
-                      (cond
-                       [(or
-                         ;; disjoint, left to right
-                         (fx<= src-end tgt-start)
-                         ;; disjoint, right to left
-                         (fx<= tgt-end src-start)
-                         ;; overlapping, right to left
-                         (fx<= tgt-start src-start))
-                        (let loop ([i src-start] [j tgt-start] [k k])
-                          (unless (fx= k 0)
-                            (vset! tgt j (vref src i))
-                            (loop (fx1+ i) (fx1+ j) (fx1- k))))]
-                       [(fx< src-start tgt-start)
-                        ;; overlapping, left to right, copy from last to first
-                        (let loop ([i (fx1- src-end)] [j (fx1- tgt-end)] [k k])
-                          (unless (fx= k 0)
-                            (vset! tgt j (vref src i))
-                            (loop (fx1- i) (fx1- j) (fx1- k))))]
-                       [else (assert-unreachable)]))
-                    (let loop ([i src-start] [j tgt-start] [k k])
-                      (unless (fx= k 0)
-                        (vset! tgt j (vref src i))
-                        (loop (fx1+ i) (fx1+ j) (fx1- k)))))))))
-
-
-  #|doc
   Similar to `iota`, generate a vector of the corresponding type
   consisting of integers from 0 to n-1.
   |#
@@ -1732,10 +1685,10 @@
   (define fxvcopy fxvector-copy)
   (define flvcopy flvector-copy)
 
-  (define vector-copy!   vcopy!)
-  (define fxvector-copy! fxvcopy!)
-  (define flvector-copy! flvcopy!)
-  (define u8vcopy!       bytevector-copy!)
+  (define vcopy!   vector-copy!)
+  (define fxvcopy! fxvector-copy!)
+  (define flvcopy! flvector-copy!)
+  (define u8vcopy! bytevector-copy!)
 
   (define vfor-all   vandmap)
   (define fxvfor-all fxvandmap)
