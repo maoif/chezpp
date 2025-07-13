@@ -135,6 +135,17 @@
      (equal? (list "Jack" 16 'male)
              (match (Person "Jack" 16 'male)
                [,($rec Person ,name ,age ,sex) (list name age sex)]))
+
+     (error? (match-Person 42
+                           [(,a ,b ,c) a]))
+     (error? (match-Person '(1 2 3)
+                           [(,name ,age _)
+                            (guard (< age 24))
+                            'small]
+                           [(,name ,age _)
+                            (guard (< age 50))
+                            'big]))
+
      )
 
 

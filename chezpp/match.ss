@@ -124,7 +124,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
             [(,bref pat)
              (identifier? #'bref)
              #'not-impl]
-            [_ (syntax-error pat "match: invalid box pattern:")])))
+            [_ (syntax-error pat "match: invalid box pattern format:")])))
       (define handle-record
         (lambda (rho expr-id pat body fk)
           ;; return the name of the record type (dt or $record-dt)
@@ -180,10 +180,11 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                           body
                                           (process-pattern rho (car fields) (car npats)
                                                            (loop (cdr fields) (cdr npats))
-                                                           fk)))))))]
+                                                           fk))))
+                                (#,fk))))]
                      [_ (syntax-error pat "match: invalid record pattern:")])
-                   (syntax-error pat "match: invalid record pattern:")))]
-            [_ (syntax-error pat "match: invalid record pattern:")])))
+                   (syntax-error pat "match: invalid record type in:")))]
+            [_ (syntax-error pat "match: invalid record pattern format:")])))
       (define handle-datatype
         (lambda (rho expr-id pat body fk)
           (syntax-case pat ()
@@ -237,8 +238,8 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                                                            fk))))
                                 (#,fk))))]
                      [_ (syntax-error pat "match: invalid datatype pattern:")])
-                   (syntax-error pat "match: invalid datatype pattern:")))]
-            [_ (syntax-error pat "match: invalid datatype pattern:")])))
+                   (syntax-error pat "match: invalid datatype/variant in:")))]
+            [_ (syntax-error pat "match: invalid datatype pattern format:")])))
       (define handle-regex
         (lambda (expr-id pat body fk)
           (define handle-rest
@@ -286,7 +287,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
             [(reg . rest)
              ;; `reg` could be arbitrary expression, check whether it evals to string/reg
              (todo)]
-            [_ (syntax-error pat "match: invalid regex pattern:")])))
+            [_ (syntax-error pat "match: invalid regex pattern format:")])))
       (define process-pattern
         (lambda (rho expr-id pat body fk)
           (define extract-pat-vars
@@ -465,16 +466,14 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
       (syntax-case stx (else)
         [(k e cl* ... [else e0 e* ...])
          ;; `match-loop` used for catamorphism
-         (begin (printf "1~n")
-                ;; `rho`: compile-time environment
-                (lambda (rho)
-                  #`(let match-loop ([v e])
-                      #,(generate-skeleton rho #'v #'(cl* ...) #'(begin e0 e* ...)))))]
+         ;; `rho`: compile-time environment
+         (lambda (rho)
+           #`(let match-loop ([v e])
+               #,(generate-skeleton rho #'v #'(cl* ...) #'(begin e0 e* ...))))]
         [(k e cl0 cl* ...)
-         (begin (printf "2~n")
-                #'(let ([v e])
-                    (match v cl0 cl* ...
-                           [else (errorf 'match "no match found")])))]
+         #'(let ([v e])
+             (match v cl0 cl* ...
+                    [else (errorf 'match "no match found")]))]
         [_ (syntax-error 'match "bad match form")])))
 
   (define-syntax match-box
@@ -535,7 +534,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
              (identifier? #'singleton)
              #`[,($datatype #,dt singleton)
                 e e* ...]]
-            [_ (syntax-error cl "3 invalid clause for " (symbol->string (syntax->datum who)))])))
+            [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
       (syntax-case stx (else)
         [(k who dt e cl* ... [else body body* ...])
          (with-syntax ([(cl* ...) (map (lambda (cl) (transform-clause #'who #'dt cl)) #'(cl* ...))])
