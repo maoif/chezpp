@@ -1,6 +1,8 @@
 (library (chezpp)
   (export)
-  (import (chezscheme))
+  (import (chezscheme)
+          (chezpp concurrency fiber)
+          (chezpp parser combinator))
 
   (export (import (chezpp chez)
                   (except (chezpp match)
@@ -23,5 +25,12 @@
                   (chezpp array)
                   (chezpp treemap)
                   (chezpp treeset)
+                  (chezpp bitvec)
+                  (chezpp bittree)
+                  (chezpp stack)
+                  (chezpp queue)
+                  (chezpp heap)
+                  (chezpp dset)
+                  (chezpp graph)
 
                   (chezpp concurrency))))
