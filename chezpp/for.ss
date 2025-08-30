@@ -400,39 +400,45 @@
                (printf "index-def: ~a~n" index-def)
                (printf "index-var: ~a~n" index-var)
                (println "for* -------------------------")
-               ;; TODO init
                ;; TODO finish
-               ;; TODO index
                (let lp-preloops ([gen-preloops gen-preloops])
                  (if (null? gen-preloops)
                      (let lp-for-loop ([i/c* iters/configs] [last-forloop #f] [last-update #f])
-                       (let ([call-lastforloop-no-incr
-                              (if frag-index
-                                  #`(#,last-forloop #,index-var #,last-update)
-                                  #`(#,last-forloop            #,last-update))])
+                       (let ([call-lastforloop
+                              (let* ([vars (if frag-index (list index-var)    '())]
+                                     [vars (if frag-init  (cons init-var vars) vars)])
+                                #`(#,last-forloop #,@vars #,last-update))])
                          (if (null? i/c*)
-                             #`(begin body* ...
-                                      ;; only incr index here if present
-                                      #,(if frag-index
-                                            #`(#,last-forloop (fx1+ #,index-var) #,last-update)
-                                            #`(#,last-forloop                    #,last-update)))
+                             (let ([call-loop (lambda (init?)
+                                                (if frag-index
+                                                    #`(#,last-forloop #,@init? (fx1+ #,index-var) #,last-update)
+                                                    #`(#,last-forloop #,@init?                    #,last-update)))])
+                               (if frag-init
+                                   #`(let ([t-acc (begin body* ...)])
+                                       #,(call-loop (list #'t-acc)))
+                                   #`(begin body* ...
+                                            #,(call-loop '()))))
                              (with-syntax ([(forloop) (generate-temporaries '(forloop))])
                                (let* ([i/c (car i/c*)] [iter-cl (car i/c)] [configs (cdr i/c)]
                                       [loop-var          (list-ref iter-cl 1)]
                                       [termination-check (list-ref iter-cl 3)]
                                       [update            (list-ref iter-cl 4)]
                                       [gen-getter        (list-ref iter-cl 5)]
-                                      [loop-var (if index-def
-                                                    (if last-forloop
-                                                        (list #`[#,index-var #,index-var] loop-var)
-                                                        (list index-def                   loop-var))
-                                                    (list loop-var))])
+                                      [loop-var
+                                       (let ([vars (if last-forloop
+                                                       (let* ([vars (if frag-index (list #`[#,index-var #,index-var])     '())]
+                                                              [vars (if frag-init  (cons #`[#,init-var  #,init-var] vars) vars)])
+                                                         vars)
+                                                       (let* ([vars (if frag-index (list index-def)     '())]
+                                                              [vars (if frag-init  (cons init-def vars) vars)])
+                                                         vars))])
+                                         `(,@vars ,loop-var))])
                                  ;; if current level terminates, call forloop of last level
                                  #`(let forloop (#,@loop-var)
                                      (if #,termination-check
                                          ;; continue on the outer loop
                                          #,(if last-forloop
-                                               call-lastforloop-no-incr
+                                               call-lastforloop
                                                ;; already outermost loop, stop
                                                #`(void))
                                          #,(let ([gen-getter (lambda (e) (if gen-getter (gen-getter e) e))])
@@ -446,7 +452,7 @@
                                                          (kw:break? #':break)
                                                          #`(if e
                                                                #,(if last-forloop
-                                                                     call-lastforloop-no-incr
+                                                                     call-lastforloop
                                                                      ;; already outermost loop, stop
                                                                      #`(void))
                                                                #,(lp-configs (cdr configs)))]
