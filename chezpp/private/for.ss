@@ -125,11 +125,11 @@
                         #f)]
                [2 (list (lambda (e)
                           #`(let ([t-start #,(car op*)] [t-stop #,(cadr op*)])
-                              (unless (and (number? t-start) (number? t-stop) (<= start stop))
+                              (unless (and (number? t-start) (number? t-stop) (<= t-start t-stop))
                                 (errorf ':nums "invalid range from ~a to ~a" t-start t-stop))
                               #,e))
                         #`[#,v t-start]
-                        #`(and (number? t-start) (number? t-stop) (<= start stop))
+                        #`(and (number? t-start) (number? t-stop) (<= t-start t-stop))
                         #`(>= #,v t-stop)
                         #`(+ #,v 1)
                         #f)]
