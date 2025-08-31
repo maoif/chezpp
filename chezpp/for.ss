@@ -1,6 +1,6 @@
 (library (chezpp for)
-  (export for/fold  for
-          for*/fold for*)
+  (export for/fold  for  for/list
+          for*/fold for* for*/list)
   (import (chezpp chez)
           (chezpp private for)
           (chezpp internal)
@@ -344,10 +344,6 @@
                      (kw:guard? #':guard)
                      (begin (add-clause cl)
                             (loop (cdr cl*)))]
-                    [(:index v)
-                     (kw:index? #':index)
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
                     [(:let v e)
                      (and (kw:let? #':let) (identifier? #'v))
                      (begin (add-clause cl)
@@ -497,15 +493,220 @@
                                (lp-preloops (cdr gen-preloops)))))))))])))
 
 
+  #|
+  (<for> (<index-clause>?
+          <iter-clause>+
+          <for-config-clause>*)
+    <body>+)
+
+  (<for*> (<index-clause>?
+           <for*-clause>+)
+    <body>+)
+  |#
   (define-syntax for
     (lambda (stx)
+      ;; just check clauses
+      (define (classify-clauses cl*)
+        (trace-define (handle-index-clause cl* res)
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [(:index v)
+                     (kw:index? #':index)
+                     (begin (println cl)
+                            (set-cdr! (assoc 'index res) cl)
+                            (handle-iter-clauses (cdr cl*) res))]
+                    [_ (handle-iter-clauses cl* res)])))))
+        (trace-define (handle-iter-clauses cl* res)
+          (define (add-clause cl)
+            (let ([cls (assoc 'iter res)])
+              (if (cdr cls)
+                  (snoc! (cdr cls) cl)
+                  (set-cdr! cls (list cl)))))
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [((v* ...) iter-ty op* ...)
+                     (and (andmap identifier? #'(v* ...))
+                          (valid-iter-ty? #'iter-ty))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(v iter-ty op* ...)
+                     (and (identifier? #'v)
+                          (valid-iter-ty? #'iter-ty))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(v lit)
+                     (and (identifier? #'v) (literal? #'lit))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(x . rest)
+                     (kw-for-config-clause? #'x)
+                     (handle-config-clauses cl* res)]
+                    [_ (syntax-error cl "unknown clause:")])))))
+        (trace-define (handle-config-clauses cl* res)
+          (define (add-clause cl)
+            (let ([cls (assoc 'config res)])
+              (if (cdr cls)
+                  (snoc! (cdr cls) cl)
+                  (set-cdr! cls (list cl)))))
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [(:break e)
+                     (kw:break? #':break)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:break e1 e2)
+                     (kw:break? #':break)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:guard e)
+                     (kw:guard? #':guard)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:let v e)
+                     (and (kw:let? #':let) (identifier? #'v))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:let-values (v* ...) e)
+                     (and (kw:let-values? #':let-values)
+                          (andmap identifier? #'(v* ...)))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [_ (syntax-error cl "unknown clause:")])))))
+        ;; making the 2nd arg a literal will make it shared static
+        ;; TODO some should use '() than #f
+        (handle-index-clause cl* (list (cons 'init   #f)
+                                       (cons 'index  #f)
+                                       (cons 'finish #f)
+                                       (cons 'iter   #f)
+                                       (cons 'config #f))))
       (syntax-case stx ()
-        [_ (todo)])))
+        [(_ (cl* ...) body* ...)
+         (let ([_ (classify-clauses #'(cl* ...))])
+           #'(for/fold (cl* ...) body* ...))])))
+
+
+  (define-syntax for/list
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ (cl* ...) body* ...)
+         #'(let ([lb (make-list-builder)])
+             (for (cl* ...)
+               (lb (begin body* ...)))
+             (lb))])))
 
 
   (define-syntax for*
     (lambda (stx)
+      ;; just check clauses
+      (define (classify-clauses cl*)
+        (trace-define (handle-index-clause cl* res)
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [(:index v)
+                     (kw:index? #':index)
+                     (begin (set-cdr! (assoc 'index res) cl)
+                            (handle-iter-clauses (cdr cl*) res))]
+                    [_ (handle-iter-clauses cl* res)])))))
+        ;; iter/config: ((<iter> <config> ...) ...)
+        (trace-define (handle-iter-clauses cl* res)
+          (define (add-clause cl)
+            (let ([cls (assoc 'iter/config res)])
+              (if (cdr cls)
+                  (snoc! (cdr cls) (list cl))
+                  (set-cdr! cls (list (list cl))))))
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [((v* ...) iter-ty op* ...)
+                     (and (andmap identifier? #'(v* ...))
+                          (valid-iter-ty? #'iter-ty))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(v iter-ty op* ...)
+                     (and (identifier? #'v)
+                          (valid-iter-ty? #'iter-ty))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(v lit)
+                     (and (identifier? #'v) (literal? #'lit))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(x . rest)
+                     (kw-for*-config-clause? #'x)
+                     (handle-config-clauses cl* res)]
+                    [_ (syntax-error cl "handle-iter-clauses: unknown clause:")])))))
+        ;; iter/config: ((<iter> <config> ...) ...)
+        (trace-define (handle-config-clauses cl* res)
+          (define (add-clause cl)
+            ;; `cls` must have at least one item
+            (let ([cls (assoc 'iter/config res)])
+              (if (cdr cls)
+                  (snoc! (list-last (cdr cls)) cl)
+                  (syntax-error cl* "bad iter/config clause parsing:"))))
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [(:break e)
+                     (kw:break? #':break)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:stop e1 e2)
+                     (kw:stop? #':stop)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:guard e)
+                     (kw:guard? #':guard)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:let v e)
+                     (and (kw:let? #':let) (identifier? #'v))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:let-values (v* ...) e)
+                     (and (kw:let-values? #':let-values)
+                          (andmap identifier? #'(v* ...)))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(x . rest)
+                     (kw-iter-clause? #'x)
+                     (handle-iter-clauses cl* res)]
+                    [(v lit)
+                     (and (identifier? #'v) (literal? #'lit))
+                     (handle-iter-clauses cl* res)]
+                    [_ (syntax-error cl "handle-config-clauses: unknown clause:")])))))
+        (handle-index-clause cl* (list (cons 'init   #f)
+                                       (cons 'index  #f)
+                                       (cons 'finish #f)
+                                       (cons 'iter/config #f))))
       (syntax-case stx ()
-        [_ (todo)])))
+        [(_ (cl* ...) body* ...)
+         (let ([_ (classify-clauses #'(cl* ...))])
+           #'(for*/fold (cl* ...) body* ...))])))
+
+
+  (define-syntax for*/list
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ (cl* ...) body* ...)
+         #'(let ([lb (make-list-builder)])
+             (for* (cl* ...)
+               (lb (begin body* ...)))
+             (lb))])))
 
   )
