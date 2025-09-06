@@ -385,6 +385,9 @@
                     [index-var (if frag-index
                                    (syntax-case frag-index () [(_ v) #'v])
                                    #f)]
+                    [init/index-vars (let* ([vars (if frag-index (list index-var)    '())]
+                                            [vars (if frag-init  (cons init-var vars) vars)])
+                                       vars)]
                     ;; (((gen-preloop loop-var tycheck term-check update gen-getter) config0 config1 ...) ...)
                     [iters/configs (map (lambda (i/c)
                                           (cons (process-iter-clause (car i/c))
@@ -417,10 +420,7 @@
                    #,(let lp-preloops ([gen-preloops gen-preloops])
                        (if (null? gen-preloops)
                            (let lp-for-loop ([i/c* iters/configs] [last-forloop #f] [last-update #f])
-                             (let ([call-lastforloop
-                                    (let* ([vars (if frag-index (list index-var)    '())]
-                                           [vars (if frag-init  (cons init-var vars) vars)])
-                                      #`(#,last-forloop #,@vars #,last-update))])
+                             (let ([call-lastforloop #`(#,last-forloop #,@init/index-vars #,last-update)])
                                (if (null? i/c*)
                                    (let ([call-loop (lambda (init?)
                                                       (if frag-index
@@ -478,7 +478,7 @@
                                                                (kw:guard? #':guard)
                                                                #`(if e
                                                                      #,(lp-configs (cdr configs))
-                                                                     (forloop #,update))]
+                                                                     (forloop #,@init/index-vars #,update))]
                                                               [(:let v e)
                                                                (kw:let? #':let)
                                                                #`(let ([v e])
