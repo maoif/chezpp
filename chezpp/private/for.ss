@@ -18,7 +18,8 @@
           (chezpp utils)
           (chezpp internal)
           (chezpp io)
-          (chezpp list))
+          (chezpp list)
+          (chezpp iter))
 
 
   (trace-define (literal? lit)
@@ -50,7 +51,8 @@
           (eq? ty ':bytevector)
           (eq? ty ':hashtable)
           (eq? ty ':hashtable-keys)
-          (eq? ty ':hashtable-values))))
+          (eq? ty ':hashtable-values)
+          (eq? ty ':iter))))
 
   (define kw-iter-clause? valid-iter-ty?)
 
@@ -689,6 +691,22 @@
                    #`(fx1+ t-i)
                    (lambda (e)
                      #`(let ([#,v (vector-ref t-vec t-i)])
+                         #,e))))]
+          [:iter
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:iter`:"))
+           (with-syntax ([(t-it t-v) (generate-temporaries '(t-it t-v))])
+             (list (lambda (e)
+                     #`(let ([t-it #,(car op*)])
+                         (unless (iter? t-it)
+                           (errorf ':iter "not a iter: ~a" t-it))
+                         #,e))
+                   #`[t-v (iter-next! t-it)]
+                   #'(void)
+                   #'(iter-end? t-v)
+                   #'(iter-next! t-it)
+                   (lambda (e)
+                     #`(let ([#,v t-v])
                          #,e))))]
           [else (syntax-error ty "bad iter type:")])))
     (trace-define (process-literal-iter-clause v lit)
