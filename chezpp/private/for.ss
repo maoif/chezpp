@@ -157,7 +157,31 @@
   |#
   (define (process-iter-clause cl)
     (trace-define (process-multi-var-iter-clause v* ty op*)
-      (todo 'process-multi-var-iter-clause))
+      (let ([nops (length op*)])
+        (case ty
+          [:hashtable
+           (println ":hashtable: ~a" v*)
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:hashtable`:"))
+           (unless (= 2 (length v*))
+             (syntax-error v* "invalid number of bound variables for iter type `:hashtable`:"))
+           (with-syntax ([(t-ht t-i t-len t-ks t-vs) (generate-temporaries '(t-ht t-i t-len t-ks t-vs))])
+             (list (lambda (e)
+                     #`(let ([t-ht #,(car op*)])
+                         (unless (hashtable? t-ht)
+                           (errorf ':hashtable "not a hashtable: ~a" t-ht))
+                         (let-values ([(t-ks t-vs) (hashtable-entries t-ht)])
+                           (let ([t-len (vector-length t-ks)])
+                             #,e))))
+                   #`[t-i 0]
+                   #`(hashtable? t-ht)
+                   #`(fx= t-i t-len)
+                   #`(fx1+ t-i)
+                   (lambda (e)
+                     #`(let ([#,(car  v*) (vector-ref t-ks t-i)]
+                             [#,(cadr v*) (vector-ref t-vs t-i)])
+                         #,e))))]
+          [else (syntax-error ty "bad iter type:")])))
     (trace-define (process-single-var-iter-clause v ty op*)
       (let ([nops (length op*)])
         (case ty
@@ -336,24 +360,6 @@
                        (lambda (e)
                          #`(let ([#,v (vector-ref t-vec t-i)])
                              #,e))))))]
-          #;
-          [:vector
-           (when (< nops 1)
-             (syntax-error op* "invalid number of options for iter type `:vector`:"))
-           (with-syntax ([(t-vec t-len t-i) (generate-temporaries '(t-vec t-len t-i))])
-             (list (lambda (e)
-                     #`(let ([t-vec #,(car op*)]) ; it seems tycheck can be put here
-                         (unless (vector? t-vec)
-                           (errorf ':vector "not a vector: ~a" t-vec))
-                         (let ([t-len (vector-length t-vec)])
-                           #,e)))
-                   #`[t-i 0]
-                   #`(vector? t-vec)
-                   #`(fx>= t-i t-len)
-                   #`(fx1+ t-i)
-                   (lambda (e)
-                     #`(let ([#,v (vector-ref t-vec t-i)])
-                         #,e))))]
           [:string
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:string`:"))
@@ -648,18 +654,42 @@
                              (lambda (e)
                                #`(let ([#,v (#,vref t-vec (if (fx> t-step 0) t-i (fx+ t-i t-step 1)) #,endianness)])
                                    #,e))))))))]
-          [:hashtable
-           (when (< nops 1)
-             (syntax-error op* "invalid number of options for iter type `:hashtable`:"))
-           (todo)]
           [:hashtable-keys
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:hashtable-keys`:"))
-           (todo)]
+           (with-syntax ([(t-ht t-i t-len t-vec) (generate-temporaries '(t-ht t-i t-len t-vec))])
+             (list (lambda (e)
+                     #`(let ([t-ht #,(car op*)])
+                         (unless (hashtable? t-ht)
+                           (errorf ':hashtable-keys "not a hashtable: ~a" t-ht))
+                         (let* ([t-vec (hashtable-keys t-ht)]
+                                [t-len (vector-length t-vec)])
+                           #,e)))
+                   #`[t-i 0]
+                   #`(hashtable? t-ht)
+                   #`(fx= t-i t-len)
+                   #`(fx1+ t-i)
+                   (lambda (e)
+                     #`(let ([#,v (vector-ref t-vec t-i)])
+                         #,e))))]
           [:hashtable-values
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:hashtable-values`:"))
-           (todo)]
+           (with-syntax ([(t-ht t-i t-len t-vec) (generate-temporaries '(t-ht t-i t-len t-vec))])
+             (list (lambda (e)
+                     #`(let ([t-ht #,(car op*)])
+                         (unless (hashtable? t-ht)
+                           (errorf ':hashtable-values "not a hashtable: ~a" t-ht))
+                         (let* ([t-vec (hashtable-values t-ht)]
+                                [t-len (vector-length t-vec)])
+                           #,e)))
+                   #`[t-i 0]
+                   #`(hashtable? t-ht)
+                   #`(fx= t-i t-len)
+                   #`(fx1+ t-i)
+                   (lambda (e)
+                     #`(let ([#,v (vector-ref t-vec t-i)])
+                         #,e))))]
           [else (syntax-error ty "bad iter type:")])))
     (trace-define (process-literal-iter-clause v lit)
       (let ([lit (->literal lit)])
