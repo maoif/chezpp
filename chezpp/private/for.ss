@@ -17,7 +17,8 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal)
-          (chezpp io))
+          (chezpp io)
+          (chezpp list))
 
 
   (trace-define (literal? lit)
@@ -39,11 +40,17 @@
     (let ([ty (syntax->datum ty)])
       (or (eq? ty ':iota)
           (eq? ty ':nums)
-          (eq? ty ':fxnums)
+          (eq? ty ':fixnums)
           (eq? ty ':string)
           (eq? ty ':list)
           (eq? ty ':vector)
-          (eq? ty ':hashtable))))
+          (eq? ty ':fxvector)
+          (eq? ty ':flvector)
+          (eq? ty ':fxvector)
+          (eq? ty ':bytevector)
+          (eq? ty ':hashtable)
+          (eq? ty ':hashtable-keys)
+          (eq? ty ':hashtable-values))))
 
   (define kw-iter-clause? valid-iter-ty?)
 
@@ -77,6 +84,66 @@
   (define kw:bind?       (gen-kw? ':bind))
   (define kw:let?        (gen-kw? ':let))
   (define kw:let-values? (gen-kw? ':let-values))
+
+  (define (op? x)
+    (let ([x (syntax->datum x)])
+      (and (symbol? x)
+           (let ([x (symbol->string x)])
+             (char=? (string-ref x 0) #\:)))))
+  ;; groups ops and their args into a list
+  (define-who (preprocess-ops ops)
+    (fold-left (lambda (res ?op)
+                 (if (op? ?op)
+                     (cons (list (syntax->datum ?op)) res)
+                     (if (null? res)
+                         (errorf who "op arg without preceding op: ~a" ops)
+                         (begin (snoc! (car res)
+                                       ?op)
+                                res))))
+               '() ops))
+  ;; return: ((:from 10) (:until 20) (:step 2) (:rev))
+  (trace-define (check-ops op-configs ops)
+    (let ([ops (preprocess-ops ops)])
+      (for-each (lambda (op)
+                  (unless (assoc (car op) op-configs)
+                    (errorf ':vector (format "unknown op: ~a" (car op)))))
+                ops)
+      (trace-let loop ([op-configs op-configs] [res '()])
+        (if (null? op-configs)
+            (reverse res)
+            (let* ([op-conf (car op-configs)]
+                   [op (car op-conf)]
+                   [nop-args (cdr op-conf)])
+              (assert (and (natural? nop-args) "bad numebr of iter options"))
+              (let ([?op-args (assoc op ops)])
+                (if ?op-args
+                    (let ([option-args (cdr ?op-args)])
+                      (unless (= (length option-args) nop-args)
+                        (errorf 'check-ops
+                                (format "expected ~a args for option ~a, given ~a"
+                                        (number->string nop-args)
+                                        (symbol->string op)
+                                        (number->string (length option-args)))))
+                      (loop (cdr op-configs)
+                            (cons ?op-args res)))
+                    (loop (cdr op-configs) res))))))))
+
+
+  (define *vector-ops*
+    ;; op     nop-args
+    '((:from  . 1)
+      (:to    . 1)
+      (:step  . 1)
+      (:rev   . 0)))
+  (define *string-ops*   *vector-ops*)
+  (define *fxvector-ops* *vector-ops*)
+  (define *flvector-ops* *vector-ops*)
+  (define *bytevector-ops*
+    (append *vector-ops*
+            '((:big    . 0)
+              (:little . 0)
+              ;; type: single double u8 s8 u16 s16 ...
+              (:type   . 1))))
 
 
   #|
@@ -149,6 +216,47 @@
                               (<= #,v t-stop))
                         #`(+ #,v t-step)
                         #f)]))]
+          [:fixnums
+           (when (not (<= 1 nops 3))
+             (syntax-error op* "invalid number of options for iter type `:fxnums`:"))
+           (with-syntax ([(t-start t-stop t-step) (generate-temporaries '(t-start t-stop t-step))])
+             (case nops
+               [1 (list (lambda (e)
+                          #`(let ([t-stop #,(car op*)])
+                              (unless (natural? t-stop)
+                                (errorf ':fxnums "not a nonnegative fixnum: ~a" t-stop))
+                              #,e))
+                        #`[#,v 0]
+                        #`(natural? t-stop)
+                        #`(fx= #,v t-stop)
+                        #`(fx+ #,v 1)
+                        #f)]
+               [2 (list (lambda (e)
+                          #`(let ([t-start #,(car op*)] [t-stop #,(cadr op*)])
+                              (unless (and (fixnum? t-start) (fixnum? t-stop) (fx<= t-start t-stop))
+                                (errorf ':fxnums "invalid range from ~a to ~a" t-start t-stop))
+                              #,e))
+                        #`[#,v t-start]
+                        #`(and (fixnum? t-start) (fixnum? t-stop) (fx<= t-start t-stop))
+                        #`(>= #,v t-stop)
+                        #`(fx+ #,v 1)
+                        #f)]
+               [3 (list (lambda (e)
+                          #`(let ([t-start #,(car op*)] [t-stop #,(cadr op*)] [t-step #,(caddr op*)])
+                              (unless (and (fixnum? t-start) (fixnum? t-stop)
+                                           (or (and (fx<= t-start t-stop) (fx> t-step 0))
+                                               (and (fx> t-start t-stop)  (fx< t-step 0))))
+                                (errorf ':fxnums "invalid range from ~a to ~a, step ~a" t-start t-stop t-step))
+                              #,e))
+                        #`[#,v t-start]
+                        #`(and (fixnum? t-start) (fixnum? t-stop)
+                               (or (and (fx<= t-start t-stop) (fx> t-step 0)))
+                               (or (and (fx> t-start t-stop)  (fx< t-step 0))))
+                        #`(if (fx<= t-start t-stop)
+                              (fx>= #,v t-stop)
+                              (fx<= #,v t-stop))
+                        #`(fx+ #,v t-step)
+                        #f)]))]
           [:list
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:list`:"))
@@ -168,6 +276,70 @@
           [:vector
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:vector`:"))
+           ;; op*: ((:from 10) (:until 20) (:step 2) (:rev))
+           (let* ([ops (check-ops *vector-ops* (cdr op*))])
+             (println "ops: ~a" ops)
+             ;; all args are syntax objs
+             (let ([op-from (assoc ':from ops)]
+                   [op-to   (assoc ':to   ops)]
+                   [op-step (assoc ':step ops)]
+                   [op-rev  (assoc ':rev  ops)])
+               (println "op-from: ~a" op-from)
+               (println "op-to:   ~a" op-to)
+               (println "op-step: ~a" op-step)
+               (println "op-rev:  ~a" op-rev)
+               ;; Q: how to use these ops?
+               (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
+                              (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
+                 (list (lambda (e)
+                         #`(let ([t-vec #,(car op*)]) ; it seems tycheck can be put here
+                             (unless (vector? t-vec)
+                               (errorf ':vector "not a vector: ~a" t-vec))
+                             (let* ([t-len (vector-length t-vec)]
+                                    [t-from #,(if op-from
+                                                  (cadr op-from)
+                                                  #'0)]
+                                    [t-to   #,(if op-to
+                                                  (cadr op-to)
+                                                  #'t-len)]
+                                    ;; handle :rev
+                                    [tt-from t-from]
+                                    [t-from #,(if op-rev
+                                                  #'(if (<= t-from t-to)
+                                                        (sub1 t-to)
+                                                        (add1 t-to))
+                                                  #'t-from)]
+                                    [t-to   #,(if op-rev
+                                                  #'(if (<= tt-from t-to)
+                                                        (sub1 tt-from)
+                                                        (add1 tt-from))
+                                                  #'t-to)]
+                                    [t-step #,(if op-step
+                                                  (let ([s (cadr op-step)])
+                                                    #`(let ([s #,s])
+                                                        (unless (positive-natural? s)
+                                                          (errorf ':vector "step has to be a positive natural number: ~a" s))
+                                                        (if (<= t-from t-to)
+                                                            s
+                                                            (- s))))
+                                                  #'(if (<= t-from t-to)
+                                                        1
+                                                        -1))])
+                               (println ":vector :from ~a :to ~a :step ~a" t-from t-to t-step)
+                               #,e)))
+                       #`[t-i t-from]
+                       #`(vector? t-vec)
+                       #`(if (fx<= t-from t-to)
+                             (fx>= t-i t-to)
+                             (fx<= t-i t-to))
+                       #`(fx+ t-i t-step)
+                       (lambda (e)
+                         #`(let ([#,v (vector-ref t-vec t-i)])
+                             #,e))))))]
+          #;
+          [:vector
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:vector`:"))
            (with-syntax ([(t-vec t-len t-i) (generate-temporaries '(t-vec t-len t-i))])
              (list (lambda (e)
                      #`(let ([t-vec #,(car op*)]) ; it seems tycheck can be put here
@@ -177,11 +349,317 @@
                            #,e)))
                    #`[t-i 0]
                    #`(vector? t-vec)
-                   #`(fx= t-i t-len)
+                   #`(fx>= t-i t-len)
                    #`(fx1+ t-i)
                    (lambda (e)
                      #`(let ([#,v (vector-ref t-vec t-i)])
                          #,e))))]
+          [:string
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:string`:"))
+           (let* ([ops (check-ops *string-ops* (cdr op*))])
+             (println "ops: ~a" ops)
+             ;; all args are syntax objs
+             (let ([op-from (assoc ':from ops)]
+                   [op-to   (assoc ':to   ops)]
+                   [op-step (assoc ':step ops)]
+                   [op-rev  (assoc ':rev  ops)])
+               (println "op-from: ~a" op-from)
+               (println "op-to:   ~a" op-to)
+               (println "op-step: ~a" op-step)
+               (println "op-rev:  ~a" op-rev)
+               ;; Q: how to use these ops?
+               (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
+                              (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
+                 (list (lambda (e)
+                         #`(let ([t-vec #,(car op*)]) ; it seems tycheck can be put here
+                             (unless (string? t-vec)
+                               (errorf ':string "not a string: ~a" t-vec))
+                             (let* ([t-len (string-length t-vec)]
+                                    [t-from #,(if op-from
+                                                  (cadr op-from)
+                                                  #'0)]
+                                    [t-to   #,(if op-to
+                                                  (cadr op-to)
+                                                  #'t-len)]
+                                    ;; handle :rev
+                                    [tt-from t-from]
+                                    [t-from #,(if op-rev
+                                                  #'(if (<= t-from t-to)
+                                                        (sub1 t-to)
+                                                        (add1 t-to))
+                                                  #'t-from)]
+                                    [t-to   #,(if op-rev
+                                                  #'(if (<= tt-from t-to)
+                                                        (sub1 tt-from)
+                                                        (add1 tt-from))
+                                                  #'t-to)]
+                                    [t-step #,(if op-step
+                                                  (let ([s (cadr op-step)])
+                                                    #`(let ([s #,s])
+                                                        (unless (positive-natural? s)
+                                                          (errorf ':string "step has to be a positive natural number: ~a" s))
+                                                        (if (<= t-from t-to)
+                                                            s
+                                                            (- s))))
+                                                  #'(if (<= t-from t-to)
+                                                        1
+                                                        -1))])
+                               (println ":string :from ~a :to ~a :step ~a" t-from t-to t-step)
+                               #,e)))
+                       #`[t-i t-from]
+                       #`(string? t-vec)
+                       #`(if (fx<= t-from t-to)
+                             (fx>= t-i t-to)
+                             (fx<= t-i t-to))
+                       #`(fx+ t-i t-step)
+                       (lambda (e)
+                         #`(let ([#,v (string-ref t-vec t-i)])
+                             #,e))))))]
+          [:fxvector
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:fxvector`:"))
+           (let* ([ops (check-ops *fxvector-ops* (cdr op*))])
+             (println "ops: ~a" ops)
+             ;; all args are syntax objs
+             (let ([op-from (assoc ':from ops)]
+                   [op-to   (assoc ':to   ops)]
+                   [op-step (assoc ':step ops)]
+                   [op-rev  (assoc ':rev  ops)])
+               (println "op-from: ~a" op-from)
+               (println "op-to:   ~a" op-to)
+               (println "op-step: ~a" op-step)
+               (println "op-rev:  ~a" op-rev)
+               ;; Q: how to use these ops?
+               (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
+                              (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
+                 (list (lambda (e)
+                         #`(let ([t-vec #,(car op*)]) ; it seems tycheck can be put here
+                             (unless (fxvector? t-vec)
+                               (errorf ':fxvector "not a fxvector: ~a" t-vec))
+                             (let* ([t-len (fxvector-length t-vec)]
+                                    [t-from #,(if op-from
+                                                  (cadr op-from)
+                                                  #'0)]
+                                    [t-to   #,(if op-to
+                                                  (cadr op-to)
+                                                  #'t-len)]
+                                    ;; handle :rev
+                                    [tt-from t-from]
+                                    [t-from #,(if op-rev
+                                                  #'(if (<= t-from t-to)
+                                                        (sub1 t-to)
+                                                        (add1 t-to))
+                                                  #'t-from)]
+                                    [t-to   #,(if op-rev
+                                                  #'(if (<= tt-from t-to)
+                                                        (sub1 tt-from)
+                                                        (add1 tt-from))
+                                                  #'t-to)]
+                                    [t-step #,(if op-step
+                                                  (let ([s (cadr op-step)])
+                                                    #`(let ([s #,s])
+                                                        (unless (positive-natural? s)
+                                                          (errorf ':fxvector "step has to be a positive natural number: ~a" s))
+                                                        (if (<= t-from t-to)
+                                                            s
+                                                            (- s))))
+                                                  #'(if (<= t-from t-to)
+                                                        1
+                                                        -1))])
+                               (println ":fxvector :from ~a :to ~a :step ~a" t-from t-to t-step)
+                               #,e)))
+                       #`[t-i t-from]
+                       #`(fxvector? t-vec)
+                       #`(if (fx<= t-from t-to)
+                             (fx>= t-i t-to)
+                             (fx<= t-i t-to))
+                       #`(fx+ t-i t-step)
+                       (lambda (e)
+                         #`(let ([#,v (fxvector-ref t-vec t-i)])
+                             #,e))))))]
+          [:flvector
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:flvector`:"))
+           (let* ([ops (check-ops *flvector-ops* (cdr op*))])
+             (println "ops: ~a" ops)
+             ;; all args are syntax objs
+             (let ([op-from (assoc ':from ops)]
+                   [op-to   (assoc ':to   ops)]
+                   [op-step (assoc ':step ops)]
+                   [op-rev  (assoc ':rev  ops)])
+               (println "op-from: ~a" op-from)
+               (println "op-to:   ~a" op-to)
+               (println "op-step: ~a" op-step)
+               (println "op-rev:  ~a" op-rev)
+               ;; Q: how to use these ops?
+               (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
+                              (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
+                 (list (lambda (e)
+                         #`(let ([t-vec #,(car op*)]) ; it seems tycheck can be put here
+                             (unless (flvector? t-vec)
+                               (errorf ':flvector "not a flvector: ~a" t-vec))
+                             (let* ([t-len (flvector-length t-vec)]
+                                    [t-from #,(if op-from
+                                                  (cadr op-from)
+                                                  #'0)]
+                                    [t-to   #,(if op-to
+                                                  (cadr op-to)
+                                                  #'t-len)]
+                                    ;; handle :rev
+                                    [tt-from t-from]
+                                    [t-from #,(if op-rev
+                                                  #'(if (<= t-from t-to)
+                                                        (sub1 t-to)
+                                                        (add1 t-to))
+                                                  #'t-from)]
+                                    [t-to   #,(if op-rev
+                                                  #'(if (<= tt-from t-to)
+                                                        (sub1 tt-from)
+                                                        (add1 tt-from))
+                                                  #'t-to)]
+                                    [t-step #,(if op-step
+                                                  (let ([s (cadr op-step)])
+                                                    #`(let ([s #,s])
+                                                        (unless (positive-natural? s)
+                                                          (errorf ':flvector "step has to be a positive natural number: ~a" s))
+                                                        (if (<= t-from t-to)
+                                                            s
+                                                            (- s))))
+                                                  #'(if (<= t-from t-to)
+                                                        1
+                                                        -1))])
+                               (println ":flvector :from ~a :to ~a :step ~a" t-from t-to t-step)
+                               #,e)))
+                       #`[t-i t-from]
+                       #`(flvector? t-vec)
+                       #`(if (fx<= t-from t-to)
+                             (fx>= t-i t-to)
+                             (fx<= t-i t-to))
+                       #`(fx+ t-i t-step)
+                       (lambda (e)
+                         #`(let ([#,v (flvector-ref t-vec t-i)])
+                             #,e))))))]
+          [:bytevector
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:bytevector`:"))
+           (let* ([ops (check-ops *bytevector-ops* (cdr op*))])
+             (println "ops: ~a" ops)
+             (let* ([*bv-table* '((single 4 bytevector-ieee-single-ref)
+                                  (double 8 bytevector-ieee-double-ref)
+                                  (u8     1 bytevector-u8-ref)
+                                  (s8     1 bytevector-s8-ref)
+                                  (u16    2 bytevector-u16-ref)
+                                  (s16    2 bytevector-s16-ref)
+                                  (u24    3 bytevector-u24-ref)
+                                  (s24    3 bytevector-s24-ref)
+                                  (u32    4 bytevector-u32-ref)
+                                  (s32    4 bytevector-s32-ref)
+                                  (u40    5 bytevector-u40-ref)
+                                  (s40    5 bytevector-s40-ref)
+                                  (u48    6 bytevector-u48-ref)
+                                  (s48    6 bytevector-s48-ref)
+                                  (u56    7 bytevector-u56-ref)
+                                  (s56    7 bytevector-s56-ref)
+                                  (u64    8 bytevector-u64-ref)
+                                  (s64    8 bytevector-s64-ref))]
+                    [op-from   (assoc ':from   ops)]
+                    [op-to     (assoc ':to     ops)]
+                    [op-step   (assoc ':step   ops)]
+                    [op-rev    (assoc ':rev    ops)]
+                    [op-type   (assoc ':type   ops)] ; default: u8
+                    [op-big    (assoc ':big    ops)]
+                    [op-little (assoc ':little ops)]
+                    [op-type   (if op-type
+                                   (let ([t (syntax->datum (cadr op-type))])
+                                     (unless (memq t '(single double u8 s8 u16 s16 u24 s24 u32 s32 u40 s40
+                                                              u48 s48 u56 s56 u64 s64))
+                                       (errorf ':bytevector "unknown access type: ~a" t))
+                                     t)
+                                   'u8)]
+                    [endianness (datum->syntax v
+                                               (if op-little
+                                                   (if op-big
+                                                       (errorf ':bytevector ":big and :little cannot be given at the same time")
+                                                       '(endianness little))
+                                                   (if op-big
+                                                       '(endianness big)
+                                                       '(endianness little))))])
+               (println "op-from: ~a" op-from)
+               (println "op-to:   ~a" op-to)
+               (println "op-step: ~a" op-step)
+               (println "op-rev:  ~a" op-rev)
+               (println "op-type: ~a" op-type)
+               (println "op-big:  ~a" op-big)
+               (println "op-little:  ~a" op-little)
+               (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
+                              (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
+                 (let ([vref (datum->syntax v (caddr (assoc op-type *bv-table*)))]
+                       [size (datum->syntax v (cadr  (assoc op-type *bv-table*)))])
+                   (println "vref: ~a size: ~a" vref size)
+                   (list (lambda (e)
+                           #`(let ([t-vec #,(car op*)])
+                               (unless (bytevector? t-vec)
+                                 (errorf ':bytevector "not a bytevector: ~a" t-vec))
+                               (let* ([t-len (bytevector-length t-vec)]
+                                      ;; TODO in terms of what, bytes?
+                                      [t-from #,(if op-from
+                                                    (cadr op-from)
+                                                    #'0)]
+                                      [t-to   #,(if op-to
+                                                    (cadr op-to)
+                                                    #'t-len)]
+                                      ;; handle :rev
+                                      [tt-from t-from]
+                                      [t-from #,(if op-rev
+                                                    #'(if (<= t-from t-to)
+                                                          (sub1 t-to)
+                                                          (add1 t-to))
+                                                    #'t-from)]
+                                      [t-to   #,(if op-rev
+                                                    #'(if (<= tt-from t-to)
+                                                          (sub1 tt-from)
+                                                          (add1 tt-from))
+                                                    #'t-to)]
+                                      ;; `step` depends on and scaled by `size`
+                                      [t-step #,(if op-step
+                                                    (let ([s (cadr op-step)])
+                                                      #`(let ([s #,s])
+                                                          (unless (positive-natural? s)
+                                                            (errorf ':bytevector "step has to be a positive natural number: ~a" s))
+                                                          (if (<= t-from t-to)
+                                                              (fx* s #,size)
+                                                              (- (fx* s #,size)))))
+                                                    #`(if (<= t-from t-to)
+                                                          (fx*  1 #,size)
+                                                          (fx* -1 #,size)))])
+                                 (println ":bytevector :from ~a :to ~a :step ~a" t-from t-to t-step)
+                                 #,e)))
+                         #`[t-i t-from]
+                         #`(bytevector? t-vec)
+                         #`(if (fx<= t-from t-to)
+                               (fx>= (fx+ t-i #,size -1) t-to)
+                               (fx<= (fx- t-i #,size -1) t-to))
+                         #`(fx+ t-i t-step)
+                         (if (memq op-type '(u8 s8))
+                             (lambda (e)
+                               #`(let ([#,v (#,vref t-vec t-i)])
+                                   #,e))
+                             (lambda (e)
+                               #`(let ([#,v (#,vref t-vec (if (fx> t-step 0) t-i (fx+ t-i t-step 1)) #,endianness)])
+                                   #,e))))))))]
+          [:hashtable
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:hashtable`:"))
+           (todo)]
+          [:hashtable-keys
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:hashtable-keys`:"))
+           (todo)]
+          [:hashtable-values
+           (when (< nops 1)
+             (syntax-error op* "invalid number of options for iter type `:hashtable-values`:"))
+           (todo)]
           [else (syntax-error ty "bad iter type:")])))
     (trace-define (process-literal-iter-clause v lit)
       (let ([lit (->literal lit)])
@@ -229,7 +707,7 @@
 
 
   (trace-define (process-iter-clauses cl*)
-    (for-each println cl*)
+    (for-each displayln cl*)
     (map process-iter-clause cl*))
 
 
