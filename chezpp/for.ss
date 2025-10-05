@@ -11,7 +11,7 @@
           (chezpp io))
 
 
-
+
   (define-syntax for/fold
     (lambda (stx)
       ;; this differs from that of for*
@@ -25,7 +25,7 @@
                   (syntax-case cl ()
                     [(:init v e)
                      (kw:init? #':init)
-                     (begin (println cl)
+                     (begin (displayln cl)
                             (set-cdr! (assoc 'init res) cl)
                             (handle-index-clause (cdr cl*) res))]
                     [_ (handle-index-clause cl* res)])))))
@@ -37,7 +37,7 @@
                   (syntax-case cl ()
                     [(:index v)
                      (kw:index? #':index)
-                     (begin (println cl)
+                     (begin (displayln cl)
                             (set-cdr! (assoc 'index res) cl)
                             (handle-finish-clause (cdr cl*) res))]
                     [_ (handle-finish-clause cl* res)])))))
@@ -49,7 +49,7 @@
                   (syntax-case cl ()
                     [(:finish v)
                      (kw:finish? #':finish)
-                     (begin (println cl)
+                     (begin (displayln cl)
                             (set-cdr! (assoc 'finish res) cl)
                             (handle-iter-clauses (cdr cl*) res))]
                     [_ (handle-iter-clauses cl* res)])))))
@@ -249,6 +249,7 @@
                                (lp-preloops (cdr gen-preloops)))))))))])))
 
 
+
   (define-syntax for*/fold
     (lambda (stx)
       (define (classify-clauses cl*)
@@ -261,7 +262,7 @@
                   (syntax-case cl ()
                     [(:init v e)
                      (kw:init? #':init)
-                     (begin (println cl)
+                     (begin (displayln cl)
                             (set-cdr! (assoc 'init res) cl)
                             (handle-index-clause (cdr cl*) res))]
                     [_ (handle-index-clause cl* res)])))))
@@ -273,7 +274,7 @@
                   (syntax-case cl ()
                     [(:index v)
                      (kw:index? #':index)
-                     (begin (println cl)
+                     (begin (displayln cl)
                             (set-cdr! (assoc 'index res) cl)
                             (handle-finish-clause (cdr cl*) res))]
                     [_ (handle-finish-clause cl* res)])))))
@@ -285,7 +286,7 @@
                   (syntax-case cl ()
                     [(:finish v)
                      (kw:finish? #':finish)
-                     (begin (println cl)
+                     (begin (displayln cl)
                             (set-cdr! (assoc 'finish res) cl)
                             (handle-iter-clauses (cdr cl*) res))]
                     [_ (handle-iter-clauses cl* res)])))))
@@ -412,7 +413,7 @@
                                           (list #'(t-finish)
                                                 #'(lambda () (void))))])
                (println "for* -------------------------")
-               (for-each println iters/configs)
+               (for-each displayln iters/configs)
                (printf "index-def: ~a~n" index-def)
                (printf "index-var: ~a~n" index-var)
                (println "for* -------------------------")
@@ -493,6 +494,7 @@
                                (lp-preloops (cdr gen-preloops)))))))))])))
 
 
+
   #|
   (<for> (<index-clause>?
           <iter-clause>+
@@ -515,7 +517,7 @@
                   (syntax-case cl ()
                     [(:index v)
                      (kw:index? #':index)
-                     (begin (println cl)
+                     (begin (displayln cl)
                             (set-cdr! (assoc 'index res) cl)
                             (handle-iter-clauses (cdr cl*) res))]
                     [_ (handle-iter-clauses cl* res)])))))

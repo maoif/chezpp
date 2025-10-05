@@ -30,7 +30,7 @@
 
      ;; `array` uses `mincap`, hence `make-array`
      (let ([arr (make-array 0 0)])
-       (println arr)
+       (displayln arr)
        (array-add! arr 0)
        (array-add! arr 1)
        (array-add! arr 2)
@@ -40,7 +40,7 @@
        (array-add! arr 1 200)
        (array-add! arr 3 300)
        (array-add! arr 4 400)
-       (println arr)
+       (displayln arr)
        (and (= 9 (array-length arr))
             (equal? '(-2 200 100 300 400 -1 0 1 2) (array->list arr))))
 

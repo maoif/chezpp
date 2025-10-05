@@ -1,7 +1,9 @@
 (library (chezpp io)
-  (export println displayln)
+  (export print println displayln
+          fprint fprintln)
   (import (chezpp chez)
-          (chezpp internal))
+          (chezpp internal)
+          (chezpp utils))
 
 
 
@@ -12,43 +14,51 @@
   (define displayln
     (case-lambda
       [(obj) (display obj) (display "\n")]
-      [(obj port) (display obj port) (display "\n" port)]))
+      [(obj port)
+       (pcheck ([port? port])
+               (display obj port)
+               (display "\n" port))]))
 
 
   #|doc
-  The same as `displayln`.
+  Contruct a formatted string using the format string `fmt` and objects `args`,
+  and print the string to the current output port, with a newline in the end.
   |#
-  (define println displayln)
+  (define println
+    (lambda (fmt . args)
+      (pcheck ([string? fmt])
+              (apply format #t fmt args)
+              (format #t "\n"))))
+
 
   #|doc
-  Print a formated string either to the current output port
-  or a given textual output port, with a newline.
+  Contruct a formatted string using the format string `fmt` and objects `args`,
+  and print the string to the current output port.
   |#
-  (define printfln
-    (case-lambda
-      [(fmt . objs) (todo)]
-      [(fmt . objs+port) (todo)]))
+  (define print
+    (lambda (fmt . args)
+      (pcheck ([string? fmt])
+              (apply format #t fmt args))))
+
 
   #|doc
-  Write a formated string either to the current output port
-  or a given textual output port, with a newline.
+  Contruct a formatted string using the format string `fmt` and objects `args`,
+  and print the string to the given output port `port`, with a newline in the end.
   |#
-  (define writefln
-    (case-lambda
-      [(fmt . objs) (todo)]
-      [(fmt . objs+port) (todo)]
-      ))
+  (define fprintln
+    (lambda (port fmt . args)
+      (pcheck ([port? port] [string? fmt])
+              (apply format port fmt args)
+              (format port "\n"))))
+
 
   #|doc
-  Display a formated string either to the current output port
-  or a given textual output port, with a newline.
+  Contruct a formatted string using the format string `fmt` and objects `args`,
+  and print the string to the given output port `port`.
   |#
-  (define displayfln
-    (case-lambda
-      [(fmt . objs) (todo)]
-      [(fmt . objs+port)
-       (todo)]
-      ))
-
+  (define fprint
+    (lambda (port fmt . args)
+      (pcheck ([port? port] [string? fmt])
+              (apply format port fmt args))))
 
   )

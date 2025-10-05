@@ -255,7 +255,7 @@
      (let ([bv1 (apply bitvec (nums 0 200))]
            [bv2 (apply bitvec (nums 100 400))]
            [bv3 (apply bitvec (nums 300 500))])
-       (println (bitvec-xor bv1 bv2 bv3))
+       (displayln (bitvec-xor bv1 bv2 bv3))
        (equal? (bitvec-xor bv1 bv2 bv3)
                (bitvec-or (apply bitvec (nums 0 100))
                           (apply bitvec (nums 200 300))

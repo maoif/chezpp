@@ -400,13 +400,13 @@
 
      (let ([ls (iota 5)])
        (list-set! ls 4 55)
-       (println ls)
+       (displayln ls)
        (equal? ls '(0 1 2 3 55)))
 
      (let ([ls (list 1 2 3)])
        (list-set! ls 0 11)
        (list-set! ls 2 33)
-       (println ls)
+       (displayln ls)
        (equal? ls '(11 2 33)))
 
      ;; literal list not equal
@@ -545,7 +545,7 @@
            [ls2 (list 4 5 6 7 8 9)]
            [ls3 (list 7 8 9 10 11 12 4 5 6)]
            [ls4 (list 4 6 7 8 2 5)])
-       (println (list=? (append ls1 ls2 ls3 ls4) (list+ ls1 ls2 ls3 ls4)))
+       (displayln (list=? (append ls1 ls2 ls3 ls4) (list+ ls1 ls2 ls3 ls4)))
        (list=? (list^ ls1 ls2 ls3 ls4)
                (list- (list+ ls1 ls2 ls3 ls4) (list& ls1 ls2 ls3 ls4))))
 
