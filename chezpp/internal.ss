@@ -6,8 +6,8 @@
   ;; todo imple as a macro? and use `who`
   (define todo
     (case-lambda
-      [() (warningf #f "not impl")]
-      [(x) (warningf x "not impl")]))
+      [() (errorf #f "not impl")]
+      [(x) (errorf x "not impl")]))
 
   (define $construct-name
     (lambda (template-identifier . args)
