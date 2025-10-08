@@ -12,6 +12,8 @@
           kw:bind?
           kw:let?
           kw:let-values?
+          kw:length?
+          kw:fill?
 
           process-iter-clause process-iter-clauses)
   (import (chezpp chez)
@@ -86,6 +88,8 @@
   (define kw:bind?       (gen-kw? ':bind))
   (define kw:let?        (gen-kw? ':let))
   (define kw:let-values? (gen-kw? ':let-values))
+  (define kw:length?     (gen-kw? ':length))
+  (define kw:fill?       (gen-kw? ':fill))
 
   (define (op? x)
     (let ([x (syntax->datum x)])

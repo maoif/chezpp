@@ -1,5 +1,5 @@
 (library (chezpp for)
-  (export for/fold  for  for/list
+  (export for/fold  for  for/list  for/vector
           for*/fold for* for*/list)
   (import (chezpp chez)
           (chezpp private for)
@@ -604,6 +604,155 @@
              (for (cl* ...)
                (lb (begin body* ...)))
              (lb))])))
+
+
+  (define-syntax for/vector
+    (lambda (stx)
+      (define (classify-clauses cl*)
+        (trace-define (handle-index-clause cl* res)
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [(:index v)
+                     (kw:index? #':index)
+                     (begin (displayln cl)
+                            (set-cdr! (assoc 'index res) cl)
+                            (handle-length-clause (cdr cl*) res))]
+                    [_ (handle-length-clause cl* res)])))))
+        (trace-define (handle-length-clause cl* res)
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [(:length v)
+                     (kw:length? #':length)
+                     (begin (displayln cl)
+                            (set-cdr! (assoc 'length res) cl)
+                            (handle-fill-clause (cdr cl*) res))]
+                    [_ (handle-fill-clause cl* res)])))))
+        (trace-define (handle-fill-clause cl* res)
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [(:fill v)
+                     (kw:fill? #':fill)
+                     (begin (displayln cl)
+                            (set-cdr! (assoc 'fill res) cl)
+                            (handle-iter-clauses (cdr cl*) res))]
+                    [_ (handle-iter-clauses cl* res)])))))
+        (trace-define (handle-iter-clauses cl* res)
+          (define (add-clause cl)
+            (let ([cls (assoc 'iter res)])
+              (if (cdr cls)
+                  (snoc! (cdr cls) cl)
+                  (set-cdr! cls (list cl)))))
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [((v* ...) iter-ty op* ...)
+                     (and (andmap identifier? #'(v* ...))
+                          (valid-iter-ty? #'iter-ty))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(v iter-ty op* ...)
+                     (and (identifier? #'v)
+                          (valid-iter-ty? #'iter-ty))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(v lit)
+                     (and (identifier? #'v) (literal? #'lit))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(x . rest)
+                     (kw-for-config-clause? #'x)
+                     (handle-config-clauses cl* res)]
+                    [_ (syntax-error cl "unknown clause:")])))))
+        (trace-define (handle-config-clauses cl* res)
+          (define (add-clause cl)
+            (let ([cls (assoc 'config res)])
+              (if (cdr cls)
+                  (snoc! (cdr cls) cl)
+                  (set-cdr! cls (list cl)))))
+          (let loop ([cl* cl*])
+            (if (null? cl*)
+                res
+                (let ([cl (car cl*)])
+                  (syntax-case cl ()
+                    [(:break e)
+                     (kw:break? #':break)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:break e1 e2)
+                     (kw:break? #':break)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:guard e)
+                     (kw:guard? #':guard)
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:let v e)
+                     (and (kw:let? #':let) (identifier? #'v))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [(:let-values (v* ...) e)
+                     (and (kw:let-values? #':let-values)
+                          (andmap identifier? #'(v* ...)))
+                     (begin (add-clause cl)
+                            (loop (cdr cl*)))]
+                    [_ (syntax-error cl "unknown clause:")])))))
+        (handle-index-clause cl* (list (cons 'init   #f)
+                                       (cons 'index  #f)
+                                       (cons 'finish #f)
+                                       (cons 'iter   #f)
+                                       (cons 'config #f)
+                                       (cons 'length #f)
+                                       (cons 'fill   #f))))
+      (syntax-case stx ()
+        [(_ (cl* ...) body* ...)
+         (let* ([fragments  (classify-clauses #'(cl* ...))]
+                [frag-len   (cdr (assoc 'length fragments))]
+                [frag-index (cdr (assoc 'index  fragments))]
+                [frag-fill  (cdr (assoc 'fill   fragments))]
+                ;; feed the clauses w/o for/vector extensions
+                [cl* (filter id `(,(cdr (assoc 'init   fragments))
+                                  ,(cdr (assoc 'index  fragments))
+                                  ,(cdr (assoc 'finish fragments))
+                                  ;; TODO what if there's no iter clauses?
+                                  ,@(cdr (assoc 'iter  fragments))
+                                  ,(cdr (assoc 'config fragments))))])
+           (println "len: ~a~ncl* ~a" frag-len cl*)
+           (if frag-len
+               #`(let ([len #,(syntax-case frag-len () [(_ l) #'l])])
+                   (unless (and (fixnum? len) (nonnegative? len))
+                     (errorf ':for/vector "length is not a nonnegative fixnum: ~a" len))
+                   (let ([vec (make-vector len
+                                           #,(if frag-fill
+                                                 ;; TODO lift `v` first
+                                                 (syntax-case frag-fill () [(_ v) #'v])
+                                                 #'#f))])
+                     ;; need index to index the vec
+                     ;; if :index is given, use it; otherwise, we add one
+                     #,(if frag-index
+                           (let ([i (syntax-case frag-index () [(_ i) #'i])])
+                             #`(for ( #,@cl*
+                                      [:break (fx= #,i len)])
+                                 (vector-set! vec #,i (begin body* ...))))
+                           #'(for ([:index i]
+                                   #,@cl*
+                                   [:break (fx= i len)])
+                               (vector-set! vec i (begin body* ...))))
+                     vec))
+               #'(let ([lb (make-list-builder)])
+                   (for (#,@cl*)
+                     (lb (begin body* ...)))
+                   (list->vector (lb)))))])))
 
 
   (define-syntax for*
