@@ -15,122 +15,51 @@
   (define-syntax for/fold
     (lambda (stx)
       ;; this differs from that of for*
-      (define (classify-clauses cl*)
-        (trace-define (handle-init-clause cl* res)
-          (let loop ([cl* cl*])
-            (if (null? cl*)
-                res
-                (let ([cl (car cl*)])
-                  ;; TODO syntax-case literal doesn't work
-                  (syntax-case cl ()
-                    [(:init v e)
-                     (kw:init? #':init)
-                     (begin (displayln cl)
-                            (set-cdr! (assoc 'init res) cl)
-                            (handle-index-clause (cdr cl*) res))]
-                    [_ (handle-index-clause cl* res)])))))
-        (trace-define (handle-index-clause cl* res)
-          (let loop ([cl* cl*])
-            (if (null? cl*)
-                res
-                (let ([cl (car cl*)])
-                  (syntax-case cl ()
-                    [(:index v)
-                     (kw:index? #':index)
-                     (begin (displayln cl)
-                            (set-cdr! (assoc 'index res) cl)
-                            (handle-finish-clause (cdr cl*) res))]
-                    [_ (handle-finish-clause cl* res)])))))
-        (trace-define (handle-finish-clause cl* res)
-          (let loop ([cl* cl*])
-            (if (null? cl*)
-                res
-                (let ([cl (car cl*)])
-                  (syntax-case cl ()
-                    [(:finish v)
-                     (kw:finish? #':finish)
-                     (begin (displayln cl)
-                            (set-cdr! (assoc 'finish res) cl)
-                            (handle-iter-clauses (cdr cl*) res))]
-                    [_ (handle-iter-clauses cl* res)])))))
-        (trace-define (handle-iter-clauses cl* res)
-          (define (add-clause cl)
-            (let ([cls (assoc 'iter res)])
-              (if (cdr cls)
-                  (snoc! (cdr cls) cl)
-                  (set-cdr! cls (list cl)))))
-          (let loop ([cl* cl*])
-            (if (null? cl*)
-                res
-                (let ([cl (car cl*)])
-                  (syntax-case cl ()
-                    [((v* ...) iter-ty op* ...)
-                     (and (andmap identifier? #'(v* ...))
-                          (valid-iter-ty? #'iter-ty))
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
-                    [(v iter-ty op* ...)
-                     (and (identifier? #'v)
-                          (valid-iter-ty? #'iter-ty))
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
-                    [(v lit)
-                     (and (identifier? #'v) (literal? #'lit))
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
-                    [(x . rest)
-                     (kw-for-config-clause? #'x)
-                     (handle-config-clauses cl* res)]
-                    [_ (syntax-error cl "unknown clause:")])))))
-        (trace-define (handle-config-clauses cl* res)
-          (define (add-clause cl)
-            (let ([cls (assoc 'config res)])
-              (if (cdr cls)
-                  (snoc! (cdr cls) cl)
-                  (set-cdr! cls (list cl)))))
-          (let loop ([cl* cl*])
-            (if (null? cl*)
-                res
-                (let ([cl (car cl*)])
-                  (syntax-case cl ()
-                    [(:break e)
-                     (kw:break? #':break)
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
-                    [(:break e1 e2)
-                     (kw:break? #':break)
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
-                    [(:guard e)
-                     (kw:guard? #':guard)
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
-                    [(:let v e)
-                     (and (kw:let? #':let) (identifier? #'v))
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
-                    [(:let-values (v* ...) e)
-                     (and (kw:let-values? #':let-values)
-                          (andmap identifier? #'(v* ...)))
-                     (begin (add-clause cl)
-                            (loop (cdr cl*)))]
-                    [_ (syntax-error cl "unknown clause:")])))))
-        ;; making the 2nd arg a literal will make it shared static
-        ;; TODO some should use '() than #f
-        (handle-init-clause cl* (list (cons 'init   #f)
-                                      (cons 'index  #f)
-                                      (cons 'finish #f)
-                                      (cons 'iter   #f)
-                                      (cons 'config #f))))
+      (define handler
+        (make-clause-handler
+         ;; order matters
+         ;; state0 state1 action
+         `(start init ,handle-init)
+         `(start e0   epsilon)
+
+         `(init index ,handle-index)
+         `(init e1    epsilon)
+
+         `(e0   index ,handle-index)
+         `(e0   e1    epsilon)
+
+         `(index finish ,handle-finish)
+         `(index e2     epsilon)
+
+         `(e1    finish ,handle-finish)
+         `(e1    e2     epsilon)
+
+         `(finish iter0 ,handle-iter)
+         `(e2     iter0 ,handle-iter)
+
+         `(iter0 iter ,handle-iter)
+         `(iter0 e3   epsilon)
+
+         `(iter iter   ,handle-iter)
+         `(iter config ,handle-config)
+         `(iter e4     epsilon)
+
+         `(e3  config  ,handle-config)
+         `(e3  e4      epsilon)
+
+         `(e4  end     epsilon)
+
+         `(config config ,handle-config)
+         `(config end    epsilon)))
       (syntax-case stx ()
         [(_ (cl* ...) body* ...)
-         (let* ([fragments (classify-clauses #'(cl* ...))]
-                [frag-init   (cdr (assoc 'init fragments))]
-                [frag-index  (cdr (assoc 'index fragments))]
-                [frag-finish (cdr (assoc 'finish fragments))]
-                [frag-config (cdr (assoc 'config fragments))])
+         (let* ([fragments (handler (make-eq-hashtable) #'(cl* ...))]
+                [frag-init   (hashtable-ref fragments 'init #f)]
+                [frag-index  (hashtable-ref fragments 'index #f)]
+                [frag-finish (hashtable-ref fragments 'finish #f)]
+                [frag-config (hashtable-ref fragments 'config #f)])
            (with-syntax ([(for-loop t-acc t-finish) (generate-temporaries '(for-loop t-acc t-finish))])
-             (let* ([iter-frags (process-iter-clauses (cdr (assoc 'iter fragments)))]
+             (let* ([iter-frags (process-iter-clauses (hashtable-ref fragments 'iter #f))]
                     [init-def (if frag-init
                                   (syntax-case frag-init () [(_ v e) #'[v e]])
                                   #f)]
