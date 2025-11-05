@@ -15,6 +15,9 @@
           kw:length?
           kw:fill?
 
+          make-clause-handler add-clause! true
+          handle-init handle-index handle-finish handle-iter handle-config
+
           process-iter-clause process-iter-clauses)
   (import (chezpp chez)
           (chezpp utils)
@@ -90,6 +93,145 @@
   (define kw:let-values? (gen-kw? ':let-values))
   (define kw:length?     (gen-kw? ':length))
   (define kw:fill?       (gen-kw? ':fill))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   clause handlers
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  (trace-define (make-clause-handler . table)
+    (assert (eq? 'start (caar table)))
+    (lambda (s clauses)
+      (trace-let loop ([n 0] [state (caar table)] [cl* clauses])
+        (when (fx> n 5000)
+          (errorf 'for "clause handler loop limit (~a) reached" n))
+        (if (eq? 'end state)
+            s
+            (trace-let loop-trans ([trans (filter (lambda (row)
+                                                    (eq? (car row) state))
+                                                  table)])
+              (if (null? trans)
+                  (errorf 'for "no handler for ~a, clauses: ~a" state cl*)
+                  (let* ([row     (car trans)]
+                         [to      (list-ref row 1)]
+                         [handler (list-ref row 2)])
+                    ;; when cl* is '(), only epsilon transition is possible
+                    (if (null? cl*)
+                        (if (eq? handler 'epsilon)
+                            (loop (fx1+ n) to cl*)
+                            (loop-trans (cdr trans)))
+                        ;; TODO remove `next?`
+                        (if (eq? handler 'epsilon)
+                            (loop (fx1+ n) to cl*)
+                            (let-values ([(handled? next?) (handler s (car cl*))])
+                              (if handled?
+                                  (if next?
+                                      (loop (fx1+ n) to (cdr cl*))
+                                      (loop (fx1+ n) to cl*))
+                                  (loop-trans (cdr trans)))))))))))))
+
+
+  (define true (lambda (state cl) (values #t #f)))
+
+  (define (add-clause! state name cl)
+    (let ([?cl (hashtable-ref state name #f)])
+      (println "add-clause! ?cl ~a" ?cl)
+      (if ?cl
+          (errorf 'for "clause already exists: ~a" cl)
+          (hashtable-set! state name cl))))
+
+  (trace-define handle-init
+    (lambda (state cl)
+      (syntax-case cl ()
+        [(:init v e)
+         (kw:init? #':init)
+         (begin (displayln cl)
+                (add-clause! state 'init cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+  (trace-define handle-index
+    (lambda (state cl)
+      (syntax-case cl ()
+        [(:index v)
+         (kw:index? #':index)
+         (begin (displayln cl)
+                (add-clause! state 'index cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+  (trace-define handle-finish
+    (lambda (state cl)
+      (syntax-case cl ()
+        [(:finish v)
+         (kw:finish? #':finish)
+         (begin (displayln cl)
+                (add-clause! state 'finish cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+  (trace-define handle-iter
+    (lambda (state cl)
+      (define (add-clause! cl)
+        (hashtable-set! state 'iter
+                        (snoc! (hashtable-ref state 'iter '()) cl)))
+      (syntax-case cl ()
+        [((v* ...) iter-ty op* ...)
+         (and (andmap identifier? #'(v* ...))
+              (valid-iter-ty? #'iter-ty))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(v iter-ty op* ...)
+         (and (identifier? #'v)
+              (valid-iter-ty? #'iter-ty))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(v lit)
+         (and (identifier? #'v) (literal? #'lit))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+  (trace-define handle-config
+    (lambda (state cl)
+      (define (add-clause! cl)
+        (hashtable-set! state 'config
+                        (snoc! (hashtable-ref state 'config '()) cl)))
+      (syntax-case cl ()
+        [(:break e)
+         (kw:break? #':break)
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(:break e1 e2)
+         (kw:break? #':break)
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(:guard e)
+         (kw:guard? #':guard)
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(:let v e)
+         (and (kw:let? #':let) (identifier? #'v))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(:let-values (v* ...) e)
+         (and (kw:let-values? #':let-values)
+              (andmap identifier? #'(v* ...)))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   clause processors
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
   (define (op? x)
     (let ([x (syntax->datum x)])
