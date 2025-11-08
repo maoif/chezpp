@@ -368,8 +368,8 @@
          `(start index ,handle-index)
          `(start e0    epsilon)
 
-         `(e0 iter0 ,handle-iter)
-         `(e0 iter0 ,handle-iter)
+         `(index iter0 ,handle-iter)
+         `(e0    iter0 ,handle-iter)
 
          `(iter0 iter ,handle-iter)
          `(iter0 e1   epsilon)
