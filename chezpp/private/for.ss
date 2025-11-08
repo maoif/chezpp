@@ -17,6 +17,7 @@
 
           make-clause-handler add-clause! true
           handle-init handle-index handle-finish handle-iter handle-config
+          handle-iter/config-iter handle-iter/config-config
 
           process-iter-clause process-iter-clauses)
   (import (chezpp chez)
@@ -109,7 +110,9 @@
         (when (fx> n 5000)
           (errorf 'for "clause handler loop limit (~a) reached" n))
         (if (eq? 'end state)
-            s
+            (if (null? cl*)
+                s
+                (errorf 'for "clauses are not handled entirely: ~a" cl*))
             (trace-let loop-trans ([trans (filter (lambda (row)
                                                     (eq? (car row) state))
                                                   table)])
@@ -207,6 +210,60 @@
                 (values #t #t))]
         [(:break e1 e2)
          (kw:break? #':break)
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(:guard e)
+         (kw:guard? #':guard)
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(:let v e)
+         (and (kw:let? #':let) (identifier? #'v))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(:let-values (v* ...) e)
+         (and (kw:let-values? #':let-values)
+              (andmap identifier? #'(v* ...)))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+  (trace-define handle-iter/config-iter
+    (lambda (state cl)
+      (define (add-clause! cl)
+        (let ([res (hashtable-ref state 'iter/config '())])
+          (hashtable-set! state 'iter/config
+                          (snoc! res (list cl)))))
+      (syntax-case cl ()
+        [((v* ...) iter-ty op* ...)
+         (and (andmap identifier? #'(v* ...))
+              (valid-iter-ty? #'iter-ty))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(v iter-ty op* ...)
+         (and (identifier? #'v)
+              (valid-iter-ty? #'iter-ty))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(v lit)
+         (and (identifier? #'v) (literal? #'lit))
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+  (trace-define handle-iter/config-config
+    (lambda (state cl)
+      (define (add-clause! cl)
+        (let ([res (hashtable-ref state 'iter/config '())])
+          (if (null? res)
+              (errorf 'for "no iter clause before config clause: ~a" cl)
+              (snoc! (list-last res) cl))))
+      (syntax-case cl ()
+        [(:break e)
+         (kw:break? #':break)
+         (begin (add-clause! cl)
+                (values #t #t))]
+        [(:stop e1 e2)
+         (kw:stop? #':stop)
          (begin (add-clause! cl)
                 (values #t #t))]
         [(:guard e)
