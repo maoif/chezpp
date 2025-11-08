@@ -17,6 +17,7 @@
 
           make-clause-handler add-clause! true
           handle-init handle-index handle-finish handle-iter handle-config
+          handle-length handle-fill
           handle-iter/config-iter handle-iter/config-config
 
           process-iter-clause process-iter-clauses)
@@ -173,6 +174,26 @@
          (kw:finish? #':finish)
          (begin (displayln cl)
                 (add-clause! state 'finish cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+  (trace-define handle-length
+    (lambda (state cl)
+      (syntax-case cl ()
+        [(:length v)
+         (kw:length? #':length)
+         (begin (displayln cl)
+                (add-clause! state 'length cl)
+                (values #t #t))]
+        [_ (values #f #f)])))
+
+  (trace-define handle-fill
+    (lambda (state cl)
+      (syntax-case cl ()
+        [(:fill v)
+         (kw:fill? #':fill)
+         (begin (displayln cl)
+                (add-clause! state 'fill cl)
                 (values #t #t))]
         [_ (values #f #f)])))
 
