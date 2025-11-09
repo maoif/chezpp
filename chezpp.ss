@@ -14,7 +14,7 @@
                   (chezpp list)
                   (chezpp utils)
                   (chezpp control)
-                  (chezpp comprehension)
+                  (chezpp for)
                   (chezpp iter)
                   (chezpp io)
                   (chezpp file)
