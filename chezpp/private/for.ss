@@ -373,9 +373,9 @@
 
   #|
   For each iter clause, the following syntax/procedures are returned:
-  - gen-preloop-proc (gen or not gen?): generate procs that outputs code that binds various variables needed in the loop
+  - gen-preloop-proc (gen or not gen?): generate procs that outputs code that binds various variables needed in the loop,
+      plus type checking of inputs
   - loop-var: induction variables that correspond to each loop variable
-  - type-check: generate code that checks whether the loop variable has the right type
   - terminate: termination checks for the loop variable
   - next: code that advances the loop variable
   - gen-getter: generate code that binds the value to be used in the body
@@ -398,7 +398,6 @@
                            (let ([t-len (vector-length t-ks)])
                              #,e))))
                    #`[t-i 0]
-                   #`(hashtable? t-ht)
                    #`(fx= t-i t-len)
                    #`(fx1+ t-i)
                    (lambda (e)
@@ -419,7 +418,6 @@
                            (errorf ':iota "not a natural number: ~a" t-stop))
                          #,e))
                    #`[#,v 0]
-                   #`(natural? t-stop)
                    #`(fx= #,v t-stop)
                    #`(fx1+ #,v)
                    #f))]
@@ -434,7 +432,6 @@
                                 (errorf ':nums "not a nonnegative number: ~a" t-stop))
                               #,e))
                         #`[#,v 0]
-                        #`(and (number? t-stop) (nonnegative? t-stop))
                         #`(= #,v t-stop)
                         #`(+ #,v 1)
                         #f)]
@@ -444,7 +441,6 @@
                                 (errorf ':nums "invalid range from ~a to ~a" t-start t-stop))
                               #,e))
                         #`[#,v t-start]
-                        #`(and (number? t-start) (number? t-stop) (<= t-start t-stop))
                         #`(>= #,v t-stop)
                         #`(+ #,v 1)
                         #f)]
@@ -456,9 +452,6 @@
                                 (errorf ':nums "invalid range from ~a to ~a, step ~a" t-start t-stop t-step))
                               #,e))
                         #`[#,v t-start]
-                        #`(and (number? t-start) (number? t-stop)
-                               (or (and (<= t-start t-stop) (> t-step 0)))
-                               (or (and (> t-start t-stop)  (< t-step 0))))
                         #`(if (<= t-start t-stop)
                               (>= #,v t-stop)
                               (<= #,v t-stop))
@@ -475,7 +468,6 @@
                                 (errorf ':fxnums "not a nonnegative fixnum: ~a" t-stop))
                               #,e))
                         #`[#,v 0]
-                        #`(natural? t-stop)
                         #`(fx= #,v t-stop)
                         #`(fx+ #,v 1)
                         #f)]
@@ -485,7 +477,6 @@
                                 (errorf ':fxnums "invalid range from ~a to ~a" t-start t-stop))
                               #,e))
                         #`[#,v t-start]
-                        #`(and (fixnum? t-start) (fixnum? t-stop) (fx<= t-start t-stop))
                         #`(>= #,v t-stop)
                         #`(fx+ #,v 1)
                         #f)]
@@ -497,9 +488,6 @@
                                 (errorf ':fxnums "invalid range from ~a to ~a, step ~a" t-start t-stop t-step))
                               #,e))
                         #`[#,v t-start]
-                        #`(and (fixnum? t-start) (fixnum? t-stop)
-                               (or (and (fx<= t-start t-stop) (fx> t-step 0)))
-                               (or (and (fx> t-start t-stop)  (fx< t-step 0))))
                         #`(if (fx<= t-start t-stop)
                               (fx>= #,v t-stop)
                               (fx<= #,v t-stop))
@@ -515,7 +503,6 @@
                            (errorf ':list "not a list: ~a" t-ls))
                          #,e))
                    #`[t-ls t-ls]
-                   #`(list? t-ls)
                    #`(null? t-ls)
                    #`(cdr t-ls)
                    (lambda (e)
@@ -576,7 +563,6 @@
                                ;; (println ":vector :from ~a :to ~a :step ~a" t-from t-to t-step)
                                #,e)))
                        #`[t-i t-from]
-                       #`(vector? t-vec)
                        #`(if (fx<= t-from t-to)
                              (fx>= t-i t-to)
                              (fx<= t-i t-to))
@@ -632,7 +618,6 @@
                                ;; (println ":string :from ~a :to ~a :step ~a" t-from t-to t-step)
                                #,e)))
                        #`[t-i t-from]
-                       #`(string? t-vec)
                        #`(if (fx<= t-from t-to)
                              (fx>= t-i t-to)
                              (fx<= t-i t-to))
@@ -688,7 +673,6 @@
                                ;; (println ":fxvector :from ~a :to ~a :step ~a" t-from t-to t-step)
                                #,e)))
                        #`[t-i t-from]
-                       #`(fxvector? t-vec)
                        #`(if (fx<= t-from t-to)
                              (fx>= t-i t-to)
                              (fx<= t-i t-to))
@@ -744,7 +728,6 @@
                                ;; (println ":flvector :from ~a :to ~a :step ~a" t-from t-to t-step)
                                #,e)))
                        #`[t-i t-from]
-                       #`(flvector? t-vec)
                        #`(if (fx<= t-from t-to)
                              (fx>= t-i t-to)
                              (fx<= t-i t-to))
@@ -840,7 +823,6 @@
                                  ;; (println ":bytevector :from ~a :to ~a :step ~a" t-from t-to t-step)
                                  #,e)))
                          #`[t-i t-from]
-                         #`(bytevector? t-vec)
                          #`(if (fx<= t-from t-to)
                                (fx>= (fx+ t-i #,size -1) t-to)
                                (fx<= (fx- t-i #,size -1) t-to))
@@ -864,7 +846,6 @@
                                 [t-len (vector-length t-vec)])
                            #,e)))
                    #`[t-i 0]
-                   #`(hashtable? t-ht)
                    #`(fx= t-i t-len)
                    #`(fx1+ t-i)
                    (lambda (e)
@@ -882,7 +863,6 @@
                                 [t-len (vector-length t-vec)])
                            #,e)))
                    #`[t-i 0]
-                   #`(hashtable? t-ht)
                    #`(fx= t-i t-len)
                    #`(fx1+ t-i)
                    (lambda (e)
@@ -898,7 +878,6 @@
                            (errorf ':iter "not a iter: ~a" t-it))
                          #,e))
                    #`[t-v (iter-next! t-it)]
-                   #'(void)
                    #'(iter-end? t-v)
                    #'(iter-next! t-it)
                    (lambda (e)
@@ -910,7 +889,6 @@
         (cond [(natural? lit)
                (list #f
                      #`[#,v 0]
-                     #'#t
                      #`(fx= #,v #,lit)
                      #`(fx1+ #,v)
                      #f)]
@@ -920,7 +898,6 @@
                          #`(let ([t-str #,lit])
                              #,e))
                        #'[t-i 0]
-                       #'#t
                        #'(fx= t-i (string-length t-str))
                        #'(fx1+ t-i)
                        (lambda (e)
@@ -932,7 +909,6 @@
                          #`(let ([t-vec '#,(datum->syntax v lit)])
                              #,e))
                        #'[t-i 0]
-                       #'#t
                        #'(fx= t-i (vector-length t-vec))
                        #'(fx1+ t-i)
                        (lambda (e)

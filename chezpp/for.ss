@@ -12,6 +12,8 @@
 
 
 
+  #|doc
+  |#
   (define-syntax for/fold
     (lambda (stx)
       ;; this differs from that of for*
@@ -82,9 +84,8 @@
                                  (when frag-index (set! res (cons index-def res)))
                                  (when frag-init  (set! res (cons init-def  res)))
                                  res)]
-                    [tychecks  (map (lambda (x*) (list-ref x* 2)) iter-frags)]
-                    [termination-checks (map (lambda (x*) (list-ref x* 3)) iter-frags)]
-                    [updates (let ([res (map (lambda (x*) (list-ref x* 4)) iter-frags)])
+                    [termination-checks (map (lambda (x*) (list-ref x* 2)) iter-frags)]
+                    [updates (let ([res (map (lambda (x*) (list-ref x* 3)) iter-frags)])
                                (when frag-index
                                  (set! res (cons (syntax-case frag-index ()
                                                    [(_ v) #'(fx1+ v)])
@@ -92,7 +93,7 @@
                                (when frag-init
                                  (set! res (cons #'t-acc res)))
                                res)]
-                    [gen-getters (map (lambda (x*) (list-ref x* 5)) iter-frags)]
+                    [gen-getters (map (lambda (x*) (list-ref x* 4)) iter-frags)]
                     [call/finish-proc (if frag-finish
                                           (let ([params '()])
                                             (when frag-index
@@ -115,7 +116,6 @@
                ;; (println "for -------------------------")
                ;; (printf "gen-preloops: ~a~n" gen-preloops)
                ;; (printf "loop-vars:    ~a~n" loop-vars)
-               ;; (printf "tychecks:     ~a~n" tychecks)
                ;; (printf "termination-checks: ~a~n" termination-checks)
                ;; (printf "updates:      ~a~n" updates)
                ;; (printf "gen-getters:  ~a~n" gen-getters)
@@ -179,6 +179,8 @@
 
 
 
+  #|doc
+  |#
   (define-syntax for*/fold
     (lambda (stx)
       (define handler
@@ -290,9 +292,9 @@
                                    (with-syntax ([(forloop) (generate-temporaries '(forloop))])
                                      (let* ([i/c (car i/c*)] [iter-cl (car i/c)] [configs (cdr i/c)]
                                             [loop-var          (list-ref iter-cl 1)]
-                                            [termination-check (list-ref iter-cl 3)]
-                                            [update            (list-ref iter-cl 4)]
-                                            [gen-getter        (list-ref iter-cl 5)]
+                                            [termination-check (list-ref iter-cl 2)]
+                                            [update            (list-ref iter-cl 3)]
+                                            [gen-getter        (list-ref iter-cl 4)]
                                             [loop-var
                                              (let ([vars (if last-forloop
                                                              (let* ([vars (if frag-index (list #`[#,index-var #,index-var])     '())]
@@ -390,6 +392,8 @@
            #'(for/fold (cl* ...) body* ...))])))
 
 
+  #|doc
+  |#
   (define-syntax for/list
     (lambda (stx)
       (syntax-case stx ()
@@ -400,6 +404,8 @@
              (lb))])))
 
 
+  #|doc
+  |#
   (define-syntax for/vector
     (lambda (stx)
       (define handler
@@ -475,6 +481,8 @@
                    (list->vector (lb)))))])))
 
 
+  #|doc
+  |#
   (define-syntax for*
     (lambda (stx)
       (define handler
@@ -508,6 +516,8 @@
            #'(for*/fold (cl* ...) body* ...))])))
 
 
+  #|doc
+  |#
   (define-syntax for*/list
     (lambda (stx)
       (syntax-case stx ()
@@ -517,6 +527,9 @@
                (lb (begin body* ...)))
              (lb))])))
 
+
+  #|doc
+  |#
   (define-syntax for*/vector
     (lambda (stx)
       (define handler
