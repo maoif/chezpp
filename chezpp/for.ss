@@ -13,6 +13,68 @@
 
 
   #|doc
+(for/fold (<init-clause>?
+           <index-clause>?    ; global index
+           <finish-clause>?
+           <iter-clause>+
+           <for-config-clasue>*)
+  <body>+)
+
+;; used to introduce an accumulator value
+<init-clause> := (:init <var> <expr>)
+
+<iter-clause> := [<var>    <iter-type> <option>*]
+              |  [(<var>+) <iter-type> <option>*] ; number of <var> depends on the iter type
+              |  [<var>    <literal>]             ; cannot have options, and binds only one <var>
+
+<iter-type> := :iota <expr>
+            |  :nums <expr> <expr> <expr>
+            |  :fixnums <expr> <expr> <expr>
+            |  :string <expr>
+            |  :list <expr>
+            |  :vector  <expr>
+            |  :fxvector <expr>
+            |  :flvector <expr>
+            |  :bytevector <expr>
+            |  :hashtable <expr>
+            |  :hashtable-values <expr>
+            |  :hashtable-keys <expr>
+            |  :iter <expr>
+
+<option> := :from  <expr>
+         |  :to    <expr>
+         |  :step  <expr>
+         |  :guard <expr>
+         |  :index <var>
+         |  :rev
+
+<literal> := <integer>  ; iter from 0 to <integer> - 1
+          |  <string>   ; iter chars in the string from left to right
+          |  <vector>   ; iter items in the vector from left to right
+
+<for-config-clause> := <break-clause>
+                    |  <guard-clasue>
+                    |  <bind-clause>
+
+<index-clause> := [:index <var>]
+
+<finish-clause> := [:finish <expr>]
+
+<break-clause> := [:break <expr>]
+               |  [:break <expr> <expr>]  ; value of 2nd expr computes the return value
+
+<guard-clasue> := [:guard <expr>]
+               |  [:guard <expr> :index <var>] ; index incrs only when guard passes
+
+<bind-clause> := [:let <var> <expr>]
+              |  [:let* <var> <expr>]
+              |  [:letrec <var> <expr>]
+              |  [:letrec* <var> <expr>]
+              |  [:let-values (<var> ...) <expr>]
+              |  [:let*-values (<var> ...) <expr>]
+
+<stop-clause> := [:stop <expr>]
+              |  [:stop <expr> <expr>]
   |#
   (define-syntax for/fold
     (lambda (stx)
@@ -180,6 +242,19 @@
 
 
   #|doc
+(for*/fold (<init-clause>?
+            <index-clause>?    ; global index
+            <finish-clause>?
+            <for*-clause>+)
+  <body>+)
+
+<for*-clause> := <iter-clause> <for*-config-clause>*
+
+<for*-config-clause> := <break-clause>      ; in for*, break one level of loop
+                     |  <guard-clasue>
+                     |  <index-clause>      ; TODO for* can have local indices
+                     |  <bind-clause>
+                     |  <stop-clause>       ; only in for*, stop the entire iter
   |#
   (define-syntax for*/fold
     (lambda (stx)
@@ -353,14 +428,10 @@
 
 
   #|
-  (<for> (<index-clause>?
-          <iter-clause>+
-          <for-config-clause>*)
-    <body>+)
-
-  (<for*> (<index-clause>?
-           <for*-clause>+)
-    <body>+)
+(<for> (<index-clause>?
+        <iter-clause>+
+        <for-config-clause>*)
+  <body>+)
   |#
   (define-syntax for
     (lambda (stx)
@@ -393,6 +464,10 @@
 
 
   #|doc
+(for/list (<index-clause>?
+           <length-clause>?
+           <for-config-clause>*)
+  <body>+)
   |#
   (define-syntax for/list
     (lambda (stx)
@@ -405,6 +480,15 @@
 
 
   #|doc
+(for/vector (<index-clause>?
+             <length-clause>?
+             <fill-clause>?
+             <iter-clause>+
+             <for-config-clause>*)
+  <body>+)
+
+<length-clause> := [:length <expr>] ; <expr> must evaluate to a non-negative fixnum
+<fill-clause>   := [:fill   <expr>]
   |#
   (define-syntax for/vector
     (lambda (stx)
@@ -482,6 +566,9 @@
 
 
   #|doc
+(for* (<index-clause>?
+       <for*-clause>+)
+   <body>+)
   |#
   (define-syntax for*
     (lambda (stx)
@@ -517,6 +604,9 @@
 
 
   #|doc
+(for*/vector (<index-clause>?
+              <for*-clause>+)
+  <body>+)
   |#
   (define-syntax for*/list
     (lambda (stx)
@@ -529,6 +619,11 @@
 
 
   #|doc
+(for*/vector (<index-clause>?
+              <length-clause>?
+              <fill-clause>?
+              <for*-clause>+)
+  <body>+)
   |#
   (define-syntax for*/vector
     (lambda (stx)
