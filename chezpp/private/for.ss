@@ -29,7 +29,7 @@
           (chezpp iter))
 
 
-  (trace-define (literal? lit)
+  (define (literal? lit)
     (let* ([x (syntax->datum lit)]
            [x (if (and (pair? x) (= 2 (length x)) (eq? 'quote (car x)))
                   (cadr x)
@@ -104,21 +104,21 @@
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  (trace-define (make-clause-handler . table)
+  (define (make-clause-handler . table)
     (assert (eq? 'start (caar table)))
     (lambda (s clauses)
-      (trace-let loop ([n 0] [state (caar table)] [cl* clauses])
+      (let loop ([n 0] [state (caar table)] [cl* clauses])
         (when (fx> n 5000)
           (errorf 'for "clause handler loop limit (~a) reached" n))
         (if (eq? 'end state)
             (if (null? cl*)
                 s
                 (errorf 'for "clauses are not handled entirely: ~a" cl*))
-            (trace-let loop-trans ([trans (filter (lambda (row)
-                                                    (eq? (car row) state))
-                                                  table)])
+            (let loop-trans ([trans (filter (lambda (row)
+                                              (eq? (car row) state))
+                                            table)])
               (if (null? trans)
-                  (errorf 'for "no handler for ~a, clauses: ~a" state cl*)
+                  (errorf 'for "no handler for clauses: ~a" cl*)
                   (let* ([row     (car trans)]
                          [to      (list-ref row 1)]
                          [handler (list-ref row 2)])
@@ -142,62 +142,61 @@
 
   (define (add-clause! state name cl)
     (let ([?cl (hashtable-ref state name #f)])
-      (println "add-clause! ?cl ~a" ?cl)
       (if ?cl
           (errorf 'for "clause already exists: ~a" cl)
           (hashtable-set! state name cl))))
 
-  (trace-define handle-init
+  (define handle-init
     (lambda (state cl)
       (syntax-case cl ()
         [(:init v e)
          (kw:init? #':init)
-         (begin (displayln cl)
+         (begin ;;(displayln cl)
                 (add-clause! state 'init cl)
                 (values #t #t))]
         [_ (values #f #f)])))
 
-  (trace-define handle-index
+  (define handle-index
     (lambda (state cl)
       (syntax-case cl ()
         [(:index v)
          (kw:index? #':index)
-         (begin (displayln cl)
+         (begin ;;(displayln cl)
                 (add-clause! state 'index cl)
                 (values #t #t))]
         [_ (values #f #f)])))
 
-  (trace-define handle-finish
+  (define handle-finish
     (lambda (state cl)
       (syntax-case cl ()
         [(:finish v)
          (kw:finish? #':finish)
-         (begin (displayln cl)
+         (begin ;;(displayln cl)
                 (add-clause! state 'finish cl)
                 (values #t #t))]
         [_ (values #f #f)])))
 
-  (trace-define handle-length
+  (define handle-length
     (lambda (state cl)
       (syntax-case cl ()
         [(:length v)
          (kw:length? #':length)
-         (begin (displayln cl)
+         (begin ;;(displayln cl)
                 (add-clause! state 'length cl)
                 (values #t #t))]
         [_ (values #f #f)])))
 
-  (trace-define handle-fill
+  (define handle-fill
     (lambda (state cl)
       (syntax-case cl ()
         [(:fill v)
          (kw:fill? #':fill)
-         (begin (displayln cl)
+         (begin ;;(displayln cl)
                 (add-clause! state 'fill cl)
                 (values #t #t))]
         [_ (values #f #f)])))
 
-  (trace-define handle-iter
+  (define handle-iter
     (lambda (state cl)
       (define (add-clause! cl)
         (hashtable-set! state 'iter
@@ -219,7 +218,7 @@
                 (values #t #t))]
         [_ (values #f #f)])))
 
-  (trace-define handle-config
+  (define handle-config
     (lambda (state cl)
       (define (add-clause! cl)
         (hashtable-set! state 'config
@@ -248,7 +247,7 @@
                 (values #t #t))]
         [_ (values #f #f)])))
 
-  (trace-define handle-iter/config-iter
+  (define handle-iter/config-iter
     (lambda (state cl)
       (define (add-clause! cl)
         (let ([res (hashtable-ref state 'iter/config '())])
@@ -271,7 +270,7 @@
                 (values #t #t))]
         [_ (values #f #f)])))
 
-  (trace-define handle-iter/config-config
+  (define handle-iter/config-config
     (lambda (state cl)
       (define (add-clause! cl)
         (let ([res (hashtable-ref state 'iter/config '())])
@@ -328,13 +327,13 @@
                                 res))))
                '() ops))
   ;; return: ((:from 10) (:until 20) (:step 2) (:rev))
-  (trace-define (check-ops op-configs ops)
+  (define (check-ops op-configs ops)
     (let ([ops (preprocess-ops ops)])
       (for-each (lambda (op)
                   (unless (assoc (car op) op-configs)
                     (errorf ':vector (format "unknown op: ~a" (car op)))))
                 ops)
-      (trace-let loop ([op-configs op-configs] [res '()])
+      (let loop ([op-configs op-configs] [res '()])
         (if (null? op-configs)
             (reverse res)
             (let* ([op-conf (car op-configs)]
@@ -382,11 +381,10 @@
   - gen-getter: generate code that binds the value to be used in the body
   |#
   (define (process-iter-clause cl)
-    (trace-define (process-multi-var-iter-clause v* ty op*)
+    (define (process-multi-var-iter-clause v* ty op*)
       (let ([nops (length op*)])
         (case ty
           [:hashtable
-           (println ":hashtable: ~a" v*)
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:hashtable`:"))
            (unless (= 2 (length v*))
@@ -408,7 +406,7 @@
                              [#,(cadr v*) (vector-ref t-vs t-i)])
                          #,e))))]
           [else (syntax-error ty "bad iter type:")])))
-    (trace-define (process-single-var-iter-clause v ty op*)
+    (define (process-single-var-iter-clause v ty op*)
       (let ([nops (length op*)])
         (case ty
           [:iota
@@ -528,16 +526,16 @@
              (syntax-error op* "invalid number of options for iter type `:vector`:"))
            ;; op*: ((:from 10) (:until 20) (:step 2) (:rev))
            (let* ([ops (check-ops *vector-ops* (cdr op*))])
-             (println "ops: ~a" ops)
+             ;; (println "ops: ~a" ops)
              ;; all args are syntax objs
              (let ([op-from (assoc ':from ops)]
                    [op-to   (assoc ':to   ops)]
                    [op-step (assoc ':step ops)]
                    [op-rev  (assoc ':rev  ops)])
-               (println "op-from: ~a" op-from)
-               (println "op-to:   ~a" op-to)
-               (println "op-step: ~a" op-step)
-               (println "op-rev:  ~a" op-rev)
+               ;; (println "op-from: ~a" op-from)
+               ;; (println "op-to:   ~a" op-to)
+               ;; (println "op-step: ~a" op-step)
+               ;; (println "op-rev:  ~a" op-rev)
                ;; Q: how to use these ops?
                (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
                               (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
@@ -575,7 +573,7 @@
                                                   #'(if (<= t-from t-to)
                                                         1
                                                         -1))])
-                               (println ":vector :from ~a :to ~a :step ~a" t-from t-to t-step)
+                               ;; (println ":vector :from ~a :to ~a :step ~a" t-from t-to t-step)
                                #,e)))
                        #`[t-i t-from]
                        #`(vector? t-vec)
@@ -590,17 +588,11 @@
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:string`:"))
            (let* ([ops (check-ops *string-ops* (cdr op*))])
-             (println "ops: ~a" ops)
              ;; all args are syntax objs
              (let ([op-from (assoc ':from ops)]
                    [op-to   (assoc ':to   ops)]
                    [op-step (assoc ':step ops)]
                    [op-rev  (assoc ':rev  ops)])
-               (println "op-from: ~a" op-from)
-               (println "op-to:   ~a" op-to)
-               (println "op-step: ~a" op-step)
-               (println "op-rev:  ~a" op-rev)
-               ;; Q: how to use these ops?
                (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
                               (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
                  (list (lambda (e)
@@ -637,7 +629,7 @@
                                                   #'(if (<= t-from t-to)
                                                         1
                                                         -1))])
-                               (println ":string :from ~a :to ~a :step ~a" t-from t-to t-step)
+                               ;; (println ":string :from ~a :to ~a :step ~a" t-from t-to t-step)
                                #,e)))
                        #`[t-i t-from]
                        #`(string? t-vec)
@@ -652,17 +644,11 @@
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:fxvector`:"))
            (let* ([ops (check-ops *fxvector-ops* (cdr op*))])
-             (println "ops: ~a" ops)
              ;; all args are syntax objs
              (let ([op-from (assoc ':from ops)]
                    [op-to   (assoc ':to   ops)]
                    [op-step (assoc ':step ops)]
                    [op-rev  (assoc ':rev  ops)])
-               (println "op-from: ~a" op-from)
-               (println "op-to:   ~a" op-to)
-               (println "op-step: ~a" op-step)
-               (println "op-rev:  ~a" op-rev)
-               ;; Q: how to use these ops?
                (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
                               (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
                  (list (lambda (e)
@@ -699,7 +685,7 @@
                                                   #'(if (<= t-from t-to)
                                                         1
                                                         -1))])
-                               (println ":fxvector :from ~a :to ~a :step ~a" t-from t-to t-step)
+                               ;; (println ":fxvector :from ~a :to ~a :step ~a" t-from t-to t-step)
                                #,e)))
                        #`[t-i t-from]
                        #`(fxvector? t-vec)
@@ -714,17 +700,11 @@
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:flvector`:"))
            (let* ([ops (check-ops *flvector-ops* (cdr op*))])
-             (println "ops: ~a" ops)
              ;; all args are syntax objs
              (let ([op-from (assoc ':from ops)]
                    [op-to   (assoc ':to   ops)]
                    [op-step (assoc ':step ops)]
                    [op-rev  (assoc ':rev  ops)])
-               (println "op-from: ~a" op-from)
-               (println "op-to:   ~a" op-to)
-               (println "op-step: ~a" op-step)
-               (println "op-rev:  ~a" op-rev)
-               ;; Q: how to use these ops?
                (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
                               (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
                  (list (lambda (e)
@@ -761,7 +741,7 @@
                                                   #'(if (<= t-from t-to)
                                                         1
                                                         -1))])
-                               (println ":flvector :from ~a :to ~a :step ~a" t-from t-to t-step)
+                               ;; (println ":flvector :from ~a :to ~a :step ~a" t-from t-to t-step)
                                #,e)))
                        #`[t-i t-from]
                        #`(flvector? t-vec)
@@ -776,7 +756,6 @@
            (when (< nops 1)
              (syntax-error op* "invalid number of options for iter type `:bytevector`:"))
            (let* ([ops (check-ops *bytevector-ops* (cdr op*))])
-             (println "ops: ~a" ops)
              (let* ([*bv-table* '((single 4 bytevector-ieee-single-ref)
                                   (double 8 bytevector-ieee-double-ref)
                                   (u8     1 bytevector-u8-ref)
@@ -817,18 +796,11 @@
                                                    (if op-big
                                                        '(endianness big)
                                                        '(endianness little))))])
-               (println "op-from: ~a" op-from)
-               (println "op-to:   ~a" op-to)
-               (println "op-step: ~a" op-step)
-               (println "op-rev:  ~a" op-rev)
-               (println "op-type: ~a" op-type)
-               (println "op-big:  ~a" op-big)
-               (println "op-little:  ~a" op-little)
                (with-syntax ([(t-vec t-len t-i t-from t-to t-step)
                               (generate-temporaries '(t-vec t-len t-i t-from t-to t-step))])
                  (let ([vref (datum->syntax v (caddr (assoc op-type *bv-table*)))]
                        [size (datum->syntax v (cadr  (assoc op-type *bv-table*)))])
-                   (println "vref: ~a size: ~a" vref size)
+                   ;; (println "vref: ~a size: ~a" vref size)
                    (list (lambda (e)
                            #`(let ([t-vec #,(car op*)])
                                (unless (bytevector? t-vec)
@@ -865,7 +837,7 @@
                                                     #`(if (<= t-from t-to)
                                                           (fx*  1 #,size)
                                                           (fx* -1 #,size)))])
-                                 (println ":bytevector :from ~a :to ~a :step ~a" t-from t-to t-step)
+                                 ;; (println ":bytevector :from ~a :to ~a :step ~a" t-from t-to t-step)
                                  #,e)))
                          #`[t-i t-from]
                          #`(bytevector? t-vec)
@@ -933,7 +905,7 @@
                      #`(let ([#,v t-v])
                          #,e))))]
           [else (syntax-error ty "bad iter type:")])))
-    (trace-define (process-literal-iter-clause v lit)
+    (define (process-literal-iter-clause v lit)
       (let ([lit (->literal lit)])
         (cond [(natural? lit)
                (list #f
@@ -978,8 +950,8 @@
       [_ (syntax-error cl "unknown iter clause:")]))
 
 
-  (trace-define (process-iter-clauses cl*)
-    (for-each displayln cl*)
+  (define (process-iter-clauses cl*)
+    ;; (for-each displayln cl*)
     (map process-iter-clause cl*))
 
 
