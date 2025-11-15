@@ -1,6 +1,5 @@
 (import (chezpp))
 
-;; TODO box
 
 (mat else-clause
 
@@ -221,6 +220,19 @@
      (equal? 222
              (match (box (box 222))
                [,($b ,($box ,a)) a]))
+
+
+     (equal? 1
+             (match-box (box 1)
+                        [,a a]))
+
+     (equal? (box 222)
+             (match-box (box (box 222))
+                        [,a a]))
+
+     (equal? 222
+             (match-box (box (box 222))
+                        [,($b ,a) a]))
 
      )
 

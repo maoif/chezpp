@@ -499,10 +499,10 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
             [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
       (syntax-case stx (else)
         [(k e cl* ... [else body body* ...])
-         (with-syntax ([(cls ...) (map transform-clause #'k #'(cl* ...))])
+         (with-syntax ([(cls ...) (map (lambda (cl) (transform-clause #'k cl)) #'(cl* ...))])
            #'(match e cls ... [else body body* ...]))]
         [(k e cl cl* ...)
-         #'(match-box k e cl cl* ...
+         #'(match-box e cl cl* ...
                       [else (errorf 'k "no match found")])])))
 
   ;; TODO correct name (macro and dt name) in error report (in adt)
