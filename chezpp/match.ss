@@ -14,6 +14,7 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
           mlambda mlambda+ mlet mlet*
           )
   (import (chezscheme)
+          (chezpp list)
           (chezpp vector)
           (chezpp irregex)
           (chezpp internal))
@@ -329,19 +330,21 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                      ;; iterate through the input list, for each item,
                      ;; destructure it and accumulate matched components in `bindings ...`.
                      #,(with-syntax ([(patvars ...) (extract-pat-vars #'pat)])
-                         (with-syntax ([(bindings ...) (generate-temporaries #'(patvars ...))]
+                         (with-syntax ([(lbs ...)      (generate-temporaries #'(patvars ...))]
                                        [(iter first rest) (generate-temporaries '(iter first rest))])
-                           #`(let iter ([ls expr-id] [bindings '()] ...)
-                               (cond
-                                [(null? ls)
-                                 (let ([patvars (reverse bindings)] ...)
-                                   #,body)]
-                                [(pair? ls)
-                                 (let ([first (car ls)] [rest (cdr ls)])
-                                   #,(process-pattern rho #'first #'pat
-                                                      #'(iter rest (cons patvars bindings) ...)
-                                                      fk))]
-                                [else (#,fk)]))))
+                           #`(let ([lbs (make-list-builder)] ...)
+                               (let iter ([ls expr-id])
+                                 (cond
+                                  [(null? ls)
+                                   (let ([patvars (lbs)] ...)
+                                     #,body)]
+                                  [(pair? ls)
+                                   (let ([first (car ls)] [rest (cdr ls)])
+                                     #,(process-pattern rho #'first #'pat
+                                                        #'(begin (lbs patvars) ...
+                                                                 (iter rest))
+                                                        fk))]
+                                  [else (#,fk)])))))
                      (#,fk))]
               ;; ... in the middle, prefer `pat1`
               [(pat0 dots . pat1)
