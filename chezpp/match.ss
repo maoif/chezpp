@@ -35,6 +35,9 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
   ;; match interface
   (define-syntax match
     (lambda (stx)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;   helpers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (define literal?
         (lambda (lit)
           (let ([p (syntax->datum lit)])
@@ -110,6 +113,9 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
       (define by-name-datatype-pats?
         (lambda (rho variant pats)
           (by-name-record-pats? rho variant pats)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;   handlers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (define handle-box
         (lambda (rho expr-id pat body fk)
           (syntax-case pat (unquote)
@@ -289,6 +295,9 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
              ;; `reg` could be arbitrary expression, check whether it evals to string/reg
              (todo)]
             [_ (syntax-error pat "match: invalid regex pattern format:")])))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;   main logic
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (define process-pattern
         (lambda (rho expr-id pat body fk)
           (define extract-pat-vars
