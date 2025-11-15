@@ -1,5 +1,6 @@
 (import (chezpp))
 
+;; TODO box
 
 (mat else-clause
 
@@ -94,6 +95,27 @@
      (equal? '((1 11) (2 22) (3 33) (4 44))
              (match '((1 11) (2 22) (3 33) (4 44))
                [((,a ...) ...) a]))
+
+     ;; before commit 19bb7a4 (when i == #e1e7):
+     ;;  479 collections
+     ;;  6.629166675s elapsed cpu time, including 5.552937423s collecting
+     ;;  6.637919414s elapsed real time, including 5.561474874s collecting
+     ;;  4067993680 bytes allocated, including 2090397616 bytes reclaimed
+     ;; after:
+     ;;  250 collections
+     ;;  4.653256847s elapsed cpu time, including 3.708845426s collecting
+     ;;  4.661777688s elapsed real time, including 3.716243300s collecting
+     ;;  2147844608 bytes allocated, including 1000091024 bytes reclaimed
+     (let ([lb (make-list-builder)])
+       (for ([i #e1e5])
+         (lb `(((,i) ,i ,i) (,i (,i) ,i) (,i (,i) ,i) . ((,i) (,i) (,i)))))
+       (time (match (lb)
+               [((((,a) ,b ,c) (,d (,e) ,f) (,g (,h) ,i) . ((,j) (,k) (,l)))
+                 ...)
+                (equal? a d)
+                (equal? g j)
+                (equal? h k)]
+               [else #f])))
 
      )
 
