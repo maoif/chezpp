@@ -388,6 +388,43 @@
      )
 
 
+(mat named-ref
+
+     (match '(1 ((a b) (c d) (e f)) 2)
+       [(1 [#`blob (_ (,x ,y) _)] 2)
+        (equal? (list blob x y)
+                '(((a b) (c d) (e f))
+                  c d))])
+
+     (match '((1 2) (1 2) (1 2) (1 2))
+       [([#`p (,x ,y)] ...)
+        (and (equal? p '((1 2) (1 2) (1 2) (1 2)))
+             (equal? x '(1 1 1 1))
+             (equal? y '(2 2 2 2)))])
+
+     (match `(1 . 2)
+       [[#`p (,x . ,y)]
+        (displayln p)
+        (equal? p (cons x y))])
+
+     ;; ellipsis
+
+     (match '((a b) (c d) (e f))
+       [((#`l (,x ,y)) ...)
+        (equal? l
+                (zip x y))])
+
+     (let ([ls '(((a) (a) (a) (a) (a))
+                 ((b) (b) (b) (b) (b))
+                 ((c) (c) (c) (c) (c)))])
+       (match ls
+         [(((#`ref (,x)) ...) ...)
+          (and (equal? ref ls)
+               (equal? x '((a a a a a) (b b b b b) (c c c c c))))]))
+
+     )
+
+
 ;;;; record
 
 
