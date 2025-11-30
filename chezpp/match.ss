@@ -303,14 +303,22 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
           (define extract-pat-vars
             (lambda (pat)
               (let loop ([pat pat] [patvars '()])
-                (syntax-case pat (unquote)
-                  [,var (identifier? #'var) (cons #'var patvars)]
+                (syntax-case pat (unquote unquote-splicing quasisyntax)
+                  [,var  (identifier? #'var) (cons #'var patvars)]
+                  [,@var (identifier? #'var) (cons #'var patvars)]
+                  [,@[,vars ...]
+                   (andmap identifier? #'(vars ...))
+                   (append #'(vars ...) patvars)]
+                  [,@[proc -> ,vars ...]
+                   (and (andmap identifier? #'(vars ...)) (identifier? #'proc) (eq? '-> (datum ->)))
+                   (append #'(vars ...) patvars)]
+                  [(#`nref pat) (identifier? #'nref) (cons #'nref (loop #'pat patvars))]
                   [(pat0 . pat1) (loop #'pat0 (loop #'pat1 patvars))]
                   [#(pat0 pat1 ...) (loop #'pat0 (loop #'(pat1 ...) patvars))]
                   [_ patvars]))))
           ;;(printf "process-pattern ~s ~s ~s ~s~n" expr-id pat body fk)
           (with-syntax ([expr-id expr-id])
-            (syntax-case pat (unquote quasiquote)
+            (syntax-case pat (unquote quasiquote unquote-splicing quasisyntax)
               [,var
                (identifier? #'var)
                #`(let ([var expr-id]) #,body)]
@@ -319,6 +327,35 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                #`(if (equal? var expr-id) #,body (#,fk))]
               [()
                #`(if (null? expr-id) #,body (#,fk))]
+              [,@var
+               (identifier? #'var)
+               #`(let ([var (match-loop expr-id)])
+                   #,body)]
+              [,@[]
+               #`(begin (match-loop expr-id)
+                        #,body)]
+              [,@[,vars ...]
+               (andmap identifier? #'(vars ...))
+               (if (fx= 1 (length #'(vars ...)))
+                   #`(let ([#,(car #'(vars ...)) (match-loop expr-id)])
+                       #,body)
+                   #`(let-values ([(vars ...) (match-loop expr-id)])
+                       #,body))]
+              [,@[proc ->]
+               (and (identifier? #'proc) (eq? '-> (datum ->)))
+               #`(begin (proc expr-id)
+                        #,body)]
+              [,@[proc -> ,vars ...]
+               (and (andmap identifier? #'(vars ...)) (identifier? #'proc) (eq? '-> (datum ->)))
+               (if (fx= 1 (length #'(vars ...)))
+                   #`(let ([#,(car #'(vars ...)) (proc expr-id)])
+                       #,body)
+                   #`(let-values ([(vars ...) (proc expr-id)])
+                       #,body))]
+              [(#`nref pat)
+               (identifier? #'nref)
+               #`(let ([nref expr-id])
+                   #,(process-pattern rho #'expr-id #'pat body fk))]
               [,(?prefix special-pats ...)
                (box-prefix? #'?prefix)
                (handle-box rho #'expr-id #'(special-pats ...) body fk)]
