@@ -436,7 +436,275 @@
 
 ;;;; catamorphism
 
+(mat catamorphism
 
+     (begin (define (cata-list-map f ls)
+              (match ls
+                [()
+                 '()]
+                [(,head . ,@tail)
+                 (cons (f head) tail)]))
+            (define (cata-list-snoc! ls x)
+              (match ls
+                [()
+                 (list x)]
+                [(,head . ,@[,tail])
+                 (cons head tail)]))
+            #t)
+
+     (equal? '()
+             (cata-list-map add1 '()))
+     (equal? (map add1 (iota 10))
+             (cata-list-map add1 (iota 10)))
+     (equal? (map add1 (iota 100))
+             (cata-list-map add1 (iota 100)))
+
+     (equal? '(1)
+             (cata-list-snoc! '() 1))
+     (equal? (snoc! (iota 10) #t)
+             (cata-list-snoc! (iota 10) #t))
+     (equal? (snoc! (iota 100) #t)
+             (cata-list-snoc! (iota 100) #t))
+
+
+     (begin (define (tree-count T)
+              (match T
+                [()
+                 0]
+                [(,@L ,@R ,v)
+                 (+ L R 1)]))
+            ;; effect only
+            (define tree-flatten
+              (lambda (T)
+                (let ([lb (make-list-builder)])
+                  (match T
+                    [()
+                     (void)]
+                    [(,@[] ,@[] ,v)
+                     (lb v)])
+                  (lb))))
+            #t)
+
+     (equal? 0
+             (tree-count '()))
+     (equal? 1
+             (tree-count '(() () 1)))
+     (equal? 3
+             (tree-count '((() () 1)
+                           (() () 2)
+                           3)))
+     (equal? 5
+             (tree-count '(((() () 1)
+                            () 2)
+                           (()
+                            (() () 3) 4)
+                           5)))
+     (equal? 8
+             (tree-count '(((() (() () 1) 2)
+                            () 3)
+                           (()
+                            ((() (() () 4)
+                              5)
+                             ()
+                             6)
+                            7)
+                           8)))
+
+     (equal? 8
+             (tree-count '(((() (() () 1) 2)
+                            () 3)
+                           (()
+                            ((() (() () 4)
+                              5)
+                             ()
+                             6)
+                            7)
+                           8)))
+
+     (equal? '()
+             (tree-flatten '()))
+     (equal? '(1)
+             (tree-flatten '(() () 1)))
+     (equal? '(2 1)
+             (tree-flatten '((() () 2) () 1)))
+     (equal? '(2 1)
+             (tree-flatten '(() (() () 2) 1)))
+     (equal? '(1 2 3)
+             (tree-flatten '((() () 1)
+                             (() () 2)
+                             3)))
+     (equal? '(1 2 3 4 5)
+             (tree-flatten '(((() () 1)
+                              () 2)
+                             (()
+                              (() () 3) 4)
+                             5)))
+     (equal? '(1 2 3 4 5 6 7 8)
+             (tree-flatten '(((() (() () 1) 2)
+                              () 3)
+                             (()
+                              ((() (() () 4)
+                                5)
+                               ()
+                               6)
+                              7)
+                             8)))
+
+
+     ;; in ellipsis
+     (begin (define (sum-list ls)
+              (match ls
+                [()
+                 0]
+                ;; order matters
+                [(,@x* ...)
+                 (apply + x*)]
+                [,x
+                 x]))
+            #t)
+
+     (= 0
+        (sum-list '()))
+     (= 1
+        (sum-list '(1)))
+     (= 2
+        (sum-list '(1 1)))
+     (= 4
+        (sum-list '(1 (1 1) 1)))
+     (= 12
+        (sum-list '(1 (1 (1 (1 1) 1) 1) 1 (1 (1 1) 1))))
+     (= 24
+        (sum-list '(1 (1 1) (1 1) (1 (1 1) (1 (1 1) (1 1) 1) 1) 1 (1 1) (1 (1 1) (1 1) 1))))
+
+
+     ;; nested ellipses, custom proc
+     (begin (define proc (lambda (x) (displayln x) (collapse-list x)))
+            (define (collapse-list data)
+              (match data
+                [#f
+                 #f]
+                [%
+                 '%]
+                [(((1 ,@[proc -> ,x] 3) ...) ...)
+                 x]))
+            #t)
+
+     (equal? #f
+             (collapse-list #f))
+     (equal? '%
+             (collapse-list '%))
+     (equal? '((#f))
+             (collapse-list '(((1 #f 3)))))
+     (equal? '((%))
+             (collapse-list '(((1 % 3)))))
+     (equal? '((% %) (#f #f))
+             (collapse-list '(((1 % 3) (1 % 3) #|...|#)
+                              ((1 #f 3) (1 #f 3) #|...|#)
+                              ;; ...
+                              )))
+     (equal? '((#f #f #f #f #f)
+               (% %
+                  ((#f #f #f #f #f) (% % % % %) (#f #f #f #f #f) (% % % % %))
+                  %
+                  %)
+               (#f #f #f #f #f)
+               (% % %
+                  ((#f #f #f #f #f) (% % % % %) (#f #f #f #f #f) (% % % % %))
+                  %))
+             (collapse-list '(((1 #f 3)
+                               (1 #f 3)
+                               (1 #f 3)
+                               (1 #f 3)
+                               (1 #f 3))
+                              ((1 % 3)
+                               (1 % 3)
+                               (1 (((1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3))
+                                   ((1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)
+                                    (1 % 3))
+                                   ((1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3))
+                                   ((1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)))
+                                  3)
+                               (1 % 3)
+                               (1 % 3))
+                              ((1 #f 3)
+                               (1 #f 3)
+                               (1 #f 3)
+                               (1 #f 3)
+                               (1 #f 3))
+                              ((1 % 3)
+                               (1 % 3)
+                               (1 % 3)
+                               (1 (((1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3))
+                                   ((1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)
+                                    (1 % 3))
+                                   ((1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3)
+                                    (1 #f 3))
+                                   ((1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)
+                                    (1 % 3)))
+                                  3)
+                               (1 % 3)))))
+
+
+     ;; multiple retval
+     (begin (define (sum/multiply-list ls)
+              (match ls
+                [()
+                 (values 0 1)]
+                ;; order matters
+                [(,@[,s* ,p*] ...)
+                 (values (apply + s*)
+                         (apply * p*))]
+                [,x
+                 (values x x)]))
+            #t)
+
+     (let-values ([(s p) (sum/multiply-list '())])
+       (and (= s 0)
+            (= p 1)))
+     (let-values ([(s p) (sum/multiply-list '(1))])
+       (and (= s 1)
+            (= p 1)))
+     (let-values ([(s p) (sum/multiply-list '(1 2))])
+       (and (= s 3)
+            (= p 2)))
+     (let-values ([(s p) (sum/multiply-list '(1 (2 3) 1))])
+       (and (= s 7)
+            (= p 6)))
+     (let-values ([(s p) (sum/multiply-list '(1 (2 (1 (3 1) 4) 1) 5 (1 (6 1) 7)))])
+       (and (= s 33)
+            (= p (* 2 3 4 5 6 7))))
+     (let-values ([(s p) (sum/multiply-list '(1 (2 3) (1 1 6 7) (1 (1 1) (1 (2 3) (1 1) 1) 1) 5 (1 1) (1 (7 8) (1 1) 1)))])
+       (and (= s 60)
+            (= p (* 2 3 6 7 2 3 5 7 8))))
+     )
 
 ;;;; in-place update
 
