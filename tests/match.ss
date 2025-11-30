@@ -116,6 +116,28 @@
                 (equal? h k)]
                [else #f])))
 
+     (match '(json (object
+                    (items
+                     (array
+                      (object (name "pen")
+                              (price 3.5))
+                      (object (name "notebook")
+                              (price 12.0))
+                      (object (name "apple")
+                              (price 1.0))
+                      100
+                      #f))))
+       [(json (object
+               (items
+                (array
+                 (object (name ,names)
+                         (price ,prices))
+                 ...
+                 100
+                 #f))))
+        (equal? '(("pen" "notebook" "apple") (3.5 12.0 1.0))
+                (list names prices))])
+
      )
 
 (mat list-with-ellipses-in-the-middle
