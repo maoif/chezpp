@@ -101,50 +101,85 @@
 
      (equal? "Jack"
              (match (Person "Jack" 16 'male)
-               [,($rec Person (name ,x)) x]))
-
-     (equal? (list "Jack" 16 'male)
-             (match-Person (Person "Jack" 16 'male)
-                           [(,name ,age ,sex) (list name age sex)]))
-     (equal? (list "Jack" 'male)
-             (match-Person (Person "Jack" 16 'male)
-                           [(,name _ ,sex) (list name sex)]))
-     (equal? (list 16 "Jack")
-             (match-Person (Person "Jack" 16 'male)
-                           [(,name ,age _) (list age name)]))
-
-     (equal? 'small
-             (match-Person (Person "Jack" 23 'male)
-                           [(,name ,age _)
-                            (guard (< age 24))
-                            'small]
-                           [(,name ,age _)
-                            (guard (< age 50))
-                            'big]
-                           [else 'old]))
-     (equal? 'old
-             (match-Person (Person "Jack" 51 'male)
-                           [(,name ,age _)
-                            (guard (< age 24))
-                            'small]
-                           [(,name ,age _)
-                            (guard (< age 50))
-                            'big]
-                           [else 'old]))
+               [,(Person (name ,x)) x]))
 
      (equal? (list "Jack" 16 'male)
              (match (Person "Jack" 16 'male)
-               [,($rec Person ,name ,age ,sex) (list name age sex)]))
+               [,(Person ,name ,age ,sex) (list name age sex)]))
+     (equal? (list "Jack" 'male)
+             (match (Person "Jack" 16 'male)
+               [,(Person ,name _ ,sex) (list name sex)]))
+     (equal? (list 16 "Jack")
+             (match (Person "Jack" 16 'male)
+               [,(Person ,name ,age _) (list age name)]))
 
-     (error? (match-Person 42
-                           [(,a ,b ,c) a]))
-     (error? (match-Person '(1 2 3)
-                           [(,name ,age _)
-                            (guard (< age 24))
-                            'small]
-                           [(,name ,age _)
-                            (guard (< age 50))
-                            'big]))
+     (equal? 'small
+             (match (Person "Jack" 23 'male)
+               [,(Person ,name ,age _)
+                (guard (< age 24))
+                'small]
+               [,(Person ,name ,age _)
+                (guard (< age 50))
+                'big]
+               [else 'old]))
+     (equal? 'old
+             (match (Person "Jack" 51 'male)
+               [,(Person ,name ,age _)
+                (guard (< age 24))
+                'small]
+               [,(Person ,name ,age _)
+                (guard (< age 50))
+                'big]
+               [else 'old]))
+
+     (equal? (list "Jack" 16 'male)
+             (match (Person "Jack" 16 'male)
+               [,(Person ,name ,age ,sex) (list name age sex)]))
+
+     (error? (match 42
+               [,(Person ,a ,b ,c) a]))
+     (error? (match '(1 2 3)
+               [,(Person ,name ,age _)
+                (guard (< age 24))
+                'small]
+               [,(Person ,name ,age _)
+                (guard (< age 50))
+                'big]))
+
+     ;; nested patterns
+     (begin
+       (record Triple (a b c))
+       #t)
+
+     (equal? '(2 3 42)
+             (match (Triple (Triple 1 1 1)
+                            (Triple (Triple 2 2 2)
+                                    (Triple 3 3 3)
+                                    (Triple (Triple 1 1 1)
+                                            (Triple 1 1 1)
+                                            (Triple 1 1 42)))
+                            (Triple 1 1 1))
+               [,(Triple ,(Triple 1 1 1)
+                         ,(Triple ,(Triple 2 ,x0 2)
+                                  ,(Triple 3 ,x1 3)
+                                  ,(Triple ,p3
+                                           ,p4
+                                           ,(Triple _ _ ,x2)))
+                         ,(Triple 1 1 1))
+                (list x0 x1 x2)]))
+
+     (equal? (list "Jack0" "Jack1" "Jack00" "Jack11")
+             (match (Triple (Person "Jack0" 16 'male)
+                            (Person "Jack1" 17 'male)
+                            (Triple (Person "Jack00" 18 'male)
+                                    (Person "Jack11" 19 'male)
+                                    (Person "Jack21" 20 'male)))
+               [,(Triple ,(Person ,n0 _ _)
+                         ,(Person ,n1 _ _)
+                         ,(Triple ,(Person ,n2 _ _)
+                                  ,(Person ,n3 _ _)
+                                  _))
+                (list n0 n1 n2 n3)]))
 
      )
 

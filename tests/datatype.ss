@@ -181,29 +181,29 @@
             #t)
 
      (= 1
-        (match-Color R
-                     [R 1]
-                     [G 2]
-                     [B 3]))
+        (match R
+          [,(Color R) 1]
+          [,(Color G) 2]
+          [,(Color B) 3]))
      (= 2
-        (match-Color G
-                     [R 1]
-                     [G 2]
-                     [B 3]))
+        (match G
+          [,(Color R) 1]
+          [,(Color G) 2]
+          [,(Color B) 3]))
      (= 3
-        (match-Color B
-                     [R 1]
-                     [G 2]
-                     [B 3]))
+        (match B
+          [,(Color R) 1]
+          [,(Color G) 2]
+          [,(Color B) 3]))
 
-     (error? (match-Color 'bla
-                          [R 1]
-                          [G 2]
-                          [B 3]))
-     (error? (match-Color 42
-                          [R 1]
-                          [G 2]
-                          [B 3]))
+     (error? (match 'bla
+               [,(Color R) 1]
+               [,(Color G) 2]
+               [,(Color B) 3]))
+     (error? (match 42
+               [,(Color R) 1]
+               [,(Color G) 2]
+               [,(Color B) 3]))
 
      )
 
@@ -216,39 +216,80 @@
 
      ;; match by position
      (eq? 'val
-          (match-Tree (Node 'val Nil Nil)
-                      [Nil 'nil]
-                      [(Node ,x _ _) x]))
+          (match (Node 'val Nil Nil)
+            [,(Tree Nil) 'nil]
+            [,(Tree Node ,x _ _) x])) ;; FIXME
 
      ;; match by name
      (equal? 2
-             (match-Tree (Node '(1 2 3) Nil Nil)
-                         [Nil 'nil]
-                         [(Node (val (_ ,x _))) x]))
+             (match (Node '(1 2 3) Nil Nil)
+               [,(Tree Nil) 'nil]
+               [,(Tree Node (val (_ ,x _))) x]))
 
      (eq? 42
-          (match-Tree (Node 42 Nil Nil)
-                      [Nil 'nil]
-                      [(Node (val ,v)) v]))
+          (match (Node 42 Nil Nil)
+            [,(Tree Nil) 'nil]
+            [,(Tree Node (val ,v)) v]))
      (eq? Nil
-          (match-Tree (Node 42 Nil Nil)
-                      [Nil 'nil]
-                      [(Node (right ,v)) v]))
+          (match (Node 42 Nil Nil)
+            [,(Tree Nil) 'nil]
+            [,(Tree Node (right ,v)) v]))
      (equal? (list 42 Nil)
-             (match-Tree (Node 42 Nil Nil)
-                         [Nil 'nil]
-                         [(Node ,v _ ,y) (list v y)]))
-     (eq? 'nil
-          (match-Tree! Nil
-                       [(Node (val ,v)) v]
-                       [Nil 'nil]))
+             (match (Node 42 Nil Nil)
+               [,(Tree Nil) 'nil]
+               [,(Tree Node ,v _ ,y) (list v y)]))
 
-     (string-contains?
-      (condition-message
-       (guard (e [#t e])
-         (expand '(match-Tree! Nil
-                               [(Node (val ,v)) v]))))
-      "incomplete variants for")
+
+     ;; nested patterns
+
+     (begin (datatype Json
+                      [JNull]
+                      [JBool   b]
+                      [JNumber num]
+                      [JString str]
+                      [JArray  arr]
+                      [JObject obj])
+            #t)
+
+     (match JNull
+       [,(Json JNull) #t])
+
+     (match (JBool #t)
+       [,(Json JBool ,x) x])
+
+     (match (JBool #f)
+       [,(Json JBool ,x) (not x)])
+
+     (match (JNumber 42)
+       [,(Json JNumber ,x)
+        (= x 42)])
+
+     (match (JString "jstr")
+       [,(Json JString ,x)
+        (string=? x "jstr")])
+
+     (match (JArray (list JNull (JBool #t) (JBool #f) (JNumber 42) (JString "jstr")))
+       [,(Json JArray (,(Json JNull)
+                       ,(Json JBool   ,x0)
+                       ,(Json JBool   ,x1)
+                       ,(Json JNumber ,x2)
+                       ,(Json JString ,x3)))
+        (equal? (list x0 x1 x2 x3)
+                (list #t #f 42 "jstr"))])
+
+     (match (JObject (list
+                      (cons "Null"   JNull)
+                      (cons "True"   (JBool   #t))
+                      (cons "False"  (JBool   #f))
+                      (cons "Number" (JNumber 42))
+                      (cons "String" (JString "jstr"))))
+       [,(Json JObject ((,n0 . ,(Json JNull))
+                        (,n1 . ,(Json JBool   ,x0))
+                        (,n2 . ,(Json JBool   ,x1))
+                        (,n3 . ,(Json JNumber ,x2))
+                        (,n4 . ,(Json JString ,x3))))
+        (equal? (list n0 n1 n2 n3 n4)
+                (list "Null" "True" "False" "Number" "String"))])
 
      )
 

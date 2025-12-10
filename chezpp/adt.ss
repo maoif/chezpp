@@ -1,7 +1,7 @@
 (library (chezpp adt)
   (export datatype record)
   (import (chezpp chez)
-          (chezpp match)
+          (chezpp private match)
           (chezpp string)
           (chezpp list)
           (chezpp internal))
@@ -222,8 +222,7 @@
               ;; $datatype-mk-dt
               [mkdt (construct-datatype-name #'dt "mk-" #'dt)]
               [((singletons ...) (mvariants ...)) (classify-variants #'(variant0 variants ...))]
-              [match-dt  ($construct-name #'dt "match-" #'dt)]
-              [match-dt! ($construct-name #'dt "match-" #'dt "!")])
+              [dt-expander ($construct-name #'dt #'dt "-expander")])
            (with-syntax ([(suids ...) (gen-vuids #'dt #'dtuid #'(singletons ...))]
                          [(muids ...) (gen-vuids #'dt #'dtuid #'(mvariants ...))]
                          [(mksingletons ...) (generate-temporaries #'(singletons ...))]
@@ -245,7 +244,7 @@
                #`(module (dt dt? mnames ... snames ...
                              mkvariants ... mvariants? ... singletons ... singletons? ...
                              getters ... setters ...
-                             match-dt match-dt!)
+                             dt-expander)
                    (define-record-type (dt mkdt dt?)
                      (nongenerative dtuid))
                    (define-record-type (mnames mkvariants mvariants?)
@@ -265,34 +264,7 @@
                    (define singletons (mksingletons))
                    ...
                    (begin setter-wrappers ...)
-                   (define-syntax match-dt
-                     (syntax-rules ()
-                       [(k e cl* (... ...)) ($match-datatype match-dt dt e cl* (... ...))]))
-                   (define-syntax match-dt!
-                     (lambda (stx)
-                       (define check
-                         (lambda (cl*)
-                           (let ([vrts  (map (lambda (cl)
-                                               (syntax-case cl ()
-                                                 [(pat . e*)
-                                                  (syntax-case #'pat ()
-                                                    [(variant . rest) #'variant]
-                                                    [singleton (identifier? #'singleton) #'singleton]
-                                                    [_ (syntax-error cl "invalid clause for " (symbol->string 'match-dt!))])]
-                                                 [_ (syntax-error cl "invalid clause for " (symbol->string 'match-dt!))]))
-                                             cl*)])
-                             (or (andmap (lambda (v) (memq v (syntax->datum vrts))) '(singletons ... mkvariants ...))
-                                 ;; TODO list unwritten variants?
-                                 (syntax-error cl* "incomplete variants for " (symbol->string 'match-dt!))))))
-                       (syntax-case stx (else)
-                         [(k e cl* (... ...) [else body body* (... ...)])
-                          #'($match-datatype match-dt! dt e cl* (... ...)
-                                             [else body body* (... ...)])]
-                         [(k e cl cl* (... ...))
-                          (check #'(cl cl* (... ...)))
-                          #'(match-dt! e cl cl* (... ...)
-                                       [else (errorf 'k "no match found")])]
-                         [_ (syntax-error stx "bad " (symbol->string 'match-dt!) " form:")])))))))]
+                   (define-match-expander dt-expander datatype-expander)))))]
         [(_ dt variant0 variants ...)
          (check-datatype-name #'dt)
          (with-syntax ([dt? ($construct-name #'dt #'dt "?")])
@@ -406,22 +378,20 @@
          (andmap identifier? #'(dt pred))
          (with-syntax ([mkdt #'dt]
                        [dtname     ($construct-name #'dt "$record-" #'dt)]
-                       [match-dt   ($construct-name #'dt "match-" #'dt)]
+                       [dt-expander ($construct-name #'dt #'dt "-expander")]
                        [uid        (gen-uid #'dt #'(fld fld* ...))]
                        [(flds ...) (handle-fields #'dt #'(fld fld* ...))]
                        [proto      (gen-protocol #'dt #'(fld fld* ...))])
            (with-syntax ([(setter-wrappers ...) (gen-setter-wrappers #'dt #'(flds ...) #'(fld fld* ...))]
                          [(getters ...) (get-getters #'(flds ...))]
                          [(setters ...) (get-setters #'dt #'(flds ...))])
-             #`(module (dtname mkdt pred getters ... setters ... match-dt)
+             #`(module (dtname mkdt pred getters ... setters ... dt-expander)
                  (define-record-type (dtname mkdt pred)
                    (nongenerative uid)
                    (fields flds ...)
                    (protocol proto))
                  (begin setter-wrappers ...)
-                 (define-syntax match-dt
-                   (syntax-rules ()
-                     [(k e cl* (... ...)) ($match-record match-dt dtname e cl* (... ...))])))))]
+                 (define-match-expander dt-expander record-expander))))]
         [(k dt (fld fld* ...))
          (identifier? #'dt)
          (with-syntax ([dt? ($construct-name #'dt #'dt "?")])

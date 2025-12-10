@@ -9,15 +9,15 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
 
 
 (library (chezpp match)
-  (export match ;; mlambda mcase-lambda mlet mletrec mlet* mletrec*
-          $match-record $match-datatype match-record match-datatype match-box match-string
-          mlambda mlambda+ mlet mlet*
-          )
+  (export match
+          mlambda mlambda+ mlet mlet*)
   (import (chezscheme)
           (chezpp list)
           (chezpp vector)
           (chezpp irregex)
-          (chezpp internal))
+          (chezpp internal)
+          (chezpp private match)
+          (chezpp io))
 
   (define subvector->list
     (lambda (vec start)
@@ -45,256 +45,30 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                 (boolean? p)
                 (string? p)
                 (char? p)))))
-      (define back-ref-id?
-        (lambda (id)
-          (and (identifier? id)
-               (char=? #\? (string-ref (symbol->string (syntax->datum id)) 0)))))
-      (define regex-prefix?
-        (lambda (p)
-          (let ([p (syntax->datum p)])
-            (or (eq? p '$r) (eq? p '$regex)))))
-      (define box-prefix?
-        (lambda (p)
-          (let ([p (syntax->datum p)])
-            (or (eq? p '$b) (eq? p '$box)))))
-      (define record-prefix?
-        (lambda (p)
-          (let ([p (syntax->datum p)])
-            (or (eq? p '$rec) (eq? p '$record)))))
-      (define datatype-prefix?
-        (lambda (p)
-          (let ([p (syntax->datum p)])
-            (or (eq? p '$data) (eq? p '$datatype)))))
-      ;; see ChezScheme syntax.ss: define-record-type
-      (define get-type-descriptor (lambda (rho dt) (cadr (rho dt))))
-      ;; get all field names of the record type, include those from the parents
-      (define get-all-fields
-        (lambda (rho dt)
-          (let ([rtd (get-type-descriptor rho dt)])
-            (let loop ([pdesc (record-type-parent rtd)]
-                       [fld** (list (record-type-field-names rtd))])
-              (if pdesc
-                  (loop (record-type-parent pdesc) (cons (record-type-field-names pdesc) fld**))
-                  ;; returns a list of vectors: '(#(f0 f1 ...) ...)
-                  (reverse fld**))))))
-      (define get-fields
-        (lambda (rho dt)
-          (let ([rtd (get-type-descriptor rho dt)])
-            ;; returns vector of names: '#(f0 f1 ...)
-            (record-type-field-names rtd))))
-      ;; return `t` if it's a record type, otherwise #f
-      (define valid-record-type?
-        (lambda (rho t)
-          (and (identifier? t)
-               (let ([r '#{r6rs-record vc7pishgmrh09qm-a}]
-                     [info (rho t)])
-                 (and info (eq? r (car (rho t))) t)))))
-      (define variant-of?
-        (lambda (rho dt variant)
-          (and (valid-record-type? rho dt)
-               (valid-record-type? rho variant)
-               (let ([pdesc (record-type-parent (get-type-descriptor rho variant))])
-                 (if pdesc
-                     (eq? pdesc (get-type-descriptor rho dt))
-                     (errorf 'match "invalid variant ~a of datatype ~a" variant dt))))))
-      (define by-name-record-pats?
-        (lambda (rho dt pats)
-          (let* ([pats (syntax->datum pats)]
-                 [fld* (get-fields rho dt)])
-            (and (apply = 2 (map (lambda (p) (or (and
-                                                  ;; in pats like (,x _ ,y), _ is not a list
-                                                  (list? p) (length p))
-                                                 -1))
-                                 pats))
-                 (<= (length pats) (vector-length fld*))
-                 ;; TODO check names are unique
-                 ;; check if each pat has right field names
-                 (andmap (lambda (pat) (vmemq (car pat) fld*)) pats)))))
-      (define by-name-datatype-pats?
-        (lambda (rho variant pats)
-          (by-name-record-pats? rho variant pats)))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;   handlers
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      (define handle-box
-        (lambda (rho expr-id pat body fk)
-          (syntax-case pat (unquote)
-            [(,bref)
-             (back-ref-id? #'bref)
-             #'not-impl]
-            [(pat)
-             #`(if (box? #,expr-id)
-                   #,(with-syntax ([(bval) (generate-temporaries '(bval))])
-                       #`(let ([bval (unbox #,expr-id)])
-                           #,(process-pattern rho #'bval #'pat body fk)))
-                   (#,fk))]
-            [(,bref pat)
-             (identifier? #'bref)
-             #'not-impl]
-            [_ (syntax-error pat "match: invalid box pattern format:")])))
-      (define handle-record
-        (lambda (rho expr-id pat body fk)
-          ;; return the name of the record type (dt or $record-dt)
-          (define check-record-type
-            (lambda (rho dt)
-              (let ([res (valid-record-type? rho dt)])
-                (or res (let ([dt1 ($construct-name dt "$record-" dt)])
-                          (or (valid-record-type? rho dt1)
-                              (errorf 'match "invalid record type: ~a" (syntax->datum dt))))))))
-          (syntax-case pat ()
-            [(dt . rest)
-             (let ([dt (check-record-type rho #'dt)])
-               (if dt
-                   (syntax-case #'rest (unquote)
-                     [(,bref)
-                      (back-ref-id? #'bref)
-                      #'not-impl]
-                     [(pat pats ...)
-                      (by-name-record-pats? rho dt #'(pat pats ...))
-                      ;; use procedural interfaces:
-                      ;; (record-predicate rtd) (record-accessor rtd i)
-                      ;; their use can be optimized if `rtd` is given at compile time
-                      (with-syntax ([(type?) (generate-temporaries '(type?))]
-                                    [rtd (datum->syntax dt (get-type-descriptor rho dt))]
-                                    [(fld* ...) (generate-temporaries (enumerate #'(pat pats ...)))]
-                                    [(i ...) (datum->syntax dt (map
-                                                                (lambda (n) (vmemq (car n) (get-fields rho dt)))
-                                                                (syntax->datum #'(pat pats ...))))]
-                                    ;; get the patterns per se: (field <pat>) -> <pat>
-                                    [((_ npats) ...) #'(pat pats ...)])
-                        ;; need to quote `rtd`
-                        #`(let ([type? (record-predicate 'rtd)])
-                            (if (type? #,expr-id)
-                                (let ([fld* ((record-accessor 'rtd i) #,expr-id)] ...)
-                                  #,(let loop ([fields #'(fld* ...)] [npats #'(npats ...)])
-                                      (if (null? fields)
-                                          body
-                                          (process-pattern rho (car fields) (car npats)
-                                                           (loop (cdr fields) (cdr npats))
-                                                           fk))))
-                                (#,fk))))]
-                     [(pat pats ...)
-                      (fx= (length #'(pat pats ...)) (vector-length (get-fields rho dt)))
-                      (with-syntax ([(type?) (generate-temporaries '(type?))]
-                                    [rtd (datum->syntax dt (get-type-descriptor rho dt))]
-                                    [(fld* ...) (generate-temporaries (enumerate #'(pat pats ...)))]
-                                    [(i ...) (datum->syntax dt (enumerate #'(pat pats ...)))])
-                        #`(let ([type? (record-predicate 'rtd)])
-                            (if (type? #,expr-id)
-                                (let ([fld* ((record-accessor 'rtd i) #,expr-id)] ...)
-                                  #,(let loop ([fields #'(fld* ...)] [npats #'(pat pats ...)])
-                                      (if (null? fields)
-                                          body
-                                          (process-pattern rho (car fields) (car npats)
-                                                           (loop (cdr fields) (cdr npats))
-                                                           fk))))
-                                (#,fk))))]
-                     [_ (syntax-error pat "match: invalid record pattern:")])
-                   (syntax-error pat "match: invalid record type in:")))]
-            [_ (syntax-error pat "match: invalid record pattern format:")])))
-      (define handle-datatype
-        (lambda (rho expr-id pat body fk)
-          (syntax-case pat ()
-            ;; singletons
-            [(dt singleton) (identifier? #'singleton)
-             #`(if (eq? #,expr-id singleton)
-                   #,body
-                   (#,fk))]
-            [(dt variant . rest)
-             ;; name of dt is dt,
-             ;; name of variant is $datatype-dt-varaint
-             (let ([variant ($construct-name #'dt "$datatype-" #'dt "-" #'variant)])
-               (if (variant-of? rho #'dt variant)
-                   (syntax-case #'rest (unquote)
-                     [(,bref)
-                      (back-ref-id? #'bref)
-                      #'not-impl]
-                     [(pat pats ...)
-                      (by-name-datatype-pats? rho variant #'(pat pats ...))
-                      (with-syntax ([(type?) (generate-temporaries '(type?))]
-                                    [rtd (datum->syntax variant (get-type-descriptor rho variant))]
-                                    [(fld* ...) (generate-temporaries (enumerate #'(pat pats ...)))]
-                                    [(i ...) (datum->syntax variant (map
-                                                                     (lambda (n) (vmemq (car n) (get-fields rho variant)))
-                                                                     (syntax->datum #'(pat pats ...))))]
-                                    [((_ npats) ...) #'(pat pats ...)])
-                        #`(let ([type? (record-predicate 'rtd)])
-                            (if (type? #,expr-id)
-                                (let ([fld* ((record-accessor 'rtd i) #,expr-id)] ...)
-                                  #,(let loop ([fields #'(fld* ...)] [npats #'(npats ...)])
-                                      (if (null? fields)
-                                          body
-                                          (process-pattern rho (car fields) (car npats)
-                                                           (loop (cdr fields) (cdr npats))
-                                                           fk))))
-                                (#,fk))))]
-                     [(pat pats ...)
-                      (fx= (length #'(pat pats ...)) (vector-length (get-fields rho variant)))
-                      (with-syntax ([(type?) (generate-temporaries '(type?))]
-                                    [rtd (datum->syntax variant (get-type-descriptor rho variant))]
-                                    [(fld* ...) (generate-temporaries (enumerate #'(pat pats ...)))]
-                                    [(i ...) (datum->syntax variant (enumerate #'(pat pats ...)))])
-                        #`(let ([type? (record-predicate 'rtd)])
-                            (if (type? #,expr-id)
-                                (let ([fld* ((record-accessor 'rtd i) #,expr-id)] ...)
-                                  #,(let loop ([fields #'(fld* ...)] [npats #'(pat pats ...)])
-                                      (if (null? fields)
-                                          body
-                                          (process-pattern rho (car fields) (car npats)
-                                                           (loop (cdr fields) (cdr npats))
-                                                           fk))))
-                                (#,fk))))]
-                     [_ (syntax-error pat "match: invalid datatype pattern:")])
-                   (syntax-error pat "match: invalid datatype/variant in:")))]
-            [_ (syntax-error pat "match: invalid datatype pattern format:")])))
-      (define handle-regex
-        (lambda (expr-id pat body fk)
-          (define handle-rest
-            (lambda (expr-id regex rest body fk)
-              (syntax-case rest ()
-                [()
-                 (with-syntax ([(m) (generate-temporaries '(m))])
-                   #`(let ([m (irregex-search #,regex #,expr-id)])
-                       (if m
-                           #,body
-                           (#,fk))))]
-                ;; TODO check for duplicate numbers and names?
-                ;; by number or by name
-                [((n* v*) ...)
-                 (and (andmap (lambda (n) (or (and (integer? n) (>= n 0))
-                                              (symbol? n)))
-                              (syntax->datum #'(n* ...)))
-                      (andmap (lambda (v)
-                                (syntax-case v ()
-                                  [,v (identifier? #'v) #t]
-                                  [_ (syntax-error pat "only one pattern variable is allowed in regex pattern: ")]))
-                              #'(v* ...)))
-                 (with-syntax ([(m) (generate-temporaries '(m))])
-                   #`(let ([m (irregex-search #,regex #,expr-id)])
-                       (if m
-                           #,(let loop ([n* #'(n* ...)]
-                                        [v* (map (lambda (v) (syntax-case v () [,var #'var])) #'(v* ...))])
-                               (if (null? n*)
-                                   body
-                                   #`(if (irregex-match-valid-index? m '#,(car n*))
-                                         (let ([#,(car v*) (irregex-match-substring m '#,(car n*))])
-                                           #,(loop (cdr n*) (cdr v*)))
-                                         (errorf 'match "invalid index number or name for regex: ~a" #,(car n*)))))
-                           (#,fk))))]
-                [_ (syntax-error pat "match: invalid regex pattern:")])))
-          (syntax-case pat ()
-            ;; TODO reg is a var ref
-            [(reg . rest)
-             (let ([reg (syntax->datum #'reg)])
-               (or (string? reg) (list reg)))
-             ;; how to directly embed the compiled regex obj?
-             (with-syntax ([(regex) (generate-temporaries '(regex))])
-               #`(let ([regex (irregex reg)])
-                   #,(handle-rest expr-id #'regex #'rest body fk)))]
-            [(reg . rest)
-             ;; `reg` could be arbitrary expression, check whether it evals to string/reg
-             (todo)]
-            [_ (syntax-error pat "match: invalid regex pattern format:")])))
+      (define handle-extension
+        (lambda (ext rho expr-id pat body fk)
+          (define (match-expander? ext)
+            (let* ([n ($construct-name ext ext "-expander")]
+                   [?p (rho n)])
+              (and ?p (eq? '*MATCH-EXPANDER* (car ?p)))))
+          (define (record? ext)
+            (or (valid-record-type? rho ext)
+                (valid-record-type? rho ($construct-name ext "$record-" ext))))
+          (cond
+           [(match-expander? ext)
+            (let ([expander (cdr (rho ($construct-name ext ext "-expander")))])
+              (assert (procedure? expander))
+              (expander process-pattern rho expr-id pat body fk))]
+           ;; TODO make this dispatch extensible
+           [(record? ext)
+            (record-expander process-pattern rho expr-id pat body fk)]
+           [(eq? 'box (syntax->datum ext))
+            (box-expander process-pattern rho expr-id pat body fk)]
+           [(eq? 'regex (syntax->datum ext))
+            (regex-expander process-pattern rho expr-id pat body fk)]
+           [(eq? 'hash (syntax->datum ext))
+            (hash-expander process-pattern rho expr-id pat body fk)]
+           [else (syntax-error ext "match: invalid extension pattern: ")])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;   main logic
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -356,18 +130,9 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
                (identifier? #'nref)
                #`(let ([nref expr-id])
                    #,(process-pattern rho #'expr-id #'pat body fk))]
-              [,(?prefix special-pats ...)
-               (box-prefix? #'?prefix)
-               (handle-box rho #'expr-id #'(special-pats ...) body fk)]
-              [,(?prefix special-pats ...)
-               (record-prefix? #'?prefix)
-               (handle-record rho #'expr-id #'(special-pats ...) body fk)]
-              [,(?prefix special-pats ...)
-               (datatype-prefix? #'?prefix)
-               (handle-datatype rho #'expr-id #'(special-pats ...) body fk)]
-              [,(?prefix special-pats ...)
-               (regex-prefix? #'?prefix)
-               (handle-regex #'expr-id #'(special-pats ...) body fk)]
+              [,(?match-extension special-pats ...)
+               (identifier? #'?match-extension)
+               (handle-extension #'?match-extension rho #'expr-id #'(?match-extension special-pats ...) body fk)]
               ;; ... in the end
               [(pat dots)
                (eq? (datum dots) '...)
@@ -524,95 +289,6 @@ https://github.com/akeep/scheme-to-llvm/blob/main/src/main/scheme/match.sls
              (match v cl0 cl* ...
                     [else (errorf 'match "no match found")]))]
         [_ (syntax-error 'match "bad match form")])))
-
-  (define-syntax match-box
-    (lambda (stx)
-      (define transform-clause
-        (lambda (who cl)
-          (syntax-case cl ()
-            [[pat e e* ...]
-             #`[,($box pat)
-                e e* ...]]
-            [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
-      (syntax-case stx (else)
-        [(k e cl* ... [else body body* ...])
-         (with-syntax ([(cls ...) (map (lambda (cl) (transform-clause #'k cl)) #'(cl* ...))])
-           #'(match e cls ... [else body body* ...]))]
-        [(k e cl cl* ...)
-         #'(match-box e cl cl* ...
-                      [else (errorf 'k "no match found")])])))
-
-  ;; TODO correct name (macro and dt name) in error report (in adt)
-  (define-syntax $match-record
-    (lambda (stx)
-      (define transform-clause
-        (lambda (who dt cl)
-          (syntax-case cl ()
-            ;; single named match
-            [[(field pat) e e* ...]
-             (identifier? #'field)
-             #`[,($record #,dt (field pat))
-                e e* ...]]
-            [[(pat pat* ...) e e* ...]
-             #`[,($record #,dt pat pat* ...)
-                e e* ...]]
-            [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
-      (syntax-case stx (else)
-        [(k who dt e cl* ... [else body body* ...])
-         (with-syntax ([(cls ...) (map (lambda (cl) (transform-clause #'who #'dt cl)) #'(cl* ...))])
-           #'(match e cls ... [else body body* ...]))]
-        [(k who dt e cl cl* ...)
-         #'($match-record who dt e cl cl* ...
-                          [else (errorf 'who "no match found")])]
-        [(k who . bla) (syntax-error stx "bad " (symbol->string (datum who)) " form:")])))
-
-  (define-syntax $match-datatype
-    (lambda (stx)
-      (define transform-clause
-        (lambda (who dt cl)
-          (syntax-case cl ()
-            [[(variant pat pats ...) e e* ...]
-             #`[,($datatype #,dt variant pat pats ...)
-                e e* ...]]
-            ;; singletons
-            [[(singleton) e e* ...]
-             (identifier? #'singleton)
-             #`[,($datatype #,dt singleton)
-                e e* ...]]
-            [[singleton e e* ...]
-             (identifier? #'singleton)
-             #`[,($datatype #,dt singleton)
-                e e* ...]]
-            [_ (syntax-error cl "invalid clause for " (symbol->string (syntax->datum who)))])))
-      (syntax-case stx (else)
-        [(k who dt e cl* ... [else body body* ...])
-         (with-syntax ([(cl* ...) (map (lambda (cl) (transform-clause #'who #'dt cl)) #'(cl* ...))])
-           #'(match e cl* ... [else body body* ...]))]
-        [(k who dt e cl cl* ...)
-         #'($match-datatype who dt e cl cl* ...
-                            [else (errorf 'who "no match found")])]
-        [(k who . bla) (syntax-error stx "bad " (symbol->string (datum who)) " form:")])))
-
-  (define-syntax match-record
-    (syntax-rules ()
-      [(k e cl* ...) ($match-record match-record e cl* ...)]))
-
-  (define-syntax match-datatype
-    (syntax-rules ()
-      [(k e cl* ...) ($match-datatype match-datatype e cl* ...)]))
-
-  (define-syntax match-string
-    (lambda (stx)
-      (syntax-case stx (else)
-        [(k str [(reg* pat** ...) . (e** ...)] ... [else el* ...])
-         #'(match str
-             [,($regex reg* pat** ...) e** ...] ...
-             [else el* ...])]
-        [(k str [(reg* pat** ...) . (e** ...)] ...)
-         #'(match str
-             [,($regex reg* pat** ...) e** ...]
-             ...)]
-        [_ (syntax-error stx "bad match-string form:")])))
 
   (define-syntax mlambda
     (lambda (stx)

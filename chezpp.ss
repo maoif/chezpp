@@ -5,8 +5,7 @@
           (chezpp parser combinator))
 
   (export (import (chezpp chez)
-                  (except (chezpp match)
-                          $match-record $match-datatype)
+                  (chezpp match)
                   (chezpp adt)
                   (chezpp string)
                   (chezpp vector)

@@ -55,11 +55,6 @@
        [(_ ,x _ _) x]
        [else #t])
 
-     (equal? 'x
-             (match '(unquote x)
-               [(unquote ,y) y]))
-
-
      ;; TODO guards
 
      )
@@ -233,28 +228,16 @@
 
      (equal? 1
              (match (box 1)
-               [,($b ,a) a]))
+               [,(box ,a) a]))
 
      (equal? (box 222)
              (match (box (box 222))
-               [,($b ,a) a]))
+               [,(box ,a) a]))
 
      (equal? 222
              (match (box (box 222))
-               [,($b ,($box ,a)) a]))
+               [,(box ,(box ,a)) a]))
 
-
-     (equal? 1
-             (match-box (box 1)
-                        [,a a]))
-
-     (equal? (box 222)
-             (match-box (box (box 222))
-                        [,a a]))
-
-     (equal? 222
-             (match-box (box (box 222))
-                        [,($b ,a) a]))
 
      )
 
@@ -310,7 +293,7 @@
       '((1 2 3) (1 4 9) (name age) ("jack" 16) box)
       (mlet ([((,x . ,y) ...) '((1 . 1) (2 . 4) (3 . 9))]
              [((,head ,body) ...) '((name "jack") (age 16))]
-             [,($b ,b) (box 'box)])
+             [,(box ,b) (box 'box)])
             (list x y head body b)))
 
      )
@@ -331,16 +314,16 @@
 
      (equal? '("ababab" "ab" "ab" "ab")
              (match "ababababab"
-               [,($regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1) (2 ,x2) (3 ,x3))
+               [,(regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1) (2 ,x2) (3 ,x3))
                 (list all x1 x2 x3)]))
 
      (string-contains?
       (condition-message
        (guard (e [#t e])
          (expand '(match "ababababab"
-                    [,($regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1)
-                              (-2 ,x2) ;; error
-                              (3 ,x3) (4 ,x4))
+                    [,(regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1)
+                             (-2 ,x2) ;; error
+                             (3 ,x3) (4 ,x4))
                      (list all x1 x2 x3 x4)]))))
       "invalid regex pattern:")
 
@@ -348,9 +331,9 @@
       (condition-message
        (guard (e [#t e])
          (expand '(match "ababababab"
-                    [,($regex "(ab)(ab)(ab)"
-                              (0 (,a ,b)) ;; error
-                              (1 ,x1) (2 ,x2) (3 ,x3) (4 ,x4))
+                    [,(regex "(ab)(ab)(ab)"
+                             (0 (,a ,b)) ;; error
+                             (1 ,x1) (2 ,x2) (3 ,x3) (4 ,x4))
                      (list all x1 x2 x3 x4)]))))
       "only one pattern variable is allowed in regex pattern:")
 
@@ -358,15 +341,15 @@
       (condition-message
        (guard (e [#t e])
          (match "ababababab"
-           [,($regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1) (2 ,x2) (3 ,x3) (4 ,x4))
+           [,(regex "(ab)(ab)(ab)" (0 ,all) (1 ,x1) (2 ,x2) (3 ,x3) (4 ,x4))
             (list all x1 x2 x3 x4)])))
       "invalid index number or name for regex")
 
      (equal? '("jack" "male" "16" "jack-16-male")
              (match "jack-16-male"
-               [,($regex '(: (=> name (+ any)) "-" (=> age (+ any)) "-" (=> sex (+ any)))
-                         (0 ,all)
-                         (name ,n) (sex ,s) (age ,a))
+               [,(regex '(: (=> name (+ any)) "-" (=> age (+ any)) "-" (=> sex (+ any)))
+                        (0 ,all)
+                        (name ,n) (sex ,s) (age ,a))
                 (list n s a all)]))
 
      )
