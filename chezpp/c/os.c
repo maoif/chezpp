@@ -149,6 +149,7 @@ ptr chezpp_vfork() {
 }
 
 static int shared_object_list_callback(struct dl_phdr_info *info, size_t size, void *data) {
+  (void)size;
   ptr *objs_addr = (ptr *)data;
   ptr objects = *objs_addr;
   *objs_addr = Scons(Sstring(info->dlpi_name), objects);
