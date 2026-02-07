@@ -180,7 +180,7 @@
                                 #f                      ; default
                                 '*                      ; number
                                 '?                      ; value-number
-                                "<bool>"                ; value-name
+                                #f                      ; value-name
                                 parser-bool             ; value-parser
                                 #\,     ; value-seperator
                                 #f      ; callback
@@ -491,6 +491,7 @@
        (pcheck ([list? args])
                ;; option name -> parsed values
                (define opts-state (make-eq-hashtable))
+               (define cmds-seen (make-list-builder))
                (define (leaf-command? cmd) (null? ((command-subcommands cmd))))
                (trace-define (find-subcommand arg subcmds)
                  (find (lambda (cmd) (string=? arg (command-name cmd))) subcmds))
@@ -516,19 +517,19 @@
                    (when (and (eq? 1 number)
                               (eq-hashtable-contains? opts-state opt-name))
                      (println "error: option ~a can only appear once!" opt-name)
-                     (print-help-and-quit cmd opt v))
+                     (print-help-and-quit (cmds-seen)))
                    (when (and (eq? '? number)
                               (eq-hashtable-contains? opts-state opt-name))
                      (println "error: option ~a can only appear zero times or once!" opt-name)
-                     (print-help-and-quit cmd opt v))
+                     (print-help-and-quit (cmds-seen)))
                    (when (and (eq? 0 value-number)
                               v)
                      (println "error: option ~a does not take value(s)!" opt-name)
-                     (print-help-and-quit cmd opt v))
+                     (print-help-and-quit (cmds-seen)))
                    (when (and (or (eq? 1 value-number) (eq? '+ value-number))
                               (not v))
                      (println "error: option ~a must take value(s)!" opt-name)
-                     (print-help-and-quit cmd opt v))
+                     (print-help-and-quit (cmds-seen)))
 
                    (cond
                     [(or (eq? '+ value-number) (eq? '* value-number))
@@ -562,7 +563,7 @@
                                  (not (eq-hashtable-contains? opts-state opt-name)))
                         ;; TODO use --o/-o
                         (begin (println "option ~a is required but not given" opt-name)
-                               (print-help-and-quit cmd opt #f)))
+                               (print-help-and-quit (cmds-seen))))
                       (when (and (memq number '(? *))
                                  (not (eq-hashtable-contains? opts-state opt-name)))
                         ;; TODO what if default is not given?
@@ -575,18 +576,21 @@
                                (assert (memq number '(1 +)))
                                (unless (eq-hashtable-contains? opts-state opt-name)
                                  (println "error: positional argument ~a is required but not given" opt-name)
-                                 (print-help-and-quit cmd opt #f))))
+                                 (print-help-and-quit (cmds-seen)))))
                            positionals))
                (trace-define (check-missing-subcommand cmd)
                  (unless (command-maybe-no-subcommand? cmd)
                    (let ([subcmds ((command-subcommands cmd))])
                      (unless (null? subcmds)
                        (println "error: (sub)command expected: ~a" (map command-name subcmds))
-                       (print-help-and-quit cmd #f)))))
+                       (print-help-and-quit (cmds-seen))))))
 
                (unless (andmap string? args)
                  (errorf who "expected list of strings: ~a" args))
                (println "~a: args ~a" who args)
+
+
+               ;; main parse loop
                (trace-let lp-cmd ([cmd cmd] [args args])
                  ;; short/long symbol -> option
                  (define-values (opts-table-short opts-table-long)
@@ -605,8 +609,8 @@
                      (values ht-short ht-long)))
                  (println "opts-table-short ~a" (hashtable-cells opts-table-short))
                  (println "opts-table-long  ~a" (hashtable-cells opts-table-long))
-
-                 ;; main parse loop
+                 (cmds-seen cmd)
+
                  (trace-let lp-arg ([args args])
                    (if (null? args)
                        ;; call exec
@@ -635,7 +639,7 @@
                                    (handle-opt-arg cmd opt (option-name opt) v))
                                  (begin
                                    (println "error: unknown long option: ~a" arg)
-                                   (print-help-and-quit cmd arg))))
+                                   (print-help-and-quit (cmds-seen)))))
                            (lp-arg (cdr args))]
                           [(and (string-startswith? arg "-") (not (string=? arg "-")))
                            ;; no grouping yet
@@ -645,7 +649,7 @@
                                    (handle-opt-arg cmd opt (option-name opt) v))
                                  (begin
                                    (println "error: unknown short option: ~a" arg)
-                                   (print-help-and-quit cmd arg))))
+                                   (print-help-and-quit (cmds-seen)))))
                            (lp-arg (cdr args))]
                           [else
                            (if (leaf-command? cmd)
@@ -657,7 +661,7 @@
                                  (println "args        (len ~a) ~a" (length args) args)
                                  (when (null? positionals)
                                    (begin (println "unknown arguments supplied: ~a" args)
-                                          (print-help-and-quit cmd #f args)))
+                                          (print-help-and-quit (cmds-seen))))
                                  (cond [(member "--" args)
                                         ;; TODO `args` may be (aa bb -- xx yy zz), where (xx yy zz) must be accepted by a sink
                                         (let* ([rest (member "--" args)]
@@ -668,10 +672,10 @@
                                           (println "sink-args     ~a" sink-args)
                                           (unless (= (length non-sink-args) (fx1- len-positionals))
                                             (println "error: invalid number of arguments supplied: ~a" args)
-                                            (print-help-and-quit cmd #f args))
+                                            (print-help-and-quit (cmds-seen)))
                                           (unless (option-sink? (list-last positionals))
                                             (println "error: invalid number of arguments supplied, expected one: ~a" args)
-                                            (print-help-and-quit cmd #f args))
+                                            (print-help-and-quit (cmds-seen)))
                                           (let ([opt-sink (list-last positionals)])
                                             (for-each (lambda (opt arg)
                                                         (handle-opt-arg cmd opt (option-name opt) arg))
@@ -697,7 +701,7 @@
                                                       (handle-opt-arg cmd opt-sink (option-name opt-sink) arg))
                                                     sink-args))]
                                        [else (begin (println "error: incorrect number of positional arguments supplied: ~a" args)
-                                                    (print-help-and-quit cmd #f args))])
+                                                    (print-help-and-quit (cmds-seen)))])
                                  ;; finish
                                  (lp-arg '()))
                                ;; try next command
@@ -719,7 +723,7 @@
                                                           v))))))
                                        (lp-cmd subcmd (cdr args)))
                                      (begin (println "error: unknown (sub)command ~a" arg)
-                                            (print-help-and-quit cmd arg)))))]))))))]))
+                                            (print-help-and-quit (cmds-seen))))))]))))))]))
 
 
 
@@ -727,12 +731,54 @@
 ;; internals
 ;;===----------------------------------------------------------------------===
 
+  ;; print usage of current cmd and if last cmd supports `--help`,
+  ;; print "for more info, run "xxx --help""
   (define-who print-help-and-quit
     (case-lambda
-      [(cmd arg) (print-help-and-quit cmd #f arg)]
-      [(cmd opt arg)
-       (todo)
-       (exit -1)]))
+      [(cmds-seen)
+       (define (get/make-positional-value-name opt)
+         (let ([vn (option-value-name opt)]
+               [tail (if (option-sink? opt) " ..." "")])
+           ;; TODO make sure `vn` is like <XXX>
+           (string-append (if vn
+                              vn
+                              (string-append "<"
+                                             (string-upcase (symbol->string (option-name opt)))
+                                             ">"))
+                          tail)))
+       (assert (fx> (length cmds-seen) 0))
+       ;; Usage: CMD0 COMMAND
+       ;; Usage: CMD0 [OPTIONS] CMD1 [OPTIONS] <POS0> <POS1> ...
+       ;; For more info, run 'CMD0 CMD1 --help'
+       (println ">>> print-help-and-quit ~a" (map command-name cmds-seen))
+       (display "Usage: ")
+       (let loop ([cmds cmds-seen])
+         (unless (null? cmds)
+           (let ([cmd (car cmds)])
+             (print "~a " (command-name cmd))
+             (unless (null? ((command-options cmd)))
+               (print "[OPTIONS] "))
+             (let* ([positionals (filter option-positional? ((command-options cmd)))])
+               (if (null? positionals)
+                   (if (and (not (null? ((command-subcommands cmd))))
+                            (null? (cdr cmds)))
+                       (print "COMMAND "))
+                   (begin (assert (null? ((command-subcommands cmd))))
+                          (let ([value-names (map get/make-positional-value-name positionals)])
+                            (for-each (lambda (vn) (print "~a " vn)) value-names)))))
+             (loop (cdr cmds)))))
+       (let* ([cmd-last (list-last cmds-seen)] [opts ((command-options cmd-last))]
+              [?help (filter (lambda (opt)
+                               (and (option-long opt) (string=? (option-long opt) "help")))
+                             opts)])
+         (if (null? ?help)
+             (newline)
+             (begin (print "For more info, run '")
+                    (for-each (lambda (cmd)
+                                (print "~a " (command-name cmd)))
+                              cmds-seen)
+                    (print " --help'\n"))))
+       (todo 'quit-or-what?)]))
 
 
   (define-who dump-command
