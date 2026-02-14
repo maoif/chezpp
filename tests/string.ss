@@ -104,3 +104,13 @@
      (equal? "xyz" (string-trim "xyz  "))
 
      )
+
+
+(mat string-empty?
+
+     (error? (string-empty? 123))
+
+     (string-empty? "")
+     (not (string-empty? "123"))
+
+     )

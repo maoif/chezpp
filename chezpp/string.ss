@@ -1,6 +1,6 @@
 (library (chezpp string)
   (export string-for-each/i string-startswith? string-endswith?
-          string-search string-search-all string-contains?
+          string-search string-search-all string-contains? string-empty?
           string-split string-trim string-trim-left string-trim-right)
   (import (chezscheme)
           (chezpp internal)
@@ -186,6 +186,14 @@
                                     (if j
                                         (loop (add1 j) (cons j res))
                                         (and (not (null? res)) (reverse res))))))])))))
+
+  #|doc
+  Checks whether a string is empty (has length 0).
+  |#
+  (define string-empty?
+    (lambda (str)
+      (pcheck ([string? str])
+              (fx= 0 (string-length str)))))
 
   #|doc
   Checks whether `str` contains the list of strings in `s`.
