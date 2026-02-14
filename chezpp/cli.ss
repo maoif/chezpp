@@ -98,6 +98,7 @@
           (chezpp adt)
           (chezpp string)
           (chezpp list)
+          (chezpp vector)
           (chezpp io))
 
   (define-record-type command
@@ -174,12 +175,12 @@
                                (errorf 'make-option "option name cannot start with -: ~a" name))
                              (n name
                                 ""                      ; help
-                                (string-ref name-str 0) ; short
+                                (string (string-ref name-str 0)) ; short
                                 name-str                ; long
                                 ""                      ; category
                                 #f                      ; default
                                 '*                      ; number
-                                '?                      ; value-number
+                                '0                      ; value-number
                                 #f                      ; value-name
                                 parser-bool             ; value-parser
                                 #\,     ; value-seperator
@@ -288,7 +289,7 @@
 
   (define *numbers* '(1 ? + *))
   (define *value-numbers* (cons 0 *numbers*))
-  (define *none* (list))
+  (define *none* (list 'none))
 
   (define option-name-set!
     (lambda (opt v)
@@ -303,8 +304,9 @@
   (define-who option-short-set!
     (lambda (opt v)
       (pcheck ([option? opt] [(p/or string? boolean?) v])
-              (unless (fx= (string-length v) 1)
-                (errorf who "option's short form must have length 1: ~s" v))
+              (when (string? v)
+                (unless (fx= (string-length v) 1)
+                  (errorf who "option's short form must have length 1: ~s" v)))
               ;; TODO disallow things like -?
               ($option-short-set! opt v))))
   (define option-long-set!
@@ -632,6 +634,26 @@
                                             v)))))))
                        (let ([arg (car args)])
                          (cond
+                          [(string=? arg "-h")
+                           (if (eq-hashtable-contains? opts-table-short 'h)
+                               (let ([opt (eq-hashtable-ref opts-table-short 'h #f)])
+                                 (handle-opt-arg cmd opt (option-name opt) #f))
+                               (begin (print-help (cmds-seen) #f #f) (exit 0)))]
+                          [(string=? arg "--help")
+                           (if (eq-hashtable-contains? opts-table-long 'help)
+                               (let ([opt (eq-hashtable-ref opts-table-long 'help #f)])
+                                 (handle-opt-arg cmd opt (option-name opt) #f))
+                               (begin (print-help (cmds-seen) #f #f) (exit 0)))]
+                          [(string=? arg "--help-all")
+                           (if (eq-hashtable-contains? opts-table-long 'help-all)
+                               (let ([opt (eq-hashtable-ref opts-table-long 'help-all #f)])
+                                 (handle-opt-arg cmd opt (option-name opt) #f))
+                               (begin (print-help (cmds-seen) #t #f) (exit 0)))]
+                          [(string=? arg "--help-commands")
+                           (if (eq-hashtable-contains? opts-table-long 'help-commands)
+                               (let ([opt (eq-hashtable-ref opts-table-long 'help-commands #f)])
+                                 (handle-opt-arg cmd opt (option-name opt) #f))
+                               (begin (print-help (cmds-seen) #f #t) (exit 0)))]
                           [(and (string-startswith? arg "--") (not (string=? arg "--")))
                            (let-values ([(o v) (split-opt-arg #f arg)])
                              (if (eq-hashtable-contains? opts-table-long o)
@@ -736,6 +758,7 @@
   (define-who print-help-and-quit
     (case-lambda
       [(cmds-seen)
+       ;; TODO call print-usage
        (define (get/make-positional-value-name opt)
          (let ([vn (option-value-name opt)]
                [tail (if (option-sink? opt) " ..." "")])
@@ -836,16 +859,239 @@
                            ((command-subcommands cmd)))))]))
 
 
+  ;; for top command, print overview...
   ;; print current command or print all subcommands
   ;; to stdout or stderr?
+  ;; Outut:
+  ;; if top cmd:
+  ;;    - overview
+  ;;    - author, version
+  ;;    - copyright
+  ;;  - usage
+  ;;  - options & subcommands
+  ;;  - about
   (define-who print-help
-    (lambda (cmd)
-      (pcheck ([command? cmd])
-              (todo))))
+    (lambda (cmds-seen all? commands?)
+      (define (print-overview cmd)
+        (let ([str (command-overview cmd)])
+          (unless (string=? str "")
+            (println "~a" str))))
+      (define (print-author-and-version cmd)
+        (let ([str1 (command-copyright cmd)]
+              [str2 (command-version cmd)])
+          ;; TODO
+          (unless (string=? str1 "")
+            (println "~a" str1))))
+      (define (print-copyright cmd)
+        (let ([str (command-copyright cmd)])
+          (unless (string=? str "")
+            (println "~a" str))))
+      (define (print-all-commands)
+        (todo))
+      ;; print options and commands of current command
+      (define (print-options-and-commands)
+        ;; categorize options and commands
+        ;; TODO handle hidden?
+        (define (categorize getter sorter objs)
+          (let ([ht (make-hashtable string-hash string=?)])
+            (for-each (lambda (obj)
+                        (let* ([cat (getter obj)] [ls (hashtable-ref ht cat '())])
+                          (hashtable-set! ht cat (cons obj ls))))
+                      objs)
+            ;; default category is ""
+            ;; TODO sort
+            (vector-for-each
+             (lambda (cat)
+               (let ([ls (hashtable-ref ht cat '())])
+                 (hashtable-set! ht cat (sort sorter ls))))
+             (hashtable-keys ht))
+            ht))
+        ;; category string -> list of commands/options
+        (define ht-cmds (categorize command-category
+                                    (lambda (c1 c2)
+                                      (string<? (command-name c1) (command-name c2)))
+                                    ((command-subcommands (list-last cmds-seen)))))
+        (define ht-opts (categorize option-category
+                                    (lambda (o1 o2)
+                                      (let ([short1 (option-short o1)]
+                                            [short2 (option-short o2)]
+                                            [long1 (option-long o1)]
+                                            [long2 (option-long o2)])
+                                        (cond [(and short1 short2)
+                                               (string<? short1 short2)]
+                                              [(and long1 long2)
+                                               (string<? long1 long2)]
+                                              [else #t])))
+                                    (filter (p/not option-positional?)
+                                            ((command-options (list-last cmds-seen))))))
+        (define ls-opts-positional (sort (lambda (o1 o2)
+                                           (string<? (symbol->string (option-name o1))
+                                                     (symbol->string (option-name o2))))
+                                         (filter option-positional?
+                                                 ((command-options (list-last cmds-seen))))))
+        ;; opt -> short/long usage summaries
+        (define ht-opts-short-summaries (make-eq-hashtable))
+        (define ht-opts-long-summaries (make-eq-hashtable))
+        (define ls-opts-positional-summaries
+          (map (lambda (opt)
+                 (let ([vn (option-value-name opt)]
+                       [tail (if (option-sink? opt) " ..." "")])
+                   (string-append (if vn
+                                      vn
+                                      (string-append "<"
+                                                     (string-upcase (symbol->string (option-name opt)))
+                                                     ">"))
+                                  tail)))
+               ls-opts-positional))
+        ;; (println ">>> ht-cmds ~a" (hashtable-cells ht-cmds))
+        ;; (println ">>> ht-opts ~a" (hashtable-cells ht-opts))
+        ;; generate option usage summaries
+        (vector-for-each
+         (lambda (cat opts)
+           (for-each (lambda (opt)
+                       ;; generate option usage summaries
+                       (let* ([short (option-short opt)] [long (option-long opt)]
+                              [number (option-number opt)] [value-number (option-value-number opt)]
+                              [vn (let ([vn (option-value-name opt)])
+                                    (if vn
+                                        vn
+                                        (string-append "<"
+                                                       (string-upcase (symbol->string (option-name opt)))
+                                                       ">")))]
+                              [val-str
+                               (case value-number
+                                 [0 ""]
+                                 [1 (string-append "=" vn)]
+                                 [? (string-append "=[" vn "]")]
+                                 [+ (string-append "="  vn (string (option-value-seperator opt)) "...")]
+                                 [* (string-append "=[" vn (string (option-value-seperator opt)) "...]")]
+                                 [else (assert-unreachable)])])
+                         (when short
+                           (hashtable-set! ht-opts-short-summaries opt
+                                           (string-append "-" short val-str)))
+                         (when long
+                           (hashtable-set! ht-opts-long-summaries opt
+                                           (string-append "--" long val-str)))))
+                     opts))
+         (hashtable-keys ht-opts) (hashtable-values ht-opts))
+        ;; (println "ht-opts-short-summaries ~a" (hashtable-cells ht-opts-short-summaries))
+        ;; (println "ht-opts-long-summaries  ~a" (hashtable-cells ht-opts-long-summaries))
+        ;; print positional options
+        (when (fx> (length ls-opts-positional-summaries) 0)
+          (let ([max-len (fx+ 2 (apply max (map string-length ls-opts-positional-summaries)))])
+            (println "ARGUMENTS")
+            (for-each (lambda (opt str)
+                        (println "    ~a~a~a"
+                                 str
+                                 (make-string (fx- max-len (string-length str)) #\space)
+                                 (option-help opt)))
+                      ls-opts-positional ls-opts-positional-summaries)
+            (newline)))
+        ;; print options
+        (when (or (fx> (hashtable-size ht-opts-short-summaries) 0)
+                  (fx> (hashtable-size ht-opts-long-summaries)  0))
+          (let ()
+            ;; compute max length of option usage summaries and paddings for each summary
+            (define (max-len str-vec)
+              (vfold-left (lambda (acc str)
+                            (if (fx> (string-length str) acc) (string-length str) acc))
+                          0 str-vec))
+            ;; + x for padding before the long opt or before the option help text
+            (define max-short (fx+ 1 (max-len (hashtable-values ht-opts-short-summaries))))
+            (define max-long  (fx+ 2 (max-len (hashtable-values ht-opts-long-summaries))))
+            (vector-for-each
+             (lambda (cat opts)
+               (println "~a" (if (string=? cat "") "OPTIONS" cat))
+               (for-each (lambda (opt)
+                           (let* ([short (hashtable-ref ht-opts-short-summaries opt #f)]
+                                  [long  (hashtable-ref ht-opts-long-summaries opt #f)]
+                                  [?short-len (if short (string-length short) #f)]
+                                  [?long-len  (if long  (string-length long) #f)])
+                             (cond
+                              [(and short long)
+                               (println "    ~a,~a~a~a~a"
+                                        short
+                                        (make-string (fx- max-short ?short-len) #\space)
+                                        long
+                                        (make-string (fx- max-long ?long-len) #\space)
+                                        (option-help opt))]
+                              [(and short (not long))
+                               (println "    ~a~a~a~a"
+                                        short
+                                        (make-string (fx- max-short ?short-len) #\space)
+                                        (make-string (fx+ max-long) #\space)
+                                        (option-help opt))]
+                              [(and (not short) long)
+                               (println "    ~a~a~a~a"
+                                        (make-string (fx+ max-short 1) #\space)
+                                        long
+                                        (make-string (fx- max-long ?long-len) #\space)
+                                        (option-help opt))]
+                              [else (assert-unreachable)])))
+                         opts)
+               (newline))
+             (hashtable-keys ht-opts) (hashtable-values ht-opts))))
+        ;; print subcommands
+        (vector-for-each
+         (lambda (cat cmds)
+           (println "~a" (if (string=? cat "") "COMMANDS" cat))
+           (map (lambda (cmd)
+                  (let ([len (string-length (command-name cmd))])
+                    (println "    ~a~a  ~a"
+                             (command-name cmd)
+                             ;; TODO
+                             (make-string (fx- 10 len) #\space)
+                             (command-help cmd))))
+                cmds)
+           (newline))
+         (hashtable-keys ht-cmds) (hashtable-values ht-cmds)))
+
+      ;; top cmd
+      (when (= 1 (length cmds-seen))
+        (let ([cmd (car cmds-seen)])
+          (print-overview cmd)
+          (print-author-and-version cmd)
+          (print-copyright cmd)))
+      (print-usage cmds-seen) (newline)
+      ;; cmds-seen: (cmd0 cmd1 cmd2 ...)
+      (if commands?
+          (print-all-commands)
+          (print-options-and-commands))))
+
 
   (define-who print-usage
-    (lambda (cmd)
-      (pcheck ([command? cmd])
-              (todo))))
+    (lambda (cmds-seen)
+      (define (get/make-positional-value-name opt)
+        (let ([vn (option-value-name opt)]
+              [tail (if (option-sink? opt) " ..." "")])
+          ;; TODO make sure `vn` is like <XXX>
+          (string-append (if vn
+                             vn
+                             (string-append "<"
+                                            (string-upcase (symbol->string (option-name opt)))
+                                            ">"))
+                         tail)))
+      (assert (fx> (length cmds-seen) 0))
+      ;; Usage: CMD0 COMMAND
+      ;; Usage: CMD0 [OPTIONS] CMD1 [OPTIONS] <POS0> <POS1> ...
+      ;; For more info, run 'CMD0 CMD1 --help'
+      (println ">>> print-help-and-quit ~a" (map command-name cmds-seen))
+      (display "Usage: ")
+      (let loop ([cmds cmds-seen])
+        (unless (null? cmds)
+          (let ([cmd (car cmds)])
+            (print "~a " (command-name cmd))
+            (unless (null? ((command-options cmd)))
+              (print "[OPTIONS] "))
+            (let* ([positionals (filter option-positional? ((command-options cmd)))])
+              (if (null? positionals)
+                  (if (and (not (null? ((command-subcommands cmd))))
+                           (null? (cdr cmds)))
+                      (print "COMMAND "))
+                  (begin (assert (null? ((command-subcommands cmd))))
+                         (let ([value-names (map get/make-positional-value-name positionals)])
+                           (for-each (lambda (vn) (print "~a " vn)) value-names)))))
+            (loop (cdr cmds)))))
+      (newline)))
 
   )
