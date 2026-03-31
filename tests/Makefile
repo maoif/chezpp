@@ -2,7 +2,8 @@ SRCS_TEST := record.ss datatype.ss match.ss for.ss control.ss os.ss iter.ss file
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
              hashset.ss treemap.ss treeset.ss \
              bittree.ss bitvec.ss dset.ss \
-             concurrency.ss
+             concurrency.ss \
+             crypto.ss
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      := $(SRCS_TEST)
 

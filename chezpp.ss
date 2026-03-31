@@ -32,4 +32,5 @@
                   (chezpp dset)
                   (chezpp graph)
 
+                  (chezpp crypto)
                   (chezpp concurrency))))
