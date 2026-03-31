@@ -16,6 +16,8 @@
           shutdown-symbol->int
           ffi-error?
           ffi-would-block?
+          ffi-would-block-read?
+          ffi-would-block-write?
           ffi-error-message)
   (import (chezpp chez)
           (chezpp utils)
@@ -45,7 +47,19 @@
     (lambda (x)
       (and (vector? x)
            (= (vector-length x) 2)
-           (eq? (vector-ref x 0) 'would-block))))
+           (memq (vector-ref x 0) '(would-block would-block-read would-block-write)))))
+
+  (define ffi-would-block-read?
+    (lambda (x)
+      (and (vector? x)
+           (= (vector-length x) 2)
+           (eq? (vector-ref x 0) 'would-block-read))))
+
+  (define ffi-would-block-write?
+    (lambda (x)
+      (and (vector? x)
+           (= (vector-length x) 2)
+           (eq? (vector-ref x 0) 'would-block-write))))
 
   (define ffi-error-message
     (lambda (x)
