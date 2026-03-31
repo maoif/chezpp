@@ -86,3 +86,89 @@
             (= (http-response-status resp) 200)
             (equal? (http-response-reason resp) "OK")
             (equal? (http-response-body resp) "done"))))
+
+(define start-echo-server
+  (lambda (handler)
+    (let ([server (open-socket 'inet 'stream)])
+      (socket-set-option! server 'reuse-address #t)
+      (socket-bind! server (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! server 8)
+      (let ([port (socket-address-port (socket-local-address server))])
+        (values server
+                port
+                (fork-thread
+                 (lambda ()
+                   (let-values ([(client peer) (socket-accept server)])
+                     (handler client peer)
+                     (close-socket client)
+                     (close-socket server)))))))))
+
+(mat net-address-dns
+     (let ([addr (make-socket-address 'inet "127.0.0.1" 8080)])
+       (and (socket-address? addr)
+            (eq? (socket-address-family addr) 'inet)
+            (equal? (socket-address-host addr) "127.0.0.1")
+            (= (socket-address-port addr) 8080)
+            (not (socket-address-path addr))))
+     (let ([addr (make-socket-address 'unix "/tmp/chezpp-net.sock")])
+       (and (socket-address? addr)
+            (eq? (socket-address-family addr) 'unix)
+            (equal? (socket-address-path addr) "/tmp/chezpp-net.sock")))
+     (let ([addr (resolve-address "127.0.0.1" 80 'inet 'stream)])
+       (and (socket-address? addr)
+            (eq? (socket-address-family addr) 'inet)))
+     (let ([addrs (resolve-addresses "localhost" 80)])
+       (and (pair? addrs)
+            (andmap socket-address? addrs)))
+     (let ([res (dns-resolve "localhost")])
+       (and (dns-result? res)
+            (pair? (dns-result-addresses res))
+            (or (not (dns-result-canonname res))
+                (string? (dns-result-canonname res)))))
+     (let ([name (dns-reverse-resolve (make-socket-address 'inet "127.0.0.1" 80))])
+       (string? name)))
+
+(mat net-socket
+     (let-values ([(server port th)
+                   (start-echo-server
+                    (lambda (client peer)
+                      (let ([payload (socket-recv client 32)])
+                        (socket-send-all client payload))))])
+       (let ([client (open-socket 'inet 'stream)])
+         (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+         (let ([local (socket-local-address client)]
+               [peer (socket-peer-address client)]
+               [payload (string->utf8 "ping")])
+           (and (socket-address? local)
+                (socket-address? peer)
+                (socket-send-all client payload)
+                (equal? (socket-recv client 32) payload)
+                (begin
+                  (close-socket client)
+                  (thread-join th)
+                  #t)))))
+     (let-values ([(server port th)
+                   (start-echo-server
+                    (lambda (client peer)
+                      (let ([payload (socket-recv client 32)])
+                        (socket-send-all client payload))))])
+       (let ([client (open-socket 'inet 'stream)])
+         (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+         (call-with-socket-ports
+          client
+          (lambda (ip op)
+            (put-bytevector op (string->utf8 "port"))
+            (flush-output-port op)
+            (equal? (get-bytevector-n ip 4) (string->utf8 "port"))))
+         (close-socket client)
+         (thread-join th)
+         #t))
+     (let ([server (open-socket 'inet 'stream)])
+       (socket-set-option! server 'reuse-address #t)
+       (socket-bind! server (make-socket-address 'inet "127.0.0.1" 0))
+       (socket-listen! server 4)
+       (let ([no-client (socket-accept/nonblocking server)]
+             [reuse? (socket-get-option server 'reuse-address)])
+         (close-socket server)
+         (and (not no-client)
+              reuse?))))
