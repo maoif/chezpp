@@ -33,4 +33,5 @@
                   (chezpp graph)
 
                   (chezpp crypto)
+                  (chezpp net)
                   (chezpp concurrency))))

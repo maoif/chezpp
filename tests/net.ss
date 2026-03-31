@@ -1,0 +1,88 @@
+(import (chezpp)
+        (chezpp net))
+
+(mat net-errors
+     (let ([err (make-net-error 'net-test 'parse "bad address" '(1 2 3))])
+       (and (net-error? err)
+            (eq? (net-error-who err) 'net-test)
+            (eq? (net-error-kind err) 'parse)
+            (equal? (net-error-message err) "bad address")
+            (equal? (net-error-data err) '(1 2 3))))
+     (guard (c [else (and (net-error? c)
+                          (eq? (net-error-kind c) 'io))])
+       (raise-net-error 'net-test 'io "closed")
+       #f))
+
+(mat net-ip
+     (let ([ipv4 (string->ip-address "127.0.0.1")]
+           [ipv6 (string->ip-address "2001:db8::1")])
+       (and (ipv4-address? ipv4)
+            (ipv6-address? ipv6)
+            (equal? (ip-address->string ipv4) "127.0.0.1")
+            (equal? (ip-address->string ipv6) "2001:db8::1")
+            (ip-address-loopback? ipv4)
+            (not (ip-address-loopback? ipv6))
+            (ip-address-private? (string->ip-address "192.168.2.10"))
+            (ip-address-private? (string->ip-address "fd12:3456::7"))
+            (ip-address-multicast? (string->ip-address "239.1.2.3"))
+            (ip-address-multicast? (string->ip-address "ff02::1"))))
+     (let ([range (cidr-parse "192.168.10.0/24")])
+       (and (cidr-contains? range (string->ip-address "192.168.10.42"))
+            (not (cidr-contains? range (string->ip-address "192.168.11.42")))
+            (equal? (ip-address->string (cidr-network-address range))
+                    "192.168.10.0")
+            (= (cidr-prefix-length range) 24)))
+     (let ([range (cidr-parse "2001:db8::/32")])
+       (and (cidr-contains? range (string->ip-address "2001:db8::9"))
+            (not (cidr-contains? range (string->ip-address "2001:db9::1")))))
+     (not (string->ip-address "999.0.0.1"))
+     (not (cidr-parse "192.168.0.1/40")))
+
+(mat net-uri
+     (let ([u (string->uri "https://alice@example.com:443/a/../b/c?q=1&x=two#frag")])
+       (and (uri? u)
+            (equal? (uri-scheme u) "https")
+            (equal? (uri-userinfo u) "alice")
+            (equal? (uri-host u) "example.com")
+            (= (uri-port u) 443)
+            (equal? (uri-path u) "/a/../b/c")
+            (equal? (uri-query u) "q=1&x=two")
+            (equal? (uri-fragment u) "frag")
+            (equal? (uri-authority u) "alice@example.com:443")
+            (equal? (uri-path-segments u) '("a" ".." "b" "c"))
+            (equal? (uri-query-alist u) '(("q" . "1") ("x" . "two")))
+            (equal? (uri->string (uri-normalize u))
+                    "https://alice@example.com/b/c?q=1&x=two#frag")))
+     (let* ([base (string->uri "https://example.com/a/b/index.html")]
+            [ref (string->uri "../api?q=test")]
+            [resolved (uri-resolve base ref)])
+       (equal? (uri->string resolved)
+               "https://example.com/a/api?q=test"))
+     (equal? (uri-encode "hello world/ok") "hello%20world%2Fok")
+     (equal? (uri-decode "hello%20world%2Fok") "hello world/ok")
+     (equal? (form-urlencode '(("q" . "hello world") ("lang" . "scheme")))
+             "q=hello+world&lang=scheme")
+     (equal? (form-urldecode "q=hello+world&lang=scheme")
+             '(("q" . "hello world") ("lang" . "scheme"))))
+
+(mat net-http
+     (let* ([req (make-http-request 'get "https://example.com/api?q=1"
+                                    '(("Accept" . "application/json")
+                                      ("X-Test" . "one"))
+                                    #vu8(1 2 3))]
+            [headers0 (http-request-headers req)]
+            [headers1 (http-header-add headers0 "X-Test" "two")]
+            [headers2 (http-header-set headers1 'accept "text/plain")]
+            [resp (make-http-response 200 "OK" headers2 "done")])
+       (and (http-request? req)
+            (equal? (http-request-method req) "GET")
+            (equal? (uri->string (http-request-uri req))
+                    "https://example.com/api?q=1")
+            (equal? (http-header-ref headers0 "accept") "application/json")
+            (equal? (http-header-ref headers1 "x-test") "one")
+            (equal? (http-header-ref headers2 "accept") "text/plain")
+            (equal? (http-request-body req) #vu8(1 2 3))
+            (http-response? resp)
+            (= (http-response-status resp) 200)
+            (equal? (http-response-reason resp) "OK")
+            (equal? (http-response-body resp) "done"))))

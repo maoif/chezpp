@@ -1,0 +1,11 @@
+(library (chezpp net)
+  (export)
+  (import (chezpp chez)
+          (chezpp utils)
+          (chezpp internal))
+
+  (export (import (chezpp net errors)
+                  (chezpp net ip)
+                  (chezpp net uri)
+                  (chezpp net http)))
+  )
