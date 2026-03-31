@@ -155,9 +155,76 @@
                          (guard (c [else #f])
                            (tls-shutdown! session))
                          (close-tls-session session)))
-                     (close-socket client)
-                     (close-socket server)
-                     (close-tls-context ctx)))))))))
+                         (close-socket client)
+                         (close-socket server)
+                         (close-tls-context ctx)))))))))
+
+(define reserve-loopback-port
+  (lambda ()
+    (let ([sock (open-socket 'inet 'stream)])
+      (socket-set-option! sock 'reuse-address #t)
+      (socket-bind! sock (make-socket-address 'inet "127.0.0.1" 0))
+      (let ([port (socket-address-port (socket-local-address sock))])
+        (close-socket sock)
+        port))))
+
+(define write-test-cert-files
+  (lambda ()
+    (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
+    (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)))
+
+(define make-test-http-server-context
+  (lambda ()
+    (write-test-cert-files)
+    (let ([ctx (make-tls-context 'server)])
+      (tls-context-load-cert! ctx "/tmp/chezpp-net-test-cert.pem")
+      (tls-context-load-private-key! ctx "/tmp/chezpp-net-test-key.pem")
+      ctx)))
+
+(define make-test-http-client-context
+  (lambda ()
+    (write-test-cert-files)
+    (let ([ctx (make-tls-context 'client)])
+      (tls-context-set-verify! ctx #f)
+      ctx)))
+
+(define start-http-connection-server
+  (case-lambda
+    [(handler)
+     (start-http-connection-server handler #f)]
+    [(handler tls-ctx)
+     (let* ([port (reserve-loopback-port)]
+            [server (http-listen "127.0.0.1" port tls-ctx)])
+       (values server
+               port
+               (fork-thread
+                (lambda ()
+                  (guard (c [else #f])
+                    (let ([conn (http-accept server)])
+                      (dynamic-wind
+                        void
+                        (lambda () (handler conn))
+                        (lambda ()
+                          (http-connection-close conn)
+                          (http-server-close server)))))))))]))
+
+(define start-http-dispatch-server
+  (case-lambda
+    [(setup)
+     (start-http-dispatch-server setup #f)]
+    [(setup tls-ctx)
+     (let* ([port (reserve-loopback-port)]
+            [server (http-listen "127.0.0.1" port tls-ctx)])
+       (setup server)
+       (values server
+               port
+               (fork-thread
+                (lambda ()
+                  (guard (c [else #f])
+                    (dynamic-wind
+                      void
+                      (lambda () (http-serve server))
+                      (lambda () (http-server-close server))))))))]))
 
 (mat net-address-dns
      (let ([addr (make-socket-address 'inet "127.0.0.1" 8080)])
@@ -324,3 +391,146 @@
                               sent
                               (= n 2)
                               (equal? (slice-bytevector buf 0 2) (string->utf8 "nb")))))))))))))
+
+(mat net-http-runtime
+     (let-values ([(server port th)
+                   (start-http-connection-server
+                    (lambda (conn)
+                      (let ([req (http-read-request conn)])
+                        (http-write-response
+                         conn
+                         (make-http-response
+                          200
+                          "OK"
+                          `(("Content-Type" . "text/plain")
+                            ("X-Client" . ,(or (http-header-ref (http-request-headers req)
+                                                                "X-Client"
+                                                                #f)
+                                               ""))
+                            ("X-Method" . ,(http-request-method req)))
+                          "hello")))))])
+       (let ([client (http-open)])
+         (and (not (http-accept/nonblocking server))
+              (begin
+                (http-set-timeout! client 250)
+                #t)
+              (begin
+                (http-set-header! client "X-Client" "ok")
+                #t)
+              (let ([resp (http-send
+                           client
+                           (make-http-request
+                            'get
+                            (format "http://127.0.0.1:~a/hello?q=1" port)
+                            '(("Accept" . "text/plain"))
+                            #f))])
+                (begin
+                  (http-close client)
+                  (thread-join th)
+                  (and (= (http-response-status resp) 200)
+                       (equal? (http-header-ref (http-response-headers resp) "X-Client")
+                               "ok")
+                       (equal? (http-header-ref (http-response-headers resp) "X-Method")
+                               "GET")
+                       (equal? (utf8->string (http-response-body resp)) "hello")))))))
+     (let-values ([(server port th)
+                   (start-http-dispatch-server
+                    (lambda (server)
+                      (http-register-handler!
+                       server
+                       'head
+                       "/meta"
+                       (lambda (req)
+                         (make-http-response
+                          200
+                          "OK"
+                          '(("X-Head" . "yes"))
+                          "body-ignored")))))])
+       (let ([resp (http-head (format "http://127.0.0.1:~a/meta" port))])
+         (thread-join th)
+         (and (= (http-response-status resp) 200)
+              (equal? (http-header-ref (http-response-headers resp) "X-Head")
+                      "yes")
+              (not (http-response-body resp))))))
+
+(mat net-http-transfer
+     (let* ([upload-path "/tmp/chezpp-net-upload.bin"]
+            [payload (string->utf8 "payload")])
+       (write-bytevector-file upload-path payload)
+       (let-values ([(server port th)
+                     (start-http-connection-server
+                      (lambda (conn)
+                        (let ([req (http-read-request conn)])
+                          (http-write-response
+                           conn
+                           (make-http-response
+                            200
+                            "OK"
+                            `(("X-Size" . ,(number->string
+                                            (bytevector-length
+                                             (http-request-body req)))))
+                            (http-request-body req))))))])
+         (let ([client (http-open)])
+           (let ([resp (http-upload client
+                                    (format "http://127.0.0.1:~a/upload" port)
+                                    upload-path)])
+             (begin
+               (http-close client)
+               (thread-join th)
+               (and (= (http-response-status resp) 200)
+                    (equal? (http-header-ref (http-response-headers resp) "X-Size")
+                            "7")
+                    (equal? (http-response-body resp) payload))))))
+     (let* ([download-path "/tmp/chezpp-net-download.bin"]
+            [payload #vu8(1 2 3 4 5)])
+       (let-values ([(server port th)
+                     (start-http-dispatch-server
+                      (lambda (server)
+                        (http-register-handler!
+                         server
+                         'get
+                         "/download"
+                         (lambda (req)
+                           (make-http-response
+                            200
+                            "OK"
+                            '(("Content-Type" . "application/octet-stream"))
+                            payload)))))])
+         (let ([client (http-open)])
+           (let ([resp (http-download client
+                                      (format "http://127.0.0.1:~a/download" port)
+                                      download-path)])
+             (begin
+               (http-close client)
+               (thread-join th)
+               (and (= (http-response-status resp) 200)
+                    (equal? (http-response-body resp) payload)
+                    (equal? (read-u8vec download-path) payload)))))))))
+
+(mat net-https
+     (let ([server-ctx (make-test-http-server-context)]
+           [client-ctx (make-test-http-client-context)])
+       (let-values ([(server port th)
+                     (start-http-dispatch-server
+                      (lambda (server)
+                        (http-register-handler!
+                         server
+                         'get
+                         "/secure"
+                         (lambda (req)
+                           (make-http-response
+                            200
+                            "OK"
+                            '(("Content-Type" . "text/plain"))
+                            "secure"))))
+                      server-ctx)])
+        (let ([client (http-open client-ctx)])
+           (let ([resp (http-get client
+                                 (format "https://127.0.0.1:~a/secure" port))])
+             (begin
+               (http-close client)
+               (close-tls-context client-ctx)
+               (close-tls-context server-ctx)
+               (thread-join th)
+               (and (= (http-response-status resp) 200)
+                    (equal? (utf8->string (http-response-body resp)) "secure"))))))))
