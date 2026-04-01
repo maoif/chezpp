@@ -1,4 +1,4 @@
-NET_TESTS := net-core.ss net-http.ss net-ftp.ss net-ssh.ss net-sftp.ss net-rpc.ss net-websocket.ss
+NET_TESTS := net-core.ss net-http.ss net-ftp.ss net-ssh.ss net-sftp.ss net-rpc.ss net-websocket.ss net-grpc.ss
 NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ssh-common.ss
 
 SRCS_TEST := record.ss datatype.ss match.ss for.ss control.ss os.ss iter.ss file.ss \

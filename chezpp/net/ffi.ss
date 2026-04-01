@@ -74,6 +74,16 @@
           ffi-net-websocket-close
           ffi-net-websocket-send
           ffi-net-websocket-recv
+          ffi-net-grpc-channel-open
+          ffi-net-grpc-channel-close
+          ffi-net-grpc-server-open
+          ffi-net-grpc-server-close
+          ffi-net-grpc-unary-call
+          ffi-net-grpc-unary-start
+          ffi-net-grpc-unary-poll
+          ffi-net-grpc-unary-close
+          ffi-net-grpc-server-request
+          ffi-net-grpc-server-respond
           ffi-net-open-rdonly
           ffi-net-open-wronly
           ffi-net-open-rdwr
@@ -256,6 +266,32 @@
     (foreign-procedure "chezpp_net_websocket_send" (uptr int ptr int int int) scheme-object))
   (define ffi-net-websocket-recv
     (foreign-procedure "chezpp_net_websocket_recv" (uptr int) scheme-object))
+  (define ffi-net-grpc-channel-open
+    (foreign-procedure "chezpp_net_grpc_channel_open" (string) scheme-object))
+  (define ffi-net-grpc-channel-close
+    (foreign-procedure "chezpp_net_grpc_channel_close" (uptr) scheme-object))
+  (define ffi-net-grpc-server-open
+    (foreign-procedure "chezpp_net_grpc_server_open" (string int) scheme-object))
+  (define ffi-net-grpc-server-close
+    (foreign-procedure "chezpp_net_grpc_server_close" (uptr) scheme-object))
+  (define ffi-net-grpc-unary-call
+    (foreign-procedure "chezpp_net_grpc_unary_call"
+                       (uptr string ptr int int scheme-object int)
+                       scheme-object))
+  (define ffi-net-grpc-unary-start
+    (foreign-procedure "chezpp_net_grpc_unary_start"
+                       (uptr string ptr int int scheme-object int)
+                       scheme-object))
+  (define ffi-net-grpc-unary-poll
+    (foreign-procedure "chezpp_net_grpc_unary_poll" (uptr) scheme-object))
+  (define ffi-net-grpc-unary-close
+    (foreign-procedure "chezpp_net_grpc_unary_close" (uptr) scheme-object))
+  (define ffi-net-grpc-server-request
+    (foreign-procedure "chezpp_net_grpc_server_request" (uptr) scheme-object))
+  (define ffi-net-grpc-server-respond
+    (foreign-procedure "chezpp_net_grpc_server_respond"
+                       (uptr ptr int int int string scheme-object)
+                       scheme-object))
   (define ffi-net-open-rdonly
     (foreign-procedure "chezpp_net_open_rdonly" () int))
   (define ffi-net-open-wronly
