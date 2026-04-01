@@ -132,7 +132,17 @@ static int fill_sockaddr(int family, const char *host, int port, const char *pat
   }
 }
 
-static int would_block_errno(int e) { return e == EAGAIN || e == EWOULDBLOCK; }
+static int would_block_errno(int e) {
+  return e == EAGAIN
+      || e == EWOULDBLOCK
+#ifdef EINPROGRESS
+      || e == EINPROGRESS
+#endif
+#ifdef EALREADY
+      || e == EALREADY
+#endif
+      ;
+}
 
 int chezpp_net_af_inet() { return AF_INET; }
 int chezpp_net_af_inet6() { return AF_INET6; }

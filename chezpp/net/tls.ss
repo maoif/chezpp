@@ -148,7 +148,12 @@
       (make-custom-binary-input-port
        "chezpp-tls-input"
        (lambda (bv start count)
-         (tls-read! session bv start (fx+ start count)))
+         (let ([n (tls-read! session bv start (fx+ start count))])
+           (cond
+            [(fixnum? n) n]
+            [(eof-object? n) 0]
+            [else (errorf 'call-with-tls-ports
+                          "unexpected nonblocking result from blocking TLS port read")])))
        (lambda () #f)
        (lambda (x) #f)
        (lambda () #t))))

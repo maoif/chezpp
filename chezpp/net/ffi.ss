@@ -40,6 +40,48 @@
           ffi-net-ftp-upload
           ffi-net-ftp-command
           ffi-net-ftp-rename
+          ffi-net-ssh-open
+          ffi-net-ssh-close
+          ffi-net-ssh-auth-password
+          ffi-net-ssh-auth-publickey-auto
+          ffi-net-ssh-auth-agent
+          ffi-net-ssh-channel-open
+          ffi-net-ssh-channel-close
+          ffi-net-ssh-channel-request-exec
+          ffi-net-ssh-channel-request-shell
+          ffi-net-ssh-channel-request-pty
+          ffi-net-ssh-channel-read
+          ffi-net-ssh-channel-read-into
+          ffi-net-ssh-channel-write
+          ffi-net-ssh-channel-exit-status
+          ffi-net-sftp-open
+          ffi-net-sftp-close
+          ffi-net-sftp-list
+          ffi-net-sftp-stat
+          ffi-net-sftp-delete
+          ffi-net-sftp-mkdir
+          ffi-net-sftp-rmdir
+          ffi-net-sftp-rename
+          ffi-net-sftp-open-file
+          ffi-net-sftp-close-file
+          ffi-net-sftp-read
+          ffi-net-sftp-read-into
+          ffi-net-sftp-write
+          ffi-net-websocket-listen
+          ffi-net-websocket-server-close
+          ffi-net-websocket-accept
+          ffi-net-websocket-connect
+          ffi-net-websocket-close
+          ffi-net-websocket-send
+          ffi-net-websocket-recv
+          ffi-net-open-rdonly
+          ffi-net-open-wronly
+          ffi-net-open-rdwr
+          ffi-net-open-append
+          ffi-net-open-creat
+          ffi-net-open-trunc
+          ffi-net-open-excl
+          ffi-net-open-text
           ffi-net-tls-context-create
           ffi-net-tls-context-free
           ffi-net-tls-context-load-ca-file
@@ -146,6 +188,90 @@
     (foreign-procedure "chezpp_net_ftp_rename"
                        (string string string int int int int int string string)
                        scheme-object))
+  (define ffi-net-ssh-open
+    (foreign-procedure "chezpp_net_ssh_open" (string int string int) scheme-object))
+  (define ffi-net-ssh-close
+    (foreign-procedure "chezpp_net_ssh_close" (uptr) scheme-object))
+  (define ffi-net-ssh-auth-password
+    (foreign-procedure "chezpp_net_ssh_auth_password" (uptr string string) scheme-object))
+  (define ffi-net-ssh-auth-publickey-auto
+    (foreign-procedure "chezpp_net_ssh_auth_publickey_auto" (uptr string string) scheme-object))
+  (define ffi-net-ssh-auth-agent
+    (foreign-procedure "chezpp_net_ssh_auth_agent" (uptr string) scheme-object))
+  (define ffi-net-ssh-channel-open
+    (foreign-procedure "chezpp_net_ssh_channel_open" (uptr) scheme-object))
+  (define ffi-net-ssh-channel-close
+    (foreign-procedure "chezpp_net_ssh_channel_close" (uptr) scheme-object))
+  (define ffi-net-ssh-channel-request-exec
+    (foreign-procedure "chezpp_net_ssh_channel_request_exec" (uptr string) scheme-object))
+  (define ffi-net-ssh-channel-request-shell
+    (foreign-procedure "chezpp_net_ssh_channel_request_shell" (uptr) scheme-object))
+  (define ffi-net-ssh-channel-request-pty
+    (foreign-procedure "chezpp_net_ssh_channel_request_pty" (uptr) scheme-object))
+  (define ffi-net-ssh-channel-read
+    (foreign-procedure "chezpp_net_ssh_channel_read" (uptr int int int) scheme-object))
+  (define ffi-net-ssh-channel-read-into
+    (foreign-procedure "chezpp_net_ssh_channel_read_into" (uptr ptr int int int int) scheme-object))
+  (define ffi-net-ssh-channel-write
+    (foreign-procedure "chezpp_net_ssh_channel_write" (uptr ptr int int int) scheme-object))
+  (define ffi-net-ssh-channel-exit-status
+    (foreign-procedure "chezpp_net_ssh_channel_exit_status" (uptr) scheme-object))
+  (define ffi-net-sftp-open
+    (foreign-procedure "chezpp_net_sftp_open" (uptr) scheme-object))
+  (define ffi-net-sftp-close
+    (foreign-procedure "chezpp_net_sftp_close" (uptr) scheme-object))
+  (define ffi-net-sftp-list
+    (foreign-procedure "chezpp_net_sftp_list" (uptr string) scheme-object))
+  (define ffi-net-sftp-stat
+    (foreign-procedure "chezpp_net_sftp_stat" (uptr string) scheme-object))
+  (define ffi-net-sftp-delete
+    (foreign-procedure "chezpp_net_sftp_delete" (uptr string) scheme-object))
+  (define ffi-net-sftp-mkdir
+    (foreign-procedure "chezpp_net_sftp_mkdir" (uptr string int) scheme-object))
+  (define ffi-net-sftp-rmdir
+    (foreign-procedure "chezpp_net_sftp_rmdir" (uptr string) scheme-object))
+  (define ffi-net-sftp-rename
+    (foreign-procedure "chezpp_net_sftp_rename" (uptr string string) scheme-object))
+  (define ffi-net-sftp-open-file
+    (foreign-procedure "chezpp_net_sftp_open_file" (uptr string int int) scheme-object))
+  (define ffi-net-sftp-close-file
+    (foreign-procedure "chezpp_net_sftp_close_file" (uptr) scheme-object))
+  (define ffi-net-sftp-read
+    (foreign-procedure "chezpp_net_sftp_read" (uptr int int) scheme-object))
+  (define ffi-net-sftp-read-into
+    (foreign-procedure "chezpp_net_sftp_read_into" (uptr ptr int int int) scheme-object))
+  (define ffi-net-sftp-write
+    (foreign-procedure "chezpp_net_sftp_write" (uptr ptr int int int) scheme-object))
+  (define ffi-net-websocket-listen
+    (foreign-procedure "chezpp_net_websocket_listen" (string int string) scheme-object))
+  (define ffi-net-websocket-server-close
+    (foreign-procedure "chezpp_net_websocket_server_close" (uptr) scheme-object))
+  (define ffi-net-websocket-accept
+    (foreign-procedure "chezpp_net_websocket_accept" (uptr int) scheme-object))
+  (define ffi-net-websocket-connect
+    (foreign-procedure "chezpp_net_websocket_connect" (string int string string int) scheme-object))
+  (define ffi-net-websocket-close
+    (foreign-procedure "chezpp_net_websocket_close" (uptr) scheme-object))
+  (define ffi-net-websocket-send
+    (foreign-procedure "chezpp_net_websocket_send" (uptr int ptr int int int) scheme-object))
+  (define ffi-net-websocket-recv
+    (foreign-procedure "chezpp_net_websocket_recv" (uptr int) scheme-object))
+  (define ffi-net-open-rdonly
+    (foreign-procedure "chezpp_net_open_rdonly" () int))
+  (define ffi-net-open-wronly
+    (foreign-procedure "chezpp_net_open_wronly" () int))
+  (define ffi-net-open-rdwr
+    (foreign-procedure "chezpp_net_open_rdwr" () int))
+  (define ffi-net-open-append
+    (foreign-procedure "chezpp_net_open_append" () int))
+  (define ffi-net-open-creat
+    (foreign-procedure "chezpp_net_open_creat" () int))
+  (define ffi-net-open-trunc
+    (foreign-procedure "chezpp_net_open_trunc" () int))
+  (define ffi-net-open-excl
+    (foreign-procedure "chezpp_net_open_excl" () int))
+  (define ffi-net-open-text
+    (foreign-procedure "chezpp_net_open_text" () int))
   (define ffi-net-tls-context-create
     (foreign-procedure "chezpp_net_tls_context_create" (int) uptr))
   (define ffi-net-tls-context-free
