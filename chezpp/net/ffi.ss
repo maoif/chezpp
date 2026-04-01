@@ -35,6 +35,11 @@
           ffi-net-poll
           ffi-net-resolve-addresses
           ffi-net-address->name
+          ffi-net-ftp-list
+          ffi-net-ftp-download
+          ffi-net-ftp-upload
+          ffi-net-ftp-command
+          ffi-net-ftp-rename
           ffi-net-tls-context-create
           ffi-net-tls-context-free
           ffi-net-tls-context-load-ca-file
@@ -121,6 +126,26 @@
     (foreign-procedure "chezpp_net_resolve_addresses" (string int int int) scheme-object))
   (define ffi-net-address->name
     (foreign-procedure "chezpp_net_address_to_name" (int string int string) scheme-object))
+  (define ffi-net-ftp-list
+    (foreign-procedure "chezpp_net_ftp_list"
+                       (string string string int int int int int)
+                       scheme-object))
+  (define ffi-net-ftp-download
+    (foreign-procedure "chezpp_net_ftp_download"
+                       (string string string string int int int int int)
+                       scheme-object))
+  (define ffi-net-ftp-upload
+    (foreign-procedure "chezpp_net_ftp_upload"
+                       (string string string string int int int int int)
+                       scheme-object))
+  (define ffi-net-ftp-command
+    (foreign-procedure "chezpp_net_ftp_command"
+                       (string string string int int int int int string)
+                       scheme-object))
+  (define ffi-net-ftp-rename
+    (foreign-procedure "chezpp_net_ftp_rename"
+                       (string string string int int int int int string string)
+                       scheme-object))
   (define ffi-net-tls-context-create
     (foreign-procedure "chezpp_net_tls_context_create" (int) uptr))
   (define ffi-net-tls-context-free

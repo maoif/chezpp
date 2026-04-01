@@ -7,6 +7,7 @@
   (export (import (chezpp net errors)
                   (chezpp net ip)
                   (chezpp net uri)
+                  (chezpp net ftp)
                   (chezpp net http)
                   (chezpp net poll)
                   (chezpp net address)

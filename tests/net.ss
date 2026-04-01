@@ -173,6 +173,362 @@
     (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
     (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)))
 
+(define read-crlf-line
+  (lambda (ip)
+    (let loop ([rev '()])
+      (let ([b (get-u8 ip)])
+        (cond
+         [(eof-object? b)
+          (and (pair? rev)
+               (utf8->string
+                (u8-list->bytevector
+                 (reverse rev))))]
+         [(= b 10)
+          (let ([rev (if (and (pair? rev) (= (car rev) 13))
+                         (cdr rev)
+                         rev)])
+            (utf8->string (u8-list->bytevector (reverse rev))))]
+         [else
+          (loop (cons b rev))])))))
+
+(define u8-list->bytevector
+  (lambda (u8*)
+    (let ([out (make-bytevector (length u8*) 0)])
+      (let loop ([rest u8*] [i 0])
+        (unless (null? rest)
+          (bytevector-u8-set! out i (car rest))
+          (loop (cdr rest) (+ i 1))))
+      out)))
+
+(define send-crlf-line
+  (lambda (op line)
+    (put-bytevector op (string->utf8 (string-append line "\r\n")))
+    (flush-output-port op)))
+
+(define join-path-segments
+  (lambda (segments)
+    (let loop ([rest segments] [out ""])
+      (if (null? rest)
+          out
+          (loop (cdr rest)
+                (if (string=? out "")
+                    (car rest)
+                    (string-append out "/" (car rest))))))))
+
+(define normalize-absolute-test-path
+  (lambda (path)
+    (let loop ([rest (string-split path #\/)] [stack '()])
+      (if (null? rest)
+          (let ([joined (join-path-segments (reverse stack))])
+            (if (string=? joined "")
+                "/"
+                (string-append "/" joined)))
+          (let ([part (car rest)])
+            (cond
+             [(or (string=? part "") (string=? part "."))
+              (loop (cdr rest) stack)]
+             [(string=? part "..")
+              (loop (cdr rest) (if (null? stack) '() (cdr stack)))]
+             [else
+              (loop (cdr rest) (cons part stack))]))))))
+
+(define test-path-join
+  (lambda (cwd path)
+    (normalize-absolute-test-path
+     (if (and (> (string-length path) 0)
+              (char=? (string-ref path 0) #\/))
+         path
+         (if (string=? cwd "/")
+             (string-append "/" path)
+             (string-append cwd "/" path))))))
+
+(define path-dirname
+  (lambda (path)
+    (let ([abs (normalize-absolute-test-path path)])
+      (let loop ([i (- (string-length abs) 1)])
+        (cond
+         [(<= i 0) "/"]
+         [(char=? (string-ref abs i) #\/)
+          (if (= i 0)
+              "/"
+              (substring abs 0 i))]
+         [else
+          (loop (- i 1))])))))
+
+(define file-basename
+  (lambda (path)
+    (let ([abs (normalize-absolute-test-path path)])
+      (let loop ([i (- (string-length abs) 1)])
+        (cond
+         [(< i 0) abs]
+         [(char=? (string-ref abs i) #\/)
+          (substring abs (+ i 1) (string-length abs))]
+         [else
+          (loop (- i 1))])))))
+
+(define read-port->bytevector
+  (lambda (ip)
+    (let loop ([parts '()] [total 0])
+      (let ([chunk (get-bytevector-n ip 4096)])
+        (if (eof-object? chunk)
+            (let ([out (make-bytevector total 0)])
+              (let fill ([rest (reverse parts)] [i 0])
+                (if (null? rest)
+                    out
+                    (let* ([part (car rest)]
+                           [n (bytevector-length part)])
+                      (bytevector-copy! part 0 out i n)
+                      (fill (cdr rest) (+ i n))))))
+            (loop (cons chunk parts) (+ total (bytevector-length chunk))))))))
+
+(define start-ftp-test-server
+  (lambda ()
+    (let ([root "/tmp/chezpp-net-ftp-root"])
+      (when (file-exists? root)
+        (file-removetree root #f))
+      (mkdirs (string-append root "/docs"))
+      (write-bytevector-file (string-append root "/hello.txt") (string->utf8 "hello ftp"))
+      (write-bytevector-file (string-append root "/docs/readme.txt") (string->utf8 "doc file"))
+      (let ([listener (open-socket 'inet 'stream)])
+        (socket-set-option! listener 'reuse-address #t)
+        (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+        (socket-listen! listener 8)
+        (let ([port (socket-address-port (socket-local-address listener))])
+          (define running? #t)
+          (define client-threads '())
+          (define physical-path
+            (lambda (virtual-path)
+              (string-append root (normalize-absolute-test-path virtual-path))))
+          (define open-passive
+            (lambda ()
+              (let ([sock (open-socket 'inet 'stream)])
+                (socket-set-option! sock 'reuse-address #t)
+                (socket-bind! sock (make-socket-address 'inet "127.0.0.1" 0))
+                (socket-listen! sock 1)
+                sock)))
+          (define close-passive
+            (lambda (sock)
+              (when sock
+                (guard (c [else #f])
+                  (close-socket sock)))))
+          (define handle-client
+            (lambda (client)
+              (let ([ip (open-socket-input-port client)]
+                    [op (open-socket-output-port client)])
+                (define cwd "/")
+                (define rename-from #f)
+                (define passive-listener #f)
+                (define passive-port #f)
+                (define data-accept
+                  (lambda ()
+                    (unless passive-listener
+                      (error 'ftp-test "passive listener missing"))
+                    (let-values ([(data peer) (socket-accept passive-listener)])
+                      (close-passive passive-listener)
+                      (set! passive-listener #f)
+                      (set! passive-port #f)
+                      data)))
+                (define ensure-parent-dir
+                  (lambda (path)
+                    (mkdirs (path-dirname path))))
+                (define list-dir
+                  (lambda (path)
+                    (map (lambda (name) (string-append name "\r\n"))
+                         (directory-list path))))
+                (send-crlf-line op "220 chezpp ftp test server")
+                (let loop ()
+                  (let ([line (read-crlf-line ip)])
+                    (when line
+                      (let* ([parts (string-split line #\space)]
+                             [cmd (string-upcase (car parts))]
+                             [arg (if (> (string-length line) (+ (string-length (car parts)) 1))
+                                      (substring line (+ (string-length (car parts)) 1)
+                                                 (string-length line))
+                                      "")])
+                        (cond
+                         [(string=? cmd "USER")
+                          (send-crlf-line op "331 password required")
+                          (loop)]
+                         [(string=? cmd "PASS")
+                          (send-crlf-line op "230 logged in")
+                          (loop)]
+                         [(string=? cmd "SYST")
+                          (send-crlf-line op "215 UNIX Type: L8")
+                          (loop)]
+                         [(string=? cmd "FEAT")
+                          (send-crlf-line op "211-Features")
+                          (send-crlf-line op " EPSV")
+                          (send-crlf-line op " UTF8")
+                          (send-crlf-line op "211 End")
+                          (loop)]
+                         [(string=? cmd "TYPE")
+                          (send-crlf-line op "200 type set")
+                          (loop)]
+                         [(string=? cmd "PWD")
+                          (send-crlf-line op (format "257 \"~a\"" cwd))
+                          (loop)]
+                         [(string=? cmd "CWD")
+                          (let* ([target (test-path-join cwd arg)]
+                                 [path (physical-path target)])
+                            (if (file-directory? path)
+                                (begin
+                                  (set! cwd target)
+                                  (send-crlf-line op "250 directory changed"))
+                                (send-crlf-line op "550 not a directory"))
+                            (loop))]
+                         [(or (string=? cmd "PASV") (string=? cmd "EPSV"))
+                          (close-passive passive-listener)
+                          (set! passive-listener (open-passive))
+                          (set! passive-port
+                                (socket-address-port (socket-local-address passive-listener)))
+                          (if (string=? cmd "PASV")
+                              (let ([p1 (quotient passive-port 256)]
+                                    [p2 (mod passive-port 256)])
+                                (send-crlf-line op
+                                                (format "227 Entering Passive Mode (127,0,0,1,~a,~a)"
+                                                        p1
+                                                        p2)))
+                              (send-crlf-line op
+                                              (format "229 Entering Extended Passive Mode (|||~a|)"
+                                                      passive-port)))
+                          (loop)]
+                         [(or (string=? cmd "LIST") (string=? cmd "NLST"))
+                          (let* ([target (if (string=? arg "") cwd (test-path-join cwd arg))]
+                                 [path (physical-path target)])
+                            (if (file-directory? path)
+                                (let ([data (data-accept)])
+                                  (send-crlf-line op "150 opening data connection")
+                                  (let ([dop (open-socket-output-port data)])
+                                    (for-each (lambda (entry)
+                                                (put-bytevector dop (string->utf8 entry)))
+                                              (list-dir path))
+                                    (flush-output-port dop)
+                                    (close-port dop))
+                                  (close-socket data)
+                                  (send-crlf-line op "226 transfer complete"))
+                                (send-crlf-line op "550 unavailable"))
+                            (loop))]
+                         [(string=? cmd "SIZE")
+                          (let* ([target (test-path-join cwd arg)]
+                                 [path (physical-path target)])
+                            (if (file-regular? path)
+                                (send-crlf-line op (format "213 ~a" (file-size path)))
+                                (send-crlf-line op "550 unavailable"))
+                            (loop))]
+                         [(string=? cmd "RETR")
+                          (let* ([target (test-path-join cwd arg)]
+                                 [path (physical-path target)])
+                            (if (file-regular? path)
+                                (let ([data (data-accept)])
+                                  (send-crlf-line op "150 opening data connection")
+                                  (let ([dop (open-socket-output-port data)])
+                                    (put-bytevector dop (read-u8vec path))
+                                    (flush-output-port dop)
+                                    (close-port dop))
+                                  (close-socket data)
+                                  (send-crlf-line op "226 transfer complete"))
+                                (send-crlf-line op "550 unavailable"))
+                            (loop))]
+                         [(string=? cmd "STOR")
+                          (let* ([target (test-path-join cwd arg)]
+                                 [path (physical-path target)])
+                            (ensure-parent-dir path)
+                            (let ([data (data-accept)])
+                              (send-crlf-line op "150 opening data connection")
+                              (let ([dip (open-socket-input-port data)])
+                                (write-bytevector-file path (read-port->bytevector dip))
+                                (close-port dip))
+                              (close-socket data)
+                              (send-crlf-line op "226 transfer complete"))
+                            (loop))]
+                         [(string=? cmd "DELE")
+                          (let ([path (physical-path (test-path-join cwd arg))])
+                            (if (file-regular? path)
+                                (begin
+                                  (delete-file path)
+                                  (send-crlf-line op "250 deleted"))
+                                (send-crlf-line op "550 unavailable"))
+                            (loop))]
+                         [(string=? cmd "MKD")
+                          (mkdirs (physical-path (test-path-join cwd arg)))
+                          (send-crlf-line op "257 created")
+                          (loop)]
+                         [(string=? cmd "RMD")
+                          (let ([path (physical-path (test-path-join cwd arg))])
+                            (if (file-directory? path)
+                                (begin
+                                  (delete-directory path)
+                                  (send-crlf-line op "250 removed"))
+                                (send-crlf-line op "550 unavailable"))
+                            (loop))]
+                         [(string=? cmd "RNFR")
+                          (let ([path (test-path-join cwd arg)])
+                            (if (file-exists? (physical-path path))
+                                (begin
+                                  (set! rename-from path)
+                                  (send-crlf-line op "350 ready for RNTO"))
+                                (send-crlf-line op "550 unavailable"))
+                            (loop))]
+                         [(string=? cmd "RNTO")
+                          (if rename-from
+                              (let ([src (physical-path rename-from)]
+                                    [dest (physical-path (test-path-join cwd arg))])
+                                (ensure-parent-dir dest)
+                                (file-move src dest)
+                                (set! rename-from #f)
+                                (send-crlf-line op "250 renamed"))
+                              (send-crlf-line op "503 bad sequence"))
+                          (loop)]
+                         [(string=? cmd "QUIT")
+                          (send-crlf-line op "221 bye")]
+                         [else
+                          (send-crlf-line op "502 command not implemented")
+                          (loop)]))))))))
+          (define spawn-client-handler
+            (lambda (client)
+              (let ([th
+                     (fork-thread
+                      (lambda ()
+                        (guard (c [else #f])
+                          (handle-client client))
+                        (guard (c [else #f])
+                          (close-socket client))))])
+                (set! client-threads (cons th client-threads))
+                th)))
+          (define server-thread
+            (fork-thread
+             (lambda ()
+               (let loop ()
+                 (when running?
+                   (let ([accepted
+                          (guard (c [else #f])
+                            (call-with-values
+                              (lambda ()
+                                (socket-accept/nonblocking listener))
+                              (case-lambda
+                                [(v) v]
+                                [(client peer)
+                                 (cons client peer)])))])
+                     (if accepted
+                         (let ([client (car accepted)]
+                               [peer (cdr accepted)])
+                           (spawn-client-handler client)
+                           (loop))
+                         (begin
+                           (milisleep 10)
+                           (loop)))))))))
+          (milisleep 10)
+          (values root
+                  port
+                  (lambda ()
+                    (set! running? #f)
+                    (guard (c [else #f])
+                      (close-socket listener))
+                    (thread-join server-thread)
+                    (for-each thread-join client-threads)
+                    (when (file-exists? root)
+                      (file-removetree root #f)))))))))
+
 (define make-test-http-server-context
   (lambda ()
     (write-test-cert-files)
@@ -534,3 +890,69 @@
                (thread-join th)
                (and (= (http-response-status resp) 200)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
+
+(mat net-ftp
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
+             [download-path "/tmp/chezpp-net-ftp-download.txt"]
+             [upload-path "/tmp/chezpp-net-ftp-upload.txt"])
+         (write-bytevector-file upload-path (string->utf8 "upload payload"))
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (ftp-session? session)
+                  (ftp-login! session "user" "pass")
+                  (equal? (ftp-pwd session) "/")
+                  (not (ftp-active-mode! session))
+                  (ftp-passive-mode! session)
+                  (let ([entries (begin
+                                   (milisleep 10)
+                                   (ftp-list session))])
+                    (and (member "docs" entries)
+                         (member "hello.txt" entries)))
+                  (equal? (ftp-cwd! session "/docs") session)
+                  (equal? (ftp-pwd session) "/docs")
+                  (equal? (begin
+                            (milisleep 10)
+                            (ftp-list session))
+                          '("readme.txt"))
+                  (ftp-cwd! session "/")
+                  (equal? (begin
+                            (milisleep 10)
+                            (ftp-download session "/hello.txt" download-path))
+                          download-path)
+                  (equal? (read-u8vec download-path) (string->utf8 "hello ftp"))
+                  (equal? (begin
+                            (milisleep 10)
+                            (ftp-upload session upload-path "/incoming.txt"))
+                          "/incoming.txt")
+                  (equal? (begin
+                            (milisleep 10)
+                            (ftp-download session "/incoming.txt" download-path))
+                          download-path)
+                  (equal? (read-u8vec download-path) (string->utf8 "upload payload"))
+                  (begin
+                    (milisleep 10)
+                    (ftp-mkdir! session "/tmpdir"))
+                  (begin
+                    (milisleep 10)
+                    (ftp-rename! session "/incoming.txt" "/renamed.txt"))
+                  (let ([entries (begin
+                                   (milisleep 10)
+                                   (ftp-list session "/"))])
+                    (and (member "renamed.txt" entries)
+                         (member "tmpdir" entries)))
+                  (begin
+                    (milisleep 10)
+                    (ftp-delete! session "/renamed.txt"))
+                  (begin
+                    (milisleep 10)
+                    (ftp-rmdir! session "/tmpdir"))
+                  (let ([entries (begin
+                                   (milisleep 10)
+                                   (ftp-list session "/"))])
+                    (and (not (member "renamed.txt" entries))
+                         (not (member "tmpdir" entries))))
+                  (equal? (ftp-quit! session) session)))
+           (lambda ()
+             (stop-server))))))
