@@ -9,16 +9,16 @@
   (import (chezpp chez)
           (chezpp utils))
 
-  (define-record-type (net-error-record %make-net-error net-error?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable who net-error-who)
-            (immutable kind net-error-kind)
-            (immutable message net-error-message)
-            (immutable data net-error-data)))
+  (define-condition-type &net-error &error
+    %make-net-error
+    net-error?
+    (who net-error-who)
+    (kind net-error-kind)
+    (message net-error-message)
+    (data net-error-data))
 
   #|proc:make-net-error
-The `make-net-error` procedure constructs a structured network error record.
+The `make-net-error` procedure constructs a structured network error condition.
 |#
   (define-who make-net-error
     (case-lambda
@@ -31,7 +31,7 @@ The `make-net-error` procedure constructs a structured network error record.
                (%make-net-error who kind message data))]))
 
   #|proc:raise-net-error
-The `raise-net-error` procedure raises a structured network error record.
+The `raise-net-error` procedure raises a structured network error condition.
 |#
   (define-who raise-net-error
     (case-lambda
