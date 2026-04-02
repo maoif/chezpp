@@ -35,6 +35,26 @@
                    (loop (fx1- attempt))))
             x)))))
 
+(define complete-sftp-write-all-nonblocking
+  (lambda (file bv start stop)
+    (let loop ([i start] [attempt 80])
+      (cond
+       [(fx= i stop)
+        (fx- stop start)]
+       [(fx= attempt 0)
+        #f]
+       [else
+        (let ([n (sftp-write-all/nonblocking file bv i stop)])
+          (cond
+           [(eq? n #f)
+            (milisleep 25)
+            (loop i (fx1- attempt))]
+           [(fx= n 0)
+            (milisleep 25)
+            (loop i (fx1- attempt))]
+           [else
+            (loop (fx+ i n) attempt)]))]))))
+
 (define start-ssh-test-server
   (lambda ()
     (let* ([port (reserve-loopback-port)]
@@ -285,15 +305,17 @@
                               (lambda ()
                                 (sftp-write/nonblocking file payload 0 2))))
                     #t)
-                  (begin
-                    (set! n2 (wait-for-result
-                              (lambda ()
-                                (sftp-write-all/nonblocking file payload 2 (bytevector-length payload)))))
+                 (begin
+                    (set! n2 (complete-sftp-write-all-nonblocking
+                              file
+                              payload
+                              2
+                              (bytevector-length payload)))
                     #t)
-                  (fixnum? n1)
-                  (= n1 2)
-                  (fixnum? n2)
-                  (= n2 5))))
+                 (fixnum? n1)
+                 (= n1 2)
+                 (fixnum? n2)
+                 (= n2 5))))
          (lambda () (sftp-close-file file)))))))
 
 (define sftp-test-port-apis
@@ -320,6 +342,94 @@
             (lambda (ip)
               (equal? (utf8->string (read-port->bytevector ip)) "port-data"))))
          (lambda () (sftp-close-file file)))))))
+
+(define sftp-test-nonblocking-apis
+  (lambda (sftp remote-root)
+    (let ([file (sftp-open-file sftp (string-append remote-root "/hello.txt") 'read)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (let ([x (wait-for-result
+                    (lambda ()
+                      (sftp-read/nonblocking file 32)))])
+            (unless (bytevector? x)
+              (errorf 'sftp-test-nonblocking-apis "unexpected nonblocking read result: ~s" x))
+            (unless (equal? (utf8->string x) "hello sftp")
+              (errorf 'sftp-test-nonblocking-apis "unexpected nonblocking read contents: ~s" x))
+            #t))
+        (lambda () (sftp-close-file file))))
+    (let ([file (sftp-open-file sftp (string-append remote-root "/nested/base.txt") 'read)]
+          [buf (make-bytevector 8 0)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (let ([n (wait-for-result
+                    (lambda ()
+                      (sftp-read!/nonblocking file buf 1 7)))])
+            (unless (fixnum? n)
+              (errorf 'sftp-test-nonblocking-apis "unexpected nonblocking read! count: ~s" n))
+            (unless (= n 6)
+              (errorf 'sftp-test-nonblocking-apis "wrong nonblocking read! count: ~s" n))
+            (let ([x (slice-bytevector buf 1 7)])
+              (unless (equal? x (string->utf8 "abcdef"))
+                (errorf 'sftp-test-nonblocking-apis "unexpected nonblocking read! contents: ~s" x))
+              #t)))
+        (lambda () (sftp-close-file file))))
+    (let ([file (sftp-open-file sftp (string-append remote-root "/nb-write.txt")
+                                '(write create truncate))]
+          [payload (string->utf8 "non")])
+      (dynamic-wind
+        void
+        (lambda ()
+          (let ([n1 (wait-for-result
+                     (lambda ()
+                       (sftp-write/nonblocking file payload 0 (bytevector-length payload))))])
+            (unless (fixnum? n1)
+              (errorf 'sftp-test-nonblocking-apis "unexpected nonblocking write count: ~s" n1))
+            (unless (= n1 3)
+              (errorf 'sftp-test-nonblocking-apis "wrong nonblocking write count: ~s" n1))
+            #t))
+        (lambda () (sftp-close-file file))))
+    (let ([file (sftp-open-file sftp (string-append remote-root "/nb-write.txt") 'read)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (let ([x (sftp-read file 32)])
+            (unless (bytevector? x)
+              (errorf 'sftp-test-nonblocking-apis "unexpected verify read result: ~s" x))
+            (unless (equal? (utf8->string x) "non")
+              (errorf 'sftp-test-nonblocking-apis "unexpected verify read contents: ~s" x))
+            #t))
+        (lambda () (sftp-close-file file))))
+    (let ([file (sftp-open-file sftp (string-append remote-root "/nb-write-all.txt")
+                                '(write create truncate))]
+          [payload (string->utf8 "nonblock")])
+      (dynamic-wind
+        void
+        (lambda ()
+          (let ([n (complete-sftp-write-all-nonblocking
+                    file
+                    payload
+                    0
+                    (bytevector-length payload))])
+            (unless (fixnum? n)
+              (errorf 'sftp-test-nonblocking-apis "unexpected nonblocking write-all count: ~s" n))
+            (unless (= n (bytevector-length payload))
+              (errorf 'sftp-test-nonblocking-apis "wrong nonblocking write-all count: ~s" n))
+            #t))
+        (lambda () (sftp-close-file file))))
+    (let ([file (sftp-open-file sftp (string-append remote-root "/nb-write-all.txt") 'read)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (let ([x (sftp-read file 32)])
+            (unless (bytevector? x)
+              (errorf 'sftp-test-nonblocking-apis "unexpected verify write-all read result: ~s" x))
+            (unless (equal? (utf8->string x) "nonblock")
+              (errorf 'sftp-test-nonblocking-apis "unexpected verify write-all contents: ~s" x))
+            #t))
+        (lambda () (sftp-close-file file))))
+    #t))
 
 (define sftp-test-transfer-apis
   (lambda (sftp remote-root upload-path download-path)
@@ -374,5 +484,26 @@
                       remote-root
                       upload-path
                       download-path)))
+                  (lambda () (sftp-close sftp))))))
+           (lambda () (ssh-close session))))))))
+
+(define run-net-sftp-nonblocking-test
+  (lambda (remote-root home port user)
+    (with-env
+     "HOME"
+     home
+     (lambda ()
+       (let ([session (ssh-open "127.0.0.1" port user)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and
+              (eq? (ssh-auth-publickey! session user) session)
+              (let ([sftp (sftp-open session)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and (sftp-session? sftp)
+                         (sftp-test-nonblocking-apis sftp remote-root)))
                   (lambda () (sftp-close sftp))))))
            (lambda () (ssh-close session))))))))

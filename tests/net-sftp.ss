@@ -12,3 +12,12 @@
            (run-net-sftp-test remote-root home port user))
          (lambda ()
            (stop-server)))))
+
+(mat net-sftp-nonblocking
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (run-net-sftp-nonblocking-test remote-root home port user))
+         (lambda ()
+           (stop-server)))))
