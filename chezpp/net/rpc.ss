@@ -221,6 +221,7 @@
     (fields (mutable socket rpc-pending-socket rpc-pending-socket-set!)
             (immutable notify? rpc-pending-notify?)
             (immutable response-type rpc-pending-response-type)
+            (immutable deadline-ms rpc-pending-deadline-ms)
             (immutable request-bytes rpc-pending-request-bytes)
             (mutable request-offset rpc-pending-request-offset rpc-pending-request-offset-set!)
             (mutable stage rpc-pending-stage rpc-pending-stage-set!)
@@ -256,10 +257,23 @@
     (lambda ()
       (make-hashtable string-hash string=?)))
 
+  (define rpc-default-timeout-ms 30000)
+
+  (define current-time-ms
+    (lambda ()
+      (let ([t (current-time)])
+        (+ (* (time-second t) 1000)
+           (quotient (time-nanosecond t) 1000000)))))
+
   (define check-slice
     (lambda (who len start stop)
       (unless (and (fixnum? start) (fixnum? stop) (fx<= 0 start stop len))
         (errorf who "invalid slice [~a, ~a) for length ~a" start stop len))))
+
+  (define timeout->deadline-ms
+    (lambda (timeout-ms)
+      (and (fx>= timeout-ms 0)
+           (+ (current-time-ms) timeout-ms))))
 
   (define u32-set!
     (lambda (bv index value)
@@ -393,8 +407,51 @@
             (close-socket sock))
           (rpc-pending-socket-set! pending #f)))))
 
+  (define clear-pending!
+    (lambda (channel pending)
+      (close-pending-socket! pending)
+      (rpc-channel-pending-set! channel #f)))
+
+  (define pending-timeout-message
+    (lambda (pending)
+      (if (rpc-pending-notify? pending)
+          "RPC notification timed out"
+          "RPC call timed out")))
+
+  (define pending-expired?
+    (lambda (pending)
+      (let ([deadline (rpc-pending-deadline-ms pending)])
+        (and deadline (<= deadline (current-time-ms))))))
+
+  (define remaining-timeout-ms
+    (lambda (pending)
+      (let ([deadline (rpc-pending-deadline-ms pending)])
+        (and deadline
+             (max 0 (- deadline (current-time-ms)))))))
+
+  (define pending-events
+    (lambda (pending)
+      (case (rpc-pending-stage pending)
+        [(connect send) '(write error hup invalid)]
+        [(recv-header recv-body) '(read error hup invalid)]
+        [else '(error hup invalid)])))
+
+  (define raise-pending-timeout!
+    (lambda (who channel pending)
+      (clear-pending! channel pending)
+      (raise-net-error who 'rpc (pending-timeout-message pending) pending)))
+
+  (define call-with-pending-cleanup
+    (lambda (channel thunk)
+      (guard (c [else
+                 (let ([pending (rpc-channel-pending channel)])
+                   (when pending
+                     (clear-pending! channel pending)))
+                 (raise c)])
+        (thunk))))
+
   (define start-pending-op!
-    (lambda (who channel method payload notify?)
+    (lambda (who channel method payload notify? timeout-ms)
       (let-values ([(method-name request-type response-type stream) (normalize-method who method)])
         (unless (eq? stream 'unary)
           (raise-net-error who 'rpc "streaming RPC methods are not implemented yet" method))
@@ -406,6 +463,7 @@
              (%make-rpc-pending-op sock
                                    notify?
                                    response-type
+                                   (timeout->deadline-ms timeout-ms)
                                    frame
                                    0
                                    'send
@@ -421,9 +479,10 @@
       (let* ([sock (rpc-pending-socket pending)]
              [target (make-poll-target sock '(write error hup invalid))]
              [ready (car (poll/nonblocking (list target)))])
-        (and (memq 'write (poll-target-ready-events ready))
-             (rpc-pending-stage-set! pending 'send)
-             #t))))
+        (and (pair? (poll-target-ready-events ready))
+             (begin
+               (rpc-pending-stage-set! pending 'send)
+               #t)))))
 
   (define maybe-send!
     (lambda (pending)
@@ -451,6 +510,8 @@
 
   (define pending-result
     (lambda (who channel pending)
+      (when (pending-expired? pending)
+        (raise-pending-timeout! who channel pending))
       (case (rpc-pending-stage pending)
         [(connect)
          (if (maybe-progress-connect! pending)
@@ -512,6 +573,34 @@
                    #f))]))]
         [else
          (raise-net-error who 'rpc "invalid RPC pending state" pending)])))
+
+  (define wait-for-pending!
+    (lambda (who channel pending)
+      (when (pending-expired? pending)
+        (raise-pending-timeout! who channel pending))
+      (let* ([sock (rpc-pending-socket pending)]
+             [timeout-ms (let ([x (remaining-timeout-ms pending)])
+                           (if x x -1))]
+             [target (car (poll (list (make-poll-target sock (pending-events pending)))
+                                timeout-ms))])
+        (when (null? (poll-target-ready-events target))
+          (raise-pending-timeout! who channel pending)))))
+
+  (define finish-pending!
+    (lambda (who channel)
+      (call-with-pending-cleanup
+       channel
+       (lambda ()
+         (let loop ()
+           (let ([pending (rpc-channel-pending channel)])
+             (if (not pending)
+                 channel
+                 (let ([result (pending-result who channel pending)])
+                   (if result
+                       result
+                       (begin
+                         (wait-for-pending! who channel pending)
+                         (loop)))))))))))
 
   #|proc:rpc-request
 The `rpc-request` procedure constructs an RPC request record.
@@ -665,73 +754,71 @@ The `rpc-serve/nonblocking` procedure processes one RPC request if a client conn
 
   #|proc:rpc-call
 The `rpc-call` procedure performs a blocking unary RPC call and returns the decoded response payload.
+An optional timeout in milliseconds can be supplied as a fourth argument.
 |#
   (define-who rpc-call
-    (lambda (channel method payload)
-      (pcheck ([rpc-channel? channel])
-              (ensure-channel-open who channel)
-              (ensure-role who channel 'client)
-              (let-values ([(method-name request-type response-type stream) (normalize-method who method)])
-                (unless (eq? stream 'unary)
-                  (raise-net-error who 'rpc "streaming RPC methods are not implemented yet" method))
-                (let-values ([(sock connected?) (open-client-socket who channel #f)])
-                  (dynamic-wind
-                    void
-                    (lambda ()
-                      (write-frame! who
-                                    sock
-                                    (make-request-datum 1 method-name payload #f request-type))
-                      (let ([response (decode-response-datum who (read-frame who sock) response-type)])
-                        (if (rpc-response-ok? response)
-                            (rpc-response-payload response)
-                            (raise-net-error who 'rpc
-                                             (or (rpc-response-error-message response)
-                                                 "RPC call failed")
-                                             response))))
-                    (lambda () (close-socket sock))))))))
+    (case-lambda
+      [(channel method payload)
+       (rpc-call channel method payload rpc-default-timeout-ms)]
+      [(channel method payload timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (ensure-channel-open who channel)
+               (ensure-role who channel 'client)
+               (unless (rpc-channel-pending channel)
+                 (start-pending-op! who channel method payload #f timeout-ms))
+               (finish-pending! who channel))]))
 
   #|proc:rpc-notify
 The `rpc-notify` procedure sends a unary fire-and-forget RPC notification.
+An optional timeout in milliseconds can be supplied as a fourth argument.
 |#
   (define-who rpc-notify
-    (lambda (channel method payload)
-      (pcheck ([rpc-channel? channel])
-              (ensure-channel-open who channel)
-              (ensure-role who channel 'client)
-              (let-values ([(method-name request-type response-type stream) (normalize-method who method)])
-                (unless (eq? stream 'unary)
-                  (raise-net-error who 'rpc "streaming RPC methods are not implemented yet" method))
-                (let-values ([(sock connected?) (open-client-socket who channel #f)])
-                  (dynamic-wind
-                    void
-                    (lambda ()
-                      (write-frame! who
-                                    sock
-                                    (make-request-datum 1 method-name payload #t request-type))
-                      channel)
-                    (lambda () (close-socket sock))))))))
+    (case-lambda
+      [(channel method payload)
+       (rpc-notify channel method payload rpc-default-timeout-ms)]
+      [(channel method payload timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (ensure-channel-open who channel)
+               (ensure-role who channel 'client)
+               (unless (rpc-channel-pending channel)
+                 (start-pending-op! who channel method payload #t timeout-ms))
+               (finish-pending! who channel))]))
 
   #|proc:rpc-call/nonblocking
 The `rpc-call/nonblocking` procedure progresses a unary RPC call without blocking and returns `#f` while the response is still pending.
+An optional timeout in milliseconds can be supplied as a fourth argument.
 |#
   (define-who rpc-call/nonblocking
-    (lambda (channel method payload)
-      (pcheck ([rpc-channel? channel])
-              (ensure-channel-open who channel)
-              (ensure-role who channel 'client)
-              (unless (rpc-channel-pending channel)
-                (start-pending-op! who channel method payload #f))
-              (pending-result who channel (rpc-channel-pending channel)))))
+    (case-lambda
+      [(channel method payload)
+       (rpc-call/nonblocking channel method payload rpc-default-timeout-ms)]
+      [(channel method payload timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (ensure-channel-open who channel)
+               (ensure-role who channel 'client)
+               (unless (rpc-channel-pending channel)
+                 (start-pending-op! who channel method payload #f timeout-ms))
+               (call-with-pending-cleanup
+                channel
+                (lambda ()
+                  (pending-result who channel (rpc-channel-pending channel)))))]))
 
   #|proc:rpc-notify/nonblocking
 The `rpc-notify/nonblocking` procedure progresses a fire-and-forget RPC notification without blocking and returns `#f` while the send is still pending.
+An optional timeout in milliseconds can be supplied as a fourth argument.
 |#
   (define-who rpc-notify/nonblocking
-    (lambda (channel method payload)
-      (pcheck ([rpc-channel? channel])
-              (ensure-channel-open who channel)
-              (ensure-role who channel 'client)
-              (unless (rpc-channel-pending channel)
-                (start-pending-op! who channel method payload #t))
-              (pending-result who channel (rpc-channel-pending channel)))))
+    (case-lambda
+      [(channel method payload)
+       (rpc-notify/nonblocking channel method payload rpc-default-timeout-ms)]
+      [(channel method payload timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (ensure-channel-open who channel)
+               (ensure-role who channel 'client)
+               (unless (rpc-channel-pending channel)
+                 (start-pending-op! who channel method payload #t timeout-ms))
+               (call-with-pending-cleanup
+                channel
+                (lambda ()
+                  (pending-result who channel (rpc-channel-pending channel)))))]))
   )
