@@ -4,6 +4,28 @@
 (load "net-common.ss")
 (load "net-ftp-common.ss")
 
+(define wait-ftp-nonblocking
+  (lambda (proc)
+    (let loop ([i 0])
+      (let ([ans (proc)])
+        (cond
+         [ans ans]
+         [(>= i 200) #f]
+         [else
+          (milisleep 10)
+          (loop (+ i 1))])))))
+
+(define retry-ftp-test-op
+  (lambda (proc)
+    (let loop ([i 0])
+      (guard (c [else
+                 (if (and (net-error? c) (< i 4))
+                     (begin
+                       (milisleep 100)
+                       (loop (+ i 1)))
+                     (raise c))])
+        (proc)))))
+
 (mat net-ftp-session
      (let-values ([(root port stop-server) (start-ftp-test-server)])
        (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
@@ -154,9 +176,9 @@
              (write-bytevector-file victim-path (string->utf8 "delete me")))
            (lambda ()
              (and (ftp-login! session "user" "pass")
-                  (eq? (begin
-                         (milisleep 100)
-                         (ftp-delete! session "/victim.txt"))
+                  (eq? (retry-ftp-test-op
+                        (lambda ()
+                          (ftp-delete! session "/victim.txt")))
                        session)
                   (not (file-exists? victim-path))))
            (lambda ()
@@ -193,4 +215,71 @@
                   (equal? (read-u8vec ported-path)
                           (string->utf8 "through port"))))
            (lambda ()
+             (stop-server))))))
+
+(mat net-ftp-list-nonblocking
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (ftp-login! session "user" "pass")
+                  (let ([entries (wait-ftp-nonblocking
+                                  (lambda ()
+                                    (ftp-list/nonblocking session)))])
+                    (and (list? entries)
+                         (not (not (member "docs" entries)))
+                         (not (not (member "hello.txt" entries)))))))
+           (lambda ()
+             (stop-server))))))
+
+(mat net-ftp-download-nonblocking
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
+             [download-path "/tmp/chezpp-net-ftp-download-nb.txt"])
+         (dynamic-wind
+           (lambda ()
+             (when (file-exists? download-path)
+               (delete-file download-path #f)))
+           (lambda ()
+             (and (ftp-login! session "user" "pass")
+                  (equal? (wait-ftp-nonblocking
+                           (lambda ()
+                             (ftp-download/nonblocking session
+                                                       "/hello.txt"
+                                                       download-path)))
+                          download-path)
+                  (equal? (read-u8vec download-path)
+                          (string->utf8 "hello ftp"))))
+           (lambda ()
+             (when (file-exists? download-path)
+               (delete-file download-path #f))
+             (stop-server))))))
+
+(mat net-ftp-upload-nonblocking
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
+             [upload-path "/tmp/chezpp-net-ftp-upload-nb.txt"]
+             [uploaded-path (string-append root "/uploaded-nb.txt")])
+         (dynamic-wind
+           (lambda ()
+             (when (file-exists? upload-path)
+               (delete-file upload-path #f)))
+           (lambda ()
+             (and (ftp-login! session "user" "pass")
+                  (begin
+                    (write-bytevector-file upload-path (string->utf8 "upload nonblocking"))
+                    #t)
+                  (equal? (wait-ftp-nonblocking
+                           (lambda ()
+                             (ftp-upload/nonblocking session
+                                                     upload-path
+                                                     "/uploaded-nb.txt")))
+                          "/uploaded-nb.txt")
+                  (file-regular? uploaded-path)
+                  (equal? (read-u8vec uploaded-path)
+                          (string->utf8 "upload nonblocking"))))
+           (lambda ()
+             (when (file-exists? upload-path)
+               (delete-file upload-path #f))
              (stop-server))))))

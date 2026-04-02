@@ -5,8 +5,11 @@
           ftp-login!
           ftp-quit!
           ftp-list
+          ftp-list/nonblocking
           ftp-download
+          ftp-download/nonblocking
           ftp-upload
+          ftp-upload/nonblocking
           ftp-delete!
           ftp-mkdir!
           ftp-rmdir!
@@ -23,8 +26,22 @@
           (chezpp string)
           (chezpp net uri)
           (chezpp net errors)
+          (chezpp net address)
+          (chezpp net socket)
+          (chezpp net poll)
           (chezpp net ffi)
           (chezpp net private))
+
+  (define-record-type (ftp-pending-op %make-ftp-pending-op ftp-pending-op?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable kind ftp-pending-kind)
+            (immutable args ftp-pending-args)
+            (immutable reader ftp-pending-reader)
+            (immutable writer ftp-pending-writer)
+            (immutable thread ftp-pending-thread)
+            (mutable done? ftp-pending-done? ftp-pending-done?-set!)
+            (mutable result ftp-pending-result ftp-pending-result-set!)))
 
   (define-record-type (ftp-session %make-ftp-session ftp-session?)
     (sealed #t)
@@ -37,6 +54,7 @@
             (mutable timeout-ms ftp-session-timeout-ms ftp-session-timeout-ms-set!)
             (mutable verify-peer? ftp-session-verify-peer? ftp-session-verify-peer?-set!)
             (mutable verify-host? ftp-session-verify-host? ftp-session-verify-host?-set!)
+            (mutable pending ftp-session-pending ftp-session-pending-set!)
             (mutable closed? ftp-session-closed? ftp-session-closed?-set!)))
 
   (define ftp-default-timeout-ms 30000)
@@ -46,6 +64,14 @@
     (lambda (who session)
       (when (ftp-session-closed? session)
         (raise-net-error who 'ftp "FTP session is closed" session))))
+
+  (define ensure-no-pending-mismatch
+    (lambda (who session kind args)
+      (let ([pending (ftp-session-pending session)])
+        (when (and pending
+                   (or (not (eq? (ftp-pending-kind pending) kind))
+                       (not (equal? (ftp-pending-args pending) args))))
+          (raise-net-error who 'ftp "another nonblocking FTP operation is pending" pending)))))
 
   (define normalize-ftp-uri
     (lambda (who value)
@@ -203,6 +229,85 @@
         (guard (c [else #f])
           (delete-file path)))))
 
+  (define close-pending-notifier!
+    (lambda (pending)
+      (guard (c [else #f])
+        (close-socket (ftp-pending-reader pending)))
+      (guard (c [else #f])
+        (close-socket (ftp-pending-writer pending)))))
+
+  (define open-pending-notifier
+    (lambda ()
+      (let ([listener (open-socket 'inet 'stream)]
+            [client #f]
+            [server #f])
+        (dynamic-wind
+          void
+          (lambda ()
+            (socket-set-option! listener 'reuse-address #t)
+            (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+            (socket-listen! listener 1)
+            (let ([addr (socket-local-address listener)])
+              (set! client (open-socket 'inet 'stream))
+              (socket-connect! client addr)
+              (let-values ([(accepted peer) (socket-accept listener)])
+                (set! server accepted)
+                (values server client))))
+          (lambda ()
+            (guard (c [else #f])
+              (close-socket listener)))))))
+
+  (define start-pending!
+    (lambda (session kind args thunk)
+        (let-values ([(reader writer) (open-pending-notifier)])
+          (letrec ([pending
+                    (%make-ftp-pending-op
+                     kind
+                     args
+                     reader
+                     writer
+                     (fork-thread
+                      (lambda ()
+                        (ftp-pending-result-set!
+                         pending
+                         (guard (c [else c])
+                           (thunk)))
+                        (ftp-pending-done?-set! pending #t)
+                        (guard (c [else #f])
+                          (socket-send-all writer #vu8(1)))))
+                     #f
+                     #f)])
+            (ftp-session-pending-set! session pending)
+            pending))))
+
+  (define pending-ready?
+    (lambda (pending)
+      (or (ftp-pending-done? pending)
+          (let* ([target (make-poll-target (ftp-pending-reader pending)
+                                           '(read error hup invalid))]
+                 [ready (car (poll/nonblocking (list target)))])
+            (pair? (poll-target-ready-events ready))))))
+
+  (define finish-pending!
+    (lambda (who session pending)
+      (ftp-session-pending-set! session #f)
+      (thread-join (ftp-pending-thread pending))
+      (close-pending-notifier! pending)
+      (let ([result (ftp-pending-result pending)])
+        (if (condition? result)
+            (raise result)
+            result))))
+
+  (define ftp-transfer/nonblocking
+    (lambda (who session kind args thunk)
+      (ensure-session-open who session)
+      (ensure-no-pending-mismatch who session kind args)
+      (let ([pending (or (ftp-session-pending session)
+                         (start-pending! session kind args thunk))])
+        (if (pending-ready? pending)
+            (finish-pending! who session pending)
+            #f))))
+
   (define make-ftp-input-port
     (lambda (session remote-path)
       (let ([local-path (next-temp-path ".download")]
@@ -288,6 +393,7 @@ The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoi
                                    (uri-path u)))
                               #t
                               ftp-default-timeout-ms
+                              #f
                               #f
                               #f
                               #f)))]
@@ -387,6 +493,22 @@ The `ftp-list` procedure returns the names of entries in a remote directory.
                                    out
                                    (cons line out))))))))]))
 
+  #|proc:ftp-list/nonblocking
+The `ftp-list/nonblocking` procedure progresses a directory listing without blocking and returns `#f` while the listing is still pending.
+|#
+  (define-who ftp-list/nonblocking
+    (case-lambda
+      [(session)
+       (ftp-list/nonblocking session ".")]
+      [(session path)
+       (pcheck ([ftp-session? session] [string? path])
+               (ftp-transfer/nonblocking who
+                                         session
+                                         'list
+                                         (list path)
+                                         (lambda ()
+                                           (ftp-list session path))))]))
+
   #|proc:ftp-download
 The `ftp-download` procedure downloads a remote file to a local pathname.
 |#
@@ -407,6 +529,19 @@ The `ftp-download` procedure downloads a remote file to a local pathname.
                                      (if (ftp-session-verify-host? session) 1 0)))
               local-path)))
 
+  #|proc:ftp-download/nonblocking
+The `ftp-download/nonblocking` procedure progresses a file download without blocking and returns `#f` while the download is still pending.
+|#
+  (define-who ftp-download/nonblocking
+    (lambda (session remote-path local-path)
+      (pcheck ([ftp-session? session] [string? remote-path local-path])
+              (ftp-transfer/nonblocking who
+                                        session
+                                        'download
+                                        (list remote-path local-path)
+                                        (lambda ()
+                                          (ftp-download session remote-path local-path))))))
+
   #|proc:ftp-upload
 The `ftp-upload` procedure uploads a local file to a remote pathname.
 |#
@@ -426,6 +561,19 @@ The `ftp-upload` procedure uploads a local file to a remote pathname.
                                    (if (ftp-session-verify-peer? session) 1 0)
                                    (if (ftp-session-verify-host? session) 1 0)))
               remote-path)))
+
+  #|proc:ftp-upload/nonblocking
+The `ftp-upload/nonblocking` procedure progresses a file upload without blocking and returns `#f` while the upload is still pending.
+|#
+  (define-who ftp-upload/nonblocking
+    (lambda (session local-path remote-path)
+      (pcheck ([ftp-session? session] [string? local-path remote-path])
+              (ftp-transfer/nonblocking who
+                                        session
+                                        'upload
+                                        (list local-path remote-path)
+                                        (lambda ()
+                                          (ftp-upload session local-path remote-path))))))
 
   #|proc:ftp-delete!
 The `ftp-delete!` procedure deletes a remote file.
