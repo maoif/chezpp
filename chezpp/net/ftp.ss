@@ -15,7 +15,9 @@
           ftp-pwd
           ftp-passive-mode!
           ftp-active-mode!
-          call-with-ftp-session)
+          call-with-ftp-session
+          open-ftp-input-port
+          open-ftp-output-port)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp string)
@@ -38,6 +40,7 @@
             (mutable closed? ftp-session-closed? ftp-session-closed?-set!)))
 
   (define ftp-default-timeout-ms 30000)
+  (define ftp-temp-counter 0)
 
   (define ensure-session-open
     (lambda (who session)
@@ -177,6 +180,96 @@
                             (if (ftp-session-verify-peer? session) 1 0)
                             (if (ftp-session-verify-host? session) 1 0)
                             cmd))))
+
+  (define next-temp-path
+    (lambda (suffix)
+      (set! ftp-temp-counter (+ ftp-temp-counter 1))
+      (let loop ()
+        (let* ([t (current-time)]
+               [path (format "/tmp/chezpp-net-ftp-~a-~a-~a~a"
+                             (time-second t)
+                             (time-nanosecond t)
+                             ftp-temp-counter
+                             suffix)])
+          (if (file-exists? path)
+              (begin
+                (set! ftp-temp-counter (+ ftp-temp-counter 1))
+                (loop))
+              path)))))
+
+  (define cleanup-temp-file!
+    (lambda (path)
+      (when (and path (file-exists? path))
+        (guard (c [else #f])
+          (delete-file path)))))
+
+  (define make-ftp-input-port
+    (lambda (session remote-path)
+      (let ([local-path (next-temp-path ".download")]
+            [ip #f]
+            [closed? #f])
+        (define close!
+          (lambda ()
+            (unless closed?
+              (set! closed? #t)
+              (when ip
+                (close-port ip)
+                (set! ip #f))
+              (cleanup-temp-file! local-path))))
+        (dynamic-wind
+          void
+          (lambda ()
+            (ftp-download session remote-path local-path)
+            (set! ip (open-file-input-port local-path
+                                           (file-options)
+                                           (buffer-mode block)
+                                           #f))
+            (make-custom-binary-input-port
+             "chezpp-ftp-input"
+             (lambda (bv start count)
+               (let ([n (get-bytevector-n! ip bv start count)])
+                 (if (eof-object? n) 0 n)))
+             (lambda () (port-position ip))
+             (lambda (pos) (set-port-position! ip pos))
+             (lambda () (close!) #t)))
+          (lambda ()
+            (when (and (not ip) (file-exists? local-path))
+              (cleanup-temp-file! local-path)))))))
+
+  (define make-ftp-output-port
+    (lambda (session remote-path)
+      (let* ([local-path (next-temp-path ".upload")]
+             [op (open-file-output-port local-path
+                                        (file-options no-fail replace)
+                                        (buffer-mode block)
+                                        #f)]
+             [closed? #f])
+        (define close!
+          (lambda ()
+            (unless closed?
+              (set! closed? #t)
+              (when op
+                (close-port op)
+                (set! op #f))
+              (dynamic-wind
+                void
+                (lambda ()
+                  (ftp-upload session local-path remote-path))
+                (lambda ()
+                  (cleanup-temp-file! local-path))))))
+        (make-custom-binary-output-port
+         "chezpp-ftp-output"
+         (lambda (bv start count)
+           (put-bytevector op bv start count)
+           count)
+         (lambda ()
+           (flush-output-port op)
+           #t)
+         (lambda (pos)
+           (set-port-position! op pos))
+         (lambda ()
+           (close!)
+           #t)))))
 
   #|proc:ftp-open
 The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoint URI or host/port tuple.
@@ -409,4 +502,22 @@ The `call-with-ftp-session` procedure opens an FTP session, applies a procedure 
                    void
                    (lambda () (proc session))
                    (lambda () (ftp-close session)))))]))
+
+  #|proc:open-ftp-input-port
+The `open-ftp-input-port` procedure opens a binary input port for a remote FTP file.
+|#
+  (define-who open-ftp-input-port
+    (lambda (session remote-path)
+      (pcheck ([ftp-session? session] [string? remote-path])
+              (ensure-session-open who session)
+              (make-ftp-input-port session remote-path))))
+
+  #|proc:open-ftp-output-port
+The `open-ftp-output-port` procedure opens a binary output port that uploads its contents to a remote FTP file when closed.
+|#
+  (define-who open-ftp-output-port
+    (lambda (session remote-path)
+      (pcheck ([ftp-session? session] [string? remote-path])
+              (ensure-session-open who session)
+              (make-ftp-output-port session remote-path))))
   )

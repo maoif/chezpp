@@ -13,6 +13,17 @@
         (let ([port (socket-address-port (socket-local-address listener))])
           (define running? #t)
           (define client-threads '())
+          (define client-sockets '())
+          (define remove-client-socket!
+            (lambda (client)
+              (let loop ([rest client-sockets] [out '()])
+                (cond
+                 [(null? rest)
+                  (set! client-sockets (reverse out))]
+                 [(eq? (car rest) client)
+                  (set! client-sockets (append (reverse out) (cdr rest)))]
+                 [else
+                  (loop (cdr rest) (cons (car rest) out))]))))
           (define physical-path
             (lambda (virtual-path)
               (string-append root (normalize-absolute-test-path virtual-path))))
@@ -205,11 +216,13 @@
                           (loop)]))))))))
           (define spawn-client-handler
             (lambda (client)
+              (set! client-sockets (cons client client-sockets))
               (let ([th
                      (fork-thread
                       (lambda ()
                         (guard (c [else #f])
                           (handle-client client))
+                        (remove-client-socket! client)
                         (guard (c [else #f])
                           (close-socket client))))])
                 (set! client-threads (cons th client-threads))
@@ -243,6 +256,10 @@
                     (set! running? #f)
                     (guard (c [else #f])
                       (close-socket listener))
+                    (for-each (lambda (client)
+                                (guard (c [else #f])
+                                  (close-socket client)))
+                              client-sockets)
                     (thread-join server-thread)
                     (for-each thread-join client-threads)
                     (when (file-exists? root)
