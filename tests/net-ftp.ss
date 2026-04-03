@@ -35,6 +35,17 @@
       (thunk)
       #f)))
 
+(define ftp-error-message-contains?
+  (lambda (fragment thunk)
+    (guard (c [else
+               (and (condition? c)
+                    (string-contains?
+                     (call-with-string-output-port
+                      (lambda (p) (display-condition c p)))
+                     fragment))])
+      (thunk)
+      #f)))
+
 (define start-stalled-ftp-control-server
   (lambda (delay-ms)
     (let ([listener (open-socket 'inet 'stream)])
@@ -115,6 +126,26 @@
            (thread-join th)
            (guard (c [else #f])
              (close-socket listener))))))
+
+(mat net-ftp-timeout-validation
+     (let ([endpoint "ftp://127.0.0.1:21/"])
+       (and
+        (ftp-error-message-contains?
+         "timeout must be non-negative"
+         (lambda ()
+           (ftp-open endpoint -1)))
+        (ftp-error-message-contains?
+         "timeout must be non-negative"
+         (lambda ()
+           (ftp-open "127.0.0.1" 21 #f -1)))
+        (ftp-error-message-contains?
+         "timeout must be non-negative"
+         (lambda ()
+           (call-with-ftp-session endpoint -1 ftp-session?)))
+        (ftp-error-message-contains?
+         "timeout must be non-negative"
+         (lambda ()
+           (call-with-ftp-session "127.0.0.1" 21 #f -1 ftp-session?))))))
 
 (mat net-ftp-list
      (let-values ([(root port stop-server) (start-ftp-test-server)])
