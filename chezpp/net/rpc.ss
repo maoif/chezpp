@@ -1011,8 +1011,7 @@ The `rpc-close` procedure closes an RPC channel or listener.
               (unless (rpc-channel-closed? channel)
                 (let ([pending (rpc-channel-pending channel)])
                   (when pending
-                    (close-pending-socket! pending)
-                    (rpc-channel-pending-set! channel #f)))
+                    (clear-pending! channel pending)))
                 (let ([sock (rpc-channel-socket channel)])
                   (when sock
                     (close-socket sock)
