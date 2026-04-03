@@ -51,9 +51,43 @@
             (loop i (fx1- attempt))]
            [(fx= n 0)
             (milisleep 25)
-            (loop i (fx1- attempt))]
+             (loop i (fx1- attempt))]
            [else
             (loop (fx+ i n) attempt)]))]))))
+
+(define ssh-test-server-master-pid-path
+  (lambda (remote-root)
+    (let* ([suffix "/remote"]
+           [n (string-length remote-root)]
+           [m (string-length suffix)])
+      (unless (and (fx>= n m)
+                   (string=? (substring remote-root (fx- n m) n) suffix))
+        (errorf 'ssh-test-server-master-pid-path "unexpected remote root ~s" remote-root))
+      (string-append (substring remote-root 0 (fx- n m)) "/sshd.pid"))))
+
+(define with-suspended-ssh-session-child
+  (lambda (who remote-root proc)
+    (let ([pid-path (ssh-test-server-master-pid-path remote-root)]
+          [pids-path (string-append remote-root "/.sshd-pids")])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? pids-path)
+            (delete-file pids-path #f))
+          (run-command!
+           who
+           (format "sh -c 'collect() { for child in $(ps -o pid= --ppid \"$1\"); do child=$(printf \"%s\" \"$child\" | tr -d \"[:space:]\"); test -n \"$child\" || continue; printf \"%s\\n\" \"$child\"; collect \"$child\"; done; }; master=$(cat ~a); { collect \"$master\"; } > ~a; test -s ~a; while IFS= read -r pid; do kill -STOP \"$pid\"; done < ~a' >/dev/null 2>&1"
+                   pid-path
+                   pids-path
+                   pids-path
+                   pids-path))
+          (milisleep 50))
+        proc
+        (lambda ()
+          (when (file-exists? pids-path)
+            (system (format "sh -c 'while IFS= read -r pid; do kill -CONT \"$pid\"; done < ~a' >/dev/null 2>&1"
+                            pids-path))
+            (milisleep 50)
+            (delete-file pids-path #f)))))))
 
 (define start-ssh-test-server
   (lambda ()
@@ -472,6 +506,51 @@
        (and (not (member "renamed.txt" entries))
             (not (member "tmpdir" entries)))))))
 
+(define sftp-test-timeouts
+  (lambda (sftp remote-root timeout?)
+    (let ([read-path-1 (string-append remote-root "/hello.txt")]
+          [read-path-2 (string-append remote-root "/nested/base.txt")]
+          [write-path (string-append remote-root "/timeout-write.txt")])
+      (and
+       (let ([file (sftp-open-file sftp read-path-1 'read)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (with-suspended-ssh-session-child
+              'sftp-test-timeouts
+              remote-root
+              (lambda ()
+                (timeout?
+                 (lambda ()
+                   (sftp-read file 16 50))))))
+           (lambda () (sftp-close-file file))))
+       (let ([file (sftp-open-file sftp read-path-2 'read)]
+             [buf (make-bytevector 32 0)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (with-suspended-ssh-session-child
+              'sftp-test-timeouts
+              remote-root
+              (lambda ()
+                (timeout?
+                 (lambda ()
+                   (sftp-read! file buf 2 18 50))))))
+           (lambda () (sftp-close-file file))))
+       (let ([file (sftp-open-file sftp write-path '(write create truncate))]
+             [payload (make-bytevector (* 1024 1024) 65)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (with-suspended-ssh-session-child
+              'sftp-test-timeouts
+              remote-root
+              (lambda ()
+                (timeout?
+                 (lambda ()
+                   (sftp-write-all file payload 0 (bytevector-length payload) 50))))))
+           (lambda () (sftp-close-file file))))))))
+
 (define run-net-sftp-test
   (lambda (remote-root home port user)
     (with-env
@@ -523,5 +602,26 @@
                   (lambda ()
                     (and (sftp-session? sftp)
                          (sftp-test-nonblocking-apis sftp remote-root)))
+                  (lambda () (sftp-close sftp))))))
+           (lambda () (ssh-close session))))))))
+
+(define run-net-sftp-timeout-test
+  (lambda (remote-root home port user timeout?)
+    (with-env
+     "HOME"
+     home
+     (lambda ()
+       (let ([session (ssh-open "127.0.0.1" port user)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and
+              (eq? (ssh-auth-publickey! session user) session)
+              (let ([sftp (sftp-open session)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and (sftp-session? sftp)
+                         (sftp-test-timeouts sftp remote-root timeout?)))
                   (lambda () (sftp-close sftp))))))
            (lambda () (ssh-close session))))))))

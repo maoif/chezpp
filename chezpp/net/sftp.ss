@@ -25,6 +25,7 @@
           open-sftp-input-port
           open-sftp-output-port)
   (import (chezpp chez)
+          (chezpp os)
           (chezpp utils)
           (chezpp net errors)
           (chezpp net ffi)
@@ -77,6 +78,43 @@
     (lambda (who len start stop)
       (unless (and (fixnum? start) (fixnum? stop) (fx<= 0 start stop len))
         (errorf who "invalid slice [~a, ~a) for length ~a" start stop len))))
+
+  (define check-timeout-ms
+    (lambda (who timeout-ms)
+      (unless (fixnum? timeout-ms)
+        (errorf who "expected timeout fixnum, given ~s" timeout-ms))
+      (when (fx< timeout-ms 0)
+        (errorf who "timeout must be non-negative, given ~s" timeout-ms))
+      timeout-ms))
+
+  (define current-time-ms
+    (lambda ()
+      (let ([t (current-time)])
+        (+ (* (time-second t) 1000)
+           (quotient (time-nanosecond t) 1000000)))))
+
+  (define timeout->deadline-ms
+    (lambda (timeout-ms)
+      (+ (current-time-ms) timeout-ms)))
+
+  (define remaining-timeout-ms
+    (lambda (deadline-ms)
+      (let ([remaining (fx- deadline-ms (current-time-ms))])
+        (if (fx<= remaining 0) 0 remaining))))
+
+  (define await-timeout-result
+    (lambda (who message timeout-ms thunk)
+      (let ([deadline-ms (timeout->deadline-ms timeout-ms)])
+        (let loop ()
+          (let ([remaining-ms (remaining-timeout-ms deadline-ms)])
+            (when (fx= remaining-ms 0)
+              (raise-net-error who 'sftp message timeout-ms))
+            (let ([x (thunk remaining-ms)])
+              (if x
+                  x
+                  (begin
+                    (milisleep 1)
+                    (loop)))))))))
 
   (define read-result
     (lambda (who x)
@@ -308,11 +346,26 @@ The `sftp-close-file` procedure closes an SFTP file handle.
 The `sftp-read` procedure reads up to `size` bytes from an SFTP file handle.
 |#
   (define-who sftp-read
-    (lambda (file size)
-      (pcheck ([sftp-file? file] [fixnum? size])
-              (ensure-file-open who file)
-              (read-result who
-                           (ffi-net-sftp-read (sftp-file-handle file) size 0)))))
+    (case-lambda
+      [(file size)
+       (pcheck ([sftp-file? file] [fixnum? size])
+               (ensure-file-open who file)
+               (read-result who
+                            (ffi-net-sftp-read (sftp-file-handle file) size 0 -1)))]
+      [(file size timeout-ms)
+       (pcheck ([sftp-file? file] [fixnum? size])
+               (check-timeout-ms who timeout-ms)
+               (ensure-file-open who file)
+               (await-timeout-result
+                who
+                "sftp read timed out"
+                timeout-ms
+                (lambda (remaining-ms)
+                  (read-result who
+                               (ffi-net-sftp-read (sftp-file-handle file)
+                                                  size
+                                                  0
+                                                  remaining-ms)))))]))
 
   #|proc:sftp-read/nonblocking
 The `sftp-read/nonblocking` procedure attempts to read from an SFTP file handle without blocking.
@@ -322,7 +375,7 @@ The `sftp-read/nonblocking` procedure attempts to read from an SFTP file handle 
       (pcheck ([sftp-file? file] [fixnum? size])
               (ensure-file-open who file)
               (read-result who
-                           (ffi-net-sftp-read (sftp-file-handle file) size 1)))))
+                           (ffi-net-sftp-read (sftp-file-handle file) size 1 -1)))))
 
   #|proc:sftp-read!
 The `sftp-read!` procedure reads into a bytevector slice from an SFTP file handle.
@@ -340,7 +393,25 @@ The `sftp-read!` procedure reads into a bytevector slice from an SFTP file handl
                                                          bv
                                                          start
                                                          stop
-                                                         0)))]))
+                                                         0
+                                                         -1)))]
+      [(file bv start stop timeout-ms)
+       (pcheck ([sftp-file? file] [bytevector? bv])
+               (check-timeout-ms who timeout-ms)
+               (ensure-file-open who file)
+               (check-slice who (bytevector-length bv) start stop)
+               (await-timeout-result
+                who
+                "sftp read timed out"
+                timeout-ms
+                (lambda (remaining-ms)
+                  (read-into-result who
+                                    (ffi-net-sftp-read-into (sftp-file-handle file)
+                                                            bv
+                                                            start
+                                                            stop
+                                                            0
+                                                            remaining-ms)))))]))
 
   #|proc:sftp-read!/nonblocking
 The `sftp-read!/nonblocking` procedure attempts to read into a bytevector slice without blocking.
@@ -377,7 +448,25 @@ The `sftp-write` procedure writes a bytevector slice to an SFTP file handle.
                                                  bv
                                                  start
                                                  stop
-                                                 0)))]))
+                                                 0
+                                                 -1)))]
+      [(file bv start stop timeout-ms)
+       (pcheck ([sftp-file? file] [bytevector? bv])
+               (check-timeout-ms who timeout-ms)
+               (ensure-file-open who file)
+               (check-slice who (bytevector-length bv) start stop)
+               (await-timeout-result
+                who
+                "sftp write timed out"
+                timeout-ms
+                (lambda (remaining-ms)
+                  (write-result who
+                                (ffi-net-sftp-write (sftp-file-handle file)
+                                                    bv
+                                                    start
+                                                    stop
+                                                    0
+                                                    remaining-ms)))))]))
 
   #|proc:sftp-write/nonblocking
 The `sftp-write/nonblocking` procedure attempts to write a bytevector slice without blocking.
@@ -390,12 +479,13 @@ The `sftp-write/nonblocking` procedure attempts to write a bytevector slice with
        (pcheck ([sftp-file? file] [bytevector? bv])
                (ensure-file-open who file)
                (check-slice who (bytevector-length bv) start stop)
-               (write-result who
+                (write-result who
                              (ffi-net-sftp-write (sftp-file-handle file)
                                                  bv
                                                  start
                                                  stop
-                                                 1)))]))
+                                                 1
+                                                 -1)))]))
 
   #|proc:sftp-write-all
 The `sftp-write-all` procedure writes an entire bytevector slice to an SFTP file handle.
@@ -411,7 +501,18 @@ The `sftp-write-all` procedure writes an entire bytevector slice to an SFTP file
                (let loop ([i start])
                  (if (fx= i stop)
                      (fx- stop start)
-                     (loop (fx+ i (sftp-write file bv i stop))))))]))
+                     (loop (fx+ i (sftp-write file bv i stop))))))]
+      [(file bv start stop timeout-ms)
+       (pcheck ([sftp-file? file] [bytevector? bv])
+               (check-timeout-ms who timeout-ms)
+               (ensure-file-open who file)
+               (check-slice who (bytevector-length bv) start stop)
+               (let ([deadline-ms (timeout->deadline-ms timeout-ms)])
+                 (let loop ([i start])
+                   (if (fx= i stop)
+                       (fx- stop start)
+                       (let ([step-timeout (remaining-timeout-ms deadline-ms)])
+                         (loop (fx+ i (sftp-write file bv i stop step-timeout))))))))]))
 
   #|proc:sftp-write-all/nonblocking
 The `sftp-write-all/nonblocking` procedure writes as much of a bytevector slice as possible without blocking.

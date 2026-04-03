@@ -738,14 +738,23 @@ ptr chezpp_net_sftp_close_file(uptr handle) {
   return Strue;
 }
 
-ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking) {
+ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking, int timeout_ms) {
   chezpp_sftp_file *wrapper = (chezpp_sftp_file *)TO_VOIDP(handle);
   ssize_t rc;
   ptr out;
+  int use_nonblocking;
+  int64_t deadline = -1;
 
   if (wrapper == NULL || wrapper->file == NULL) return make_error_status_message("invalid sftp file");
 
-  if (!nonblocking) {
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = nonblocking || timeout_ms >= 0;
+
+  if (!use_nonblocking) {
     out = Smake_bytevector((iptr)size, 0);
     rc = p_sftp_read(wrapper->file, Sbytevector_data(out), (size_t)size);
 
@@ -763,17 +772,29 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking) {
 
   p_ssh_set_blocking(wrapper->owner->owner->session, 0);
   p_sftp_file_set_nonblocking(wrapper->file);
-  if (wrapper->pending_read == NULL) {
-    rc = p_sftp_aio_begin_read(wrapper->file, (size_t)size, &wrapper->pending_read);
-    if (rc == SSH_ERROR || rc < 0) {
-      p_sftp_file_set_blocking(wrapper->file);
-      p_ssh_set_blocking(wrapper->owner->owner->session, 1);
-      return sftp_file_error_status(wrapper, "sftp read failed");
+  for (;;) {
+    if (wrapper->pending_read == NULL) {
+      rc = p_sftp_aio_begin_read(wrapper->file, (size_t)size, &wrapper->pending_read);
+      if (rc == SSH_ERROR || rc < 0) {
+        p_sftp_file_set_blocking(wrapper->file);
+        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        return sftp_file_error_status(wrapper, "sftp read failed");
+      }
+      wrapper->pending_read_len = (size_t)rc;
     }
-    wrapper->pending_read_len = (size_t)rc;
+    out = Smake_bytevector((iptr)wrapper->pending_read_len, 0);
+    rc = p_sftp_aio_wait_read(&wrapper->pending_read, Sbytevector_data(out), wrapper->pending_read_len);
+    if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->owner->session, POLLIN, deadline,
+                                               "sftp read timed out");
+      if (wait_status != Strue) {
+        p_sftp_file_set_blocking(wrapper->file);
+        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        return wait_status;
+      }
+    }
   }
-  out = Smake_bytevector((iptr)wrapper->pending_read_len, 0);
-  rc = p_sftp_aio_wait_read(&wrapper->pending_read, Sbytevector_data(out), wrapper->pending_read_len);
   p_sftp_file_set_blocking(wrapper->file);
   p_ssh_set_blocking(wrapper->owner->owner->session, 1);
 
@@ -781,7 +802,7 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking) {
   wrapper->pending_read_len = 0;
   if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp read failed");
   if (rc == 0) return Seof_object;
-  if ((size_t)rc == Sbytevector_length(out)) return out;
+  if (rc == (ssize_t)Sbytevector_length(out)) return out;
 
   {
     ptr clipped = Smake_bytevector((iptr)rc, 0);
@@ -790,13 +811,23 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking) {
   }
 }
 
-ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonblocking) {
+ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonblocking,
+                              int timeout_ms) {
   chezpp_sftp_file *wrapper = (chezpp_sftp_file *)TO_VOIDP(handle);
   ssize_t rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
 
   if (wrapper == NULL || wrapper->file == NULL) return make_error_status_message("invalid sftp file");
 
-  if (!nonblocking) {
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = nonblocking || timeout_ms >= 0;
+
+  if (!use_nonblocking) {
     rc = p_sftp_read(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
 
     if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
@@ -807,18 +838,30 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
 
   p_ssh_set_blocking(wrapper->owner->owner->session, 0);
   p_sftp_file_set_nonblocking(wrapper->file);
-  if (wrapper->pending_read == NULL) {
-    rc = p_sftp_aio_begin_read(wrapper->file, (size_t)(stop - start), &wrapper->pending_read);
-    if (rc == SSH_ERROR || rc < 0) {
-      p_sftp_file_set_blocking(wrapper->file);
-      p_ssh_set_blocking(wrapper->owner->owner->session, 1);
-      return sftp_file_error_status(wrapper, "sftp read failed");
+  for (;;) {
+    if (wrapper->pending_read == NULL) {
+      rc = p_sftp_aio_begin_read(wrapper->file, (size_t)(stop - start), &wrapper->pending_read);
+      if (rc == SSH_ERROR || rc < 0) {
+        p_sftp_file_set_blocking(wrapper->file);
+        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        return sftp_file_error_status(wrapper, "sftp read failed");
+      }
+      wrapper->pending_read_len = (size_t)rc;
     }
-    wrapper->pending_read_len = (size_t)rc;
+    rc = p_sftp_aio_wait_read(&wrapper->pending_read,
+                              Sbytevector_data(bv) + start,
+                              (size_t)(stop - start));
+    if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->owner->session, POLLIN, deadline,
+                                               "sftp read timed out");
+      if (wait_status != Strue) {
+        p_sftp_file_set_blocking(wrapper->file);
+        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        return wait_status;
+      }
+    }
   }
-  rc = p_sftp_aio_wait_read(&wrapper->pending_read,
-                            Sbytevector_data(bv) + start,
-                            (size_t)(stop - start));
   p_sftp_file_set_blocking(wrapper->file);
   p_ssh_set_blocking(wrapper->owner->owner->session, 1);
 
@@ -829,13 +872,23 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
   return Sfixnum((iptr)rc);
 }
 
-ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblocking) {
+ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblocking,
+                          int timeout_ms) {
   chezpp_sftp_file *wrapper = (chezpp_sftp_file *)TO_VOIDP(handle);
   ssize_t rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
 
   if (wrapper == NULL || wrapper->file == NULL) return make_error_status_message("invalid sftp file");
 
-  if (!nonblocking) {
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = nonblocking || timeout_ms >= 0;
+
+  if (!use_nonblocking) {
     rc = p_sftp_write(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
 
     if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
@@ -845,19 +898,31 @@ ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblock
 
   p_ssh_set_blocking(wrapper->owner->owner->session, 0);
   p_sftp_file_set_nonblocking(wrapper->file);
-  if (wrapper->pending_write == NULL) {
-    rc = p_sftp_aio_begin_write(wrapper->file,
-                                Sbytevector_data(bv) + start,
-                                (size_t)(stop - start),
-                                &wrapper->pending_write);
-    if (rc == SSH_ERROR || rc < 0) {
-      p_sftp_file_set_blocking(wrapper->file);
-      p_ssh_set_blocking(wrapper->owner->owner->session, 1);
-      return sftp_file_error_status(wrapper, "sftp write failed");
+  for (;;) {
+    if (wrapper->pending_write == NULL) {
+      rc = p_sftp_aio_begin_write(wrapper->file,
+                                  Sbytevector_data(bv) + start,
+                                  (size_t)(stop - start),
+                                  &wrapper->pending_write);
+      if (rc == SSH_ERROR || rc < 0) {
+        p_sftp_file_set_blocking(wrapper->file);
+        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        return sftp_file_error_status(wrapper, "sftp write failed");
+      }
+      wrapper->pending_write_len = (size_t)rc;
     }
-    wrapper->pending_write_len = (size_t)rc;
+    rc = p_sftp_aio_wait_write(&wrapper->pending_write);
+    if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->owner->session, POLLOUT, deadline,
+                                               "sftp write timed out");
+      if (wait_status != Strue) {
+        p_sftp_file_set_blocking(wrapper->file);
+        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        return wait_status;
+      }
+    }
   }
-  rc = p_sftp_aio_wait_write(&wrapper->pending_write);
   p_sftp_file_set_blocking(wrapper->file);
   p_ssh_set_blocking(wrapper->owner->owner->session, 1);
 

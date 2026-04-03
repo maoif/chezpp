@@ -255,11 +255,11 @@
   (define ffi-net-sftp-close-file
     (foreign-procedure "chezpp_net_sftp_close_file" (uptr) scheme-object))
   (define ffi-net-sftp-read
-    (foreign-procedure "chezpp_net_sftp_read" (uptr int int) scheme-object))
+    (foreign-procedure "chezpp_net_sftp_read" (uptr int int int) scheme-object))
   (define ffi-net-sftp-read-into
-    (foreign-procedure "chezpp_net_sftp_read_into" (uptr ptr int int int) scheme-object))
+    (foreign-procedure "chezpp_net_sftp_read_into" (uptr ptr int int int int) scheme-object))
   (define ffi-net-sftp-write
-    (foreign-procedure "chezpp_net_sftp_write" (uptr ptr int int int) scheme-object))
+    (foreign-procedure "chezpp_net_sftp_write" (uptr ptr int int int int) scheme-object))
   (define ffi-net-websocket-listen
     (foreign-procedure "chezpp_net_websocket_listen" (string int string) scheme-object))
   (define ffi-net-websocket-server-close
