@@ -5,8 +5,11 @@
           rpc-close
           rpc-call
           rpc-call/server-stream
+          rpc-call/server-stream/nonblocking
           rpc-call/client-stream
+          rpc-call/client-stream/nonblocking
           rpc-call/bidi-stream
+          rpc-call/bidi-stream/nonblocking
           rpc-notify
           rpc-register-handler!
           rpc-serve
@@ -250,7 +253,12 @@
             (mutable header rpc-pending-header rpc-pending-header-set!)
             (mutable header-offset rpc-pending-header-offset rpc-pending-header-offset-set!)
             (mutable body rpc-pending-body rpc-pending-body-set!)
-            (mutable body-offset rpc-pending-body-offset rpc-pending-body-offset-set!)))
+            (mutable body-offset rpc-pending-body-offset rpc-pending-body-offset-set!)
+            (immutable reader rpc-pending-reader)
+            (immutable writer rpc-pending-writer)
+            (immutable thread rpc-pending-thread)
+            (mutable done? rpc-pending-done? rpc-pending-done?-set!)
+            (mutable result rpc-pending-result rpc-pending-result-set!)))
 
   (define-record-type (rpc-channel %make-rpc-channel rpc-channel?)
     (sealed #t)
@@ -606,16 +614,50 @@
             (close-socket sock))
           (rpc-pending-socket-set! pending #f)))))
 
+  (define close-pending-notifier!
+    (lambda (pending)
+      (let ([reader (rpc-pending-reader pending)]
+            [writer (rpc-pending-writer pending)])
+        (when reader
+          (guard (c [else #f])
+            (close-socket reader)))
+        (when writer
+          (guard (c [else #f])
+            (close-socket writer))))))
+
+  (define open-pending-notifier
+    (lambda ()
+      (let ([listener (open-socket 'inet 'stream)]
+            [client #f]
+            [server #f])
+        (dynamic-wind
+          void
+          (lambda ()
+            (socket-set-option! listener 'reuse-address #t)
+            (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+            (socket-listen! listener 1)
+            (let ([addr (socket-local-address listener)])
+              (set! client (open-socket 'inet 'stream))
+              (socket-connect! client addr)
+              (let-values ([(accepted peer) (socket-accept listener)])
+                (set! server accepted)
+                (values server client))))
+          (lambda ()
+            (guard (c [else #f])
+              (close-socket listener)))))))
+
   (define clear-pending!
     (lambda (channel pending)
       (close-pending-socket! pending)
+      (close-pending-notifier! pending)
       (rpc-channel-pending-set! channel #f)))
 
   (define pending-timeout-message
     (lambda (pending)
-      (if (rpc-pending-notify? pending)
-          "RPC notification timed out"
-          "RPC call timed out")))
+      (case (rpc-pending-kind pending)
+        [(notify) "RPC notification timed out"]
+        [(call) "RPC call timed out"]
+        [else "RPC stream timed out"])))
 
   (define pending-expired?
     (lambda (pending)
@@ -659,6 +701,20 @@
           (values method-name request-type response-type frame
                   (list method-name notify? frame timeout-ms))))))
 
+  (define stream-pending-key
+    (lambda (who method stream payload timeout-ms)
+      (let-values ([(method-name request-type response-type stream-shape) (normalize-method who method)])
+        (unless (eq? stream-shape stream)
+          (raise-net-error who 'rpc "RPC stream shape mismatch" method))
+        (let ([frame (datum->frame
+                      (make-stream-open-datum 1
+                                              method-name
+                                              stream
+                                              payload
+                                              (and (eq? stream 'server) request-type)))])
+          (values method-name request-type response-type frame
+                  (list method-name stream frame timeout-ms))))))
+
   (define start-pending-op!
     (lambda (who channel method payload notify? timeout-ms)
       (let-values ([(method-name request-type response-type frame key)
@@ -678,11 +734,98 @@
                                    0
                                    'send
                                    (make-bytevector 4 0)
-                                   0
-                                   #f
-                                   0))
+                                    0
+                                    #f
+                                    0
+                                    #f
+                                    #f
+                                    #f
+                                    #f
+                                    #f))
             (unless ans
               (rpc-pending-stage-set! (rpc-channel-pending channel) 'connect)))))))
+
+  (define start-pending-stream!
+    (lambda (who channel method stream payload timeout-ms)
+      (let-values ([(method-name request-type response-type frame key)
+                    (stream-pending-key who method stream payload timeout-ms)])
+        (let-values ([(reader writer) (open-pending-notifier)])
+          (letrec ([pending
+                    (%make-rpc-pending-op
+                     (case stream
+                       [(server) 'server-stream]
+                       [(client) 'client-stream]
+                       [(bidi) 'bidi-stream])
+                     key
+                     #f
+                     #f
+                     #f
+                     (timeout->deadline-ms timeout-ms)
+                     #f
+                     0
+                     #f
+                     #f
+                     0
+                     #f
+                     0
+                     reader
+                     writer
+                     (fork-thread
+                      (lambda ()
+                        (rpc-pending-result-set!
+                         pending
+                         (guard (c [else c])
+                           (open-client-stream who channel method stream payload timeout-ms)))
+                        (rpc-pending-done?-set! pending #t)
+                        (guard (c [else #f])
+                          (socket-send-all writer #vu8(1)))))
+                     #f
+                     #f)])
+            (rpc-channel-pending-set! channel pending)
+            pending)))))
+
+  (define pending-stream-ready?
+    (lambda (pending)
+      (or (rpc-pending-done? pending)
+          (let ([reader (rpc-pending-reader pending)])
+            (and reader
+                 (let* ([target (make-poll-target reader '(read error hup invalid))]
+                        [ready (car (poll/nonblocking (list target)))])
+                   (pair? (poll-target-ready-events ready))))))))
+
+  (define finish-pending-stream!
+    (lambda (who channel pending)
+      (when (pending-expired? pending)
+        (raise-pending-timeout! who channel pending))
+      (rpc-channel-pending-set! channel #f)
+      (thread-join (rpc-pending-thread pending))
+      (close-pending-notifier! pending)
+      (let ([result (rpc-pending-result pending)])
+        (if (condition? result)
+            (raise result)
+            result))))
+
+  (define open-client-stream/nonblocking
+    (lambda (who channel kind method stream payload timeout-ms)
+      (ensure-channel-open who channel)
+      (ensure-role who channel 'client)
+      (let-values ([(method-name request-type response-type frame key)
+                    (stream-pending-key who method stream payload timeout-ms)])
+        (ensure-pending-matches who channel kind key)
+        (let ([pending (or (rpc-channel-pending channel)
+                           (start-pending-stream!
+                            who
+                            channel
+                            method
+                            stream
+                            payload
+                            timeout-ms))])
+          (if (pending-stream-ready? pending)
+              (finish-pending-stream! who channel pending)
+              (begin
+                (when (pending-expired? pending)
+                  (raise-pending-timeout! who channel pending))
+                #f))))))
 
   (define maybe-progress-connect!
     (lambda (pending)
@@ -1178,6 +1321,25 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
                (ensure-role who channel 'client)
                (open-client-stream who channel method 'server payload timeout-ms))]))
 
+  #|proc:rpc-call/server-stream/nonblocking
+The `rpc-call/server-stream/nonblocking` procedure progresses opening a server-streaming RPC without blocking and returns `#f` until the stream is ready.
+An optional timeout in milliseconds can be supplied as a fourth argument.
+|#
+  (define-who rpc-call/server-stream/nonblocking
+    (case-lambda
+      [(channel method payload)
+       (rpc-call/server-stream/nonblocking channel method payload rpc-default-timeout-ms)]
+      [(channel method payload timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (open-client-stream/nonblocking
+                who
+                channel
+                'server-stream
+                method
+                'server
+                payload
+                timeout-ms))]))
+
   #|proc:rpc-call/client-stream
 The `rpc-call/client-stream` procedure opens a client-streaming RPC and returns an RPC stream.
 An optional timeout in milliseconds can be supplied as a third argument.
@@ -1192,6 +1354,25 @@ An optional timeout in milliseconds can be supplied as a third argument.
                (ensure-role who channel 'client)
                (open-client-stream who channel method 'client #f timeout-ms))]))
 
+  #|proc:rpc-call/client-stream/nonblocking
+The `rpc-call/client-stream/nonblocking` procedure progresses opening a client-streaming RPC without blocking and returns `#f` until the stream is ready.
+An optional timeout in milliseconds can be supplied as a third argument.
+|#
+  (define-who rpc-call/client-stream/nonblocking
+    (case-lambda
+      [(channel method)
+       (rpc-call/client-stream/nonblocking channel method rpc-default-timeout-ms)]
+      [(channel method timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (open-client-stream/nonblocking
+                who
+                channel
+                'client-stream
+                method
+                'client
+                #f
+                timeout-ms))]))
+
   #|proc:rpc-call/bidi-stream
 The `rpc-call/bidi-stream` procedure opens a bidirectional streaming RPC and returns an RPC stream.
 An optional timeout in milliseconds can be supplied as a third argument.
@@ -1205,6 +1386,25 @@ An optional timeout in milliseconds can be supplied as a third argument.
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (open-client-stream who channel method 'bidi #f timeout-ms))]))
+
+  #|proc:rpc-call/bidi-stream/nonblocking
+The `rpc-call/bidi-stream/nonblocking` procedure progresses opening a bidirectional streaming RPC without blocking and returns `#f` until the stream is ready.
+An optional timeout in milliseconds can be supplied as a third argument.
+|#
+  (define-who rpc-call/bidi-stream/nonblocking
+    (case-lambda
+      [(channel method)
+       (rpc-call/bidi-stream/nonblocking channel method rpc-default-timeout-ms)]
+      [(channel method timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (open-client-stream/nonblocking
+                who
+                channel
+                'bidi-stream
+                method
+                'bidi
+                #f
+                timeout-ms))]))
 
   #|proc:rpc-notify
 The `rpc-notify` procedure sends a unary fire-and-forget RPC notification.

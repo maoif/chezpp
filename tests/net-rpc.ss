@@ -72,6 +72,16 @@
               (milisleep 10)
               (loop)))))))
 
+(define wait-rpc-stream/nonblocking
+  (lambda (proc)
+    (let loop ()
+      (let ([stream (proc)])
+        (if stream
+            stream
+            (begin
+              (milisleep 10)
+              (loop)))))))
+
 (define rpc-call-times-out?
   (lambda (thunk)
     (guard (c [else
@@ -140,6 +150,74 @@
                        (let ([r2 (rpc-stream-recv stream)])
                          (and (rpc-chat-reply? r2)
                               (equal? (rpc-chat-reply-text r2) "echo:two")
+                              (begin
+                                (rpc-stream-close-send stream)
+                                (eof-object? (rpc-stream-recv stream))))))
+                     #f)))])
+        (rpc-stream-close stream)
+        ok?))))
+
+(define rpc-server-stream-nonblocking-ok?
+  (lambda (client)
+    (let ([stream (wait-rpc-stream/nonblocking
+                   (lambda ()
+                     (rpc-call/server-stream/nonblocking
+                      client
+                      rpc-streaming-watch
+                      (make-rpc-watch-request 2 "nb-")
+                      2000)))])
+      (let ([ok?
+             (let ([m1 (rpc-stream-recv stream)]
+                   [m2 (rpc-stream-recv stream)]
+                   [done (rpc-stream-recv stream)])
+               (and (rpc-hello-reply? m1)
+                    (rpc-hello-reply? m2)
+                    (equal? (map rpc-hello-reply-message (list m1 m2))
+                            '("nb-0" "nb-1"))
+                    (eof-object? done)))])
+        (rpc-stream-close stream)
+        ok?))))
+
+(define rpc-client-stream-nonblocking-ok?
+  (lambda (client)
+    (let ([stream (wait-rpc-stream/nonblocking
+                   (lambda ()
+                     (rpc-call/client-stream/nonblocking
+                      client
+                      rpc-streaming-sum
+                      2000)))])
+      (let ([ok?
+             (begin
+               (rpc-stream-send stream (make-rpc-sum-part 13))
+               (rpc-stream-send stream (make-rpc-sum-part 21))
+               (rpc-stream-close-send stream)
+               (let ([reply (rpc-stream-recv stream)]
+                     [done (rpc-stream-recv stream)])
+                 (and (rpc-sum-reply? reply)
+                      (= (rpc-sum-reply-total reply) 34)
+                      (eof-object? done))))])
+        (rpc-stream-close stream)
+        ok?))))
+
+(define rpc-bidi-stream-nonblocking-ok?
+  (lambda (client)
+    (let ([stream (wait-rpc-stream/nonblocking
+                   (lambda ()
+                     (rpc-call/bidi-stream/nonblocking
+                      client
+                      rpc-streaming-chat
+                      2000)))])
+      (let ([ok?
+             (begin
+               (rpc-stream-send stream (make-rpc-chat-request "left"))
+               (let ([r1 (rpc-stream-recv stream)])
+                 (if (and (rpc-chat-reply? r1)
+                          (equal? (rpc-chat-reply-text r1) "echo:left"))
+                     (begin
+                       (rpc-stream-send stream (make-rpc-chat-request "right"))
+                       (let ([r2 (rpc-stream-recv stream)])
+                         (and (rpc-chat-reply? r2)
+                              (equal? (rpc-chat-reply-text r2) "echo:right")
                               (begin
                                 (rpc-stream-close-send stream)
                                 (eof-object? (rpc-stream-recv stream))))))
@@ -242,8 +320,11 @@
                             (lambda ()
                               (wait-rpc-call client "slow" #f 10)))
                            (rpc-server-stream-ok? client)
+                           (rpc-server-stream-nonblocking-ok? client)
                            (rpc-client-stream-ok? client)
+                           (rpc-client-stream-nonblocking-ok? client)
                            (rpc-bidi-stream-ok? client)
+                           (rpc-bidi-stream-nonblocking-ok? client)
                            (rpc-reply-ok? (wait-rpc-call client "dave" "es" 200)
                                           "hello dave/es"))])
                      (rpc-close client)
