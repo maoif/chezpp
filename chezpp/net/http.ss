@@ -56,11 +56,18 @@
           (chezpp net address)
           (chezpp net socket)
           (chezpp net poll)
+          (chezpp net private)
           (chezpp net tls))
 
   ;;===----------------------------------------------------------------------===
   ;; Data Types
   ;;===----------------------------------------------------------------------===
+
+  (define check-backlog
+    (lambda (who backlog)
+      (when (fx< backlog 0)
+        (errorf who "backlog must be non-negative, given ~s" backlog))
+      backlog))
 
   (define-record-type (http-request-record %make-http-request http-request?)
     (sealed #t)
@@ -1316,6 +1323,8 @@ The `http-listen` procedure opens a listening HTTP server on `host` and `port`, 
        (http-listen host port tls-context 128)]
       [(host port tls-context backlog)
        (pcheck ([string? host] [fixnum? port] [fixnum? backlog])
+               (check-port who port)
+               (check-backlog who backlog)
                (unless (or (not tls-context) (tls-context? tls-context))
                  (errorf who "expected #f or TLS context, given ~s" tls-context))
                (let ([server-socket (open-socket 'inet 'stream)])

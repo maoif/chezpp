@@ -344,6 +344,21 @@
          (lambda ()
            (http-close client)))))
 
+(mat net-http-listen-validation
+     (and
+      (http-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (http-listen "127.0.0.1" -1)))
+      (http-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (http-listen "127.0.0.1" 70000)))
+      (http-error-message-contains?
+       "backlog must be non-negative"
+       (lambda ()
+         (http-listen "127.0.0.1" 0 #f -1)))))
+
 (mat net-http-nonblocking
      (let-values ([(server port th stop)
                    (start-http-dispatch-loop-server
