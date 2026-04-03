@@ -75,7 +75,7 @@
             (delete-file pids-path #f))
           (run-command!
            who
-           (format "sh -c 'collect() { for child in $(ps -o pid= --ppid \"$1\"); do child=$(printf \"%s\" \"$child\" | tr -d \"[:space:]\"); test -n \"$child\" || continue; printf \"%s\\n\" \"$child\"; collect \"$child\"; done; }; master=$(cat ~a); { collect \"$master\"; } > ~a; test -s ~a; while IFS= read -r pid; do kill -STOP \"$pid\"; done < ~a' >/dev/null 2>&1"
+           (format "sh -c 'collect() { for child in $(ps -o pid= --ppid \"$1\"); do child=$(printf \"%s\" \"$child\" | tr -d \"[:space:]\"); test -n \"$child\" || continue; printf \"%s\\n\" \"$child\"; collect \"$child\"; done; }; master=$(cat ~a); stopped=0; attempt=0; while [ \"$attempt\" -lt 4 ] && [ \"$stopped\" -eq 0 ]; do { collect \"$master\"; } > ~a; if [ -s ~a ]; then while IFS= read -r pid; do if kill -0 \"$pid\" >/dev/null 2>&1; then kill -STOP \"$pid\" >/dev/null 2>&1 || true; stopped=1; fi; done < ~a; fi; attempt=$((attempt + 1)); if [ \"$stopped\" -eq 0 ]; then sleep 0.05; fi; done; test \"$stopped\" -eq 1' >/dev/null 2>&1"
                    pid-path
                    pids-path
                    pids-path
@@ -257,6 +257,74 @@
           (and (ssh-channel? (ssh-shell channel))
                (= (ssh-write-all channel (string->utf8 "exit\n")) 5)))
         (lambda () (ssh-close-channel channel))))))
+
+(define ssh-test-setup-timeouts
+  (lambda (session remote-root timeout?)
+    (and
+     (timeout?
+      (lambda ()
+        (with-suspended-ssh-session-child
+         'ssh-test-setup-timeouts
+         remote-root
+         (lambda ()
+           (ssh-open-channel session 50)))))
+     (timeout?
+      (lambda ()
+        (with-suspended-ssh-session-child
+         'ssh-test-setup-timeouts
+         remote-root
+         (lambda ()
+           (call-with-ssh-channel session 50 ssh-channel?)))))
+     (let ([channel (ssh-open-channel session)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (timeout?
+            (lambda ()
+              (with-suspended-ssh-session-child
+               'ssh-test-setup-timeouts
+               remote-root
+               (lambda ()
+                 (ssh-request-pty! channel 50))))))
+          (lambda () (ssh-close-channel channel))))
+     (let ([channel (ssh-open-channel session)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (timeout?
+            (lambda ()
+              (with-suspended-ssh-session-child
+               'ssh-test-setup-timeouts
+               remote-root
+               (lambda ()
+                 (ssh-exec channel "printf late" 50))))))
+          (lambda () (ssh-close-channel channel))))
+     (let ([channel (ssh-open-channel session)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (timeout?
+            (lambda ()
+              (with-suspended-ssh-session-child
+               'ssh-test-setup-timeouts
+               remote-root
+               (lambda ()
+                 (ssh-shell channel 50))))))
+          (lambda () (ssh-close-channel channel))))
+     (timeout?
+      (lambda ()
+        (with-suspended-ssh-session-child
+         'ssh-test-setup-timeouts
+         remote-root
+         (lambda ()
+           (ssh-exec session "printf late" 50)))))
+     (timeout?
+      (lambda ()
+        (with-suspended-ssh-session-child
+         'ssh-test-setup-timeouts
+         remote-root
+         (lambda ()
+           (ssh-shell session 50))))))))
 
 (define ssh-test-port-wrappers
   (lambda (session)

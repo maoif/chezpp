@@ -420,16 +420,40 @@ ptr chezpp_net_ssh_auth_agent(uptr handle, const char *user) {
   return ssh_error_status_from_wrapper(wrapper, "ssh agent authentication failed");
 }
 
-ptr chezpp_net_ssh_channel_open(uptr handle) {
+ptr chezpp_net_ssh_channel_open(uptr handle, int timeout_ms) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   chezpp_ssh_channel *channel_wrapper;
   ssh_channel channel;
+  int rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
 
   if (wrapper == NULL || wrapper->session == NULL) return make_error_status_message("invalid ssh session");
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
 
   channel = p_ssh_channel_new(wrapper->session);
   if (channel == NULL) return ssh_error_status_from_wrapper(wrapper, "failed to allocate ssh channel");
-  if (p_ssh_channel_open_session(channel) != SSH_OK) {
+  use_nonblocking = timeout_ms >= 0;
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 0);
+  for (;;) {
+    rc = p_ssh_channel_open_session(channel);
+    if (rc != SSH_AGAIN || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->session, POLLIN | POLLOUT, deadline,
+                                               "ssh channel open timed out");
+      if (wait_status != Strue) {
+        if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 1);
+        p_ssh_channel_free(channel);
+        return wait_status;
+      }
+    }
+  }
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 1);
+  if (rc != SSH_OK) {
     ptr status = ssh_error_status_from_wrapper(wrapper, "failed to open ssh channel");
     p_ssh_channel_free(channel);
     return status;
@@ -458,26 +482,95 @@ ptr chezpp_net_ssh_channel_close(uptr handle) {
   return Strue;
 }
 
-ptr chezpp_net_ssh_channel_request_exec(uptr handle, const char *cmd) {
+ptr chezpp_net_ssh_channel_request_exec(uptr handle, const char *cmd, int timeout_ms) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  int rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
   if (wrapper == NULL || wrapper->channel == NULL) return make_error_status_message("invalid ssh channel");
-  if (p_ssh_channel_request_exec(wrapper->channel, cmd) != SSH_OK)
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = timeout_ms >= 0;
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  for (;;) {
+    rc = p_ssh_channel_request_exec(wrapper->channel, cmd);
+    if (rc != SSH_AGAIN || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN | POLLOUT, deadline,
+                                               "ssh exec request timed out");
+      if (wait_status != Strue) {
+        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        return wait_status;
+      }
+    }
+  }
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (rc != SSH_OK)
     return ssh_channel_error_status(wrapper, "failed to request ssh exec");
   return Strue;
 }
 
-ptr chezpp_net_ssh_channel_request_shell(uptr handle) {
+ptr chezpp_net_ssh_channel_request_shell(uptr handle, int timeout_ms) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  int rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
   if (wrapper == NULL || wrapper->channel == NULL) return make_error_status_message("invalid ssh channel");
-  if (p_ssh_channel_request_shell(wrapper->channel) != SSH_OK)
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = timeout_ms >= 0;
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  for (;;) {
+    rc = p_ssh_channel_request_shell(wrapper->channel);
+    if (rc != SSH_AGAIN || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN | POLLOUT, deadline,
+                                               "ssh shell request timed out");
+      if (wait_status != Strue) {
+        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        return wait_status;
+      }
+    }
+  }
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (rc != SSH_OK)
     return ssh_channel_error_status(wrapper, "failed to request ssh shell");
   return Strue;
 }
 
-ptr chezpp_net_ssh_channel_request_pty(uptr handle) {
+ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  int rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
   if (wrapper == NULL || wrapper->channel == NULL) return make_error_status_message("invalid ssh channel");
-  if (p_ssh_channel_request_pty(wrapper->channel) != SSH_OK)
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = timeout_ms >= 0;
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  for (;;) {
+    rc = p_ssh_channel_request_pty(wrapper->channel);
+    if (rc != SSH_AGAIN || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN | POLLOUT, deadline,
+                                               "ssh pty request timed out");
+      if (wait_status != Strue) {
+        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        return wait_status;
+      }
+    }
+  }
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (rc != SSH_OK)
     return ssh_channel_error_status(wrapper, "failed to request ssh pty");
   return Strue;
 }

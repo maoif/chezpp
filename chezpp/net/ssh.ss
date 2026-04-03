@@ -157,16 +157,25 @@
        (lambda () #t))))
 
   (define request-exec!
-    (lambda (who channel cmd)
-      (ensure-success who 'ssh
-                      (ffi-net-ssh-channel-request-exec (ssh-channel-handle channel) cmd))
-      channel))
+    (case-lambda
+      [(who channel cmd)
+       (request-exec! who channel cmd -1)]
+      [(who channel cmd timeout-ms)
+       (ensure-success who 'ssh
+                       (ffi-net-ssh-channel-request-exec (ssh-channel-handle channel)
+                                                         cmd
+                                                         timeout-ms))
+       channel]))
 
   (define request-shell!
-    (lambda (who channel)
-      (ensure-success who 'ssh
-                      (ffi-net-ssh-channel-request-shell (ssh-channel-handle channel)))
-      channel))
+    (case-lambda
+      [(who channel)
+       (request-shell! who channel -1)]
+      [(who channel timeout-ms)
+       (ensure-success who 'ssh
+                       (ffi-net-ssh-channel-request-shell (ssh-channel-handle channel)
+                                                          timeout-ms))
+       channel]))
 
   #|proc:%ssh-session-handle
 The `%ssh-session-handle` procedure returns the foreign handle stored inside an SSH session record.
@@ -277,13 +286,25 @@ The `ssh-auth-agent!` procedure authenticates an SSH session using the local SSH
 The `ssh-open-channel` procedure opens a new SSH session channel.
 |#
   (define-who ssh-open-channel
-    (lambda (session)
-      (pcheck ([ssh-session? session])
-              (ensure-session-open who session)
-              (%make-ssh-channel
-               (ensure-success who 'ssh (ffi-net-ssh-channel-open (ssh-session-handle session)))
-               session
-               #f))))
+    (case-lambda
+      [(session)
+       (pcheck ([ssh-session? session])
+               (ensure-session-open who session)
+               (%make-ssh-channel
+                (ensure-success who 'ssh
+                                (ffi-net-ssh-channel-open (ssh-session-handle session) -1))
+                session
+                #f))]
+      [(session timeout-ms)
+       (pcheck ([ssh-session? session] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
+               (ensure-session-open who session)
+               (%make-ssh-channel
+                (ensure-success who 'ssh
+                                (ffi-net-ssh-channel-open (ssh-session-handle session)
+                                                          timeout-ms))
+                session
+                #f))]))
 
   #|proc:ssh-close-channel
 The `ssh-close-channel` procedure closes an SSH channel and releases its foreign resources.
@@ -304,16 +325,32 @@ The `ssh-exec` procedure requests remote command execution on an SSH channel.
   (define-who ssh-exec
     (case-lambda
       [(channel cmd)
+       (ssh-exec channel cmd -1)]
+      [(channel cmd timeout-ms)
        (cond
         [(ssh-channel? channel)
-         (pcheck ([string? cmd])
+         (pcheck ([string? cmd] [fixnum? timeout-ms])
+                 (when (fx>= timeout-ms 0)
+                   (check-timeout-ms who timeout-ms))
                  (ensure-channel-open who channel)
-                 (request-exec! who channel cmd))]
+                 (request-exec! who channel cmd timeout-ms))]
         [(ssh-session? channel)
-         (pcheck ([string? cmd])
-                 (let ([ch (ssh-open-channel channel)])
+         (pcheck ([string? cmd] [fixnum? timeout-ms])
+                 (let* ([deadline-ms (and (fx>= timeout-ms 0)
+                                          (begin
+                                            (check-timeout-ms who timeout-ms)
+                                            (timeout->deadline-ms timeout-ms)))]
+                        [ch (if deadline-ms
+                                (ssh-open-channel channel
+                                                  (remaining-timeout-ms deadline-ms))
+                                (ssh-open-channel channel))])
                    (guard (c [else (ssh-close-channel ch) (raise c)])
-                     (request-exec! who ch cmd))))]
+                     (request-exec! who
+                                    ch
+                                    cmd
+                                    (if deadline-ms
+                                        (remaining-timeout-ms deadline-ms)
+                                        -1)))))]
         [else
          (errorf who "expected ssh channel or session, given ~s" channel)])]))
 
@@ -321,28 +358,52 @@ The `ssh-exec` procedure requests remote command execution on an SSH channel.
 The `ssh-shell` procedure requests an interactive shell on an SSH channel.
 |#
   (define-who ssh-shell
-    (lambda (target)
-      (cond
-       [(ssh-channel? target)
-        (ensure-channel-open who target)
-        (request-shell! who target)]
-       [(ssh-session? target)
-        (let ([ch (ssh-open-channel target)])
-          (guard (c [else (ssh-close-channel ch) (raise c)])
-            (request-shell! who ch)))]
-       [else
-        (errorf who "expected ssh channel or session, given ~s" target)])))
+    (case-lambda
+      [(target)
+       (ssh-shell target -1)]
+      [(target timeout-ms)
+       (cond
+        [(ssh-channel? target)
+         (pcheck ([fixnum? timeout-ms])
+                 (when (fx>= timeout-ms 0)
+                   (check-timeout-ms who timeout-ms))
+                 (ensure-channel-open who target)
+                 (request-shell! who target timeout-ms))]
+        [(ssh-session? target)
+         (pcheck ([fixnum? timeout-ms])
+                 (let* ([deadline-ms (and (fx>= timeout-ms 0)
+                                          (begin
+                                            (check-timeout-ms who timeout-ms)
+                                            (timeout->deadline-ms timeout-ms)))]
+                        [ch (if deadline-ms
+                                (ssh-open-channel target
+                                                  (remaining-timeout-ms deadline-ms))
+                                (ssh-open-channel target))])
+                   (guard (c [else (ssh-close-channel ch) (raise c)])
+                     (request-shell! who
+                                     ch
+                                     (if deadline-ms
+                                         (remaining-timeout-ms deadline-ms)
+                                         -1)))))]
+        [else
+         (errorf who "expected ssh channel or session, given ~s" target)])]))
 
   #|proc:ssh-request-pty!
 The `ssh-request-pty!` procedure requests a pseudo-terminal on an SSH channel.
 |#
   (define-who ssh-request-pty!
-    (lambda (channel)
-      (pcheck ([ssh-channel? channel])
-              (ensure-channel-open who channel)
-              (ensure-success who 'ssh
-                              (ffi-net-ssh-channel-request-pty (ssh-channel-handle channel)))
-              channel)))
+    (case-lambda
+      [(channel)
+       (ssh-request-pty! channel -1)]
+      [(channel timeout-ms)
+       (pcheck ([ssh-channel? channel] [fixnum? timeout-ms])
+               (when (fx>= timeout-ms 0)
+                 (check-timeout-ms who timeout-ms))
+               (ensure-channel-open who channel)
+               (ensure-success who 'ssh
+                               (ffi-net-ssh-channel-request-pty (ssh-channel-handle channel)
+                                                                timeout-ms))
+               channel)]))
 
   #|proc:ssh-read
 The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout stream.
@@ -574,13 +635,22 @@ The `call-with-ssh-session` procedure opens an SSH session, applies a procedure,
 The `call-with-ssh-channel` procedure opens an SSH channel, applies a procedure, and closes the channel afterwards.
 |#
   (define-who call-with-ssh-channel
-    (lambda (session proc)
-      (pcheck ([ssh-session? session] [procedure? proc])
-              (let ([channel (ssh-open-channel session)])
-                (dynamic-wind
-                  void
-                  (lambda () (proc channel))
-                  (lambda () (ssh-close-channel channel)))))))
+    (case-lambda
+      [(session proc)
+       (pcheck ([ssh-session? session] [procedure? proc])
+               (let ([channel (ssh-open-channel session)])
+                 (dynamic-wind
+                   void
+                   (lambda () (proc channel))
+                   (lambda () (ssh-close-channel channel)))))]
+      [(session timeout-ms proc)
+       (pcheck ([ssh-session? session] [fixnum? timeout-ms] [procedure? proc])
+               (check-timeout-ms who timeout-ms)
+               (let ([channel (ssh-open-channel session timeout-ms)])
+                 (dynamic-wind
+                   void
+                   (lambda () (proc channel))
+                   (lambda () (ssh-close-channel channel)))))]))
 
   #|proc:open-ssh-channel-input-port
 The `open-ssh-channel-input-port` procedure opens a binary input port over an SSH channel's stdout stream.

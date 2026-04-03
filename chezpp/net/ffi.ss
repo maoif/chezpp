@@ -217,15 +217,15 @@
   (define ffi-net-ssh-auth-agent
     (foreign-procedure "chezpp_net_ssh_auth_agent" (uptr string) scheme-object))
   (define ffi-net-ssh-channel-open
-    (foreign-procedure "chezpp_net_ssh_channel_open" (uptr) scheme-object))
+    (foreign-procedure "chezpp_net_ssh_channel_open" (uptr int) scheme-object))
   (define ffi-net-ssh-channel-close
     (foreign-procedure "chezpp_net_ssh_channel_close" (uptr) scheme-object))
   (define ffi-net-ssh-channel-request-exec
-    (foreign-procedure "chezpp_net_ssh_channel_request_exec" (uptr string) scheme-object))
+    (foreign-procedure "chezpp_net_ssh_channel_request_exec" (uptr string int) scheme-object))
   (define ffi-net-ssh-channel-request-shell
-    (foreign-procedure "chezpp_net_ssh_channel_request_shell" (uptr) scheme-object))
+    (foreign-procedure "chezpp_net_ssh_channel_request_shell" (uptr int) scheme-object))
   (define ffi-net-ssh-channel-request-pty
-    (foreign-procedure "chezpp_net_ssh_channel_request_pty" (uptr) scheme-object))
+    (foreign-procedure "chezpp_net_ssh_channel_request_pty" (uptr int) scheme-object))
   (define ffi-net-ssh-channel-read
     (foreign-procedure "chezpp_net_ssh_channel_read" (uptr int int int int) scheme-object))
   (define ffi-net-ssh-channel-read-into
