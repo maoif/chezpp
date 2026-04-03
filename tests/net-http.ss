@@ -186,6 +186,50 @@
                (and (= (http-response-status resp) 200)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
 
+(mat net-http-reuse
+     (call-with-values
+      (lambda ()
+        (start-http-dispatch-loop-server
+         1
+         (lambda (server)
+           (let ((count 0))
+             (http-register-handler!
+              server
+              'get
+              "/reuse"
+              (lambda (req)
+                (set! count (+ count 1))
+                (make-http-response
+                 200
+                 "OK"
+                 (if (= count 2)
+                     '(("Connection" . "close")
+                       ("X-Seq" . "2"))
+                     '(("X-Seq" . "1")))
+                 "reuse")))))))
+      (lambda (server port th stop)
+        (let ((client (http-open)))
+          (dynamic-wind
+            void
+            (lambda ()
+              (let ((resp1 (http-get client (format "http://127.0.0.1:~a/reuse" port))))
+                (let ((resp2 (http-get client (format "http://127.0.0.1:~a/reuse" port))))
+                  (and (= (http-response-status resp1) 200)
+                       (= (http-response-status resp2) 200)
+                       (equal? (http-header-ref (http-response-headers resp1) "Connection")
+                               "keep-alive")
+                       (equal? (http-header-ref (http-response-headers resp1) "X-Seq")
+                               "1")
+                       (equal? (http-header-ref (http-response-headers resp2) "Connection")
+                               "close")
+                       (equal? (http-header-ref (http-response-headers resp2) "X-Seq")
+                               "2")
+                       (equal? (utf8->string (http-response-body resp2)) "reuse")))))
+            (lambda ()
+              (http-close client)
+              (stop)
+              (thread-join th)))))))
+
 (mat net-http-timeout
      (let-values ([(server port th stop)
                    (start-http-dispatch-loop-server

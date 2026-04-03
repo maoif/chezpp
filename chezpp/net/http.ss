@@ -85,6 +85,8 @@
             (mutable follow-redirects? http-client-follow-redirects? http-client-follow-redirects?-set!)
             (mutable timeout-ms http-client-timeout-ms http-client-timeout-ms-set!)
             (immutable tls-context http-client-tls-context)
+            (mutable cached-origin http-client-cached-origin http-client-cached-origin-set!)
+            (mutable cached-connection http-client-cached-connection http-client-cached-connection-set!)
             (mutable pending http-client-pending http-client-pending-set!)
             (mutable closed? http-client-closed? http-client-closed?-set!)))
 
@@ -115,6 +117,7 @@
     (opaque #f)
     (fields (immutable socket http-connection-socket)
             (immutable tls-session http-connection-tls-session)
+            (immutable deadline-cell http-connection-deadline-cell)
             (immutable input-port http-connection-input-port)
             (immutable output-port http-connection-output-port)
             (immutable secure? http-connection-secure?)
@@ -214,6 +217,30 @@
     (lambda (deadline-ms)
       (and deadline-ms
            (max 0 (- deadline-ms (current-time-ms))))))
+
+  (define connection-close?
+    (lambda (headers)
+      (let ([value (http-header-ref headers "Connection" #f)])
+        (and value
+             (ormap (lambda (part)
+                      (string-ci=? (string-trim part) "close"))
+                    (string-split value #\,))))))
+
+  (define request-origin-key
+    (lambda (request)
+      (let* ([u (http-request-uri request)]
+             [scheme (or (uri-scheme u) "http")]
+             [host (or (uri-host u) "localhost")]
+             [port (default-port-for-uri 'request-origin-key u)])
+        (list scheme host port))))
+
+  (define http-connection-deadline-ms
+    (lambda (conn)
+      (vector-ref (http-connection-deadline-cell conn) 0)))
+
+  (define http-connection-deadline-ms-set!
+    (lambda (conn deadline-ms)
+      (vector-set! (http-connection-deadline-cell conn) 0 deadline-ms)))
 
   (define close-pending-notifier!
     (lambda (pending)
@@ -340,7 +367,7 @@
         ready)))
 
   (define make-deadline-socket-input-port
-    (lambda (who sock deadline-ms)
+    (lambda (who sock deadline-ref)
       (make-custom-binary-input-port
        "chezpp-http-client-input"
        (lambda (bv start count)
@@ -354,7 +381,7 @@
                  (wait-socket-ready! who
                                      sock
                                      '(read error hup invalid)
-                                     deadline-ms
+                                     (deadline-ref)
                                      "HTTP request timed out")
                  (loop)])))))
        (lambda () #f)
@@ -362,7 +389,7 @@
        (lambda () #t))))
 
   (define make-deadline-socket-output-port
-    (lambda (who sock deadline-ms)
+    (lambda (who sock deadline-ref)
       (make-custom-binary-output-port
        "chezpp-http-client-output"
        (lambda (bv start count)
@@ -377,7 +404,7 @@
                          (wait-socket-ready! who
                                              sock
                                              '(write error hup invalid)
-                                             deadline-ms
+                                             (deadline-ref)
                                              "HTTP request timed out")
                          (loop i))))))))
        (lambda () #f)
@@ -385,7 +412,7 @@
        (lambda () #t))))
 
   (define make-deadline-tls-input-port
-    (lambda (who session deadline-ms)
+    (lambda (who session deadline-ref)
       (make-custom-binary-input-port
        "chezpp-http-client-tls-input"
        (lambda (bv start count)
@@ -396,7 +423,7 @@
                                 bv
                                 start
                                 (fx+ start count)
-                                (let ([x (remaining-timeout-ms deadline-ms)])
+                                (let ([x (remaining-timeout-ms (deadline-ref))])
                                   (if x x -1)))])
               (if (eof-object? n) 0 n)))))
        (lambda () #f)
@@ -404,7 +431,7 @@
        (lambda () #t))))
 
   (define make-deadline-tls-output-port
-    (lambda (who session deadline-ms)
+    (lambda (who session deadline-ref)
       (make-custom-binary-output-port
        "chezpp-http-client-tls-output"
        (lambda (bv start count)
@@ -415,7 +442,7 @@
                            bv
                            start
                            (fx+ start count)
-                           (let ([x (remaining-timeout-ms deadline-ms)])
+                           (let ([x (remaining-timeout-ms (deadline-ref))])
                              (if x x -1))))))
        (lambda () #f)
        (lambda (x) #f)
@@ -511,7 +538,9 @@
                           headers
                           (http-header-set headers "Host"
                                            (http-host-header (http-request-uri request))))]
-             [headers (http-header-set headers "Connection" "close")])
+             [headers (if (http-header-ref headers "Connection" #f)
+                          headers
+                          (http-header-set headers "Connection" "keep-alive"))])
         (if (http-header-ref headers "Content-Length" #f)
             headers
             (http-header-set headers "Content-Length"
@@ -643,9 +672,11 @@
   (define ensure-response-headers
     (lambda (response)
       (let* ([body (body->bytevector (http-response-body response))]
-             [headers (http-header-set (http-response-headers response)
-                                       "Connection"
-                                       "close")])
+             [headers (if (http-header-ref (http-response-headers response) "Connection" #f)
+                          (http-response-headers response)
+                          (http-header-set (http-response-headers response)
+                                           "Connection"
+                                           "close"))])
         (if (http-header-ref headers "Content-Length" #f)
             headers
             (http-header-set headers "Content-Length"
@@ -684,50 +715,129 @@
                                 headers
                                 (normalize-response-body status method headers body)))))))
 
+  (define make-http-connection*
+    (lambda (who sock tls-session secure? deadline-ms)
+      (let ([deadline-cell (vector deadline-ms)])
+        (%make-http-connection sock
+                               tls-session
+                               deadline-cell
+                               (if tls-session
+                                   (make-deadline-tls-input-port
+                                    who
+                                    tls-session
+                                    (lambda () (vector-ref deadline-cell 0)))
+                                   (make-deadline-socket-input-port
+                                    who
+                                    sock
+                                    (lambda () (vector-ref deadline-cell 0))))
+                               (if tls-session
+                                   (make-deadline-tls-output-port
+                                    who
+                                    tls-session
+                                    (lambda () (vector-ref deadline-cell 0)))
+                                   (make-deadline-socket-output-port
+                                    who
+                                    sock
+                                    (lambda () (vector-ref deadline-cell 0))))
+                               secure?
+                               #f))))
+
+  (define cache-http-connection!
+    (lambda (client origin conn)
+      (let ([old (http-client-cached-connection client)])
+        (when (and old (not (eq? old conn)))
+          (close-http-connection old)))
+      (http-client-cached-origin-set! client origin)
+      (http-client-cached-connection-set! client conn)
+      conn))
+
+  (define uncache-http-connection!
+    (lambda (client conn)
+      (when (eq? (http-client-cached-connection client) conn)
+        (http-client-cached-origin-set! client #f)
+        (http-client-cached-connection-set! client #f))))
+
+  (define reusable-http-connection-stale?
+    (lambda (conn)
+      (let* ([ready (poll/nonblocking
+                     (list (make-poll-target (http-connection-socket conn)
+                                             '(read hup error invalid))))]
+             [events (poll-target-ready-events (car ready))])
+        (or (memq 'read events)
+            (memq 'hup events)
+            (memq 'error events)
+            (memq 'invalid events)))))
+
+  (define take-http-connection
+    (lambda (client request deadline-ms)
+      (let* ([origin (request-origin-key request)]
+             [cached-origin (http-client-cached-origin client)]
+             [cached-conn (http-client-cached-connection client)])
+        (cond
+         [(and cached-conn
+               (equal? cached-origin origin)
+               (not (http-connection-closed? cached-conn))
+               (not (reusable-http-connection-stale? cached-conn)))
+          (http-client-cached-origin-set! client #f)
+          (http-client-cached-connection-set! client #f)
+          (http-connection-deadline-ms-set! cached-conn deadline-ms)
+          cached-conn]
+         [else
+          (when (and cached-conn
+                     (or (http-connection-closed? cached-conn)
+                         (reusable-http-connection-stale? cached-conn)))
+            (uncache-http-connection! client cached-conn)
+            (close-http-connection cached-conn))
+          #f]))))
+
+  (define reusable-response?
+    (lambda (request-headers response method)
+      (let ([status (http-response-status response)]
+            [body (http-response-body response)])
+        (and (not (connection-close? request-headers))
+             (not (connection-close? (http-response-headers response)))
+             (or (string=? method "HEAD")
+                 (= status 204)
+                 (= status 304)
+                 (http-header-ref (http-response-headers response) "Content-Length" #f)
+                 (and (bytevector? body)
+                      (fx= 0 (bytevector-length body))))))))
+
   (define open-http-connection
     (lambda (who client request deadline-ms)
-      (let* ([u (http-request-uri request)]
-             [host (or (uri-host u) "localhost")]
-             [port (default-port-for-uri who u)]
-             [address (or (resolve-address host port #f 'stream)
-                          (raise-net-error who 'http "failed to resolve HTTP endpoint" u))]
-             [sock (open-socket (socket-address-family address) 'stream)])
-        (socket-set-blocking! sock #f)
-        (unless (socket-connect! sock address)
-          (let ([ready (wait-socket-ready! who
-                                           sock
-                                           '(write error hup invalid)
-                                           deadline-ms
-                                           "HTTP request timed out")])
-            (when (and (memq 'error ready) (not (memq 'write ready)))
-              (raise-net-error who 'http "HTTP connect failed" address))
-            (when (memq 'invalid ready)
-              (raise-net-error who 'http "HTTP connect failed" address))))
-        (if (string=? (uri-scheme u) "https")
-            (let* ([ctx (or (http-client-tls-context client)
-                            (let ([ctx (make-tls-context 'client)])
-                              (tls-context-set-verify! ctx #f)
-                              ctx))]
-                   [session (call-with-http-timeout-translation
-                             who
-                             (lambda ()
-                               (tls-connect ctx
-                                            sock
-                                            host
-                                            (let ([x (remaining-timeout-ms deadline-ms)])
-                                              (if x x -1)))))])
-              (%make-http-connection sock
-                                     session
-                                     (make-deadline-tls-input-port who session deadline-ms)
-                                     (make-deadline-tls-output-port who session deadline-ms)
-                                     #t
-                                     #f))
-            (%make-http-connection sock
-                                   #f
-                                   (make-deadline-socket-input-port who sock deadline-ms)
-                                   (make-deadline-socket-output-port who sock deadline-ms)
-                                   #f
-                                   #f)))))
+      (or (take-http-connection client request deadline-ms)
+          (let* ([u (http-request-uri request)]
+                 [host (or (uri-host u) "localhost")]
+                 [port (default-port-for-uri who u)]
+                 [address (or (resolve-address host port #f 'stream)
+                              (raise-net-error who 'http "failed to resolve HTTP endpoint" u))]
+                 [sock (open-socket (socket-address-family address) 'stream)])
+            (socket-set-blocking! sock #f)
+            (unless (socket-connect! sock address)
+              (let ([ready (wait-socket-ready! who
+                                               sock
+                                               '(write error hup invalid)
+                                               deadline-ms
+                                               "HTTP request timed out")])
+                (when (and (memq 'error ready) (not (memq 'write ready)))
+                  (raise-net-error who 'http "HTTP connect failed" address))
+                (when (memq 'invalid ready)
+                  (raise-net-error who 'http "HTTP connect failed" address))))
+            (if (string=? (uri-scheme u) "https")
+                (let* ([ctx (or (http-client-tls-context client)
+                                (let ([ctx (make-tls-context 'client)])
+                                  (tls-context-set-verify! ctx #f)
+                                  ctx))]
+                       [session (call-with-http-timeout-translation
+                                 who
+                                 (lambda ()
+                                   (tls-connect ctx
+                                                sock
+                                                host
+                                                (let ([x (remaining-timeout-ms deadline-ms)])
+                                                  (if x x -1)))))])
+                  (make-http-connection* who sock session #t deadline-ms))
+                (make-http-connection* who sock #f #f deadline-ms))))))
 
   (define close-http-connection
     (lambda (conn)
@@ -742,6 +852,22 @@
         (guard (c [else #f])
           (close-socket (http-connection-socket conn)))
         (http-connection-closed?-set! conn #t))))
+
+  (define server-prepare-response
+    (lambda (request response)
+      (let* ([headers (http-response-headers response)]
+             [close? (or (connection-close? (http-request-headers request))
+                         (connection-close? headers))]
+             [headers (if (http-header-ref headers "Connection" #f)
+                          headers
+                          (http-header-set headers
+                                           "Connection"
+                                           (if close? "close" "keep-alive")))])
+        (values close?
+                (make-http-response (http-response-status response)
+                                    (http-response-reason response)
+                                    headers
+                                    (http-response-body response))))))
 
   (define redirect-request
     (lambda (request response)
@@ -759,26 +885,38 @@
 
   (define http-send*
     (lambda (who client request redirects-left deadline-ms)
-      (let ([conn (open-http-connection who client request deadline-ms)])
+      (let ([conn (open-http-connection who client request deadline-ms)]
+            [reusable? #f]
+            [origin (request-origin-key request)])
         (dynamic-wind
           void
           (lambda ()
-            (write-request-port (http-connection-output-port conn)
-                                request
-                                (merge-request-headers request client))
-            (let ([response (read-http-response* who
-                                                 (http-connection-input-port conn)
-                                                 (http-request-method request))])
-              (if (and (http-client-follow-redirects? client)
-                       (> redirects-left 0)
-                       (redirect-status? (http-response-status response)))
-                  (let ([next-request (redirect-request request response)])
-                    (if next-request
-                        (http-send* who client next-request (fx1- redirects-left) deadline-ms)
-                        response))
-                  response)))
+            (http-connection-deadline-ms-set! conn deadline-ms)
+            (uncache-http-connection! client conn)
+            (let ([request-headers (merge-request-headers request client)])
+              (write-request-port (http-connection-output-port conn)
+                                  request
+                                  request-headers)
+              (let ([response (read-http-response* who
+                                                   (http-connection-input-port conn)
+                                                   (http-request-method request))])
+                (set! reusable?
+                  (reusable-response? request-headers
+                                      response
+                                      (http-request-method request)))
+                (when reusable?
+                  (cache-http-connection! client origin conn))
+                (if (and (http-client-follow-redirects? client)
+                         (> redirects-left 0)
+                         (redirect-status? (http-response-status response)))
+                    (let ([next-request (redirect-request request response)])
+                      (if next-request
+                          (http-send* who client next-request (fx1- redirects-left) deadline-ms)
+                          response))
+                    response))))
           (lambda ()
-            (close-http-connection conn))))))
+            (unless reusable?
+              (close-http-connection conn)))))))
 
   (define make-handler-key
     (case-lambda
@@ -809,12 +947,14 @@
           (let ([session (tls-accept tls-context sock)])
             (%make-http-connection sock
                                    session
+                                   (vector #f)
                                    (open-tls-input-port session)
                                    (open-tls-output-port session)
                                    #t
                                    #f))
           (%make-http-connection sock
                                  #f
+                                 (vector #f)
                                  (open-socket-input-port sock)
                                  (open-socket-output-port sock)
                                  #f
@@ -911,10 +1051,10 @@ The `http-open` procedure constructs an HTTP client with optional TLS context st
   (define-who http-open
     (case-lambda
       [()
-       (%make-http-client '() #f 30000 #f #f #f)]
+       (%make-http-client '() #f 30000 #f #f #f #f #f)]
       [(tls-context)
        (pcheck ([tls-context? tls-context])
-               (%make-http-client '() #f 30000 tls-context #f #f))]))
+               (%make-http-client '() #f 30000 tls-context #f #f #f #f))]))
 
   #|proc:http-close
 The `http-close` procedure marks an HTTP client as closed.
@@ -925,6 +1065,10 @@ The `http-close` procedure marks an HTTP client as closed.
               (let ([pending (http-client-pending client)])
                 (when pending
                   (cancel-pending! client pending)))
+              (let ([conn (http-client-cached-connection client)])
+                (when conn
+                  (uncache-http-connection! client conn)
+                  (close-http-connection conn)))
               (http-client-closed?-set! client #t)
               client)))
 
@@ -1306,7 +1450,7 @@ The `http-write-response/nonblocking` procedure writes an HTTP response if the c
                     #f)))))
 
   #|proc:http-serve
-The `http-serve` procedure accepts one connection, dispatches one request through the registered handler table, writes the response, and closes the connection.
+The `http-serve` procedure accepts one connection, dispatches requests through the registered handler table, and keeps serving that connection until either side asks to close it.
 |#
   (define-who http-serve
     (lambda (server)
@@ -1316,14 +1460,20 @@ The `http-serve` procedure accepts one connection, dispatches one request throug
                 (dynamic-wind
                   void
                   (lambda ()
-                    (let* ([request (http-read-request conn)]
-                           [handler (or (lookup-handler server request)
-                                        default-handler)]
-                           [response (handler request)])
-                      (unless (http-response? response)
-                        (errorf who "HTTP handler must return an HTTP response, given ~s"
-                                response))
-                      (http-write-response conn response)
-                      response))
+                    (let loop ()
+                      (let* ([request (http-read-request conn)]
+                             [handler (or (lookup-handler server request)
+                                          default-handler)]
+                             [response (handler request)])
+                        (unless (http-response? response)
+                          (errorf who "HTTP handler must return an HTTP response, given ~s"
+                                  response))
+                        (let-values ([(close? prepared)
+                                      (server-prepare-response request response)])
+                          (http-write-response conn prepared)
+                          (if close?
+                              prepared
+                              (loop)))))
+                    )
                   (lambda ()
                     (http-connection-close conn))))))))
