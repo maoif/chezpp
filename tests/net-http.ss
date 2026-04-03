@@ -419,3 +419,43 @@
                (http-close client)
                (stop)
                (thread-join th)))))))
+
+(mat net-http-cancel
+     (let-values ([(server port th stop)
+                   (start-http-dispatch-loop-server
+                    2
+                    (lambda (server)
+                      (http-register-handler!
+                       server
+                       'get
+                       "/slow-cancel"
+                       (lambda (req)
+                         (milisleep 120)
+                         (make-http-response 200 "OK" '() "slow")))
+                      (http-register-handler!
+                       server
+                       'get
+                       "/after-cancel"
+                       (lambda (req)
+                         (make-http-response 200 "OK" '() "after")))))])
+       (let ([client (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let* ([slow-request (make-http-request 'get
+                                                     (format "http://127.0.0.1:~a/slow-cancel" port)
+                                                     '()
+                                                     #f)]
+                    [first (http-send/nonblocking client slow-request)])
+               (and (not first)
+                    (begin
+                      (http-cancel-pending! client)
+                      #t)
+                    (let ([resp (http-get client
+                                          (format "http://127.0.0.1:~a/after-cancel" port))])
+                      (and (= (http-response-status resp) 200)
+                           (equal? (utf8->string (http-response-body resp)) "after"))))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join th))))))

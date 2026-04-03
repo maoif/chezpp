@@ -29,6 +29,7 @@
           http-follow-redirects!
           http-set-header!
           http-set-timeout!
+          http-cancel-pending!
           http-send/nonblocking
           http-request/nonblocking
           http-download/nonblocking
@@ -960,6 +961,18 @@ The `http-set-timeout!` procedure records a client timeout value in milliseconds
               (ensure-client-open who client)
               (http-client-timeout-ms-set! client timeout-ms)
               timeout-ms)))
+
+  #|proc:http-cancel-pending!
+The `http-cancel-pending!` procedure cancels and discards the currently pending non-blocking HTTP operation on a client, if any.
+|#
+  (define-who http-cancel-pending!
+    (lambda (client)
+      (pcheck ([http-client? client])
+              (ensure-client-open who client)
+              (let ([pending (http-client-pending client)])
+                (when pending
+                  (cancel-pending! client pending)))
+              client)))
 
   #|proc:http-send
 The `http-send` procedure sends an HTTP request with a configured client and returns an HTTP response.
