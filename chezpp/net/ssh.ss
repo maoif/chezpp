@@ -157,16 +157,24 @@ The `ssh-open` procedure opens a network SSH session to a remote host.
 |#
   (define-who ssh-open
     (case-lambda
-      [(host) (ssh-open host 22 #f)]
-      [(host port) (ssh-open host port #f)]
-      [(host port user)
+      [(host) (ssh-open host 22 #f ssh-default-timeout-ms)]
+      [(host port) (ssh-open host port #f ssh-default-timeout-ms)]
+      [(host port user-or-timeout)
+       (if (fixnum? user-or-timeout)
+           (ssh-open host port #f user-or-timeout)
+           (ssh-open host port user-or-timeout ssh-default-timeout-ms))]
+      [(host port user timeout-ms)
        (pcheck ([string? host] [fixnum? port])
                (ensure-user-maybe who user)
+               (unless (fixnum? timeout-ms)
+                 (errorf who "expected timeout fixnum, given ~s" timeout-ms))
+               (when (fx< timeout-ms 0)
+                 (errorf who "timeout must be non-negative, given ~s" timeout-ms))
                (let ([ans (ensure-success who 'ssh
                                           (ffi-net-ssh-open host
                                                             port
                                                             (or user "")
-                                                            ssh-default-timeout-ms))])
+                                                            timeout-ms))])
                  (%make-ssh-session ans host port user #f)))]))
 
   #|proc:ssh-close
@@ -462,12 +470,17 @@ The `call-with-ssh-session` procedure opens an SSH session, applies a procedure,
   (define-who call-with-ssh-session
     (case-lambda
       [(host proc)
-       (call-with-ssh-session host 22 #f proc)]
+       (call-with-ssh-session host 22 #f ssh-default-timeout-ms proc)]
       [(host port proc)
-       (call-with-ssh-session host port #f proc)]
-      [(host port user proc)
+       (call-with-ssh-session host port #f ssh-default-timeout-ms proc)]
+      [(host port user-or-timeout proc)
        (pcheck ([procedure? proc])
-               (let ([session (ssh-open host port user)])
+               (if (fixnum? user-or-timeout)
+                   (call-with-ssh-session host port #f user-or-timeout proc)
+                   (call-with-ssh-session host port user-or-timeout ssh-default-timeout-ms proc)))]
+      [(host port user timeout-ms proc)
+       (pcheck ([procedure? proc])
+               (let ([session (ssh-open host port user timeout-ms)])
                  (dynamic-wind
                    void
                    (lambda () (proc session))
