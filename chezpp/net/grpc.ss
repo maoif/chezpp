@@ -1,6 +1,7 @@
 (library (chezpp net grpc)
   (export grpc-open-channel
           grpc-close-channel
+          grpc-cancel-pending!
           grpc-channel?
           grpc-stream?
           grpc-stream-send
@@ -70,7 +71,8 @@
             (immutable writer grpc-pending-op-writer)
             (immutable thread grpc-pending-op-thread)
             (mutable done? grpc-pending-op-done? grpc-pending-op-done?-set!)
-            (mutable result grpc-pending-op-result grpc-pending-op-result-set!)))
+            (mutable result grpc-pending-op-result grpc-pending-op-result-set!)
+            (mutable cancelled? grpc-pending-op-cancelled? grpc-pending-op-cancelled?-set!)))
 
   (define-record-type (grpc-stream %make-grpc-stream grpc-stream?)
     (sealed #t)
@@ -121,7 +123,7 @@
 
   (define make-unary-pending-op
     (lambda (args handle)
-      (%make-grpc-pending-op 'unary args handle #f #f #f #f #f)))
+      (%make-grpc-pending-op 'unary args handle #f #f #f #f #f #f)))
 
   (define check-slice
     (lambda (who len start stop)
@@ -393,13 +395,19 @@
                    writer
                    (fork-thread
                     (lambda ()
-                      (grpc-pending-op-result-set!
-                       pending
-                       (guard (c [else c])
-                         (thunk)))
+                      (let ([result
+                             (guard (c [else c])
+                               (thunk))])
+                        (when (and (grpc-stream? result)
+                                   (grpc-pending-op-cancelled? pending))
+                          (guard (c [else #f])
+                            (grpc-stream-close result))
+                          (set! result #f))
+                        (grpc-pending-op-result-set! pending result))
                       (grpc-pending-op-done?-set! pending #t)
                       (guard (c [else #f])
                         (socket-send-all writer #vu8(1)))))
+                   #f
                    #f
                    #f)])
           (grpc-channel-pending-set! channel pending)
@@ -423,6 +431,13 @@
         (if (condition? result)
             (raise result)
             result))))
+
+  (define cancel-pending!
+    (lambda (who channel pending)
+      (grpc-pending-op-cancelled?-set! pending #t)
+      (grpc-channel-pending-set! channel #f)
+      (clear-pending! who pending)
+      channel))
 
   (define clear-pending!
     (lambda (who pending)
@@ -538,8 +553,7 @@ The `grpc-close-channel` procedure closes a gRPC client channel or server listen
               (unless (grpc-channel-closed? channel)
                 (let ([pending (grpc-channel-pending channel)])
                   (when pending
-                    (clear-pending! who pending)
-                    (grpc-channel-pending-set! channel #f)))
+                    (cancel-pending! who channel pending)))
                 (let ([handle (grpc-channel-handle channel)])
                   (when handle
                     (ensure-success who
@@ -548,6 +562,17 @@ The `grpc-close-channel` procedure closes a gRPC client channel or server listen
                                         (ffi-net-grpc-channel-close handle)))
                     (grpc-channel-handle-set! channel 0)))
                 (grpc-channel-closed?-set! channel #t))
+              channel)))
+
+  #|proc:grpc-cancel-pending!
+The `grpc-cancel-pending!` procedure cancels and discards the currently pending non-blocking gRPC operation on a channel, if any.
+|#
+  (define-who grpc-cancel-pending!
+    (lambda (channel)
+      (pcheck ([grpc-channel? channel])
+              (let ([pending (grpc-channel-pending channel)])
+                (when pending
+                  (cancel-pending! who channel pending)))
               channel)))
 
   #|proc:grpc-register-service!

@@ -36,21 +36,35 @@
   (lambda (serve-count register proc)
     (let* ([port (reserve-loopback-port)]
            [server (grpc-open-channel 'server "127.0.0.1" port)]
-           [client (grpc-open-channel "127.0.0.1" port)])
+           [client (grpc-open-channel "127.0.0.1" port)]
+           [done? #f])
       (register server)
       (let ([th (fork-thread
                  (lambda ()
-                   (let loop ([n serve-count])
-                     (unless (= n 0)
-                       (grpc-serve server)
-                       (loop (- n 1))))))])
+                   (if serve-count
+                       (let loop ([n serve-count])
+                         (unless (= n 0)
+                           (grpc-serve server)
+                           (loop (- n 1))))
+                       (let loop ()
+                         (unless done?
+                           (guard (c [else #f])
+                             (grpc-serve server))
+                           (loop))))))])
         (dynamic-wind
           void
           (lambda () (proc server client))
           (lambda ()
-            (thread-join th)
-            (grpc-close-channel client)
-            (grpc-close-channel server)))))))
+            (if serve-count
+                (begin
+                  (thread-join th)
+                  (grpc-close-channel client)
+                  (grpc-close-channel server))
+                (begin
+                  (set! done? #t)
+                  (grpc-close-channel client)
+                  (grpc-close-channel server)
+                  (thread-join th)))))))))
 
 (define wait-grpc-call/nonblocking
   (lambda (client method payload metadata timeout-ms)
@@ -345,7 +359,7 @@
      (with-grpc-env
       (lambda ()
         (call-with-grpc-peer
-         3
+         #f
          (lambda (server)
            (grpc-register-service!
             server
@@ -379,6 +393,22 @@
            (and
             (grpc-channel? server)
             (grpc-channel? client)
+            (eq? (grpc-cancel-pending! client) client)
+            (not (grpc-call/nonblocking
+                  client
+                  "/chezpp.test.Echo/UnarySlow"
+                  "slow"
+                  '()
+                  500))
+            (eq? (grpc-cancel-pending! client) client)
+            (let ([resp (grpc-call
+                         client
+                         "/chezpp.test.Echo/UnarySlow"
+                         "fast"
+                         '()
+                         500)])
+              (and (grpc-response? resp)
+                   (equal? (utf8->string (grpc-response-payload resp)) "fast")))
             (not (grpc-call/nonblocking
                   client
                   "/chezpp.test.Echo/UnarySlow"
@@ -406,7 +436,7 @@
                            client
                            "/chezpp.test.Echo/ClientStream"
                            '()
-                           2000)])
+                           5000)])
               (let ([ok-stream?
                      (and
                       (grpc-stream? stream)
@@ -429,7 +459,7 @@
                            "/chezpp.test.Echo/ServerStream"
                            "watch"
                            '()
-                           2000)])
+                           5000)])
               (let ([ok-stream?
                      (and
                       (grpc-net-error-message?
