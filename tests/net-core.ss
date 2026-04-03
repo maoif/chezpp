@@ -236,6 +236,23 @@
        (lambda ()
          (make-poll-target 0 '(bogus))))))
 
+(mat net-socket-validation
+     (let ([sock (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and
+            (tls-error-message-contains?
+             "size must be non-negative"
+             (lambda ()
+               (socket-recv sock -1)))
+            (tls-error-message-contains?
+             "size must be non-negative"
+             (lambda ()
+               (socket-recv/nonblocking sock -1)))))
+         (lambda ()
+           (close-socket sock)))))
+
 (mat net-tls
      (let-values ([(server server-ctx port th) (start-tls-echo-server)])
        (let ([client (open-socket 'inet 'stream)]
@@ -426,6 +443,36 @@
                      "timeout must be non-negative"
                      (lambda ()
                        (tls-write-all session payload 0 1 -1)))))
+                 (lambda ()
+                   (close-tls-session session)))))
+           (lambda ()
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
+
+(mat net-tls-size-validation
+     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([session (tls-connect ctx client "localhost")])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (and
+                    (tls-error-message-contains?
+                     "size must be non-negative"
+                     (lambda ()
+                       (tls-read session -1)))
+                    (tls-error-message-contains?
+                     "size must be non-negative"
+                     (lambda ()
+                       (tls-read/nonblocking session -1)))))
                  (lambda ()
                    (close-tls-session session)))))
            (lambda ()

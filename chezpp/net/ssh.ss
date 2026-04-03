@@ -94,6 +94,12 @@
       (unless (and (fixnum? start) (fixnum? stop) (fx<= 0 start stop len))
         (errorf who "invalid slice [~a, ~a) for length ~a" start stop len))))
 
+  (define check-size
+    (lambda (who size)
+      (when (fx< size 0)
+        (errorf who "size must be non-negative, given ~s" size))
+      size))
+
   (define ensure-user-maybe
     (lambda (who user)
       (unless (or (string? user) (eq? user #f))
@@ -412,6 +418,7 @@ The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout s
     (case-lambda
       [(channel size)
        (pcheck ([ssh-channel? channel] [fixnum? size])
+               (check-size who size)
                (ensure-channel-open who channel)
                (read-result who
                             (ffi-net-ssh-channel-read (ssh-channel-handle channel)
@@ -421,6 +428,7 @@ The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout s
                                                       -1)))]
       [(channel size timeout-ms)
        (pcheck ([ssh-channel? channel] [fixnum? size])
+               (check-size who size)
                (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (read-result who
@@ -436,6 +444,7 @@ The `ssh-read/nonblocking` procedure attempts to read from an SSH channel withou
   (define-who ssh-read/nonblocking
     (lambda (channel size)
       (pcheck ([ssh-channel? channel] [fixnum? size])
+              (check-size who size)
               (ensure-channel-open who channel)
               (read-result who
                            (ffi-net-ssh-channel-read (ssh-channel-handle channel) size 0 1 -1)))))

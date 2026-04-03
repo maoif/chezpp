@@ -79,6 +79,12 @@
       (unless (and (fixnum? start) (fixnum? stop) (fx<= 0 start stop len))
         (errorf who "invalid slice [~a, ~a) for length ~a" start stop len))))
 
+  (define check-size
+    (lambda (who size)
+      (when (fx< size 0)
+        (errorf who "size must be non-negative, given ~s" size))
+      size))
+
   (define check-timeout-ms
     (lambda (who timeout-ms)
       (unless (fixnum? timeout-ms)
@@ -349,11 +355,13 @@ The `sftp-read` procedure reads up to `size` bytes from an SFTP file handle.
     (case-lambda
       [(file size)
        (pcheck ([sftp-file? file] [fixnum? size])
+               (check-size who size)
                (ensure-file-open who file)
                (read-result who
                             (ffi-net-sftp-read (sftp-file-handle file) size 0 -1)))]
       [(file size timeout-ms)
        (pcheck ([sftp-file? file] [fixnum? size])
+               (check-size who size)
                (check-timeout-ms who timeout-ms)
                (ensure-file-open who file)
                (await-timeout-result
@@ -373,6 +381,7 @@ The `sftp-read/nonblocking` procedure attempts to read from an SFTP file handle 
   (define-who sftp-read/nonblocking
     (lambda (file size)
       (pcheck ([sftp-file? file] [fixnum? size])
+              (check-size who size)
               (ensure-file-open who file)
               (read-result who
                            (ffi-net-sftp-read (sftp-file-handle file) size 1 -1)))))

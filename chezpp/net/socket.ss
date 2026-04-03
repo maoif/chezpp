@@ -61,6 +61,12 @@
       (unless (and (fixnum? start) (fixnum? stop) (fx<= 0 start stop len))
         (errorf who "invalid slice [~a, ~a) for length ~a" start stop len))))
 
+  (define check-size
+    (lambda (who size)
+      (when (fx< size 0)
+        (errorf who "size must be non-negative, given ~s" size))
+      size))
+
   (define ensure-ffi-success
     (lambda (who x kind)
       (when (ffi-error? x)
@@ -294,6 +300,7 @@ The `socket-recv` procedure reads up to `size` bytes from a socket and returns a
   (define-who socket-recv
     (lambda (sock size)
       (pcheck ([socket? sock] [fixnum? size])
+              (check-size who size)
               (ensure-open who sock)
               (recv-result who (ffi-net-socket-recv (socket-fd sock) size 0)))))
 
@@ -303,6 +310,7 @@ The `socket-recv/nonblocking` procedure attempts to read up to `size` bytes with
   (define-who socket-recv/nonblocking
     (lambda (sock size)
       (pcheck ([socket? sock] [fixnum? size])
+              (check-size who size)
               (ensure-open who sock)
               (recv-result who (ffi-net-socket-recv (socket-fd sock) size 1)))))
 

@@ -106,6 +106,12 @@
         (errorf who "timeout must be non-negative, given ~s" timeout-ms))
       timeout-ms))
 
+  (define check-size
+    (lambda (who size)
+      (when (fx< size 0)
+        (errorf who "size must be non-negative, given ~s" size))
+      size))
+
   (define tls-connect*
     (lambda (who ctx sock server-name timeout-ms)
       (ensure-context-open who ctx)
@@ -413,9 +419,11 @@ The `tls-read` procedure reads up to `size` bytes from a TLS session.
     (case-lambda
       [(session size)
        (pcheck ([tls-session? session] [fixnum? size])
+               (check-size who size)
                (tls-read* who session size tls-no-timeout #f))]
       [(session size timeout-ms)
        (pcheck ([tls-session? session] [fixnum? size])
+               (check-size who size)
                (check-timeout-ms who timeout-ms)
                (tls-read* who session size timeout-ms #f))]))
 
@@ -425,6 +433,7 @@ The `tls-read/nonblocking` procedure attempts a non-blocking TLS read and return
   (define-who tls-read/nonblocking
     (lambda (session size)
       (pcheck ([tls-session? session] [fixnum? size])
+              (check-size who size)
               (tls-read* who session size tls-no-timeout #t))))
 
   #|proc:tls-read!

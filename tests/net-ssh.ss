@@ -151,3 +151,38 @@
                      (ssh-close session))))))))
          (lambda ()
            (stop-server)))))
+
+(mat net-ssh-read-size-validation
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME"
+            home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and
+                     (eq? (ssh-auth-publickey! session user) session)
+                     (let ([channel (ssh-exec session "printf data")])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (and
+                            (ssh-error-message-contains?
+                             "size must be non-negative"
+                             (lambda ()
+                               (ssh-read channel -1)))
+                            (ssh-error-message-contains?
+                             "size must be non-negative"
+                             (lambda ()
+                               (ssh-read/nonblocking channel -1)))))
+                         (lambda ()
+                           (ssh-close-channel channel))))))
+                  (lambda ()
+                    (ssh-close session)))))))
+         (lambda ()
+           (stop-server)))))
