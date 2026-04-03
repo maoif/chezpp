@@ -264,15 +264,15 @@
   (define ffi-net-websocket-server-close
     (foreign-procedure "chezpp_net_websocket_server_close" (uptr) scheme-object))
   (define ffi-net-websocket-accept
-    (foreign-procedure "chezpp_net_websocket_accept" (uptr int) scheme-object))
+    (foreign-procedure "chezpp_net_websocket_accept" (uptr int int) scheme-object))
   (define ffi-net-websocket-connect
-    (foreign-procedure "chezpp_net_websocket_connect" (string int string string int) scheme-object))
+    (foreign-procedure "chezpp_net_websocket_connect" (string int string string int int) scheme-object))
   (define ffi-net-websocket-close
     (foreign-procedure "chezpp_net_websocket_close" (uptr) scheme-object))
   (define ffi-net-websocket-send
-    (foreign-procedure "chezpp_net_websocket_send" (uptr int ptr int int int) scheme-object))
+    (foreign-procedure "chezpp_net_websocket_send" (uptr int ptr int int int int) scheme-object))
   (define ffi-net-websocket-recv
-    (foreign-procedure "chezpp_net_websocket_recv" (uptr int) scheme-object))
+    (foreign-procedure "chezpp_net_websocket_recv" (uptr int int) scheme-object))
   (define ffi-net-grpc-channel-open
     (foreign-procedure "chezpp_net_grpc_channel_open" (string) scheme-object))
   (define ffi-net-grpc-channel-close

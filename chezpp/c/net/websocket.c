@@ -109,8 +109,8 @@ enum {
 };
 
 #define CHEZPP_WS_DEFAULT_PROTOCOL "chezpp-websocket"
-#define CHEZPP_WS_STEP_TIMEOUT_MS 10
-#define CHEZPP_WS_WAIT_STEPS 500
+#define CHEZPP_WS_SERVICE_STEP_MS 10
+#define CHEZPP_WS_NONBLOCK_SERVICE_MS 1
 
 static ptr make_status(const char *tag, ptr value) {
   ptr v = Smake_vector(2, Sfalse);
@@ -138,6 +138,28 @@ static const char *ws_type_symbol(int type) {
   default:
     return "binary";
   }
+}
+
+static int current_time_ms(long long *out) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+  *out = ((long long)ts.tv_sec * 1000LL) + ((long long)ts.tv_nsec / 1000000LL);
+  return 1;
+}
+
+static int remaining_timeout_ms(int timeout_ms, long long start_ms) {
+  long long now;
+  long long elapsed;
+  long long remaining;
+
+  if (timeout_ms < 0) return -1;
+  if (!current_time_ms(&now)) return -2;
+  elapsed = now - start_ms;
+  if (elapsed < 0) elapsed = 0;
+  remaining = (long long)timeout_ms - elapsed;
+  if (remaining <= 0) return 0;
+  if (remaining > (long long)INT_MAX) return INT_MAX;
+  return (int)remaining;
 }
 
 static char *ws_strdup(const char *s) {
@@ -214,6 +236,10 @@ static void unregister_context(struct lws_context *context) {
     }
     pp = &(*pp)->next;
   }
+}
+
+static void service_context(struct lws_context *primary, int timeout_ms) {
+  if (primary != NULL) p_lws_service(primary, timeout_ms);
 }
 
 static void service_registered(struct lws_context *primary, int timeout_ms) {
@@ -460,13 +486,29 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
   }
 }
 
-static int wait_for_condition(struct lws_context *primary, int (*pred)(void *), void *data) {
-  int i;
-  for (i = 0; i < CHEZPP_WS_WAIT_STEPS; ++i) {
+static int wait_for_condition(struct lws_context *primary, int (*pred)(void *), void *data,
+                              int timeout_ms, int service_all) {
+  long long start_ms = 0;
+
+  if (timeout_ms >= 0 && !current_time_ms(&start_ms)) return 0;
+
+  for (;;) {
+    int step_ms;
     if (pred(data)) return 1;
-    service_registered(primary, CHEZPP_WS_STEP_TIMEOUT_MS);
+    if (timeout_ms >= 0) {
+      int remaining = remaining_timeout_ms(timeout_ms, start_ms);
+      if (remaining <= 0) return pred(data);
+      step_ms = remaining < CHEZPP_WS_SERVICE_STEP_MS ? remaining : CHEZPP_WS_SERVICE_STEP_MS;
+    } else {
+      step_ms = CHEZPP_WS_SERVICE_STEP_MS;
+    }
+    if (service_all)
+      service_registered(primary, 0);
+    else
+      service_context(primary, 0);
+    if (pred(data)) return 1;
+    if (poll(NULL, 0, step_ms) < 0 && errno != EINTR) return pred(data);
   }
-  return pred(data);
 }
 
 static int pred_connected(void *data) {
@@ -571,11 +613,12 @@ ptr chezpp_net_websocket_server_close(uptr handle) {
   return Strue;
 }
 
-ptr chezpp_net_websocket_accept(uptr handle, int nonblocking) {
+ptr chezpp_net_websocket_accept(uptr handle, int nonblocking, int timeout_ms) {
   chezpp_ws_server *server = (chezpp_ws_server *)TO_VOIDP(handle);
   chezpp_ws_connection *conn;
   if (server == NULL || server->closed) return make_error_status_message("invalid websocket server");
-  if (server->accept_head == NULL && !nonblocking && !wait_for_condition(server->context, pred_accept_ready, server))
+  if (server->accept_head == NULL && !nonblocking &&
+      !wait_for_condition(server->context, pred_accept_ready, server, timeout_ms, 1))
     return make_error_status_message("websocket accept timed out");
   if (server->accept_head == NULL) {
     if (server->closed) return Seof_object;
@@ -586,7 +629,7 @@ ptr chezpp_net_websocket_accept(uptr handle, int nonblocking) {
 }
 
 ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
-                                 const char *protocol_name, int secure) {
+                                 const char *protocol_name, int secure, int timeout_ms) {
   chezpp_ws_connection *conn;
   struct lws_context_creation_info info;
   struct lws_client_connect_info ccinfo;
@@ -651,7 +694,7 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
     return make_error_status_message("failed to start websocket client connection");
   }
 
-  if (!wait_for_condition(conn->context, pred_connected, conn)) {
+  if (!wait_for_condition(conn->context, pred_connected, conn, timeout_ms, 1)) {
     unregister_context(conn->context);
     p_lws_context_destroy(conn->context);
     if (conn->error != NULL) free(conn->error);
@@ -678,7 +721,7 @@ ptr chezpp_net_websocket_close(uptr handle) {
   if (!conn->closed && conn->wsi != NULL) {
     p_lws_close_reason(conn->wsi, LWS_CLOSE_STATUS_NORMAL, NULL, 0);
     p_lws_set_timeout(conn->wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
-    service_registered(conn->context, 0);
+    service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
   }
   conn->closed = 1;
   clear_messages(conn);
@@ -695,7 +738,8 @@ ptr chezpp_net_websocket_close(uptr handle) {
   return Strue;
 }
 
-ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop, int nonblocking) {
+ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop, int nonblocking,
+                              int timeout_ms) {
   chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
   size_t len;
 
@@ -704,9 +748,9 @@ ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop
 
   if (conn->pending_send != NULL) {
     if (nonblocking) {
-      service_registered(conn->context, 0);
+      service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
       if (conn->pending_send != NULL) return make_status("would-block", Sfalse);
-    } else if (!wait_for_condition(conn->context, pred_send_done, conn)) {
+    } else if (!wait_for_condition(conn->context, pred_send_done, conn, timeout_ms, 0)) {
       return make_error_status_message("websocket send timed out");
     }
   }
@@ -719,9 +763,9 @@ ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop
   p_lws_callback_on_writable(conn->wsi);
 
   if (nonblocking) {
-    service_registered(conn->context, 0);
+    service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
     if (conn->pending_send != NULL) return make_status("would-block", Sfalse);
-  } else if (!wait_for_condition(conn->context, pred_send_done, conn)) {
+  } else if (!wait_for_condition(conn->context, pred_send_done, conn, timeout_ms, 0)) {
     clear_pending_send(conn);
     return make_error_status_message("websocket send timed out");
   }
@@ -730,7 +774,7 @@ ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop
   return Sfixnum((iptr)len);
 }
 
-ptr chezpp_net_websocket_recv(uptr handle, int nonblocking) {
+ptr chezpp_net_websocket_recv(uptr handle, int nonblocking, int timeout_ms) {
   chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
 
   if (conn == NULL || (conn->closed && conn->msg_head == NULL))
@@ -738,8 +782,8 @@ ptr chezpp_net_websocket_recv(uptr handle, int nonblocking) {
 
   if (conn->msg_head == NULL) {
     if (nonblocking) {
-      service_registered(conn->context, 0);
-    } else if (!wait_for_condition(conn->context, pred_recv_ready, conn)) {
+      service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
+    } else if (!wait_for_condition(conn->context, pred_recv_ready, conn, timeout_ms, 0)) {
       return make_error_status_message("websocket receive timed out");
     }
   }

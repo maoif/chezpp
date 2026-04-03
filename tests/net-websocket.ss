@@ -3,6 +3,30 @@
 
 (load "net-common.ss")
 
+(define websocket-net-error-message?
+  (lambda (message thunk)
+    (guard (c [else
+               (and (net-error? c)
+                    (equal? (net-error-message c) message))])
+      (thunk)
+      #f)))
+
+(define start-stalled-websocket-handshake-server
+  (lambda (delay-ms)
+    (let ([listener (open-socket 'inet 'stream)])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values listener
+                port
+                (fork-thread
+                 (lambda ()
+                   (let-values ([(client peer) (socket-accept listener)])
+                     (milisleep delay-ms)
+                     (close-socket client)
+                     (close-socket listener)))))))))
+
 (mat net-websocket
      (let* ([port (reserve-loopback-port)]
             [server (websocket-listen "127.0.0.1" port)]
@@ -68,3 +92,29 @@
                        (websocket-close accepted)))))))))
          (lambda ()
            (websocket-server-close server)))))
+
+(mat net-websocket-timeout
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (websocket-net-error-message?
+            "websocket accept timed out"
+            (lambda ()
+              (websocket-accept server 50))))
+         (lambda ()
+           (websocket-server-close server))))
+     (let-values ([(listener port th)
+                   (start-stalled-websocket-handshake-server 150)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (websocket-net-error-message?
+            "websocket connect timed out"
+            (lambda ()
+              (websocket-connect (format "ws://127.0.0.1:~a/stall" port) 50))))
+         (lambda ()
+           (thread-join th)
+           (guard (c [else #f])
+             (close-socket listener))))))
