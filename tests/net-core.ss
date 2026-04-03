@@ -3,6 +3,30 @@
 
 (load "net-common.ss")
 
+(define tls-net-error-timeout?
+  (lambda (thunk)
+    (guard (c [else
+               (and (net-error? c)
+                    (string-contains? (net-error-message c) "timed out"))])
+      (thunk)
+      #f)))
+
+(define start-stalled-tls-handshake-server
+  (lambda (delay-ms)
+    (let ([listener (open-socket 'inet 'stream)])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values listener
+                port
+                (fork-thread
+                 (lambda ()
+                   (let-values ([(client peer) (socket-accept listener)])
+                     (milisleep delay-ms)
+                     (close-socket client)
+                     (close-socket listener)))))))))
+
 (mat net-errors
      (let ([err (make-net-error 'net-test 'parse "bad address" '(1 2 3))])
        (and (net-error? err)
@@ -254,3 +278,53 @@
                               sent
                               (= n 2)
                               (equal? (slice-bytevector buf 0 2) (string->utf8 "nb")))))))))))))
+
+(mat net-tls-timeout
+     (let-values ([(listener port th)
+                   (start-stalled-tls-handshake-server 200)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (tls-net-error-timeout?
+              (lambda ()
+                (call-with-tls-client ctx client 50 tls-session?))))
+           (lambda ()
+             (close-tls-context ctx)
+             (guard (c [else #f])
+               (close-socket client))
+             (thread-join th)
+             (guard (c [else #f])
+               (close-socket listener))))))
+     (let ([listener (open-socket 'inet 'stream)]
+           [server-ctx (make-tls-context 'server)])
+       (write-test-cert-files)
+       (tls-context-load-cert! server-ctx "/tmp/chezpp-net-test-cert.pem")
+       (tls-context-load-private-key! server-ctx "/tmp/chezpp-net-test-key.pem")
+       (socket-set-option! listener 'reuse-address #t)
+       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+       (socket-listen! listener 4)
+       (let ([port (socket-address-port (socket-local-address listener))]
+             [client (open-socket 'inet 'stream)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let-values ([(accepted peer) (socket-accept listener)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (tls-net-error-timeout?
+                    (lambda ()
+                      (call-with-tls-server server-ctx accepted 50 tls-session?))))
+                 (lambda ()
+                   (guard (c [else #f])
+                     (close-socket accepted))))))
+           (lambda ()
+             (close-tls-context server-ctx)
+             (guard (c [else #f])
+               (close-socket client))
+             (guard (c [else #f])
+               (close-socket listener)))))))

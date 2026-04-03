@@ -240,7 +240,7 @@ static int ensure_ssh_loaded(void) {
 static ptr ssh_error_status(ssh_session session, const char *fallback) {
   const char *msg = NULL;
   if (session != NULL && p_ssh_get_error != NULL) msg = p_ssh_get_error(session);
-  return make_error_status_message(msg == NULL ? fallback : msg);
+  return make_error_status_message(msg == NULL || *msg == 0 ? fallback : msg);
 }
 
 static ptr ssh_error_status_from_wrapper(chezpp_ssh_session *wrapper, const char *fallback) {
@@ -708,7 +708,6 @@ ptr chezpp_net_sftp_open(uptr handle) {
   sftp_session sftp;
 
   if (wrapper == NULL || wrapper->session == NULL) return make_error_status_message("invalid ssh session");
-
   sftp = p_sftp_new(wrapper->session);
   if (sftp == NULL) return ssh_error_status_from_wrapper(wrapper, "failed to allocate sftp session");
   if (p_sftp_init(sftp) != SSH_OK) {

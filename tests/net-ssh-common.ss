@@ -575,7 +575,7 @@
             (not (member "tmpdir" entries)))))))
 
 (define sftp-test-timeouts
-  (lambda (sftp remote-root timeout?)
+  (lambda (session sftp remote-root timeout?)
     (let ([read-path-1 (string-append remote-root "/hello.txt")]
           [read-path-2 (string-append remote-root "/nested/base.txt")]
           [write-path (string-append remote-root "/timeout-write.txt")])
@@ -617,7 +617,7 @@
                 (timeout?
                  (lambda ()
                    (sftp-write-all file payload 0 (bytevector-length payload) 50))))))
-           (lambda () (sftp-close-file file))))))))
+            (lambda () (sftp-close-file file))))))))
 
 (define run-net-sftp-test
   (lambda (remote-root home port user)
@@ -690,6 +690,6 @@
                   void
                   (lambda ()
                     (and (sftp-session? sftp)
-                         (sftp-test-timeouts sftp remote-root timeout?)))
+                         (sftp-test-timeouts session sftp remote-root timeout?)))
                   (lambda () (sftp-close sftp))))))
            (lambda () (ssh-close session))))))))

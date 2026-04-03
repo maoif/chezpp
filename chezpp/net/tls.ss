@@ -573,9 +573,25 @@ The `call-with-tls-client` procedure performs a client TLS handshake, passes the
   (define-who call-with-tls-client
     (case-lambda
       [(ctx sock proc) (call-with-tls-client ctx sock #f proc)]
+      [(ctx sock timeout-ms proc)
+       (pcheck ([tls-context? ctx] [socket? sock] [fixnum? timeout-ms] [procedure? proc])
+               (let ([session (tls-connect ctx sock #f timeout-ms)])
+                 (dynamic-wind
+                   void
+                   (lambda () (proc session))
+                   (lambda () (when session (close-tls-session session))))))]
       [(ctx sock server-name proc)
        (pcheck ([tls-context? ctx] [socket? sock] [procedure? proc])
                (let ([session (tls-connect ctx sock server-name)])
+                 (dynamic-wind
+                   void
+                   (lambda () (proc session))
+                   (lambda () (when session (close-tls-session session))))))]
+      [(ctx sock server-name timeout-ms proc)
+       (pcheck ([tls-context? ctx] [socket? sock] [fixnum? timeout-ms] [procedure? proc])
+               (unless (or (not server-name) (string? server-name))
+                 (errorf who "server name must be a string or #f, given ~s" server-name))
+               (let ([session (tls-connect ctx sock server-name timeout-ms)])
                  (dynamic-wind
                    void
                    (lambda () (proc session))
@@ -585,13 +601,21 @@ The `call-with-tls-client` procedure performs a client TLS handshake, passes the
 The `call-with-tls-server` procedure performs a server TLS handshake, passes the session to a procedure, and closes the session afterwards.
 |#
   (define-who call-with-tls-server
-    (lambda (ctx sock proc)
-      (pcheck ([tls-context? ctx] [socket? sock] [procedure? proc])
-              (let ([session (tls-accept ctx sock)])
-                (dynamic-wind
-                  void
-                  (lambda () (proc session))
-                  (lambda () (when session (close-tls-session session))))))))
+    (case-lambda
+      [(ctx sock proc)
+       (pcheck ([tls-context? ctx] [socket? sock] [procedure? proc])
+               (let ([session (tls-accept ctx sock)])
+                 (dynamic-wind
+                   void
+                   (lambda () (proc session))
+                   (lambda () (when session (close-tls-session session))))))]
+      [(ctx sock timeout-ms proc)
+       (pcheck ([tls-context? ctx] [socket? sock] [fixnum? timeout-ms] [procedure? proc])
+               (let ([session (tls-accept ctx sock timeout-ms)])
+                 (dynamic-wind
+                   void
+                   (lambda () (proc session))
+                   (lambda () (when session (close-tls-session session))))))]))
 
   #|proc:open-tls-port
 The `open-tls-port` procedure opens a bidirectional binary port layered over a TLS session.
