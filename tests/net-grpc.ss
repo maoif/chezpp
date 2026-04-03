@@ -62,6 +62,16 @@
               (milisleep 10)
               (loop)))))))
 
+(define wait-grpc-stream/nonblocking
+  (lambda (proc)
+    (let loop ()
+      (let ([stream (proc)])
+        (if stream
+            stream
+            (begin
+              (milisleep 10)
+              (loop)))))))
+
 (define grpc-server-stream-ok?
   (lambda (client)
     (let ([stream (grpc-call/server-stream
@@ -117,6 +127,73 @@
                        (grpc-stream-send stream "two")
                        (let ([r2 (grpc-stream-recv stream)])
                          (and (equal? (utf8->string r2) "echo:two")
+                              (begin
+                                (grpc-stream-close-send stream)
+                                (eof-object? (grpc-stream-recv stream))))))
+                     #f)))])
+        (grpc-stream-close stream)
+        ok?))))
+
+(define grpc-server-stream-nonblocking-ok?
+  (lambda (client)
+    (let ([stream (wait-grpc-stream/nonblocking
+                   (lambda ()
+                     (grpc-call/server-stream/nonblocking
+                      client
+                      "/chezpp.test.Echo/ServerStream"
+                      "watch"
+                      '()
+                      2000)))])
+      (let ([ok?
+             (let ([m1 (grpc-stream-recv stream)]
+                   [m2 (grpc-stream-recv stream)]
+                   [done (grpc-stream-recv stream)])
+               (and (grpc-stream? stream)
+                    (equal? (utf8->string m1) "watch:0")
+                    (equal? (utf8->string m2) "watch:1")
+                    (eof-object? done)))])
+        (grpc-stream-close stream)
+        ok?))))
+
+(define grpc-client-stream-nonblocking-ok?
+  (lambda (client)
+    (let ([stream (wait-grpc-stream/nonblocking
+                   (lambda ()
+                     (grpc-call/client-stream/nonblocking
+                      client
+                      "/chezpp.test.Echo/ClientStream"
+                      '()
+                      2000)))])
+      (let ([ok?
+             (begin
+               (grpc-stream-send stream "13")
+               (grpc-stream-send stream "21")
+               (grpc-stream-close-send stream)
+               (let ([reply (grpc-stream-recv stream)]
+                     [done (grpc-stream-recv stream)])
+                 (and (equal? (utf8->string reply) "sum:34")
+                      (eof-object? done))))])
+        (grpc-stream-close stream)
+        ok?))))
+
+(define grpc-bidi-stream-nonblocking-ok?
+  (lambda (client)
+    (let ([stream (wait-grpc-stream/nonblocking
+                   (lambda ()
+                     (grpc-call/bidi-stream/nonblocking
+                      client
+                      "/chezpp.test.Echo/Bidi"
+                      '()
+                      2000)))])
+      (let ([ok?
+             (begin
+               (grpc-stream-send stream "left")
+               (let ([r1 (grpc-stream-recv stream)])
+                 (if (equal? (utf8->string r1) "echo:left")
+                     (begin
+                       (grpc-stream-send stream "right")
+                       (let ([r2 (grpc-stream-recv stream)])
+                         (and (equal? (utf8->string r2) "echo:right")
                               (begin
                                 (grpc-stream-close-send stream)
                                 (eof-object? (grpc-stream-recv stream))))))
@@ -205,7 +282,7 @@
      (with-grpc-env
       (lambda ()
         (call-with-grpc-peer
-         3
+         6
          (lambda (server)
            (grpc-register-service!
             server
@@ -247,8 +324,11 @@
               #f)))
          (lambda (server client)
            (and
-            (grpc-channel? server)
-            (grpc-channel? client)
+           (grpc-channel? server)
+           (grpc-channel? client)
             (grpc-server-stream-ok? client)
             (grpc-client-stream-ok? client)
-            (grpc-bidi-stream-ok? client)))))))
+            (grpc-bidi-stream-ok? client)
+            (grpc-server-stream-nonblocking-ok? client)
+            (grpc-client-stream-nonblocking-ok? client)
+            (grpc-bidi-stream-nonblocking-ok? client)))))))

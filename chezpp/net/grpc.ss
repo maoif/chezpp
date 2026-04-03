@@ -32,6 +32,9 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp net errors)
+          (chezpp net address)
+          (chezpp net socket)
+          (chezpp net poll)
           (chezpp net ffi)
           (chezpp net private))
 
@@ -60,7 +63,14 @@
   (define-record-type (grpc-pending-op %make-grpc-pending-op grpc-pending-op?)
     (sealed #t)
     (opaque #f)
-    (fields (mutable handle grpc-pending-op-handle grpc-pending-op-handle-set!)))
+    (fields (immutable kind grpc-pending-op-kind)
+            (immutable args grpc-pending-op-args)
+            (mutable handle grpc-pending-op-handle grpc-pending-op-handle-set!)
+            (immutable reader grpc-pending-op-reader)
+            (immutable writer grpc-pending-op-writer)
+            (immutable thread grpc-pending-op-thread)
+            (mutable done? grpc-pending-op-done? grpc-pending-op-done?-set!)
+            (mutable result grpc-pending-op-result grpc-pending-op-result-set!)))
 
   (define-record-type (grpc-stream %make-grpc-stream grpc-stream?)
     (sealed #t)
@@ -108,6 +118,10 @@
   (define make-handler-table
     (lambda ()
       (make-hashtable string-hash string=?)))
+
+  (define make-unary-pending-op
+    (lambda (args handle)
+      (%make-grpc-pending-op 'unary args handle #f #f #f #f #f)))
 
   (define check-slice
     (lambda (who len start stop)
@@ -335,6 +349,98 @@
                 (vector-ref ans 1)
                 (vector-ref ans 2)))))
 
+  (define close-pending-notifier!
+    (lambda (pending)
+      (let ([reader (grpc-pending-op-reader pending)]
+            [writer (grpc-pending-op-writer pending)])
+        (when reader
+          (guard (c [else #f])
+            (close-socket reader)))
+        (when writer
+          (guard (c [else #f])
+            (close-socket writer))))))
+
+  (define open-pending-notifier
+    (lambda ()
+      (let ([listener (open-socket 'inet 'stream)]
+            [client #f]
+            [server #f])
+        (dynamic-wind
+          void
+          (lambda ()
+            (socket-set-option! listener 'reuse-address #t)
+            (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+            (socket-listen! listener 1)
+            (let ([addr (socket-local-address listener)])
+              (set! client (open-socket 'inet 'stream))
+              (socket-connect! client addr)
+              (let-values ([(accepted peer) (socket-accept listener)])
+                (set! server accepted)
+                (values server client))))
+          (lambda ()
+            (guard (c [else #f])
+              (close-socket listener)))))))
+
+  (define start-pending-stream!
+    (lambda (channel kind args thunk)
+      (let-values ([(reader writer) (open-pending-notifier)])
+        (letrec ([pending
+                  (%make-grpc-pending-op
+                   kind
+                   args
+                   #f
+                   reader
+                   writer
+                   (fork-thread
+                    (lambda ()
+                      (grpc-pending-op-result-set!
+                       pending
+                       (guard (c [else c])
+                         (thunk)))
+                      (grpc-pending-op-done?-set! pending #t)
+                      (guard (c [else #f])
+                        (socket-send-all writer #vu8(1)))))
+                   #f
+                   #f)])
+          (grpc-channel-pending-set! channel pending)
+          pending))))
+
+  (define pending-ready?
+    (lambda (pending)
+      (or (grpc-pending-op-done? pending)
+          (let ([reader (grpc-pending-op-reader pending)])
+            (and reader
+                 (let* ([target (make-poll-target reader '(read error hup invalid))]
+                        [ready (car (poll/nonblocking (list target)))])
+                   (pair? (poll-target-ready-events ready))))))))
+
+  (define finish-stream-pending!
+    (lambda (who channel pending)
+      (grpc-channel-pending-set! channel #f)
+      (thread-join (grpc-pending-op-thread pending))
+      (close-pending-notifier! pending)
+      (let ([result (grpc-pending-op-result pending)])
+        (if (condition? result)
+            (raise result)
+            result))))
+
+  (define clear-pending!
+    (lambda (who pending)
+      (case (grpc-pending-op-kind pending)
+        [(unary)
+         (let ([handle (grpc-pending-op-handle pending)])
+           (when handle
+             (ensure-success who (ffi-net-grpc-unary-close handle))
+             (grpc-pending-op-handle-set! pending #f)))]
+        [else
+         (close-pending-notifier! pending)])))
+
+  (define ensure-pending-matches
+    (lambda (who pending kind args)
+      (unless (and (eq? (grpc-pending-op-kind pending) kind)
+                   (equal? (grpc-pending-op-args pending) args))
+        (raise-net-error who 'grpc "another nonblocking gRPC operation is pending" pending))))
+
   #|proc:grpc-request
 The `grpc-request` procedure constructs a gRPC request record.
 |#
@@ -432,7 +538,7 @@ The `grpc-close-channel` procedure closes a gRPC client channel or server listen
               (unless (grpc-channel-closed? channel)
                 (let ([pending (grpc-channel-pending channel)])
                   (when pending
-                    (ensure-success who (ffi-net-grpc-unary-close (grpc-pending-op-handle pending)))
+                    (clear-pending! who pending)
                     (grpc-channel-pending-set! channel #f)))
                 (let ([handle (grpc-channel-handle channel)])
                   (when handle
@@ -497,6 +603,7 @@ The `grpc-call` procedure performs a blocking unary gRPC call and returns a gRPC
       (let* ([method* (method-name who method)]
              [payload* (normalize-payload who payload)]
              [metadata* (normalize-metadata who metadata)]
+             [args (list method* payload* metadata* timeout-ms)]
              [ans (ensure-success who
                                   (ffi-net-grpc-unary-start (grpc-channel-handle channel)
                                                             method*
@@ -507,7 +614,7 @@ The `grpc-call` procedure performs a blocking unary gRPC call and returns a gRPC
                                                                 0)
                                                             metadata*
                                                             timeout-ms))])
-        (grpc-channel-pending-set! channel (%make-grpc-pending-op ans)))))
+        (grpc-channel-pending-set! channel (make-unary-pending-op args ans)))))
 
   #|proc:grpc-call/nonblocking
 The `grpc-call/nonblocking` procedure progresses a unary gRPC call without blocking and returns `#f` while the response is pending.
@@ -522,14 +629,47 @@ The `grpc-call/nonblocking` procedure progresses a unary gRPC call without block
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
-               (unless (grpc-channel-pending channel)
-                 (start-pending-unary! who channel method payload metadata timeout-ms))
+               (let* ([method* (method-name who method)]
+                      [payload* (normalize-payload who payload)]
+                      [metadata* (normalize-metadata who metadata)]
+                      [args (list method* payload* metadata* timeout-ms)])
+                 (unless (grpc-channel-pending channel)
+                   (start-pending-unary! who channel method payload metadata timeout-ms))
+                 (ensure-pending-matches who (grpc-channel-pending channel) 'unary args))
                (let* ([pending (grpc-channel-pending channel)]
                       [ans (ensure-success who (ffi-net-grpc-unary-poll (grpc-pending-op-handle pending)))]
                       [response (maybe-response-from-ffi who ans)])
                  (when response
                    (grpc-channel-pending-set! channel #f))
                  response))]))
+
+  (define open-stream/nonblocking
+    (lambda (who channel kind method shape payload metadata timeout-ms)
+      (ensure-channel-open who channel)
+      (ensure-role who channel 'client)
+      (let* ([method* (method-name who method)]
+             [payload* (normalize-payload who payload)]
+             [metadata* (normalize-metadata who metadata)]
+             [args (list kind method* payload* metadata* timeout-ms)]
+             [pending (grpc-channel-pending channel)])
+        (when pending
+          (ensure-pending-matches who pending kind args))
+        (let ([pending (or pending
+                           (start-pending-stream!
+                            channel
+                            kind
+                            args
+                            (lambda ()
+                              (open-stream who
+                                           channel
+                                           method*
+                                           shape
+                                           payload*
+                                           metadata*
+                                           timeout-ms))))])
+          (if (pending-ready? pending)
+              (finish-stream-pending! who channel pending)
+              #f)))))
 
   (define respond-to-request
     (lambda (who request response)
@@ -684,10 +824,6 @@ The `grpc-stream-close` procedure closes a gRPC streaming call and releases its 
                 (grpc-stream-recv-closed?-set! stream #t))
               stream)))
 
-  (define not-implemented-stream
-    (lambda (who)
-      (raise-net-error who 'grpc "streaming gRPC APIs are not implemented yet")))
-
   #|proc:grpc-call/server-stream
 The `grpc-call/server-stream` procedure opens a blocking server-streaming gRPC call and returns a gRPC stream object.
 |#
@@ -734,22 +870,70 @@ The `grpc-call/bidi-stream` procedure opens a blocking bidirectional gRPC stream
                (open-stream who channel method 'bidi #f metadata timeout-ms))]))
 
   #|proc:grpc-call/server-stream/nonblocking
-The `grpc-call/server-stream/nonblocking` procedure is reserved for future streaming gRPC support.
+The `grpc-call/server-stream/nonblocking` procedure progresses opening a server-streaming gRPC call without blocking and returns `#f` until the stream is ready.
 |#
   (define-who grpc-call/server-stream/nonblocking
-    (lambda args
-      (not-implemented-stream who)))
+    (case-lambda
+      [(channel method payload)
+       (grpc-call/server-stream/nonblocking channel method payload '() 30000)]
+      [(channel method payload metadata-or-timeout)
+       (if (fixnum? metadata-or-timeout)
+           (grpc-call/server-stream/nonblocking channel method payload '() metadata-or-timeout)
+           (grpc-call/server-stream/nonblocking channel method payload metadata-or-timeout 30000))]
+      [(channel method payload metadata timeout-ms)
+       (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (open-stream/nonblocking
+                who
+                channel
+                'server-stream
+                method
+                'server
+                payload
+                metadata
+                timeout-ms))]))
 
   #|proc:grpc-call/client-stream/nonblocking
-The `grpc-call/client-stream/nonblocking` procedure is reserved for future streaming gRPC support.
+The `grpc-call/client-stream/nonblocking` procedure progresses opening a client-streaming gRPC call without blocking and returns `#f` until the stream is ready.
 |#
   (define-who grpc-call/client-stream/nonblocking
-    (lambda args
-      (not-implemented-stream who)))
+    (case-lambda
+      [(channel method)
+       (grpc-call/client-stream/nonblocking channel method '() 30000)]
+      [(channel method metadata-or-timeout)
+       (if (fixnum? metadata-or-timeout)
+           (grpc-call/client-stream/nonblocking channel method '() metadata-or-timeout)
+           (grpc-call/client-stream/nonblocking channel method metadata-or-timeout 30000))]
+      [(channel method metadata timeout-ms)
+       (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (open-stream/nonblocking
+                who
+                channel
+                'client-stream
+                method
+                'client
+                #f
+                metadata
+                timeout-ms))]))
 
   #|proc:grpc-call/bidi-stream/nonblocking
-The `grpc-call/bidi-stream/nonblocking` procedure is reserved for future streaming gRPC support.
+The `grpc-call/bidi-stream/nonblocking` procedure progresses opening a bidirectional gRPC stream without blocking and returns `#f` until the stream is ready.
 |#
   (define-who grpc-call/bidi-stream/nonblocking
-    (lambda args
-      (not-implemented-stream who))))
+    (case-lambda
+      [(channel method)
+       (grpc-call/bidi-stream/nonblocking channel method '() 30000)]
+      [(channel method metadata-or-timeout)
+       (if (fixnum? metadata-or-timeout)
+           (grpc-call/bidi-stream/nonblocking channel method '() metadata-or-timeout)
+           (grpc-call/bidi-stream/nonblocking channel method metadata-or-timeout 30000))]
+      [(channel method metadata timeout-ms)
+       (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (open-stream/nonblocking
+                who
+                channel
+                'bidi-stream
+                method
+                'bidi
+                #f
+                metadata
+                timeout-ms))])))
