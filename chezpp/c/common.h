@@ -6,9 +6,14 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <assert.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <time.h>
 #include <grp.h>
 #include <pwd.h>
 

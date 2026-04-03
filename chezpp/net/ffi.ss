@@ -356,17 +356,17 @@
   (define ffi-net-tls-context-set-alpn
     (foreign-procedure "chezpp_net_tls_context_set_alpn" (uptr ptr int int) scheme-object))
   (define ffi-net-tls-connect
-    (foreign-procedure "chezpp_net_tls_connect" (uptr int string) scheme-object))
+    (foreign-procedure "chezpp_net_tls_connect" (uptr int string int) scheme-object))
   (define ffi-net-tls-accept
-    (foreign-procedure "chezpp_net_tls_accept" (uptr int) scheme-object))
+    (foreign-procedure "chezpp_net_tls_accept" (uptr int int) scheme-object))
   (define ffi-net-tls-close
     (foreign-procedure "chezpp_net_tls_close" (uptr) scheme-object))
   (define ffi-net-tls-read
-    (foreign-procedure "chezpp_net_tls_read" (uptr int int) scheme-object))
+    (foreign-procedure "chezpp_net_tls_read" (uptr int int int) scheme-object))
   (define ffi-net-tls-read-into
-    (foreign-procedure "chezpp_net_tls_read_into" (uptr ptr int int int) scheme-object))
+    (foreign-procedure "chezpp_net_tls_read_into" (uptr ptr int int int int) scheme-object))
   (define ffi-net-tls-write
-    (foreign-procedure "chezpp_net_tls_write" (uptr ptr int int int) scheme-object))
+    (foreign-procedure "chezpp_net_tls_write" (uptr ptr int int int int) scheme-object))
   (define ffi-net-tls-shutdown
     (foreign-procedure "chezpp_net_tls_shutdown" (uptr) scheme-object))
   (define ffi-net-tls-protocol-version
