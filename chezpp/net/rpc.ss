@@ -4,11 +4,19 @@
           rpc-open
           rpc-close
           rpc-call
+          rpc-call/server-stream
+          rpc-call/client-stream
+          rpc-call/bidi-stream
           rpc-notify
           rpc-register-handler!
           rpc-serve
           rpc-serve/nonblocking
           rpc-channel?
+          rpc-stream?
+          rpc-stream-send
+          rpc-stream-recv
+          rpc-stream-close-send
+          rpc-stream-close
           rpc-request
           rpc-request?
           rpc-request-id
@@ -212,6 +220,18 @@
             (immutable payload rpc-response-payload)
             (immutable error-message rpc-response-error-message)))
 
+  (define-record-type (rpc-stream-record %make-rpc-stream rpc-stream?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable socket rpc-stream-socket)
+            (immutable id rpc-stream-id)
+            (immutable send-type rpc-stream-send-type)
+            (immutable recv-type rpc-stream-recv-type)
+            (immutable deadline-ms rpc-stream-deadline-ms)
+            (mutable send-closed? rpc-stream-send-closed? rpc-stream-send-closed?-set!)
+            (mutable recv-closed? rpc-stream-recv-closed? rpc-stream-recv-closed?-set!)
+            (mutable closed? rpc-stream-closed? rpc-stream-closed?-set!)))
+
   (define rpc-request? rpc-request-record?)
   (define rpc-response? rpc-response-record?)
 
@@ -245,6 +265,11 @@
     (lambda (who channel)
       (when (rpc-channel-closed? channel)
         (raise-net-error who 'rpc "RPC channel is closed" channel))))
+
+  (define ensure-stream-open
+    (lambda (who stream)
+      (when (rpc-stream-closed? stream)
+        (raise-net-error who 'rpc "RPC stream is closed" stream))))
 
   (define ensure-role
     (lambda (who channel role)
@@ -381,6 +406,170 @@
        (vector-ref datum 2)
        (rpc-decode-payload (vector-ref datum 3) method-type)
        (vector-ref datum 4))))
+
+  (define stream-timeout-message
+    (lambda (stream)
+      "RPC stream timed out"))
+
+  (define stream-remaining-timeout-ms
+    (lambda (stream)
+      (let ([deadline (rpc-stream-deadline-ms stream)])
+        (and deadline
+             (max 0 (- deadline (current-time-ms)))))))
+
+  (define wait-stream-ready!
+    (lambda (who stream event*)
+      (let* ([timeout-ms (let ([x (stream-remaining-timeout-ms stream)])
+                           (if x x -1))]
+             [target (car (poll (list (make-poll-target (rpc-stream-socket stream) event*))
+                                timeout-ms))]
+             [ready (poll-target-ready-events target)])
+        (when (null? ready)
+          (raise-net-error who 'rpc (stream-timeout-message stream) stream))
+        ready)))
+
+  (define make-stream-open-datum
+    (lambda (id method-name stream payload request-type)
+      (vector 'rpc-stream-open
+              id
+              method-name
+              stream
+              (rpc-encode-payload payload request-type))))
+
+  (define decode-stream-open-datum
+    (lambda (who datum request-type)
+      (unless (and (vector? datum)
+                   (= (vector-length datum) 5)
+                   (eq? (vector-ref datum 0) 'rpc-stream-open))
+        (raise-net-error who 'rpc "invalid RPC stream-open frame" datum))
+      (values (vector-ref datum 1)
+              (vector-ref datum 2)
+              (vector-ref datum 3)
+              (rpc-decode-payload (vector-ref datum 4) request-type))))
+
+  (define make-stream-message-datum
+    (lambda (stream payload)
+      (vector 'rpc-stream-message
+              (rpc-stream-id stream)
+              (rpc-encode-payload payload (rpc-stream-send-type stream)))))
+
+  (define stream-frame-id
+    (lambda (who datum tag length)
+      (unless (and (vector? datum)
+                   (= (vector-length datum) length)
+                   (eq? (vector-ref datum 0) tag))
+        (raise-net-error who 'rpc
+                         (format "invalid RPC ~a frame" tag)
+                         datum))
+      (vector-ref datum 1)))
+
+  (define decode-stream-message-datum
+    (lambda (who stream datum)
+      (let ([id (stream-frame-id who datum 'rpc-stream-message 3)])
+        (unless (= id (rpc-stream-id stream))
+          (raise-net-error who 'rpc "RPC stream id mismatch" datum))
+        (rpc-decode-payload (vector-ref datum 2)
+                            (rpc-stream-recv-type stream)))))
+
+  (define stream-close-frame?
+    (lambda (stream datum)
+      (and (vector? datum)
+           (= (vector-length datum) 2)
+           (eq? (vector-ref datum 0) 'rpc-stream-close)
+           (= (vector-ref datum 1) (rpc-stream-id stream)))))
+
+  (define decode-stream-error-datum
+    (lambda (who stream datum)
+      (let ([id (stream-frame-id who datum 'rpc-stream-error 3)])
+        (unless (= id (rpc-stream-id stream))
+          (raise-net-error who 'rpc "RPC stream id mismatch" datum))
+        (vector-ref datum 2))))
+
+  (define send-stream-error!
+    (lambda (who stream message)
+      (guard (c [else #f])
+        (write-frame! who
+                      (rpc-stream-socket stream)
+                      (vector 'rpc-stream-error
+                              (rpc-stream-id stream)
+                              message)))))
+
+  (define close-stream-socket!
+    (lambda (stream)
+      (unless (rpc-stream-closed? stream)
+        (guard (c [else #f])
+          (close-socket (rpc-stream-socket stream)))
+        (rpc-stream-closed?-set! stream #t))))
+
+  (define maybe-close-stream-socket!
+    (lambda (stream)
+      (when (and (rpc-stream-send-closed? stream)
+                 (rpc-stream-recv-closed? stream))
+        (close-stream-socket! stream))))
+
+  (define make-server-stream
+    (lambda (who sock id stream request-type response-type)
+      (case stream
+        [(server)
+         (%make-rpc-stream sock id response-type #f #f #f #t #f)]
+        [(client)
+         (%make-rpc-stream sock id response-type request-type #f #f #f #f)]
+        [(bidi)
+         (%make-rpc-stream sock id response-type request-type #f #f #f #f)]
+        [else
+         (raise-net-error who 'rpc "invalid RPC stream shape" stream)])))
+
+  (define normalize-stream-final-response
+    (lambda (value)
+      (if (rpc-response-record? value)
+          value
+          (%make-rpc-response-record #t value #f))))
+
+  (define open-client-stream
+    (lambda (who channel method stream payload timeout-ms)
+      (let-values ([(method-name request-type response-type stream-shape) (normalize-method who method)])
+        (unless (eq? stream-shape stream)
+          (raise-net-error who 'rpc "RPC stream shape mismatch" method))
+        (let-values ([(sock ans) (open-client-socket who channel #f)])
+          (let ([stream-obj
+                 (case stream
+                   [(server)
+                    (%make-rpc-stream sock
+                                      1
+                                      #f
+                                      response-type
+                                      (timeout->deadline-ms timeout-ms)
+                                      #t
+                                      #f
+                                      #f)]
+                   [(client)
+                    (%make-rpc-stream sock
+                                      1
+                                      request-type
+                                      response-type
+                                      (timeout->deadline-ms timeout-ms)
+                                      #f
+                                      #f
+                                      #f)]
+                   [(bidi)
+                    (%make-rpc-stream sock
+                                      1
+                                      request-type
+                                      response-type
+                                      (timeout->deadline-ms timeout-ms)
+                                      #f
+                                      #f
+                                      #f)]
+                   [else
+                    (raise-net-error who 'rpc "invalid RPC stream shape" stream)])])
+            (write-frame! who
+                          sock
+                          (make-stream-open-datum 1
+                                                  method-name
+                                                  stream
+                                                  payload
+                                                  (and (eq? stream 'server) request-type)))
+            stream-obj)))))
 
   (define normalize-response
     (lambda (value)
@@ -695,17 +884,103 @@ The `rpc-register-handler!` procedure registers a request handler on a server RP
                                                      method-name)))]
          [else
           (let ([stream (vector-ref entry 4)])
-            (unless (eq? stream 'unary)
-              (raise-net-error who 'rpc "streaming RPC methods are not implemented yet" entry))
-            (values request
-                    (guard (c [else
-                               (%make-rpc-response-record
-                                #f
-                                #f
-                                (if (condition? c)
-                                    (format "~a" c)
-                                    (format "~s" c)))])
-                      (normalize-response ((vector-ref entry 1) request)))))]))))
+            (if (not (eq? stream 'unary))
+                (values request
+                        (%make-rpc-response-record
+                         #f
+                         #f
+                         (format "RPC method ~a requires streaming transport"
+                                 method-name)))
+                (values request
+                        (guard (c [else
+                                   (%make-rpc-response-record
+                                    #f
+                                    #f
+                                    (if (condition? c)
+                                        (format "~a" c)
+                                        (format "~s" c)))])
+                          (normalize-response ((vector-ref entry 1) request))))))]))))
+
+  (define dispatch-stream-open
+    (lambda (who channel client datum)
+      (let-values ([(id method-name stream payload)
+                    (decode-stream-open-datum who datum #f)])
+        (let ([entry (handler-entry channel method-name)])
+          (if (not entry)
+              (begin
+                (write-frame! who
+                              client
+                              (vector 'rpc-stream-error
+                                      id
+                                      (format "no RPC handler registered for ~a"
+                                              method-name)))
+                (%make-rpc-request-record id method-name payload #f))
+              (let* ([proc (vector-ref entry 1)]
+                     [request-type (vector-ref entry 2)]
+                     [response-type (vector-ref entry 3)]
+                     [expected-stream (vector-ref entry 4)])
+                (if (not (eq? expected-stream stream))
+                    (begin
+                      (write-frame! who
+                                    client
+                                    (vector 'rpc-stream-error
+                                            id
+                                            (format "RPC stream shape mismatch for ~a"
+                                                    method-name)))
+                      (%make-rpc-request-record id method-name payload #f))
+                    (let-values ([(id* method-name* stream* payload*)
+                                  (decode-stream-open-datum
+                                   who
+                                   datum
+                                   (and (eq? stream 'server) request-type))])
+                      (let ([request (%make-rpc-request-record id* method-name* payload* #f)]
+                            [stream-obj (make-server-stream who
+                                                            client
+                                                            id*
+                                                            stream*
+                                                            request-type
+                                                            response-type)])
+                        (guard (c [else
+                                   (send-stream-error!
+                                    who
+                                    stream-obj
+                                    (if (condition? c)
+                                        (format "~a" c)
+                                        (format "~s" c)))
+                                   request])
+                          (case stream*
+                            [(server)
+                             (proc request stream-obj)
+                             (unless (rpc-stream-send-closed? stream-obj)
+                               (rpc-stream-close-send stream-obj))
+                             request]
+                            [(client)
+                             (let ([result (proc stream-obj)])
+                               (unless (rpc-stream-send-closed? stream-obj)
+                                 (let ([response (normalize-stream-final-response result)])
+                                   (if (rpc-response-ok? response)
+                                       (begin
+                                         (rpc-stream-send
+                                          stream-obj
+                                          (rpc-response-payload response))
+                                         (rpc-stream-close-send stream-obj))
+                                       (begin
+                                         (send-stream-error!
+                                          who
+                                          stream-obj
+                                          (or (rpc-response-error-message response)
+                                              "RPC stream failed"))
+                                         (rpc-stream-close stream-obj)))))
+                               request)]
+                            [(bidi)
+                             (proc stream-obj)
+                             (unless (rpc-stream-send-closed? stream-obj)
+                               (rpc-stream-close-send stream-obj))
+                             request]
+                            [else
+                             (raise-net-error who 'rpc
+                                              "invalid RPC stream shape"
+                                              stream*)])))))))))))
 
   (define serve-accepted
     (lambda (who channel client)
@@ -713,17 +988,114 @@ The `rpc-register-handler!` procedure registers a request handler on a server RP
         void
         (lambda ()
           (let* ([datum (read-frame who client)])
-            (let-values ([(request response) (dispatch-request who channel datum)])
-              (unless (rpc-request-notify? request)
-                (write-frame! who
-                              client
-                              (vector 'rpc-response
-                                      (rpc-request-id request)
-                                      (rpc-response-ok? response)
-                                      (rpc-encode-payload (rpc-response-payload response))
-                                      (rpc-response-error-message response)))
-              request))))
+            (cond
+             [(and (vector? datum)
+                   (= (vector-length datum) 5)
+                   (eq? (vector-ref datum 0) 'rpc-request))
+              (let-values ([(request response) (dispatch-request who channel datum)])
+                (unless (rpc-request-notify? request)
+                  (write-frame! who
+                                client
+                                (vector 'rpc-response
+                                        (rpc-request-id request)
+                                        (rpc-response-ok? response)
+                                        (rpc-encode-payload (rpc-response-payload response))
+                                        (rpc-response-error-message response))))
+                request)]
+             [(and (vector? datum)
+                   (= (vector-length datum) 5)
+                   (eq? (vector-ref datum 0) 'rpc-stream-open))
+              (dispatch-stream-open who channel client datum)]
+             [else
+              (raise-net-error who 'rpc "invalid RPC frame" datum)])))
         (lambda () (close-socket client)))))
+
+  ;;===----------------------------------------------------------------------===
+  ;; Stream APIs
+  ;;===----------------------------------------------------------------------===
+
+  #|proc:rpc-stream-send
+The `rpc-stream-send` procedure sends one message on an RPC stream.
+|#
+  (define-who rpc-stream-send
+    (lambda (stream payload)
+      (pcheck ([rpc-stream? stream])
+              (ensure-stream-open who stream)
+              (when (rpc-stream-send-closed? stream)
+                (raise-net-error who 'rpc "RPC stream send side is closed" stream))
+              (unless (rpc-stream-send-type stream)
+                (raise-net-error who 'rpc "RPC stream does not support sending" stream))
+              (wait-stream-ready! who stream '(write error hup invalid))
+              (write-frame! who
+                            (rpc-stream-socket stream)
+                            (make-stream-message-datum stream payload))
+              stream)))
+
+  #|proc:rpc-stream-recv
+The `rpc-stream-recv` procedure receives one message from an RPC stream and returns an EOF object when the peer closes its send side.
+|#
+  (define-who rpc-stream-recv
+    (lambda (stream)
+      (pcheck ([rpc-stream? stream])
+              (ensure-stream-open who stream)
+              (unless (rpc-stream-recv-type stream)
+                (raise-net-error who 'rpc "RPC stream does not support receiving" stream))
+              (if (rpc-stream-recv-closed? stream)
+                  (eof-object)
+                  (begin
+                    (wait-stream-ready! who stream '(read error hup invalid))
+                    (let ([datum (read-frame who (rpc-stream-socket stream))])
+                      (cond
+                       [(and (vector? datum)
+                             (= (vector-length datum) 3)
+                             (eq? (vector-ref datum 0) 'rpc-stream-message))
+                        (decode-stream-message-datum who stream datum)]
+                       [(stream-close-frame? stream datum)
+                        (rpc-stream-recv-closed?-set! stream #t)
+                        (maybe-close-stream-socket! stream)
+                        (eof-object)]
+                       [(and (vector? datum)
+                             (= (vector-length datum) 3)
+                             (eq? (vector-ref datum 0) 'rpc-stream-error))
+                        (rpc-stream-recv-closed?-set! stream #t)
+                        (rpc-stream-send-closed?-set! stream #t)
+                        (close-stream-socket! stream)
+                        (raise-net-error who 'rpc
+                                         (decode-stream-error-datum who stream datum)
+                                         stream)]
+                       [else
+                        (raise-net-error who 'rpc "invalid RPC stream frame" datum)])))))))
+
+  #|proc:rpc-stream-close-send
+The `rpc-stream-close-send` procedure closes the local send side of an RPC stream.
+|#
+  (define-who rpc-stream-close-send
+    (lambda (stream)
+      (pcheck ([rpc-stream? stream])
+              (ensure-stream-open who stream)
+              (unless (rpc-stream-send-closed? stream)
+                (write-frame! who
+                              (rpc-stream-socket stream)
+                              (vector 'rpc-stream-close (rpc-stream-id stream)))
+                (rpc-stream-send-closed?-set! stream #t)
+                (maybe-close-stream-socket! stream))
+              stream)))
+
+  #|proc:rpc-stream-close
+The `rpc-stream-close` procedure closes an RPC stream and releases its socket.
+|#
+  (define-who rpc-stream-close
+    (lambda (stream)
+      (pcheck ([rpc-stream? stream])
+              (unless (rpc-stream-closed? stream)
+                (when (and (not (rpc-stream-send-closed? stream))
+                           (rpc-stream-send-type stream))
+                  (guard (c [else #f])
+                    (rpc-stream-close-send stream)))
+                (rpc-stream-send-closed?-set! stream #t)
+                (rpc-stream-recv-closed?-set! stream #t)
+                (close-stream-socket! stream))
+              stream)))
 
   #|proc:rpc-serve
 The `rpc-serve` procedure accepts and processes one RPC request on a server channel.
@@ -767,6 +1139,48 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
                (unless (rpc-channel-pending channel)
                  (start-pending-op! who channel method payload #f timeout-ms))
                (finish-pending! who channel))]))
+
+  #|proc:rpc-call/server-stream
+The `rpc-call/server-stream` procedure opens a server-streaming RPC and returns an RPC stream.
+An optional timeout in milliseconds can be supplied as a fourth argument.
+|#
+  (define-who rpc-call/server-stream
+    (case-lambda
+      [(channel method payload)
+       (rpc-call/server-stream channel method payload rpc-default-timeout-ms)]
+      [(channel method payload timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (ensure-channel-open who channel)
+               (ensure-role who channel 'client)
+               (open-client-stream who channel method 'server payload timeout-ms))]))
+
+  #|proc:rpc-call/client-stream
+The `rpc-call/client-stream` procedure opens a client-streaming RPC and returns an RPC stream.
+An optional timeout in milliseconds can be supplied as a third argument.
+|#
+  (define-who rpc-call/client-stream
+    (case-lambda
+      [(channel method)
+       (rpc-call/client-stream channel method rpc-default-timeout-ms)]
+      [(channel method timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (ensure-channel-open who channel)
+               (ensure-role who channel 'client)
+               (open-client-stream who channel method 'client #f timeout-ms))]))
+
+  #|proc:rpc-call/bidi-stream
+The `rpc-call/bidi-stream` procedure opens a bidirectional streaming RPC and returns an RPC stream.
+An optional timeout in milliseconds can be supplied as a third argument.
+|#
+  (define-who rpc-call/bidi-stream
+    (case-lambda
+      [(channel method)
+       (rpc-call/bidi-stream channel method rpc-default-timeout-ms)]
+      [(channel method timeout-ms)
+       (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (ensure-channel-open who channel)
+               (ensure-role who channel 'client)
+               (open-client-stream who channel method 'bidi #f timeout-ms))]))
 
   #|proc:rpc-notify
 The `rpc-notify` procedure sends a unary fire-and-forget RPC notification.
