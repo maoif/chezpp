@@ -315,6 +315,14 @@
       (unless (and (fixnum? start) (fixnum? stop) (fx<= 0 start stop len))
         (errorf who "invalid slice [~a, ~a) for length ~a" start stop len))))
 
+  (define check-timeout-ms
+    (lambda (who timeout-ms)
+      (unless (fixnum? timeout-ms)
+        (errorf who "expected timeout fixnum, given ~s" timeout-ms))
+      (when (fx< timeout-ms 0)
+        (errorf who "timeout must be non-negative, given ~s" timeout-ms))
+      timeout-ms))
+
   (define timeout->deadline-ms
     (lambda (timeout-ms)
       (and (fx>= timeout-ms 0)
@@ -1327,6 +1335,7 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (rpc-call channel method payload rpc-default-timeout-ms)]
       [(channel method payload timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (let-values ([(method-name request-type response-type frame key)
@@ -1346,6 +1355,7 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (rpc-call/server-stream channel method payload rpc-default-timeout-ms)]
       [(channel method payload timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (open-client-stream who channel method 'server payload timeout-ms))]))
@@ -1360,6 +1370,7 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (rpc-call/server-stream/nonblocking channel method payload rpc-default-timeout-ms)]
       [(channel method payload timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-client-stream/nonblocking
                 who
                 channel
@@ -1379,6 +1390,7 @@ An optional timeout in milliseconds can be supplied as a third argument.
        (rpc-call/client-stream channel method rpc-default-timeout-ms)]
       [(channel method timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (open-client-stream who channel method 'client #f timeout-ms))]))
@@ -1393,6 +1405,7 @@ An optional timeout in milliseconds can be supplied as a third argument.
        (rpc-call/client-stream/nonblocking channel method rpc-default-timeout-ms)]
       [(channel method timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-client-stream/nonblocking
                 who
                 channel
@@ -1412,6 +1425,7 @@ An optional timeout in milliseconds can be supplied as a third argument.
        (rpc-call/bidi-stream channel method rpc-default-timeout-ms)]
       [(channel method timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (open-client-stream who channel method 'bidi #f timeout-ms))]))
@@ -1426,6 +1440,7 @@ An optional timeout in milliseconds can be supplied as a third argument.
        (rpc-call/bidi-stream/nonblocking channel method rpc-default-timeout-ms)]
       [(channel method timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-client-stream/nonblocking
                 who
                 channel
@@ -1445,6 +1460,7 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (rpc-notify channel method payload rpc-default-timeout-ms)]
       [(channel method payload timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (let-values ([(method-name request-type response-type frame key)
@@ -1464,6 +1480,7 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (rpc-call/nonblocking channel method payload rpc-default-timeout-ms)]
       [(channel method payload timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (let-values ([(method-name request-type response-type frame key)
@@ -1486,6 +1503,7 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (rpc-notify/nonblocking channel method payload rpc-default-timeout-ms)]
       [(channel method payload timeout-ms)
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (let-values ([(method-name request-type response-type frame key)

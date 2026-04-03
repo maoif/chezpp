@@ -99,6 +99,17 @@
       (thunk)
       #f)))
 
+(define rpc-error-message-contains?
+  (lambda (fragment thunk)
+    (guard (c [else
+               (and (condition? c)
+                    (string-contains?
+                     (call-with-string-output-port
+                      (lambda (p) (display-condition c p)))
+                     fragment))])
+      (thunk)
+      #f)))
+
 (define rpc-server-stream-ok?
   (lambda (client)
     (let ([stream (rpc-call/server-stream
@@ -330,6 +341,89 @@
                      (rpc-close client)
                      client-ok?))
                  (equal? seen-note "note-1"))])
+           (set! done? #t)
+           (guard (c [else #f])
+             (let ([wake (open-socket 'inet 'stream)])
+               (socket-connect! wake (make-socket-address 'inet "127.0.0.1" port))
+               (close-socket wake)))
+           (thread-join th)
+           (rpc-close server)
+           ok?))))
+
+(mat net-rpc-timeout-validation
+     (let* ([port (reserve-loopback-port)]
+            [server (rpc-open 'server "127.0.0.1" port)]
+            [done? #f])
+       (rpc-register-handler!
+        server
+        rpc-greeter-hello
+        (lambda (req)
+          (make-rpc-hello-reply "ok")))
+       (let ([th (fork-thread
+                  (lambda ()
+                    (let loop ()
+                      (unless done?
+                        (guard (c [else #f])
+                          (rpc-serve server))
+                        (loop)))))])
+         (let ([ok?
+                (let ([client (rpc-open "127.0.0.1" port)])
+                  (let ([client-ok?
+                         (and
+                          (rpc-error-message-contains?
+                           "timeout must be non-negative"
+                           (lambda ()
+                             (rpc-call client
+                                       rpc-greeter-hello
+                                       (make-rpc-hello-request "x" #f)
+                                       -1)))
+                          (rpc-error-message-contains?
+                           "timeout must be non-negative"
+                           (lambda ()
+                             (rpc-call/nonblocking
+                              client
+                              rpc-greeter-hello
+                              (make-rpc-hello-request "x" #f)
+                              -1)))
+                          (rpc-error-message-contains?
+                           "timeout must be non-negative"
+                           (lambda ()
+                             (rpc-call/server-stream
+                              client
+                              rpc-streaming-watch
+                              (make-rpc-watch-request 1 "x-")
+                              -1)))
+                          (rpc-error-message-contains?
+                           "timeout must be non-negative"
+                           (lambda ()
+                             (rpc-call/client-stream
+                              client
+                              rpc-streaming-sum
+                              -1)))
+                          (rpc-error-message-contains?
+                           "timeout must be non-negative"
+                           (lambda ()
+                             (rpc-call/bidi-stream/nonblocking
+                              client
+                              rpc-streaming-chat
+                              -1)))
+                          (rpc-error-message-contains?
+                           "timeout must be non-negative"
+                           (lambda ()
+                             (rpc-notify client
+                                         rpc-admin-note
+                                         (make-rpc-note-request "x")
+                                         -1)))
+                          (rpc-error-message-contains?
+                           "timeout must be non-negative"
+                           (lambda ()
+                             (rpc-notify/nonblocking
+                              client
+                              rpc-admin-note
+                              (make-rpc-note-request "x")
+                              -1))))])
+                    (rpc-close client)
+                    client-ok?))])
            (set! done? #t)
            (guard (c [else #f])
              (let ([wake (open-socket 'inet 'stream)])
