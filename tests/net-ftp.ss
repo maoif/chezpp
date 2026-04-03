@@ -22,9 +22,34 @@
                  (if (and (net-error? c) (< i 4))
                      (begin
                        (milisleep 100)
-                       (loop (+ i 1)))
+                     (loop (+ i 1)))
                      (raise c))])
         (proc)))))
+
+(define ftp-net-error-timeout?
+  (lambda (thunk)
+    (guard (c [else
+               (and (net-error? c)
+                    (or (string-contains? (net-error-message c) "timed out")
+                        (string-contains? (net-error-message c) "Timeout")))])
+      (thunk)
+      #f)))
+
+(define start-stalled-ftp-control-server
+  (lambda (delay-ms)
+    (let ([listener (open-socket 'inet 'stream)])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values listener
+                port
+                (fork-thread
+                 (lambda ()
+                   (let-values ([(client peer) (socket-accept listener)])
+                     (milisleep delay-ms)
+                     (close-socket client)
+                     (close-socket listener)))))))))
 
 (mat net-ftp-session
      (let-values ([(root port stop-server) (start-ftp-test-server)])
@@ -40,6 +65,56 @@
                   (equal? (ftp-quit! session) session)))
            (lambda ()
              (stop-server))))))
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open "127.0.0.1" port #f 2000)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (ftp-session? session)
+                  (ftp-login! session "user" "pass")
+                  (equal? (ftp-pwd session) "/")))
+           (lambda ()
+             (ftp-close session)
+             (stop-server))))
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (call-with-ftp-session
+            (format "ftp://127.0.0.1:~a/" port)
+            2000
+            ftp-session?))
+         (lambda ()
+           (stop-server))))
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (call-with-ftp-session
+            "127.0.0.1"
+            port
+            2000
+            ftp-session?))
+         (lambda ()
+           (stop-server))))
+     (let-values ([(listener port th)
+                   (start-stalled-ftp-control-server 200)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port) 50)])
+             (dynamic-wind
+               void
+               (lambda ()
+                 (ftp-net-error-timeout?
+                  (lambda ()
+                    (ftp-list session))))
+               (lambda ()
+                 (ftp-close session)))))
+         (lambda ()
+           (thread-join th)
+           (guard (c [else #f])
+             (close-socket listener))))))
 
 (mat net-ftp-list
      (let-values ([(root port stop-server) (start-ftp-test-server)])

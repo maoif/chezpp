@@ -394,30 +394,42 @@ The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoi
   (define-who ftp-open
     (case-lambda
       [(endpoint)
-       (let ([u (normalize-ftp-uri who endpoint)])
-         (let-values ([(user pass) (split-userinfo (uri-userinfo u))])
-           (%make-ftp-session u
-                              user
-                              pass
-                              (normalize-absolute-path
-                               (if (or (not (uri-path u)) (string=? (uri-path u) ""))
-                                   "/"
-                                   (uri-path u)))
-                              #t
-                              ftp-default-timeout-ms
-                              #f
-                              #f
-                              #f
-                              #f)))]
+       (ftp-open endpoint ftp-default-timeout-ms)]
+      [(endpoint timeout-ms)
+       (pcheck ([fixnum? timeout-ms])
+         (when (fx< timeout-ms 0)
+           (errorf who "timeout must be non-negative, given ~s" timeout-ms))
+         (let ([u (normalize-ftp-uri who endpoint)])
+           (let-values ([(user pass) (split-userinfo (uri-userinfo u))])
+             (%make-ftp-session u
+                                user
+                                pass
+                                (normalize-absolute-path
+                                 (if (or (not (uri-path u)) (string=? (uri-path u) ""))
+                                     "/"
+                                     (uri-path u)))
+                                #t
+                                timeout-ms
+                                #f
+                                #f
+                                #f
+                                #f))))]
       [(host port)
-       (ftp-open host port #f)]
+       (ftp-open host port #f ftp-default-timeout-ms)]
       [(host port secure?)
+       (ftp-open host port secure? ftp-default-timeout-ms)]
+      [(host port secure? timeout-ms)
        (pcheck ([string? host] [fixnum? port] [boolean? secure?])
+               (unless (fixnum? timeout-ms)
+                 (errorf who "expected timeout fixnum, given ~s" timeout-ms))
+               (when (fx< timeout-ms 0)
+                 (errorf who "timeout must be non-negative, given ~s" timeout-ms))
                (ftp-open
                 (format "~a://~a:~a/"
                         (if secure? "ftps" "ftp")
                         host
-                        port)))]))
+                        port)
+                timeout-ms))]))
 
   #|proc:ftp-close
 The `ftp-close` procedure marks an FTP session as closed.
@@ -661,21 +673,28 @@ The `call-with-ftp-session` procedure opens an FTP session, applies a procedure 
   (define-who call-with-ftp-session
     (case-lambda
       [(endpoint proc)
+       (call-with-ftp-session endpoint ftp-default-timeout-ms proc)]
+      [(endpoint timeout-ms proc)
        (pcheck ([procedure? proc])
-               (let ([session (ftp-open endpoint)])
-                 (dynamic-wind
-                   void
-                   (lambda () (proc session))
-                   (lambda () (ftp-close session)))))]
+         (let ([session (ftp-open endpoint timeout-ms)])
+           (dynamic-wind
+             void
+             (lambda () (proc session))
+             (lambda () (ftp-close session)))))]
       [(host port proc)
-       (call-with-ftp-session host port #f proc)]
-      [(host port secure? proc)
+       (call-with-ftp-session host port #f ftp-default-timeout-ms proc)]
+      [(host port secure?-or-timeout proc)
        (pcheck ([procedure? proc])
-               (let ([session (ftp-open host port secure?)])
-                 (dynamic-wind
-                   void
-                   (lambda () (proc session))
-                   (lambda () (ftp-close session)))))]))
+         (if (fixnum? secure?-or-timeout)
+             (call-with-ftp-session host port #f secure?-or-timeout proc)
+             (call-with-ftp-session host port secure?-or-timeout ftp-default-timeout-ms proc)))]
+      [(host port secure? timeout-ms proc)
+       (pcheck ([procedure? proc])
+         (let ([session (ftp-open host port secure? timeout-ms)])
+           (dynamic-wind
+             void
+             (lambda () (proc session))
+             (lambda () (ftp-close session)))))]))
 
   #|proc:open-ftp-input-port
 The `open-ftp-input-port` procedure opens a binary input port for a remote FTP file.
