@@ -738,6 +738,18 @@ ptr chezpp_net_websocket_close(uptr handle) {
   return Strue;
 }
 
+ptr chezpp_net_websocket_cancel_send(uptr handle) {
+  chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
+
+  if (conn == NULL || conn->closed || conn->wsi == NULL)
+    return make_error_status_message("invalid websocket connection");
+
+  clear_pending_send(conn);
+  service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
+  if (conn->failed) return connection_error_status(conn, "websocket send failed");
+  return Strue;
+}
+
 ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop, int nonblocking,
                               int timeout_ms) {
   chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);

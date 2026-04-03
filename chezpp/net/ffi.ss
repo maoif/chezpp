@@ -72,6 +72,7 @@
           ffi-net-websocket-accept
           ffi-net-websocket-connect
           ffi-net-websocket-close
+          ffi-net-websocket-cancel-send
           ffi-net-websocket-send
           ffi-net-websocket-recv
           ffi-net-grpc-channel-open
@@ -269,6 +270,8 @@
     (foreign-procedure "chezpp_net_websocket_connect" (string int string string int int) scheme-object))
   (define ffi-net-websocket-close
     (foreign-procedure "chezpp_net_websocket_close" (uptr) scheme-object))
+  (define ffi-net-websocket-cancel-send
+    (foreign-procedure "chezpp_net_websocket_cancel_send" (uptr) scheme-object))
   (define ffi-net-websocket-send
     (foreign-procedure "chezpp_net_websocket_send" (uptr int ptr int int int int) scheme-object))
   (define ffi-net-websocket-recv

@@ -11,6 +11,7 @@
           websocket-send-binary
           websocket-send-ping
           websocket-send-pong
+          websocket-cancel-pending-send!
           websocket-send/nonblocking
           websocket-recv
           websocket-recv/nonblocking
@@ -369,6 +370,18 @@ The `websocket-send-pong` procedure sends a pong frame on a WebSocket connection
        (pcheck ([websocket-connection? conn] [bytevector? payload])
                (check-timeout-ms who timeout-ms)
                (do-send who conn 'pong payload #f timeout-ms))]))
+
+  #|proc:websocket-cancel-pending-send!
+The `websocket-cancel-pending-send!` procedure cancels and discards the currently pending non-blocking send on a WebSocket connection, if any.
+|#
+  (define-who websocket-cancel-pending-send!
+    (lambda (conn)
+      (pcheck ([websocket-connection? conn])
+              (ensure-connection-open who conn)
+              (ensure-success who
+                              (ffi-net-websocket-cancel-send
+                               (websocket-connection-handle conn)))
+              conn)))
 
   #|proc:websocket-send/nonblocking
 The `websocket-send/nonblocking` procedure attempts to send a WebSocket frame without blocking and returns `#f` if the send is still pending.
