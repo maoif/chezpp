@@ -42,6 +42,7 @@
   (define grpc-status-ok 0)
   (define grpc-status-internal 13)
   (define grpc-status-unimplemented 12)
+  (define grpc-default-timeout-ms 30000)
 
   (define-record-type (grpc-request-record %make-grpc-request-record grpc-request-record?)
     (sealed #t)
@@ -129,6 +130,14 @@
     (lambda (who len start stop)
       (unless (and (fixnum? start) (fixnum? stop) (fx<= 0 start stop len))
         (errorf who "invalid slice [~a, ~a) for length ~a" start stop len))))
+
+  (define check-timeout-ms
+    (lambda (who timeout-ms)
+      (unless (fixnum? timeout-ms)
+        (errorf who "expected timeout fixnum, given ~s" timeout-ms))
+      (when (fx< timeout-ms 0)
+        (errorf who "timeout must be non-negative, given ~s" timeout-ms))
+      timeout-ms))
 
   (define endpoint-string
     (case-lambda
@@ -616,11 +625,12 @@ The `grpc-call` procedure performs a blocking unary gRPC call and returns a gRPC
   (define-who grpc-call
     (case-lambda
       [(channel method payload)
-       (grpc-call channel method payload '() 30000)]
+       (grpc-call channel method payload '() grpc-default-timeout-ms)]
       [(channel method payload metadata)
-       (grpc-call channel method payload metadata 30000)]
+       (grpc-call channel method payload metadata grpc-default-timeout-ms)]
       [(channel method payload metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (call-unary who channel method payload metadata timeout-ms))]))
 
   (define start-pending-unary!
@@ -647,11 +657,12 @@ The `grpc-call/nonblocking` procedure progresses a unary gRPC call without block
   (define-who grpc-call/nonblocking
     (case-lambda
       [(channel method payload)
-       (grpc-call/nonblocking channel method payload '() 30000)]
+       (grpc-call/nonblocking channel method payload '() grpc-default-timeout-ms)]
       [(channel method payload metadata)
-       (grpc-call/nonblocking channel method payload metadata 30000)]
+       (grpc-call/nonblocking channel method payload metadata grpc-default-timeout-ms)]
       [(channel method payload metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
                (let* ([method* (method-name who method)]
@@ -855,13 +866,14 @@ The `grpc-call/server-stream` procedure opens a blocking server-streaming gRPC c
   (define-who grpc-call/server-stream
     (case-lambda
       [(channel method payload)
-       (grpc-call/server-stream channel method payload '() 30000)]
+       (grpc-call/server-stream channel method payload '() grpc-default-timeout-ms)]
       [(channel method payload metadata-or-timeout)
        (if (fixnum? metadata-or-timeout)
            (grpc-call/server-stream channel method payload '() metadata-or-timeout)
-           (grpc-call/server-stream channel method payload metadata-or-timeout 30000))]
+           (grpc-call/server-stream channel method payload metadata-or-timeout grpc-default-timeout-ms))]
       [(channel method payload metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-stream who channel method 'server payload metadata timeout-ms))]))
 
   #|proc:grpc-call/client-stream
@@ -870,13 +882,14 @@ The `grpc-call/client-stream` procedure opens a blocking client-streaming gRPC c
   (define-who grpc-call/client-stream
     (case-lambda
       [(channel method)
-       (grpc-call/client-stream channel method '() 30000)]
+       (grpc-call/client-stream channel method '() grpc-default-timeout-ms)]
       [(channel method metadata-or-timeout)
        (if (fixnum? metadata-or-timeout)
            (grpc-call/client-stream channel method '() metadata-or-timeout)
-           (grpc-call/client-stream channel method metadata-or-timeout 30000))]
+           (grpc-call/client-stream channel method metadata-or-timeout grpc-default-timeout-ms))]
       [(channel method metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-stream who channel method 'client #f metadata timeout-ms))]))
 
   #|proc:grpc-call/bidi-stream
@@ -885,13 +898,14 @@ The `grpc-call/bidi-stream` procedure opens a blocking bidirectional gRPC stream
   (define-who grpc-call/bidi-stream
     (case-lambda
       [(channel method)
-       (grpc-call/bidi-stream channel method '() 30000)]
+       (grpc-call/bidi-stream channel method '() grpc-default-timeout-ms)]
       [(channel method metadata-or-timeout)
        (if (fixnum? metadata-or-timeout)
            (grpc-call/bidi-stream channel method '() metadata-or-timeout)
-           (grpc-call/bidi-stream channel method metadata-or-timeout 30000))]
+           (grpc-call/bidi-stream channel method metadata-or-timeout grpc-default-timeout-ms))]
       [(channel method metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-stream who channel method 'bidi #f metadata timeout-ms))]))
 
   #|proc:grpc-call/server-stream/nonblocking
@@ -900,13 +914,14 @@ The `grpc-call/server-stream/nonblocking` procedure progresses opening a server-
   (define-who grpc-call/server-stream/nonblocking
     (case-lambda
       [(channel method payload)
-       (grpc-call/server-stream/nonblocking channel method payload '() 30000)]
+       (grpc-call/server-stream/nonblocking channel method payload '() grpc-default-timeout-ms)]
       [(channel method payload metadata-or-timeout)
        (if (fixnum? metadata-or-timeout)
            (grpc-call/server-stream/nonblocking channel method payload '() metadata-or-timeout)
-           (grpc-call/server-stream/nonblocking channel method payload metadata-or-timeout 30000))]
+           (grpc-call/server-stream/nonblocking channel method payload metadata-or-timeout grpc-default-timeout-ms))]
       [(channel method payload metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-stream/nonblocking
                 who
                 channel
@@ -923,13 +938,14 @@ The `grpc-call/client-stream/nonblocking` procedure progresses opening a client-
   (define-who grpc-call/client-stream/nonblocking
     (case-lambda
       [(channel method)
-       (grpc-call/client-stream/nonblocking channel method '() 30000)]
+       (grpc-call/client-stream/nonblocking channel method '() grpc-default-timeout-ms)]
       [(channel method metadata-or-timeout)
        (if (fixnum? metadata-or-timeout)
            (grpc-call/client-stream/nonblocking channel method '() metadata-or-timeout)
-           (grpc-call/client-stream/nonblocking channel method metadata-or-timeout 30000))]
+           (grpc-call/client-stream/nonblocking channel method metadata-or-timeout grpc-default-timeout-ms))]
       [(channel method metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-stream/nonblocking
                 who
                 channel
@@ -946,13 +962,14 @@ The `grpc-call/bidi-stream/nonblocking` procedure progresses opening a bidirecti
   (define-who grpc-call/bidi-stream/nonblocking
     (case-lambda
       [(channel method)
-       (grpc-call/bidi-stream/nonblocking channel method '() 30000)]
+       (grpc-call/bidi-stream/nonblocking channel method '() grpc-default-timeout-ms)]
       [(channel method metadata-or-timeout)
        (if (fixnum? metadata-or-timeout)
            (grpc-call/bidi-stream/nonblocking channel method '() metadata-or-timeout)
-           (grpc-call/bidi-stream/nonblocking channel method metadata-or-timeout 30000))]
+           (grpc-call/bidi-stream/nonblocking channel method metadata-or-timeout grpc-default-timeout-ms))]
       [(channel method metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (open-stream/nonblocking
                 who
                 channel

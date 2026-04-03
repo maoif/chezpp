@@ -94,6 +94,17 @@
       (thunk)
       #f)))
 
+(define grpc-error-message-contains?
+  (lambda (fragment thunk)
+    (guard (c [else
+               (and (condition? c)
+                    (string-contains?
+                     (call-with-string-output-port
+                      (lambda (p) (display-condition c p)))
+                     fragment))])
+      (thunk)
+      #f)))
+
 (define grpc-server-stream-ok?
   (lambda (client)
     (let ([stream (grpc-call/server-stream
@@ -470,3 +481,32 @@
                       (eof-object? (grpc-stream-recv stream)))])
                 (grpc-stream-close stream)
                 ok-stream?))))))))
+
+(mat net-grpc-timeout-validation
+     (with-grpc-env
+      (lambda ()
+        (call-with-grpc-peer
+         0
+         (lambda (server) #t)
+         (lambda (server client)
+           (and
+            (grpc-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (grpc-call client "/chezpp.test.Echo/Unary" "x" '() -1)))
+            (grpc-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (grpc-call/nonblocking client "/chezpp.test.Echo/Unary" "x" '() -1)))
+            (grpc-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (grpc-call/server-stream client "/chezpp.test.Echo/ServerStream" "x" '() -1)))
+            (grpc-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (grpc-call/client-stream client "/chezpp.test.Echo/ClientStream" '() -1)))
+            (grpc-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (grpc-call/bidi-stream/nonblocking client "/chezpp.test.Echo/Bidi" '() -1)))))))))
