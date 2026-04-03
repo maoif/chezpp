@@ -82,7 +82,14 @@
           ffi-net-grpc-unary-start
           ffi-net-grpc-unary-poll
           ffi-net-grpc-unary-close
+          ffi-net-grpc-stream-open
+          ffi-net-grpc-stream-send
+          ffi-net-grpc-stream-recv
+          ffi-net-grpc-stream-close-send
+          ffi-net-grpc-stream-finish
+          ffi-net-grpc-stream-close
           ffi-net-grpc-server-request
+          ffi-net-grpc-server-request-stream
           ffi-net-grpc-server-respond
           ffi-net-open-rdonly
           ffi-net-open-wronly
@@ -286,8 +293,26 @@
     (foreign-procedure "chezpp_net_grpc_unary_poll" (uptr) scheme-object))
   (define ffi-net-grpc-unary-close
     (foreign-procedure "chezpp_net_grpc_unary_close" (uptr) scheme-object))
+  (define ffi-net-grpc-stream-open
+    (foreign-procedure "chezpp_net_grpc_stream_open"
+                       (uptr string int ptr int int scheme-object int)
+                       scheme-object))
+  (define ffi-net-grpc-stream-send
+    (foreign-procedure "chezpp_net_grpc_stream_send" (uptr ptr int int) scheme-object))
+  (define ffi-net-grpc-stream-recv
+    (foreign-procedure "chezpp_net_grpc_stream_recv" (uptr) scheme-object))
+  (define ffi-net-grpc-stream-close-send
+    (foreign-procedure "chezpp_net_grpc_stream_close_send" (uptr) scheme-object))
+  (define ffi-net-grpc-stream-finish
+    (foreign-procedure "chezpp_net_grpc_stream_finish"
+                       (uptr ptr int int int string scheme-object)
+                       scheme-object))
+  (define ffi-net-grpc-stream-close
+    (foreign-procedure "chezpp_net_grpc_stream_close" (uptr) scheme-object))
   (define ffi-net-grpc-server-request
     (foreign-procedure "chezpp_net_grpc_server_request" (uptr) scheme-object))
+  (define ffi-net-grpc-server-request-stream
+    (foreign-procedure "chezpp_net_grpc_server_request_stream" (uptr) scheme-object))
   (define ffi-net-grpc-server-respond
     (foreign-procedure "chezpp_net_grpc_server_respond"
                        (uptr ptr int int int string scheme-object)

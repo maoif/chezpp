@@ -13,6 +13,14 @@
 typedef struct chezpp_grpc_server chezpp_grpc_server;
 typedef struct chezpp_grpc_server_call chezpp_grpc_server_call;
 typedef struct chezpp_grpc_unary_call chezpp_grpc_unary_call;
+typedef struct chezpp_grpc_stream chezpp_grpc_stream;
+
+#define CHEZPP_GRPC_STREAM_SHAPE_SERVER 1
+#define CHEZPP_GRPC_STREAM_SHAPE_CLIENT 2
+#define CHEZPP_GRPC_STREAM_SHAPE_BIDI 3
+
+#define CHEZPP_GRPC_STREAM_SIDE_CLIENT 1
+#define CHEZPP_GRPC_STREAM_SIDE_SERVER 2
 
 struct chezpp_grpc_server {
   grpc_server *server;
@@ -41,6 +49,31 @@ struct chezpp_grpc_unary_call {
   grpc_status_code status;
   grpc_slice status_details;
   const char *error_string;
+};
+
+struct chezpp_grpc_stream {
+  grpc_completion_queue *cq;
+  grpc_call *call;
+  chezpp_grpc_server *server;
+  grpc_metadata *send_metadata;
+  size_t send_metadata_count;
+  grpc_metadata_array recv_initial_metadata;
+  grpc_metadata_array recv_trailing_metadata;
+  grpc_status_code status;
+  grpc_slice status_details;
+  const char *error_string;
+  int shape;
+  int side;
+  int owns_cq;
+  int send_started;
+  int send_closed;
+  int recv_initial_done;
+  int recv_closed;
+  int status_received;
+  int closed;
+  int send_tag;
+  int recv_tag;
+  int status_tag;
 };
 
 typedef void (*grpc_init_fn)(void);
@@ -146,6 +179,8 @@ static gpr_time_add_fn p_gpr_time_add = NULL;
 static gpr_free_fn p_gpr_free = NULL;
 
 static int grpc_initialized = 0;
+
+static ptr make_call_error_status(grpc_call_error error);
 
 static ptr make_status(const char *tag, ptr value) {
   ptr v = Smake_vector(2, Sfalse);
@@ -334,6 +369,20 @@ static ptr maybe_string_from_slice(grpc_slice slice) {
   return out;
 }
 
+static ptr make_error_status_from_slice(grpc_slice slice) {
+  size_t n = GRPC_SLICE_LENGTH(slice);
+  char *buf;
+  ptr out;
+  if (n == 0) return make_error_status_message("gRPC stream failed");
+  buf = (char *)malloc(n + 1);
+  if (buf == NULL) return make_error_status_message("gRPC stream failed");
+  memcpy(buf, GRPC_SLICE_START_PTR(slice), n);
+  buf[n] = '\0';
+  out = make_error_status_message(buf);
+  free(buf);
+  return out;
+}
+
 static ptr metadata_array_to_scheme(const grpc_metadata_array *array) {
   ptr head = Snil;
   ptr tail = Snil;
@@ -450,6 +499,14 @@ static ptr make_request_vector(uptr handle, ptr method, ptr payload, ptr metadat
   return out;
 }
 
+static ptr make_stream_request_vector(uptr handle, ptr method, ptr metadata) {
+  ptr out = Smake_vector(3, Sfalse);
+  Svector_set(out, 0, make_handle(handle));
+  Svector_set(out, 1, method);
+  Svector_set(out, 2, metadata);
+  return out;
+}
+
 static void cleanup_unary_call(chezpp_grpc_unary_call *op) {
   if (op == NULL) return;
   if (op->call != NULL && p_grpc_call_cancel != NULL) {
@@ -481,6 +538,192 @@ static void cleanup_unary_call(chezpp_grpc_unary_call *op) {
     op->cq = NULL;
   }
   free(op);
+}
+
+static void cleanup_grpc_stream(chezpp_grpc_stream *stream) {
+  if (stream == NULL) return;
+  if (stream->call != NULL && stream->side == CHEZPP_GRPC_STREAM_SIDE_CLIENT &&
+      p_grpc_call_cancel != NULL && !stream->closed) {
+    (void)p_grpc_call_cancel(stream->call, NULL);
+  }
+  p_grpc_metadata_array_destroy(&stream->recv_initial_metadata);
+  p_grpc_metadata_array_destroy(&stream->recv_trailing_metadata);
+  if (GRPC_SLICE_LENGTH(stream->status_details) > 0) {
+    p_grpc_slice_unref(stream->status_details);
+  }
+  if (stream->error_string != NULL) {
+    p_gpr_free((void *)stream->error_string);
+    stream->error_string = NULL;
+  }
+  free_metadata_array(stream->send_metadata, stream->send_metadata_count);
+  stream->send_metadata = NULL;
+  stream->send_metadata_count = 0;
+  if (stream->call != NULL) {
+    p_grpc_call_unref(stream->call);
+    stream->call = NULL;
+  }
+  if (stream->owns_cq && stream->cq != NULL) {
+    p_grpc_completion_queue_shutdown(stream->cq);
+    p_grpc_completion_queue_destroy(stream->cq);
+    stream->cq = NULL;
+  }
+  stream->closed = 1;
+  free(stream);
+}
+
+static grpc_event pluck_stream_event(chezpp_grpc_stream *stream, void *tag) {
+  return p_grpc_completion_queue_pluck(stream->cq, tag, p_gpr_inf_future(GPR_CLOCK_REALTIME), NULL);
+}
+
+static ptr wait_stream_complete(chezpp_grpc_stream *stream, void *tag, const char *message) {
+  grpc_event ev = pluck_stream_event(stream, tag);
+  if (ev.type != GRPC_OP_COMPLETE) {
+    cleanup_grpc_stream(stream);
+    return make_error_status_message(message);
+  }
+  return Strue;
+}
+
+static ptr init_grpc_stream(chezpp_grpc_stream *stream, grpc_call *call, grpc_completion_queue *cq,
+                            chezpp_grpc_server *server, int side, int shape, int owns_cq) {
+  memset(stream, 0, sizeof(*stream));
+  stream->call = call;
+  stream->cq = cq;
+  stream->server = server;
+  stream->side = side;
+  stream->shape = shape;
+  stream->owns_cq = owns_cq;
+  stream->status = GRPC_STATUS_UNKNOWN;
+  stream->status_details = p_grpc_empty_slice();
+  p_grpc_metadata_array_init(&stream->recv_initial_metadata);
+  p_grpc_metadata_array_init(&stream->recv_trailing_metadata);
+  return Strue;
+}
+
+static ptr receive_stream_status(chezpp_grpc_stream *stream) {
+  grpc_op ops[1];
+  grpc_call_error err;
+  if (stream->status_received) {
+    if (stream->status == GRPC_STATUS_OK) return Strue;
+    if (GRPC_SLICE_LENGTH(stream->status_details) > 0) {
+      return make_error_status_message((const char *)GRPC_SLICE_START_PTR(stream->status_details));
+    }
+    if (stream->error_string != NULL) return make_error_status_message(stream->error_string);
+    return make_error_status_message("gRPC stream failed");
+  }
+  memset(ops, 0, sizeof(ops));
+  ops[0].op = GRPC_OP_RECV_STATUS_ON_CLIENT;
+  ops[0].data.recv_status_on_client.trailing_metadata = &stream->recv_trailing_metadata;
+  ops[0].data.recv_status_on_client.status = &stream->status;
+  ops[0].data.recv_status_on_client.status_details = &stream->status_details;
+  ops[0].data.recv_status_on_client.error_string = &stream->error_string;
+  err = p_grpc_call_start_batch(stream->call, ops, 1, &stream->status_tag, NULL);
+  if (err != GRPC_CALL_OK) return make_call_error_status(err);
+  {
+    ptr ans = wait_stream_complete(stream, &stream->status_tag,
+                                   "unexpected gRPC client status event");
+    if (ans != Strue) return ans;
+  }
+  stream->status_received = 1;
+  if (stream->status == GRPC_STATUS_OK) return Strue;
+  if (GRPC_SLICE_LENGTH(stream->status_details) > 0) {
+    return make_error_status_from_slice(stream->status_details);
+  }
+  if (stream->error_string != NULL) return make_error_status_message(stream->error_string);
+  return make_error_status_message("gRPC stream failed");
+}
+
+static ptr stream_send_message(chezpp_grpc_stream *stream, ptr payload, int start, int stop) {
+  grpc_op ops[2];
+  grpc_byte_buffer *send_message;
+  grpc_call_error err;
+  size_t nops = 0;
+
+  if (stream == NULL || stream->call == NULL) return make_error_status_message("invalid gRPC stream");
+  if (stream->closed || stream->send_closed) return make_error_status_message("gRPC stream send side is closed");
+
+  memset(ops, 0, sizeof(ops));
+  if (!stream->send_started) {
+    ops[nops].op = GRPC_OP_SEND_INITIAL_METADATA;
+    ops[nops].data.send_initial_metadata.count = stream->send_metadata_count;
+    ops[nops].data.send_initial_metadata.metadata = stream->send_metadata;
+    nops += 1;
+  }
+
+  send_message = make_request_buffer(payload, start, stop);
+  ops[nops].op = GRPC_OP_SEND_MESSAGE;
+  ops[nops].data.send_message.send_message = send_message;
+  nops += 1;
+
+  err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->send_tag, NULL);
+  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
+  if (err != GRPC_CALL_OK) return make_call_error_status(err);
+  {
+    ptr ans = wait_stream_complete(stream, &stream->send_tag,
+                                   "unexpected gRPC stream send event");
+    if (ans != Strue) return ans;
+  }
+  stream->send_started = 1;
+  return Strue;
+}
+
+static ptr stream_finish_server(chezpp_grpc_stream *stream, ptr payload, int start, int stop,
+                                int status_code, const char *status_message, ptr metadata_ls) {
+  grpc_metadata *metadata = NULL;
+  size_t metadata_count = 0;
+  const char *metadata_error = NULL;
+  grpc_byte_buffer *send_message = NULL;
+  grpc_slice status_slice;
+  grpc_op ops[3];
+  grpc_call_error err;
+  size_t nops = 0;
+
+  if (stream == NULL || stream->call == NULL) return make_error_status_message("invalid gRPC stream");
+  if (stream->side != CHEZPP_GRPC_STREAM_SIDE_SERVER)
+    return make_error_status_message("gRPC stream finish is only valid on server streams");
+  if (stream->closed || stream->send_closed) return Strue;
+
+  if (!scheme_metadata_to_grpc(metadata_ls, &metadata, &metadata_count, &metadata_error)) {
+    return make_error_status_message(metadata_error);
+  }
+
+  memset(ops, 0, sizeof(ops));
+  if (!stream->send_started) {
+    ops[nops].op = GRPC_OP_SEND_INITIAL_METADATA;
+    ops[nops].data.send_initial_metadata.count = 0;
+    ops[nops].data.send_initial_metadata.metadata = NULL;
+    nops += 1;
+  }
+  if (payload != Sfalse) {
+    send_message = make_request_buffer(payload, start, stop);
+    ops[nops].op = GRPC_OP_SEND_MESSAGE;
+    ops[nops].data.send_message.send_message = send_message;
+    nops += 1;
+  }
+  status_slice = p_grpc_slice_from_copied_string(status_message == NULL ? "" : status_message);
+  ops[nops].op = GRPC_OP_SEND_STATUS_FROM_SERVER;
+  ops[nops].data.send_status_from_server.trailing_metadata_count = metadata_count;
+  ops[nops].data.send_status_from_server.trailing_metadata = metadata;
+  ops[nops].data.send_status_from_server.status = (grpc_status_code)status_code;
+  ops[nops].data.send_status_from_server.status_details = &status_slice;
+  nops += 1;
+
+  err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->status_tag, NULL);
+  p_grpc_slice_unref(status_slice);
+  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
+  if (err != GRPC_CALL_OK) {
+    free_metadata_array(metadata, metadata_count);
+    return make_call_error_status(err);
+  }
+  {
+    ptr ans = wait_stream_complete(stream, &stream->status_tag,
+                                   "unexpected gRPC server stream completion event");
+    free_metadata_array(metadata, metadata_count);
+    if (ans != Strue) return ans;
+  }
+  stream->send_started = 1;
+  stream->send_closed = 1;
+  return Strue;
 }
 
 static ptr finalize_unary_call(chezpp_grpc_unary_call *op) {
@@ -845,4 +1088,235 @@ ptr chezpp_net_grpc_server_respond(uptr handle, ptr payload, int start, int stop
   }
   cleanup_server_call(call);
   return Strue;
+}
+
+ptr chezpp_net_grpc_stream_open(uptr handle, const char *method, int shape, ptr payload, int start,
+                                int stop, ptr metadata_ls, int timeout_ms) {
+  grpc_channel *channel = (grpc_channel *)handle;
+  grpc_completion_queue *cq;
+  grpc_slice method_slice;
+  grpc_call *call;
+  chezpp_grpc_stream *stream;
+  grpc_op ops[3];
+  grpc_byte_buffer *send_message = NULL;
+  grpc_call_error err;
+  const char *metadata_error = NULL;
+  size_t nops = 0;
+
+  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (channel == NULL) return make_error_status_message("invalid gRPC channel");
+  if (shape != CHEZPP_GRPC_STREAM_SHAPE_SERVER && shape != CHEZPP_GRPC_STREAM_SHAPE_CLIENT &&
+      shape != CHEZPP_GRPC_STREAM_SHAPE_BIDI)
+    return make_error_status_message("invalid gRPC stream shape");
+
+  cq = p_grpc_completion_queue_create_for_pluck(NULL);
+  if (cq == NULL) return make_error_status_message("failed to create gRPC completion queue");
+
+  method_slice = p_grpc_slice_from_copied_string(method);
+  call = p_grpc_channel_create_call(channel, NULL, GRPC_PROPAGATE_DEFAULTS, cq, method_slice, NULL,
+                                    make_deadline(timeout_ms), NULL);
+  p_grpc_slice_unref(method_slice);
+  if (call == NULL) {
+    p_grpc_completion_queue_shutdown(cq);
+    p_grpc_completion_queue_destroy(cq);
+    return make_error_status_message("failed to create gRPC call");
+  }
+
+  stream = (chezpp_grpc_stream *)calloc(1, sizeof(chezpp_grpc_stream));
+  if (stream == NULL) {
+    p_grpc_call_unref(call);
+    p_grpc_completion_queue_shutdown(cq);
+    p_grpc_completion_queue_destroy(cq);
+    return make_error_status_message("out of memory");
+  }
+  init_grpc_stream(stream, call, cq, NULL, CHEZPP_GRPC_STREAM_SIDE_CLIENT, shape, 1);
+
+  if (!scheme_metadata_to_grpc(metadata_ls, &stream->send_metadata, &stream->send_metadata_count,
+                               &metadata_error)) {
+    cleanup_grpc_stream(stream);
+    return make_error_status_message(metadata_error);
+  }
+
+  memset(ops, 0, sizeof(ops));
+  ops[nops].op = GRPC_OP_SEND_INITIAL_METADATA;
+  ops[nops].data.send_initial_metadata.count = stream->send_metadata_count;
+  ops[nops].data.send_initial_metadata.metadata = stream->send_metadata;
+  nops += 1;
+  if (shape == CHEZPP_GRPC_STREAM_SHAPE_SERVER) {
+    if (payload != Sfalse) {
+      send_message = make_request_buffer(payload, start, stop);
+      ops[nops].op = GRPC_OP_SEND_MESSAGE;
+      ops[nops].data.send_message.send_message = send_message;
+      nops += 1;
+    }
+    ops[nops].op = GRPC_OP_SEND_CLOSE_FROM_CLIENT;
+    nops += 1;
+  }
+
+  err = p_grpc_call_start_batch(call, ops, nops, &stream->send_tag, NULL);
+  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
+  if (err != GRPC_CALL_OK) {
+    cleanup_grpc_stream(stream);
+    return make_call_error_status(err);
+  }
+  {
+    ptr ans = wait_stream_complete(stream, &stream->send_tag,
+                                   "unexpected gRPC stream open event");
+    if (ans != Strue) return ans;
+  }
+  stream->send_started = 1;
+  if (shape == CHEZPP_GRPC_STREAM_SHAPE_SERVER) stream->send_closed = 1;
+  return make_handle((uptr)stream);
+}
+
+ptr chezpp_net_grpc_stream_send(uptr handle, ptr payload, int start, int stop) {
+  return stream_send_message((chezpp_grpc_stream *)handle, payload, start, stop);
+}
+
+ptr chezpp_net_grpc_stream_recv(uptr handle) {
+  chezpp_grpc_stream *stream = (chezpp_grpc_stream *)handle;
+  grpc_op ops[2];
+  grpc_byte_buffer *recv_message = NULL;
+  grpc_call_error err;
+  size_t nops = 0;
+  ptr payload;
+
+  if (stream == NULL || stream->call == NULL) return make_error_status_message("invalid gRPC stream");
+  if (stream->closed) return make_error_status_message("gRPC stream is closed");
+  if (stream->recv_closed) return Seof_object;
+
+  memset(ops, 0, sizeof(ops));
+  if (stream->side == CHEZPP_GRPC_STREAM_SIDE_CLIENT && !stream->recv_initial_done) {
+    ops[nops].op = GRPC_OP_RECV_INITIAL_METADATA;
+    ops[nops].data.recv_initial_metadata.recv_initial_metadata = &stream->recv_initial_metadata;
+    nops += 1;
+  }
+  ops[nops].op = GRPC_OP_RECV_MESSAGE;
+  ops[nops].data.recv_message.recv_message = &recv_message;
+  nops += 1;
+
+  err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->recv_tag, NULL);
+  if (err != GRPC_CALL_OK) return make_call_error_status(err);
+  {
+    ptr ans = wait_stream_complete(stream, &stream->recv_tag,
+                                   "unexpected gRPC stream receive event");
+    if (ans != Strue) return ans;
+  }
+  if (stream->side == CHEZPP_GRPC_STREAM_SIDE_CLIENT) stream->recv_initial_done = 1;
+
+  if (recv_message != NULL) {
+    payload = maybe_bytevector_from_buffer(recv_message);
+    p_grpc_byte_buffer_destroy(recv_message);
+    return payload;
+  }
+
+  stream->recv_closed = 1;
+  if (stream->side == CHEZPP_GRPC_STREAM_SIDE_CLIENT) {
+    ptr ans = receive_stream_status(stream);
+    if (ans != Strue) return ans;
+  }
+  return Seof_object;
+}
+
+ptr chezpp_net_grpc_stream_close_send(uptr handle) {
+  chezpp_grpc_stream *stream = (chezpp_grpc_stream *)handle;
+  grpc_op ops[2];
+  grpc_call_error err;
+  size_t nops = 0;
+
+  if (stream == NULL || stream->call == NULL) return make_error_status_message("invalid gRPC stream");
+  if (stream->closed || stream->send_closed) return Strue;
+
+  if (stream->side == CHEZPP_GRPC_STREAM_SIDE_SERVER) {
+    return stream_finish_server(stream, Sfalse, 0, 0, GRPC_STATUS_OK, "", Snil);
+  }
+
+  memset(ops, 0, sizeof(ops));
+  if (!stream->send_started) {
+    ops[nops].op = GRPC_OP_SEND_INITIAL_METADATA;
+    ops[nops].data.send_initial_metadata.count = stream->send_metadata_count;
+    ops[nops].data.send_initial_metadata.metadata = stream->send_metadata;
+    nops += 1;
+  }
+  ops[nops].op = GRPC_OP_SEND_CLOSE_FROM_CLIENT;
+  nops += 1;
+
+  err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->send_tag, NULL);
+  if (err != GRPC_CALL_OK) return make_call_error_status(err);
+  {
+    ptr ans = wait_stream_complete(stream, &stream->send_tag,
+                                   "unexpected gRPC client close event");
+    if (ans != Strue) return ans;
+  }
+  stream->send_started = 1;
+  stream->send_closed = 1;
+  return Strue;
+}
+
+ptr chezpp_net_grpc_stream_finish(uptr handle, ptr payload, int start, int stop, int status_code,
+                                  const char *status_message, ptr metadata_ls) {
+  return stream_finish_server((chezpp_grpc_stream *)handle, payload, start, stop, status_code,
+                              status_message, metadata_ls);
+}
+
+ptr chezpp_net_grpc_stream_close(uptr handle) {
+  chezpp_grpc_stream *stream = (chezpp_grpc_stream *)handle;
+  ptr ans = Strue;
+  if (stream == NULL) return Strue;
+  if (stream->side == CHEZPP_GRPC_STREAM_SIDE_SERVER && !stream->send_closed) {
+    ans = stream_finish_server(stream, Sfalse, 0, 0, GRPC_STATUS_OK, "", Snil);
+  }
+  cleanup_grpc_stream(stream);
+  return ans;
+}
+
+ptr chezpp_net_grpc_server_request_stream(uptr handle) {
+  chezpp_grpc_server *server = (chezpp_grpc_server *)handle;
+  grpc_call *call = NULL;
+  grpc_call_details details;
+  grpc_metadata_array request_metadata;
+  grpc_call_error err;
+  grpc_event ev;
+  chezpp_grpc_stream *stream;
+  ptr method;
+  ptr metadata;
+
+  if (server == NULL || server->closed) return make_error_status_message("invalid gRPC server");
+
+  p_grpc_call_details_init(&details);
+  p_grpc_metadata_array_init(&request_metadata);
+
+  err = p_grpc_server_request_call(server->server, &call, &details, &request_metadata, server->cq,
+                                   server->cq, &details);
+  if (err != GRPC_CALL_OK) {
+    p_grpc_metadata_array_destroy(&request_metadata);
+    p_grpc_call_details_destroy(&details);
+    return make_call_error_status(err);
+  }
+
+  ev = p_grpc_completion_queue_pluck(server->cq, &details, p_gpr_inf_future(GPR_CLOCK_REALTIME),
+                                     NULL);
+  if (ev.type != GRPC_OP_COMPLETE) {
+    if (call != NULL) p_grpc_call_unref(call);
+    p_grpc_metadata_array_destroy(&request_metadata);
+    p_grpc_call_details_destroy(&details);
+    return make_error_status_message("unexpected gRPC server accept event");
+  }
+
+  stream = (chezpp_grpc_stream *)calloc(1, sizeof(chezpp_grpc_stream));
+  if (stream == NULL) {
+    if (call != NULL) p_grpc_call_unref(call);
+    p_grpc_metadata_array_destroy(&request_metadata);
+    p_grpc_call_details_destroy(&details);
+    return make_error_status_message("out of memory");
+  }
+  init_grpc_stream(stream, call, server->cq, server, CHEZPP_GRPC_STREAM_SIDE_SERVER,
+                   CHEZPP_GRPC_STREAM_SHAPE_BIDI, 0);
+  stream->recv_initial_done = 1;
+
+  method = maybe_string_from_slice(details.method);
+  metadata = metadata_array_to_scheme(&request_metadata);
+  p_grpc_metadata_array_destroy(&request_metadata);
+  p_grpc_call_details_destroy(&details);
+  return make_stream_request_vector((uptr)stream, method, metadata);
 }

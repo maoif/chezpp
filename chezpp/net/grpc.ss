@@ -2,6 +2,11 @@
   (export grpc-open-channel
           grpc-close-channel
           grpc-channel?
+          grpc-stream?
+          grpc-stream-send
+          grpc-stream-recv
+          grpc-stream-close-send
+          grpc-stream-close
           grpc-register-service!
           grpc-serve
           grpc-call
@@ -57,6 +62,16 @@
     (opaque #f)
     (fields (mutable handle grpc-pending-op-handle grpc-pending-op-handle-set!)))
 
+  (define-record-type (grpc-stream %make-grpc-stream grpc-stream?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable handle grpc-stream-handle)
+            (immutable side grpc-stream-side)
+            (immutable shape grpc-stream-shape)
+            (mutable send-closed? grpc-stream-send-closed? grpc-stream-send-closed?-set!)
+            (mutable recv-closed? grpc-stream-recv-closed? grpc-stream-recv-closed?-set!)
+            (mutable closed? grpc-stream-closed? grpc-stream-closed?-set!)))
+
   (define-record-type (grpc-channel %make-grpc-channel grpc-channel?)
     (sealed #t)
     (opaque #f)
@@ -77,6 +92,11 @@
     (lambda (who channel)
       (when (grpc-channel-closed? channel)
         (raise-net-error who 'grpc "gRPC channel is closed" channel))))
+
+  (define ensure-stream-open
+    (lambda (who stream)
+      (when (grpc-stream-closed? stream)
+        (raise-net-error who 'grpc "gRPC stream is closed" stream))))
 
   (define ensure-role
     (lambda (who channel role)
@@ -210,6 +230,111 @@
        [(symbol? method) (symbol->string method)]
        [else (errorf who "expected gRPC method string or symbol, given ~s" method)])))
 
+  (define normalize-stream-shape
+    (lambda (who shape)
+      (case shape
+        [(unary server client bidi) shape]
+        [else
+         (errorf who "invalid gRPC stream shape ~s" shape)])))
+
+  (define stream-shape->int
+    (lambda (who shape)
+      (case shape
+        [(server) 1]
+        [(client) 2]
+        [(bidi) 3]
+        [else
+         (errorf who "invalid gRPC stream shape ~s" shape)])))
+
+  (define stream-send-allowed?
+    (lambda (stream)
+      (or (eq? (grpc-stream-side stream) 'server)
+          (memq (grpc-stream-shape stream) '(client bidi)))))
+
+  (define stream-recv-allowed?
+    (lambda (stream)
+      (or (eq? (grpc-stream-side stream) 'server)
+          (memq (grpc-stream-shape stream) '(server client bidi)))))
+
+  (define normalize-stream-response
+    (lambda (value)
+      (cond
+       [(grpc-response? value) value]
+       [(or (bytevector? value) (string? value) (eq? value #f))
+        (grpc-response value '() grpc-status-ok "")]
+       [else
+        (errorf 'grpc-serve
+                "streaming handler must return a gRPC response, string, bytevector, or #f: ~s"
+                value)])))
+
+  (define make-client-stream
+    (lambda (handle shape)
+      (%make-grpc-stream handle 'client shape #f #f #f)))
+
+  (define make-server-stream
+    (lambda (handle shape)
+      (%make-grpc-stream handle 'server shape #f #f #f)))
+
+  (define close-stream-handle!
+    (lambda (who stream)
+      (unless (grpc-stream-closed? stream)
+        (ensure-success who (ffi-net-grpc-stream-close (grpc-stream-handle stream)))
+        (grpc-stream-closed?-set! stream #t))))
+
+  (define finish-server-stream!
+    (lambda (who stream response)
+      (ensure-success who
+                      (ffi-net-grpc-stream-finish
+                       (grpc-stream-handle stream)
+                       (grpc-response-payload response)
+                       0
+                       (if (grpc-response-payload response)
+                           (bytevector-length (grpc-response-payload response))
+                           0)
+                       (grpc-status-code response)
+                       (grpc-status-message response)
+                       (grpc-response-metadata response)))
+      (grpc-stream-send-closed?-set! stream #t)
+      stream))
+
+  (define open-stream
+    (lambda (who channel method shape payload metadata timeout-ms)
+      (ensure-channel-open who channel)
+      (ensure-role who channel 'client)
+      (let* ([method* (method-name who method)]
+             [payload* (normalize-payload who payload)]
+             [metadata* (normalize-metadata who metadata)]
+             [handle (ensure-success who
+                                     (ffi-net-grpc-stream-open
+                                      (grpc-channel-handle channel)
+                                      method*
+                                      (stream-shape->int who shape)
+                                      payload*
+                                      0
+                                      (if payload*
+                                          (bytevector-length payload*)
+                                          0)
+                                      metadata*
+                                      timeout-ms))])
+        (make-client-stream handle shape))))
+
+  (define stream-recv-result
+    (lambda (who x)
+      (cond
+       [(or (bytevector? x) (eof-object? x)) x]
+       [else (ensure-success who x)])))
+
+  (define accept-stream-request
+    (lambda (who channel)
+      (let ([ans (ensure-success who
+                                 (ffi-net-grpc-server-request-stream
+                                  (grpc-channel-handle channel)))])
+        (unless (and (vector? ans) (= (vector-length ans) 3))
+          (errorf who "unexpected gRPC stream request payload ~s" ans))
+        (values (vector-ref ans 0)
+                (vector-ref ans 1)
+                (vector-ref ans 2)))))
+
   #|proc:grpc-request
 The `grpc-request` procedure constructs a gRPC request record.
 |#
@@ -320,15 +445,20 @@ The `grpc-close-channel` procedure closes a gRPC client channel or server listen
               channel)))
 
   #|proc:grpc-register-service!
-The `grpc-register-service!` procedure registers a unary gRPC handler on a server channel.
+The `grpc-register-service!` procedure registers a gRPC handler on a server channel.
 |#
   (define-who grpc-register-service!
-    (lambda (channel method proc)
-      (pcheck ([grpc-channel? channel] [procedure? proc])
-              (ensure-channel-open who channel)
-              (ensure-role who channel 'server)
-              (hashtable-set! (grpc-channel-handlers channel) (method-name who method) proc)
-              channel)))
+    (case-lambda
+      [(channel method proc)
+       (grpc-register-service! channel method 'unary proc)]
+      [(channel method shape proc)
+       (pcheck ([grpc-channel? channel] [procedure? proc])
+               (ensure-channel-open who channel)
+               (ensure-role who channel 'server)
+               (hashtable-set! (grpc-channel-handlers channel)
+                               (method-name who method)
+                               (vector (normalize-stream-shape who shape) proc))
+               channel)]))
 
   (define call-unary
     (lambda (who channel method payload metadata timeout-ms)
@@ -415,60 +545,193 @@ The `grpc-call/nonblocking` procedure progresses a unary gRPC call without block
                                       (grpc-response-metadata response))))))
 
   #|proc:grpc-serve
-The `grpc-serve` procedure accepts and processes one unary gRPC request on a server channel.
+The `grpc-serve` procedure accepts and processes one gRPC request on a server channel.
 |#
   (define-who grpc-serve
     (lambda (channel)
       (pcheck ([grpc-channel? channel])
               (ensure-channel-open who channel)
               (ensure-role who channel 'server)
-              (let* ((request (request-from-ffi who
-                                                (ensure-success who
-                                                                (ffi-net-grpc-server-request
-                                                                 (grpc-channel-handle channel)))))
-                     (handler (hashtable-ref (grpc-channel-handlers channel)
-                                             (grpc-request-method request)
-                                             #f))
-                     (response
+              (let-values ([(handle method metadata)
+                            (accept-stream-request who channel)])
+                (let* ([entry (hashtable-ref (grpc-channel-handlers channel) method #f)]
+                       [shape (and entry (vector-ref entry 0))]
+                       [proc (and entry (vector-ref entry 1))]
+                       [stream (make-server-stream handle (or shape 'bidi))]
+                       [request (%make-grpc-request-record handle method #f metadata)])
+                  (dynamic-wind
+                    void
+                    (lambda ()
                       (cond
-                       ((not handler)
-                        (grpc-response #f '() grpc-status-unimplemented "unimplemented"))
-                       (else
-                        (guard (c [else
-                                   (grpc-response #f
-                                                  '()
-                                                  grpc-status-internal
-                                                  (if (condition? c)
-                                                      (format "~a" c)
-                                                      (format "~s" c)))])
-                          (normalize-response (handler request)))))))
-                (respond-to-request who request response)
-                request))))
+                       [(not entry)
+                        (finish-server-stream!
+                         who
+                         stream
+                         (grpc-response #f '() grpc-status-unimplemented "unimplemented"))
+                        request]
+                       [(eq? shape 'unary)
+                        (let* ([payload (stream-recv-result who
+                                                           (ffi-net-grpc-stream-recv
+                                                            (grpc-stream-handle stream)))]
+                               [request* (%make-grpc-request-record handle method payload metadata)]
+                               [response
+                                (guard (c [else
+                                           (grpc-response #f
+                                                          '()
+                                                          grpc-status-internal
+                                                          (if (condition? c)
+                                                              (format "~a" c)
+                                                              (format "~s" c)))])
+                                  (normalize-response (proc request*)))])
+                          (when (eof-object? payload)
+                            (raise-net-error who 'grpc "unexpected EOF in unary gRPC request" request*))
+                          (grpc-stream-recv-closed?-set! stream #t)
+                          (finish-server-stream! who stream response)
+                          request*)]
+                       [else
+                        (let ([result
+                               (guard (c [else
+                                          (finish-server-stream!
+                                           who
+                                           stream
+                                           (grpc-response #f
+                                                          '()
+                                                          grpc-status-internal
+                                                          (if (condition? c)
+                                                              (format "~a" c)
+                                                              (format "~s" c))))
+                                          #f])
+                                 (proc stream))])
+                          (unless (or (not result) (grpc-stream-send-closed? stream))
+                            (finish-server-stream!
+                             who
+                             stream
+                             (normalize-stream-response result)))
+                          (unless (grpc-stream-send-closed? stream)
+                            (finish-server-stream! who stream (grpc-response #f '() grpc-status-ok "")))
+                          request)]))
+                    (lambda ()
+                      (guard (c [else #f])
+                        (grpc-stream-close stream)))))))))
+
+  #|proc:grpc-stream-send
+The `grpc-stream-send` procedure sends one message on a gRPC streaming call.
+|#
+  (define-who grpc-stream-send
+    (lambda (stream payload)
+      (pcheck ([grpc-stream? stream])
+              (ensure-stream-open who stream)
+              (unless (stream-send-allowed? stream)
+                (raise-net-error who 'grpc "gRPC stream does not support sending" stream))
+              (when (grpc-stream-send-closed? stream)
+                (raise-net-error who 'grpc "gRPC stream send side is closed" stream))
+              (let ([payload* (normalize-payload who payload)])
+                (ensure-success who
+                                (ffi-net-grpc-stream-send
+                                 (grpc-stream-handle stream)
+                                 payload*
+                                 0
+                                 (if payload*
+                                     (bytevector-length payload*)
+                                     0)))
+                stream))))
+
+  #|proc:grpc-stream-recv
+The `grpc-stream-recv` procedure receives one message from a gRPC streaming call and returns an EOF object when the peer finishes sending.
+|#
+  (define-who grpc-stream-recv
+    (lambda (stream)
+      (pcheck ([grpc-stream? stream])
+              (ensure-stream-open who stream)
+              (unless (stream-recv-allowed? stream)
+                (raise-net-error who 'grpc "gRPC stream does not support receiving" stream))
+              (let ([ans (stream-recv-result who
+                                            (ffi-net-grpc-stream-recv
+                                             (grpc-stream-handle stream)))])
+                (when (eof-object? ans)
+                  (grpc-stream-recv-closed?-set! stream #t))
+                ans))))
+
+  #|proc:grpc-stream-close-send
+The `grpc-stream-close-send` procedure closes the local send side of a gRPC streaming call.
+|#
+  (define-who grpc-stream-close-send
+    (lambda (stream)
+      (pcheck ([grpc-stream? stream])
+              (ensure-stream-open who stream)
+              (unless (stream-send-allowed? stream)
+                (raise-net-error who 'grpc "gRPC stream does not support sending" stream))
+              (unless (grpc-stream-send-closed? stream)
+                (ensure-success who
+                                (ffi-net-grpc-stream-close-send
+                                 (grpc-stream-handle stream)))
+                (grpc-stream-send-closed?-set! stream #t))
+              stream)))
+
+  #|proc:grpc-stream-close
+The `grpc-stream-close` procedure closes a gRPC streaming call and releases its resources.
+|#
+  (define-who grpc-stream-close
+    (lambda (stream)
+      (pcheck ([grpc-stream? stream])
+              (unless (grpc-stream-closed? stream)
+                (guard (c [else #f])
+                  (when (and (eq? (grpc-stream-side stream) 'server)
+                             (not (grpc-stream-send-closed? stream)))
+                    (grpc-stream-close-send stream)))
+                (close-stream-handle! who stream)
+                (grpc-stream-send-closed?-set! stream #t)
+                (grpc-stream-recv-closed?-set! stream #t))
+              stream)))
 
   (define not-implemented-stream
     (lambda (who)
       (raise-net-error who 'grpc "streaming gRPC APIs are not implemented yet")))
 
   #|proc:grpc-call/server-stream
-The `grpc-call/server-stream` procedure is reserved for future streaming gRPC support.
+The `grpc-call/server-stream` procedure opens a blocking server-streaming gRPC call and returns a gRPC stream object.
 |#
   (define-who grpc-call/server-stream
-    (lambda args
-      (not-implemented-stream who)))
+    (case-lambda
+      [(channel method payload)
+       (grpc-call/server-stream channel method payload '() 30000)]
+      [(channel method payload metadata-or-timeout)
+       (if (fixnum? metadata-or-timeout)
+           (grpc-call/server-stream channel method payload '() metadata-or-timeout)
+           (grpc-call/server-stream channel method payload metadata-or-timeout 30000))]
+      [(channel method payload metadata timeout-ms)
+       (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (open-stream who channel method 'server payload metadata timeout-ms))]))
 
   #|proc:grpc-call/client-stream
-The `grpc-call/client-stream` procedure is reserved for future streaming gRPC support.
+The `grpc-call/client-stream` procedure opens a blocking client-streaming gRPC call and returns a gRPC stream object.
 |#
   (define-who grpc-call/client-stream
-    (lambda args
-      (not-implemented-stream who)))
+    (case-lambda
+      [(channel method)
+       (grpc-call/client-stream channel method '() 30000)]
+      [(channel method metadata-or-timeout)
+       (if (fixnum? metadata-or-timeout)
+           (grpc-call/client-stream channel method '() metadata-or-timeout)
+           (grpc-call/client-stream channel method metadata-or-timeout 30000))]
+      [(channel method metadata timeout-ms)
+       (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (open-stream who channel method 'client #f metadata timeout-ms))]))
 
   #|proc:grpc-call/bidi-stream
-The `grpc-call/bidi-stream` procedure is reserved for future streaming gRPC support.
+The `grpc-call/bidi-stream` procedure opens a blocking bidirectional gRPC streaming call and returns a gRPC stream object.
 |#
   (define-who grpc-call/bidi-stream
-    (lambda args
-      (not-implemented-stream who)))
+    (case-lambda
+      [(channel method)
+       (grpc-call/bidi-stream channel method '() 30000)]
+      [(channel method metadata-or-timeout)
+       (if (fixnum? metadata-or-timeout)
+           (grpc-call/bidi-stream channel method '() metadata-or-timeout)
+           (grpc-call/bidi-stream channel method metadata-or-timeout 30000))]
+      [(channel method metadata timeout-ms)
+       (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
+               (open-stream who channel method 'bidi #f metadata timeout-ms))]))
 
   #|proc:grpc-call/server-stream/nonblocking
 The `grpc-call/server-stream/nonblocking` procedure is reserved for future streaming gRPC support.
