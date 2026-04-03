@@ -11,6 +11,17 @@
       (thunk)
       #f)))
 
+(define websocket-error-message-contains?
+  (lambda (fragment thunk)
+    (guard (c [else
+               (and (condition? c)
+                    (string-contains?
+                     (call-with-string-output-port
+                      (lambda (p) (display-condition c p)))
+                     fragment))])
+      (thunk)
+      #f)))
+
 (define start-stalled-websocket-handshake-server
   (lambda (delay-ms)
     (let ([listener (open-socket 'inet 'stream)])
@@ -162,6 +173,72 @@
                        "websocket receive timed out"
                        (lambda ()
                          (websocket-next-message accepted 50)))))
+               (lambda ()
+                 (when accepted
+                   (websocket-close accepted))
+                 (websocket-close client)))))
+         (lambda ()
+           (websocket-server-close server)))))
+
+(mat net-websocket-timeout-validation
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [uri (format "ws://127.0.0.1:~a/validate" port)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and
+            (websocket-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (websocket-accept server -1)))
+            (websocket-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (websocket-connect uri -1)))
+            (websocket-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (call-with-websocket uri -1 websocket-connection?)))))
+         (lambda ()
+           (websocket-server-close server))))
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [uri (format "ws://127.0.0.1:~a/io" port)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([client (websocket-connect uri)]
+                 [accepted #f])
+             (dynamic-wind
+               void
+               (lambda ()
+                 (set! accepted (websocket-accept server))
+                 (and
+                  (websocket-error-message-contains?
+                   "timeout must be non-negative"
+                   (lambda ()
+                     (websocket-send-text client "x" -1)))
+                  (websocket-error-message-contains?
+                   "timeout must be non-negative"
+                   (lambda ()
+                     (websocket-send-binary accepted #vu8(1) -1)))
+                  (websocket-error-message-contains?
+                   "timeout must be non-negative"
+                   (lambda ()
+                     (websocket-send-ping client #vu8() -1)))
+                  (websocket-error-message-contains?
+                   "timeout must be non-negative"
+                   (lambda ()
+                     (websocket-send-pong accepted #vu8() -1)))
+                  (websocket-error-message-contains?
+                   "timeout must be non-negative"
+                   (lambda ()
+                     (websocket-recv client -1)))
+                  (websocket-error-message-contains?
+                   "timeout must be non-negative"
+                   (lambda ()
+                     (websocket-next-message accepted -1)))))
                (lambda ()
                  (when accepted
                    (websocket-close accepted))
