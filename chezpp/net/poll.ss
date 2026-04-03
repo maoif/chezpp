@@ -57,6 +57,14 @@
                  0
                  event*)))
 
+  (define check-timeout-ms
+    (lambda (who timeout-ms)
+      (unless (fixnum? timeout-ms)
+        (errorf who "expected timeout fixnum, given ~s" timeout-ms))
+      (when (fx< timeout-ms -1)
+        (errorf who "poll timeout must be -1 or non-negative, given ~s" timeout-ms))
+      timeout-ms))
+
   (define resource->fd
     (lambda (who resource)
       (cond
@@ -77,6 +85,7 @@ The `make-poll-target` procedure constructs a poll target from a socket or file 
   (define-who make-poll-target
     (lambda (resource event*)
       (let ([fd (resource->fd who resource)])
+        (event-list->mask who event*)
         (%make-poll-target resource fd event* '()))))
 
   #|proc:poll
@@ -87,6 +96,7 @@ The `poll` procedure waits for readiness across poll targets and returns updated
       [(target*) (poll target* -1)]
       [(target* timeout-ms)
        (pcheck ([fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
                (unless (list? target*)
                  (errorf who "poll targets must be a list, given ~s" target*))
                (for-each (lambda (target)

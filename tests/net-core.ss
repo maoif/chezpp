@@ -17,6 +17,17 @@
                (and (condition? c)
                     (string-contains?
                      (call-with-string-output-port
+                     (lambda (p) (display-condition c p)))
+                     fragment))])
+      (thunk)
+      #f)))
+
+(define poll-error-message-contains?
+  (lambda (fragment thunk)
+    (guard (c [else
+               (and (condition? c)
+                    (string-contains?
+                     (call-with-string-output-port
                       (lambda (p) (display-condition c p)))
                      fragment))])
       (thunk)
@@ -209,6 +220,21 @@
            (close-socket server)
            (and (null? (poll-target-ready-events (car before)))
                 (not (not (memq 'read (poll-target-ready-events (car after))))))))))
+
+(mat net-poll-validation
+     (and
+      (poll-error-message-contains?
+       "poll timeout must be -1 or non-negative"
+       (lambda ()
+         (poll '() -2)))
+      (poll-error-message-contains?
+       "poll events must be a list"
+       (lambda ()
+         (make-poll-target 0 'read)))
+      (poll-error-message-contains?
+       "invalid poll event"
+       (lambda ()
+         (make-poll-target 0 '(bogus))))))
 
 (mat net-tls
      (let-values ([(server server-ctx port th) (start-tls-echo-server)])
