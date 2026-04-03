@@ -11,6 +11,17 @@
       (thunk)
       #f)))
 
+(define http-error-message-contains?
+  (lambda (fragment thunk)
+    (guard (c [else
+               (and (condition? c)
+                    (string-contains?
+                     (call-with-string-output-port
+                      (lambda (p) (display-condition c p)))
+                     fragment))])
+      (thunk)
+      #f)))
+
 (define start-http-dispatch-loop-server
   (lambda (serve-count setup . maybe-tls-ctx)
     (let* ([tls-ctx (if (null? maybe-tls-ctx) #f (car maybe-tls-ctx))]
@@ -320,6 +331,18 @@
                (thread-join th)
                (close-tls-context client-ctx)
                (close-tls-context server-ctx)))))))
+
+(mat net-http-timeout-validation
+     (let ([client (http-open)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (http-error-message-contains?
+            "timeout must be non-negative"
+            (lambda ()
+              (http-set-timeout! client -1))))
+         (lambda ()
+           (http-close client)))))
 
 (mat net-http-nonblocking
      (let-values ([(server port th stop)

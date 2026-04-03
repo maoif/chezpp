@@ -202,6 +202,16 @@
       (when (http-connection-closed? conn)
         (raise-net-error who 'http "HTTP connection is closed" conn))))
 
+  (define http-default-timeout-ms 30000)
+
+  (define check-timeout-ms
+    (lambda (who timeout-ms)
+      (unless (fixnum? timeout-ms)
+        (errorf who "expected timeout fixnum, given ~s" timeout-ms))
+      (when (fx< timeout-ms 0)
+        (errorf who "timeout must be non-negative, given ~s" timeout-ms))
+      timeout-ms))
+
   (define current-time-ms
     (lambda ()
       (let ([t (current-time)])
@@ -1051,10 +1061,10 @@ The `http-open` procedure constructs an HTTP client with optional TLS context st
   (define-who http-open
     (case-lambda
       [()
-       (%make-http-client '() #f 30000 #f #f #f #f #f)]
+       (%make-http-client '() #f http-default-timeout-ms #f #f #f #f #f)]
       [(tls-context)
        (pcheck ([tls-context? tls-context])
-               (%make-http-client '() #f 30000 tls-context #f #f #f #f))]))
+               (%make-http-client '() #f http-default-timeout-ms tls-context #f #f #f #f))]))
 
   #|proc:http-close
 The `http-close` procedure marks an HTTP client as closed.
@@ -1100,8 +1110,7 @@ The `http-set-timeout!` procedure records a client timeout value in milliseconds
   (define-who http-set-timeout!
     (lambda (client timeout-ms)
       (pcheck ([http-client? client] [fixnum? timeout-ms])
-              (when (fx< timeout-ms 0)
-                (errorf who "timeout must be non-negative, given ~s" timeout-ms))
+              (check-timeout-ms who timeout-ms)
               (ensure-client-open who client)
               (http-client-timeout-ms-set! client timeout-ms)
               timeout-ms)))
