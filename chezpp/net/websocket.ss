@@ -215,6 +215,7 @@ The `websocket-listen` procedure creates a WebSocket server listener.
       [(host port) (websocket-listen host port "chezpp-websocket")]
       [(host port protocol)
        (pcheck ([string? host] [fixnum? port] [string? protocol])
+               (check-port who port)
                (let ([ans (ffi-net-websocket-listen host port protocol)])
                  (if (ffi-error? ans)
                      (ensure-success who ans)

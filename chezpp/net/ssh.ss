@@ -204,6 +204,7 @@ The `ssh-open` procedure opens a network SSH session to a remote host.
            (ssh-open host port user-or-timeout ssh-default-timeout-ms))]
       [(host port user timeout-ms)
        (pcheck ([string? host] [fixnum? port])
+               (check-port who port)
                (ensure-user-maybe who user)
                (unless (fixnum? timeout-ms)
                  (errorf who "expected timeout fixnum, given ~s" timeout-ms))

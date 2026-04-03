@@ -241,10 +241,21 @@
                      (websocket-next-message accepted -1)))))
                (lambda ()
                  (when accepted
-                   (websocket-close accepted))
+                 (websocket-close accepted))
                  (websocket-close client)))))
          (lambda ()
            (websocket-server-close server)))))
+
+(mat net-websocket-port-validation
+     (and
+      (websocket-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (websocket-listen "127.0.0.1" -1)))
+      (websocket-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (websocket-listen "127.0.0.1" 70000)))))
 
 (mat net-websocket-cancel
      (let* ([port (reserve-loopback-port)]

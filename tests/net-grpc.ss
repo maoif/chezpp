@@ -510,3 +510,14 @@
              "timeout must be non-negative"
              (lambda ()
                (grpc-call/bidi-stream/nonblocking client "/chezpp.test.Echo/Bidi" '() -1)))))))))
+
+(mat net-grpc-port-validation
+     (and
+      (grpc-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (grpc-open-channel "127.0.0.1" -1)))
+      (grpc-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (grpc-open-channel 'server "127.0.0.1" 70000)))))

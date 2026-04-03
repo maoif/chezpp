@@ -150,6 +150,7 @@
          (errorf who "expected host string, given ~s" host))
        (unless (fixnum? port)
          (errorf who "expected port fixnum, given ~s" port))
+       (check-port who port)
        (format "~a:~a" host port)]))
 
   (define normalize-payload
@@ -538,6 +539,7 @@ Use `(grpc-open-channel endpoint)`, `(grpc-open-channel host port)`, or `(grpc-o
           #f))]
       [(role host port)
        (pcheck ([symbol? role] [string? host] [fixnum? port])
+               (check-port who port)
                (case role
                  [(server)
                   (let ([ans (ensure-success who (ffi-net-grpc-server-open host port))])

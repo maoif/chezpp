@@ -433,6 +433,17 @@
            (rpc-close server)
            ok?))))
 
+(mat net-rpc-port-validation
+     (and
+      (rpc-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (rpc-open "127.0.0.1" -1)))
+      (rpc-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (rpc-open 'server "127.0.0.1" 70000)))))
+
 (mat net-rpc-errors
      (let* ([port (reserve-loopback-port)]
             [server (rpc-open 'server "127.0.0.1" port)]

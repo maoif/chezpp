@@ -152,6 +152,17 @@
          (lambda ()
            (stop-server)))))
 
+(mat net-ssh-port-validation
+     (and
+      (ssh-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (ssh-open "127.0.0.1" -1)))
+      (ssh-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (call-with-ssh-session "127.0.0.1" 70000 #f 1000 ssh-session?)))))
+
 (mat net-ssh-read-size-validation
      (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
        (dynamic-wind

@@ -40,6 +40,7 @@
           (chezpp net address)
           (chezpp net socket)
           (chezpp net poll)
+          (chezpp net private)
           (chezpp net private rpc))
 
   (define-syntax define-rpc-message
@@ -1010,9 +1011,11 @@ Use `(rpc-open host port)` for a client channel and `(rpc-open 'server host port
     (case-lambda
       [(host port)
        (pcheck ([string? host] [fixnum? port])
+               (check-port who port)
                (%make-rpc-channel 'client host port #f (make-method-table) #f #f))]
       [(role host port)
        (pcheck ([symbol? role] [string? host] [fixnum? port])
+               (check-port who port)
                (case role
                  [(server)
                   (let ([sock (open-socket 'inet 'stream)])

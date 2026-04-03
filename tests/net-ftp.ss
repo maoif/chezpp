@@ -147,6 +147,17 @@
          (lambda ()
            (call-with-ftp-session "127.0.0.1" 21 #f -1 ftp-session?))))))
 
+(mat net-ftp-port-validation
+     (and
+      (ftp-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (ftp-open "127.0.0.1" -1 #f 1000)))
+      (ftp-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (call-with-ftp-session "127.0.0.1" 70000 #f 1000 ftp-session?)))))
+
 (mat net-ftp-list
      (let-values ([(root port stop-server) (start-ftp-test-server)])
        (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])

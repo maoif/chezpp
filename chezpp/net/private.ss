@@ -14,6 +14,7 @@
           family-symbol->int
           type-symbol->int
           shutdown-symbol->int
+          check-port
           ffi-error?
           ffi-would-block?
           ffi-would-block-read?
@@ -103,4 +104,10 @@
         [(write) (net-shut-write)]
         [(read/write) (net-shut-read/write)]
         [else (errorf who "invalid shutdown mode ~s" how)])))
+
+  (define check-port
+    (lambda (who port)
+      (when (or (fx< port 0) (fx> port 65535))
+        (errorf who "port must be between 0 and 65535, given ~s" port))
+      port))
   )

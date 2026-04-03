@@ -420,6 +420,7 @@ The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoi
        (ftp-open host port secure? ftp-default-timeout-ms)]
       [(host port secure? timeout-ms)
        (pcheck ([string? host] [fixnum? port] [boolean? secure?])
+               (check-port who port)
                (unless (fixnum? timeout-ms)
                  (errorf who "expected timeout fixnum, given ~s" timeout-ms))
                (when (fx< timeout-ms 0)
