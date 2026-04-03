@@ -98,6 +98,73 @@
 
   (define tls-no-timeout -1)
 
+  (define check-timeout-ms
+    (lambda (who timeout-ms)
+      (unless (fixnum? timeout-ms)
+        (errorf who "timeout must be a fixnum, given ~s" timeout-ms))
+      (when (fx< timeout-ms 0)
+        (errorf who "timeout must be non-negative, given ~s" timeout-ms))
+      timeout-ms))
+
+  (define tls-connect*
+    (lambda (who ctx sock server-name timeout-ms)
+      (ensure-context-open who ctx)
+      (let ([ans (ffi-net-tls-connect (tls-context-handle ctx)
+                                      (socket-fd sock)
+                                      (or server-name "")
+                                      timeout-ms)])
+        (cond
+         [(ffi-error? ans)
+          (raise-net-error who 'tls (ffi-error-message ans) ans)]
+         [(ffi-would-block? ans) #f]
+         [else (%make-tls-session ans ctx sock #f)]))))
+
+  (define tls-accept*
+    (lambda (who ctx sock timeout-ms)
+      (ensure-context-open who ctx)
+      (let ([ans (ffi-net-tls-accept (tls-context-handle ctx)
+                                     (socket-fd sock)
+                                     timeout-ms)])
+        (cond
+         [(ffi-error? ans)
+          (raise-net-error who 'tls (ffi-error-message ans) ans)]
+         [(ffi-would-block? ans) #f]
+         [else (%make-tls-session ans ctx sock #f)]))))
+
+  (define tls-read*
+    (lambda (who session size timeout-ms nonblocking?)
+      (ensure-session-open who session)
+      (read-result who
+                   (ffi-net-tls-read (tls-session-handle session)
+                                     size
+                                     timeout-ms
+                                     (if nonblocking? 1 0)))))
+
+  (define tls-read-into*
+    (lambda (who session bv start stop timeout-ms nonblocking?)
+      (ensure-session-open who session)
+      (check-slice who (bytevector-length bv) start stop)
+      (read-into-result
+       who
+       (ffi-net-tls-read-into (tls-session-handle session)
+                              bv
+                              start
+                              stop
+                              timeout-ms
+                              (if nonblocking? 1 0)))))
+
+  (define tls-write*
+    (lambda (who session bv start stop timeout-ms nonblocking?)
+      (ensure-session-open who session)
+      (check-slice who (bytevector-length bv) start stop)
+      (write-result who
+                    (ffi-net-tls-write (tls-session-handle session)
+                                       bv
+                                       start
+                                       stop
+                                       timeout-ms
+                                       (if nonblocking? 1 0)))))
+
   (define encode-alpn
     (lambda (who proto*)
       (unless (list? proto*)
@@ -299,45 +366,33 @@ The `tls-connect` procedure performs a client-side TLS handshake over an existin
 |#
   (define-who tls-connect
     (case-lambda
-      [(ctx sock) (tls-connect ctx sock #f)]
+      [(ctx sock)
+       (pcheck ([tls-context? ctx] [socket? sock])
+               (tls-connect* who ctx sock #f tls-no-timeout))]
       [(ctx sock server-name)
-       (tls-connect ctx sock server-name tls-no-timeout)]
+       (pcheck ([tls-context? ctx] [socket? sock])
+               (unless (or (not server-name) (string? server-name))
+                 (errorf who "server name must be a string or #f, given ~s" server-name))
+               (tls-connect* who ctx sock server-name tls-no-timeout))]
       [(ctx sock server-name timeout-ms)
        (pcheck ([tls-context? ctx] [socket? sock])
                (unless (or (not server-name) (string? server-name))
                  (errorf who "server name must be a string or #f, given ~s" server-name))
-               (unless (fixnum? timeout-ms)
-                 (errorf who "timeout must be a fixnum, given ~s" timeout-ms))
-               (ensure-context-open who ctx)
-               (let ([ans (ffi-net-tls-connect (tls-context-handle ctx)
-                                               (socket-fd sock)
-                                               (or server-name "")
-                                               timeout-ms)])
-                 (cond
-                  [(ffi-error? ans)
-                   (raise-net-error who 'tls (ffi-error-message ans) ans)]
-                  [(ffi-would-block? ans) #f]
-                  [else (%make-tls-session ans ctx sock #f)])))]))
+               (check-timeout-ms who timeout-ms)
+               (tls-connect* who ctx sock server-name timeout-ms))]))
 
   #|proc:tls-accept
 The `tls-accept` procedure performs a server-side TLS handshake over an existing socket.
 |#
   (define-who tls-accept
     (case-lambda
-      [(ctx sock) (tls-accept ctx sock tls-no-timeout)]
+      [(ctx sock)
+       (pcheck ([tls-context? ctx] [socket? sock])
+               (tls-accept* who ctx sock tls-no-timeout))]
       [(ctx sock timeout-ms)
        (pcheck ([tls-context? ctx] [socket? sock])
-               (unless (fixnum? timeout-ms)
-                 (errorf who "timeout must be a fixnum, given ~s" timeout-ms))
-               (ensure-context-open who ctx)
-               (let ([ans (ffi-net-tls-accept (tls-context-handle ctx)
-                                              (socket-fd sock)
-                                              timeout-ms)])
-                 (cond
-                  [(ffi-error? ans)
-                   (raise-net-error who 'tls (ffi-error-message ans) ans)]
-                  [(ffi-would-block? ans) #f]
-                  [else (%make-tls-session ans ctx sock #f)])))]))
+               (check-timeout-ms who timeout-ms)
+               (tls-accept* who ctx sock timeout-ms))]))
 
   #|proc:close-tls-session
 The `close-tls-session` procedure releases foreign resources owned by a TLS session.
@@ -357,14 +412,12 @@ The `tls-read` procedure reads up to `size` bytes from a TLS session.
   (define-who tls-read
     (case-lambda
       [(session size)
-       (tls-read session size tls-no-timeout)]
+       (pcheck ([tls-session? session] [fixnum? size])
+               (tls-read* who session size tls-no-timeout #f))]
       [(session size timeout-ms)
        (pcheck ([tls-session? session] [fixnum? size])
-               (unless (fixnum? timeout-ms)
-                 (errorf who "timeout must be a fixnum, given ~s" timeout-ms))
-               (ensure-session-open who session)
-               (read-result who
-                            (ffi-net-tls-read (tls-session-handle session) size timeout-ms 0)))]))
+               (check-timeout-ms who timeout-ms)
+               (tls-read* who session size timeout-ms #f))]))
 
   #|proc:tls-read/nonblocking
 The `tls-read/nonblocking` procedure attempts a non-blocking TLS read and returns `#f` if progress would block.
@@ -372,9 +425,7 @@ The `tls-read/nonblocking` procedure attempts a non-blocking TLS read and return
   (define-who tls-read/nonblocking
     (lambda (session size)
       (pcheck ([tls-session? session] [fixnum? size])
-              (ensure-session-open who session)
-              (read-result who
-                           (ffi-net-tls-read (tls-session-handle session) size tls-no-timeout 1)))))
+              (tls-read* who session size tls-no-timeout #t))))
 
   #|proc:tls-read!
 The `tls-read!` procedure reads into a bytevector slice and returns a byte count or EOF object.
@@ -384,21 +435,12 @@ The `tls-read!` procedure reads into a bytevector slice and returns a byte count
       [(session bv) (tls-read! session bv 0 (bytevector-length bv))]
       [(session bv start) (tls-read! session bv start (bytevector-length bv))]
       [(session bv start stop)
-       (tls-read! session bv start stop tls-no-timeout)]
+       (pcheck ([tls-session? session] [bytevector? bv])
+               (tls-read-into* who session bv start stop tls-no-timeout #f))]
       [(session bv start stop timeout-ms)
        (pcheck ([tls-session? session] [bytevector? bv])
-               (unless (fixnum? timeout-ms)
-                 (errorf who "timeout must be a fixnum, given ~s" timeout-ms))
-               (ensure-session-open who session)
-               (check-slice who (bytevector-length bv) start stop)
-               (read-into-result
-                who
-                (ffi-net-tls-read-into (tls-session-handle session)
-                                       bv
-                                       start
-                                       stop
-                                       timeout-ms
-                                       0)))]))
+               (check-timeout-ms who timeout-ms)
+               (tls-read-into* who session bv start stop timeout-ms #f))]))
 
   #|proc:tls-read!/nonblocking
 The `tls-read!/nonblocking` procedure attempts a non-blocking TLS read into a bytevector slice and returns `#f` if progress would block.
@@ -409,16 +451,7 @@ The `tls-read!/nonblocking` procedure attempts a non-blocking TLS read into a by
       [(session bv start) (tls-read!/nonblocking session bv start (bytevector-length bv))]
       [(session bv start stop)
        (pcheck ([tls-session? session] [bytevector? bv])
-               (ensure-session-open who session)
-               (check-slice who (bytevector-length bv) start stop)
-               (read-into-result
-                who
-                (ffi-net-tls-read-into (tls-session-handle session)
-                                       bv
-                                       start
-                                       stop
-                                       tls-no-timeout
-                                       1)))]))
+               (tls-read-into* who session bv start stop tls-no-timeout #t))]))
 
   #|proc:tls-write
 The `tls-write` procedure writes a bytevector slice to a TLS session and returns the number of bytes written.
@@ -428,20 +461,12 @@ The `tls-write` procedure writes a bytevector slice to a TLS session and returns
       [(session bv) (tls-write session bv 0 (bytevector-length bv))]
       [(session bv start) (tls-write session bv start (bytevector-length bv))]
       [(session bv start stop)
-       (tls-write session bv start stop tls-no-timeout)]
+       (pcheck ([tls-session? session] [bytevector? bv])
+               (tls-write* who session bv start stop tls-no-timeout #f))]
       [(session bv start stop timeout-ms)
        (pcheck ([tls-session? session] [bytevector? bv])
-               (unless (fixnum? timeout-ms)
-                 (errorf who "timeout must be a fixnum, given ~s" timeout-ms))
-               (ensure-session-open who session)
-               (check-slice who (bytevector-length bv) start stop)
-               (write-result who
-                             (ffi-net-tls-write (tls-session-handle session)
-                                                bv
-                                                start
-                                                stop
-                                                timeout-ms
-                                                0)))]))
+               (check-timeout-ms who timeout-ms)
+               (tls-write* who session bv start stop timeout-ms #f))]))
 
   #|proc:tls-write/nonblocking
 The `tls-write/nonblocking` procedure attempts a non-blocking TLS write and returns `#f` if progress would block.
@@ -452,15 +477,7 @@ The `tls-write/nonblocking` procedure attempts a non-blocking TLS write and retu
       [(session bv start) (tls-write/nonblocking session bv start (bytevector-length bv))]
       [(session bv start stop)
        (pcheck ([tls-session? session] [bytevector? bv])
-               (ensure-session-open who session)
-               (check-slice who (bytevector-length bv) start stop)
-               (write-result who
-                             (ffi-net-tls-write (tls-session-handle session)
-                                                bv
-                                                start
-                                                stop
-                                                tls-no-timeout
-                                                1)))]))
+               (tls-write* who session bv start stop tls-no-timeout #t))]))
 
   #|proc:tls-write-all
 The `tls-write-all` procedure writes an entire bytevector slice to a TLS session before returning.
@@ -470,17 +487,20 @@ The `tls-write-all` procedure writes an entire bytevector slice to a TLS session
       [(session bv) (tls-write-all session bv 0 (bytevector-length bv))]
       [(session bv start) (tls-write-all session bv start (bytevector-length bv))]
       [(session bv start stop)
-       (tls-write-all session bv start stop tls-no-timeout)]
-      [(session bv start stop timeout-ms)
        (pcheck ([tls-session? session] [bytevector? bv])
-               (unless (fixnum? timeout-ms)
-                 (errorf who "timeout must be a fixnum, given ~s" timeout-ms))
-               (ensure-session-open who session)
                (check-slice who (bytevector-length bv) start stop)
                (let loop ([i start])
                  (if (fx= i stop)
                      (fx- stop start)
-                     (loop (fx+ i (tls-write session bv i stop timeout-ms))))))]))
+                     (loop (fx+ i (tls-write* who session bv i stop tls-no-timeout #f))))))]
+      [(session bv start stop timeout-ms)
+       (pcheck ([tls-session? session] [bytevector? bv])
+               (check-timeout-ms who timeout-ms)
+               (check-slice who (bytevector-length bv) start stop)
+               (let loop ([i start])
+                 (if (fx= i stop)
+                     (fx- stop start)
+                     (loop (fx+ i (tls-write* who session bv i stop timeout-ms #f))))))]))
 
   #|proc:tls-write-all/nonblocking
 The `tls-write-all/nonblocking` procedure writes as much of a bytevector slice as possible without blocking.
@@ -575,6 +595,7 @@ The `call-with-tls-client` procedure performs a client TLS handshake, passes the
       [(ctx sock proc) (call-with-tls-client ctx sock #f proc)]
       [(ctx sock timeout-ms proc)
        (pcheck ([tls-context? ctx] [socket? sock] [fixnum? timeout-ms] [procedure? proc])
+               (check-timeout-ms who timeout-ms)
                (let ([session (tls-connect ctx sock #f timeout-ms)])
                  (dynamic-wind
                    void
@@ -589,6 +610,7 @@ The `call-with-tls-client` procedure performs a client TLS handshake, passes the
                    (lambda () (when session (close-tls-session session))))))]
       [(ctx sock server-name timeout-ms proc)
        (pcheck ([tls-context? ctx] [socket? sock] [fixnum? timeout-ms] [procedure? proc])
+               (check-timeout-ms who timeout-ms)
                (unless (or (not server-name) (string? server-name))
                  (errorf who "server name must be a string or #f, given ~s" server-name))
                (let ([session (tls-connect ctx sock server-name timeout-ms)])
@@ -611,6 +633,7 @@ The `call-with-tls-server` procedure performs a server TLS handshake, passes the
                    (lambda () (when session (close-tls-session session))))))]
       [(ctx sock timeout-ms proc)
        (pcheck ([tls-context? ctx] [socket? sock] [fixnum? timeout-ms] [procedure? proc])
+               (check-timeout-ms who timeout-ms)
                (let ([session (tls-accept ctx sock timeout-ms)])
                  (dynamic-wind
                    void

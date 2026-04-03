@@ -11,6 +11,17 @@
       (thunk)
       #f)))
 
+(define tls-error-message-contains?
+  (lambda (fragment thunk)
+    (guard (c [else
+               (and (condition? c)
+                    (string-contains?
+                     (call-with-string-output-port
+                      (lambda (p) (display-condition c p)))
+                     fragment))])
+      (thunk)
+      #f)))
+
 (define start-stalled-tls-handshake-server
   (lambda (delay-ms)
     (let ([listener (open-socket 'inet 'stream)])
@@ -328,3 +339,70 @@
                (close-socket client))
              (guard (c [else #f])
                (close-socket listener)))))))
+
+(mat net-tls-timeout-validation
+     (let ([client-ctx (make-tls-context 'client)]
+           [server-ctx (make-tls-context 'server)]
+           [sock (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and
+            (tls-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (tls-connect client-ctx sock #f -1)))
+            (tls-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (tls-accept server-ctx sock -1)))
+            (tls-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (call-with-tls-client client-ctx sock -1 tls-session?)))
+            (tls-error-message-contains?
+             "timeout must be non-negative"
+             (lambda ()
+               (call-with-tls-server server-ctx sock -1 tls-session?)))))
+         (lambda ()
+           (close-tls-context client-ctx)
+           (close-tls-context server-ctx)
+           (close-socket sock))))
+     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)]
+             [payload (string->utf8 "x")]
+             [buf (make-bytevector 1 0)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([session (tls-connect ctx client "localhost")])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (and
+                    (tls-error-message-contains?
+                     "timeout must be non-negative"
+                     (lambda ()
+                       (tls-read session 1 -1)))
+                    (tls-error-message-contains?
+                     "timeout must be non-negative"
+                     (lambda ()
+                       (tls-read! session buf 0 1 -1)))
+                    (tls-error-message-contains?
+                     "timeout must be non-negative"
+                     (lambda ()
+                       (tls-write session payload 0 1 -1)))
+                    (tls-error-message-contains?
+                     "timeout must be non-negative"
+                     (lambda ()
+                       (tls-write-all session payload 0 1 -1)))))
+                 (lambda ()
+                   (close-tls-session session)))))
+           (lambda ()
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
