@@ -117,4 +117,30 @@
          (lambda ()
            (thread-join th)
            (guard (c [else #f])
-             (close-socket listener))))))
+             (close-socket listener)))))
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [uri (format "ws://127.0.0.1:~a/idle" port)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([client (websocket-connect uri)]
+                 [accepted #f])
+             (dynamic-wind
+               void
+               (lambda ()
+                 (set! accepted (websocket-accept server))
+                 (and (websocket-net-error-message?
+                       "websocket receive timed out"
+                       (lambda ()
+                         (websocket-recv client 50)))
+                      (websocket-net-error-message?
+                       "websocket receive timed out"
+                       (lambda ()
+                         (websocket-next-message accepted 50)))))
+               (lambda ()
+                 (when accepted
+                   (websocket-close accepted))
+                 (websocket-close client)))))
+         (lambda ()
+           (websocket-server-close server)))))

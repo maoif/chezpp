@@ -125,8 +125,9 @@
     (lambda (who x)
       (cond
        [(ffi-would-block? x) #f]
-       [(vector? x) (message-from-ffi x)]
+       [(ffi-error? x) (ensure-success who x)]
        [(eof-object? x) x]
+       [(vector? x) (message-from-ffi x)]
        [else (ensure-success who x)])))
 
   (define send-result
@@ -381,13 +382,17 @@ The `websocket-send/nonblocking` procedure attempts to send a WebSocket frame wi
 The `websocket-recv` procedure receives the next complete WebSocket message.
 |#
   (define-who websocket-recv
-    (lambda (conn)
-      (pcheck ([websocket-connection? conn])
-              (ensure-connection-open who conn)
-              (recv-result who
-                           (ffi-net-websocket-recv (websocket-connection-handle conn)
-                                                   0
-                                                   websocket-no-timeout)))))
+    (case-lambda
+      [(conn)
+       (websocket-recv conn websocket-default-timeout-ms)]
+      [(conn timeout-ms)
+       (pcheck ([websocket-connection? conn] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
+               (ensure-connection-open who conn)
+               (recv-result who
+                            (ffi-net-websocket-recv (websocket-connection-handle conn)
+                                                    0
+                                                    timeout-ms)))]))
 
   #|proc:websocket-recv/nonblocking
 The `websocket-recv/nonblocking` procedure receives the next complete WebSocket message if one is ready, and returns `#f` otherwise.
@@ -405,9 +410,12 @@ The `websocket-recv/nonblocking` procedure receives the next complete WebSocket 
 The `websocket-next-message` procedure is an alias of `websocket-recv`.
 |#
   (define-who websocket-next-message
-    (lambda (conn)
-      (pcheck ([websocket-connection? conn])
-              (websocket-recv conn))))
+    (case-lambda
+      [(conn)
+       (websocket-recv conn)]
+      [(conn timeout-ms)
+       (pcheck ([websocket-connection? conn] [fixnum? timeout-ms])
+               (websocket-recv conn timeout-ms))]))
 
   #|proc:call-with-websocket
 The `call-with-websocket` procedure opens a WebSocket connection, passes it to `proc`, and closes it afterward.
