@@ -3,6 +3,34 @@
 
 (load "net-common.ss")
 
+(define http-net-error-message?
+  (lambda (message thunk)
+    (guard (c [else
+               (and (net-error? c)
+                    (equal? (net-error-message c) message))])
+      (thunk)
+      #f)))
+
+(define start-http-dispatch-loop-server
+  (lambda (serve-count setup . maybe-tls-ctx)
+    (let* ([tls-ctx (if (null? maybe-tls-ctx) #f (car maybe-tls-ctx))]
+           [port (reserve-loopback-port)]
+           [server (http-listen "127.0.0.1" port tls-ctx)]
+           [done? #f])
+      (setup server)
+      (values server
+              port
+              (fork-thread
+               (lambda ()
+                 (let loop ([n serve-count])
+                   (unless (or done? (= n 0))
+                     (guard (c [else #f])
+                       (http-serve server))
+                     (loop (- n 1))))))
+              (lambda ()
+                (set! done? #t)
+                (http-server-close server))))))
+
 (mat net-http-runtime
      (let-values ([(server port th)
                    (start-http-connection-server
@@ -145,3 +173,94 @@
                (thread-join th)
                (and (= (http-response-status resp) 200)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
+
+(mat net-http-timeout
+     (let-values ([(server port th stop)
+                   (start-http-dispatch-loop-server
+                    1
+                    (lambda (server)
+                      (http-register-handler!
+                       server
+                       'get
+                       "/slow"
+                       (lambda (req)
+                         (milisleep 150)
+                         (make-http-response 200 "OK" '() "slow")))))])
+       (let ([client (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (http-set-timeout! client 50)
+             (http-net-error-message?
+              "HTTP request timed out"
+              (lambda ()
+                (http-get client (format "http://127.0.0.1:~a/slow" port)))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join th)))))
+     (let-values ([(server port th stop)
+                   (start-http-dispatch-loop-server
+                    2
+                    (lambda (server)
+                      (http-register-handler!
+                       server
+                       'get
+                       "/a"
+                       (lambda (req)
+                         (milisleep 40)
+                         (make-http-response
+                          302
+                          "Found"
+                          '(("Location" . "/b"))
+                          #f)))
+                      (http-register-handler!
+                       server
+                       'get
+                       "/b"
+                       (lambda (req)
+                         (milisleep 40)
+                         (make-http-response 200 "OK" '() "done")))))])
+       (let ([client (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (http-set-timeout! client 60)
+             (http-follow-redirects! client #t)
+             (http-net-error-message?
+              "HTTP request timed out"
+              (lambda ()
+                (http-get client (format "http://127.0.0.1:~a/a" port)))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join th)))))
+     (let ([server-ctx (make-test-http-server-context)]
+           [client-ctx (make-test-http-client-context)])
+       (let-values ([(server port th stop)
+                     (start-http-dispatch-loop-server
+                      1
+                      (lambda (server)
+                        (http-register-handler!
+                         server
+                         'get
+                         "/slow"
+                         (lambda (req)
+                           (milisleep 150)
+                           (make-http-response 200 "OK" '() "secure"))))
+                      server-ctx)])
+         (let ([client (http-open client-ctx)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (http-set-timeout! client 50)
+               (http-net-error-message?
+                "HTTP request timed out"
+                (lambda ()
+                  (http-get client (format "https://127.0.0.1:~a/slow" port)))))
+             (lambda ()
+               (http-close client)
+               (stop)
+               (thread-join th)
+               (close-tls-context client-ctx)
+               (close-tls-context server-ctx)))))))

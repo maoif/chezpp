@@ -173,6 +173,132 @@
       (when (http-connection-closed? conn)
         (raise-net-error who 'http "HTTP connection is closed" conn))))
 
+  (define current-time-ms
+    (lambda ()
+      (let ([t (current-time)])
+        (+ (* (time-second t) 1000)
+           (quotient (time-nanosecond t) 1000000)))))
+
+  (define timeout->deadline-ms
+    (lambda (timeout-ms)
+      (and (fx>= timeout-ms 0)
+           (+ (current-time-ms) timeout-ms))))
+
+  (define remaining-timeout-ms
+    (lambda (deadline-ms)
+      (and deadline-ms
+           (max 0 (- deadline-ms (current-time-ms))))))
+
+  (define raise-http-timeout
+    (lambda (who detail data)
+      (raise-net-error who 'http detail data)))
+
+  (define tls-timeout-condition?
+    (lambda (c)
+      (and (net-error? c)
+           (eq? (net-error-kind c) 'tls)
+           (string-contains? (net-error-message c) "timed out"))))
+
+  (define call-with-http-timeout-translation
+    (lambda (who thunk)
+      (guard (c [else
+                 (if (tls-timeout-condition? c)
+                     (raise-http-timeout who "HTTP request timed out" c)
+                     (raise c))])
+        (thunk))))
+
+  (define wait-socket-ready!
+    (lambda (who sock event* deadline-ms detail)
+      (let* ([timeout-ms (let ([x (remaining-timeout-ms deadline-ms)])
+                           (if x x -1))]
+             [target (car (poll (list (make-poll-target sock event*)) timeout-ms))]
+             [ready (poll-target-ready-events target)])
+        (when (null? ready)
+          (raise-http-timeout who detail sock))
+        ready)))
+
+  (define make-deadline-socket-input-port
+    (lambda (who sock deadline-ms)
+      (make-custom-binary-input-port
+       "chezpp-http-client-input"
+       (lambda (bv start count)
+         (let ([stop (fx+ start count)])
+           (let loop ()
+             (let ([n (socket-recv!/nonblocking sock bv start stop)])
+               (cond
+                [(fixnum? n) n]
+                [(eof-object? n) 0]
+                [else
+                 (wait-socket-ready! who
+                                     sock
+                                     '(read error hup invalid)
+                                     deadline-ms
+                                     "HTTP request timed out")
+                 (loop)])))))
+       (lambda () #f)
+       (lambda (x) #f)
+       (lambda () #t))))
+
+  (define make-deadline-socket-output-port
+    (lambda (who sock deadline-ms)
+      (make-custom-binary-output-port
+       "chezpp-http-client-output"
+       (lambda (bv start count)
+         (let ([stop (fx+ start count)])
+           (let loop ([i start])
+             (if (fx= i stop)
+                 count
+                 (let ([n (socket-send/nonblocking sock bv i stop)])
+                   (if n
+                       (loop (fx+ i n))
+                       (begin
+                         (wait-socket-ready! who
+                                             sock
+                                             '(write error hup invalid)
+                                             deadline-ms
+                                             "HTTP request timed out")
+                         (loop i))))))))
+       (lambda () #f)
+       (lambda (x) #f)
+       (lambda () #t))))
+
+  (define make-deadline-tls-input-port
+    (lambda (who session deadline-ms)
+      (make-custom-binary-input-port
+       "chezpp-http-client-tls-input"
+       (lambda (bv start count)
+         (call-with-http-timeout-translation
+          who
+          (lambda ()
+            (let ([n (tls-read! session
+                                bv
+                                start
+                                (fx+ start count)
+                                (let ([x (remaining-timeout-ms deadline-ms)])
+                                  (if x x -1)))])
+              (if (eof-object? n) 0 n)))))
+       (lambda () #f)
+       (lambda (x) #f)
+       (lambda () #t))))
+
+  (define make-deadline-tls-output-port
+    (lambda (who session deadline-ms)
+      (make-custom-binary-output-port
+       "chezpp-http-client-tls-output"
+       (lambda (bv start count)
+         (call-with-http-timeout-translation
+          who
+          (lambda ()
+            (tls-write-all session
+                           bv
+                           start
+                           (fx+ start count)
+                           (let ([x (remaining-timeout-ms deadline-ms)])
+                             (if x x -1))))))
+       (lambda () #f)
+       (lambda (x) #f)
+       (lambda () #t))))
+
   (define body->bytevector
     (lambda (body)
       (cond
@@ -437,30 +563,47 @@
                                 (normalize-response-body status method headers body)))))))
 
   (define open-http-connection
-    (lambda (who client request)
+    (lambda (who client request deadline-ms)
       (let* ([u (http-request-uri request)]
              [host (or (uri-host u) "localhost")]
              [port (default-port-for-uri who u)]
              [address (or (resolve-address host port #f 'stream)
                           (raise-net-error who 'http "failed to resolve HTTP endpoint" u))]
              [sock (open-socket (socket-address-family address) 'stream)])
-        (socket-connect! sock address)
+        (socket-set-blocking! sock #f)
+        (unless (socket-connect! sock address)
+          (let ([ready (wait-socket-ready! who
+                                           sock
+                                           '(write error hup invalid)
+                                           deadline-ms
+                                           "HTTP request timed out")])
+            (when (and (memq 'error ready) (not (memq 'write ready)))
+              (raise-net-error who 'http "HTTP connect failed" address))
+            (when (memq 'invalid ready)
+              (raise-net-error who 'http "HTTP connect failed" address))))
         (if (string=? (uri-scheme u) "https")
             (let* ([ctx (or (http-client-tls-context client)
                             (let ([ctx (make-tls-context 'client)])
                               (tls-context-set-verify! ctx #f)
                               ctx))]
-                   [session (tls-connect ctx sock host)])
+                   [session (call-with-http-timeout-translation
+                             who
+                             (lambda ()
+                               (tls-connect ctx
+                                            sock
+                                            host
+                                            (let ([x (remaining-timeout-ms deadline-ms)])
+                                              (if x x -1)))))])
               (%make-http-connection sock
                                      session
-                                     (open-tls-input-port session)
-                                     (open-tls-output-port session)
+                                     (make-deadline-tls-input-port who session deadline-ms)
+                                     (make-deadline-tls-output-port who session deadline-ms)
                                      #t
                                      #f))
             (%make-http-connection sock
                                    #f
-                                   (open-socket-input-port sock)
-                                   (open-socket-output-port sock)
+                                   (make-deadline-socket-input-port who sock deadline-ms)
+                                   (make-deadline-socket-output-port who sock deadline-ms)
                                    #f
                                    #f)))))
 
@@ -493,8 +636,8 @@
                                       (http-request-body request))))))))
 
   (define http-send*
-    (lambda (who client request redirects-left)
-      (let ([conn (open-http-connection who client request)])
+    (lambda (who client request redirects-left deadline-ms)
+      (let ([conn (open-http-connection who client request deadline-ms)])
         (dynamic-wind
           void
           (lambda ()
@@ -509,7 +652,7 @@
                        (redirect-status? (http-response-status response)))
                   (let ([next-request (redirect-request request response)])
                     (if next-request
-                        (http-send* who client next-request (fx1- redirects-left))
+                        (http-send* who client next-request (fx1- redirects-left) deadline-ms)
                         response))
                   response)))
           (lambda ()
@@ -701,7 +844,12 @@ The `http-send` procedure sends an HTTP request with a configured client and ret
     (lambda (client request)
       (pcheck ([http-client? client] [http-request? request])
               (ensure-client-open who client)
-              (http-send* who client request 5))))
+              (http-send* who
+                          client
+                          request
+                          5
+                          (timeout->deadline-ms
+                           (http-client-timeout-ms client))))))
 
   #|proc:http-request
 The `http-request` procedure sends a one-shot HTTP request without manually managing a client object.
