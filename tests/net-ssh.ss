@@ -13,6 +13,17 @@
       (thunk)
       #f)))
 
+(define ssh-error-message-contains?
+  (lambda (fragment thunk)
+    (guard (c [else
+               (and (condition? c)
+                    (string-contains?
+                     (call-with-string-output-port
+                      (lambda (p) (display-condition c p)))
+                     fragment))])
+      (thunk)
+      #f)))
+
 (define start-stalled-ssh-banner-server
   (lambda (delay-ms)
     (let ([listener (open-socket 'inet 'stream)])
@@ -78,3 +89,65 @@
            (thread-join th)
            (guard (c [else #f])
              (close-socket listener)))))
+
+(mat net-ssh-timeout-validation
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME"
+            home
+            (lambda ()
+              (and
+               (ssh-error-message-contains?
+                "timeout must be non-negative"
+                (lambda ()
+                  (ssh-open "127.0.0.1" port user -1)))
+               (ssh-error-message-contains?
+                "timeout must be non-negative"
+                (lambda ()
+                  (call-with-ssh-session "127.0.0.1" port user -1 ssh-session?)))
+               (let ([session (ssh-open "127.0.0.1" port user)])
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (and
+                      (eq? (ssh-auth-publickey! session user) session)
+                      (ssh-error-message-contains?
+                       "timeout must be non-negative"
+                       (lambda ()
+                         (ssh-open-channel session -1)))
+                      (ssh-error-message-contains?
+                       "timeout must be non-negative"
+                       (lambda ()
+                         (call-with-ssh-channel session -1 ssh-channel?)))
+                      (let ([read-ch (ssh-exec session "printf data")]
+                            [write-bv (string->utf8 "x")]
+                            [buf (make-bytevector 4 0)])
+                        (dynamic-wind
+                          void
+                          (lambda ()
+                            (and
+                             (ssh-error-message-contains?
+                              "timeout must be non-negative"
+                              (lambda ()
+                                (ssh-read read-ch 1 -1)))
+                             (ssh-error-message-contains?
+                              "timeout must be non-negative"
+                              (lambda ()
+                                (ssh-read! read-ch buf 0 1 -1)))
+                             (ssh-error-message-contains?
+                              "timeout must be non-negative"
+                              (lambda ()
+                                (ssh-write read-ch write-bv 0 1 -1)))
+                             (ssh-error-message-contains?
+                              "timeout must be non-negative"
+                              (lambda ()
+                                (ssh-write-all read-ch write-bv 0 1 -1)))))
+                          (lambda ()
+                            (ssh-close-channel read-ch))))))
+                   (lambda ()
+                     (ssh-close session))))))))
+         (lambda ()
+           (stop-server)))))
