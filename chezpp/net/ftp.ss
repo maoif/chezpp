@@ -2,6 +2,7 @@
   (export ftp-session?
           ftp-open
           ftp-close
+          ftp-cancel-pending!
           ftp-login!
           ftp-quit!
           ftp-list
@@ -41,7 +42,8 @@
             (immutable writer ftp-pending-writer)
             (immutable thread ftp-pending-thread)
             (mutable done? ftp-pending-done? ftp-pending-done?-set!)
-            (mutable result ftp-pending-result ftp-pending-result-set!)))
+            (mutable result ftp-pending-result ftp-pending-result-set!)
+            (mutable cancelled? ftp-pending-cancelled? ftp-pending-cancelled?-set!)))
 
   (define-record-type (ftp-session %make-ftp-session ftp-session?)
     (sealed #t)
@@ -268,13 +270,16 @@
                      writer
                      (fork-thread
                       (lambda ()
-                        (ftp-pending-result-set!
-                         pending
-                         (guard (c [else c])
-                           (thunk)))
+                        (let ([result
+                               (guard (c [else c])
+                                 (thunk))])
+                          (when (ftp-pending-cancelled? pending)
+                            (set! result #f))
+                          (ftp-pending-result-set! pending result))
                         (ftp-pending-done?-set! pending #t)
                         (guard (c [else #f])
                           (socket-send-all writer #vu8(1)))))
+                     #f
                      #f
                      #f)])
             (ftp-session-pending-set! session pending)
@@ -297,6 +302,13 @@
         (if (condition? result)
             (raise result)
             result))))
+
+  (define cancel-pending!
+    (lambda (session pending)
+      (ftp-pending-cancelled?-set! pending #t)
+      (close-pending-notifier! pending)
+      (ftp-session-pending-set! session #f)
+      session))
 
   (define ftp-transfer/nonblocking
     (lambda (who session kind args thunk)
@@ -413,7 +425,21 @@ The `ftp-close` procedure marks an FTP session as closed.
   (define-who ftp-close
     (lambda (session)
       (pcheck ([ftp-session? session])
+              (let ([pending (ftp-session-pending session)])
+                (when pending
+                  (cancel-pending! session pending)))
               (ftp-session-closed?-set! session #t)
+              session)))
+
+  #|proc:ftp-cancel-pending!
+The `ftp-cancel-pending!` procedure cancels and discards the currently pending non-blocking FTP operation on a session, if any.
+|#
+  (define-who ftp-cancel-pending!
+    (lambda (session)
+      (pcheck ([ftp-session? session])
+              (let ([pending (ftp-session-pending session)])
+                (when pending
+                  (cancel-pending! session pending)))
               session)))
 
   #|proc:ftp-quit!

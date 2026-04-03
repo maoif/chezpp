@@ -233,6 +233,23 @@
            (lambda ()
              (stop-server))))))
 
+(mat net-ftp-cancel-pending
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (ftp-login! session "user" "pass")
+                  (eq? (ftp-cancel-pending! session) session)
+                  (not (ftp-list/nonblocking session "/slow"))
+                  (eq? (ftp-cancel-pending! session) session)
+                  (let ([entries (ftp-list session)])
+                    (and (list? entries)
+                         (not (not (member "docs" entries)))
+                         (not (not (member "hello.txt" entries)))))))
+           (lambda ()
+             (stop-server))))))
+
 (mat net-ftp-download-nonblocking
      (let-values ([(root port stop-server) (start-ftp-test-server)])
        (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
