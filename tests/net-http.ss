@@ -31,6 +31,18 @@
                 (set! done? #t)
                 (http-server-close server))))))
 
+(define await-http-nonblocking
+  (lambda (thunk)
+    (let loop ([i 0])
+      (let ([ans (thunk)])
+        (if ans
+            ans
+            (begin
+              (when (> i 100)
+                (error 'await-http-nonblocking "HTTP nonblocking operation did not complete"))
+              (milisleep 10)
+              (loop (+ i 1))))))))
+
 (mat net-http-runtime
      (let-values ([(server port th)
                    (start-http-connection-server
@@ -264,3 +276,146 @@
                (thread-join th)
                (close-tls-context client-ctx)
                (close-tls-context server-ctx)))))))
+
+(mat net-http-nonblocking
+     (let-values ([(server port th stop)
+                   (start-http-dispatch-loop-server
+                    1
+                    (lambda (server)
+                      (http-register-handler!
+                       server
+                       'get
+                       "/slow"
+                       (lambda (req)
+                         (milisleep 60)
+                         (make-http-response 200 "OK" '() "nb-ok")))))])
+       (let ([client (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let* ([request (make-http-request 'get
+                                                (format "http://127.0.0.1:~a/slow" port)
+                                                '()
+                                                #f)]
+                    [first (http-send/nonblocking client request)])
+               (let ([resp (await-http-nonblocking
+                            (lambda ()
+                              (http-send/nonblocking client request)))])
+                 (and (not first)
+                      (= (http-response-status resp) 200)
+                      (equal? (utf8->string (http-response-body resp)) "nb-ok")))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join th)))))
+     (let-values ([(server port th stop)
+                   (start-http-dispatch-loop-server
+                    1
+                    (lambda (server)
+                      (http-register-handler!
+                       server
+                       'post
+                       "/echo"
+                       (lambda (req)
+                         (milisleep 60)
+                         (make-http-response 200
+                                             "OK"
+                                             '(("Content-Type" . "text/plain"))
+                                             (http-request-body req))))))])
+       (let ([client (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let ([first (http-request/nonblocking client
+                                                    'post
+                                                    (format "http://127.0.0.1:~a/echo" port)
+                                                    '(("Content-Type" . "text/plain"))
+                                                    "payload")])
+               (let ([resp (await-http-nonblocking
+                            (lambda ()
+                              (http-request/nonblocking client
+                                                        'post
+                                                        (format "http://127.0.0.1:~a/echo" port)
+                                                        '(("Content-Type" . "text/plain"))
+                                                        "payload")))])
+                 (and (not first)
+                      (= (http-response-status resp) 200)
+                      (equal? (utf8->string (http-response-body resp)) "payload")))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join th)))))
+     (let* ([download-path "/tmp/chezpp-net-download-nonblocking.bin"]
+            [payload #vu8(10 20 30 40)])
+       (let-values ([(server port th stop)
+                     (start-http-dispatch-loop-server
+                      1
+                      (lambda (server)
+                        (http-register-handler!
+                         server
+                         'get
+                         "/download-nb"
+                         (lambda (req)
+                           (milisleep 60)
+                           (make-http-response
+                            200
+                            "OK"
+                            '(("Content-Type" . "application/octet-stream"))
+                            payload)))))])
+         (let ([client (http-open)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (let ([first (http-download/nonblocking
+                             client
+                             (format "http://127.0.0.1:~a/download-nb" port)
+                             download-path)])
+                 (let ([resp (await-http-nonblocking
+                              (lambda ()
+                                (http-download/nonblocking
+                                 client
+                                 (format "http://127.0.0.1:~a/download-nb" port)
+                                 download-path)))])
+                   (and (not first)
+                        (= (http-response-status resp) 200)
+                        (equal? (http-response-body resp) payload)
+                        (equal? (read-u8vec download-path) payload)))))
+             (lambda ()
+               (http-close client)
+               (stop)
+               (thread-join th))))))
+     (let* ([upload-path "/tmp/chezpp-net-upload-nonblocking.bin"]
+            [payload (string->utf8 "nb-upload")])
+       (write-bytevector-file upload-path payload)
+       (let-values ([(server port th stop)
+                     (start-http-dispatch-loop-server
+                      1
+                      (lambda (server)
+                        (http-register-handler!
+                         server
+                         'put
+                         "/upload-nb"
+                         (lambda (req)
+                           (milisleep 60)
+                           (make-http-response 200 "OK" '() (http-request-body req))))))])
+         (let ([client (http-open)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (let ([first (http-upload/nonblocking
+                             client
+                             (format "http://127.0.0.1:~a/upload-nb" port)
+                             upload-path)])
+                 (let ([resp (await-http-nonblocking
+                              (lambda ()
+                                (http-upload/nonblocking
+                                 client
+                                 (format "http://127.0.0.1:~a/upload-nb" port)
+                                 upload-path)))])
+                   (and (not first)
+                        (= (http-response-status resp) 200)
+                        (equal? (http-response-body resp) payload)))))
+             (lambda ()
+               (http-close client)
+               (stop)
+               (thread-join th)))))))

@@ -29,6 +29,10 @@
           http-follow-redirects!
           http-set-header!
           http-set-timeout!
+          http-send/nonblocking
+          http-request/nonblocking
+          http-download/nonblocking
+          http-upload/nonblocking
           http-server?
           http-listen
           http-server-close
@@ -80,7 +84,20 @@
             (mutable follow-redirects? http-client-follow-redirects? http-client-follow-redirects?-set!)
             (mutable timeout-ms http-client-timeout-ms http-client-timeout-ms-set!)
             (immutable tls-context http-client-tls-context)
+            (mutable pending http-client-pending http-client-pending-set!)
             (mutable closed? http-client-closed? http-client-closed?-set!)))
+
+  (define-record-type (http-pending-op %make-http-pending-op http-pending-op?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable kind http-pending-kind)
+            (immutable args http-pending-args)
+            (immutable reader http-pending-reader)
+            (immutable writer http-pending-writer)
+            (immutable thread http-pending-thread)
+            (mutable done? http-pending-done? http-pending-done?-set!)
+            (mutable result http-pending-result http-pending-result-set!)
+            (mutable cancelled? http-pending-cancelled? http-pending-cancelled?-set!)))
 
   (define-record-type (http-server %make-http-server http-server?)
     (sealed #t)
@@ -163,6 +180,14 @@
       (when (http-client-closed? client)
         (raise-net-error who 'http "HTTP client is closed" client))))
 
+  (define ensure-no-pending-mismatch
+    (lambda (who client kind args)
+      (let ([pending (http-client-pending client)])
+        (when (and pending
+                   (or (not (eq? (http-pending-kind pending) kind))
+                       (not (equal? (http-pending-args pending) args))))
+          (raise-net-error who 'http "another nonblocking HTTP operation is pending" pending)))))
+
   (define ensure-server-open
     (lambda (who server)
       (when (http-server-closed? server)
@@ -188,6 +213,102 @@
     (lambda (deadline-ms)
       (and deadline-ms
            (max 0 (- deadline-ms (current-time-ms))))))
+
+  (define close-pending-notifier!
+    (lambda (pending)
+      (guard (c [else #f])
+        (close-socket (http-pending-reader pending)))
+      (guard (c [else #f])
+        (close-socket (http-pending-writer pending)))))
+
+  (define open-pending-notifier
+    (lambda ()
+      (let ([listener (open-socket 'inet 'stream)]
+            [client #f]
+            [server #f])
+        (dynamic-wind
+          void
+          (lambda ()
+            (socket-set-option! listener 'reuse-address #t)
+            (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+            (socket-listen! listener 1)
+            (let ([addr (socket-local-address listener)])
+              (set! client (open-socket 'inet 'stream))
+              (socket-connect! client addr)
+              (let-values ([(accepted peer) (socket-accept listener)])
+                (set! server accepted)
+                (values server client))))
+          (lambda ()
+            (guard (c [else #f])
+              (close-socket listener)))))))
+
+  (define start-pending!
+    (lambda (client kind args thunk)
+      (let-values ([(reader writer) (open-pending-notifier)])
+        (letrec ([pending
+                  (%make-http-pending-op
+                   kind
+                   args
+                   reader
+                   writer
+                   (fork-thread
+                    (lambda ()
+                      (let ([result
+                             (guard (c [else c])
+                               (thunk))])
+                        (when (http-pending-cancelled? pending)
+                          (set! result #f))
+                        (http-pending-result-set! pending result))
+                      (http-pending-done?-set! pending #t)
+                      (guard (c [else #f])
+                        (socket-send-all writer #vu8(1)))))
+                   #f
+                   #f
+                   #f)])
+          (http-client-pending-set! client pending)
+          pending))))
+
+  (define pending-ready?
+    (lambda (pending)
+      (or (http-pending-done? pending)
+          (let* ([target (make-poll-target (http-pending-reader pending)
+                                           '(read error hup invalid))]
+                 [ready (car (poll/nonblocking (list target)))])
+            (pair? (poll-target-ready-events ready))))))
+
+  (define finish-pending!
+    (lambda (who client pending)
+      (http-client-pending-set! client #f)
+      (thread-join (http-pending-thread pending))
+      (close-pending-notifier! pending)
+      (let ([result (http-pending-result pending)])
+        (if (condition? result)
+            (raise result)
+            result))))
+
+  (define cancel-pending!
+    (lambda (client pending)
+      (http-pending-cancelled?-set! pending #t)
+      (close-pending-notifier! pending)
+      (http-client-pending-set! client #f)
+      client))
+
+  (define http-transfer/nonblocking
+    (lambda (who client kind args thunk)
+      (ensure-client-open who client)
+      (ensure-no-pending-mismatch who client kind args)
+      (let ([pending (or (http-client-pending client)
+                         (start-pending! client kind args thunk))])
+        (if (pending-ready? pending)
+            (finish-pending! who client pending)
+            #f))))
+
+  (define request-key
+    (lambda (request)
+      (list (http-request-method request)
+            (uri->string (http-request-uri request))
+            (http-request-headers request)
+            (http-request-body request))))
 
   (define raise-http-timeout
     (lambda (who detail data)
@@ -789,10 +910,10 @@ The `http-open` procedure constructs an HTTP client with optional TLS context st
   (define-who http-open
     (case-lambda
       [()
-       (%make-http-client '() #f 30000 #f #f)]
+       (%make-http-client '() #f 30000 #f #f #f)]
       [(tls-context)
        (pcheck ([tls-context? tls-context])
-               (%make-http-client '() #f 30000 tls-context #f))]))
+               (%make-http-client '() #f 30000 tls-context #f #f))]))
 
   #|proc:http-close
 The `http-close` procedure marks an HTTP client as closed.
@@ -800,6 +921,9 @@ The `http-close` procedure marks an HTTP client as closed.
   (define-who http-close
     (lambda (client)
       (pcheck ([http-client? client])
+              (let ([pending (http-client-pending client)])
+                (when pending
+                  (cancel-pending! client pending)))
               (http-client-closed?-set! client #t)
               client)))
 
@@ -851,6 +975,20 @@ The `http-send` procedure sends an HTTP request with a configured client and ret
                           (timeout->deadline-ms
                            (http-client-timeout-ms client))))))
 
+  #|proc:http-send/nonblocking
+The `http-send/nonblocking` procedure progresses an HTTP request without blocking and returns `#f` while the response is still pending.
+|#
+  (define-who http-send/nonblocking
+    (lambda (client request)
+      (pcheck ([http-client? client] [http-request? request])
+              (http-transfer/nonblocking
+               who
+               client
+               'send
+               (request-key request)
+               (lambda ()
+                 (http-send client request))))))
+
   #|proc:http-request
 The `http-request` procedure sends a one-shot HTTP request without manually managing a client object.
 |#
@@ -868,6 +1006,26 @@ The `http-request` procedure sends a one-shot HTTP request without manually mana
              (http-send client (make-http-request method uri headers body)))
            (lambda ()
              (http-close client))))]))
+
+  #|proc:http-request/nonblocking
+The `http-request/nonblocking` procedure progresses a one-client HTTP request without blocking and returns `#f` while the response is still pending.
+|#
+  (define-who http-request/nonblocking
+    (case-lambda
+      [(client method uri)
+       (http-request/nonblocking client method uri '() #f)]
+      [(client method uri headers)
+       (http-request/nonblocking client method uri headers #f)]
+      [(client method uri headers body)
+       (pcheck ([http-client? client])
+               (let ([request (make-http-request method uri headers body)])
+                 (http-transfer/nonblocking
+                  who
+                  client
+                  'request
+                  (request-key request)
+                  (lambda ()
+                    (http-send client request)))))]))
 
   (define make-http-verb
     (lambda (method)
@@ -929,6 +1087,20 @@ The `http-download` procedure downloads a response body to `path` and returns th
                    (write-u8vec! path (http-response-body response)))
                  response))]))
 
+  #|proc:http-download/nonblocking
+The `http-download/nonblocking` procedure progresses a download without blocking and returns `#f` while the response is still pending.
+|#
+  (define-who http-download/nonblocking
+    (lambda (client uri path)
+      (pcheck ([http-client? client] [string? path])
+              (http-transfer/nonblocking
+               who
+               client
+               'download
+               (list (if (uri? uri) (uri->string uri) uri) path)
+               (lambda ()
+                 (http-download client uri path))))))
+
   #|proc:http-upload
 The `http-upload` procedure uploads a file as a PUT request body and returns the HTTP response.
 |#
@@ -948,6 +1120,20 @@ The `http-upload` procedure uploads a file as a PUT request body and returns the
                          uri
                          '(("Content-Type" . "application/octet-stream"))
                          (read-u8vec path)))]))
+
+  #|proc:http-upload/nonblocking
+The `http-upload/nonblocking` procedure progresses an upload without blocking and returns `#f` while the response is still pending.
+|#
+  (define-who http-upload/nonblocking
+    (lambda (client uri path)
+      (pcheck ([http-client? client] [string? path])
+              (http-transfer/nonblocking
+               who
+               client
+               'upload
+               (list (if (uri? uri) (uri->string uri) uri) path)
+               (lambda ()
+                 (http-upload client uri path))))))
 
   ;;===----------------------------------------------------------------------===
   ;; Server API
