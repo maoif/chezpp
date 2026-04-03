@@ -392,8 +392,20 @@
                         (loop)))))])
          (let ([ok?
                 (let ([client (rpc-open "127.0.0.1" port)])
-                  (let ([client-ok?
+                 (let ([client-ok?
                          (and
+                          (eq? (rpc-cancel-pending! client) client)
+                          (not (rpc-call/nonblocking
+                                client
+                                rpc-greeter-hello
+                                (make-rpc-hello-request "slow" #f)
+                                500))
+                          (eq? (rpc-cancel-pending! client) client)
+                          (rpc-reply-ok? (rpc-call client
+                                                   rpc-greeter-hello
+                                                   (make-rpc-hello-request "fast" #f)
+                                                   500)
+                                         "hello fast/default")
                           (not (rpc-call/nonblocking
                                 client
                                 rpc-greeter-hello

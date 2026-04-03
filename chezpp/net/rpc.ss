@@ -3,6 +3,7 @@
           define-rpc-service
           rpc-open
           rpc-close
+          rpc-cancel-pending!
           rpc-call
           rpc-call/server-stream
           rpc-call/server-stream/nonblocking
@@ -258,7 +259,8 @@
             (immutable writer rpc-pending-writer)
             (immutable thread rpc-pending-thread)
             (mutable done? rpc-pending-done? rpc-pending-done?-set!)
-            (mutable result rpc-pending-result rpc-pending-result-set!)))
+            (mutable result rpc-pending-result rpc-pending-result-set!)
+            (mutable cancelled? rpc-pending-cancelled? rpc-pending-cancelled?-set!)))
 
   (define-record-type (rpc-channel %make-rpc-channel rpc-channel?)
     (sealed #t)
@@ -652,6 +654,16 @@
       (close-pending-notifier! pending)
       (rpc-channel-pending-set! channel #f)))
 
+  (define cancel-pending!
+    (lambda (channel pending)
+      (rpc-pending-cancelled?-set! pending #t)
+      (let ([result (rpc-pending-result pending)])
+        (when (rpc-stream? result)
+          (guard (c [else #f])
+            (rpc-stream-close result))
+          (rpc-pending-result-set! pending #f)))
+      (clear-pending! channel pending)))
+
   (define pending-timeout-message
     (lambda (pending)
       (case (rpc-pending-kind pending)
@@ -679,7 +691,7 @@
 
   (define raise-pending-timeout!
     (lambda (who channel pending)
-      (clear-pending! channel pending)
+      (cancel-pending! channel pending)
       (raise-net-error who 'rpc (pending-timeout-message pending) pending)))
 
   (define call-with-pending-cleanup
@@ -687,7 +699,7 @@
       (guard (c [else
                  (let ([pending (rpc-channel-pending channel)])
                    (when pending
-                     (clear-pending! channel pending)))
+                     (cancel-pending! channel pending)))
                  (raise c)])
         (thunk))))
 
@@ -741,6 +753,7 @@
                                     #f
                                     #f
                                     #f
+                                    #f
                                     #f))
             (unless ans
               (rpc-pending-stage-set! (rpc-channel-pending channel) 'connect)))))))
@@ -772,13 +785,19 @@
                      writer
                      (fork-thread
                       (lambda ()
-                        (rpc-pending-result-set!
-                         pending
-                         (guard (c [else c])
-                           (open-client-stream who channel method stream payload timeout-ms)))
+                        (let ([result
+                               (guard (c [else c])
+                                 (open-client-stream who channel method stream payload timeout-ms))])
+                          (when (and (rpc-stream? result)
+                                     (rpc-pending-cancelled? pending))
+                            (guard (c [else #f])
+                              (rpc-stream-close result))
+                            (set! result #f))
+                          (rpc-pending-result-set! pending result))
                         (rpc-pending-done?-set! pending #t)
                         (guard (c [else #f])
                           (socket-send-all writer #vu8(1)))))
+                     #f
                      #f
                      #f)])
             (rpc-channel-pending-set! channel pending)
@@ -1011,12 +1030,23 @@ The `rpc-close` procedure closes an RPC channel or listener.
               (unless (rpc-channel-closed? channel)
                 (let ([pending (rpc-channel-pending channel)])
                   (when pending
-                    (clear-pending! channel pending)))
+                    (cancel-pending! channel pending)))
                 (let ([sock (rpc-channel-socket channel)])
                   (when sock
                     (close-socket sock)
                     (rpc-channel-socket-set! channel #f)))
                 (rpc-channel-closed?-set! channel #t))
+              channel)))
+
+  #|proc:rpc-cancel-pending!
+The `rpc-cancel-pending!` procedure cancels and discards the currently pending non-blocking RPC operation on a channel, if any.
+|#
+  (define-who rpc-cancel-pending!
+    (lambda (channel)
+      (pcheck ([rpc-channel? channel])
+              (let ([pending (rpc-channel-pending channel)])
+                (when pending
+                  (cancel-pending! channel pending)))
               channel)))
 
   #|proc:rpc-register-handler!
