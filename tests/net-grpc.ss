@@ -72,6 +72,14 @@
               (milisleep 10)
               (loop)))))))
 
+(define grpc-net-error-message?
+  (lambda (message thunk)
+    (guard (c [else
+               (and (net-error? c)
+                    (equal? (net-error-message c) message))])
+      (thunk)
+      #f)))
+
 (define grpc-server-stream-ok?
   (lambda (client)
     (let ([stream (grpc-call/server-stream
@@ -332,3 +340,103 @@
             (grpc-server-stream-nonblocking-ok? client)
             (grpc-client-stream-nonblocking-ok? client)
             (grpc-bidi-stream-nonblocking-ok? client)))))))
+
+(mat net-grpc-errors
+     (with-grpc-env
+      (lambda ()
+        (call-with-grpc-peer
+         3
+         (lambda (server)
+           (grpc-register-service!
+            server
+            "/chezpp.test.Echo/UnarySlow"
+            (lambda (req)
+              (when (equal? (utf8->string (grpc-request-payload req)) "slow")
+                (milisleep 100))
+              (grpc-response (grpc-request-payload req) '() 0 "")))
+           (grpc-register-service!
+            server
+            "/chezpp.test.Echo/ServerStream"
+            'server
+            (lambda (stream)
+              (let ([payload (grpc-stream-recv stream)])
+                (when (bytevector? payload)
+                  (grpc-stream-send
+                   stream
+                   (string-append (utf8->string payload) ":0")))
+                #f)))
+           (grpc-register-service!
+            server
+            "/chezpp.test.Echo/ClientStream"
+            'client
+            (lambda (stream)
+              (let loop ([total 0])
+                (let ([payload (grpc-stream-recv stream)])
+                  (if (eof-object? payload)
+                      (string-append "sum:" (number->string total))
+                      (loop (+ total (string->number (utf8->string payload))))))))))
+         (lambda (server client)
+           (and
+            (grpc-channel? server)
+            (grpc-channel? client)
+            (not (grpc-call/nonblocking
+                  client
+                  "/chezpp.test.Echo/UnarySlow"
+                  "slow"
+                  '()
+                  500))
+            (grpc-net-error-message?
+             "another nonblocking gRPC operation is pending"
+             (lambda ()
+               (grpc-call/nonblocking
+                client
+                "/chezpp.test.Echo/UnarySlow"
+                "fast"
+                '()
+                500)))
+            (let ([resp (wait-grpc-call/nonblocking
+                         client
+                         "/chezpp.test.Echo/UnarySlow"
+                         "slow"
+                         '()
+                         500)])
+              (and (grpc-response? resp)
+                   (equal? (utf8->string (grpc-response-payload resp)) "slow")))
+            (let ([stream (grpc-call/client-stream
+                           client
+                           "/chezpp.test.Echo/ClientStream"
+                           '()
+                           2000)])
+              (let ([ok-stream?
+                     (and
+                      (grpc-stream? stream)
+                      (eq? (grpc-stream-close-send stream) stream)
+                      (grpc-net-error-message?
+                       "gRPC stream send side is closed"
+                       (lambda ()
+                         (grpc-stream-send stream "1")))
+                      (equal? (utf8->string (grpc-stream-recv stream)) "sum:0")
+                      (eof-object? (grpc-stream-recv stream))
+                      (eq? (grpc-stream-close stream) stream)
+                      (eq? (grpc-stream-close stream) stream)
+                      (grpc-net-error-message?
+                       "gRPC stream is closed"
+                       (lambda ()
+                         (grpc-stream-recv stream))))])
+                ok-stream?))
+            (let ([stream (grpc-call/server-stream
+                           client
+                           "/chezpp.test.Echo/ServerStream"
+                           "watch"
+                           '()
+                           2000)])
+              (let ([ok-stream?
+                     (and
+                      (grpc-net-error-message?
+                       "gRPC stream does not support sending"
+                       (lambda ()
+                         (grpc-stream-send stream "bad")))
+                      (equal? (utf8->string (grpc-stream-recv stream)) "watch:0")
+                      (eof-object? (grpc-stream-recv stream)))])
+                (grpc-stream-close stream)
+                ok-stream?))))))))

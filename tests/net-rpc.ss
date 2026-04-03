@@ -81,6 +81,14 @@
       (thunk)
       #f)))
 
+(define rpc-net-error-message?
+  (lambda (message thunk)
+    (guard (c [else
+               (and (net-error? c)
+                    (equal? (net-error-message c) message))])
+      (thunk)
+      #f)))
+
 (define rpc-server-stream-ok?
   (lambda (client)
     (let ([stream (rpc-call/server-stream
@@ -241,6 +249,120 @@
                      (rpc-close client)
                      client-ok?))
                  (equal? seen-note "note-1"))])
+           (set! done? #t)
+           (guard (c [else #f])
+             (let ([wake (open-socket 'inet 'stream)])
+               (socket-connect! wake (make-socket-address 'inet "127.0.0.1" port))
+               (close-socket wake)))
+           (thread-join th)
+           (rpc-close server)
+           ok?))))
+
+(mat net-rpc-errors
+     (let* ([port (reserve-loopback-port)]
+            [server (rpc-open 'server "127.0.0.1" port)]
+            [done? #f])
+       (rpc-register-handler!
+        server
+        rpc-greeter-hello
+        (lambda (req)
+          (let ([msg (rpc-request-payload req)])
+            (when (equal? (rpc-hello-request-name msg) "slow")
+              (milisleep 100))
+            (make-rpc-hello-reply
+             (string-append "hello "
+                            (rpc-hello-request-name msg)
+                            "/"
+                            (or (rpc-hello-request-language msg) "default"))))))
+       (rpc-register-handler!
+        server
+        rpc-admin-note
+        (lambda (req)
+          (make-rpc-hello-reply "ok")))
+       (rpc-register-handler!
+        server
+        rpc-streaming-watch
+        (lambda (req stream)
+          (let ([msg (rpc-request-payload req)])
+            (let loop ([i 0])
+              (when (< i (rpc-watch-request-count msg))
+                (rpc-stream-send
+                 stream
+                 (make-rpc-hello-reply
+                  (format "~a~a"
+                          (rpc-watch-request-prefix msg)
+                          i)))
+                (loop (+ i 1)))))))
+       (rpc-register-handler!
+        server
+        rpc-streaming-sum
+        (lambda (stream)
+          (let loop ([total 0])
+            (let ([msg (rpc-stream-recv stream)])
+              (if (eof-object? msg)
+                  (make-rpc-sum-reply total)
+                  (loop (+ total (rpc-sum-part-value msg))))))))
+       (let ([th (fork-thread
+                  (lambda ()
+                    (let loop ()
+                      (unless done?
+                        (guard (c [else #f])
+                          (rpc-serve server))
+                        (loop)))))])
+         (let ([ok?
+                (let ([client (rpc-open "127.0.0.1" port)])
+                  (let ([client-ok?
+                         (and
+                          (not (rpc-call/nonblocking
+                                client
+                                rpc-greeter-hello
+                                (make-rpc-hello-request "slow" #f)
+                                500))
+                          (rpc-net-error-message?
+                           "another nonblocking RPC operation is pending"
+                           (lambda ()
+                             (rpc-notify/nonblocking
+                              client
+                              rpc-admin-note
+                              (make-rpc-note-request "mismatch")
+                              500)))
+                          (rpc-reply-ok? (wait-rpc-call client "slow" #f 500)
+                                         "hello slow/default")
+                          (let ([stream (rpc-call/client-stream client rpc-streaming-sum)])
+                            (let ([ok-stream?
+                                   (and
+                                    (rpc-stream? stream)
+                                    (eq? (rpc-stream-close-send stream) stream)
+                                    (rpc-net-error-message?
+                                     "RPC stream send side is closed"
+                                     (lambda ()
+                                       (rpc-stream-send stream (make-rpc-sum-part 1))))
+                                    (rpc-sum-reply? (rpc-stream-recv stream))
+                                    (eof-object? (rpc-stream-recv stream))
+                                    (eq? (rpc-stream-close stream) stream)
+                                    (eq? (rpc-stream-close stream) stream)
+                                    (rpc-net-error-message?
+                                     "RPC stream is closed"
+                                     (lambda ()
+                                       (rpc-stream-recv stream))))])
+                              ok-stream?))
+                          (let ([stream (rpc-call/server-stream
+                                         client
+                                         rpc-streaming-watch
+                                         (make-rpc-watch-request 1 "x-"))])
+                            (let ([ok-stream?
+                                   (and
+                                    (rpc-net-error-message?
+                                     "RPC stream send side is closed"
+                                     (lambda ()
+                                       (rpc-stream-send stream
+                                                        (make-rpc-hello-reply "bad"))))
+                                    (rpc-hello-reply? (rpc-stream-recv stream))
+                                    (eof-object? (rpc-stream-recv stream)))])
+                              (rpc-stream-close stream)
+                              ok-stream?)))])
+                    (rpc-close client)
+                    client-ok?))])
            (set! done? #t)
            (guard (c [else #f])
              (let ([wake (open-socket 'inet 'stream)])

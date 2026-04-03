@@ -238,7 +238,9 @@
   (define-record-type (rpc-pending-op %make-rpc-pending-op rpc-pending-op?)
     (sealed #t)
     (opaque #f)
-    (fields (mutable socket rpc-pending-socket rpc-pending-socket-set!)
+    (fields (immutable kind rpc-pending-kind)
+            (immutable args rpc-pending-args)
+            (mutable socket rpc-pending-socket rpc-pending-socket-set!)
             (immutable notify? rpc-pending-notify?)
             (immutable response-type rpc-pending-response-type)
             (immutable deadline-ms rpc-pending-deadline-ms)
@@ -270,6 +272,14 @@
     (lambda (who stream)
       (when (rpc-stream-closed? stream)
         (raise-net-error who 'rpc "RPC stream is closed" stream))))
+
+  (define ensure-pending-matches
+    (lambda (who channel kind args)
+      (let ([pending (rpc-channel-pending channel)])
+        (when (and pending
+                   (or (not (eq? (rpc-pending-kind pending) kind))
+                       (not (equal? (rpc-pending-args pending) args))))
+          (raise-net-error who 'rpc "another nonblocking RPC operation is pending" pending)))))
 
   (define ensure-role
     (lambda (who channel role)
@@ -639,17 +649,28 @@
                  (raise c)])
         (thunk))))
 
-  (define start-pending-op!
-    (lambda (who channel method payload notify? timeout-ms)
+  (define unary-pending-key
+    (lambda (who method payload notify? timeout-ms)
       (let-values ([(method-name request-type response-type stream) (normalize-method who method)])
         (unless (eq? stream 'unary)
           (raise-net-error who 'rpc "streaming RPC methods are not implemented yet" method))
-        (let* ([request (make-request-datum 1 method-name payload notify? request-type)]
-               [frame (datum->frame request)])
+        (let ([frame (datum->frame
+                      (make-request-datum 1 method-name payload notify? request-type))])
+          (values method-name request-type response-type frame
+                  (list method-name notify? frame timeout-ms))))))
+
+  (define start-pending-op!
+    (lambda (who channel method payload notify? timeout-ms)
+      (let-values ([(method-name request-type response-type frame key)
+                    (unary-pending-key who method payload notify? timeout-ms)])
+        (let* ([kind (if notify? 'notify 'call)]
+               [args key])
           (let-values ([(sock ans) (open-client-socket who channel #t)])
             (rpc-channel-pending-set!
              channel
-             (%make-rpc-pending-op sock
+             (%make-rpc-pending-op kind
+                                   args
+                                   sock
                                    notify?
                                    response-type
                                    (timeout->deadline-ms timeout-ms)
@@ -1136,6 +1157,9 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
+               (let-values ([(method-name request-type response-type frame key)
+                             (unary-pending-key who method payload #f timeout-ms)])
+                 (ensure-pending-matches who channel 'call key))
                (unless (rpc-channel-pending channel)
                  (start-pending-op! who channel method payload #f timeout-ms))
                (finish-pending! who channel))]))
@@ -1194,6 +1218,9 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
+               (let-values ([(method-name request-type response-type frame key)
+                             (unary-pending-key who method payload #t timeout-ms)])
+                 (ensure-pending-matches who channel 'notify key))
                (unless (rpc-channel-pending channel)
                  (start-pending-op! who channel method payload #t timeout-ms))
                (finish-pending! who channel))]))
@@ -1210,6 +1237,9 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
+               (let-values ([(method-name request-type response-type frame key)
+                             (unary-pending-key who method payload #f timeout-ms)])
+                 (ensure-pending-matches who channel 'call key))
                (unless (rpc-channel-pending channel)
                  (start-pending-op! who channel method payload #f timeout-ms))
                (call-with-pending-cleanup
@@ -1229,6 +1259,9 @@ An optional timeout in milliseconds can be supplied as a fourth argument.
        (pcheck ([rpc-channel? channel] [fixnum? timeout-ms])
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
+               (let-values ([(method-name request-type response-type frame key)
+                             (unary-pending-key who method payload #t timeout-ms)])
+                 (ensure-pending-matches who channel 'notify key))
                (unless (rpc-channel-pending channel)
                  (start-pending-op! who channel method payload #t timeout-ms))
                (call-with-pending-cleanup
