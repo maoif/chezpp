@@ -67,6 +67,12 @@
         (errorf who "size must be non-negative, given ~s" size))
       size))
 
+  (define check-backlog
+    (lambda (who backlog)
+      (when (fx< backlog 0)
+        (errorf who "backlog must be non-negative, given ~s" backlog))
+      backlog))
+
   (define ensure-ffi-success
     (lambda (who x kind)
       (when (ffi-error? x)
@@ -161,6 +167,7 @@ The `socket-listen!` procedure marks a bound stream socket as listening.
       [(sock) (socket-listen! sock 128)]
       [(sock backlog)
        (pcheck ([socket? sock] [fixnum? backlog])
+               (check-backlog who backlog)
                (ensure-open who sock)
                (ensure-ffi-success who (ffi-net-socket-listen (socket-fd sock) backlog) 'socket))]))
 

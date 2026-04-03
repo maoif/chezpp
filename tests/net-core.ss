@@ -160,6 +160,25 @@
      (let ([name (dns-reverse-resolve (make-socket-address 'inet "127.0.0.1" 80))])
        (string? name)))
 
+(mat net-address-validation
+     (and
+      (tls-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (make-socket-address 'inet "127.0.0.1" -1)))
+      (tls-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (make-socket-address 'inet "127.0.0.1" 70000)))
+      (tls-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (resolve-address "localhost" -1)))
+      (tls-error-message-contains?
+       "port must be between 0 and 65535"
+       (lambda ()
+         (resolve-addresses "localhost" 70000)))))
+
 (mat net-socket
      (let-values ([(server port th)
                    (start-echo-server
@@ -204,6 +223,18 @@
          (close-socket server)
          (and (not no-client)
               reuse?))))
+
+(mat net-socket-listen-validation
+     (let ([sock (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (tls-error-message-contains?
+            "backlog must be non-negative"
+            (lambda ()
+              (socket-listen! sock -1))))
+         (lambda ()
+           (close-socket sock)))))
 
 (mat net-poll
      (let ([server (open-socket 'inet 'stream)])

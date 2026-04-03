@@ -21,6 +21,12 @@
         (raise-net-error who 'address (ffi-error-message x) x))
       x))
 
+  (define check-port
+    (lambda (who port)
+      (when (or (fx< port 0) (fx> port 65535))
+        (errorf who "port must be between 0 and 65535, given ~s" port))
+      port))
+
   #|proc:make-socket-address
 The `make-socket-address` procedure constructs a socket address record for internet or Unix-domain sockets.
 |#
@@ -35,6 +41,7 @@ The `make-socket-address` procedure constructs a socket address record for inter
        (pcheck ([string? host] [fixnum? port])
                (unless (memq family '(inet inet6))
                  (errorf who "three-argument socket addresses require family 'inet or 'inet6"))
+               (check-port who port)
                (%make-socket-address family host port #f))]))
 
   #|proc:resolve-addresses
@@ -46,6 +53,7 @@ The `resolve-addresses` procedure resolves a host and port into a list of socket
       [(host port family) (resolve-addresses host port family #f)]
       [(host port family type)
        (pcheck ([string? host] [fixnum? port])
+               (check-port who port)
                (let ([ans (ensure-success
                            who
                            (ffi-net-resolve-addresses host port
