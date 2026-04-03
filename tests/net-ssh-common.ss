@@ -196,6 +196,24 @@
                  (= (ssh-channel-exit-status channel) 0))))
         (lambda () (ssh-close-channel channel))))))
 
+(define ssh-test-read-timeout
+  (lambda (session timeout?)
+    (let ([channel-1 (ssh-exec session "sh -c 'sleep 1; printf late'")]
+          [channel-2 (ssh-exec session "sh -c 'sleep 1; printf later'")]
+          [buf (make-bytevector 8 0)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (and (timeout?
+                (lambda ()
+                  (ssh-read channel-1 4 50)))
+               (timeout?
+                (lambda ()
+                  (ssh-read! channel-2 buf 1 6 50)))))
+        (lambda ()
+          (ssh-close-channel channel-1)
+          (ssh-close-channel channel-2))))))
+
 (define ssh-test-shell
   (lambda (session)
     (let ([channel (ssh-open-channel session)])

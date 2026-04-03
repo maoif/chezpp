@@ -51,6 +51,7 @@ typedef int (*ssh_channel_send_eof_fn)(ssh_channel);
 typedef int (*ssh_channel_close_fn)(ssh_channel);
 typedef int (*ssh_channel_get_exit_status_fn)(ssh_channel);
 typedef int (*ssh_channel_is_eof_fn)(ssh_channel);
+typedef socket_t (*ssh_get_fd_fn)(ssh_session);
 typedef void (*ssh_set_blocking_fn)(ssh_session, int);
 typedef sftp_session (*sftp_new_fn)(ssh_session);
 typedef int (*sftp_init_fn)(sftp_session);
@@ -102,6 +103,7 @@ static ssh_channel_send_eof_fn p_ssh_channel_send_eof = NULL;
 static ssh_channel_close_fn p_ssh_channel_close = NULL;
 static ssh_channel_get_exit_status_fn p_ssh_channel_get_exit_status = NULL;
 static ssh_channel_is_eof_fn p_ssh_channel_is_eof = NULL;
+static ssh_get_fd_fn p_ssh_get_fd = NULL;
 static ssh_set_blocking_fn p_ssh_set_blocking = NULL;
 static sftp_new_fn p_sftp_new = NULL;
 static sftp_init_fn p_sftp_init = NULL;
@@ -200,6 +202,7 @@ static int ensure_ssh_loaded(void) {
       !load_symbol((void **)&p_ssh_channel_close, "ssh_channel_close") ||
       !load_symbol((void **)&p_ssh_channel_get_exit_status, "ssh_channel_get_exit_status") ||
       !load_symbol((void **)&p_ssh_channel_is_eof, "ssh_channel_is_eof") ||
+      !load_symbol((void **)&p_ssh_get_fd, "ssh_get_fd") ||
       !load_symbol((void **)&p_ssh_set_blocking, "ssh_set_blocking") ||
       !load_symbol((void **)&p_sftp_new, "sftp_new") ||
       !load_symbol((void **)&p_sftp_init, "sftp_init") ||
@@ -268,6 +271,46 @@ static ptr sftp_file_error_status(chezpp_sftp_file *wrapper, const char *fallbac
 }
 
 static ptr make_ssh_handle(uptr handle) { return Sunsigned(handle); }
+
+static int64_t monotonic_ms(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return -1;
+  return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+}
+
+static ptr wait_ssh_session_until(ssh_session session, short events, int64_t deadline,
+                                  const char *timeout_msg) {
+  struct pollfd pfd;
+
+  if (session == NULL || p_ssh_get_fd == NULL) return make_error_status_message("invalid ssh session");
+  pfd.fd = (int)p_ssh_get_fd(session);
+  if (pfd.fd < 0) return make_error_status_message("failed to query ssh session socket");
+  pfd.events = events;
+  pfd.revents = 0;
+
+  for (;;) {
+    int wait_ms = -1;
+    int rc;
+    if (deadline >= 0) {
+      int64_t now = monotonic_ms();
+      int64_t remaining;
+      if (now < 0) return make_errno_status();
+      remaining = deadline - now;
+      if (remaining <= 0) return make_error_status_message(timeout_msg);
+      wait_ms = remaining > INT_MAX ? INT_MAX : (int)remaining;
+    }
+    rc = poll(&pfd, 1, wait_ms);
+    if (rc > 0) {
+      if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+        return make_error_status_message("ssh session socket failed while waiting for readiness");
+      if ((pfd.revents & events) != 0) return Strue;
+      continue;
+    }
+    if (rc == 0) return make_error_status_message(timeout_msg);
+    if (errno == EINTR) continue;
+    return make_errno_status();
+  }
+}
 
 static ptr sftp_attr_to_vector(sftp_attributes attr) {
   ptr v = Smake_vector(8, Sfalse);
@@ -439,18 +482,37 @@ ptr chezpp_net_ssh_channel_request_pty(uptr handle) {
   return Strue;
 }
 
-ptr chezpp_net_ssh_channel_read(uptr handle, int size, int is_stderr, int nonblocking) {
+ptr chezpp_net_ssh_channel_read(uptr handle, int size, int is_stderr, int nonblocking, int timeout_ms) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   int rc;
   ptr out;
+  int use_nonblocking;
+  int64_t deadline = -1;
 
   if (wrapper == NULL || wrapper->channel == NULL || wrapper->owner == NULL)
     return make_error_status_message("invalid ssh channel");
 
-  if (nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = nonblocking || timeout_ms >= 0;
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
   out = Smake_bytevector((iptr)size, 0);
-  rc = p_ssh_channel_read(wrapper->channel, Sbytevector_data(out), (uint32_t)size, is_stderr);
-  if (nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  for (;;) {
+    rc = p_ssh_channel_read(wrapper->channel, Sbytevector_data(out), (uint32_t)size, is_stderr);
+    if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN, deadline,
+                                               "ssh read timed out");
+      if (wait_status != Strue) {
+        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        return wait_status;
+      }
+    }
+  }
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
 
   if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
   if (rc == SSH_ERROR) return ssh_channel_error_status(wrapper, "ssh read failed");
@@ -466,17 +528,36 @@ ptr chezpp_net_ssh_channel_read(uptr handle, int size, int is_stderr, int nonblo
 }
 
 ptr chezpp_net_ssh_channel_read_into(uptr handle, ptr bv, int start, int stop, int is_stderr,
-                                     int nonblocking) {
+                                     int nonblocking, int timeout_ms) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   int rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
 
   if (wrapper == NULL || wrapper->channel == NULL || wrapper->owner == NULL)
     return make_error_status_message("invalid ssh channel");
 
-  if (nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
-  rc = p_ssh_channel_read(wrapper->channel, Sbytevector_data(bv) + start, (uint32_t)(stop - start),
-                          is_stderr);
-  if (nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = nonblocking || timeout_ms >= 0;
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  for (;;) {
+    rc = p_ssh_channel_read(wrapper->channel, Sbytevector_data(bv) + start,
+                            (uint32_t)(stop - start), is_stderr);
+    if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN, deadline,
+                                               "ssh read timed out");
+      if (wait_status != Strue) {
+        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        return wait_status;
+      }
+    }
+  }
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
 
   if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
   if (rc == SSH_ERROR) return ssh_channel_error_status(wrapper, "ssh read failed");
@@ -485,16 +566,37 @@ ptr chezpp_net_ssh_channel_read_into(uptr handle, ptr bv, int start, int stop, i
   return Sfixnum((iptr)rc);
 }
 
-ptr chezpp_net_ssh_channel_write(uptr handle, ptr bv, int start, int stop, int nonblocking) {
+ptr chezpp_net_ssh_channel_write(uptr handle, ptr bv, int start, int stop, int nonblocking,
+                                 int timeout_ms) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   int rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
 
   if (wrapper == NULL || wrapper->channel == NULL || wrapper->owner == NULL)
     return make_error_status_message("invalid ssh channel");
 
-  if (nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
-  rc = p_ssh_channel_write(wrapper->channel, Sbytevector_data(bv) + start, (uint32_t)(stop - start));
-  if (nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  use_nonblocking = nonblocking || timeout_ms >= 0;
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  for (;;) {
+    rc = p_ssh_channel_write(wrapper->channel, Sbytevector_data(bv) + start,
+                             (uint32_t)(stop - start));
+    if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLOUT, deadline,
+                                               "ssh write timed out");
+      if (wait_status != Strue) {
+        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        return wait_status;
+      }
+    }
+  }
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
 
   if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
   if (rc == SSH_ERROR || rc < 0) return ssh_channel_error_status(wrapper, "ssh write failed");

@@ -57,6 +57,7 @@
                       (ssh-test-read-slice session)
                       (ssh-test-session-exec session)
                       (ssh-test-blocking-write session)
+                      (ssh-test-read-timeout session ssh-net-error-timeout?)
                       (ssh-test-nonblocking-io session)
                       (ssh-test-shell session)
                       (ssh-test-port-wrappers session)))

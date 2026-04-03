@@ -99,6 +99,29 @@
       (unless (or (string? user) (eq? user #f))
         (errorf who "expected string or #f, given ~s" user))))
 
+  (define check-timeout-ms
+    (lambda (who timeout-ms)
+      (unless (fixnum? timeout-ms)
+        (errorf who "expected timeout fixnum, given ~s" timeout-ms))
+      (when (fx< timeout-ms 0)
+        (errorf who "timeout must be non-negative, given ~s" timeout-ms))
+      timeout-ms))
+
+  (define current-time-ms
+    (lambda ()
+      (let ([t (current-time)])
+        (+ (* (time-second t) 1000)
+           (quotient (time-nanosecond t) 1000000)))))
+
+  (define timeout->deadline-ms
+    (lambda (timeout-ms)
+      (+ (current-time-ms) timeout-ms)))
+
+  (define remaining-timeout-ms
+    (lambda (deadline-ms)
+      (let ([remaining (fx- deadline-ms (current-time-ms))])
+        (if (fx<= remaining 0) 0 remaining))))
+
   (define make-binary-input-port
     (lambda (channel stderr?)
       (make-custom-binary-input-port
@@ -112,7 +135,8 @@
                                                     start
                                                     stop
                                                     (if stderr? 1 0)
-                                                    0))])
+                                                    0
+                                                    -1))])
              (cond
               [(fixnum? n) n]
               [(eof-object? n) 0]
@@ -324,11 +348,26 @@ The `ssh-request-pty!` procedure requests a pseudo-terminal on an SSH channel.
 The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout stream.
 |#
   (define-who ssh-read
-    (lambda (channel size)
-      (pcheck ([ssh-channel? channel] [fixnum? size])
-              (ensure-channel-open who channel)
-              (read-result who
-                           (ffi-net-ssh-channel-read (ssh-channel-handle channel) size 0 0)))))
+    (case-lambda
+      [(channel size)
+       (pcheck ([ssh-channel? channel] [fixnum? size])
+               (ensure-channel-open who channel)
+               (read-result who
+                            (ffi-net-ssh-channel-read (ssh-channel-handle channel)
+                                                      size
+                                                      0
+                                                      0
+                                                      -1)))]
+      [(channel size timeout-ms)
+       (pcheck ([ssh-channel? channel] [fixnum? size])
+               (check-timeout-ms who timeout-ms)
+               (ensure-channel-open who channel)
+               (read-result who
+                            (ffi-net-ssh-channel-read (ssh-channel-handle channel)
+                                                      size
+                                                      0
+                                                      0
+                                                      timeout-ms)))]))
 
   #|proc:ssh-read/nonblocking
 The `ssh-read/nonblocking` procedure attempts to read from an SSH channel without blocking.
@@ -338,7 +377,7 @@ The `ssh-read/nonblocking` procedure attempts to read from an SSH channel withou
       (pcheck ([ssh-channel? channel] [fixnum? size])
               (ensure-channel-open who channel)
               (read-result who
-                           (ffi-net-ssh-channel-read (ssh-channel-handle channel) size 0 1)))))
+                           (ffi-net-ssh-channel-read (ssh-channel-handle channel) size 0 1 -1)))))
 
   #|proc:ssh-read!
 The `ssh-read!` procedure reads into a bytevector slice from an SSH channel's stdout stream.
@@ -358,7 +397,22 @@ The `ssh-read!` procedure reads into a bytevector slice from an SSH channel's st
                                                start
                                                stop
                                                0
-                                               0)))]))
+                                               0
+                                               -1)))]
+      [(channel bv start stop timeout-ms)
+       (pcheck ([ssh-channel? channel] [bytevector? bv])
+               (check-timeout-ms who timeout-ms)
+               (ensure-channel-open who channel)
+               (check-slice who (bytevector-length bv) start stop)
+               (read-into-result
+                who
+                (ffi-net-ssh-channel-read-into (ssh-channel-handle channel)
+                                               bv
+                                               start
+                                               stop
+                                               0
+                                               0
+                                               timeout-ms)))]))
 
   #|proc:ssh-read!/nonblocking
 The `ssh-read!/nonblocking` procedure attempts to read into a bytevector slice without blocking.
@@ -378,7 +432,8 @@ The `ssh-read!/nonblocking` procedure attempts to read into a bytevector slice w
                                                start
                                                stop
                                                0
-                                               1)))]))
+                                               1
+                                               -1)))]))
 
   #|proc:ssh-write
 The `ssh-write` procedure writes a bytevector slice to an SSH channel's stdin stream.
@@ -397,7 +452,21 @@ The `ssh-write` procedure writes a bytevector slice to an SSH channel's stdin st
                                            bv
                                            start
                                            stop
-                                           0)))]))
+                                           0
+                                           -1)))]
+      [(channel bv start stop timeout-ms)
+       (pcheck ([ssh-channel? channel] [bytevector? bv])
+               (check-timeout-ms who timeout-ms)
+               (ensure-channel-open who channel)
+               (check-slice who (bytevector-length bv) start stop)
+               (write-result
+                who
+                (ffi-net-ssh-channel-write (ssh-channel-handle channel)
+                                           bv
+                                           start
+                                           stop
+                                           0
+                                           timeout-ms)))]))
 
   #|proc:ssh-write/nonblocking
 The `ssh-write/nonblocking` procedure attempts to write a bytevector slice without blocking.
@@ -416,7 +485,8 @@ The `ssh-write/nonblocking` procedure attempts to write a bytevector slice witho
                                            bv
                                            start
                                            stop
-                                           1)))]))
+                                           1
+                                           -1)))]))
 
   #|proc:ssh-write-all
 The `ssh-write-all` procedure writes an entire bytevector slice to an SSH channel.
@@ -432,7 +502,21 @@ The `ssh-write-all` procedure writes an entire bytevector slice to an SSH channe
                (let loop ([i start])
                  (if (fx= i stop)
                      (fx- stop start)
-                     (loop (fx+ i (ssh-write channel bv i stop))))))]))
+                     (loop (fx+ i (ssh-write channel bv i stop))))))]
+      [(channel bv start stop timeout-ms)
+       (pcheck ([ssh-channel? channel] [bytevector? bv])
+               (check-timeout-ms who timeout-ms)
+               (ensure-channel-open who channel)
+               (check-slice who (bytevector-length bv) start stop)
+               (let ([deadline-ms (and (fixnum? timeout-ms) (fx>= timeout-ms 0)
+                                       (timeout->deadline-ms timeout-ms))])
+                 (let loop ([i start])
+                   (if (fx= i stop)
+                       (fx- stop start)
+                       (let ([step-timeout (if deadline-ms
+                                               (remaining-timeout-ms deadline-ms)
+                                               -1)])
+                         (loop (fx+ i (ssh-write channel bv i stop step-timeout))))))))]))
 
   #|proc:ssh-write-all/nonblocking
 The `ssh-write-all/nonblocking` procedure writes as much of a bytevector slice as possible without blocking.

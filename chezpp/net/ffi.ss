@@ -227,11 +227,11 @@
   (define ffi-net-ssh-channel-request-pty
     (foreign-procedure "chezpp_net_ssh_channel_request_pty" (uptr) scheme-object))
   (define ffi-net-ssh-channel-read
-    (foreign-procedure "chezpp_net_ssh_channel_read" (uptr int int int) scheme-object))
+    (foreign-procedure "chezpp_net_ssh_channel_read" (uptr int int int int) scheme-object))
   (define ffi-net-ssh-channel-read-into
-    (foreign-procedure "chezpp_net_ssh_channel_read_into" (uptr ptr int int int int) scheme-object))
+    (foreign-procedure "chezpp_net_ssh_channel_read_into" (uptr ptr int int int int int) scheme-object))
   (define ffi-net-ssh-channel-write
-    (foreign-procedure "chezpp_net_ssh_channel_write" (uptr ptr int int int) scheme-object))
+    (foreign-procedure "chezpp_net_ssh_channel_write" (uptr ptr int int int int) scheme-object))
   (define ffi-net-ssh-channel-exit-status
     (foreign-procedure "chezpp_net_ssh_channel_exit_status" (uptr) scheme-object))
   (define ffi-net-sftp-open
