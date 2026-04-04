@@ -457,6 +457,7 @@
       (grpc-pending-op-cancelled?-set! pending #t)
       (grpc-channel-pending-set! channel #f)
       (clear-pending! who pending)
+      (wait-pending-thread! pending)
       channel))
 
   (define wait-pending-thread!

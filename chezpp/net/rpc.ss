@@ -689,7 +689,8 @@
           (guard (c [else #f])
             (rpc-stream-close result))
           (rpc-pending-result-set! pending #f)))
-      (clear-pending! channel pending)))
+      (clear-pending! channel pending)
+      (wait-pending-thread! pending)))
 
   (define wait-pending-thread!
     (lambda (pending)
