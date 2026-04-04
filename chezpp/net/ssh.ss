@@ -189,6 +189,7 @@ The `%ssh-session-handle` procedure returns the foreign handle stored inside an 
   (define-who %ssh-session-handle
     (lambda (session)
       (pcheck ([ssh-session? session])
+              (ensure-session-open who session)
               (ssh-session-handle session))))
 
   #|proc:ssh-open

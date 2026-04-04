@@ -197,3 +197,30 @@
                     (ssh-close session)))))))
          (lambda ()
            (stop-server)))))
+
+(mat net-ssh-handle-closed-session
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME"
+            home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and
+                     (eq? (ssh-auth-publickey! session user) session)
+                     (begin
+                       (ssh-close session)
+                       #t)
+                     (ssh-error-message-contains?
+                      "SSH session is closed"
+                      (lambda ()
+                        (%ssh-session-handle session)))))
+                  (lambda ()
+                    (ssh-close session)))))))
+         (lambda ()
+           (stop-server)))))
