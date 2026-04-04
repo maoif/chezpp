@@ -68,6 +68,11 @@
       (when (sftp-session-closed? session)
         (raise-net-error who 'sftp "SFTP session is closed" session))))
 
+  (define ensure-ssh-session-open
+    (lambda (who session)
+      (when (fx= 0 (%ssh-session-handle session))
+        (raise-net-error who 'ssh "SSH session is closed" session))))
+
   (define ensure-file-open
     (lambda (who file)
       (when (sftp-file-closed? file)
@@ -227,6 +232,7 @@ The `sftp-open` procedure opens an SFTP session on top of an authenticated SSH s
   (define-who sftp-open
     (lambda (session)
       (pcheck ([ssh-session? session])
+              (ensure-ssh-session-open who session)
               (%make-sftp-session
                (ensure-success who 'sftp
                                (ffi-net-sftp-open (%ssh-session-handle session)))
