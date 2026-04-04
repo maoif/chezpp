@@ -42,6 +42,56 @@
                 (set! done? #t)
                 (http-server-close server))))))
 
+(define start-http-cancel-cache-server
+  (lambda ()
+    (let* ([port (reserve-loopback-port)]
+           [server (http-listen "127.0.0.1" port)]
+           [done? #f]
+           [accept-count 0])
+      (define respond!
+        (lambda (conn next-id)
+          (let* ([req (http-read-request conn)]
+                 [path (uri-path (http-request-uri req))]
+                 [resp (cond
+                        [(string=? path "/slow-cancel")
+                         (milisleep 120)
+                         (make-http-response 200
+                                             "OK"
+                                             '()
+                                             (format "slow-conn-~a" next-id))]
+                        [(string=? path "/after-cancel")
+                         (set! done? #t)
+                         (make-http-response 200
+                                             "OK"
+                                             '()
+                                             (format "after-conn-~a" next-id))]
+                        [else
+                         (make-http-response 404 "Not Found" '() "missing")])])
+            (http-write-response conn resp))))
+      (values server
+              port
+              (fork-thread
+               (lambda ()
+                 (let loop ([conn-id 0])
+                   (unless done?
+                     (guard (c [else #f])
+                       (let ([conn (http-accept server)])
+                         (let ([next-id (+ conn-id 1)])
+                           (set! accept-count next-id)
+                           (dynamic-wind
+                             void
+                             (lambda ()
+                               (respond! conn next-id))
+                             (lambda ()
+                               (guard (c [else #f])
+                                 (http-connection-close conn))))
+                           (unless done?
+                             (loop next-id)))))))))
+              (lambda ()
+                (set! done? #t)
+                (http-server-close server))
+              (lambda () accept-count)))))
+
 (define await-http-nonblocking
   (lambda (thunk)
     (let loop ([i 0])
@@ -611,6 +661,36 @@
                                           (format "http://127.0.0.1:~a/after-cancel" port))])
                       (and (= (http-response-status resp) 200)
                            (equal? (utf8->string (http-response-body resp)) "after"))))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join th))))))
+
+(mat net-http-cancel-does-not-overwrite-cache
+     (let-values ([(server port th stop accepted-count)
+                   (start-http-cancel-cache-server)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let* ([slow-request (make-http-request 'get
+                                                     (format "http://127.0.0.1:~a/slow-cancel" port)
+                                                     '()
+                                                     #f)]
+                    [first (http-send/nonblocking client slow-request)])
+               (and (not first)
+                    (begin
+                      (http-cancel-pending! client)
+                      #t)
+                    (begin
+                      (milisleep 200)
+                      #t)
+                    (let ([after (http-get client
+                                           (format "http://127.0.0.1:~a/after-cancel" port))])
+                      (and
+                       (= (http-response-status after) 200)
+                       (equal? (utf8->string (http-response-body after)) "after-conn-2")
+                       (= (accepted-count) 2))))))
            (lambda ()
              (http-close client)
              (stop)

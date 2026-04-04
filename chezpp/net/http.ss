@@ -310,7 +310,7 @@
                     (lambda ()
                       (let ([result
                              (guard (c [else c])
-                               (thunk))])
+                               (thunk pending))])
                         (when (http-pending-cancelled? pending)
                           (set! result #f))
                         (http-pending-result-set! pending result))
@@ -919,10 +919,20 @@
                                       (http-request-headers request)
                                       (http-request-body request))))))))
 
+  (define cache-connection-allowed?
+    (lambda (client pending)
+      (or (not pending)
+          (and (not (http-client-closed? client))
+               (eq? (http-client-pending client) pending)
+               (not (http-pending-cancelled? pending))))))
+
   (define http-send*
-    (lambda (who client request redirects-left deadline-ms)
+    (case-lambda
+      [(who client request redirects-left deadline-ms)
+       (http-send* who client request redirects-left deadline-ms #f)]
+      [(who client request redirects-left deadline-ms pending)
       (let ([conn (open-http-connection who client request deadline-ms)]
-            [reusable? #f]
+            [keep-open? #f]
             [origin (request-origin-key request)])
         (dynamic-wind
           void
@@ -936,23 +946,24 @@
               (let ([response (read-http-response* who
                                                    (http-connection-input-port conn)
                                                    (http-request-method request))])
-                (set! reusable?
-                  (reusable-response? request-headers
-                                      response
-                                      (http-request-method request)))
-                (when reusable?
+                (set! keep-open?
+                  (and (reusable-response? request-headers
+                                           response
+                                           (http-request-method request))
+                       (cache-connection-allowed? client pending)))
+                (when keep-open?
                   (cache-http-connection! client origin conn))
                 (if (and (http-client-follow-redirects? client)
                          (> redirects-left 0)
                          (redirect-status? (http-response-status response)))
                     (let ([next-request (redirect-request request response)])
                       (if next-request
-                          (http-send* who client next-request (fx1- redirects-left) deadline-ms)
+                          (http-send* who client next-request (fx1- redirects-left) deadline-ms pending)
                           response))
                     response))))
           (lambda ()
-            (unless reusable?
-              (close-http-connection conn)))))))
+            (unless keep-open?
+              (close-http-connection conn)))))]))
 
   (define make-handler-key
     (case-lambda
@@ -1186,8 +1197,14 @@ The `http-send/nonblocking` procedure progresses an HTTP request without blockin
                client
                'send
                (request-key request)
-               (lambda ()
-                 (http-send client request))))))
+               (lambda (pending)
+                 (http-send* who
+                             client
+                             request
+                             5
+                             (timeout->deadline-ms
+                              (http-client-timeout-ms client))
+                             pending))))))
 
   #|proc:http-request
 The `http-request` procedure sends a one-shot HTTP request without manually managing a client object.
@@ -1220,12 +1237,18 @@ The `http-request/nonblocking` procedure progresses a one-client HTTP request wi
        (pcheck ([http-client? client])
                (let ([request (make-http-request method uri headers body)])
                  (http-transfer/nonblocking
-                  who
+                 who
                   client
                   'request
                   (request-key request)
-                  (lambda ()
-                    (http-send client request)))))]))
+                  (lambda (pending)
+                    (http-send* who
+                                client
+                                request
+                                5
+                                (timeout->deadline-ms
+                                 (http-client-timeout-ms client))
+                                pending)))))]))
 
   (define make-http-verb
     (lambda (method)
@@ -1298,8 +1321,18 @@ The `http-download/nonblocking` procedure progresses a download without blocking
                client
                'download
                (list (if (uri? uri) (uri->string uri) uri) path)
-               (lambda ()
-                 (http-download client uri path))))))
+               (lambda (pending)
+                 (let ([response
+                        (http-send* who
+                                    client
+                                    (make-http-request 'get uri '() #f)
+                                    5
+                                    (timeout->deadline-ms
+                                     (http-client-timeout-ms client))
+                                    pending)])
+                   (when (bytevector? (http-response-body response))
+                     (write-u8vec! path (http-response-body response)))
+                   response))))))
 
   #|proc:http-upload
 The `http-upload` procedure uploads a file as a PUT request body and returns the HTTP response.
@@ -1332,8 +1365,18 @@ The `http-upload/nonblocking` procedure progresses an upload without blocking an
                client
                'upload
                (list (if (uri? uri) (uri->string uri) uri) path)
-               (lambda ()
-                 (http-upload client uri path))))))
+               (lambda (pending)
+                 (http-send* who
+                             client
+                             (make-http-request
+                              'put
+                              uri
+                              '(("Content-Type" . "application/octet-stream"))
+                              (read-u8vec path))
+                             5
+                             (timeout->deadline-ms
+                              (http-client-timeout-ms client))
+                             pending))))))
 
   ;;===----------------------------------------------------------------------===
   ;; Server API
