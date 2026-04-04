@@ -691,6 +691,12 @@
           (rpc-pending-result-set! pending #f)))
       (clear-pending! channel pending)))
 
+  (define wait-pending-thread!
+    (lambda (pending)
+      (let ([th (rpc-pending-thread pending)])
+        (when th
+          (thread-join th)))))
+
   (define pending-timeout-message
     (lambda (pending)
       (case (rpc-pending-kind pending)
@@ -1063,7 +1069,8 @@ The `rpc-close` procedure closes an RPC channel or listener.
               (unless (rpc-channel-closed? channel)
                 (let ([pending (rpc-channel-pending channel)])
                   (when pending
-                    (cancel-pending! channel pending)))
+                    (cancel-pending! channel pending)
+                    (wait-pending-thread! pending)))
                 (let ([sock (rpc-channel-socket channel)])
                   (when sock
                     (close-socket sock)

@@ -29,6 +29,9 @@
 (define-rpc-message rpc-chat-reply
   ([1 text string]))
 
+(define-rpc-message rpc-flood-request
+  ([1 payload string]))
+
 (define-rpc-service rpc-greeter
   (rpc hello
     (request rpc-hello-request)
@@ -52,6 +55,12 @@
     (stream bidi)
     (request rpc-chat-request)
     (response rpc-chat-reply)))
+
+(define-rpc-service rpc-stall
+  (rpc flood
+    (stream server)
+    (request rpc-flood-request)
+    (response rpc-hello-reply)))
 
 (define rpc-reply-ok?
   (lambda (reply message)
@@ -81,6 +90,47 @@
             (begin
               (milisleep 10)
               (loop)))))))
+
+(define start-rpc-stalled-open-server
+  (lambda ()
+    (let* ([port (reserve-loopback-port)]
+           [listener (open-socket 'inet 'stream)]
+           [done? #f]
+           [accepted '()])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" port))
+      (socket-listen! listener 1)
+      (values listener
+              port
+              (fork-thread
+               (lambda ()
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (let loop ([i 0])
+                       (unless (or done? (= i 50))
+                         (call-with-values
+                         (lambda () (socket-accept/nonblocking listener))
+                          (case-lambda
+                            [(ans)
+                             (unless (not ans)
+                               (error 'start-rpc-stalled-open-server
+                                      "unexpected nonblocking accept result ~s"
+                                      ans))]
+                            [(client peer)
+                             (set! accepted (cons client accepted))]))
+                         (milisleep 10)
+                         (loop (+ i 1)))))
+                   (lambda ()
+                     (for-each
+                      (lambda (sock)
+                        (guard (c [else #f])
+                          (close-socket sock)))
+                      accepted)))))
+              (lambda ()
+                (set! done? #t)
+                (guard (c [else #f])
+                  (close-socket listener)))))))
 
 (define rpc-call-times-out?
   (lambda (thunk)
@@ -349,6 +399,67 @@
            (thread-join th)
            (rpc-close server)
            ok?))))
+
+(mat net-rpc-stream-cancel
+     (let* ([before (proc-fd-count)]
+            [payload (make-string (* 16 1024 1024) #\x)]
+            [request (make-rpc-flood-request payload)])
+       (and
+        (let-values ([(listener port th stop) (start-rpc-stalled-open-server)])
+          (let ([client (rpc-open "127.0.0.1" port)])
+            (dynamic-wind
+              void
+              (lambda ()
+                (and
+                 (not (rpc-call/server-stream/nonblocking
+                       client
+                       rpc-stall-flood
+                       request
+                       1000))
+                 (eq? (rpc-cancel-pending! client) client)
+                 (not (rpc-call/server-stream/nonblocking
+                       client
+                       rpc-stall-flood
+                       request
+                       1000))
+                 (rpc-net-error-message?
+                  "another nonblocking RPC operation is pending"
+                  (lambda ()
+                    (rpc-call/bidi-stream/nonblocking
+                     client
+                     rpc-streaming-chat
+                     1000)))))
+              (lambda ()
+                (guard (c [else #f])
+                  (rpc-close client)))))
+          (stop)
+          (thread-join th)
+          #t)
+        (let-values ([(listener port th stop) (start-rpc-stalled-open-server)])
+          (let ([client (rpc-open "127.0.0.1" port)])
+            (dynamic-wind
+              void
+              (lambda ()
+                (and
+                 (not (rpc-call/server-stream/nonblocking
+                       client
+                       rpc-stall-flood
+                       request
+                       1000))
+                 (eq? (rpc-close client) client)
+                 (rpc-net-error-message?
+                  "RPC channel is closed"
+                  (lambda ()
+                    (rpc-call client
+                              rpc-greeter-hello
+                              (make-rpc-hello-request "x" #f)
+                              1000)))))
+              (lambda ()
+                (guard (c [else #f])
+                  (rpc-close client)))))
+          (stop)
+          (thread-join th)
+          (<= (proc-fd-count) before)))))
 
 (mat net-rpc-timeout-validation
      (let* ([port (reserve-loopback-port)]
