@@ -321,8 +321,10 @@ The `ssh-close-channel` procedure closes an SSH channel and releases its foreign
     (lambda (channel)
       (pcheck ([ssh-channel? channel])
               (unless (ssh-channel-closed? channel)
-                (ensure-success who 'ssh
-                                (ffi-net-ssh-channel-close (ssh-channel-handle channel)))
+                (when (guard (c [else #f])
+                        (not (fx= 0 (%ssh-session-handle (ssh-channel-session channel)))))
+                  (ensure-success who 'ssh
+                                  (ffi-net-ssh-channel-close (ssh-channel-handle channel))))
                 (ssh-channel-handle-set! channel 0)
                 (ssh-channel-closed?-set! channel #t))
               channel)))
