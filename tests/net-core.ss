@@ -510,3 +510,59 @@
              (close-tls-context ctx)
              (close-socket client)
              (thread-join th))))))
+
+(mat net-tls-port-closed-session
+     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([session (tls-connect ctx client "localhost")])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (let ([ip (open-tls-input-port session)]
+                         [op (open-tls-output-port session)]
+                         [bp (open-tls-port session)])
+                     (dynamic-wind
+                       void
+                       (lambda ()
+                         (and
+                          (begin
+                            (close-tls-session session)
+                            #t)
+                          (tls-error-message-contains?
+                           "TLS session is closed"
+                           (lambda ()
+                             (get-bytevector-n ip 1)))
+                          (tls-error-message-contains?
+                           "TLS session is closed"
+                           (lambda ()
+                             (put-bytevector op (string->utf8 "x"))
+                             (flush-output-port op)))
+                          (tls-error-message-contains?
+                           "TLS session is closed"
+                           (lambda ()
+                             (put-bytevector bp (string->utf8 "y"))
+                             (flush-output-port bp)))))
+                       (lambda ()
+                         (unless (port-closed? ip)
+                           (guard (c [else #f])
+                             (close-port ip)))
+                         (unless (port-closed? op)
+                           (guard (c [else #f])
+                             (close-port op)))
+                         (unless (port-closed? bp)
+                           (guard (c [else #f])
+                             (close-port bp)))))))
+                 (lambda ()
+                   (guard (c [else #f])
+                     (close-tls-session session))))))
+           (lambda ()
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
