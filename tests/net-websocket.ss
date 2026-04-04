@@ -180,6 +180,39 @@
          (lambda ()
            (websocket-server-close server)))))
 
+(mat net-websocket-server-close-live-connection
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [uri (format "ws://127.0.0.1:~a/live-after-close" port)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([client (websocket-connect uri)]
+                 [accepted #f])
+             (dynamic-wind
+               void
+               (lambda ()
+                 (set! accepted (websocket-accept server))
+                 (and
+                  (eq? (websocket-server-close server) server)
+                  (= (websocket-send-text client "after-server-close") 18)
+                  (let ([msg (websocket-recv accepted)])
+                    (and (websocket-message? msg)
+                         (eq? (websocket-message-type msg) 'text)
+                         (equal? (websocket-message-data msg) "after-server-close")))
+                  (= (websocket-send-text accepted "server-side-still-live") 22)
+                  (let ([msg (websocket-recv client)])
+                    (and (websocket-message? msg)
+                         (eq? (websocket-message-type msg) 'text)
+                         (equal? (websocket-message-data msg) "server-side-still-live")))))
+               (lambda ()
+                 (when accepted
+                   (websocket-close accepted))
+                 (websocket-close client)))))
+         (lambda ()
+           (guard (c [else #f])
+             (websocket-server-close server))))))
+
 (mat net-websocket-timeout-validation
      (let* ([port (reserve-loopback-port)]
             [server (websocket-listen "127.0.0.1" port)]

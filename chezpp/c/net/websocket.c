@@ -28,6 +28,7 @@ struct chezpp_ws_server {
   char *protocol_name;
   int port;
   int closed;
+  int live_count;
   char *error;
   chezpp_ws_connection *accept_head;
   chezpp_ws_connection *accept_tail;
@@ -290,6 +291,23 @@ static void set_error(char **slot, const char *msg) {
   *slot = ws_strdup(msg == NULL ? "websocket error" : msg);
 }
 
+static void destroy_server_resources(chezpp_ws_server *server) {
+  if (server->context != NULL) {
+    unregister_context(server->context);
+    p_lws_context_destroy(server->context);
+    server->context = NULL;
+  }
+  if (server->protocol_name != NULL) free(server->protocol_name);
+  if (server->error != NULL) free(server->error);
+  free(server);
+}
+
+static void maybe_release_server(chezpp_ws_server *server) {
+  if (server != NULL && server->closed && server->live_count <= 0) {
+    destroy_server_resources(server);
+  }
+}
+
 static chezpp_ws_connection *pop_accept(chezpp_ws_server *server) {
   chezpp_ws_connection *conn = server->accept_head;
   if (conn == NULL) return NULL;
@@ -406,6 +424,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     accepted->server = server;
     accepted->established = 1;
     accepted->client_side = 0;
+    server->live_count += 1;
     p_lws_set_opaque_user_data(wsi, accepted);
     if (server->accept_tail == NULL) {
       server->accept_head = accepted;
@@ -589,27 +608,21 @@ ptr chezpp_net_websocket_server_close(uptr handle) {
   chezpp_ws_server *server = (chezpp_ws_server *)TO_VOIDP(handle);
   chezpp_ws_connection *queued;
   if (server == NULL) return Strue;
-  if (!server->closed) {
-    server->closed = 1;
-    if (server->context != NULL) {
-      unregister_context(server->context);
-      p_lws_context_destroy(server->context);
-      server->context = NULL;
-    }
-  }
+  if (!server->closed) server->closed = 1;
   queued = server->accept_head;
+  server->accept_head = NULL;
+  server->accept_tail = NULL;
   while (queued != NULL) {
     chezpp_ws_connection *next = queued->next_accept;
     clear_messages(queued);
     clear_pending_send(queued);
     clear_rx(queued);
     if (queued->error != NULL) free(queued->error);
+    if (server->live_count > 0) server->live_count -= 1;
     free(queued);
     queued = next;
   }
-  if (server->protocol_name != NULL) free(server->protocol_name);
-  if (server->error != NULL) free(server->error);
-  free(server);
+  maybe_release_server(server);
   return Strue;
 }
 
@@ -717,7 +730,9 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
 
 ptr chezpp_net_websocket_close(uptr handle) {
   chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
+  chezpp_ws_server *server = NULL;
   if (conn == NULL) return Strue;
+  server = conn->server;
   if (!conn->closed && conn->wsi != NULL) {
     p_lws_close_reason(conn->wsi, LWS_CLOSE_STATUS_NORMAL, NULL, 0);
     p_lws_set_timeout(conn->wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
@@ -731,6 +746,9 @@ ptr chezpp_net_websocket_close(uptr handle) {
     unregister_context(conn->context);
     p_lws_context_destroy(conn->context);
     conn->context = NULL;
+  } else if (server != NULL) {
+    if (server->live_count > 0) server->live_count -= 1;
+    maybe_release_server(server);
   }
   if (conn->error != NULL) free(conn->error);
   if (conn->protocol_name != NULL) free(conn->protocol_name);
