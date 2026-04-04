@@ -970,14 +970,22 @@
   (define make-server-connection
     (lambda (sock tls-context)
       (if tls-context
-          (let ([session (tls-accept tls-context sock)])
-            (%make-http-connection sock
-                                   session
-                                   (vector #f)
-                                   (open-tls-input-port session)
-                                   (open-tls-output-port session)
-                                   #t
-                                   #f))
+          (let ([session #f])
+            (guard (c [else
+                       (when session
+                         (guard (x [else #f])
+                           (close-tls-session session)))
+                       (guard (x [else #f])
+                         (close-socket sock))
+                       (raise c)])
+              (set! session (tls-accept tls-context sock))
+              (%make-http-connection sock
+                                     session
+                                     (vector #f)
+                                     (open-tls-input-port session)
+                                     (open-tls-output-port session)
+                                     #t
+                                     #f)))
           (%make-http-connection sock
                                  #f
                                  (vector #f)

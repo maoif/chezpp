@@ -401,6 +401,38 @@
          (lambda ()
            (http-close client)))))
 
+(mat net-http-accept-failure-cleanup
+     (let ([server-ctx (make-test-http-server-context)])
+       (let* ([port (reserve-loopback-port)]
+              [server (http-listen "127.0.0.1" port server-ctx)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let ([before (proc-fd-count)])
+               (and
+                (let loop ([i 0])
+                  (if (= i 8)
+                      #t
+                      (let ([sock (open-socket 'inet 'stream)])
+                        (dynamic-wind
+                          (lambda ()
+                            (socket-connect! sock
+                                             (make-socket-address 'inet "127.0.0.1" port))
+                            (close-socket sock))
+                          (lambda ()
+                            (and (guard (c [else #t])
+                                   (let ([conn (http-accept server)])
+                                     (http-connection-close conn)
+                                     #f))
+                                 (loop (+ i 1))))
+                          (lambda ()
+                            (guard (c [else #f])
+                              (close-socket sock)))))))
+                (= before (proc-fd-count)))))
+           (lambda ()
+             (http-server-close server)
+             (close-tls-context server-ctx))))))
+
 (mat net-http-nonblocking
      (let-values ([(server port th stop)
                    (start-http-dispatch-loop-server
