@@ -107,7 +107,8 @@
             (immutable thread http-pending-thread)
             (mutable done? http-pending-done? http-pending-done?-set!)
             (mutable result http-pending-result http-pending-result-set!)
-            (mutable cancelled? http-pending-cancelled? http-pending-cancelled?-set!)))
+            (mutable cancelled? http-pending-cancelled? http-pending-cancelled?-set!)
+            (mutable connection http-pending-connection http-pending-connection-set!)))
 
   (define-record-type (http-server %make-http-server http-server?)
     (sealed #t)
@@ -319,6 +320,7 @@
                         (socket-send-all writer #vu8(1)))))
                    #f
                    #f
+                   #f
                    #f)])
           (http-client-pending-set! client pending)
           pending))))
@@ -344,8 +346,14 @@
   (define cancel-pending!
     (lambda (client pending)
       (http-pending-cancelled?-set! pending #t)
+      (let ([conn (http-pending-connection pending)])
+        (when conn
+          (http-pending-connection-set! pending #f)
+          (uncache-http-connection! client conn)
+          (close-http-connection conn)))
       (close-pending-notifier! pending)
       (http-client-pending-set! client #f)
+      (thread-join (http-pending-thread pending))
       client))
 
   (define http-transfer/nonblocking
@@ -937,6 +945,8 @@
         (dynamic-wind
           void
           (lambda ()
+            (when pending
+              (http-pending-connection-set! pending conn))
             (http-connection-deadline-ms-set! conn deadline-ms)
             (uncache-http-connection! client conn)
             (let ([request-headers (merge-request-headers request client)])
@@ -962,6 +972,9 @@
                           response))
                     response))))
           (lambda ()
+            (when (and pending
+                       (eq? (http-pending-connection pending) conn))
+              (http-pending-connection-set! pending #f))
             (unless keep-open?
               (close-http-connection conn)))))]))
 

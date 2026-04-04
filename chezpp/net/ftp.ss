@@ -318,6 +318,7 @@
       (ftp-pending-cancelled?-set! pending #t)
       (close-pending-notifier! pending)
       (ftp-session-pending-set! session #f)
+      (thread-join (ftp-pending-thread pending))
       session))
 
   (define ftp-transfer/nonblocking
