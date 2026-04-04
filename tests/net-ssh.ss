@@ -256,3 +256,40 @@
                     (ssh-close session)))))))
          (lambda ()
            (stop-server)))))
+
+(mat net-ssh-port-read-closed-session
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME"
+            home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and
+                     (eq? (ssh-auth-publickey! session user) session)
+                     (let ([channel (ssh-exec session "printf data")])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (call-with-port
+                            (open-ssh-channel-input-port channel)
+                            (lambda (ip)
+                              (and
+                               (begin
+                                 (ssh-close session)
+                                 #t)
+                               (ssh-error-message-contains?
+                                "SSH session is closed"
+                                (lambda ()
+                                  (get-bytevector-n ip 1)))))))
+                         (lambda ()
+                           (ssh-close-channel channel))))))
+                  (lambda ()
+                    (ssh-close session)))))))
+         (lambda ()
+           (stop-server)))))

@@ -133,6 +133,7 @@
       (make-custom-binary-input-port
        (if stderr? "chezpp-ssh-error" "chezpp-ssh-input")
        (lambda (bv start count)
+         (ensure-channel-open 'open-ssh-channel-input-port channel)
          (let ([stop (fx+ start count)])
            (let ([n (read-into-result
                      'open-ssh-channel-input-port
