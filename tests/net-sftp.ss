@@ -213,3 +213,43 @@
                     (ssh-close session)))))))
          (lambda ()
            (stop-server)))))
+
+(mat net-sftp-close-file-closed-ssh-session
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME"
+            home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and
+                     (eq? (ssh-auth-publickey! session user) session)
+                     (let ([sftp (sftp-open session)])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (let ([file (sftp-open-file sftp
+                                                       (string-append remote-root "/hello.txt")
+                                                       'read)])
+                             (dynamic-wind
+                               void
+                               (lambda ()
+                                 (and
+                                  (begin
+                                    (ssh-close session)
+                                    #t)
+                                  (eq? (sftp-close-file file) file)
+                                  (eq? (sftp-close-file file) file)))
+                               (lambda ()
+                                 (sftp-close-file file)))))
+                         (lambda ()
+                           (sftp-close sftp))))))
+                  (lambda ()
+                    (ssh-close session)))))))
+         (lambda ()
+           (stop-server)))))

@@ -352,7 +352,11 @@ The `sftp-close-file` procedure closes an SFTP file handle.
     (lambda (file)
       (pcheck ([sftp-file? file])
               (unless (sftp-file-closed? file)
-                (ensure-success who 'sftp (ffi-net-sftp-close-file (sftp-file-handle file)))
+                (when (guard (c [else #f])
+                        (begin
+                          (ensure-session-open who (sftp-file-session file))
+                          #t))
+                  (ensure-success who 'sftp (ffi-net-sftp-close-file (sftp-file-handle file))))
                 (sftp-file-handle-set! file 0)
                 (sftp-file-closed?-set! file #t))
               file)))
