@@ -334,6 +334,70 @@
            (lambda ()
              (stop-server))))))
 
+(mat net-ftp-input-port-closed-session
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (ftp-login! session "user" "pass")
+                  (begin
+                    (ftp-close session)
+                    #t)
+                  (ftp-error-message-contains?
+                   "FTP session is closed"
+                   (lambda ()
+                     (open-ftp-input-port session "/hello.txt")))))
+           (lambda ()
+             (stop-server))))))
+
+(mat net-ftp-output-port-closed-session
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (ftp-login! session "user" "pass")
+                  (begin
+                    (ftp-close session)
+                    #t)
+                  (ftp-error-message-contains?
+                   "FTP session is closed"
+                   (lambda ()
+                     (open-ftp-output-port session "/ported.txt")))))
+           (lambda ()
+             (stop-server))))))
+
+(mat net-ftp-output-port-close-closed-session
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
+             [ported-path (string-append root "/ported-after-close.txt")])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and
+              (ftp-login! session "user" "pass")
+              (let ([op (open-ftp-output-port session "/ported-after-close.txt")])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and
+                     (begin
+                       (put-bytevector op (string->utf8 "through close"))
+                       (ftp-close session)
+                       #t)
+                     (ftp-error-message-contains?
+                      "FTP session is closed"
+                      (lambda ()
+                        (close-port op)))
+                     (not (file-exists? ported-path))))
+                  (lambda ()
+                    (unless (port-closed? op)
+                      (guard (c [else #f])
+                        (close-port op))))))))
+           (lambda ()
+             (stop-server))))))
+
 (mat net-ftp-list-nonblocking
      (let-values ([(root port stop-server) (start-ftp-test-server)])
        (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
