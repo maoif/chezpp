@@ -828,33 +828,42 @@
                  [port (default-port-for-uri who u)]
                  [address (or (resolve-address host port #f 'stream)
                               (raise-net-error who 'http "failed to resolve HTTP endpoint" u))]
-                 [sock (open-socket (socket-address-family address) 'stream)])
-            (socket-set-blocking! sock #f)
-            (unless (socket-connect! sock address)
-              (let ([ready (wait-socket-ready! who
-                                               sock
-                                               '(write error hup invalid)
-                                               deadline-ms
-                                               "HTTP request timed out")])
-                (when (and (memq 'error ready) (not (memq 'write ready)))
-                  (raise-net-error who 'http "HTTP connect failed" address))
-                (when (memq 'invalid ready)
-                  (raise-net-error who 'http "HTTP connect failed" address))))
-            (if (string=? (uri-scheme u) "https")
-                (let* ([ctx (or (http-client-tls-context client)
-                                (let ([ctx (make-tls-context 'client)])
-                                  (tls-context-set-verify! ctx #f)
-                                  ctx))]
-                       [session (call-with-http-timeout-translation
-                                 who
-                                 (lambda ()
-                                   (tls-connect ctx
-                                                sock
-                                                host
-                                                (let ([x (remaining-timeout-ms deadline-ms)])
-                                                  (if x x -1)))))])
-                  (make-http-connection* who sock session #t deadline-ms))
-                (make-http-connection* who sock #f #f deadline-ms))))))
+                 [sock (open-socket (socket-address-family address) 'stream)]
+                 [session #f])
+            (guard (c [else
+                       (when session
+                         (guard (x [else #f])
+                           (close-tls-session session)))
+                       (guard (x [else #f])
+                         (close-socket sock))
+                       (raise c)])
+              (socket-set-blocking! sock #f)
+              (unless (socket-connect! sock address)
+                (let ([ready (wait-socket-ready! who
+                                                 sock
+                                                 '(write error hup invalid)
+                                                 deadline-ms
+                                                 "HTTP request timed out")])
+                  (when (and (memq 'error ready) (not (memq 'write ready)))
+                    (raise-net-error who 'http "HTTP connect failed" address))
+                  (when (memq 'invalid ready)
+                    (raise-net-error who 'http "HTTP connect failed" address))))
+              (if (string=? (uri-scheme u) "https")
+                  (let ([ctx (or (http-client-tls-context client)
+                                 (let ([ctx (make-tls-context 'client)])
+                                   (tls-context-set-verify! ctx #f)
+                                   ctx))])
+                    (set! session
+                          (call-with-http-timeout-translation
+                           who
+                           (lambda ()
+                             (tls-connect ctx
+                                          sock
+                                          host
+                                          (let ([x (remaining-timeout-ms deadline-ms)])
+                                            (if x x -1))))))
+                    (make-http-connection* who sock session #t deadline-ms))
+                  (make-http-connection* who sock #f #f deadline-ms)))))))
 
   (define close-http-connection
     (lambda (conn)
@@ -1328,16 +1337,20 @@ The `http-listen` procedure opens a listening HTTP server on `host` and `port`, 
                (unless (or (not tls-context) (tls-context? tls-context))
                  (errorf who "expected #f or TLS context, given ~s" tls-context))
                (let ([server-socket (open-socket 'inet 'stream)])
-                 (socket-set-option! server-socket 'reuse-address #t)
-                 (socket-bind! server-socket (make-socket-address 'inet host port))
-                 (socket-listen! server-socket backlog)
-                 (%make-http-server server-socket
-                                    host
-                                    (socket-address-port
-                                     (socket-local-address server-socket))
-                                    tls-context
-                                    '()
-                                    #f)))]))
+                 (guard (c [else
+                            (guard (x [else #f])
+                              (close-socket server-socket))
+                            (raise c)])
+                   (socket-set-option! server-socket 'reuse-address #t)
+                   (socket-bind! server-socket (make-socket-address 'inet host port))
+                   (socket-listen! server-socket backlog)
+                   (%make-http-server server-socket
+                                      host
+                                      (socket-address-port
+                                       (socket-local-address server-socket))
+                                      tls-context
+                                      '()
+                                      #f))))]))
 
   #|proc:http-server-close
 The `http-server-close` procedure closes the listening socket owned by an HTTP server.

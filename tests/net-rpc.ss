@@ -444,6 +444,70 @@
        (lambda ()
          (rpc-open 'server "127.0.0.1" 70000)))))
 
+(mat net-rpc-open-failure-cleanup
+     (let ([sock (open-socket 'inet 'stream)])
+       (dynamic-wind
+         (lambda ()
+           (socket-set-option! sock 'reuse-address #t)
+           (socket-bind! sock (make-socket-address 'inet "127.0.0.1" 0))
+           (socket-listen! sock 4))
+         (lambda ()
+           (let ([port (socket-address-port (socket-local-address sock))]
+                 [before (proc-fd-count)])
+             (and
+              (let loop ([i 0])
+                (if (= i 8)
+                    #t
+                    (and (guard (c [else #t])
+                           (rpc-open 'server "127.0.0.1" port)
+                           #f)
+                         (loop (+ i 1)))))
+              (= before (proc-fd-count)))))
+         (lambda ()
+           (close-socket sock)))))
+
+(mat net-rpc-call-failure-cleanup
+     (let ([port (reserve-loopback-port)]
+           [before (proc-fd-count)])
+       (let ([client (rpc-open "127.0.0.1" port)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and
+              (let loop ([i 0])
+                (if (= i 8)
+                    #t
+                    (and (guard (c [else #t])
+                           (rpc-call client 'noop #f 100)
+                           #f)
+                         (loop (+ i 1)))))
+              (= before (proc-fd-count))))
+           (lambda ()
+             (rpc-close client))))))
+
+(mat net-rpc-stream-open-failure-cleanup
+     (let ([port (reserve-loopback-port)]
+           [before (proc-fd-count)])
+       (let ([client (rpc-open "127.0.0.1" port)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and
+              (let loop ([i 0])
+                (if (= i 8)
+                    #t
+                    (and (guard (c [else #t])
+                           (rpc-call/server-stream
+                            client
+                            rpc-streaming-watch
+                            (make-rpc-watch-request 1 "tick-")
+                            100)
+                           #f)
+                         (loop (+ i 1)))))
+              (= before (proc-fd-count))))
+           (lambda ()
+             (rpc-close client))))))
+
 (mat net-rpc-errors
      (let* ([port (reserve-loopback-port)]
             [server (rpc-open 'server "127.0.0.1" port)]

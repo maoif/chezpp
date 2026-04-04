@@ -560,45 +560,49 @@
         (unless (eq? stream-shape stream)
           (raise-net-error who 'rpc "RPC stream shape mismatch" method))
         (let-values ([(sock ans) (open-client-socket who channel #f)])
-          (let ([stream-obj
-                 (case stream
-                   [(server)
-                    (%make-rpc-stream sock
-                                      1
-                                      #f
-                                      response-type
-                                      (timeout->deadline-ms timeout-ms)
-                                      #t
-                                      #f
-                                      #f)]
-                   [(client)
-                    (%make-rpc-stream sock
-                                      1
-                                      request-type
-                                      response-type
-                                      (timeout->deadline-ms timeout-ms)
-                                      #f
-                                      #f
-                                      #f)]
-                   [(bidi)
-                    (%make-rpc-stream sock
-                                      1
-                                      request-type
-                                      response-type
-                                      (timeout->deadline-ms timeout-ms)
-                                      #f
-                                      #f
-                                      #f)]
-                   [else
-                    (raise-net-error who 'rpc "invalid RPC stream shape" stream)])])
-            (write-frame! who
-                          sock
-                          (make-stream-open-datum 1
-                                                  method-name
-                                                  stream
-                                                  payload
-                                                  (and (eq? stream 'server) request-type)))
-            stream-obj)))))
+          (guard (c [else
+                     (guard (x [else #f])
+                       (close-socket sock))
+                     (raise c)])
+            (let ([stream-obj
+                   (case stream
+                     [(server)
+                      (%make-rpc-stream sock
+                                        1
+                                        #f
+                                        response-type
+                                        (timeout->deadline-ms timeout-ms)
+                                        #t
+                                        #f
+                                        #f)]
+                     [(client)
+                      (%make-rpc-stream sock
+                                        1
+                                        request-type
+                                        response-type
+                                        (timeout->deadline-ms timeout-ms)
+                                        #f
+                                        #f
+                                        #f)]
+                     [(bidi)
+                      (%make-rpc-stream sock
+                                        1
+                                        request-type
+                                        response-type
+                                        (timeout->deadline-ms timeout-ms)
+                                        #f
+                                        #f
+                                        #f)]
+                     [else
+                      (raise-net-error who 'rpc "invalid RPC stream shape" stream)])])
+              (write-frame! who
+                            sock
+                            (make-stream-open-datum 1
+                                                    method-name
+                                                    stream
+                                                    payload
+                                                    (and (eq? stream 'server) request-type)))
+              stream-obj))))))
 
   (define normalize-response
     (lambda (value)
@@ -609,13 +613,17 @@
   (define open-client-socket
     (lambda (who channel nonblocking?)
       (let ([sock (open-socket 'inet 'stream)])
-        (when nonblocking?
-          (socket-set-blocking! sock #f))
-        (let ([ans (socket-connect! sock
-                                    (make-socket-address 'inet
-                                                         (rpc-channel-host channel)
-                                                         (rpc-channel-port channel)))])
-          (values sock ans)))))
+        (guard (c [else
+                   (guard (x [else #f])
+                     (close-socket sock))
+                   (raise c)])
+          (when nonblocking?
+            (socket-set-blocking! sock #f))
+          (let ([ans (socket-connect! sock
+                                      (make-socket-address 'inet
+                                                           (rpc-channel-host channel)
+                                                           (rpc-channel-port channel)))])
+            (values sock ans))))))
 
   (define close-pending-socket!
     (lambda (pending)
@@ -1019,16 +1027,20 @@ Use `(rpc-open host port)` for a client channel and `(rpc-open 'server host port
                (case role
                  [(server)
                   (let ([sock (open-socket 'inet 'stream)])
-                    (socket-set-option! sock 'reuse-address #t)
-                    (socket-bind! sock (make-socket-address 'inet host port))
-                    (socket-listen! sock 16)
-                    (%make-rpc-channel 'server
-                                       host
-                                       (socket-address-port (socket-local-address sock))
-                                       sock
-                                       (make-method-table)
-                                       #f
-                                       #f))]
+                    (guard (c [else
+                               (guard (x [else #f])
+                                 (close-socket sock))
+                               (raise c)])
+                      (socket-set-option! sock 'reuse-address #t)
+                      (socket-bind! sock (make-socket-address 'inet host port))
+                      (socket-listen! sock 16)
+                      (%make-rpc-channel 'server
+                                         host
+                                         (socket-address-port (socket-local-address sock))
+                                         sock
+                                         (make-method-table)
+                                         #f
+                                         #f)))]
                  [else
                   (errorf who "invalid RPC role ~s" role)]))]))
 

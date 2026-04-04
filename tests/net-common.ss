@@ -79,6 +79,10 @@
         (close-socket sock)
         port))))
 
+(define proc-fd-count
+  (lambda ()
+    (length (directory-list "/proc/self/fd"))))
+
 (define write-test-cert-files
   (lambda ()
     (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)

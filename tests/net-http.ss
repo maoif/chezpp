@@ -359,6 +359,48 @@
        (lambda ()
          (http-listen "127.0.0.1" 0 #f -1)))))
 
+(mat net-http-listen-failure-cleanup
+     (let ([sock (open-socket 'inet 'stream)])
+       (dynamic-wind
+         (lambda ()
+           (socket-set-option! sock 'reuse-address #t)
+           (socket-bind! sock (make-socket-address 'inet "127.0.0.1" 0))
+           (socket-listen! sock 4))
+         (lambda ()
+           (let ([port (socket-address-port (socket-local-address sock))]
+                 [before (proc-fd-count)])
+             (and
+              (let loop ([i 0])
+                (if (= i 8)
+                    #t
+                    (and (guard (c [else #t])
+                           (http-listen "127.0.0.1" port)
+                           #f)
+                         (loop (+ i 1)))))
+              (= before (proc-fd-count)))))
+         (lambda ()
+           (close-socket sock)))))
+
+(mat net-http-request-failure-cleanup
+     (let ([client (http-open)]
+           [port (reserve-loopback-port)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([before (proc-fd-count)]
+                 [uri (format "http://127.0.0.1:~a/unreachable" port)])
+             (and
+              (let loop ([i 0])
+                (if (= i 8)
+                    #t
+                    (and (guard (c [else #t])
+                           (http-get client uri)
+                           #f)
+                         (loop (+ i 1)))))
+              (= before (proc-fd-count)))))
+         (lambda ()
+           (http-close client)))))
+
 (mat net-http-nonblocking
      (let-values ([(server port th stop)
                    (start-http-dispatch-loop-server
