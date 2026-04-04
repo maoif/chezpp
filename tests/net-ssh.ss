@@ -294,6 +294,47 @@
          (lambda ()
            (stop-server)))))
 
+(mat net-ssh-error-port-read-closed-session
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME"
+            home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and
+                     (eq? (ssh-auth-publickey! session user) session)
+                     (let ([channel (ssh-exec session "sh -c 'printf err 1>&2'")])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (call-with-port
+                            (open-ssh-channel-error-port channel)
+                            (lambda (ep)
+                              (and
+                               (begin
+                                 (ssh-close session)
+                                 #t)
+                               (ssh-error-message-contains?
+                                "open-ssh-channel-error-port"
+                                (lambda ()
+                                  (get-bytevector-n ep 1)))
+                               (ssh-error-message-contains?
+                                "SSH session is closed"
+                                (lambda ()
+                                  (get-bytevector-n ep 1)))))))
+                         (lambda ()
+                           (ssh-close-channel channel))))))
+                  (lambda ()
+                    (ssh-close session)))))))
+         (lambda ()
+           (stop-server)))))
+
 (mat net-ssh-port-ops-closed-channel
      (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
        (dynamic-wind
@@ -326,6 +367,27 @@
                                   (get-bytevector-n ip 1)))))))
                          (lambda ()
                            (ssh-close-channel read-ch))))
+                     (let ([err-ch (ssh-exec session "sh -c 'printf err 1>&2'")])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (call-with-port
+                            (open-ssh-channel-error-port err-ch)
+                            (lambda (ep)
+                              (and
+                               (begin
+                                 (ssh-close-channel err-ch)
+                                 #t)
+                               (ssh-error-message-contains?
+                                "open-ssh-channel-error-port"
+                                (lambda ()
+                                  (get-bytevector-n ep 1)))
+                               (ssh-error-message-contains?
+                                "SSH channel is closed"
+                                (lambda ()
+                                  (get-bytevector-n ep 1)))))))
+                         (lambda ()
+                           (ssh-close-channel err-ch))))
                      (let ([write-ch (ssh-exec session "sh -c 'IFS= read -r line; printf \"%s\" \"$line\"'")])
                        (dynamic-wind
                          void

@@ -129,14 +129,14 @@
         (if (fx<= remaining 0) 0 remaining))))
 
   (define make-binary-input-port
-    (lambda (channel stderr?)
+    (lambda (who-name channel stderr?)
       (make-custom-binary-input-port
        (if stderr? "chezpp-ssh-error" "chezpp-ssh-input")
        (lambda (bv start count)
-         (ensure-channel-open 'open-ssh-channel-input-port channel)
+         (ensure-channel-open who-name channel)
          (let ([stop (fx+ start count)])
            (let ([n (read-into-result
-                     'open-ssh-channel-input-port
+                     who-name
                      (ffi-net-ssh-channel-read-into (ssh-channel-handle channel)
                                                     bv
                                                     start
@@ -147,7 +147,7 @@
              (cond
               [(fixnum? n) n]
               [(eof-object? n) 0]
-              [else (errorf 'open-ssh-channel-input-port
+              [else (errorf who-name
                             "unexpected nonblocking result from blocking SSH port read")]))))
        (lambda () #f)
        (lambda (x) #f)
@@ -673,7 +673,7 @@ The `open-ssh-channel-input-port` procedure opens a binary input port over an SS
     (lambda (channel)
       (pcheck ([ssh-channel? channel])
               (ensure-channel-open who channel)
-              (make-binary-input-port channel #f))))
+              (make-binary-input-port who channel #f))))
 
   #|proc:open-ssh-channel-output-port
 The `open-ssh-channel-output-port` procedure opens a binary output port over an SSH channel's stdin stream.
@@ -691,5 +691,5 @@ The `open-ssh-channel-error-port` procedure opens a binary input port over an SS
     (lambda (channel)
       (pcheck ([ssh-channel? channel])
               (ensure-channel-open who channel)
-              (make-binary-input-port channel #t))))
+              (make-binary-input-port who channel #t))))
   )
