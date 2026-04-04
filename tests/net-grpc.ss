@@ -482,6 +482,63 @@
                 (grpc-stream-close stream)
                 ok-stream?))))))))
 
+(mat net-grpc-stream-cancel
+     (with-grpc-env
+      (lambda ()
+        (let ([port (reserve-loopback-port)])
+          (let ([client (grpc-open-channel "127.0.0.1" port)])
+            (dynamic-wind
+              void
+              (lambda ()
+                (and
+                 (not (grpc-call/server-stream/nonblocking
+                       client
+                       "/chezpp.test.Echo/ServerStream"
+                       "x"
+                       '()
+                       100))
+                 (eq? (grpc-cancel-pending! client) client)
+                 (not (grpc-call/server-stream/nonblocking
+                       client
+                       "/chezpp.test.Echo/ServerStream"
+                       "x"
+                       '()
+                       100))
+                 (grpc-net-error-message?
+                  "another nonblocking gRPC operation is pending"
+                  (lambda ()
+                    (grpc-call/bidi-stream/nonblocking
+                     client
+                     "/chezpp.test.Echo/Bidi"
+                     '()
+                     100)))))
+              (lambda ()
+                (guard (c [else #f])
+                  (grpc-close-channel client)))))
+          (let ([client (grpc-open-channel "127.0.0.1" port)])
+            (dynamic-wind
+              void
+              (lambda ()
+                (and
+                 (not (grpc-call/server-stream/nonblocking
+                       client
+                       "/chezpp.test.Echo/ServerStream"
+                       "x"
+                       '()
+                       100))
+                 (eq? (grpc-close-channel client) client)
+                 (grpc-net-error-message?
+                  "gRPC channel is closed"
+                  (lambda ()
+                    (grpc-call client
+                               "/chezpp.test.Echo/Unary"
+                               "x"
+                               '()
+                               100)))))
+              (lambda ()
+                (guard (c [else #f])
+                  (grpc-close-channel client)))))))))
+
 (mat net-grpc-timeout-validation
      (with-grpc-env
       (lambda ()

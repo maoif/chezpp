@@ -459,6 +459,12 @@
       (clear-pending! who pending)
       channel))
 
+  (define wait-pending-thread!
+    (lambda (pending)
+      (let ([th (grpc-pending-op-thread pending)])
+        (when th
+          (thread-join th)))))
+
   (define clear-pending!
     (lambda (who pending)
       (case (grpc-pending-op-kind pending)
@@ -574,7 +580,8 @@ The `grpc-close-channel` procedure closes a gRPC client channel or server listen
               (unless (grpc-channel-closed? channel)
                 (let ([pending (grpc-channel-pending channel)])
                   (when pending
-                    (cancel-pending! who channel pending)))
+                    (cancel-pending! who channel pending)
+                    (wait-pending-thread! pending)))
                 (let ([handle (grpc-channel-handle channel)])
                   (when handle
                     (ensure-success who
