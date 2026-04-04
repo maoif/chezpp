@@ -350,3 +350,75 @@
                     (ssh-close session)))))))
          (lambda ()
            (stop-server)))))
+
+(mat net-sftp-port-ops-closed-file
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME"
+            home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and
+                     (eq? (ssh-auth-publickey! session user) session)
+                     (let ([sftp (sftp-open session)])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (and
+                            (let ([file (sftp-open-file sftp
+                                                        (string-append remote-root "/hello.txt")
+                                                        'read)])
+                              (dynamic-wind
+                                void
+                                (lambda ()
+                                  (call-with-port
+                                   (open-sftp-input-port file)
+                                   (lambda (ip)
+                                     (and
+                                      (begin
+                                        (sftp-close-file file)
+                                        #t)
+                                      (sftp-error-message-contains?
+                                       "SFTP file is closed"
+                                       (lambda ()
+                                         (get-bytevector-n ip 1)))))))
+                                (lambda ()
+                                  (sftp-close-file file))))
+                            (let ([file (sftp-open-file sftp
+                                                        (string-append remote-root "/port-write-closed-file.txt")
+                                                        '(write create truncate))])
+                              (dynamic-wind
+                                void
+                                (lambda ()
+                                  (let ([op (open-sftp-output-port file)])
+                                    (dynamic-wind
+                                      void
+                                      (lambda ()
+                                        (and
+                                         (begin
+                                           (sftp-close-file file)
+                                           #t)
+                                         (sftp-error-message-contains?
+                                          "SFTP file is closed"
+                                          (lambda ()
+                                            (put-bytevector op (string->utf8 "x"))
+                                            (flush-output-port op)
+                                            (close-port op)))))
+                                      (lambda ()
+                                        (unless (port-closed? op)
+                                          (guard (c [else #f])
+                                            (close-port op)))))))
+                                (lambda ()
+                                  (sftp-close-file file))))))
+                         (lambda ()
+                           (sftp-close sftp))))))
+                  (lambda ()
+                    (ssh-close session)))))))
+         (lambda ()
+           (stop-server)))))

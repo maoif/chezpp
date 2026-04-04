@@ -109,16 +109,17 @@
                    (lambda ()
                      (let loop ([i 0])
                        (unless (or done? (= i 50))
-                         (call-with-values
-                         (lambda () (socket-accept/nonblocking listener))
-                          (case-lambda
-                            [(ans)
-                             (unless (not ans)
-                               (error 'start-rpc-stalled-open-server
-                                      "unexpected nonblocking accept result ~s"
-                                      ans))]
-                            [(client peer)
-                             (set! accepted (cons client accepted))]))
+                         (guard (c [else #f])
+                           (call-with-values
+                            (lambda () (socket-accept/nonblocking listener))
+                            (case-lambda
+                              [(ans)
+                               (unless (not ans)
+                                 (error 'start-rpc-stalled-open-server
+                                        "unexpected nonblocking accept result ~s"
+                                        ans))]
+                              [(client peer)
+                               (set! accepted (cons client accepted))])))
                          (milisleep 10)
                          (loop (+ i 1)))))
                    (lambda ()
