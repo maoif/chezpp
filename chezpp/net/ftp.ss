@@ -243,21 +243,31 @@
       (let ([listener (open-socket 'inet 'stream)]
             [client #f]
             [server #f])
-        (dynamic-wind
-          void
-          (lambda ()
-            (socket-set-option! listener 'reuse-address #t)
-            (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
-            (socket-listen! listener 1)
-            (let ([addr (socket-local-address listener)])
-              (set! client (open-socket 'inet 'stream))
-              (socket-connect! client addr)
-              (let-values ([(accepted peer) (socket-accept listener)])
-                (set! server accepted)
-                (values server client))))
-          (lambda ()
-            (guard (c [else #f])
-              (close-socket listener)))))))
+        (guard (c [else
+                   (when server
+                     (guard (x [else #f])
+                       (close-socket server)))
+                   (when client
+                     (guard (x [else #f])
+                       (close-socket client)))
+                   (guard (x [else #f])
+                     (close-socket listener))
+                   (raise c)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (socket-set-option! listener 'reuse-address #t)
+              (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+              (socket-listen! listener 1)
+              (let ([addr (socket-local-address listener)])
+                (set! client (open-socket 'inet 'stream))
+                (socket-connect! client addr)
+                (let-values ([(accepted peer) (socket-accept listener)])
+                  (set! server accepted)
+                  (values server client))))
+            (lambda ()
+              (guard (c [else #f])
+                (close-socket listener))))))))
 
   (define start-pending!
     (lambda (session kind args thunk)
