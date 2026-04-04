@@ -66,7 +66,8 @@
   (define ensure-session-open
     (lambda (who session)
       (when (sftp-session-closed? session)
-        (raise-net-error who 'sftp "SFTP session is closed" session))))
+        (raise-net-error who 'sftp "SFTP session is closed" session))
+      (ensure-ssh-session-open who (sftp-session-ssh-session session))))
 
   (define ensure-ssh-session-open
     (lambda (who session)
@@ -246,7 +247,9 @@ The `sftp-close` procedure closes an SFTP session.
     (lambda (session)
       (pcheck ([sftp-session? session])
               (unless (sftp-session-closed? session)
-                (ensure-success who 'sftp (ffi-net-sftp-close (sftp-session-handle session)))
+                (when (guard (c [else #f])
+                        (not (fx= 0 (%ssh-session-handle (sftp-session-ssh-session session)))))
+                  (ensure-success who 'sftp (ffi-net-sftp-close (sftp-session-handle session))))
                 (sftp-session-handle-set! session 0)
                 (sftp-session-closed?-set! session #t))
               session)))

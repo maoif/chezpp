@@ -179,3 +179,37 @@
                     (ssh-close session)))))))
          (lambda ()
            (stop-server)))))
+
+(mat net-sftp-ops-closed-ssh-session
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME"
+            home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (and
+                     (eq? (ssh-auth-publickey! session user) session)
+                     (let ([sftp (sftp-open session)])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (and
+                            (begin
+                              (ssh-close session)
+                              #t)
+                            (sftp-error-message-contains?
+                             "SSH session is closed"
+                             (lambda ()
+                               (sftp-list sftp)))))
+                         (lambda ()
+                           (sftp-close sftp))))))
+                  (lambda ()
+                    (ssh-close session)))))))
+         (lambda ()
+           (stop-server)))))
