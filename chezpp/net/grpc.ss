@@ -440,7 +440,7 @@
             (and reader
                  (let* ([target (make-poll-target reader '(read error hup invalid))]
                         [ready (car (poll/nonblocking (list target)))])
-                   (pair? (poll-target-ready-events ready))))))))
+                   (memq 'read (poll-target-ready-events ready))))))))
 
   (define finish-stream-pending!
     (lambda (who channel pending)

@@ -331,7 +331,7 @@
           (let* ([target (make-poll-target (http-pending-reader pending)
                                            '(read error hup invalid))]
                  [ready (car (poll/nonblocking (list target)))])
-            (pair? (poll-target-ready-events ready))))))
+            (memq 'read (poll-target-ready-events ready))))))
 
   (define finish-pending!
     (lambda (who client pending)
