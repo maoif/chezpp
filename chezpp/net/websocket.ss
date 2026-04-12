@@ -131,6 +131,21 @@
        [(vector? x) (message-from-ffi x)]
        [else (ensure-success who x)])))
 
+  (define accept-result
+    (lambda (who server x)
+      (cond
+       [(ffi-error? x) (ensure-success who x)]
+       [(ffi-would-block? x) #f]
+       [(eof-object? x) x]
+       [else
+        (%make-websocket-connection x
+                                    (websocket-server-host server)
+                                    (websocket-server-port server)
+                                    "/"
+                                    #f
+                                    (websocket-server-protocol server)
+                                    #f)])))
+
   (define send-result
     (lambda (who x)
       (cond
@@ -244,11 +259,12 @@ The `websocket-accept` procedure accepts an incoming WebSocket connection.
       [(server timeout-ms)
        (pcheck ([websocket-server? server])
                (check-timeout-ms who timeout-ms)
-               (wait-nonblocking who
-                                 timeout-ms
-                                 "websocket accept timed out"
-                                 (lambda ()
-                                   (websocket-accept/nonblocking server))))]))
+               (ensure-server-open who server)
+               (accept-result who
+                              server
+                              (ffi-net-websocket-accept (websocket-server-handle server)
+                                                        0
+                                                        timeout-ms)))]))
 
   #|proc:websocket-accept/nonblocking
 The `websocket-accept/nonblocking` procedure accepts an incoming WebSocket connection if one is ready, and returns `#f` otherwise.
@@ -257,21 +273,11 @@ The `websocket-accept/nonblocking` procedure accepts an incoming WebSocket conne
     (lambda (server)
       (pcheck ([websocket-server? server])
               (ensure-server-open who server)
-              (let ([ans (ffi-net-websocket-accept (websocket-server-handle server)
-                                                   1
-                                                   websocket-no-timeout)])
-                (cond
-                 [(ffi-error? ans) (ensure-success who ans)]
-                 [(ffi-would-block? ans) #f]
-                 [(eof-object? ans) ans]
-                 [else
-                  (%make-websocket-connection ans
-                                              (websocket-server-host server)
-                                              (websocket-server-port server)
-                                              "/"
-                                              #f
-                                              (websocket-server-protocol server)
-                                              #f)])))))
+              (accept-result who
+                             server
+                             (ffi-net-websocket-accept (websocket-server-handle server)
+                                                       1
+                                                       websocket-no-timeout)))))
 
   #|proc:websocket-connect
 The `websocket-connect` procedure connects to a WebSocket endpoint described by a `ws:` or `wss:` URI.

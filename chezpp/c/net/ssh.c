@@ -1024,15 +1024,15 @@ ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblock
   return Sfixnum((iptr)rc);
 }
 
-int chezpp_net_open_rdonly(void) { return O_RDONLY; }
-int chezpp_net_open_wronly(void) { return O_WRONLY; }
-int chezpp_net_open_rdwr(void) { return O_RDWR; }
-int chezpp_net_open_append(void) { return O_APPEND; }
-int chezpp_net_open_creat(void) { return O_CREAT; }
-int chezpp_net_open_trunc(void) { return O_TRUNC; }
-int chezpp_net_open_excl(void) { return O_EXCL; }
+int chezpp_net_sftp_flag_read(void) { return O_RDONLY; }
+int chezpp_net_sftp_flag_write(void) { return O_WRONLY; }
+int chezpp_net_sftp_flag_read_write(void) { return O_RDWR; }
+int chezpp_net_sftp_flag_append(void) { return O_APPEND; }
+int chezpp_net_sftp_flag_create(void) { return O_CREAT; }
+int chezpp_net_sftp_flag_truncate(void) { return O_TRUNC; }
+int chezpp_net_sftp_flag_exclusive(void) { return O_EXCL; }
 #ifdef O_TEXT
-int chezpp_net_open_text(void) { return O_TEXT; }
+int chezpp_net_sftp_flag_text(void) { return O_TEXT; }
 #else
-int chezpp_net_open_text(void) { return 0; }
+int chezpp_net_sftp_flag_text(void) { return 0; }
 #endif

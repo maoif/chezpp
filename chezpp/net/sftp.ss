@@ -47,14 +47,14 @@
             (mutable closed? sftp-file-closed? sftp-file-closed?-set!)))
 
   (define sftp-default-mode #o644)
-  (define sftp-open-rdonly (ffi-net-open-rdonly))
-  (define sftp-open-wronly (ffi-net-open-wronly))
-  (define sftp-open-rdwr (ffi-net-open-rdwr))
-  (define sftp-open-append (ffi-net-open-append))
-  (define sftp-open-creat (ffi-net-open-creat))
-  (define sftp-open-trunc (ffi-net-open-trunc))
-  (define sftp-open-excl (ffi-net-open-excl))
-  (define sftp-open-text (ffi-net-open-text))
+  (define sftp-open-rdonly (ffi-net-sftp-flag-read))
+  (define sftp-open-wronly (ffi-net-sftp-flag-write))
+  (define sftp-open-rdwr (ffi-net-sftp-flag-read/write))
+  (define sftp-open-append (ffi-net-sftp-flag-append))
+  (define sftp-open-creat (ffi-net-sftp-flag-create))
+  (define sftp-open-trunc (ffi-net-sftp-flag-truncate))
+  (define sftp-open-excl (ffi-net-sftp-flag-exclusive))
+  (define sftp-open-text (ffi-net-sftp-flag-text))
 
   (define ensure-success
     (lambda (who kind x)

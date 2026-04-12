@@ -92,14 +92,14 @@
           ffi-net-grpc-server-request
           ffi-net-grpc-server-request-stream
           ffi-net-grpc-server-respond
-          ffi-net-open-rdonly
-          ffi-net-open-wronly
-          ffi-net-open-rdwr
-          ffi-net-open-append
-          ffi-net-open-creat
-          ffi-net-open-trunc
-          ffi-net-open-excl
-          ffi-net-open-text
+          ffi-net-sftp-flag-read
+          ffi-net-sftp-flag-write
+          ffi-net-sftp-flag-read/write
+          ffi-net-sftp-flag-append
+          ffi-net-sftp-flag-create
+          ffi-net-sftp-flag-truncate
+          ffi-net-sftp-flag-exclusive
+          ffi-net-sftp-flag-text
           ffi-net-tls-context-create
           ffi-net-tls-context-free
           ffi-net-tls-context-load-ca-file
@@ -320,22 +320,22 @@
     (foreign-procedure "chezpp_net_grpc_server_respond"
                        (uptr ptr int int int string scheme-object)
                        scheme-object))
-  (define ffi-net-open-rdonly
-    (foreign-procedure "chezpp_net_open_rdonly" () int))
-  (define ffi-net-open-wronly
-    (foreign-procedure "chezpp_net_open_wronly" () int))
-  (define ffi-net-open-rdwr
-    (foreign-procedure "chezpp_net_open_rdwr" () int))
-  (define ffi-net-open-append
-    (foreign-procedure "chezpp_net_open_append" () int))
-  (define ffi-net-open-creat
-    (foreign-procedure "chezpp_net_open_creat" () int))
-  (define ffi-net-open-trunc
-    (foreign-procedure "chezpp_net_open_trunc" () int))
-  (define ffi-net-open-excl
-    (foreign-procedure "chezpp_net_open_excl" () int))
-  (define ffi-net-open-text
-    (foreign-procedure "chezpp_net_open_text" () int))
+  (define ffi-net-sftp-flag-read
+    (foreign-procedure "chezpp_net_sftp_flag_read" () int))
+  (define ffi-net-sftp-flag-write
+    (foreign-procedure "chezpp_net_sftp_flag_write" () int))
+  (define ffi-net-sftp-flag-read/write
+    (foreign-procedure "chezpp_net_sftp_flag_read_write" () int))
+  (define ffi-net-sftp-flag-append
+    (foreign-procedure "chezpp_net_sftp_flag_append" () int))
+  (define ffi-net-sftp-flag-create
+    (foreign-procedure "chezpp_net_sftp_flag_create" () int))
+  (define ffi-net-sftp-flag-truncate
+    (foreign-procedure "chezpp_net_sftp_flag_truncate" () int))
+  (define ffi-net-sftp-flag-exclusive
+    (foreign-procedure "chezpp_net_sftp_flag_exclusive" () int))
+  (define ffi-net-sftp-flag-text
+    (foreign-procedure "chezpp_net_sftp_flag_text" () int))
   (define ffi-net-tls-context-create
     (foreign-procedure "chezpp_net_tls_context_create" (int) uptr))
   (define ffi-net-tls-context-free

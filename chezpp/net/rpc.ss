@@ -345,7 +345,7 @@
 
   (define datum->frame
     (lambda (datum)
-      (let-values ([(op get) (open-bytevector-output-port)])
+      (let-values ([(op get) (open-bytevector-output-port)]) ;; TODO port closed?
         (fasl-write datum op)
         (let* ([body (get)]
                [n (bytevector-length body)]
@@ -737,6 +737,7 @@
                  (raise c)])
         (thunk))))
 
+  ;; TODO doc
   (define unary-pending-key
     (lambda (who method payload notify? timeout-ms)
       (let-values ([(method-name request-type response-type stream) (normalize-method who method)])
@@ -1230,6 +1231,7 @@ The `rpc-register-handler!` procedure registers a request handler on a server RP
                 (unless (rpc-request-notify? request)
                   (write-frame! who
                                 client
+                                ;; TODO perf
                                 (vector 'rpc-response
                                         (rpc-request-id request)
                                         (rpc-response-ok? response)

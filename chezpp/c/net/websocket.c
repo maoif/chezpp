@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <libwebsockets.h>
+#include <stdarg.h>
 
 typedef struct chezpp_ws_message chezpp_ws_message;
 typedef struct chezpp_ws_send chezpp_ws_send;
@@ -24,7 +25,7 @@ struct chezpp_ws_send {
 
 struct chezpp_ws_server {
   struct lws_context *context;
-  struct lws_protocols protocols[2];
+  struct lws_protocols protocols[3];
   char *protocol_name;
   int port;
   int closed;
@@ -101,6 +102,27 @@ static lws_set_timeout_fn p_lws_set_timeout = NULL;
 static lws_get_vhost_by_name_fn p_lws_get_vhost_by_name = NULL;
 static lws_get_vhost_listen_port_fn p_lws_get_vhost_listen_port = NULL;
 static chezpp_ws_context_node *context_list = NULL;
+static int ws_trace_flag = -1;
+
+static int ws_trace_enabled(void) {
+  if (ws_trace_flag < 0) {
+    const char *value = getenv("CHEZPP_WS_TRACE");
+    ws_trace_flag = (value != NULL && *value != 0) ? 1 : 0;
+  }
+  return ws_trace_flag;
+}
+
+static void ws_tracef(const char *fmt, ...) {
+  va_list ap;
+
+  if (!ws_trace_enabled()) return;
+  fprintf(stderr, "[chezpp-ws] ");
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  fputc('\n', stderr);
+  fflush(stderr);
+}
 
 enum {
   CHEZPP_WS_TEXT = 1,
@@ -214,7 +236,13 @@ static int ensure_websocket_loaded(void) {
     return 0;
   }
 
-  p_lws_set_log_level(0, NULL);
+  {
+    const char *level = getenv("CHEZPP_WS_LOGLEVEL");
+    if (level != NULL && *level != 0)
+      p_lws_set_log_level((int)strtol(level, NULL, 0), NULL);
+    else
+      p_lws_set_log_level(0, NULL);
+  }
   return 1;
 }
 
@@ -243,19 +271,53 @@ static void service_context(struct lws_context *primary, int timeout_ms) {
   if (primary != NULL) p_lws_service(primary, timeout_ms);
 }
 
+static int context_registered(struct lws_context *context) {
+  chezpp_ws_context_node *node = context_list;
+  while (node != NULL) {
+    if (node->context == context) return 1;
+    node = node->next;
+  }
+  return 0;
+}
+
 static void service_registered(struct lws_context *primary, int timeout_ms) {
   chezpp_ws_context_node *node = context_list;
+  struct lws_context **snapshot = NULL;
+  size_t count = 0;
+  size_t i = 0;
   int used_primary = 0;
 
   while (node != NULL) {
-    chezpp_ws_context_node *next = node->next;
-    int step = (node->context == primary && !used_primary) ? timeout_ms : 0;
-    p_lws_service(node->context, step);
-    if (node->context == primary) used_primary = 1;
-    node = next;
+    count += 1;
+    node = node->next;
   }
 
-  if (primary != NULL && !used_primary) p_lws_service(primary, timeout_ms);
+  if (count > 0) {
+    snapshot = (struct lws_context **)malloc(sizeof(struct lws_context *) * count);
+    if (snapshot == NULL) {
+      if (primary != NULL) p_lws_service(primary, timeout_ms);
+      return;
+    }
+  }
+
+  node = context_list;
+  while (node != NULL && i < count) {
+    snapshot[i++] = node->context;
+    node = node->next;
+  }
+  count = i;
+
+  for (i = 0; i < count; ++i) {
+    struct lws_context *context = snapshot[i];
+    int step = (context == primary && !used_primary) ? timeout_ms : 0;
+    if (!context_registered(context)) continue;
+    p_lws_service(context, step);
+    if (context == primary) used_primary = 1;
+  }
+
+  if (snapshot != NULL) free(snapshot);
+  if (primary != NULL && !used_primary && context_registered(primary))
+    p_lws_service(primary, timeout_ms);
 }
 
 static void clear_messages(chezpp_ws_connection *conn) {
@@ -412,6 +474,8 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
   if (wsi != NULL && p_lws_get_opaque_user_data != NULL)
     conn = (chezpp_ws_connection *)p_lws_get_opaque_user_data(wsi);
 
+  ws_tracef("callback reason=%d wsi=%p conn=%p", (int)reason, (void *)wsi, (void *)conn);
+
   switch (reason) {
   case LWS_CALLBACK_ESTABLISHED: {
     chezpp_ws_server *server =
@@ -419,6 +483,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     chezpp_ws_connection *accepted =
         (chezpp_ws_connection *)calloc(1, sizeof(chezpp_ws_connection));
     if (accepted == NULL) return -1;
+    ws_tracef("server established context=%p server=%p", (void *)server->context, (void *)server);
     accepted->context = server->context;
     accepted->wsi = wsi;
     accepted->server = server;
@@ -439,6 +504,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     if (conn != NULL) {
       conn->wsi = wsi;
       conn->established = 1;
+      ws_tracef("client established conn=%p", (void *)conn);
     }
     return 0;
   case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -448,6 +514,8 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     if (conn != NULL) {
       conn->failed = 1;
       set_error(&conn->error, in == NULL ? "websocket connection failed" : (const char *)in);
+      ws_tracef("client connection error conn=%p message=%s", (void *)conn,
+                in == NULL ? "websocket connection failed" : (const char *)in);
     }
     return 0;
   case LWS_CALLBACK_RECEIVE:
@@ -498,6 +566,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     if (conn != NULL) {
       conn->wsi = NULL;
       conn->closed = 1;
+      ws_tracef("connection closed conn=%p", (void *)conn);
     }
     return 0;
   default:
@@ -522,11 +591,10 @@ static int wait_for_condition(struct lws_context *primary, int (*pred)(void *), 
       step_ms = CHEZPP_WS_SERVICE_STEP_MS;
     }
     if (service_all)
-      service_registered(primary, 0);
+      service_registered(primary, step_ms);
     else
-      service_context(primary, 0);
+      service_context(primary, step_ms);
     if (pred(data)) return 1;
-    if (poll(NULL, 0, step_ms) < 0 && errno != EINTR) return pred(data);
   }
 }
 
@@ -574,14 +642,18 @@ ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol
   }
 
   memset(&info, 0, sizeof(info));
-  server->protocols[0].name = server->protocol_name;
+  server->protocols[0].name = "http";
   server->protocols[0].callback = websocket_callback;
   server->protocols[0].per_session_data_size = 0;
   server->protocols[0].rx_buffer_size = 0;
-  server->protocols[1] = (struct lws_protocols)LWS_PROTOCOL_LIST_TERM;
+  server->protocols[1].name = server->protocol_name;
+  server->protocols[1].callback = websocket_callback;
+  server->protocols[1].per_session_data_size = 0;
+  server->protocols[1].rx_buffer_size = 0;
+  server->protocols[2] = (struct lws_protocols)LWS_PROTOCOL_LIST_TERM;
 
   info.port = port;
-  info.iface = NULL;
+  info.iface = (host != NULL && *host != 0) ? host : NULL;
   info.protocols = server->protocols;
   info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
   info.vhost_name = (host != NULL && *host != 0) ? host : "localhost";
@@ -597,6 +669,8 @@ ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol
   }
 
   register_context(server->context);
+  ws_tracef("listen host=%s port=%d protocol=%s context=%p",
+            host == NULL ? "(null)" : host, port, server->protocol_name, (void *)server->context);
   vhost = p_lws_get_vhost_by_name(server->context, info.vhost_name);
   if (vhost == NULL) vhost = p_lws_get_vhost_by_name(server->context, "default");
   if (vhost != NULL) server->port = p_lws_get_vhost_listen_port(vhost);
@@ -614,6 +688,8 @@ ptr chezpp_net_websocket_server_close(uptr handle) {
   server->accept_tail = NULL;
   while (queued != NULL) {
     chezpp_ws_connection *next = queued->next_accept;
+    if (queued->wsi != NULL && p_lws_set_opaque_user_data != NULL)
+      p_lws_set_opaque_user_data(queued->wsi, NULL);
     clear_messages(queued);
     clear_pending_send(queued);
     clear_rx(queued);
@@ -630,6 +706,9 @@ ptr chezpp_net_websocket_accept(uptr handle, int nonblocking, int timeout_ms) {
   chezpp_ws_server *server = (chezpp_ws_server *)TO_VOIDP(handle);
   chezpp_ws_connection *conn;
   if (server == NULL || server->closed) return make_error_status_message("invalid websocket server");
+  if (server->accept_head == NULL && nonblocking) {
+    service_registered(server->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
+  }
   if (server->accept_head == NULL && !nonblocking &&
       !wait_for_condition(server->context, pred_accept_ready, server, timeout_ms, 1))
     return make_error_status_message("websocket accept timed out");
@@ -638,6 +717,7 @@ ptr chezpp_net_websocket_accept(uptr handle, int nonblocking, int timeout_ms) {
     return make_status("would-block", Sfalse);
   }
   conn = pop_accept(server);
+  ws_tracef("accept conn=%p server=%p", (void *)conn, (void *)server);
   return make_websocket_handle((uptr)conn);
 }
 
@@ -684,6 +764,8 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
     return make_error_status_message("failed to create websocket client context");
   }
   register_context(conn->context);
+  ws_tracef("connect-start host=%s port=%d path=%s protocol=%s context=%p",
+            host, port, (path != NULL && *path != 0) ? path : "/", protocol, (void *)conn->context);
 
   memset(&ccinfo, 0, sizeof(ccinfo));
   snprintf(origin, sizeof(origin), "%s://%s:%d", secure ? "https" : "http", host, port);
@@ -708,6 +790,8 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   }
 
   if (!wait_for_condition(conn->context, pred_connected, conn, timeout_ms, 1)) {
+    ws_tracef("connect-timeout host=%s port=%d path=%s protocol=%s", host, port,
+              (path != NULL && *path != 0) ? path : "/", protocol);
     unregister_context(conn->context);
     p_lws_context_destroy(conn->context);
     if (conn->error != NULL) free(conn->error);
@@ -733,11 +817,14 @@ ptr chezpp_net_websocket_close(uptr handle) {
   chezpp_ws_server *server = NULL;
   if (conn == NULL) return Strue;
   server = conn->server;
+  if (conn->wsi != NULL && p_lws_set_opaque_user_data != NULL)
+    p_lws_set_opaque_user_data(conn->wsi, NULL);
   if (!conn->closed && conn->wsi != NULL) {
     p_lws_close_reason(conn->wsi, LWS_CLOSE_STATUS_NORMAL, NULL, 0);
     p_lws_set_timeout(conn->wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
     service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
   }
+  conn->wsi = NULL;
   conn->closed = 1;
   clear_messages(conn);
   clear_pending_send(conn);
