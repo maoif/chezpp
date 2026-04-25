@@ -75,15 +75,17 @@
   (import (chezpp chez))
 
   (define ffi-random-status (foreign-procedure "crypto_random_status" () int))
-  (define ffi-random-bytevector (foreign-procedure "crypto_random_bytevector" (int) ptr))
-  (define ffi-random-fill! (foreign-procedure "crypto_random_fill" (ptr int int) int))
+  (define ffi-random-bytevector (foreign-procedure "crypto_random_bytevector" (unsigned-64) ptr))
+  (define ffi-random-fill! (foreign-procedure "crypto_random_fill" (ptr unsigned-64 unsigned-64) int))
   (define ffi-constant-time-eq
-    (foreign-procedure "crypto_constant_time_eq" (ptr int int ptr int int) int))
+    (foreign-procedure "crypto_constant_time_eq"
+                       (ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64)
+                       int))
 
   (define ffi-hash-bytevector
-    (foreign-procedure "crypto_hash_bytevector" (ptr ptr int int) ptr))
+    (foreign-procedure "crypto_hash_bytevector" (ptr ptr unsigned-64 unsigned-64) ptr))
   (define ffi-hash-string
-    (foreign-procedure "crypto_hash_string" (ptr ptr int int) ptr))
+    (foreign-procedure "crypto_hash_string" (ptr ptr unsigned-64 unsigned-64) ptr))
   (define ffi-hash-output-size
     (foreign-procedure "crypto_hash_output_size" (ptr) int))
   (define ffi-hash-block-size
@@ -99,12 +101,16 @@
   (define ffi-hash-state-reset!
     (foreign-procedure "crypto_hash_state_reset" (void*) int))
   (define ffi-hash-state-update-bytevector!
-    (foreign-procedure "crypto_hash_state_update_bytevector" (void* ptr int int) int))
+    (foreign-procedure "crypto_hash_state_update_bytevector"
+                       (void* ptr unsigned-64 unsigned-64)
+                       int))
   (define ffi-hash-state-update-string!
-    (foreign-procedure "crypto_hash_state_update_string" (void* ptr int int) int))
+    (foreign-procedure "crypto_hash_state_update_string"
+                       (void* ptr unsigned-64 unsigned-64)
+                       int))
 
   (define ffi-hmac-state-create
-    (foreign-procedure "crypto_hmac_state_create" (ptr ptr int int) void*))
+    (foreign-procedure "crypto_hmac_state_create" (ptr ptr unsigned-64 unsigned-64) void*))
   (define ffi-hmac-state-destroy
     (foreign-procedure "crypto_hmac_state_destroy" (void*) void))
   (define ffi-hmac-state-get
@@ -114,28 +120,54 @@
   (define ffi-hmac-state-reset!
     (foreign-procedure "crypto_hmac_state_reset" (void*) int))
   (define ffi-hmac-state-update-bytevector!
-    (foreign-procedure "crypto_hmac_state_update_bytevector" (void* ptr int int) int))
+    (foreign-procedure "crypto_hmac_state_update_bytevector"
+                       (void* ptr unsigned-64 unsigned-64)
+                       int))
   (define ffi-hmac-state-update-string!
-    (foreign-procedure "crypto_hmac_state_update_string" (void* ptr int int) int))
+    (foreign-procedure "crypto_hmac_state_update_string"
+                       (void* ptr unsigned-64 unsigned-64)
+                       int))
 
   (define ffi-hkdf
-    (foreign-procedure "crypto_hkdf" (ptr ptr int int ptr int int ptr int int int) ptr))
+    (foreign-procedure "crypto_hkdf"
+                       (ptr ptr unsigned-64 unsigned-64
+                            ptr unsigned-64 unsigned-64
+                            ptr unsigned-64 unsigned-64 int)
+                       ptr))
   (define ffi-hkdf-extract
-    (foreign-procedure "crypto_hkdf_extract" (ptr ptr int int ptr int int) ptr))
+    (foreign-procedure "crypto_hkdf_extract"
+                       (ptr ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64)
+                       ptr))
   (define ffi-hkdf-expand
-    (foreign-procedure "crypto_hkdf_expand" (ptr ptr int int ptr int int int) ptr))
+    (foreign-procedure "crypto_hkdf_expand"
+                       (ptr ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64 int)
+                       ptr))
   (define ffi-pbkdf2
-    (foreign-procedure "crypto_pbkdf2" (ptr ptr int int ptr int int int int) ptr))
+    (foreign-procedure "crypto_pbkdf2"
+                       (ptr ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64 int int)
+                       ptr))
   (define ffi-scrypt
-    (foreign-procedure "crypto_scrypt" (ptr int int ptr int int int int int int) ptr))
+    (foreign-procedure "crypto_scrypt"
+                       (ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64 int int int int)
+                       ptr))
 
   (define ffi-aead-encrypt
     (foreign-procedure "crypto_aead_encrypt"
-                       (ptr ptr int int ptr int int ptr int int ptr int int int)
+                       (ptr
+                        ptr unsigned-64 unsigned-64
+                        ptr unsigned-64 unsigned-64
+                        ptr unsigned-64 unsigned-64
+                        ptr unsigned-64 unsigned-64
+                        int)
                        ptr))
   (define ffi-aead-decrypt
     (foreign-procedure "crypto_aead_decrypt"
-                       (ptr ptr int int ptr int int ptr int int ptr int int ptr int int)
+                       (ptr
+                        ptr unsigned-64 unsigned-64
+                        ptr unsigned-64 unsigned-64
+                        ptr unsigned-64 unsigned-64
+                        ptr unsigned-64 unsigned-64
+                        ptr unsigned-64 unsigned-64)
                        ptr))
 
   (define ffi-cipher-key-size
@@ -145,11 +177,15 @@
   (define ffi-cipher-block-size
     (foreign-procedure "crypto_cipher_block_size" (ptr) int))
   (define ffi-cipher-state-create
-    (foreign-procedure "crypto_cipher_state_create" (ptr int ptr int int ptr int int) void*))
+    (foreign-procedure "crypto_cipher_state_create"
+                       (ptr int ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64)
+                       void*))
   (define ffi-cipher-state-destroy
     (foreign-procedure "crypto_cipher_state_destroy" (void*) void))
   (define ffi-cipher-state-update
-    (foreign-procedure "crypto_cipher_state_update" (void* ptr int int) ptr))
+    (foreign-procedure "crypto_cipher_state_update"
+                       (void* ptr unsigned-64 unsigned-64)
+                       ptr))
   (define ffi-cipher-state-finalize
     (foreign-procedure "crypto_cipher_state_finalize" (void*) ptr))
   (define ffi-cipher-state-reset!
@@ -174,24 +210,26 @@
   (define ffi-pkey-store-public-der
     (foreign-procedure "crypto_pkey_store_public_der" (void*) ptr))
   (define ffi-pkey-load-private-pem
-    (foreign-procedure "crypto_pkey_load_private_pem" (ptr int int) void*))
+    (foreign-procedure "crypto_pkey_load_private_pem" (ptr unsigned-64 unsigned-64) void*))
   (define ffi-pkey-load-public-pem
-    (foreign-procedure "crypto_pkey_load_public_pem" (ptr int int) void*))
+    (foreign-procedure "crypto_pkey_load_public_pem" (ptr unsigned-64 unsigned-64) void*))
   (define ffi-pkey-load-private-der
-    (foreign-procedure "crypto_pkey_load_private_der" (ptr int int) void*))
+    (foreign-procedure "crypto_pkey_load_private_der" (ptr unsigned-64 unsigned-64) void*))
   (define ffi-pkey-load-public-der
-    (foreign-procedure "crypto_pkey_load_public_der" (ptr int int) void*))
+    (foreign-procedure "crypto_pkey_load_public_der" (ptr unsigned-64 unsigned-64) void*))
   (define ffi-sign-message
-    (foreign-procedure "crypto_sign_message" (ptr ptr void* ptr int int) ptr))
+    (foreign-procedure "crypto_sign_message" (ptr ptr void* ptr unsigned-64 unsigned-64) ptr))
   (define ffi-verify-message
-    (foreign-procedure "crypto_verify_message" (ptr ptr void* ptr int int ptr int int) int))
+    (foreign-procedure "crypto_verify_message"
+                       (ptr ptr void* ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64)
+                       int))
   (define ffi-derive-shared-secret
     (foreign-procedure "crypto_derive_shared_secret" (ptr void* void*) ptr))
 
   (define ffi-cert-load-pem
-    (foreign-procedure "crypto_cert_load_pem" (ptr int int) void*))
+    (foreign-procedure "crypto_cert_load_pem" (ptr unsigned-64 unsigned-64) void*))
   (define ffi-cert-load-der
-    (foreign-procedure "crypto_cert_load_der" (ptr int int) void*))
+    (foreign-procedure "crypto_cert_load_der" (ptr unsigned-64 unsigned-64) void*))
   (define ffi-cert-free
     (foreign-procedure "crypto_cert_free" (void*) void))
   (define ffi-cert-subject

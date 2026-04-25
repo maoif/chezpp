@@ -14,6 +14,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
+#include <limits.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -65,15 +66,52 @@ static ptr make_bytevector_copy(const unsigned char *buf, size_t len) {
   return bv;
 }
 
-static ptr make_subbytevector_copy(ptr bv, int start, int stop) {
-  return make_bytevector_copy(Sbytevector_data(bv) + start, (size_t)(stop - start));
+static size_t slice_len(uint64_t start, uint64_t stop) {
+  return (size_t)(stop - start);
 }
 
-static ptr make_string_utf32_copy(ptr str, int start, int stop) {
-  ptr bv = Smake_bytevector((iptr)((stop - start) * 4), 0);
+static int uint64_to_int(uint64_t n, int *out) {
+  if (n > (uint64_t)INT_MAX) return 0;
+  *out = (int)n;
+  return 1;
+}
+
+static int rand_bytes_all(unsigned char *buf, uint64_t len) {
+  uint64_t done = 0;
+  while (done < len) {
+    uint64_t remaining = len - done;
+    int chunk = remaining > (uint64_t)INT_MAX ? INT_MAX : (int)remaining;
+    if (RAND_bytes(buf + (size_t)done, chunk) != 1) return 0;
+    done += (uint64_t)chunk;
+  }
+  return 1;
+}
+
+static int evp_cipher_update_all(EVP_CIPHER_CTX *ctx, unsigned char *out,
+                                 size_t *out_len, const unsigned char *in,
+                                 uint64_t in_len) {
+  uint64_t done = 0;
+  size_t written = 0;
+  while (done < in_len) {
+    uint64_t remaining = in_len - done;
+    int chunk = remaining > (uint64_t)INT_MAX ? INT_MAX : (int)remaining;
+    int chunk_out = 0;
+    if (EVP_CipherUpdate(ctx, out == NULL ? NULL : out + written, &chunk_out,
+                         in + (size_t)done, chunk) != 1) {
+      return 0;
+    }
+    done += (uint64_t)chunk;
+    written += (size_t)chunk_out;
+  }
+  *out_len = written;
+  return 1;
+}
+
+static ptr make_string_utf32_copy(ptr str, uint64_t start, uint64_t stop) {
+  ptr bv = Smake_bytevector((iptr)(slice_len(start, stop) * 4), 0);
   unsigned char *dst = Sbytevector_data(bv);
-  for (int i = start; i < stop; i++) {
-    uint32_t c = (uint32_t)Sstring_ref(str, i);
+  for (uint64_t i = start; i < stop; i++) {
+    uint32_t c = (uint32_t)Sstring_ref(str, (iptr)i);
     memcpy(dst + ((size_t)(i - start) * 4), &c, 4);
   }
   return bv;
@@ -167,30 +205,30 @@ int crypto_random_status() {
   return RAND_status();
 }
 
-ptr crypto_random_bytevector(int len) {
+ptr crypto_random_bytevector(uint64_t len) {
   ensure_crypto_init();
   ptr bv = Smake_bytevector((iptr)len, 0);
-  if (RAND_bytes(Sbytevector_data(bv), len) != 1) {
+  if (rand_bytes_all(Sbytevector_data(bv), len) != 1) {
     return Sfalse;
   }
   return bv;
 }
 
-int crypto_random_fill(ptr bv, int start, int stop) {
+int crypto_random_fill(ptr bv, uint64_t start, uint64_t stop) {
   ensure_crypto_init();
-  return RAND_bytes(Sbytevector_data(bv) + start, stop - start);
+  return rand_bytes_all(Sbytevector_data(bv) + (size_t)start, stop - start);
 }
 
-int crypto_constant_time_eq(ptr bv1, int start1, int stop1, ptr bv2, int start2,
-                            int stop2) {
-  size_t len1 = (size_t)(stop1 - start1);
-  size_t len2 = (size_t)(stop2 - start2);
+int crypto_constant_time_eq(ptr bv1, uint64_t start1, uint64_t stop1, ptr bv2,
+                            uint64_t start2, uint64_t stop2) {
+  size_t len1 = slice_len(start1, stop1);
+  size_t len2 = slice_len(start2, stop2);
   if (len1 != len2) return 0;
-  return CRYPTO_memcmp(Sbytevector_data(bv1) + start1,
-                       Sbytevector_data(bv2) + start2, len1) == 0;
+  return CRYPTO_memcmp(Sbytevector_data(bv1) + (size_t)start1,
+                       Sbytevector_data(bv2) + (size_t)start2, len1) == 0;
 }
 
-ptr crypto_hash_bytevector(ptr which, ptr bv, int start, int stop) {
+ptr crypto_hash_bytevector(ptr which, ptr bv, uint64_t start, uint64_t stop) {
   EVP_MD *md = fetch_digest(which);
   EVP_MD_CTX *ctx;
   ptr ans = Sfalse;
@@ -199,7 +237,10 @@ ptr crypto_hash_bytevector(ptr which, ptr bv, int start, int stop) {
   ctx = EVP_MD_CTX_new();
   if (ctx == NULL) goto done;
   if (EVP_DigestInit_ex(ctx, md, NULL) != 1) goto done;
-  if (EVP_DigestUpdate(ctx, Sbytevector_data(bv) + start, stop - start) != 1) goto done;
+  if (EVP_DigestUpdate(ctx, Sbytevector_data(bv) + (size_t)start,
+                       slice_len(start, stop)) != 1) {
+    goto done;
+  }
   ans = digest_ctx_result(ctx);
 
 done:
@@ -208,9 +249,9 @@ done:
   return ans;
 }
 
-ptr crypto_hash_string(ptr which, ptr str, int start, int stop) {
+ptr crypto_hash_string(ptr which, ptr str, uint64_t start, uint64_t stop) {
   ptr bv = make_string_utf32_copy(str, start, stop);
-  return crypto_hash_bytevector(which, bv, 0, stop - start == 0 ? 0 : (stop - start) * 4);
+  return crypto_hash_bytevector(which, bv, 0, slice_len(start, stop) * 4);
 }
 
 int crypto_hash_output_size(ptr which) {
@@ -293,16 +334,18 @@ int crypto_hash_state_reset(void *ptr_st) {
   return EVP_DigestInit_ex(st->ctx, st->md, NULL);
 }
 
-int crypto_hash_state_update_bytevector(void *ptr_st, ptr bv, int start, int stop) {
+int crypto_hash_state_update_bytevector(void *ptr_st, ptr bv, uint64_t start,
+                                        uint64_t stop) {
   chezpp_hash_state *st = (chezpp_hash_state *)ptr_st;
   if (st == NULL || st->ctx == NULL) return 0;
-  return EVP_DigestUpdate(st->ctx, Sbytevector_data(bv) + start, stop - start);
+  return EVP_DigestUpdate(st->ctx, Sbytevector_data(bv) + (size_t)start,
+                          slice_len(start, stop));
 }
 
-int crypto_hash_state_update_string(void *ptr_st, ptr str, int start, int stop) {
+int crypto_hash_state_update_string(void *ptr_st, ptr str, uint64_t start,
+                                    uint64_t stop) {
   ptr bv = make_string_utf32_copy(str, start, stop);
-  return crypto_hash_state_update_bytevector(ptr_st, bv, 0,
-                                             stop - start == 0 ? 0 : (stop - start) * 4);
+  return crypto_hash_state_update_bytevector(ptr_st, bv, 0, slice_len(start, stop) * 4);
 }
 
 static int hmac_init_state(chezpp_hmac_state *st) {
@@ -313,9 +356,9 @@ static int hmac_init_state(chezpp_hmac_state *st) {
   return EVP_MAC_init(st->ctx, st->key, st->key_len, params);
 }
 
-void *crypto_hmac_state_create(ptr which, ptr key, int start, int stop) {
+void *crypto_hmac_state_create(ptr which, ptr key, uint64_t start, uint64_t stop) {
   chezpp_hmac_state *st = malloc(sizeof(chezpp_hmac_state));
-  size_t key_len = (size_t)(stop - start);
+  size_t key_len = slice_len(start, stop);
 
   if (st == NULL) return NULL;
   st->mac = NULL;
@@ -335,7 +378,7 @@ void *crypto_hmac_state_create(ptr which, ptr key, int start, int stop) {
   st->key = malloc(key_len == 0 ? 1 : key_len);
   if (st->key == NULL) goto fail;
   if (key_len != 0) {
-    memcpy(st->key, Sbytevector_data(key) + start, key_len);
+    memcpy(st->key, Sbytevector_data(key) + (size_t)start, key_len);
   }
 
   if (hmac_init_state(st) != 1) goto fail;
@@ -418,21 +461,24 @@ int crypto_hmac_state_reset(void *ptr_st) {
   return hmac_init_state(st);
 }
 
-int crypto_hmac_state_update_bytevector(void *ptr_st, ptr bv, int start, int stop) {
+int crypto_hmac_state_update_bytevector(void *ptr_st, ptr bv, uint64_t start,
+                                        uint64_t stop) {
   chezpp_hmac_state *st = (chezpp_hmac_state *)ptr_st;
   if (st == NULL || st->ctx == NULL) return 0;
-  return EVP_MAC_update(st->ctx, Sbytevector_data(bv) + start, stop - start);
+  return EVP_MAC_update(st->ctx, Sbytevector_data(bv) + (size_t)start,
+                        slice_len(start, stop));
 }
 
-int crypto_hmac_state_update_string(void *ptr_st, ptr str, int start, int stop) {
+int crypto_hmac_state_update_string(void *ptr_st, ptr str, uint64_t start,
+                                    uint64_t stop) {
   ptr bv = make_string_utf32_copy(str, start, stop);
-  return crypto_hmac_state_update_bytevector(ptr_st, bv, 0,
-                                             stop - start == 0 ? 0 : (stop - start) * 4);
+  return crypto_hmac_state_update_bytevector(ptr_st, bv, 0, slice_len(start, stop) * 4);
 }
 
-static ptr hkdf_common(int mode, ptr which, ptr ikm, int ikm_start, int ikm_stop,
-                       ptr salt, int salt_start, int salt_stop, ptr info,
-                       int info_start, int info_stop, int out_len) {
+static ptr hkdf_common(int mode, ptr which, ptr ikm, uint64_t ikm_start,
+                       uint64_t ikm_stop, ptr salt, uint64_t salt_start,
+                       uint64_t salt_stop, ptr info, uint64_t info_start,
+                       uint64_t info_stop, int out_len) {
   EVP_KDF *kdf = NULL;
   EVP_KDF_CTX *ctx = NULL;
   OSSL_PARAM params[6];
@@ -454,11 +500,14 @@ static ptr hkdf_common(int mode, ptr which, ptr ikm, int ikm_start, int ikm_stop
       OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, (char *)md_name, 0);
   params[idx++] = OSSL_PARAM_construct_int(OSSL_KDF_PARAM_MODE, &mode_copy);
   params[idx++] = OSSL_PARAM_construct_octet_string(
-      OSSL_KDF_PARAM_KEY, Sbytevector_data(ikm) + ikm_start, ikm_stop - ikm_start);
+      OSSL_KDF_PARAM_KEY, Sbytevector_data(ikm) + (size_t)ikm_start,
+      slice_len(ikm_start, ikm_stop));
   params[idx++] = OSSL_PARAM_construct_octet_string(
-      OSSL_KDF_PARAM_SALT, Sbytevector_data(salt) + salt_start, salt_stop - salt_start);
+      OSSL_KDF_PARAM_SALT, Sbytevector_data(salt) + (size_t)salt_start,
+      slice_len(salt_start, salt_stop));
   params[idx++] = OSSL_PARAM_construct_octet_string(
-      OSSL_KDF_PARAM_INFO, Sbytevector_data(info) + info_start, info_stop - info_start);
+      OSSL_KDF_PARAM_INFO, Sbytevector_data(info) + (size_t)info_start,
+      slice_len(info_start, info_stop));
   params[idx++] = OSSL_PARAM_construct_end();
 
   out_buf = malloc(out_len == 0 ? 1 : (size_t)out_len);
@@ -476,16 +525,16 @@ done:
   return ans;
 }
 
-ptr crypto_hkdf(ptr which, ptr ikm, int ikm_start, int ikm_stop, ptr salt,
-                int salt_start, int salt_stop, ptr info, int info_start,
-                int info_stop, int out_len) {
+ptr crypto_hkdf(ptr which, ptr ikm, uint64_t ikm_start, uint64_t ikm_stop, ptr salt,
+                uint64_t salt_start, uint64_t salt_stop, ptr info,
+                uint64_t info_start, uint64_t info_stop, int out_len) {
   return hkdf_common(EVP_KDF_HKDF_MODE_EXTRACT_AND_EXPAND, which, ikm, ikm_start,
                      ikm_stop, salt, salt_start, salt_stop, info, info_start,
                      info_stop, out_len);
 }
 
-ptr crypto_hkdf_extract(ptr which, ptr ikm, int ikm_start, int ikm_stop, ptr salt,
-                        int salt_start, int salt_stop) {
+ptr crypto_hkdf_extract(ptr which, ptr ikm, uint64_t ikm_start, uint64_t ikm_stop,
+                        ptr salt, uint64_t salt_start, uint64_t salt_stop) {
   EVP_MD *md = fetch_digest(which);
   int out_len;
   ptr ans;
@@ -498,26 +547,29 @@ ptr crypto_hkdf_extract(ptr which, ptr ikm, int ikm_start, int ikm_stop, ptr sal
   return ans;
 }
 
-ptr crypto_hkdf_expand(ptr which, ptr prk, int prk_start, int prk_stop, ptr info,
-                       int info_start, int info_stop, int out_len) {
+ptr crypto_hkdf_expand(ptr which, ptr prk, uint64_t prk_start, uint64_t prk_stop,
+                       ptr info, uint64_t info_start, uint64_t info_stop, int out_len) {
   ptr empty = Smake_bytevector(0, 0);
   return hkdf_common(EVP_KDF_HKDF_MODE_EXPAND_ONLY, which, prk, prk_start, prk_stop,
                      empty, 0, 0, info, info_start, info_stop, out_len);
 }
 
-ptr crypto_pbkdf2(ptr which, ptr password, int pw_start, int pw_stop, ptr salt,
-                  int salt_start, int salt_stop, int iterations, int out_len) {
+ptr crypto_pbkdf2(ptr which, ptr password, uint64_t pw_start, uint64_t pw_stop,
+                  ptr salt, uint64_t salt_start, uint64_t salt_stop, int iterations,
+                  int out_len) {
   EVP_MD *md = fetch_digest(which);
   unsigned char *out_buf = NULL;
   ptr ans = Sfalse;
+  int pw_len, salt_len;
 
   if (md == NULL) return Sfalse;
+  if (!uint64_to_int(pw_stop - pw_start, &pw_len)) goto done;
+  if (!uint64_to_int(salt_stop - salt_start, &salt_len)) goto done;
   out_buf = malloc(out_len == 0 ? 1 : (size_t)out_len);
   if (out_buf == NULL) goto done;
-  if (PKCS5_PBKDF2_HMAC((const char *)(Sbytevector_data(password) + pw_start),
-                        pw_stop - pw_start, Sbytevector_data(salt) + salt_start,
-                        salt_stop - salt_start, iterations, md, out_len,
-                        out_buf) != 1) {
+  if (PKCS5_PBKDF2_HMAC((const char *)(Sbytevector_data(password) + (size_t)pw_start),
+                        pw_len, Sbytevector_data(salt) + (size_t)salt_start,
+                        salt_len, iterations, md, out_len, out_buf) != 1) {
     goto done;
   }
   ans = make_bytevector_copy(out_buf, out_len);
@@ -531,16 +583,18 @@ done:
   return ans;
 }
 
-ptr crypto_scrypt(ptr password, int pw_start, int pw_stop, ptr salt, int salt_start,
-                  int salt_stop, int n, int r, int p, int out_len) {
+ptr crypto_scrypt(ptr password, uint64_t pw_start, uint64_t pw_stop, ptr salt,
+                  uint64_t salt_start, uint64_t salt_stop, int n, int r, int p,
+                  int out_len) {
   unsigned char *out_buf = malloc(out_len == 0 ? 1 : (size_t)out_len);
   ptr ans = Sfalse;
 
   if (out_buf == NULL) return Sfalse;
   ensure_crypto_init();
-  if (EVP_PBE_scrypt((const char *)(Sbytevector_data(password) + pw_start),
-                     pw_stop - pw_start, Sbytevector_data(salt) + salt_start,
-                     salt_stop - salt_start, (uint64_t)n, (uint64_t)r,
+  if (EVP_PBE_scrypt((const char *)(Sbytevector_data(password) + (size_t)pw_start),
+                     slice_len(pw_start, pw_stop),
+                     Sbytevector_data(salt) + (size_t)salt_start,
+                     slice_len(salt_start, salt_stop), (uint64_t)n, (uint64_t)r,
                      (uint64_t)p, 0, out_buf, (size_t)out_len) != 1) {
     goto done;
   }
@@ -560,43 +614,50 @@ static ptr make_aead_pair(const unsigned char *ct, size_t ct_len,
   return v;
 }
 
-ptr crypto_aead_encrypt(ptr which, ptr key, int key_start, int key_stop, ptr nonce,
-                        int nonce_start, int nonce_stop, ptr aad, int aad_start,
-                        int aad_stop, ptr plaintext, int pt_start, int pt_stop,
+ptr crypto_aead_encrypt(ptr which, ptr key, uint64_t key_start, uint64_t key_stop,
+                        ptr nonce, uint64_t nonce_start, uint64_t nonce_stop,
+                        ptr aad, uint64_t aad_start, uint64_t aad_stop,
+                        ptr plaintext, uint64_t pt_start, uint64_t pt_stop,
                         int tag_len) {
   EVP_CIPHER *cipher = fetch_cipher(which);
   EVP_CIPHER_CTX *ctx = NULL;
   unsigned char *out = NULL;
   unsigned char *tag = NULL;
   ptr ans = Sfalse;
-  int out1 = 0, out2 = 0;
-  size_t pt_len = (size_t)(pt_stop - pt_start);
+  size_t out_len = 0;
+  int out2 = 0;
+  int nonce_len;
+  size_t pt_len = slice_len(pt_start, pt_stop);
 
+  (void)key_stop;
   if (cipher == NULL) return Sfalse;
+  if (!uint64_to_int(nonce_stop - nonce_start, &nonce_len)) goto done;
   ctx = EVP_CIPHER_CTX_new();
   if (ctx == NULL) goto done;
   if (EVP_EncryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1) goto done;
-  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, nonce_stop - nonce_start, NULL) != 1) goto done;
-  if (EVP_EncryptInit_ex(ctx, NULL, NULL, Sbytevector_data(key) + key_start,
-                         Sbytevector_data(nonce) + nonce_start) != 1) {
+  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, nonce_len, NULL) != 1) goto done;
+  if (EVP_EncryptInit_ex(ctx, NULL, NULL, Sbytevector_data(key) + (size_t)key_start,
+                         Sbytevector_data(nonce) + (size_t)nonce_start) != 1) {
     goto done;
   }
   if (aad_stop > aad_start &&
-      EVP_EncryptUpdate(ctx, NULL, &out1, Sbytevector_data(aad) + aad_start,
-                        aad_stop - aad_start) != 1) {
+      !evp_cipher_update_all(ctx, NULL, &out_len, Sbytevector_data(aad) + (size_t)aad_start,
+                             aad_stop - aad_start)) {
     goto done;
   }
+  out_len = 0;
   out = malloc(pt_len == 0 ? 1 : pt_len);
   tag = malloc(tag_len == 0 ? 1 : (size_t)tag_len);
   if (out == NULL || tag == NULL) goto done;
   if (pt_len != 0 &&
-      EVP_EncryptUpdate(ctx, out, &out1, Sbytevector_data(plaintext) + pt_start,
-                        pt_stop - pt_start) != 1) {
+      !evp_cipher_update_all(ctx, out, &out_len,
+                             Sbytevector_data(plaintext) + (size_t)pt_start,
+                             pt_stop - pt_start)) {
     goto done;
   }
-  if (EVP_EncryptFinal_ex(ctx, out + out1, &out2) != 1) goto done;
+  if (EVP_EncryptFinal_ex(ctx, out + out_len, &out2) != 1) goto done;
   if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, tag_len, tag) != 1) goto done;
-  ans = make_aead_pair(out, (size_t)(out1 + out2), tag, (size_t)tag_len);
+  ans = make_aead_pair(out, out_len + (size_t)out2, tag, (size_t)tag_len);
 
 done:
   if (out != NULL) {
@@ -612,44 +673,52 @@ done:
   return ans;
 }
 
-ptr crypto_aead_decrypt(ptr which, ptr key, int key_start, int key_stop, ptr nonce,
-                        int nonce_start, int nonce_stop, ptr aad, int aad_start,
-                        int aad_stop, ptr ciphertext, int ct_start, int ct_stop,
-                        ptr tag, int tag_start, int tag_stop) {
+ptr crypto_aead_decrypt(ptr which, ptr key, uint64_t key_start, uint64_t key_stop,
+                        ptr nonce, uint64_t nonce_start, uint64_t nonce_stop,
+                        ptr aad, uint64_t aad_start, uint64_t aad_stop,
+                        ptr ciphertext, uint64_t ct_start, uint64_t ct_stop,
+                        ptr tag, uint64_t tag_start, uint64_t tag_stop) {
   EVP_CIPHER *cipher = fetch_cipher(which);
   EVP_CIPHER_CTX *ctx = NULL;
   unsigned char *out = NULL;
   ptr ans = Sfalse;
-  int out1 = 0, out2 = 0;
-  size_t ct_len = (size_t)(ct_stop - ct_start);
+  size_t out_len = 0;
+  int out2 = 0;
+  int nonce_len, tag_len;
+  size_t ct_len = slice_len(ct_start, ct_stop);
 
+  (void)key_stop;
   if (cipher == NULL) return Sfalse;
+  if (!uint64_to_int(nonce_stop - nonce_start, &nonce_len)) goto done;
+  if (!uint64_to_int(tag_stop - tag_start, &tag_len)) goto done;
   ctx = EVP_CIPHER_CTX_new();
   if (ctx == NULL) goto done;
   if (EVP_DecryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1) goto done;
-  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, nonce_stop - nonce_start, NULL) != 1) goto done;
-  if (EVP_DecryptInit_ex(ctx, NULL, NULL, Sbytevector_data(key) + key_start,
-                         Sbytevector_data(nonce) + nonce_start) != 1) {
+  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, nonce_len, NULL) != 1) goto done;
+  if (EVP_DecryptInit_ex(ctx, NULL, NULL, Sbytevector_data(key) + (size_t)key_start,
+                         Sbytevector_data(nonce) + (size_t)nonce_start) != 1) {
     goto done;
   }
   if (aad_stop > aad_start &&
-      EVP_DecryptUpdate(ctx, NULL, &out1, Sbytevector_data(aad) + aad_start,
-                        aad_stop - aad_start) != 1) {
+      !evp_cipher_update_all(ctx, NULL, &out_len, Sbytevector_data(aad) + (size_t)aad_start,
+                             aad_stop - aad_start)) {
     goto done;
   }
+  out_len = 0;
   out = malloc(ct_len == 0 ? 1 : ct_len);
   if (out == NULL) goto done;
   if (ct_len != 0 &&
-      EVP_DecryptUpdate(ctx, out, &out1, Sbytevector_data(ciphertext) + ct_start,
-                        ct_stop - ct_start) != 1) {
+      !evp_cipher_update_all(ctx, out, &out_len,
+                             Sbytevector_data(ciphertext) + (size_t)ct_start,
+                             ct_stop - ct_start)) {
     goto done;
   }
-  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, tag_stop - tag_start,
-                          Sbytevector_data(tag) + tag_start) != 1) {
+  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, tag_len,
+                          Sbytevector_data(tag) + (size_t)tag_start) != 1) {
     goto done;
   }
-  if (EVP_DecryptFinal_ex(ctx, out + out1, &out2) != 1) goto done;
-  ans = make_bytevector_copy(out, (size_t)(out1 + out2));
+  if (EVP_DecryptFinal_ex(ctx, out + out_len, &out2) != 1) goto done;
+  ans = make_bytevector_copy(out, out_len + (size_t)out2);
 
 done:
   if (out != NULL) {
@@ -699,8 +768,9 @@ int crypto_cipher_block_size(ptr which) {
   return ans;
 }
 
-void *crypto_cipher_state_create(ptr which, int encrypt, ptr key, int key_start,
-                                 int key_stop, ptr iv, int iv_start, int iv_stop) {
+void *crypto_cipher_state_create(ptr which, int encrypt, ptr key, uint64_t key_start,
+                                 uint64_t key_stop, ptr iv, uint64_t iv_start,
+                                 uint64_t iv_stop) {
   chezpp_cipher_state *st = malloc(sizeof(chezpp_cipher_state));
 
   if (st == NULL) return NULL;
@@ -708,9 +778,9 @@ void *crypto_cipher_state_create(ptr which, int encrypt, ptr key, int key_start,
   st->ctx = NULL;
   st->encrypt = encrypt;
   st->key = NULL;
-  st->key_len = (size_t)(key_stop - key_start);
+  st->key_len = slice_len(key_start, key_stop);
   st->iv = NULL;
-  st->iv_len = (size_t)(iv_stop - iv_start);
+  st->iv_len = slice_len(iv_start, iv_stop);
 
   st->cipher = fetch_cipher(which);
   if (st->cipher == NULL) goto fail;
@@ -722,10 +792,10 @@ void *crypto_cipher_state_create(ptr which, int encrypt, ptr key, int key_start,
   st->iv = malloc(st->iv_len == 0 ? 1 : st->iv_len);
   if (st->key == NULL || st->iv == NULL) goto fail;
   if (st->key_len != 0) {
-    memcpy(st->key, Sbytevector_data(key) + key_start, st->key_len);
+    memcpy(st->key, Sbytevector_data(key) + (size_t)key_start, st->key_len);
   }
   if (st->iv_len != 0) {
-    memcpy(st->iv, Sbytevector_data(iv) + iv_start, st->iv_len);
+    memcpy(st->iv, Sbytevector_data(iv) + (size_t)iv_start, st->iv_len);
   }
 
   if (cipher_state_init(st) != 1) goto fail;
@@ -762,23 +832,24 @@ void crypto_cipher_state_destroy(void *ptr_st) {
   free(st);
 }
 
-ptr crypto_cipher_state_update(void *ptr_st, ptr bv, int start, int stop) {
+ptr crypto_cipher_state_update(void *ptr_st, ptr bv, uint64_t start, uint64_t stop) {
   chezpp_cipher_state *st = (chezpp_cipher_state *)ptr_st;
   unsigned char *out = NULL;
   ptr ans = Sfalse;
-  int out_len = 0;
-  size_t in_len = (size_t)(stop - start);
+  size_t out_len = 0;
+  size_t in_len = slice_len(start, stop);
   size_t out_cap;
 
   if (st == NULL || st->ctx == NULL) return Sfalse;
   out_cap = in_len + (size_t)EVP_CIPHER_CTX_get_block_size(st->ctx);
   out = malloc(out_cap == 0 ? 1 : out_cap);
   if (out == NULL) return Sfalse;
-  if (EVP_CipherUpdate(st->ctx, out, &out_len, Sbytevector_data(bv) + start,
-                       stop - start) != 1) {
+  if (!evp_cipher_update_all(st->ctx, out, &out_len,
+                             Sbytevector_data(bv) + (size_t)start,
+                             stop - start)) {
     goto done;
   }
-  ans = make_bytevector_copy(out, (size_t)out_len);
+  ans = make_bytevector_copy(out, out_len);
 
 done:
   if (out != NULL) {
@@ -815,10 +886,6 @@ int crypto_cipher_state_reset(void *ptr_st) {
   if (st == NULL || st->ctx == NULL) return 0;
   if (EVP_CIPHER_CTX_reset(st->ctx) != 1) return 0;
   return cipher_state_init(st);
-}
-
-static ptr make_string_copy(const char *s) {
-  return s == NULL ? Sfalse : Sstring(s);
 }
 
 static const char *curve_name(ptr curve) {
@@ -979,8 +1046,10 @@ done:
   return ans;
 }
 
-void *crypto_pkey_load_private_pem(ptr bv, int start, int stop) {
-  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + start, stop - start);
+void *crypto_pkey_load_private_pem(ptr bv, uint64_t start, uint64_t stop) {
+  int len;
+  if (!uint64_to_int(stop - start, &len)) return NULL;
+  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
   pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
@@ -988,8 +1057,10 @@ void *crypto_pkey_load_private_pem(ptr bv, int start, int stop) {
   return pkey;
 }
 
-void *crypto_pkey_load_public_pem(ptr bv, int start, int stop) {
-  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + start, stop - start);
+void *crypto_pkey_load_public_pem(ptr bv, uint64_t start, uint64_t stop) {
+  int len;
+  if (!uint64_to_int(stop - start, &len)) return NULL;
+  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
   pkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
@@ -997,8 +1068,10 @@ void *crypto_pkey_load_public_pem(ptr bv, int start, int stop) {
   return pkey;
 }
 
-void *crypto_pkey_load_private_der(ptr bv, int start, int stop) {
-  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + start, stop - start);
+void *crypto_pkey_load_private_der(ptr bv, uint64_t start, uint64_t stop) {
+  int len;
+  if (!uint64_to_int(stop - start, &len)) return NULL;
+  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
   pkey = d2i_PrivateKey_bio(bio, NULL);
@@ -1006,8 +1079,10 @@ void *crypto_pkey_load_private_der(ptr bv, int start, int stop) {
   return pkey;
 }
 
-void *crypto_pkey_load_public_der(ptr bv, int start, int stop) {
-  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + start, stop - start);
+void *crypto_pkey_load_public_der(ptr bv, uint64_t start, uint64_t stop) {
+  int len;
+  if (!uint64_to_int(stop - start, &len)) return NULL;
+  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
   pkey = d2i_PUBKEY_bio(bio, NULL);
@@ -1020,8 +1095,8 @@ static ptr sign_digest_name(ptr alg, ptr digest) {
   return digest;
 }
 
-ptr crypto_sign_message(ptr alg, ptr digest, void *ptr_pkey, ptr bv, int start,
-                        int stop) {
+ptr crypto_sign_message(ptr alg, ptr digest, void *ptr_pkey, ptr bv, uint64_t start,
+                        uint64_t stop) {
   EVP_PKEY *pkey = (EVP_PKEY *)ptr_pkey;
   EVP_MD_CTX *ctx = NULL;
   EVP_PKEY_CTX *pctx = NULL;
@@ -1036,14 +1111,14 @@ ptr crypto_sign_message(ptr alg, ptr digest, void *ptr_pkey, ptr bv, int start,
 
   if (alg == Sstring_to_symbol("ed25519")) {
     if (EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey) != 1) goto done;
-    if (EVP_DigestSign(ctx, NULL, &sig_len, Sbytevector_data(bv) + start,
-                       stop - start) != 1) {
+    if (EVP_DigestSign(ctx, NULL, &sig_len, Sbytevector_data(bv) + (size_t)start,
+                       slice_len(start, stop)) != 1) {
       goto done;
     }
     sig = malloc(sig_len == 0 ? 1 : sig_len);
     if (sig == NULL) goto done;
-    if (EVP_DigestSign(ctx, sig, &sig_len, Sbytevector_data(bv) + start,
-                       stop - start) != 1) {
+    if (EVP_DigestSign(ctx, sig, &sig_len, Sbytevector_data(bv) + (size_t)start,
+                       slice_len(start, stop)) != 1) {
       goto done;
     }
   } else {
@@ -1054,7 +1129,8 @@ ptr crypto_sign_message(ptr alg, ptr digest, void *ptr_pkey, ptr bv, int start,
       if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) != 1) goto done;
       if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, -1) != 1) goto done;
     }
-    if (EVP_DigestSignUpdate(ctx, Sbytevector_data(bv) + start, stop - start) != 1)
+    if (EVP_DigestSignUpdate(ctx, Sbytevector_data(bv) + (size_t)start,
+                             slice_len(start, stop)) != 1)
       goto done;
     if (EVP_DigestSignFinal(ctx, NULL, &sig_len) != 1) goto done;
     sig = malloc(sig_len == 0 ? 1 : sig_len);
@@ -1073,8 +1149,9 @@ done:
   return ans;
 }
 
-int crypto_verify_message(ptr alg, ptr digest, void *ptr_pkey, ptr msg, int msg_start,
-                          int msg_stop, ptr sig, int sig_start, int sig_stop) {
+int crypto_verify_message(ptr alg, ptr digest, void *ptr_pkey, ptr msg,
+                          uint64_t msg_start, uint64_t msg_stop, ptr sig,
+                          uint64_t sig_start, uint64_t sig_stop) {
   EVP_PKEY *pkey = (EVP_PKEY *)ptr_pkey;
   EVP_MD_CTX *ctx = NULL;
   EVP_PKEY_CTX *pctx = NULL;
@@ -1087,8 +1164,10 @@ int crypto_verify_message(ptr alg, ptr digest, void *ptr_pkey, ptr msg, int msg_
 
   if (alg == Sstring_to_symbol("ed25519")) {
     if (EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey) != 1) goto done;
-    ok = EVP_DigestVerify(ctx, Sbytevector_data(sig) + sig_start, sig_stop - sig_start,
-                          Sbytevector_data(msg) + msg_start, msg_stop - msg_start) == 1;
+    ok = EVP_DigestVerify(ctx, Sbytevector_data(sig) + (size_t)sig_start,
+                          slice_len(sig_start, sig_stop),
+                          Sbytevector_data(msg) + (size_t)msg_start,
+                          slice_len(msg_start, msg_stop)) == 1;
   } else {
     md = fetch_digest(digest);
     if (md == NULL) goto done;
@@ -1097,11 +1176,11 @@ int crypto_verify_message(ptr alg, ptr digest, void *ptr_pkey, ptr msg, int msg_
       if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) != 1) goto done;
       if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, -1) != 1) goto done;
     }
-    if (EVP_DigestVerifyUpdate(ctx, Sbytevector_data(msg) + msg_start,
-                               msg_stop - msg_start) != 1)
+    if (EVP_DigestVerifyUpdate(ctx, Sbytevector_data(msg) + (size_t)msg_start,
+                               slice_len(msg_start, msg_stop)) != 1)
       goto done;
-    ok = EVP_DigestVerifyFinal(ctx, Sbytevector_data(sig) + sig_start,
-                               sig_stop - sig_start) == 1;
+    ok = EVP_DigestVerifyFinal(ctx, Sbytevector_data(sig) + (size_t)sig_start,
+                               slice_len(sig_start, sig_stop)) == 1;
   }
 
 done:
@@ -1154,10 +1233,12 @@ static char *copy_bytevector_to_cstring(ptr bv) {
   return s;
 }
 
-static X509 *load_x509_from_mem(const unsigned char *buf, long len, int pem) {
+static X509 *load_x509_from_mem(const unsigned char *buf, uint64_t len, int pem) {
   BIO *bio = NULL;
   X509 *cert = NULL;
-  bio = BIO_new_mem_buf(buf, (int)len);
+  int bio_len;
+  if (!uint64_to_int(len, &bio_len)) return NULL;
+  bio = BIO_new_mem_buf(buf, bio_len);
   if (bio == NULL) return NULL;
   cert = pem ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : d2i_X509_bio(bio, NULL);
   BIO_free(bio);
@@ -1204,12 +1285,12 @@ static ptr make_general_name_entry(const GENERAL_NAME *name) {
   }
 }
 
-void *crypto_cert_load_pem(ptr bv, int start, int stop) {
-  return load_x509_from_mem(Sbytevector_data(bv) + start, stop - start, 1);
+void *crypto_cert_load_pem(ptr bv, uint64_t start, uint64_t stop) {
+  return load_x509_from_mem(Sbytevector_data(bv) + (size_t)start, stop - start, 1);
 }
 
-void *crypto_cert_load_der(ptr bv, int start, int stop) {
-  return load_x509_from_mem(Sbytevector_data(bv) + start, stop - start, 0);
+void *crypto_cert_load_der(ptr bv, uint64_t start, uint64_t stop) {
+  return load_x509_from_mem(Sbytevector_data(bv) + (size_t)start, stop - start, 0);
 }
 
 void crypto_cert_free(void *ptr_cert) {

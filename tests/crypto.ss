@@ -74,6 +74,32 @@
           #t]
          [else (loop (+ i 1))])))))
 
+(define with-sparse-byte-file
+  (lambda (size proc)
+    (let ([path (format "crypto-sparse-~a-~a.tmp"
+                        (random 9999)
+                        (time-nanosecond (current-time)))])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? path)
+            (delete-file path))
+          (let ([p (open-file-output-port path
+                                          (file-options replace)
+                                          (buffer-mode block)
+                                          #f)])
+            (dynamic-wind
+              void
+              (lambda ()
+                (set-port-position! p (fx- size 1))
+                (put-u8 p 0))
+              (lambda ()
+                (close-port p)))))
+        (lambda ()
+          (proc path))
+        (lambda ()
+          (when (file-exists? path)
+            (delete-file path)))))))
+
 (mat crypto-encoding
      (equal? "000102ff" (bytevector->hex (bytevector 0 1 2 255)))
      (equal? (bytevector 0 1 2 255) (hex->bytevector "000102ff"))
@@ -144,6 +170,40 @@
        (guard (c [else #t])
          (hash-get st)
          #f)))
+
+(mat crypto-uint64-slices
+     (with-sparse-byte-file
+      (fx+ #x80000000 1)
+      (lambda (path)
+        (equal? (hash-file 'sha256 path #x80000000 #x80000000)
+                (hash-bytevector 'sha256 (bytevector)))))
+     (let* ([key (bytevector 9 1 2 3 4 9)]
+            [data (string->utf8 "xxpayloadyy")]
+            [st (make-hmac-state 'sha256 key 1 5)])
+       (hmac-update-bytevector! st data 2 9)
+       (equal? (hmac-finalize! st)
+               (hmac 'sha256 (bytevector 1 2 3 4) (string->utf8 "payload"))))
+     (let* ([alg 'aes-128-ctr]
+            [key (make-bytevector (cipher-key-size alg) 1)]
+            [iv (make-bytevector (cipher-iv-size alg) 2)]
+            [wrapped (string->utf8 "xxplainyy")]
+            [st (make-cipher-state 'encrypt alg key iv)]
+            [ct (bv-concat* (list (cipher-update-bytevector! st wrapped 2 7)
+                                  (cipher-finalize! st)))]
+            [dst (make-cipher-state 'decrypt alg key iv)]
+            [pt0 (cipher-update-bytevector! dst ct)]
+            [tail1 (cipher-finalize! dst)])
+       (equal? (bv-concat* (list pt0 tail1))
+               (string->utf8 "plain")))
+     (let* ([key (generate-private-key 'ed25519)]
+            [pem (store-private-key key)]
+            [wrapped (bv-concat* (list (bytevector 0) pem (bytevector 0)))]
+            [loaded (load-private-key wrapped 'pem 1 (fx+ 1 (bytevector-length pem)))])
+       (private-key=? key loaded))
+     (let* ([pem (read-file-bytevector crypto-leaf-cert-file)]
+            [wrapped (bv-concat* (list (bytevector 0) pem (bytevector 0)))]
+            [cert (load-certificate wrapped 'pem 1 (fx+ 1 (bytevector-length pem)))])
+       (certificate? cert)))
 
 (mat crypto-mac
      (equal? (bytevector->hex
