@@ -1,4 +1,5 @@
 SCHEME := scheme
+SCHEME_SCRIPT := $(or $(shell command -v $(SCHEME) 2>/dev/null),$(SCHEME))
 PREFIX := /usr
 
 # TODO include Chez header file
@@ -8,7 +9,7 @@ SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
 SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c')
 
 CC := gcc
-CFLAGS := -fPIC -Wall -Wextra -O2 -shared
+CFLAGS := -fPIC -Wall -Wextra -O2 -shared -luuid -lssl -lcrypto -lxxhash -lblake3
 
 chezpplibs = chezpp.lib \
              chezpp/concurrency/fiber.lib \
@@ -20,19 +21,31 @@ chezppwpos = chezpp.wpo \
 
 chezppdeps = ${chezpplibs} ${chezppwpos}
 
+define generate_chezpp_launcher
+	@rm -f $(1)
+	@sed \
+	      -e 's|@SCHEME_SCRIPT@|$(SCHEME_SCRIPT)|g' \
+	      -e 's|@LIBCHEZPP@|$(2)|g' \
+	      -e 's|@CHEZPP_LIB@|$(3)|g' \
+	      -e 's|@FIBER_LIB@|$(4)|g' \
+	      -e 's|@COMBINATOR_LIB@|$(5)|g' \
+	      chez++.in > $(1)
+	@chmod +x $(1)
+endef
+
 .PHONY: all
-all: chez++.exe
+all: chez++
 
 .PHONY: run
-run: chez++.exe
+run: chez++
 	@./chez++
 
 libchezpp.so:
 	$(CC) $(CFLAGS) -o $@ $(SRCS_C)
 
 ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
-	@echo '(optimize-level 2)' \
-	      '(compile-imported-libraries #t)'\
+	@echo '(optimize-level 1)' \
+	      '(compile-imported-libraries #t) (generate-inspector-information #t) (generate-procedure-source-information #t)'\
 	      '(generate-wpo-files #t)' \
 	      '(time (compile-file "chezpp.ss"))' \
 	      '(unless (null? (compile-whole-library "chezpp.wpo" "chezpp.lib"))' \
@@ -44,21 +57,11 @@ ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
 	      | ${SCHEME} -q
 	@rm -f chezpp.so
 
-chez++.ss: ${chezpplibs}
-	@rm -f chez++.ss
-	@echo '(load "$(realpath chezpp.lib)")' \
-	      '(load "$(realpath chezpp/concurrency/fiber.lib)")' \
-	      '(load "$(realpath chezpp/parser/combinator.lib)")' \
-	      '(import (chezpp))' \
-	      > chez++.ss
+chez++: ${chezppdeps} chez++.in Makefile
+	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib),$(abspath chezpp/concurrency/fiber.lib),$(abspath chezpp/parser/combinator.lib))
 
-chez++.exe: ${chezppdeps} chez++.ss
-	@rm -f chez++
-	@echo '#!/usr/bin/env bash'                     >> chez++
-	@echo 'SCHEME=${SCHEME}'                        >> chez++
-	@echo 'export LIBCHEZPP=$(CURDIR)/libchezpp.so' >> chez++
-	@echo '$$SCHEME "$$@" $(realpath chez++.ss)'    >> chez++
-	@chmod +x chez++
+.PHONY: chez++.exe
+chez++.exe: chez++
 
 installdeps: ${chezppdeps}
 	install -d $(PREFIX)/bin $(PREFIX)/lib
@@ -67,18 +70,9 @@ installdeps: ${chezppdeps}
 	install ${chezppwpos} $(PREFIX)/lib
 
 .PHONY: install
-install: chez++.exe installdeps
+install: chez++ installdeps
 	rm -f $(PREFIX)/bin/chez++ $(PREFIX)/lib/chez++.ss
-	@echo '(load "$(realpath $(PREFIX)/lib/chezpp.lib)")' \
-	      '(load "$(realpath $(PREFIX)/lib/fiber.lib)")' \
-	      '(load "$(realpath $(PREFIX)/lib/combinator.lib)")' \
-	      '(import (chezpp))' \
-	      > $(PREFIX)/lib/chez++.ss
-	@echo '#!/usr/bin/env bash'                                >> $(PREFIX)/bin/chez++
-	@echo 'export LIBCHEZPP=$(PREFIX)/lib/libchezpp.so'        >> $(PREFIX)/bin/chez++
-	@echo 'SCHEME=${SCHEME}'                                   >> $(PREFIX)/bin/chez++
-	@echo '$$SCHEME "$$@" $(realpath $(PREFIX)/lib/chez++.ss)' >> $(PREFIX)/bin/chez++
-	chmod +x $(PREFIX)/bin/chez++
+	$(call generate_chezpp_launcher,$(PREFIX)/bin/chez++,$(abspath $(PREFIX)/lib/libchezpp.so),$(abspath $(PREFIX)/lib/chezpp.lib),$(abspath $(PREFIX)/lib/fiber.lib),$(abspath $(PREFIX)/lib/combinator.lib))
 
 .PHONY: clean
 clean:

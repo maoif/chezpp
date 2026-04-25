@@ -1,0 +1,54 @@
+#!@SCHEME_SCRIPT@ --script
+(putenv "LIBCHEZPP" "@LIBCHEZPP@")
+(load "@CHEZPP_LIB@")
+(load "@FIBER_LIB@")
+(load "@COMBINATOR_LIB@")
+(import (chezpp))
+
+(define load-file*
+  (lambda (file*)
+    (for-each load file*)))
+
+(define run-script
+  (lambda (file arg*)
+    (apply (scheme-script) file arg*)))
+
+(define stdin-interactive?
+  (lambda ()
+    (= 0 (system "test -t 0 >/dev/null 2>&1"))))
+
+(define configure-repl!
+  (lambda (quiet?)
+    (when quiet?
+      (suppress-greeting #t)
+      (waiter-prompt-string ""))))
+
+(define parse-args
+  (lambda (arg*)
+    (let loop ([rest arg*] [quiet? #f])
+      (cond
+       [(null? rest)
+        (values quiet? #f '() '())]
+       [(string=? (car rest) "-q")
+        (loop (cdr rest) #t)]
+       [(string=? (car rest) "--script")
+        (let ([script-rest (cdr rest)])
+          (unless (pair? script-rest)
+            (errorf 'chez++ "missing script file after --script"))
+          (values quiet? #t (list (car script-rest)) (cdr script-rest)))]
+       [else
+        (values quiet? #f rest '())]))))
+
+(define main
+  (lambda ()
+    (let-values ([(quiet? script? file* script-arg*)
+                  (parse-args (command-line-arguments))])
+      (if script?
+          (run-script (car file*) script-arg*)
+          (begin
+            (command-line-arguments file*)
+            (load-file* file*)
+            (configure-repl! quiet?)
+            (new-cafe))))))
+
+(main)
