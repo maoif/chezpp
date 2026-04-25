@@ -56,6 +56,10 @@
           ffi-net-ssh-channel-exit-status
           ffi-net-sftp-open
           ffi-net-sftp-close
+          ffi-net-scp-download-file
+          ffi-net-scp-upload-file
+          ffi-net-scp-download-directory
+          ffi-net-scp-upload-directory
           ffi-net-sftp-list
           ffi-net-sftp-stat
           ffi-net-sftp-delete
@@ -238,6 +242,14 @@
     (foreign-procedure "chezpp_net_sftp_open" (uptr) scheme-object))
   (define ffi-net-sftp-close
     (foreign-procedure "chezpp_net_sftp_close" (uptr) scheme-object))
+  (define ffi-net-scp-download-file
+    (foreign-procedure "chezpp_net_scp_download_file" (uptr string string int) scheme-object))
+  (define ffi-net-scp-upload-file
+    (foreign-procedure "chezpp_net_scp_upload_file" (uptr string string int) scheme-object))
+  (define ffi-net-scp-download-directory
+    (foreign-procedure "chezpp_net_scp_download_directory" (uptr string string int) scheme-object))
+  (define ffi-net-scp-upload-directory
+    (foreign-procedure "chezpp_net_scp_upload_directory" (uptr string string int) scheme-object))
   (define ffi-net-sftp-list
     (foreign-procedure "chezpp_net_sftp_list" (uptr string) scheme-object))
   (define ffi-net-sftp-stat
