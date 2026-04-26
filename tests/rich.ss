@@ -347,6 +347,61 @@
      )
 
 
+(mat rich-rule-render
+
+     (let ([r (rich-rule #f 6)])
+       (and (rich-rule? r)
+            (rich-rule-style? 'ascii)
+            (rich-rule-style? 'unicode)
+            (not (rich-rule-style? 'double))
+            (equal? "------" (rich-rule-render r))))
+
+     (equal? "-- Build ---"
+             (rich-rule-render (rich-rule "Build" 12)))
+
+     (equal? "─── Build ───"
+             (rich-rule-render (rich-rule "Build" 13 'unicode)))
+
+     (equal? "Build"
+             (rich-rule-render (rich-rule "Build" 5)))
+
+     )
+
+
+(mat rich-rule-print
+
+     (equal? "-- Build ---"
+             (with-output-to-string
+               (lambda ()
+                 (rich-rule-print (rich-rule "Build" 12)))))
+
+     (equal? "-- Build ---\n"
+             (with-output-to-string
+               (lambda ()
+                 (rich-rule-println (rich-rule "Build" 12)))))
+
+     (let ([port (open-output-string)])
+       (rich-rule-fprint port (rich-rule "Build" 12))
+       (equal? "-- Build ---" (get-output-string port)))
+
+     (let ([port (open-output-string)])
+       (rich-rule-fprintln port (rich-rule "Build" 12))
+       (equal? "-- Build ---\n" (get-output-string port)))
+
+     )
+
+
+(mat rich-rule-errors
+
+     (error? (rich-rule 123))
+     (error? (rich-rule "Build" 0))
+     (error? (rich-rule "Build" 12 'double))
+     (error? (rich-rule-render #f))
+     (error? (rich-rule-fprint "not-a-port" (rich-rule "Build" 12)))
+
+     )
+
+
 (mat rich-progress-render
 
      (let ([p (make-rich-progress 10)])

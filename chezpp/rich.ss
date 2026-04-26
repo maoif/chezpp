@@ -41,6 +41,15 @@
           rich-tree-fprint
           rich-tree-fprintln
 
+          rich-rule
+          rich-rule?
+          rich-rule-style?
+          rich-rule-render
+          rich-rule-print
+          rich-rule-println
+          rich-rule-fprint
+          rich-rule-fprintln
+
           make-rich-progress
           rich-progress?
           rich-progress-task?
@@ -100,6 +109,11 @@
     (fields (immutable label rich-tree-label)
             (mutable children rich-tree-children rich-tree-children-set!)
             (immutable guide-style rich-tree-guide-style)))
+
+  (define-record-type ($rich-rule mk-rich-rule $rich-rule?)
+    (fields (immutable title rich-rule-title)
+            (immutable width rich-rule-width)
+            (immutable style rich-rule-style)))
 
   (define-record-type ($rich-progress mk-rich-progress $rich-progress?)
     (fields (mutable next-id rich-progress-next-id rich-progress-next-id-set!)
@@ -244,6 +258,10 @@
       (and (memq style '(ascii unicode)) #t)))
 
   (define $rich-tree-guide-style?
+    (lambda (style)
+      (and (memq style '(ascii unicode)) #t)))
+
+  (define $rich-rule-style?
     (lambda (style)
       (and (memq style '(ascii unicode)) #t)))
 
@@ -410,6 +428,34 @@
                     (rich-tree-guide-style tree))])
         (cons (rich-tree-label tree)
               ($rich-tree-children-lines (rich-tree-children tree) "" chars)))))
+
+  (define $rich-rule-char
+    (lambda (who style)
+      (case style
+        [(ascii) #\-]
+        [(unicode) #\─]
+        [else (errorf who "unknown rule style: ~a" style)])))
+
+  (define $rich-rule-line
+    (lambda (rule)
+      (let* ([title (rich-rule-title rule)]
+             [width (rich-rule-width rule)]
+             [ch ($rich-rule-char 'rich-rule-render (rich-rule-style rule))])
+        (if title
+            (let ([title-width (string-length title)])
+              (if (>= title-width width)
+                  title
+                  (let* ([decorated (string-append " " title " ")]
+                         [decorated-width (string-length decorated)])
+                    (if (>= decorated-width width)
+                        title
+                        (let* ([remaining (fx- width decorated-width)]
+                               [left (quotient remaining 2)]
+                               [right (fx- remaining left)])
+                          (string-append (make-string left ch)
+                                         decorated
+                                         (make-string right ch)))))))
+            (make-string width ch)))))
 
   (define $list-remove
     (lambda (pred ls)
@@ -1076,6 +1122,83 @@ appends a newline.
     (lambda (port tree)
       (pcheck ([output-port? port] [$rich-tree? tree])
               (display (rich-tree-render tree) port)
+              (newline port))))
+
+  #|proc:rich-rule
+The `rich-rule` procedure constructs a horizontal rule. The optional `title`
+is centered in the rule, `width` controls the rendered character width, and
+`style` may be `ascii` or `unicode`.
+|#
+  (define-who rich-rule
+    (case-lambda
+      [() (rich-rule #f 80 'ascii)]
+      [(title) (rich-rule title 80 'ascii)]
+      [(title width) (rich-rule title width 'ascii)]
+      [(title width style)
+       (pcheck ([positive-natural? width] [$rich-rule-style? style])
+               (when (and title (not (string? title)))
+                 (errorf who "expected title string or #f: ~a" title))
+               (mk-rich-rule title width style))]))
+
+  #|proc:rich-rule?
+The `rich-rule?` procedure checks whether `obj` is a rich rule.
+|#
+  (define rich-rule?
+    (lambda (obj)
+      ($rich-rule? obj)))
+
+  #|proc:rich-rule-style?
+The `rich-rule-style?` procedure checks whether `obj` is a supported rule
+style. Supported styles are `ascii` and `unicode`.
+|#
+  (define rich-rule-style?
+    (lambda (obj)
+      ($rich-rule-style? obj)))
+
+  #|proc:rich-rule-render
+The `rich-rule-render` procedure renders `rule` as a horizontal rule string.
+|#
+  (define rich-rule-render
+    (lambda (rule)
+      (pcheck ([$rich-rule? rule])
+              ($rich-rule-line rule))))
+
+  #|proc:rich-rule-print
+The `rich-rule-print` procedure writes the rendered rule to the current output
+port without appending a newline.
+|#
+  (define rich-rule-print
+    (lambda (rule)
+      (pcheck ([$rich-rule? rule])
+              (display (rich-rule-render rule)))))
+
+  #|proc:rich-rule-println
+The `rich-rule-println` procedure writes the rendered rule to the current
+output port and appends a newline.
+|#
+  (define rich-rule-println
+    (lambda (rule)
+      (pcheck ([$rich-rule? rule])
+              (display (rich-rule-render rule))
+              (newline))))
+
+  #|proc:rich-rule-fprint
+The `rich-rule-fprint` procedure writes the rendered rule to `port` without
+appending a newline.
+|#
+  (define rich-rule-fprint
+    (lambda (port rule)
+      (pcheck ([output-port? port] [$rich-rule? rule])
+              (display (rich-rule-render rule) port))))
+
+  #|proc:rich-rule-fprintln
+The `rich-rule-fprintln` procedure writes the rendered rule to `port` and
+appends a newline.
+|#
+  (define rich-rule-fprintln
+    (lambda (port rule)
+      (pcheck ([output-port? port] [$rich-rule? rule])
+              (display (rich-rule-render rule) port)
               (newline port))))
 
   #|proc:make-rich-progress
