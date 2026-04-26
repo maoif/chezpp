@@ -508,6 +508,59 @@
      )
 
 
+(mat rich-columns-render
+
+     (let ([c (rich-columns (list "a" "bb" "ccc" "dddd") 10)])
+       (and (rich-columns? c)
+            (equal? "a     bb\nccc   dddd" (rich-columns-render c))))
+
+     (equal? "a\nbb\nccc"
+             (rich-columns-render (rich-columns (list "a" "bb" "ccc") 4)))
+
+     (equal? "a    bb   c"
+             (rich-columns-render (rich-columns (list "a" "bb" "c") 20 3)))
+
+     (equal? ""
+             (rich-columns-render (rich-columns '() 10)))
+
+     )
+
+
+(mat rich-columns-print
+
+     (equal? "a   bb"
+             (with-output-to-string
+               (lambda ()
+                 (rich-columns-print (rich-columns (list "a" "bb") 10)))))
+
+     (equal? "a   bb\n"
+             (with-output-to-string
+               (lambda ()
+                 (rich-columns-println (rich-columns (list "a" "bb") 10)))))
+
+     (let ([port (open-output-string)])
+       (rich-columns-fprint port (rich-columns (list "a" "bb") 10))
+       (equal? "a   bb" (get-output-string port)))
+
+     (let ([port (open-output-string)])
+       (rich-columns-fprintln port (rich-columns (list "a" "bb") 10))
+       (equal? "a   bb\n" (get-output-string port)))
+
+     )
+
+
+(mat rich-columns-errors
+
+     (error? (rich-columns "not-a-list" 10))
+     (error? (rich-columns (list "a" 1) 10))
+     (error? (rich-columns (list "a") 0))
+     (error? (rich-columns (list "a") 10 0))
+     (error? (rich-columns-render #f))
+     (error? (rich-columns-fprint "not-a-port" (rich-columns (list "a") 10)))
+
+     )
+
+
 (mat rich-progress-render
 
      (let ([p (make-rich-progress 10)])

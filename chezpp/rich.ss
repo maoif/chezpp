@@ -67,6 +67,14 @@
           rich-padding-fprint
           rich-padding-fprintln
 
+          rich-columns
+          rich-columns?
+          rich-columns-render
+          rich-columns-print
+          rich-columns-println
+          rich-columns-fprint
+          rich-columns-fprintln
+
           make-rich-progress
           rich-progress?
           rich-progress-task?
@@ -143,6 +151,11 @@
             (immutable right rich-padding-right)
             (immutable bottom rich-padding-bottom)
             (immutable left rich-padding-left)))
+
+  (define-record-type ($rich-columns mk-rich-columns $rich-columns?)
+    (fields (immutable items rich-columns-items)
+            (immutable total-width rich-columns-total-width)
+            (immutable gap rich-columns-gap)))
 
   (define-record-type ($rich-progress mk-rich-progress $rich-progress?)
     (fields (mutable next-id rich-progress-next-id rich-progress-next-id-set!)
@@ -297,6 +310,11 @@
   (define $rich-align-style?
     (lambda (style)
       (and (memq style '(left center right)) #t)))
+
+  (define $rich-string-list?
+    (lambda (obj)
+      (and (list? obj)
+           (andmap string? obj))))
 
   (define $rich-table-border-chars
     (lambda (who style)
@@ -540,6 +558,65 @@
                                right-spaces))
               body-lines)
          (make-list bottom blank)))))
+
+  (define $rich-columns-column-count
+    (lambda (items total-width gap)
+      (if (null? items)
+          1
+          (let* ([column-width ($rich-lines-max-width items)]
+                 [stride (+ column-width gap)])
+            (max 1 (quotient (+ total-width gap) stride))))))
+
+  (define $rich-columns-row
+    (lambda (cells column-width gap)
+      (let ([gap-spaces (make-string gap #\space)])
+        (let loop ([cells cells] [parts '()])
+          (cond [(null? cells)
+                 (apply string-append (reverse parts))]
+                [(null? (cdr cells))
+                 (loop '() (cons (car cells) parts))]
+                [else
+                 (loop (cdr cells)
+                       (cons (string-append
+                              ($pad-right (car cells) column-width)
+                              gap-spaces)
+                             parts))])))))
+
+  (define $rich-columns-lines
+    (lambda (columns)
+      (let ([items (rich-columns-items columns)])
+        (if (null? items)
+            '()
+            (let* ([column-width ($rich-lines-max-width items)]
+                   [column-count ($rich-columns-column-count
+                                  items
+                                  (rich-columns-total-width columns)
+                                  (rich-columns-gap columns))]
+                   [gap (rich-columns-gap columns)])
+              (let loop ([items items] [cells '()] [count 0] [rows '()])
+                (cond [(null? items)
+                       (reverse
+                        (if (null? cells)
+                            rows
+                            (cons ($rich-columns-row
+                                   (reverse cells)
+                                   column-width
+                                   gap)
+                                  rows)))]
+                      [(= count column-count)
+                       (loop items
+                             '()
+                             0
+                             (cons ($rich-columns-row
+                                    (reverse cells)
+                                    column-width
+                                    gap)
+                                   rows))]
+                      [else
+                       (loop (cdr items)
+                             (cons (car items) cells)
+                             (+ count 1)
+                             rows)])))))))
 
   (define $list-remove
     (lambda (pred ls)
@@ -1424,6 +1501,72 @@ appends a newline.
     (lambda (port padding)
       (pcheck ([output-port? port] [$rich-padding? padding])
               (display (rich-padding-render padding) port)
+              (newline port))))
+
+  #|proc:rich-columns
+The `rich-columns` procedure constructs a fixed-width column layout from a
+list of strings. With two arguments it uses a two-space gap. With three
+arguments, `gap` controls the spaces between columns.
+|#
+  (define rich-columns
+    (case-lambda
+      [(items total-width) (rich-columns items total-width 2)]
+      [(items total-width gap)
+       (pcheck ([$rich-string-list? items]
+                [positive-natural? total-width gap])
+               (mk-rich-columns items total-width gap))]))
+
+  #|proc:rich-columns?
+The `rich-columns?` procedure checks whether `obj` is a rich columns layout.
+|#
+  (define rich-columns?
+    (lambda (obj)
+      ($rich-columns? obj)))
+
+  #|proc:rich-columns-render
+The `rich-columns-render` procedure renders a columns layout as a string.
+|#
+  (define rich-columns-render
+    (lambda (columns)
+      (pcheck ([$rich-columns? columns])
+              ($string-join "\n" ($rich-columns-lines columns)))))
+
+  #|proc:rich-columns-print
+The `rich-columns-print` procedure writes rendered columns to the current
+output port without appending a newline.
+|#
+  (define rich-columns-print
+    (lambda (columns)
+      (pcheck ([$rich-columns? columns])
+              (display (rich-columns-render columns)))))
+
+  #|proc:rich-columns-println
+The `rich-columns-println` procedure writes rendered columns to the current
+output port and appends a newline.
+|#
+  (define rich-columns-println
+    (lambda (columns)
+      (pcheck ([$rich-columns? columns])
+              (display (rich-columns-render columns))
+              (newline))))
+
+  #|proc:rich-columns-fprint
+The `rich-columns-fprint` procedure writes rendered columns to `port` without
+appending a newline.
+|#
+  (define rich-columns-fprint
+    (lambda (port columns)
+      (pcheck ([output-port? port] [$rich-columns? columns])
+              (display (rich-columns-render columns) port))))
+
+  #|proc:rich-columns-fprintln
+The `rich-columns-fprintln` procedure writes rendered columns to `port` and
+appends a newline.
+|#
+  (define rich-columns-fprintln
+    (lambda (port columns)
+      (pcheck ([output-port? port] [$rich-columns? columns])
+              (display (rich-columns-render columns) port)
               (newline port))))
 
   #|proc:make-rich-progress
