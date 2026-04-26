@@ -37,6 +37,8 @@
           rich-progress-update!
           rich-progress-advance!
           rich-progress-complete!
+          rich-progress-start-task!
+          rich-progress-stop-task!
           rich-progress-task-visible?-set!
           rich-progress-render
           rich-progress-print
@@ -53,8 +55,12 @@
           rich-progress-bar-column
           rich-progress-percent-column
           rich-progress-complete-column
+          rich-progress-elapsed-column
+          rich-progress-remaining-column
+          rich-progress-transfer-speed-column
           rich-progress-columns
-          rich-progress-columns-set!)
+          rich-progress-columns-set!
+          rich-progress-current-time)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal))
@@ -82,7 +88,9 @@
             (mutable description rich-progress-task-description rich-progress-task-description-set!)
             (mutable total rich-progress-task-total rich-progress-task-total-set!)
             (mutable completed rich-progress-task-completed rich-progress-task-completed-set!)
-            (mutable visible? rich-progress-task-visible? rich-progress-task-visible?-raw-set!)))
+            (mutable visible? rich-progress-task-visible? rich-progress-task-visible?-raw-set!)
+            (mutable start-time rich-progress-task-start-time rich-progress-task-start-time-set!)
+            (mutable stop-time rich-progress-task-stop-time rich-progress-task-stop-time-set!)))
 
   (define-record-type ($rich-progress-column mk-rich-progress-column $rich-progress-column?)
     (fields (immutable kind rich-progress-column-kind)
@@ -151,6 +159,11 @@
   (define $rich-render-args
     (lambda (args)
       (map $rich-render-arg args)))
+
+  (define $current-time-seconds
+    (lambda ()
+      (let ([t (current-time)])
+        (+ (time-second t) (/ (time-nanosecond t) 1000000000)))))
 
   (define $string-join
     (lambda (sep strs)
@@ -321,6 +334,60 @@
           (format #f "~a" total)
           "?")))
 
+  (define $two-digits
+    (lambda (n)
+      (if (< n 10)
+          (string-append "0" (number->string n))
+          (number->string n))))
+
+  (define $rich-progress-time-string
+    (lambda (seconds)
+      (let* ([seconds (floor seconds)]
+             [minutes (quotient seconds 60)]
+             [seconds (remainder seconds 60)])
+        (string-append ($two-digits minutes) ":" ($two-digits seconds)))))
+
+  (define $rich-progress-now
+    (lambda (who)
+      (let ([seconds ((rich-progress-current-time))])
+        (unless (real? seconds)
+          (errorf who "progress clock returned non-real value: ~a" seconds))
+        seconds)))
+
+  (define $rich-progress-elapsed-seconds
+    (lambda (task)
+      (let ([stop (rich-progress-task-stop-time task)]
+            [start (rich-progress-task-start-time task)])
+        (max 0 (- (if stop stop ($rich-progress-now 'rich-progress-render)) start)))))
+
+  (define $rich-progress-elapsed-string
+    (lambda (task)
+      ($rich-progress-time-string ($rich-progress-elapsed-seconds task))))
+
+  (define $rich-progress-speed
+    (lambda (task)
+      (let ([elapsed ($rich-progress-elapsed-seconds task)])
+        (and (> elapsed 0)
+             (> (rich-progress-task-completed task) 0)
+             (/ (rich-progress-task-completed task) elapsed)))))
+
+  (define $rich-progress-remaining-string
+    (lambda (task)
+      (let ([total (rich-progress-task-total task)]
+            [completed (rich-progress-task-completed task)]
+            [speed ($rich-progress-speed task)])
+        (if (and total speed (> speed 0) (< completed total))
+            ($rich-progress-time-string
+             (ceiling (/ (- total completed) speed)))
+            "--:--"))))
+
+  (define $rich-progress-speed-string
+    (lambda (task)
+      (let ([speed ($rich-progress-speed task)])
+        (if speed
+            (format #f "~a/s" (floor speed))
+            "--/s"))))
+
   (define $rich-progress-bar
     (lambda (completed total width)
       (let ([filled (if total (quotient (* completed width) total) 0)])
@@ -354,6 +421,9 @@
           [(bar) ($rich-progress-bar completed total width)]
           [(percent) ($rich-progress-percent-string completed total)]
           [(complete) ($rich-progress-count-string completed total)]
+          [(elapsed) ($rich-progress-elapsed-string task)]
+          [(remaining) ($rich-progress-remaining-string task)]
+          [(transfer-speed) ($rich-progress-speed-string task)]
           [else (errorf 'rich-progress-render
                         "unknown progress column kind: ~a"
                         (rich-progress-column-kind column))]))))
@@ -389,6 +459,18 @@ ANSI escape codes. When set to `#f`, style values render as empty strings.
        (if (boolean? v)
            v
            (errorf 'rich-enable-color? "expected boolean: ~a" v)))))
+
+  #|proc:rich-progress-current-time
+The `rich-progress-current-time` parameter contains a nullary procedure that
+returns the current progress time in seconds.
+|#
+  (define rich-progress-current-time
+    (make-parameter
+     $current-time-seconds
+     (lambda (proc)
+       (if (procedure? proc)
+           proc
+           (errorf 'rich-progress-current-time "expected procedure: ~a" proc)))))
 
   #|proc:rich-style?
 The `rich-style?` procedure checks whether `obj` is a rich style value.
@@ -681,7 +763,7 @@ the supported task templates: `{description}`, `{completed}`, `{total}`, or
               ($rich-progress-text-template
                who
                template
-               (mk-rich-progress-task 0 "" 1 0 #t))
+               (mk-rich-progress-task 0 "" 1 0 #t 0 #f))
               (mk-rich-progress-column 'text template))))
 
   #|proc:rich-progress-bar-column
@@ -705,6 +787,29 @@ count column.
   (define rich-progress-complete-column
     (lambda ()
       (mk-rich-progress-column 'complete #f)))
+
+  #|proc:rich-progress-elapsed-column
+The `rich-progress-elapsed-column` procedure constructs an elapsed-time column.
+|#
+  (define rich-progress-elapsed-column
+    (lambda ()
+      (mk-rich-progress-column 'elapsed #f)))
+
+  #|proc:rich-progress-remaining-column
+The `rich-progress-remaining-column` procedure constructs an estimated remaining
+time column.
+|#
+  (define rich-progress-remaining-column
+    (lambda ()
+      (mk-rich-progress-column 'remaining #f)))
+
+  #|proc:rich-progress-transfer-speed-column
+The `rich-progress-transfer-speed-column` procedure constructs a transfer-speed
+column.
+|#
+  (define rich-progress-transfer-speed-column
+    (lambda ()
+      (mk-rich-progress-column 'transfer-speed #f)))
 
   #|proc:rich-progress-default-columns
 The `rich-progress-default-columns` procedure returns the default progress
@@ -740,7 +845,10 @@ indeterminate task.
                 (rich-progress-tasks-set!
                  progress
                  (append (rich-progress-tasks progress)
-                         (list (mk-rich-progress-task id description total 0 #t))))
+                         (list (mk-rich-progress-task
+                                id description total 0 #t
+                                ($rich-progress-now who)
+                                #f))))
                 id))))
 
   #|proc:rich-progress-remove-task!
@@ -793,6 +901,27 @@ The `rich-progress-complete!` procedure marks a determinate task complete.
                 (unless total
                   (errorf who "cannot complete indeterminate task: ~a" task-id))
                 (rich-progress-task-completed-set! task total)
+                #t))))
+
+  #|proc:rich-progress-start-task!
+The `rich-progress-start-task!` procedure starts or restarts timing for a task.
+|#
+  (define-who rich-progress-start-task!
+    (lambda (progress task-id)
+      (pcheck ([$rich-progress? progress] [natural? task-id])
+              (let ([task ($rich-progress-find-task who progress task-id)])
+                (rich-progress-task-start-time-set! task ($rich-progress-now who))
+                (rich-progress-task-stop-time-set! task #f)
+                #t))))
+
+  #|proc:rich-progress-stop-task!
+The `rich-progress-stop-task!` procedure stops timing for a task.
+|#
+  (define-who rich-progress-stop-task!
+    (lambda (progress task-id)
+      (pcheck ([$rich-progress? progress] [natural? task-id])
+              (let ([task ($rich-progress-find-task who progress task-id)])
+                (rich-progress-task-stop-time-set! task ($rich-progress-now who))
                 #t))))
 
   #|proc:rich-progress-task-visible?-set!

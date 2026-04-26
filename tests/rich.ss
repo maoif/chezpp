@@ -418,6 +418,63 @@
      )
 
 
+(mat rich-progress-time-columns
+
+     (parameterize ([rich-progress-current-time (lambda () 100)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "download" 100)])
+         (rich-progress-columns-set!
+          p
+          (list (rich-progress-text-column "{description}")
+                (rich-progress-elapsed-column)
+                (rich-progress-remaining-column)
+                (rich-progress-transfer-speed-column)))
+         (parameterize ([rich-progress-current-time (lambda () 110)])
+           (rich-progress-update! p id 20)
+           (equal? "download 00:10 00:40 2/s" (rich-progress-render p)))))
+
+     (parameterize ([rich-progress-current-time (lambda () 100)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "scan" #f)])
+         (rich-progress-columns-set!
+          p
+          (list (rich-progress-elapsed-column)
+                (rich-progress-remaining-column)
+                (rich-progress-transfer-speed-column)))
+         (parameterize ([rich-progress-current-time (lambda () 103)])
+           (rich-progress-advance! p id 9)
+           (equal? "00:03 --:-- 3/s" (rich-progress-render p)))))
+
+     (parameterize ([rich-progress-current-time (lambda () 10)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "build" 10)])
+         (rich-progress-columns-set!
+          p
+          (list (rich-progress-elapsed-column)
+                (rich-progress-remaining-column)
+                (rich-progress-transfer-speed-column)))
+         (rich-progress-stop-task! p id)
+         (parameterize ([rich-progress-current-time (lambda () 100)])
+           (equal? "00:00 --:-- --/s" (rich-progress-render p)))))
+
+     (parameterize ([rich-progress-current-time (lambda () 10)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "build" 10)])
+         (rich-progress-stop-task! p id)
+         (parameterize ([rich-progress-current-time (lambda () 20)])
+           (rich-progress-start-task! p id)
+           (rich-progress-update! p id 5)
+           (parameterize ([rich-progress-current-time (lambda () 25)])
+             (rich-progress-columns-set!
+              p
+              (list (rich-progress-elapsed-column)
+                    (rich-progress-remaining-column)
+                    (rich-progress-transfer-speed-column)))
+             (equal? "00:05 00:05 1/s" (rich-progress-render p))))))
+
+     )
+
+
 (mat rich-progress-errors
 
      (error? (make-rich-progress 0))
@@ -442,5 +499,9 @@
      (error? (rich-progress-text-column "{unknown}"))
      (error? (rich-progress-columns-set! (make-rich-progress) '()))
      (error? (rich-progress-columns-set! (make-rich-progress) (list 'not-column)))
+     (error? (parameterize ([rich-progress-current-time 123])
+               (make-rich-progress)))
+     (error? (rich-progress-start-task! (make-rich-progress) 99))
+     (error? (rich-progress-stop-task! (make-rich-progress) 99))
 
      )
