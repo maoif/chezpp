@@ -378,6 +378,46 @@
      )
 
 
+(mat rich-progress-columns
+
+     (let ([cols (rich-progress-default-columns)])
+       (and (not (null? cols))
+            (andmap rich-progress-column? cols)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-columns-set!
+        p
+        (list (rich-progress-text-column "{description}")
+              (rich-progress-percent-column)))
+       (rich-progress-update! p id 4)
+       (equal? "download 40%" (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-columns-set!
+        p
+        (list (rich-progress-text-column "{completed}")
+              (rich-progress-text-column "{total}")
+              (rich-progress-bar-column)
+              (rich-progress-complete-column)))
+       (rich-progress-update! p id 4)
+       (equal? "4 10 [####------] 4/10" (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "scan" #f)])
+       (rich-progress-columns-set!
+        p
+        (list (rich-progress-text-column "{description}")
+              (rich-progress-text-column "{total}")
+              (rich-progress-percent-column)
+              (rich-progress-complete-column)))
+       (rich-progress-advance! p id 3)
+       (equal? "scan ? --% 3/?" (rich-progress-render p)))
+
+     )
+
+
 (mat rich-progress-errors
 
      (error? (make-rich-progress 0))
@@ -399,5 +439,8 @@
      (error? (rich-progress-fprint "not-a-port" (make-rich-progress)))
      (error? (rich-progress-frefresh! "not-a-port" (make-rich-progress)))
      (error? (rich-progress-ffinish! "not-a-port" (make-rich-progress)))
+     (error? (rich-progress-text-column "{unknown}"))
+     (error? (rich-progress-columns-set! (make-rich-progress) '()))
+     (error? (rich-progress-columns-set! (make-rich-progress) (list 'not-column)))
 
      )

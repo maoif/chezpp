@@ -46,7 +46,15 @@
           rich-progress-refresh!
           rich-progress-frefresh!
           rich-progress-finish!
-          rich-progress-ffinish!)
+          rich-progress-ffinish!
+          rich-progress-column?
+          rich-progress-default-columns
+          rich-progress-text-column
+          rich-progress-bar-column
+          rich-progress-percent-column
+          rich-progress-complete-column
+          rich-progress-columns
+          rich-progress-columns-set!)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal))
@@ -66,7 +74,8 @@
   (define-record-type ($rich-progress mk-rich-progress $rich-progress?)
     (fields (mutable next-id rich-progress-next-id rich-progress-next-id-set!)
             (mutable bar-width rich-progress-bar-width rich-progress-bar-width-set!)
-            (mutable tasks rich-progress-tasks rich-progress-tasks-set!)))
+            (mutable tasks rich-progress-tasks rich-progress-tasks-set!)
+            (mutable columns rich-progress-columns rich-progress-columns-raw-set!)))
 
   (define-record-type ($rich-progress-task mk-rich-progress-task $rich-progress-task?)
     (fields (immutable id rich-progress-task-id)
@@ -74,6 +83,10 @@
             (mutable total rich-progress-task-total rich-progress-task-total-set!)
             (mutable completed rich-progress-task-completed rich-progress-task-completed-set!)
             (mutable visible? rich-progress-task-visible? rich-progress-task-visible?-raw-set!)))
+
+  (define-record-type ($rich-progress-column mk-rich-progress-column $rich-progress-column?)
+    (fields (immutable kind rich-progress-column-kind)
+            (immutable value rich-progress-column-value)))
 
   (define $style-code
     (lambda (who name)
@@ -302,6 +315,12 @@
           (format #f "~a/~a" completed total)
           (format #f "~a/?" completed))))
 
+  (define $rich-progress-total-string
+    (lambda (total)
+      (if total
+          (format #f "~a" total)
+          "?")))
+
   (define $rich-progress-bar
     (lambda (completed total width)
       (let ([filled (if total (quotient (* completed width) total) 0)])
@@ -311,19 +330,40 @@
          (make-string (- width filled) #\-)
          "]"))))
 
-  (define $rich-progress-task-line
-    (lambda (progress task)
+  (define $rich-progress-text-template
+    (lambda (who template task)
+      (cond [(string=? template "{description}") (rich-progress-task-description task)]
+            [(string=? template "{completed}") (format #f "~a" (rich-progress-task-completed task))]
+            [(string=? template "{total}") ($rich-progress-total-string (rich-progress-task-total task))]
+            [(string=? template "{percent}")
+             ($rich-progress-percent-string
+              (rich-progress-task-completed task)
+              (rich-progress-task-total task))]
+            [else (errorf who "unsupported progress text template: ~a" template)])))
+
+  (define $rich-progress-column-string
+    (lambda (progress task column)
       (let ([completed (rich-progress-task-completed task)]
             [total (rich-progress-task-total task)]
             [width (rich-progress-bar-width progress)])
-        (string-append
-         (rich-progress-task-description task)
-         " "
-         ($rich-progress-bar completed total width)
-         " "
-         ($rich-progress-percent-string completed total)
-         " "
-         ($rich-progress-count-string completed total)))))
+        (case (rich-progress-column-kind column)
+          [(text) ($rich-progress-text-template
+                   'rich-progress-render
+                   (rich-progress-column-value column)
+                   task)]
+          [(bar) ($rich-progress-bar completed total width)]
+          [(percent) ($rich-progress-percent-string completed total)]
+          [(complete) ($rich-progress-count-string completed total)]
+          [else (errorf 'rich-progress-render
+                        "unknown progress column kind: ~a"
+                        (rich-progress-column-kind column))]))))
+
+  (define $rich-progress-task-line
+    (lambda (progress task)
+      ($string-join
+       " "
+       (map (lambda (column) ($rich-progress-column-string progress task column))
+            (rich-progress-columns progress)))))
 
   (define $rich-progress-visible-tasks
     (lambda (progress)
@@ -332,6 +372,11 @@
               [(rich-progress-task-visible? (car tasks))
                (loop (cdr tasks) (cons (car tasks) res))]
               [else (loop (cdr tasks) res)]))))
+
+  (define $rich-progress-column-list?
+    (lambda (columns)
+      (and (pair? columns)
+           (andmap $rich-progress-column? columns))))
 
   #|proc:rich-enable-color?
 The `rich-enable-color?` parameter controls whether rich style values render
@@ -600,7 +645,7 @@ The `make-rich-progress` procedure constructs a progress manager. The optional
       [() (make-rich-progress 40)]
       [(bar-width)
        (pcheck ([positive-natural? bar-width])
-               (mk-rich-progress 0 bar-width '()))]))
+               (mk-rich-progress 0 bar-width '() (rich-progress-default-columns)))]))
 
   #|proc:rich-progress?
 The `rich-progress?` procedure checks whether `obj` is a rich progress manager.
@@ -615,6 +660,71 @@ The `rich-progress-task?` procedure checks whether `obj` is a progress task.
   (define rich-progress-task?
     (lambda (obj)
       ($rich-progress-task? obj)))
+
+  #|proc:rich-progress-column?
+The `rich-progress-column?` procedure checks whether `obj` is a progress
+rendering column.
+|#
+  (define rich-progress-column?
+    (lambda (obj)
+      ($rich-progress-column? obj)))
+
+  #|proc:rich-progress-text-column
+The `rich-progress-text-column` procedure constructs a text column from one of
+the supported task templates: `{description}`, `{completed}`, `{total}`, or
+`{percent}`.
+|#
+  (define-who rich-progress-text-column
+    (lambda (template)
+      (pcheck ([string? template])
+              ;; validate eagerly so invalid templates fail at construction.
+              ($rich-progress-text-template
+               who
+               template
+               (mk-rich-progress-task 0 "" 1 0 #t))
+              (mk-rich-progress-column 'text template))))
+
+  #|proc:rich-progress-bar-column
+The `rich-progress-bar-column` procedure constructs a progress bar column.
+|#
+  (define rich-progress-bar-column
+    (lambda ()
+      (mk-rich-progress-column 'bar #f)))
+
+  #|proc:rich-progress-percent-column
+The `rich-progress-percent-column` procedure constructs a percent column.
+|#
+  (define rich-progress-percent-column
+    (lambda ()
+      (mk-rich-progress-column 'percent #f)))
+
+  #|proc:rich-progress-complete-column
+The `rich-progress-complete-column` procedure constructs a completed/total
+count column.
+|#
+  (define rich-progress-complete-column
+    (lambda ()
+      (mk-rich-progress-column 'complete #f)))
+
+  #|proc:rich-progress-default-columns
+The `rich-progress-default-columns` procedure returns the default progress
+columns: description, bar, percent, and completed/total count.
+|#
+  (define rich-progress-default-columns
+    (lambda ()
+      (list (rich-progress-text-column "{description}")
+            (rich-progress-bar-column)
+            (rich-progress-percent-column)
+            (rich-progress-complete-column))))
+
+  #|proc:rich-progress-columns-set!
+The `rich-progress-columns-set!` procedure replaces the progress render columns.
+`columns` must be a non-empty list of progress columns.
+|#
+  (define rich-progress-columns-set!
+    (lambda (progress columns)
+      (pcheck ([$rich-progress? progress] [$rich-progress-column-list? columns])
+              (rich-progress-columns-raw-set! progress columns))))
 
   #|proc:rich-progress-add-task!
 The `rich-progress-add-task!` procedure adds a task to `progress` and returns
