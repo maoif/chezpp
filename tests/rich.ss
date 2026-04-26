@@ -360,6 +360,23 @@
                    (rich-progress-refresh! p)))))
 
      (let* ([p (make-rich-progress 10)]
+            [id0 (rich-progress-add-task! p "build" 10)]
+            [id1 (rich-progress-add-task! p "test" 10)]
+            [port (open-output-string)])
+       (rich-progress-update! p id0 4)
+       (rich-progress-update! p id1 7)
+       (rich-progress-frefresh! port p)
+       (rich-progress-remove-task! p id1)
+       (rich-progress-update! p id0 5)
+       (rich-progress-frefresh! port p)
+       (equal? (string-append
+                "\r\033[2Kbuild [####------] 40% 4/10\n"
+                "test [#######---] 70% 7/10"
+                "\r\033[2K\033[1A\r\033[2K"
+                "build [#####-----] 50% 5/10")
+               (get-output-string port)))
+
+     (let* ([p (make-rich-progress 10)]
             [id (rich-progress-add-task! p "download" 10)]
             [port (open-output-string)])
        (rich-progress-complete! p id)

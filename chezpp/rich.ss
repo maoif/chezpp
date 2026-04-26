@@ -87,7 +87,10 @@
             (mutable tasks rich-progress-tasks rich-progress-tasks-set!)
             (mutable columns rich-progress-columns rich-progress-columns-raw-set!)
             (mutable live? $rich-progress-live? $rich-progress-live?-set!)
-            (mutable live-thread $rich-progress-live-thread $rich-progress-live-thread-set!)))
+            (mutable live-thread $rich-progress-live-thread $rich-progress-live-thread-set!)
+            (mutable refresh-line-count
+                     $rich-progress-refresh-line-count
+                     $rich-progress-refresh-line-count-set!)))
 
   (define-record-type ($rich-progress-task mk-rich-progress-task $rich-progress-task?)
     (fields (immutable id rich-progress-task-id)
@@ -485,6 +488,19 @@
           ($rich-progress-sleep-ms interval-ms)
           (loop)))))
 
+  (define $rich-progress-render-line-count
+    (lambda (rendered)
+      (length ($string-split-lines rendered))))
+
+  (define $rich-progress-clear-lines
+    (lambda (port count)
+      (let loop ([count count])
+        (when (> count 0)
+          (display "\r\033[2K" port)
+          (when (> count 1)
+            (display "\033[1A" port))
+          (loop (- count 1))))))
+
   (define $rich-progress-visible-tasks
     (lambda (progress)
       (let loop ([tasks (rich-progress-tasks progress)] [res '()])
@@ -778,7 +794,7 @@ The `make-rich-progress` procedure constructs a progress manager. The optional
       [(bar-width)
        (pcheck ([positive-natural? bar-width])
                (mk-rich-progress
-                0 bar-width '() (rich-progress-default-columns) #f #f))]))
+                0 bar-width '() (rich-progress-default-columns) #f #f 1))]))
 
   #|proc:rich-progress?
 The `rich-progress?` procedure checks whether `obj` is a rich progress manager.
@@ -1072,14 +1088,20 @@ the rendered progress output.
               (rich-progress-frefresh! (current-output-port) progress))))
 
   #|proc:rich-progress-frefresh!
-The `rich-progress-frefresh!` procedure writes carriage-return, ANSI clear-line,
-and rendered progress output to `port`.
+The `rich-progress-frefresh!` procedure clears the previous live progress
+render from `port` and writes the current rendered progress output.
 |#
   (define rich-progress-frefresh!
     (lambda (port progress)
       (pcheck ([output-port? port] [$rich-progress? progress])
-              (display "\r\033[2K" port)
-              (display (rich-progress-render progress) port))))
+              (let ([rendered (rich-progress-render progress)])
+                ($rich-progress-clear-lines
+                 port
+                 ($rich-progress-refresh-line-count progress))
+                (display rendered port)
+                ($rich-progress-refresh-line-count-set!
+                 progress
+                 ($rich-progress-render-line-count rendered))))))
 
   #|proc:rich-progress-finish!
 The `rich-progress-finish!` procedure writes the final rendered progress output
