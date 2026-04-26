@@ -435,14 +435,39 @@
                      frame-count)])
         (list-ref frames index))))
 
+  (define $rich-progress-pulse-width
+    (lambda (width)
+      (min 3 width)))
+
+  (define $rich-progress-pulse-bar
+    (lambda (task width)
+      (let* ([pulse-width ($rich-progress-pulse-width width)]
+             [max-start (- width pulse-width)]
+             [start (if (= max-start 0)
+                        0
+                        (modulo
+                         (inexact->exact
+                          (floor (+ (/ ($rich-progress-elapsed-seconds task) 0.1)
+                                    1e-9)))
+                         (+ max-start 1)))]
+             [end (+ start pulse-width)])
+        (let loop ([i 0] [chars '()])
+          (if (= i width)
+              (string-append "[" (list->string (reverse chars)) "]")
+              (loop (+ i 1)
+                    (cons (if (and (>= i start) (< i end)) #\# #\-)
+                          chars)))))))
+
   (define $rich-progress-bar
-    (lambda (completed total width)
-      (let ([filled (if total (quotient (* completed width) total) 0)])
-        (string-append
-         "["
-         (make-string filled #\#)
-         (make-string (- width filled) #\-)
-         "]"))))
+    (lambda (task completed total width)
+      (if total
+          (let ([filled (quotient (* completed width) total)])
+            (string-append
+             "["
+             (make-string filled #\#)
+             (make-string (- width filled) #\-)
+             "]"))
+          ($rich-progress-pulse-bar task width))))
 
   (define $rich-progress-text-template
     (lambda (who template task)
@@ -465,7 +490,7 @@
                    'rich-progress-render
                    (rich-progress-column-value column)
                    task)]
-          [(bar) ($rich-progress-bar completed total width)]
+          [(bar) ($rich-progress-bar task completed total width)]
           [(percent) ($rich-progress-percent-string completed total)]
           [(complete) ($rich-progress-count-string completed total)]
           [(spinner) ($rich-progress-spinner-string task column)]

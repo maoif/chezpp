@@ -288,11 +288,15 @@
                      "test [##########] 100% 5/5")
                     (rich-progress-render p))))
 
-     (let* ([p (make-rich-progress 10)]
-            [id (rich-progress-add-task! p "scan" #f)])
-       (rich-progress-advance! p id 3)
-       (equal? "scan [----------] --% 3/?"
-               (rich-progress-render p)))
+     (parameterize ([rich-progress-current-time (lambda () 100)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "scan" #f)])
+         (rich-progress-advance! p id 3)
+         (and (equal? "scan [###-------] --% 3/?"
+                      (rich-progress-render p))
+              (parameterize ([rich-progress-current-time (lambda () 100.2)])
+                (equal? "scan [--###-----] --% 3/?"
+                        (rich-progress-render p))))))
 
      (let* ([p (make-rich-progress 10)]
             [id (rich-progress-add-task! p "download" 10)])
@@ -309,12 +313,13 @@
        (equal? "scan [##--------] 25% 3/12"
                (rich-progress-render p)))
 
-     (let* ([p (make-rich-progress 10)]
-            [id (rich-progress-add-task! p "download" 10)])
-       (rich-progress-update! p id 4)
-       (rich-progress-task-total-set! p id #f)
-       (equal? "download [----------] --% 4/?"
-               (rich-progress-render p)))
+     (parameterize ([rich-progress-current-time (lambda () 100)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "download" 10)])
+         (rich-progress-update! p id 4)
+         (rich-progress-task-total-set! p id #f)
+         (equal? "download [###-------] --% 4/?"
+                 (rich-progress-render p))))
 
      (let* ([p (make-rich-progress 10)]
             [id0 (rich-progress-add-task! p "a" 10)]
