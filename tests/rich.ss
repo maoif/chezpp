@@ -283,6 +283,70 @@
      )
 
 
+(mat rich-tree-render
+
+     (let ([t (make-rich-tree "root")])
+       (and (rich-tree? t)
+            (rich-tree-guide-style? 'unicode)
+            (rich-tree-guide-style? 'ascii)
+            (not (rich-tree-guide-style? 'double))
+            (equal? "root" (rich-tree-render t))))
+
+     (let* ([t (make-rich-tree "root")]
+            [src (rich-tree-add! t "src")])
+       (rich-tree-add! src "main.ss")
+       (rich-tree-add! t "tests")
+       (equal? (string-append
+                "root\n"
+                "├── src\n"
+                "│   └── main.ss\n"
+                "└── tests")
+               (rich-tree-render t)))
+
+     (let* ([t (make-rich-tree "root" 'ascii)]
+            [src (rich-tree-add! t "src")])
+       (rich-tree-add! src "main.ss")
+       (rich-tree-add! t "tests")
+       (equal? (string-append
+                "root\n"
+                "|-- src\n"
+                "|   `-- main.ss\n"
+                "`-- tests")
+               (rich-tree-render t)))
+
+     )
+
+
+(mat rich-tree-print
+
+     (let* ([t (make-rich-tree "root")]
+            [port (open-output-string)])
+       (rich-tree-add! t "child")
+       (rich-tree-fprint port t)
+       (equal? "root\n└── child" (get-output-string port)))
+
+     (let ([t (make-rich-tree "root")])
+       (rich-tree-add! t "child")
+       (equal? "root\n└── child\n"
+               (with-output-to-string
+                 (lambda ()
+                   (rich-tree-println t)))))
+
+     )
+
+
+(mat rich-tree-errors
+
+     (error? (make-rich-tree 123))
+     (error? (make-rich-tree "root" 'double))
+     (error? (rich-tree-add! #f "child"))
+     (error? (rich-tree-add! (make-rich-tree "root") 123))
+     (error? (rich-tree-render #f))
+     (error? (rich-tree-fprint "not-a-port" (make-rich-tree "root")))
+
+     )
+
+
 (mat rich-progress-render
 
      (let ([p (make-rich-progress 10)])

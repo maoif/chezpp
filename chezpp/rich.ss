@@ -31,6 +31,16 @@
           rich-panel-fprint
           rich-panel-fprintln
 
+          make-rich-tree
+          rich-tree?
+          rich-tree-guide-style?
+          rich-tree-add!
+          rich-tree-render
+          rich-tree-print
+          rich-tree-println
+          rich-tree-fprint
+          rich-tree-fprintln
+
           make-rich-progress
           rich-progress?
           rich-progress-task?
@@ -85,6 +95,11 @@
     (fields (immutable body rich-panel-body)
             (immutable title rich-panel-title)
             (immutable border-style rich-panel-border-style)))
+
+  (define-record-type ($rich-tree mk-rich-tree $rich-tree?)
+    (fields (immutable label rich-tree-label)
+            (mutable children rich-tree-children rich-tree-children-set!)
+            (immutable guide-style rich-tree-guide-style)))
 
   (define-record-type ($rich-progress mk-rich-progress $rich-progress?)
     (fields (mutable next-id rich-progress-next-id rich-progress-next-id-set!)
@@ -228,6 +243,10 @@
     (lambda (style)
       (and (memq style '(ascii unicode)) #t)))
 
+  (define $rich-tree-guide-style?
+    (lambda (style)
+      (and (memq style '(ascii unicode)) #t)))
+
   (define $rich-table-border-chars
     (lambda (who style)
       (case style
@@ -352,6 +371,45 @@
         (append (list ($rich-panel-top-border width title border))
                 (map (lambda (line) ($rich-panel-row line width border)) body-lines)
                 (list ($rich-panel-bottom-border width border))))))
+
+  (define $rich-tree-guide-chars
+    (lambda (who style)
+      (case style
+        [(ascii) '#("|-- " "`-- " "|   " "    ")]
+        [(unicode) '#("├── " "└── " "│   " "    ")]
+        [else (errorf who "unknown tree guide style: ~a" style)])))
+
+  (define $rich-tree-child-lines
+    (lambda (tree prefix last? chars)
+      (let* ([connector (vector-ref chars (if last? 1 0))]
+             [continuation (vector-ref chars (if last? 3 2))]
+             [line (string-append prefix connector (rich-tree-label tree))]
+             [child-prefix (string-append prefix continuation)])
+        (cons line ($rich-tree-children-lines
+                    (rich-tree-children tree)
+                    child-prefix
+                    chars)))))
+
+  (define $rich-tree-children-lines
+    (lambda (children prefix chars)
+      (let loop ([children children] [res '()])
+        (if (null? children)
+            (reverse res)
+            (loop (cdr children)
+                  (append (reverse ($rich-tree-child-lines
+                                    (car children)
+                                    prefix
+                                    (null? (cdr children))
+                                    chars))
+                          res))))))
+
+  (define $rich-tree-lines
+    (lambda (tree)
+      (let ([chars ($rich-tree-guide-chars
+                    'rich-tree-render
+                    (rich-tree-guide-style tree))])
+        (cons (rich-tree-label tree)
+              ($rich-tree-children-lines (rich-tree-children tree) "" chars)))))
 
   (define $list-remove
     (lambda (pred ls)
@@ -931,6 +989,93 @@ appends a newline.
     (lambda (port panel)
       (pcheck ([output-port? port] [$rich-panel? panel])
               (display (rich-panel-render panel) port)
+              (newline port))))
+
+  #|proc:make-rich-tree
+The `make-rich-tree` procedure constructs a tree with root `label`. With one
+argument it uses Unicode guide characters. With two arguments, `guide-style`
+may be `unicode` or `ascii`.
+|#
+  (define-who make-rich-tree
+    (case-lambda
+      [(label) (make-rich-tree label 'unicode)]
+      [(label guide-style)
+       (pcheck ([string? label] [$rich-tree-guide-style? guide-style])
+               (mk-rich-tree label '() guide-style))]))
+
+  #|proc:rich-tree?
+The `rich-tree?` procedure checks whether `obj` is a rich tree.
+|#
+  (define rich-tree?
+    (lambda (obj)
+      ($rich-tree? obj)))
+
+  #|proc:rich-tree-guide-style?
+The `rich-tree-guide-style?` procedure checks whether `obj` is a supported
+tree guide style. Supported styles are `unicode` and `ascii`.
+|#
+  (define rich-tree-guide-style?
+    (lambda (obj)
+      ($rich-tree-guide-style? obj)))
+
+  #|proc:rich-tree-add!
+The `rich-tree-add!` procedure appends a child with `label` to `tree` and
+returns the new child tree.
+|#
+  (define rich-tree-add!
+    (lambda (tree label)
+      (pcheck ([$rich-tree? tree] [string? label])
+              (let ([child (mk-rich-tree label '() (rich-tree-guide-style tree))])
+                (rich-tree-children-set!
+                 tree
+                 (append (rich-tree-children tree) (list child)))
+                child))))
+
+  #|proc:rich-tree-render
+The `rich-tree-render` procedure renders `tree` as a newline-separated string
+using the tree's guide style.
+|#
+  (define rich-tree-render
+    (lambda (tree)
+      (pcheck ([$rich-tree? tree])
+              ($string-join "\n" ($rich-tree-lines tree)))))
+
+  #|proc:rich-tree-print
+The `rich-tree-print` procedure writes the rendered tree to the current output
+port without appending a newline.
+|#
+  (define rich-tree-print
+    (lambda (tree)
+      (pcheck ([$rich-tree? tree])
+              (display (rich-tree-render tree)))))
+
+  #|proc:rich-tree-println
+The `rich-tree-println` procedure writes the rendered tree to the current
+output port and appends a newline.
+|#
+  (define rich-tree-println
+    (lambda (tree)
+      (pcheck ([$rich-tree? tree])
+              (display (rich-tree-render tree))
+              (newline))))
+
+  #|proc:rich-tree-fprint
+The `rich-tree-fprint` procedure writes the rendered tree to `port` without
+appending a newline.
+|#
+  (define rich-tree-fprint
+    (lambda (port tree)
+      (pcheck ([output-port? port] [$rich-tree? tree])
+              (display (rich-tree-render tree) port))))
+
+  #|proc:rich-tree-fprintln
+The `rich-tree-fprintln` procedure writes the rendered tree to `port` and
+appends a newline.
+|#
+  (define rich-tree-fprintln
+    (lambda (port tree)
+      (pcheck ([output-port? port] [$rich-tree? tree])
+              (display (rich-tree-render tree) port)
               (newline port))))
 
   #|proc:make-rich-progress
