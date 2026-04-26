@@ -6,7 +6,8 @@
           iter->list
 
           get-iter iter-end iter-end? iter-next! iter-reset! iter-finalize!
-          (rename ($iter-finalized? iter-finalized?))
+          (rename ($iter-finalized? iter-finalized?)
+                  ($iter? iter?))
           iter-for-each iter-map iter-filter iter-take iter-drop iter-fold
           iter-append iter-zip iter-interleave
 
