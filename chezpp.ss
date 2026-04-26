@@ -36,4 +36,5 @@
                   (chezpp hash)
                   (chezpp crypto)
                   (chezpp net)
-                  (chezpp concurrency))))
+                  (chezpp concurrency)
+                  (chezpp rich))))
