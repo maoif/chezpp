@@ -27,7 +27,26 @@
           rich-panel-print
           rich-panel-println
           rich-panel-fprint
-          rich-panel-fprintln)
+          rich-panel-fprintln
+
+          make-rich-progress
+          rich-progress?
+          rich-progress-task?
+          rich-progress-add-task!
+          rich-progress-remove-task!
+          rich-progress-update!
+          rich-progress-advance!
+          rich-progress-complete!
+          rich-progress-task-visible?-set!
+          rich-progress-render
+          rich-progress-print
+          rich-progress-println
+          rich-progress-fprint
+          rich-progress-fprintln
+          rich-progress-refresh!
+          rich-progress-frefresh!
+          rich-progress-finish!
+          rich-progress-ffinish!)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal))
@@ -43,6 +62,18 @@
     (fields (immutable body rich-panel-body)
             (immutable title rich-panel-title)
             (immutable border-style rich-panel-border-style)))
+
+  (define-record-type ($rich-progress mk-rich-progress $rich-progress?)
+    (fields (mutable next-id rich-progress-next-id rich-progress-next-id-set!)
+            (mutable bar-width rich-progress-bar-width rich-progress-bar-width-set!)
+            (mutable tasks rich-progress-tasks rich-progress-tasks-set!)))
+
+  (define-record-type ($rich-progress-task mk-rich-progress-task $rich-progress-task?)
+    (fields (immutable id rich-progress-task-id)
+            (mutable description rich-progress-task-description rich-progress-task-description-set!)
+            (mutable total rich-progress-task-total rich-progress-task-total-set!)
+            (mutable completed rich-progress-task-completed rich-progress-task-completed-set!)
+            (mutable visible? rich-progress-task-visible? rich-progress-task-visible?-raw-set!)))
 
   (define $style-code
     (lambda (who name)
@@ -232,6 +263,75 @@
         (append (list ($rich-panel-top-border width title border))
                 (map (lambda (line) ($rich-panel-row line width border)) body-lines)
                 (list ($rich-panel-bottom-border width border))))))
+
+  (define $list-remove
+    (lambda (pred ls)
+      (let loop ([ls ls] [res '()])
+        (cond [(null? ls) (reverse res)]
+              [(pred (car ls)) (loop (cdr ls) res)]
+              [else (loop (cdr ls) (cons (car ls) res))]))))
+
+  (define $rich-progress-find-task
+    (lambda (who progress task-id)
+      (let loop ([tasks (rich-progress-tasks progress)])
+        (cond [(null? tasks) (errorf who "unknown progress task id: ~a" task-id)]
+              [(= task-id (rich-progress-task-id (car tasks))) (car tasks)]
+              [else (loop (cdr tasks))]))))
+
+  (define $rich-progress-check-total
+    (lambda (who total)
+      (unless (or (not total) (positive-natural? total))
+        (errorf who "expected positive natural total or #f: ~a" total))))
+
+  (define $rich-progress-check-current
+    (lambda (who current total)
+      (unless (natural? current)
+        (errorf who "expected natural current: ~a" current))
+      (when (and total (> current total))
+        (errorf who "current exceeds total: ~a > ~a" current total))))
+
+  (define $rich-progress-percent-string
+    (lambda (completed total)
+      (if total
+          (format #f "~a%" (quotient (* completed 100) total))
+          "--%")))
+
+  (define $rich-progress-count-string
+    (lambda (completed total)
+      (if total
+          (format #f "~a/~a" completed total)
+          (format #f "~a/?" completed))))
+
+  (define $rich-progress-bar
+    (lambda (completed total width)
+      (let ([filled (if total (quotient (* completed width) total) 0)])
+        (string-append
+         "["
+         (make-string filled #\#)
+         (make-string (- width filled) #\-)
+         "]"))))
+
+  (define $rich-progress-task-line
+    (lambda (progress task)
+      (let ([completed (rich-progress-task-completed task)]
+            [total (rich-progress-task-total task)]
+            [width (rich-progress-bar-width progress)])
+        (string-append
+         (rich-progress-task-description task)
+         " "
+         ($rich-progress-bar completed total width)
+         " "
+         ($rich-progress-percent-string completed total)
+         " "
+         ($rich-progress-count-string completed total)))))
+
+  (define $rich-progress-visible-tasks
+    (lambda (progress)
+      (let loop ([tasks (rich-progress-tasks progress)] [res '()])
+        (cond [(null? tasks) (reverse res)]
+              [(rich-progress-task-visible? (car tasks))
+               (loop (cdr tasks) (cons (car tasks) res))]
+              [else (loop (cdr tasks) res)]))))
 
   #|proc:rich-enable-color?
 The `rich-enable-color?` parameter controls whether rich style values render
@@ -489,6 +589,200 @@ appends a newline.
     (lambda (port panel)
       (pcheck ([output-port? port] [$rich-panel? panel])
               (display (rich-panel-render panel) port)
+              (newline port))))
+
+  #|proc:make-rich-progress
+The `make-rich-progress` procedure constructs a progress manager. The optional
+`bar-width` controls the number of characters in rendered bars.
+|#
+  (define-who make-rich-progress
+    (case-lambda
+      [() (make-rich-progress 40)]
+      [(bar-width)
+       (pcheck ([positive-natural? bar-width])
+               (mk-rich-progress 0 bar-width '()))]))
+
+  #|proc:rich-progress?
+The `rich-progress?` procedure checks whether `obj` is a rich progress manager.
+|#
+  (define rich-progress?
+    (lambda (obj)
+      ($rich-progress? obj)))
+
+  #|proc:rich-progress-task?
+The `rich-progress-task?` procedure checks whether `obj` is a progress task.
+|#
+  (define rich-progress-task?
+    (lambda (obj)
+      ($rich-progress-task? obj)))
+
+  #|proc:rich-progress-add-task!
+The `rich-progress-add-task!` procedure adds a task to `progress` and returns
+the task id. `total` is either a positive natural number or `#f` for an
+indeterminate task.
+|#
+  (define-who rich-progress-add-task!
+    (lambda (progress description total)
+      (pcheck ([$rich-progress? progress] [string? description])
+              ($rich-progress-check-total who total)
+              (let ([id (rich-progress-next-id progress)])
+                (rich-progress-next-id-set! progress (fx+ id 1))
+                (rich-progress-tasks-set!
+                 progress
+                 (append (rich-progress-tasks progress)
+                         (list (mk-rich-progress-task id description total 0 #t))))
+                id))))
+
+  #|proc:rich-progress-remove-task!
+The `rich-progress-remove-task!` procedure removes the task identified by
+`task-id` from `progress`.
+|#
+  (define-who rich-progress-remove-task!
+    (lambda (progress task-id)
+      (pcheck ([$rich-progress? progress] [natural? task-id])
+              ($rich-progress-find-task who progress task-id)
+              (rich-progress-tasks-set!
+               progress
+               ($list-remove
+                (lambda (task) (= task-id (rich-progress-task-id task)))
+                (rich-progress-tasks progress)))
+              #t)))
+
+  #|proc:rich-progress-update!
+The `rich-progress-update!` procedure sets the completed amount for a task.
+|#
+  (define-who rich-progress-update!
+    (lambda (progress task-id completed)
+      (pcheck ([$rich-progress? progress] [natural? task-id completed])
+              (let ([task ($rich-progress-find-task who progress task-id)])
+                ($rich-progress-check-current who completed (rich-progress-task-total task))
+                (rich-progress-task-completed-set! task completed)
+                #t))))
+
+  #|proc:rich-progress-advance!
+The `rich-progress-advance!` procedure increments a task's completed amount by
+`amount`.
+|#
+  (define-who rich-progress-advance!
+    (lambda (progress task-id amount)
+      (pcheck ([$rich-progress? progress] [natural? task-id amount])
+              (let* ([task ($rich-progress-find-task who progress task-id)]
+                     [completed (+ (rich-progress-task-completed task) amount)])
+                ($rich-progress-check-current who completed (rich-progress-task-total task))
+                (rich-progress-task-completed-set! task completed)
+                #t))))
+
+  #|proc:rich-progress-complete!
+The `rich-progress-complete!` procedure marks a determinate task complete.
+|#
+  (define-who rich-progress-complete!
+    (lambda (progress task-id)
+      (pcheck ([$rich-progress? progress] [natural? task-id])
+              (let* ([task ($rich-progress-find-task who progress task-id)]
+                     [total (rich-progress-task-total task)])
+                (unless total
+                  (errorf who "cannot complete indeterminate task: ~a" task-id))
+                (rich-progress-task-completed-set! task total)
+                #t))))
+
+  #|proc:rich-progress-task-visible?-set!
+The `rich-progress-task-visible?-set!` procedure controls whether a task is
+included in rendered progress output.
+|#
+  (define-who rich-progress-task-visible?-set!
+    (lambda (progress task-id visible?)
+      (pcheck ([$rich-progress? progress] [natural? task-id] [boolean? visible?])
+              (rich-progress-task-visible?-raw-set!
+               ($rich-progress-find-task who progress task-id)
+               visible?)
+              #t)))
+
+  #|proc:rich-progress-render
+The `rich-progress-render` procedure renders visible progress tasks as a
+newline-separated string.
+|#
+  (define rich-progress-render
+    (lambda (progress)
+      (pcheck ([$rich-progress? progress])
+              ($string-join
+               "\n"
+               (map (lambda (task) ($rich-progress-task-line progress task))
+                    ($rich-progress-visible-tasks progress))))))
+
+  #|proc:rich-progress-print
+The `rich-progress-print` procedure writes rendered progress to the current
+output port without appending a newline.
+|#
+  (define rich-progress-print
+    (lambda (progress)
+      (pcheck ([$rich-progress? progress])
+              (display (rich-progress-render progress)))))
+
+  #|proc:rich-progress-println
+The `rich-progress-println` procedure writes rendered progress to the current
+output port and appends a newline.
+|#
+  (define rich-progress-println
+    (lambda (progress)
+      (pcheck ([$rich-progress? progress])
+              (display (rich-progress-render progress))
+              (newline))))
+
+  #|proc:rich-progress-fprint
+The `rich-progress-fprint` procedure writes rendered progress to `port`
+without appending a newline.
+|#
+  (define rich-progress-fprint
+    (lambda (port progress)
+      (pcheck ([output-port? port] [$rich-progress? progress])
+              (display (rich-progress-render progress) port))))
+
+  #|proc:rich-progress-fprintln
+The `rich-progress-fprintln` procedure writes rendered progress to `port` and
+appends a newline.
+|#
+  (define rich-progress-fprintln
+    (lambda (port progress)
+      (pcheck ([output-port? port] [$rich-progress? progress])
+              (display (rich-progress-render progress) port)
+              (newline port))))
+
+  #|proc:rich-progress-refresh!
+The `rich-progress-refresh!` procedure rewrites the current terminal line with
+the rendered progress output.
+|#
+  (define rich-progress-refresh!
+    (lambda (progress)
+      (pcheck ([$rich-progress? progress])
+              (rich-progress-frefresh! (current-output-port) progress))))
+
+  #|proc:rich-progress-frefresh!
+The `rich-progress-frefresh!` procedure writes carriage-return, ANSI clear-line,
+and rendered progress output to `port`.
+|#
+  (define rich-progress-frefresh!
+    (lambda (port progress)
+      (pcheck ([output-port? port] [$rich-progress? progress])
+              (display "\r\033[2K" port)
+              (display (rich-progress-render progress) port))))
+
+  #|proc:rich-progress-finish!
+The `rich-progress-finish!` procedure writes the final rendered progress output
+to the current output port and appends a newline.
+|#
+  (define rich-progress-finish!
+    (lambda (progress)
+      (pcheck ([$rich-progress? progress])
+              (rich-progress-ffinish! (current-output-port) progress))))
+
+  #|proc:rich-progress-ffinish!
+The `rich-progress-ffinish!` procedure writes the final rendered progress output
+to `port` and appends a newline.
+|#
+  (define rich-progress-ffinish!
+    (lambda (port progress)
+      (pcheck ([output-port? port] [$rich-progress? progress])
+              (display (rich-progress-render progress) port)
               (newline port))))
 
   )

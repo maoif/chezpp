@@ -262,3 +262,142 @@
      (error? (rich-panel-fprint "not-a-port" (rich-panel "hello")))
 
      )
+
+
+(mat rich-progress-render
+
+     (let ([p (make-rich-progress 10)])
+       (and (rich-progress? p)
+            (equal? "" (rich-progress-render p))))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-update! p id 4)
+       (equal? "download [####------] 40% 4/10"
+               (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id0 (rich-progress-add-task! p "build" 4)]
+            [id1 (rich-progress-add-task! p "test" 5)])
+       (and (= id0 0)
+            (= id1 1)
+            (rich-progress-advance! p id0 2)
+            (rich-progress-complete! p id1)
+            (equal? (string-append
+                     "build [#####-----] 50% 2/4\n"
+                     "test [##########] 100% 5/5")
+                    (rich-progress-render p))))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "scan" #f)])
+       (rich-progress-advance! p id 3)
+       (equal? "scan [----------] --% 3/?"
+               (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id0 (rich-progress-add-task! p "a" 10)]
+            [id1 (rich-progress-add-task! p "b" 10)])
+       (rich-progress-task-visible?-set! p id0 #f)
+       (rich-progress-remove-task! p id1)
+       (equal? "" (rich-progress-render p)))
+
+     )
+
+
+(mat rich-progress-print
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-update! p id 4)
+       (equal? "download [####------] 40% 4/10"
+               (with-output-to-string
+                 (lambda ()
+                   (rich-progress-print p)))))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-update! p id 4)
+       (equal? "download [####------] 40% 4/10\n"
+               (with-output-to-string
+                 (lambda ()
+                   (rich-progress-println p)))))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)]
+            [port (open-output-string)])
+       (rich-progress-update! p id 4)
+       (rich-progress-fprint port p)
+       (equal? "download [####------] 40% 4/10"
+               (get-output-string port)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)]
+            [port (open-output-string)])
+       (rich-progress-update! p id 4)
+       (rich-progress-fprintln port p)
+       (equal? "download [####------] 40% 4/10\n"
+               (get-output-string port)))
+
+     )
+
+
+(mat rich-progress-live
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)]
+            [port (open-output-string)])
+       (rich-progress-update! p id 4)
+       (rich-progress-frefresh! port p)
+       (equal? "\r\033[2Kdownload [####------] 40% 4/10"
+               (get-output-string port)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-update! p id 4)
+       (equal? "\r\033[2Kdownload [####------] 40% 4/10"
+               (with-output-to-string
+                 (lambda ()
+                   (rich-progress-refresh! p)))))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)]
+            [port (open-output-string)])
+       (rich-progress-complete! p id)
+       (rich-progress-ffinish! port p)
+       (equal? "download [##########] 100% 10/10\n"
+               (get-output-string port)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-complete! p id)
+       (equal? "download [##########] 100% 10/10\n"
+               (with-output-to-string
+                 (lambda ()
+                   (rich-progress-finish! p)))))
+
+     )
+
+
+(mat rich-progress-errors
+
+     (error? (make-rich-progress 0))
+     (error? (rich-progress-render #f))
+     (error? (rich-progress-add-task! (make-rich-progress) 123 10))
+     (error? (rich-progress-add-task! (make-rich-progress) "bad" 0))
+
+     (error? (let* ([p (make-rich-progress)]
+                    [id (rich-progress-add-task! p "download" 10)])
+               (rich-progress-update! p id 11)))
+
+     (error? (let* ([p (make-rich-progress)]
+                    [id (rich-progress-add-task! p "download" 10)])
+               (rich-progress-advance! p id 11)))
+
+     (error? (let ([p (make-rich-progress)])
+               (rich-progress-update! p 99 1)))
+
+     (error? (rich-progress-fprint "not-a-port" (make-rich-progress)))
+     (error? (rich-progress-frefresh! "not-a-port" (make-rich-progress)))
+     (error? (rich-progress-ffinish! "not-a-port" (make-rich-progress)))
+
+     )
