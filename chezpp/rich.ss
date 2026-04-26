@@ -8,13 +8,27 @@
           rich-style
           rich-style?
           rich-reset
-          rich-enable-color?)
+          rich-enable-color?
+
+          make-rich-table
+          rich-table?
+          rich-table-add-column!
+          rich-table-add-row!
+          rich-table-render
+          rich-table-print
+          rich-table-println
+          rich-table-fprint
+          rich-table-fprintln)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal))
 
   (define-record-type ($rich-style mk-rich-style $rich-style?)
     (fields (immutable ansi rich-style-ansi)))
+
+  (define-record-type ($rich-table mk-rich-table $rich-table?)
+    (fields (mutable columns rich-table-columns rich-table-columns-set!)
+            (mutable rows rich-table-rows rich-table-rows-set!)))
 
   (define $style-code
     (lambda (who name)
@@ -79,6 +93,71 @@
   (define $rich-render-args
     (lambda (args)
       (map $rich-render-arg args)))
+
+  (define $string-join
+    (lambda (sep strs)
+      (cond [(null? strs) ""]
+            [(null? (cdr strs)) (car strs)]
+            [else (let loop ([strs (cdr strs)] [res (car strs)])
+                    (if (null? strs)
+                        res
+                        (loop (cdr strs) (string-append res sep (car strs)))))])))
+
+  (define $rich-cell->string
+    (lambda (cell)
+      (if (string? cell)
+          cell
+          (format #f "~a" ($rich-render-arg cell)))))
+
+  (define $rich-table-widths
+    (lambda (columns rows)
+      (map (lambda (column cells)
+             (apply max (map string-length (cons column cells))))
+           columns
+           (let loop ([i 0] [columns columns])
+             (if (null? columns)
+                 '()
+                 (cons (map (lambda (row) (list-ref row i)) rows)
+                       (loop (fx+ i 1) (cdr columns))))))))
+
+  (define $pad-right
+    (lambda (str width)
+      (let ([padding (fx- width (string-length str))])
+        (if (fx> padding 0)
+            (string-append str (make-string padding #\space))
+            str))))
+
+  (define $rich-table-border
+    (lambda (widths)
+      (string-append
+       "+"
+       ($string-join
+        "+"
+        (map (lambda (width) (make-string (fx+ width 2) #\-)) widths))
+       "+")))
+
+  (define $rich-table-row
+    (lambda (cells widths)
+      (string-append
+       "| "
+       ($string-join
+        " | "
+        (map (lambda (cell width) ($pad-right cell width)) cells widths))
+       " |")))
+
+  (define $rich-table-lines
+    (lambda (table)
+      (let ([columns (rich-table-columns table)] [rows (rich-table-rows table)])
+        (if (null? columns)
+            '()
+            (let* ([widths ($rich-table-widths columns rows)]
+                   [border ($rich-table-border widths)]
+                   [header ($rich-table-row columns widths)])
+              (if (null? rows)
+                  (list border header border)
+                  (append (list border header border)
+                          (map (lambda (row) ($rich-table-row row widths)) rows)
+                          (list border))))))))
 
   #|proc:rich-enable-color?
 The `rich-enable-color?` parameter controls whether rich style values render
@@ -169,5 +248,95 @@ The `rich-reset` value resets terminal styles when inserted into a rich format
 string.
 |#
   (define rich-reset (mk-rich-style "\033[0m"))
+
+  #|proc:make-rich-table
+The `make-rich-table` procedure constructs an empty rich table.
+|#
+  (define make-rich-table
+    (lambda ()
+      (mk-rich-table '() '())))
+
+  #|proc:rich-table?
+The `rich-table?` procedure checks whether `obj` is a rich table.
+|#
+  (define rich-table?
+    (lambda (obj)
+      ($rich-table? obj)))
+
+  #|proc:rich-table-add-column!
+The `rich-table-add-column!` procedure appends a column with the string
+`title` to `table`.
+|#
+  (define rich-table-add-column!
+    (lambda (table title)
+      (pcheck ([$rich-table? table] [string? title])
+              (unless (null? (rich-table-rows table))
+                (errorf 'rich-table-add-column! "cannot add columns after rows"))
+              (rich-table-columns-set!
+               table
+               (append (rich-table-columns table) (list title))))))
+
+  #|proc:rich-table-add-row!
+The `rich-table-add-row!` procedure appends a row of `cells` to `table`.
+The number of cells must match the number of table columns.
+|#
+  (define-who rich-table-add-row!
+    (lambda (table . cells)
+      (pcheck ([$rich-table? table])
+              (let ([columns (rich-table-columns table)])
+                (unless (= (length cells) (length columns))
+                  (errorf who "row has ~a cells, expected ~a"
+                          (length cells)
+                          (length columns)))
+                (rich-table-rows-set!
+                 table
+                 (append (rich-table-rows table)
+                         (list (map $rich-cell->string cells))))))))
+
+  #|proc:rich-table-render
+The `rich-table-render` procedure renders `table` as an ASCII table string.
+|#
+  (define rich-table-render
+    (lambda (table)
+      (pcheck ([$rich-table? table])
+              ($string-join "\n" ($rich-table-lines table)))))
+
+  #|proc:rich-table-print
+The `rich-table-print` procedure writes the rendered table to the current
+output port without appending a newline.
+|#
+  (define rich-table-print
+    (lambda (table)
+      (pcheck ([$rich-table? table])
+              (display (rich-table-render table)))))
+
+  #|proc:rich-table-println
+The `rich-table-println` procedure writes the rendered table to the current
+output port and appends a newline.
+|#
+  (define rich-table-println
+    (lambda (table)
+      (pcheck ([$rich-table? table])
+              (display (rich-table-render table))
+              (newline))))
+
+  #|proc:rich-table-fprint
+The `rich-table-fprint` procedure writes the rendered table to `port` without
+appending a newline.
+|#
+  (define rich-table-fprint
+    (lambda (port table)
+      (pcheck ([output-port? port] [$rich-table? table])
+              (display (rich-table-render table) port))))
+
+  #|proc:rich-table-fprintln
+The `rich-table-fprintln` procedure writes the rendered table to `port` and
+appends a newline.
+|#
+  (define rich-table-fprintln
+    (lambda (port table)
+      (pcheck ([output-port? port] [$rich-table? table])
+              (display (rich-table-render table) port)
+              (newline port))))
 
   )

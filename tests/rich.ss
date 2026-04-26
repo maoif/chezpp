@@ -78,3 +78,98 @@
                (rich-format "~a" "x")))
 
      )
+
+
+(mat rich-table-render
+
+     (let ([t (make-rich-table)])
+       (and (rich-table? t)
+            (equal? "" (rich-table-render t))))
+
+     (let ([t (make-rich-table)])
+       (rich-table-add-column! t "Name")
+       (rich-table-add-column! t "Status")
+       (equal? (string-append
+                "+------+--------+\n"
+                "| Name | Status |\n"
+                "+------+--------+")
+               (rich-table-render t)))
+
+     (let ([t (make-rich-table)])
+       (rich-table-add-column! t "Name")
+       (rich-table-add-column! t "Status")
+       (rich-table-add-row! t "build" "ok")
+       (equal? (string-append
+                "+-------+--------+\n"
+                "| Name  | Status |\n"
+                "+-------+--------+\n"
+                "| build | ok     |\n"
+                "+-------+--------+")
+               (rich-table-render t)))
+
+     (let ([t (make-rich-table)])
+       (rich-table-add-column! t "Status")
+       (rich-table-add-row! t (rich-format "~a~a~a"
+                                           (rich-style 'green)
+                                           "ok"
+                                           rich-reset))
+       (string-contains? (rich-table-render t) "\033[32mok\033[0m"))
+
+     )
+
+
+(mat rich-table-print
+
+     (let ([t (make-rich-table)])
+       (rich-table-add-column! t "Name")
+       (equal? (string-append
+                "+------+\n"
+                "| Name |\n"
+                "+------+")
+               (with-output-to-string
+                 (lambda ()
+                   (rich-table-print t)))))
+
+     (let ([t (make-rich-table)])
+       (rich-table-add-column! t "Name")
+       (equal? (string-append
+                "+------+\n"
+                "| Name |\n"
+                "+------+\n")
+               (with-output-to-string
+                 (lambda ()
+                   (rich-table-println t)))))
+
+     (let ([t (make-rich-table)] [p (open-output-string)])
+       (rich-table-add-column! t "Name")
+       (rich-table-fprint p t)
+       (equal? (string-append
+                "+------+\n"
+                "| Name |\n"
+                "+------+")
+               (get-output-string p)))
+
+     (let ([t (make-rich-table)] [p (open-output-string)])
+       (rich-table-add-column! t "Name")
+       (rich-table-fprintln p t)
+       (equal? (string-append
+                "+------+\n"
+                "| Name |\n"
+                "+------+\n")
+               (get-output-string p)))
+
+     )
+
+
+(mat rich-table-errors
+
+     (error? (rich-table-render #f))
+     (error? (rich-table-add-column! (make-rich-table) 'Name))
+
+     (error? (let ([t (make-rich-table)])
+               (rich-table-add-column! t "Name")
+               (rich-table-add-row! t "a" "b")))
+
+     (error? (rich-table-fprint "not-a-port" (make-rich-table)))
+
+     )
