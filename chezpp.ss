@@ -37,4 +37,5 @@
                   (chezpp crypto)
                   (chezpp net)
                   (chezpp concurrency)
-                  (chezpp rich))))
+                  (chezpp rich)
+                  (chezpp cli))))
