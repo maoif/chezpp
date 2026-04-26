@@ -12,6 +12,8 @@
 
           make-rich-table
           rich-table?
+          rich-table-border-style?
+          rich-table-border-style-set!
           rich-table-add-column!
           rich-table-add-row!
           rich-table-render
@@ -76,7 +78,8 @@
 
   (define-record-type ($rich-table mk-rich-table $rich-table?)
     (fields (mutable columns rich-table-columns rich-table-columns-set!)
-            (mutable rows rich-table-rows rich-table-rows-set!)))
+            (mutable rows rich-table-rows rich-table-rows-set!)
+            (mutable border-style rich-table-border-style rich-table-border-style-raw-set!)))
 
   (define-record-type ($rich-panel mk-rich-panel $rich-panel?)
     (fields (immutable body rich-panel-body)
@@ -221,23 +224,65 @@
             (string-append str (make-string padding #\space))
             str))))
 
-  (define $rich-table-border
-    (lambda (widths)
+  (define $rich-border-style?
+    (lambda (style)
+      (and (memq style '(ascii unicode)) #t)))
+
+  (define $rich-table-border-chars
+    (lambda (who style)
+      (case style
+        [(ascii) '#("+" "+" "+" "+" "+" "+" "-" "|")]
+        [(unicode) '#("┌" "┬" "┐" "├" "┼" "┤" "─" "│"
+                      "└" "┴" "┘")]
+        [else (errorf who "unknown table border style: ~a" style)])))
+
+  (define $rich-table-border-line
+    (lambda (widths left middle right hchar)
       (string-append
-       "+"
+       left
        ($string-join
-        "+"
-        (map (lambda (width) (make-string (fx+ width 2) #\-)) widths))
-       "+")))
+        middle
+        (map (lambda (width) (make-string (fx+ width 2) hchar)) widths))
+       right)))
+
+  (define $rich-table-top-border
+    (lambda (widths chars)
+      ($rich-table-border-line
+       widths
+       (vector-ref chars 0)
+       (vector-ref chars 1)
+       (vector-ref chars 2)
+       (string-ref (vector-ref chars 6) 0))))
+
+  (define $rich-table-middle-border
+    (lambda (widths chars)
+      ($rich-table-border-line
+       widths
+       (vector-ref chars 3)
+       (vector-ref chars 4)
+       (vector-ref chars 5)
+       (string-ref (vector-ref chars 6) 0))))
+
+  (define $rich-table-bottom-border
+    (lambda (widths chars)
+      (if (= (vector-length chars) 8)
+          ($rich-table-top-border widths chars)
+          ($rich-table-border-line
+           widths
+           (vector-ref chars 8)
+           (vector-ref chars 9)
+           (vector-ref chars 10)
+           (string-ref (vector-ref chars 6) 0)))))
 
   (define $rich-table-row
-    (lambda (cells widths)
-      (string-append
-       "| "
-       ($string-join
-        " | "
-        (map (lambda (cell width) ($pad-right cell width)) cells widths))
-       " |")))
+    (lambda (cells widths chars)
+      (let ([v (vector-ref chars 7)])
+        (string-append
+         v " "
+         ($string-join
+          (string-append " " v " ")
+          (map (lambda (cell width) ($pad-right cell width)) cells widths))
+         " " v))))
 
   (define $rich-table-lines
     (lambda (table)
@@ -245,13 +290,18 @@
         (if (null? columns)
             '()
             (let* ([widths ($rich-table-widths columns rows)]
-                   [border ($rich-table-border widths)]
-                   [header ($rich-table-row columns widths)])
+                   [chars ($rich-table-border-chars
+                           'rich-table-render
+                           (rich-table-border-style table))]
+                   [top-border ($rich-table-top-border widths chars)]
+                   [middle-border ($rich-table-middle-border widths chars)]
+                   [bottom-border ($rich-table-bottom-border widths chars)]
+                   [header ($rich-table-row columns widths chars)])
               (if (null? rows)
-                  (list border header border)
-                  (append (list border header border)
-                          (map (lambda (row) ($rich-table-row row widths)) rows)
-                          (list border))))))))
+                  (list top-border header bottom-border)
+                  (append (list top-border header middle-border)
+                          (map (lambda (row) ($rich-table-row row widths chars)) rows)
+                          (list bottom-border))))))))
 
   (define $rich-panel-border
     (lambda (who style)
@@ -702,7 +752,7 @@ The `make-rich-table` procedure constructs an empty rich table.
 |#
   (define make-rich-table
     (lambda ()
-      (mk-rich-table '() '())))
+      (mk-rich-table '() '() 'ascii)))
 
   #|proc:rich-table?
 The `rich-table?` procedure checks whether `obj` is a rich table.
@@ -710,6 +760,24 @@ The `rich-table?` procedure checks whether `obj` is a rich table.
   (define rich-table?
     (lambda (obj)
       ($rich-table? obj)))
+
+  #|proc:rich-table-border-style?
+The `rich-table-border-style?` procedure checks whether `obj` is a supported
+table border style. Supported styles are `ascii` and `unicode`.
+|#
+  (define rich-table-border-style?
+    (lambda (obj)
+      ($rich-border-style? obj)))
+
+  #|proc:rich-table-border-style-set!
+The `rich-table-border-style-set!` procedure sets the border style for `table`.
+Supported styles are `ascii` and `unicode`.
+|#
+  (define rich-table-border-style-set!
+    (lambda (table style)
+      (pcheck ([$rich-table? table] [$rich-border-style? style])
+              (rich-table-border-style-raw-set! table style)
+              #t)))
 
   #|proc:rich-table-add-column!
 The `rich-table-add-column!` procedure appends a column with the string

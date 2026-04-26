@@ -82,6 +82,10 @@
 
 (mat rich-table-render
 
+     (rich-table-border-style? 'ascii)
+     (rich-table-border-style? 'unicode)
+     (not (rich-table-border-style? 'double))
+
      (let ([t (make-rich-table)])
        (and (rich-table? t)
             (equal? "" (rich-table-render t))))
@@ -105,6 +109,19 @@
                 "+-------+--------+\n"
                 "| build | ok     |\n"
                 "+-------+--------+")
+               (rich-table-render t)))
+
+     (let ([t (make-rich-table)])
+       (rich-table-add-column! t "Name")
+       (rich-table-add-column! t "Status")
+       (rich-table-add-row! t "build" "ok")
+       (rich-table-border-style-set! t 'unicode)
+       (equal? (string-append
+                "┌───────┬────────┐\n"
+                "│ Name  │ Status │\n"
+                "├───────┼────────┤\n"
+                "│ build │ ok     │\n"
+                "└───────┴────────┘")
                (rich-table-render t)))
 
      (let ([t (make-rich-table)])
@@ -165,6 +182,8 @@
 
      (error? (rich-table-render #f))
      (error? (rich-table-add-column! (make-rich-table) 'Name))
+     (error? (rich-table-border-style-set! #f 'unicode))
+     (error? (rich-table-border-style-set! (make-rich-table) 'double))
 
      (error? (let ([t (make-rich-table)])
                (rich-table-add-column! t "Name")
