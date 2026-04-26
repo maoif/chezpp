@@ -1,3 +1,4 @@
+#!chezscheme
 (library (chezpp utils)
   (export pcase pcheck pcheck-pair pcheck-list pcheck-string pcheck-char pcheck-proc
           pcheck-hashtable pcheck-vector pcheck-port pcheck-binary-port pcheck-textual-port
@@ -13,6 +14,10 @@
           neq? neqv? nequal?
           id bool octal hex bin
           define-who trace-define-who
+
+          p/and p/or p/not
+
+          procedure-variable-arity? procedure-name
 
           random-char random-string random-symbol random-datum random-list random-box
           random-bytevector random-u8vec
@@ -296,6 +301,61 @@
            #'(trace-define id (let ([who 'id]) e)))])))
 
 
+  #|doc:p/and
+  `p/and` is a predicate combinator that takes a list of unary predicate procedures `procs`
+  as input and returns a new unary predicate `p` such that `(p x)` returns #t iff
+  for every `p'` in `procs`, `(p' x)` returns #t.
+  |#
+  (define-who p/and
+    (lambda procs
+      (unless (andmap procedure? procs)
+        (errorf who "expected procedures: ~a" procs))
+      (lambda (x)
+        (andmap (lambda (p) (p x)) procs))))
+
+  #|doc:p/or
+  `p/or` is a predicate combinator that takes a list of unary predicate procedures `procs`
+  as input and returns a new unary predicate `p` such that `(p x)` returns #t when there
+  exists at least one `p'` in `procs` and `(p' x)` returns #t.
+  |#
+  (define-who p/or
+    (lambda procs
+      (unless (andmap procedure? procs)
+        (errorf who "expected procedures: ~a" procs))
+      (lambda (x)
+        (ormap (lambda (p) (p x)) procs))))
+
+  #|doc:p/not
+  `p/or` is a predicate combinator that takes a unary predicate procedure as input
+  and returns a new unary predicate that negates it.
+  |#
+  (define-who p/not
+    (lambda (proc)
+      (unless (procedure? proc)
+        (errorf who "expected a procedure: ~a" proc))
+      (lambda (x) (not (proc x)))))
+
+
+  #|doc
+  Return whether the procedure `proc` can accept a variable number of arguments.
+  |#
+  (define procedure-variable-arity?
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (let ([m (procedure-arity-mask proc)])
+                (< m 0)))))
+
+
+  #|doc
+  Return the name in string of the procedure `proc`.
+  If `proc` is an anonymous function (e.g., a lambda), then `procedure-name` returns #f.
+  |#
+  (define procedure-name
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (#%$procedure-name proc))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;;   random data generators
@@ -421,7 +481,7 @@
   (define $random-bytevector
     (case-lambda
       [(who)    ($random-bytevector who 0 10)]
-      [(who lb) ($random-bytevector who lb 10)]
+      [(who ub) ($random-bytevector who 0 ub)]
       [(who lb ub)
        (pcheck-natural
         (lb ub)
