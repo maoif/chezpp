@@ -475,6 +475,48 @@
      )
 
 
+(mat rich-progress-spinner-column
+
+     (parameterize ([rich-progress-current-time (lambda () 100)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "scan" #f)])
+         (rich-progress-columns-set!
+          p
+          (list (rich-progress-spinner-column)
+                (rich-progress-text-column "{description}")))
+         (parameterize ([rich-progress-current-time (lambda () 100)])
+           (and (equal? "⠋ scan" (rich-progress-render p))
+                (parameterize ([rich-progress-current-time (lambda () 100.1)])
+                  (equal? "⠙ scan" (rich-progress-render p)))
+                (parameterize ([rich-progress-current-time (lambda () 100.8)])
+                  (equal? "⠋ scan" (rich-progress-render p)))))))
+
+     (parameterize ([rich-progress-current-time (lambda () 10)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "build" 10)])
+         (rich-progress-columns-set!
+          p
+          (list (rich-progress-spinner-column (list "." "o" "O") 0.5)
+                (rich-progress-text-column "{percent}")))
+         (parameterize ([rich-progress-current-time (lambda () 11)])
+           (rich-progress-update! p id 5)
+           (equal? "O 50%" (rich-progress-render p)))))
+
+     (parameterize ([rich-progress-current-time (lambda () 10)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "build" 10)])
+         (rich-progress-columns-set!
+          p
+          (list (rich-progress-spinner-column (list "-" "+") 1)
+                (rich-progress-text-column "{description}")))
+         (parameterize ([rich-progress-current-time (lambda () 11)])
+           (rich-progress-stop-task! p id))
+         (parameterize ([rich-progress-current-time (lambda () 20)])
+           (equal? "+ build" (rich-progress-render p)))))
+
+     )
+
+
 (mat rich-progress-errors
 
      (error? (make-rich-progress 0))
@@ -503,5 +545,9 @@
                (make-rich-progress)))
      (error? (rich-progress-start-task! (make-rich-progress) 99))
      (error? (rich-progress-stop-task! (make-rich-progress) 99))
+     (error? (rich-progress-spinner-column '()))
+     (error? (rich-progress-spinner-column (list "." 1) 0.1))
+     (error? (rich-progress-spinner-column (list ".") 0))
+     (error? (rich-progress-spinner-column (list ".") "fast"))
 
      )

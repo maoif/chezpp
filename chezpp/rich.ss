@@ -55,6 +55,7 @@
           rich-progress-bar-column
           rich-progress-percent-column
           rich-progress-complete-column
+          rich-progress-spinner-column
           rich-progress-elapsed-column
           rich-progress-remaining-column
           rich-progress-transfer-speed-column
@@ -334,6 +335,19 @@
           (format #f "~a" total)
           "?")))
 
+  (define $rich-progress-default-spinner-frames
+    '("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧"))
+
+  (define $positive-real?
+    (lambda (obj)
+      (and (real? obj) (finite? obj) (> obj 0))))
+
+  (define $rich-progress-spinner-frames?
+    (lambda (obj)
+      (and (pair? obj)
+           (list? obj)
+           (andmap string? obj))))
+
   (define $two-digits
     (lambda (n)
       (if (< n 10)
@@ -388,6 +402,19 @@
             (format #f "~a/s" (floor speed))
             "--/s"))))
 
+  (define $rich-progress-spinner-string
+    (lambda (task column)
+      (let* ([spec (rich-progress-column-value column)]
+             [frames (vector-ref spec 0)]
+             [interval (vector-ref spec 1)]
+             [frame-count (length frames)]
+             [index (modulo
+                     (inexact->exact
+                      (floor (+ (/ ($rich-progress-elapsed-seconds task) interval)
+                                1e-9)))
+                     frame-count)])
+        (list-ref frames index))))
+
   (define $rich-progress-bar
     (lambda (completed total width)
       (let ([filled (if total (quotient (* completed width) total) 0)])
@@ -421,6 +448,7 @@
           [(bar) ($rich-progress-bar completed total width)]
           [(percent) ($rich-progress-percent-string completed total)]
           [(complete) ($rich-progress-count-string completed total)]
+          [(spinner) ($rich-progress-spinner-string task column)]
           [(elapsed) ($rich-progress-elapsed-string task)]
           [(remaining) ($rich-progress-remaining-string task)]
           [(transfer-speed) ($rich-progress-speed-string task)]
@@ -787,6 +815,22 @@ count column.
   (define rich-progress-complete-column
     (lambda ()
       (mk-rich-progress-column 'complete #f)))
+
+  #|proc:rich-progress-spinner-column
+The `rich-progress-spinner-column` procedure constructs an animated spinner
+column. With no arguments it uses a Rich-like dots spinner. With one argument,
+`frames` must be a non-empty list of strings and uses the default interval.
+With two arguments, `interval` is the number of seconds per frame.
+|#
+  (define rich-progress-spinner-column
+    (case-lambda
+      [()
+       (rich-progress-spinner-column $rich-progress-default-spinner-frames 0.1)]
+      [(frames)
+       (rich-progress-spinner-column frames 0.1)]
+      [(frames interval)
+       (pcheck ([$rich-progress-spinner-frames? frames] [$positive-real? interval])
+               (mk-rich-progress-column 'spinner (vector frames interval)))]))
 
   #|proc:rich-progress-elapsed-column
 The `rich-progress-elapsed-column` procedure constructs an elapsed-time column.
