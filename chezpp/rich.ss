@@ -37,6 +37,8 @@
           rich-progress-update!
           rich-progress-advance!
           rich-progress-complete!
+          rich-progress-task-description-set!
+          rich-progress-task-total-set!
           rich-progress-start-task!
           rich-progress-stop-task!
           rich-progress-task-visible?-set!
@@ -94,8 +96,10 @@
 
   (define-record-type ($rich-progress-task mk-rich-progress-task $rich-progress-task?)
     (fields (immutable id rich-progress-task-id)
-            (mutable description rich-progress-task-description rich-progress-task-description-set!)
-            (mutable total rich-progress-task-total rich-progress-task-total-set!)
+            (mutable description
+                     rich-progress-task-description
+                     rich-progress-task-description-raw-set!)
+            (mutable total rich-progress-task-total rich-progress-task-total-raw-set!)
             (mutable completed rich-progress-task-completed rich-progress-task-completed-set!)
             (mutable visible? rich-progress-task-visible? rich-progress-task-visible?-raw-set!)
             (mutable start-time rich-progress-task-start-time rich-progress-task-start-time-set!)
@@ -993,6 +997,36 @@ The `rich-progress-complete!` procedure marks a determinate task complete.
                 (unless total
                   (errorf who "cannot complete indeterminate task: ~a" task-id))
                 (rich-progress-task-completed-set! task total)
+                #t))))
+
+  #|proc:rich-progress-task-description-set!
+The `rich-progress-task-description-set!` procedure changes the description for
+the task identified by `task-id` in `progress`.
+|#
+  (define-who rich-progress-task-description-set!
+    (lambda (progress task-id description)
+      (pcheck ([$rich-progress? progress] [natural? task-id] [string? description])
+              (rich-progress-task-description-raw-set!
+               ($rich-progress-find-task who progress task-id)
+               description)
+              #t)))
+
+  #|proc:rich-progress-task-total-set!
+The `rich-progress-task-total-set!` procedure changes the total for the task
+identified by `task-id` in `progress`. `total` is either a positive natural
+number or `#f` for an indeterminate task. The current completed amount must not
+exceed a determinate total.
+|#
+  (define-who rich-progress-task-total-set!
+    (lambda (progress task-id total)
+      (pcheck ([$rich-progress? progress] [natural? task-id])
+              ($rich-progress-check-total who total)
+              (let ([task ($rich-progress-find-task who progress task-id)])
+                ($rich-progress-check-current
+                 who
+                 (rich-progress-task-completed task)
+                 total)
+                (rich-progress-task-total-raw-set! task total)
                 #t))))
 
   #|proc:rich-progress-start-task!

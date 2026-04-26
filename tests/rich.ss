@@ -295,6 +295,28 @@
                (rich-progress-render p)))
 
      (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-update! p id 4)
+       (rich-progress-task-description-set! p id "upload")
+       (rich-progress-task-total-set! p id 20)
+       (equal? "upload [##--------] 20% 4/20"
+               (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "scan" #f)])
+       (rich-progress-advance! p id 3)
+       (rich-progress-task-total-set! p id 12)
+       (equal? "scan [##--------] 25% 3/12"
+               (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-update! p id 4)
+       (rich-progress-task-total-set! p id #f)
+       (equal? "download [----------] --% 4/?"
+               (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
             [id0 (rich-progress-add-task! p "a" 10)]
             [id1 (rich-progress-add-task! p "b" 10)])
        (rich-progress-task-visible?-set! p id0 #f)
@@ -574,6 +596,21 @@
 
      (error? (let ([p (make-rich-progress)])
                (rich-progress-update! p 99 1)))
+
+     (error? (let ([p (make-rich-progress)])
+               (rich-progress-task-description-set! p 99 "missing")))
+
+     (error? (let ([p (make-rich-progress)])
+               (rich-progress-task-description-set! p 0 123)))
+
+     (error? (let* ([p (make-rich-progress)]
+                    [id (rich-progress-add-task! p "download" 10)])
+               (rich-progress-update! p id 8)
+               (rich-progress-task-total-set! p id 7)))
+
+     (error? (let* ([p (make-rich-progress)]
+                    [id (rich-progress-add-task! p "download" 10)])
+               (rich-progress-task-total-set! p id 0)))
 
      (error? (rich-progress-fprint "not-a-port" (make-rich-progress)))
      (error? (rich-progress-frefresh! "not-a-port" (make-rich-progress)))
