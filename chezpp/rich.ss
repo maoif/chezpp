@@ -49,6 +49,9 @@
           rich-progress-frefresh!
           rich-progress-finish!
           rich-progress-ffinish!
+          rich-progress-live?
+          rich-progress-start!
+          rich-progress-stop!
           rich-progress-column?
           rich-progress-default-columns
           rich-progress-text-column
@@ -82,7 +85,9 @@
     (fields (mutable next-id rich-progress-next-id rich-progress-next-id-set!)
             (mutable bar-width rich-progress-bar-width rich-progress-bar-width-set!)
             (mutable tasks rich-progress-tasks rich-progress-tasks-set!)
-            (mutable columns rich-progress-columns rich-progress-columns-raw-set!)))
+            (mutable columns rich-progress-columns rich-progress-columns-raw-set!)
+            (mutable live? $rich-progress-live? $rich-progress-live?-set!)
+            (mutable live-thread $rich-progress-live-thread $rich-progress-live-thread-set!)))
 
   (define-record-type ($rich-progress-task mk-rich-progress-task $rich-progress-task?)
     (fields (immutable id rich-progress-task-id)
@@ -368,6 +373,14 @@
           (errorf who "progress clock returned non-real value: ~a" seconds))
         seconds)))
 
+  (define $rich-progress-sleep-ms
+    (lambda (milliseconds)
+      (if (fx>= milliseconds 1000)
+          (let ([seconds (fx/ milliseconds 1000)]
+                [nanoseconds (fx* 1000000 (fxmod milliseconds 1000))])
+            ($sleep (make-time 'time-duration nanoseconds seconds)))
+          ($sleep (make-time 'time-duration (fx* milliseconds 1000000) 0)))))
+
   (define $rich-progress-elapsed-seconds
     (lambda (task)
       (let ([stop (rich-progress-task-stop-time task)]
@@ -462,6 +475,15 @@
        " "
        (map (lambda (column) ($rich-progress-column-string progress task column))
             (rich-progress-columns progress)))))
+
+  (define $rich-progress-live-loop
+    (lambda (progress port interval-ms)
+      (let loop ()
+        (when ($rich-progress-live? progress)
+          (rich-progress-frefresh! port progress)
+          (flush-output-port port)
+          ($rich-progress-sleep-ms interval-ms)
+          (loop)))))
 
   (define $rich-progress-visible-tasks
     (lambda (progress)
@@ -755,7 +777,8 @@ The `make-rich-progress` procedure constructs a progress manager. The optional
       [() (make-rich-progress 40)]
       [(bar-width)
        (pcheck ([positive-natural? bar-width])
-               (mk-rich-progress 0 bar-width '() (rich-progress-default-columns)))]))
+               (mk-rich-progress
+                0 bar-width '() (rich-progress-default-columns) #f #f))]))
 
   #|proc:rich-progress?
 The `rich-progress?` procedure checks whether `obj` is a rich progress manager.
@@ -770,6 +793,15 @@ The `rich-progress-task?` procedure checks whether `obj` is a progress task.
   (define rich-progress-task?
     (lambda (obj)
       ($rich-progress-task? obj)))
+
+  #|proc:rich-progress-live?
+The `rich-progress-live?` procedure checks whether `progress` has an
+auto-refresh thread running.
+|#
+  (define rich-progress-live?
+    (lambda (progress)
+      (pcheck ([$rich-progress? progress])
+              ($rich-progress-live? progress))))
 
   #|proc:rich-progress-column?
 The `rich-progress-column?` procedure checks whether `obj` is a progress
@@ -1067,5 +1099,45 @@ to `port` and appends a newline.
       (pcheck ([output-port? port] [$rich-progress? progress])
               (display (rich-progress-render progress) port)
               (newline port))))
+
+  #|proc:rich-progress-start!
+The `rich-progress-start!` procedure starts automatic live refreshing for
+`progress`. With one argument it writes to the current output port every 100
+milliseconds. With two arguments it writes to `port`. With three arguments,
+`interval-ms` controls the refresh interval in milliseconds.
+|#
+  (define-who rich-progress-start!
+    (case-lambda
+      [(progress)
+       (rich-progress-start! (current-output-port) progress 100)]
+      [(port progress)
+       (rich-progress-start! port progress 100)]
+      [(port progress interval-ms)
+       (pcheck ([output-port? port] [$rich-progress? progress] [positive-natural? interval-ms])
+               (when ($rich-progress-live? progress)
+                 (errorf who "progress is already live"))
+               ($rich-progress-live?-set! progress #t)
+               ($rich-progress-live-thread-set!
+                progress
+                (fork-thread
+                 (lambda ()
+                   ($rich-progress-live-loop progress port interval-ms))))
+               #t)]))
+
+  #|proc:rich-progress-stop!
+The `rich-progress-stop!` procedure stops automatic live refreshing for
+`progress` and joins the background refresh thread. It returns `#t` when a live
+thread was stopped and `#f` when `progress` was not live.
+|#
+  (define rich-progress-stop!
+    (lambda (progress)
+      (pcheck ([$rich-progress? progress])
+              (if ($rich-progress-live? progress)
+                  (let ([thread ($rich-progress-live-thread progress)])
+                    ($rich-progress-live?-set! progress #f)
+                    ($rich-progress-live-thread-set! progress #f)
+                    (when thread (thread-join thread))
+                    #t)
+                  #f))))
 
   )

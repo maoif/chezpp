@@ -378,6 +378,29 @@
      )
 
 
+(mat rich-progress-live-auto
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)]
+            [port (open-output-string)])
+       (and (not (rich-progress-live? p))
+            (rich-progress-start! port p 1)
+            (rich-progress-live? p)
+            (rich-progress-update! p id 4)
+            (milisleep 20)
+            (rich-progress-stop! p)
+            (not (rich-progress-live? p))
+            (let ([out (get-output-string port)])
+              (and (string-contains? out "\r\033[2K")
+                   (string-contains? out "download [####------] 40% 4/10")))))
+
+     (let ([p (make-rich-progress 10)])
+       (and (not (rich-progress-live? p))
+            (not (rich-progress-stop! p))))
+
+     )
+
+
 (mat rich-progress-columns
 
      (let ([cols (rich-progress-default-columns)])
@@ -538,6 +561,9 @@
      (error? (rich-progress-fprint "not-a-port" (make-rich-progress)))
      (error? (rich-progress-frefresh! "not-a-port" (make-rich-progress)))
      (error? (rich-progress-ffinish! "not-a-port" (make-rich-progress)))
+     (error? (rich-progress-start! "not-a-port" (make-rich-progress) 1))
+     (error? (rich-progress-start! (open-output-string) #f 1))
+     (error? (rich-progress-start! (open-output-string) (make-rich-progress) 0))
      (error? (rich-progress-text-column "{unknown}"))
      (error? (rich-progress-columns-set! (make-rich-progress) '()))
      (error? (rich-progress-columns-set! (make-rich-progress) (list 'not-column)))
