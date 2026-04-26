@@ -75,6 +75,23 @@
           rich-columns-fprint
           rich-columns-fprintln
 
+          make-rich-status
+          rich-status?
+          rich-status-live?
+          rich-status-current-time
+          rich-status-message-set!
+          rich-status-render
+          rich-status-print
+          rich-status-println
+          rich-status-fprint
+          rich-status-fprintln
+          rich-status-refresh!
+          rich-status-frefresh!
+          rich-status-finish!
+          rich-status-ffinish!
+          rich-status-start!
+          rich-status-stop!
+
           make-rich-progress
           rich-progress?
           rich-progress-task?
@@ -156,6 +173,14 @@
     (fields (immutable items rich-columns-items)
             (immutable total-width rich-columns-total-width)
             (immutable gap rich-columns-gap)))
+
+  (define-record-type ($rich-status mk-rich-status $rich-status?)
+    (fields (mutable message rich-status-message rich-status-message-raw-set!)
+            (immutable frames rich-status-frames)
+            (immutable interval rich-status-interval)
+            (immutable start-time rich-status-start-time)
+            (mutable live? $rich-status-live? $rich-status-live?-set!)
+            (mutable live-thread $rich-status-live-thread $rich-status-live-thread-set!)))
 
   (define-record-type ($rich-progress mk-rich-progress $rich-progress?)
     (fields (mutable next-id rich-progress-next-id rich-progress-next-id-set!)
@@ -618,6 +643,41 @@
                              (+ count 1)
                              rows)])))))))
 
+  (define $rich-status-now
+    (lambda (who)
+      (let ([seconds ((rich-status-current-time))])
+        (unless (real? seconds)
+          (errorf who "status clock returned non-real value: ~a" seconds))
+        seconds)))
+
+  (define $rich-status-frame
+    (lambda (status)
+      (let* ([frames (rich-status-frames status)]
+             [interval (rich-status-interval status)]
+             [frame-count (length frames)]
+             [elapsed (max 0 (- ($rich-status-now 'rich-status-render)
+                                (rich-status-start-time status)))]
+             [index (modulo
+                     (inexact->exact
+                      (floor (+ (/ elapsed interval) 1e-9)))
+                     frame-count)])
+        (list-ref frames index))))
+
+  (define $rich-status-line
+    (lambda (status)
+      (string-append ($rich-status-frame status)
+                     " "
+                     (rich-status-message status))))
+
+  (define $rich-status-live-loop
+    (lambda (status port interval-ms)
+      (let loop ()
+        (when ($rich-status-live? status)
+          (rich-status-frefresh! port status)
+          (flush-output-port port)
+          ($rich-progress-sleep-ms interval-ms)
+          (loop)))))
+
   (define $list-remove
     (lambda (pred ls)
       (let loop ([ls ls] [res '()])
@@ -933,6 +993,18 @@ returns the current progress time in seconds.
        (if (procedure? proc)
            proc
            (errorf 'rich-progress-current-time "expected procedure: ~a" proc)))))
+
+  #|proc:rich-status-current-time
+The `rich-status-current-time` parameter contains a nullary procedure that
+returns the current status spinner time in seconds.
+|#
+  (define rich-status-current-time
+    (make-parameter
+     $current-time-seconds
+     (lambda (proc)
+       (if (procedure? proc)
+           proc
+           (errorf 'rich-status-current-time "expected procedure: ~a" proc)))))
 
   #|proc:rich-style?
 The `rich-style?` procedure checks whether `obj` is a rich style value.
@@ -1568,6 +1640,180 @@ appends a newline.
       (pcheck ([output-port? port] [$rich-columns? columns])
               (display (rich-columns-render columns) port)
               (newline port))))
+
+  #|proc:make-rich-status
+The `make-rich-status` procedure constructs a spinner status renderable.
+With one argument it uses a Rich-like dots spinner. With two arguments,
+`frames` must be a non-empty list of strings. With three arguments,
+`interval` is the number of seconds per frame.
+|#
+  (define-who make-rich-status
+    (case-lambda
+      [(message)
+       (make-rich-status message $rich-progress-default-spinner-frames 0.1)]
+      [(message frames)
+       (make-rich-status message frames 0.1)]
+      [(message frames interval)
+       (pcheck ([string? message]
+                [$rich-progress-spinner-frames? frames]
+                [$positive-real? interval])
+               (mk-rich-status
+                message
+                frames
+                interval
+                ($rich-status-now who)
+                #f
+                #f))]))
+
+  #|proc:rich-status?
+The `rich-status?` procedure checks whether `obj` is a rich status renderable.
+|#
+  (define rich-status?
+    (lambda (obj)
+      ($rich-status? obj)))
+
+  #|proc:rich-status-live?
+The `rich-status-live?` procedure checks whether `status` has an auto-refresh
+thread running.
+|#
+  (define rich-status-live?
+    (lambda (status)
+      (pcheck ([$rich-status? status])
+              ($rich-status-live? status))))
+
+  #|proc:rich-status-message-set!
+The `rich-status-message-set!` procedure changes the status message.
+|#
+  (define rich-status-message-set!
+    (lambda (status message)
+      (pcheck ([$rich-status? status] [string? message])
+              (rich-status-message-raw-set! status message)
+              #t)))
+
+  #|proc:rich-status-render
+The `rich-status-render` procedure renders the current spinner frame and
+message as a string.
+|#
+  (define rich-status-render
+    (lambda (status)
+      (pcheck ([$rich-status? status])
+              ($rich-status-line status))))
+
+  #|proc:rich-status-print
+The `rich-status-print` procedure writes rendered status to the current output
+port without appending a newline.
+|#
+  (define rich-status-print
+    (lambda (status)
+      (pcheck ([$rich-status? status])
+              (display (rich-status-render status)))))
+
+  #|proc:rich-status-println
+The `rich-status-println` procedure writes rendered status to the current
+output port and appends a newline.
+|#
+  (define rich-status-println
+    (lambda (status)
+      (pcheck ([$rich-status? status])
+              (display (rich-status-render status))
+              (newline))))
+
+  #|proc:rich-status-fprint
+The `rich-status-fprint` procedure writes rendered status to `port` without
+appending a newline.
+|#
+  (define rich-status-fprint
+    (lambda (port status)
+      (pcheck ([output-port? port] [$rich-status? status])
+              (display (rich-status-render status) port))))
+
+  #|proc:rich-status-fprintln
+The `rich-status-fprintln` procedure writes rendered status to `port` and
+appends a newline.
+|#
+  (define rich-status-fprintln
+    (lambda (port status)
+      (pcheck ([output-port? port] [$rich-status? status])
+              (display (rich-status-render status) port)
+              (newline port))))
+
+  #|proc:rich-status-refresh!
+The `rich-status-refresh!` procedure clears the current terminal line and
+writes the rendered status.
+|#
+  (define rich-status-refresh!
+    (lambda (status)
+      (pcheck ([$rich-status? status])
+              (rich-status-frefresh! (current-output-port) status))))
+
+  #|proc:rich-status-frefresh!
+The `rich-status-frefresh!` procedure clears the current line on `port` and
+writes the rendered status.
+|#
+  (define rich-status-frefresh!
+    (lambda (port status)
+      (pcheck ([output-port? port] [$rich-status? status])
+              (display "\r\033[2K" port)
+              (display (rich-status-render status) port))))
+
+  #|proc:rich-status-finish!
+The `rich-status-finish!` procedure writes the final rendered status to the
+current output port and appends a newline.
+|#
+  (define rich-status-finish!
+    (lambda (status)
+      (pcheck ([$rich-status? status])
+              (rich-status-ffinish! (current-output-port) status))))
+
+  #|proc:rich-status-ffinish!
+The `rich-status-ffinish!` procedure writes the final rendered status to
+`port` and appends a newline.
+|#
+  (define rich-status-ffinish!
+    (lambda (port status)
+      (pcheck ([output-port? port] [$rich-status? status])
+              (display (rich-status-render status) port)
+              (newline port))))
+
+  #|proc:rich-status-start!
+The `rich-status-start!` procedure starts automatic live refreshing for
+`status`. With one argument it writes to the current output port every 100
+milliseconds. With two arguments it writes to `port`. With three arguments,
+`interval-ms` controls the refresh interval in milliseconds.
+|#
+  (define-who rich-status-start!
+    (case-lambda
+      [(status)
+       (rich-status-start! (current-output-port) status 100)]
+      [(port status)
+       (rich-status-start! port status 100)]
+      [(port status interval-ms)
+       (pcheck ([output-port? port] [$rich-status? status] [positive-natural? interval-ms])
+               (when ($rich-status-live? status)
+                 (errorf who "status is already live"))
+               ($rich-status-live?-set! status #t)
+               ($rich-status-live-thread-set!
+                status
+                (fork-thread
+                 (lambda ()
+                   ($rich-status-live-loop status port interval-ms))))
+               #t)]))
+
+  #|proc:rich-status-stop!
+The `rich-status-stop!` procedure stops automatic live refreshing for `status`.
+It returns `#t` when a live thread was stopped and `#f` when `status` was not
+live.
+|#
+  (define rich-status-stop!
+    (lambda (status)
+      (pcheck ([$rich-status? status])
+              (if ($rich-status-live? status)
+                  (let ([thread ($rich-status-live-thread status)])
+                    ($rich-status-live?-set! status #f)
+                    ($rich-status-live-thread-set! status #f)
+                    (when thread (thread-join thread))
+                    #t)
+                  #f))))
 
   #|proc:make-rich-progress
 The `make-rich-progress` procedure constructs a progress manager. The optional

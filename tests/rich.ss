@@ -561,6 +561,116 @@
      )
 
 
+(mat rich-status-render
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (let ([s (make-rich-status "Working")])
+         (and (rich-status? s)
+              (not (rich-status-live? s))
+              (equal? "⠋ Working" (rich-status-render s))
+              (parameterize ([rich-status-current-time (lambda () 100.1)])
+                (equal? "⠙ Working" (rich-status-render s))))))
+
+     (parameterize ([rich-status-current-time (lambda () 10)])
+       (let ([s (make-rich-status "Work" (list "." "o") 1)])
+         (parameterize ([rich-status-current-time (lambda () 11)])
+           (and (equal? "o Work" (rich-status-render s))
+                (rich-status-message-set! s "Done")
+                (equal? "o Done" (rich-status-render s))))))
+
+     )
+
+
+(mat rich-status-print
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (equal? "⠋ Working"
+               (with-output-to-string
+                 (lambda ()
+                   (rich-status-print (make-rich-status "Working"))))))
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (equal? "⠋ Working\n"
+               (with-output-to-string
+                 (lambda ()
+                   (rich-status-println (make-rich-status "Working"))))))
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (let ([port (open-output-string)])
+         (rich-status-fprint port (make-rich-status "Working"))
+         (equal? "⠋ Working" (get-output-string port))))
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (let ([port (open-output-string)])
+         (rich-status-fprintln port (make-rich-status "Working"))
+         (equal? "⠋ Working\n" (get-output-string port))))
+
+     )
+
+
+(mat rich-status-live
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (let ([port (open-output-string)]
+             [s (make-rich-status "Working")])
+         (rich-status-frefresh! port s)
+         (equal? "\r\033[2K⠋ Working" (get-output-string port))))
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (let ([s (make-rich-status "Working")])
+         (equal? "\r\033[2K⠋ Working"
+                 (with-output-to-string
+                   (lambda ()
+                     (rich-status-refresh! s))))))
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (let ([port (open-output-string)]
+             [s (make-rich-status "Working")])
+         (rich-status-ffinish! port s)
+         (equal? "⠋ Working\n" (get-output-string port))))
+
+     (parameterize ([rich-status-current-time (lambda () 100)])
+       (let ([s (make-rich-status "Working")])
+         (equal? "⠋ Working\n"
+                 (with-output-to-string
+                   (lambda ()
+                     (rich-status-finish! s))))))
+
+     (let ([port (open-output-string)]
+           [s (make-rich-status "Working")])
+       (and (not (rich-status-live? s))
+            (rich-status-start! port s 1)
+            (rich-status-live? s)
+            (milisleep 20)
+            (rich-status-stop! s)
+            (not (rich-status-live? s))
+            (string-contains? (get-output-string port) "\r\033[2K")))
+
+     )
+
+
+(mat rich-status-errors
+
+     (error? (make-rich-status 123))
+     (error? (make-rich-status "Working" '()))
+     (error? (make-rich-status "Working" (list "." 1)))
+     (error? (make-rich-status "Working" (list ".") 0))
+     (error? (make-rich-status "Working" (list ".") "fast"))
+     (error? (rich-status-render #f))
+     (error? (rich-status-message-set! #f "Done"))
+     (error? (rich-status-message-set! (make-rich-status "Working") 123))
+     (error? (rich-status-fprint "not-a-port" (make-rich-status "Working")))
+     (error? (rich-status-frefresh! "not-a-port" (make-rich-status "Working")))
+     (error? (rich-status-ffinish! "not-a-port" (make-rich-status "Working")))
+     (error? (rich-status-start! "not-a-port" (make-rich-status "Working") 1))
+     (error? (rich-status-start! (open-output-string) #f 1))
+     (error? (rich-status-start! (open-output-string) (make-rich-status "Working") 0))
+     (error? (parameterize ([rich-status-current-time 123])
+               (make-rich-status "Working")))
+
+     )
+
+
 (mat rich-progress-render
 
      (let ([p (make-rich-progress 10)])
