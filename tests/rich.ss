@@ -464,6 +464,31 @@
             [id (rich-progress-add-task! p "download" 10)])
        (rich-progress-columns-set!
         p
+        (list (rich-progress-text-column
+               "{description}: {completed}/{total} ({percent})")))
+       (rich-progress-update! p id 4)
+       (equal? "download: 4/10 (40%)" (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "scan" #f)])
+       (rich-progress-columns-set!
+        p
+        (list (rich-progress-text-column "{description}: {completed}/{total}")))
+       (rich-progress-advance! p id 3)
+       (equal? "scan: 3/?" (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-columns-set!
+        p
+        (list (rich-progress-text-column "literal progress")))
+       (rich-progress-update! p id 4)
+       (equal? "literal progress" (rich-progress-render p)))
+
+     (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-columns-set!
+        p
         (list (rich-progress-text-column "{completed}")
               (rich-progress-text-column "{total}")
               (rich-progress-bar-column)

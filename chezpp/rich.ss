@@ -485,16 +485,52 @@
                "]"))
             ($rich-progress-pulse-bar task width fill empty pulse)))))
 
-  (define $rich-progress-text-template
-    (lambda (who template task)
-      (cond [(string=? template "{description}") (rich-progress-task-description task)]
-            [(string=? template "{completed}") (format #f "~a" (rich-progress-task-completed task))]
-            [(string=? template "{total}") ($rich-progress-total-string (rich-progress-task-total task))]
-            [(string=? template "{percent}")
+  (define $rich-progress-text-placeholder
+    (lambda (who placeholder task template)
+      (cond [(string=? placeholder "{description}")
+             (rich-progress-task-description task)]
+            [(string=? placeholder "{completed}")
+             (format #f "~a" (rich-progress-task-completed task))]
+            [(string=? placeholder "{total}")
+             ($rich-progress-total-string (rich-progress-task-total task))]
+            [(string=? placeholder "{percent}")
              ($rich-progress-percent-string
               (rich-progress-task-completed task)
               (rich-progress-task-total task))]
             [else (errorf who "unsupported progress text template: ~a" template)])))
+
+  (define $rich-progress-find-placeholder-end
+    (lambda (template start)
+      (let ([len (string-length template)])
+        (let loop ([i start])
+          (cond [(= i len) #f]
+                [(char=? (string-ref template i) #\}) i]
+                [else (loop (+ i 1))])))))
+
+  (define $rich-progress-text-template
+    (lambda (who template task)
+      (let ([len (string-length template)])
+        (let loop ([i 0] [start 0] [parts '()])
+          (cond
+           [(= i len)
+            (apply string-append
+                   (reverse (cons (substring template start len) parts)))]
+           [(char=? (string-ref template i) #\{)
+            (let ([end ($rich-progress-find-placeholder-end template (+ i 1))])
+              (unless end
+                (errorf who "unsupported progress text template: ~a" template))
+              (loop
+               (+ end 1)
+               (+ end 1)
+               (cons ($rich-progress-text-placeholder
+                      who
+                      (substring template i (+ end 1))
+                      task
+                      template)
+                     (cons (substring template start i) parts))))]
+           [(char=? (string-ref template i) #\})
+            (errorf who "unsupported progress text template: ~a" template)]
+           [else (loop (+ i 1) start parts)])))))
 
   (define $rich-progress-column-string
     (lambda (progress task column)
@@ -873,9 +909,9 @@ rendering column.
       ($rich-progress-column? obj)))
 
   #|proc:rich-progress-text-column
-The `rich-progress-text-column` procedure constructs a text column from one of
-the supported task templates: `{description}`, `{completed}`, `{total}`, or
-`{percent}`.
+The `rich-progress-text-column` procedure constructs a text column from a
+template string. The template may contain literal text and these placeholders:
+`{description}`, `{completed}`, `{total}`, and `{percent}`.
 |#
   (define-who rich-progress-text-column
     (lambda (template)
