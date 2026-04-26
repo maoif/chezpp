@@ -32,6 +32,8 @@
                   (chezpp dset)
                   (chezpp graph)
 
+                  (chezpp uuid)
+                  (chezpp hash)
                   (chezpp crypto)
                   (chezpp net)
                   (chezpp concurrency))))
