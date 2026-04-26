@@ -50,6 +50,23 @@
           rich-rule-fprint
           rich-rule-fprintln
 
+          rich-align
+          rich-align?
+          rich-align-style?
+          rich-align-render
+          rich-align-print
+          rich-align-println
+          rich-align-fprint
+          rich-align-fprintln
+
+          rich-padding
+          rich-padding?
+          rich-padding-render
+          rich-padding-print
+          rich-padding-println
+          rich-padding-fprint
+          rich-padding-fprintln
+
           make-rich-progress
           rich-progress?
           rich-progress-task?
@@ -114,6 +131,18 @@
     (fields (immutable title rich-rule-title)
             (immutable width rich-rule-width)
             (immutable style rich-rule-style)))
+
+  (define-record-type ($rich-align mk-rich-align $rich-align?)
+    (fields (immutable body rich-align-body)
+            (immutable width rich-align-width)
+            (immutable style rich-align-style)))
+
+  (define-record-type ($rich-padding mk-rich-padding $rich-padding?)
+    (fields (immutable body rich-padding-body)
+            (immutable top rich-padding-top)
+            (immutable right rich-padding-right)
+            (immutable bottom rich-padding-bottom)
+            (immutable left rich-padding-left)))
 
   (define-record-type ($rich-progress mk-rich-progress $rich-progress?)
     (fields (mutable next-id rich-progress-next-id rich-progress-next-id-set!)
@@ -264,6 +293,10 @@
   (define $rich-rule-style?
     (lambda (style)
       (and (memq style '(ascii unicode)) #t)))
+
+  (define $rich-align-style?
+    (lambda (style)
+      (and (memq style '(left center right)) #t)))
 
   (define $rich-table-border-chars
     (lambda (who style)
@@ -456,6 +489,57 @@
                                          decorated
                                          (make-string right ch)))))))
             (make-string width ch)))))
+
+  (define $rich-lines-max-width
+    (lambda (lines)
+      (apply max (map string-length lines))))
+
+  (define $rich-align-line
+    (lambda (line width style)
+      (let* ([line-width (string-length line)]
+             [padding (fx- width line-width)])
+        (if (fx<= padding 0)
+            line
+            (case style
+              [(left) (string-append line (make-string padding #\space))]
+              [(right) (string-append (make-string padding #\space) line)]
+              [(center)
+               (let* ([left (quotient padding 2)]
+                      [right (fx- padding left)])
+                 (string-append (make-string left #\space)
+                                line
+                                (make-string right #\space)))]
+              [else (errorf 'rich-align-render
+                            "unknown align style: ~a"
+                            style)])))))
+
+  (define $rich-align-lines
+    (lambda (align)
+      (let ([width (rich-align-width align)]
+            [style (rich-align-style align)])
+        (map (lambda (line) ($rich-align-line line width style))
+             ($string-split-lines (rich-align-body align))))))
+
+  (define $rich-padding-lines
+    (lambda (padding)
+      (let* ([body-lines ($string-split-lines (rich-padding-body padding))]
+             [inner-width ($rich-lines-max-width body-lines)]
+             [top (rich-padding-top padding)]
+             [right (rich-padding-right padding)]
+             [bottom (rich-padding-bottom padding)]
+             [left (rich-padding-left padding)]
+             [total-width (fx+ inner-width left right)]
+             [blank (make-string total-width #\space)]
+             [left-spaces (make-string left #\space)]
+             [right-spaces (make-string right #\space)])
+        (append
+         (make-list top blank)
+         (map (lambda (line)
+                (string-append left-spaces
+                               ($pad-right line inner-width)
+                               right-spaces))
+              body-lines)
+         (make-list bottom blank)))))
 
   (define $list-remove
     (lambda (pred ls)
@@ -1199,6 +1283,147 @@ appends a newline.
     (lambda (port rule)
       (pcheck ([output-port? port] [$rich-rule? rule])
               (display (rich-rule-render rule) port)
+              (newline port))))
+
+  #|proc:rich-align
+The `rich-align` procedure constructs a fixed-width aligned text renderable.
+With two arguments it left-aligns `body`; with three arguments, `style` may be
+`left`, `center`, or `right`.
+|#
+  (define rich-align
+    (case-lambda
+      [(body width) (rich-align body width 'left)]
+      [(body width style)
+       (pcheck ([string? body] [positive-natural? width] [$rich-align-style? style])
+               (mk-rich-align body width style))]))
+
+  #|proc:rich-align?
+The `rich-align?` procedure checks whether `obj` is a rich alignment renderable.
+|#
+  (define rich-align?
+    (lambda (obj)
+      ($rich-align? obj)))
+
+  #|proc:rich-align-style?
+The `rich-align-style?` procedure checks whether `obj` is a supported alignment
+style. Supported styles are `left`, `center`, and `right`.
+|#
+  (define rich-align-style?
+    (lambda (obj)
+      ($rich-align-style? obj)))
+
+  #|proc:rich-align-render
+The `rich-align-render` procedure renders aligned text as a string.
+|#
+  (define rich-align-render
+    (lambda (align)
+      (pcheck ([$rich-align? align])
+              ($string-join "\n" ($rich-align-lines align)))))
+
+  #|proc:rich-align-print
+The `rich-align-print` procedure writes rendered aligned text to the current
+output port without appending a newline.
+|#
+  (define rich-align-print
+    (lambda (align)
+      (pcheck ([$rich-align? align])
+              (display (rich-align-render align)))))
+
+  #|proc:rich-align-println
+The `rich-align-println` procedure writes rendered aligned text to the current
+output port and appends a newline.
+|#
+  (define rich-align-println
+    (lambda (align)
+      (pcheck ([$rich-align? align])
+              (display (rich-align-render align))
+              (newline))))
+
+  #|proc:rich-align-fprint
+The `rich-align-fprint` procedure writes rendered aligned text to `port`
+without appending a newline.
+|#
+  (define rich-align-fprint
+    (lambda (port align)
+      (pcheck ([output-port? port] [$rich-align? align])
+              (display (rich-align-render align) port))))
+
+  #|proc:rich-align-fprintln
+The `rich-align-fprintln` procedure writes rendered aligned text to `port` and
+appends a newline.
+|#
+  (define rich-align-fprintln
+    (lambda (port align)
+      (pcheck ([output-port? port] [$rich-align? align])
+              (display (rich-align-render align) port)
+              (newline port))))
+
+  #|proc:rich-padding
+The `rich-padding` procedure constructs a padded text renderable. With two
+arguments, the same padding is used for all sides. With three arguments,
+`vertical` controls top and bottom and `horizontal` controls left and right.
+With five arguments, sides are `top`, `right`, `bottom`, and `left`.
+|#
+  (define rich-padding
+    (case-lambda
+      [(body pad) (rich-padding body pad pad pad pad)]
+      [(body vertical horizontal)
+       (rich-padding body vertical horizontal vertical horizontal)]
+      [(body top right bottom left)
+       (pcheck ([string? body] [natural? top right bottom left])
+               (mk-rich-padding body top right bottom left))]))
+
+  #|proc:rich-padding?
+The `rich-padding?` procedure checks whether `obj` is a rich padding renderable.
+|#
+  (define rich-padding?
+    (lambda (obj)
+      ($rich-padding? obj)))
+
+  #|proc:rich-padding-render
+The `rich-padding-render` procedure renders padded text as a string.
+|#
+  (define rich-padding-render
+    (lambda (padding)
+      (pcheck ([$rich-padding? padding])
+              ($string-join "\n" ($rich-padding-lines padding)))))
+
+  #|proc:rich-padding-print
+The `rich-padding-print` procedure writes rendered padded text to the current
+output port without appending a newline.
+|#
+  (define rich-padding-print
+    (lambda (padding)
+      (pcheck ([$rich-padding? padding])
+              (display (rich-padding-render padding)))))
+
+  #|proc:rich-padding-println
+The `rich-padding-println` procedure writes rendered padded text to the current
+output port and appends a newline.
+|#
+  (define rich-padding-println
+    (lambda (padding)
+      (pcheck ([$rich-padding? padding])
+              (display (rich-padding-render padding))
+              (newline))))
+
+  #|proc:rich-padding-fprint
+The `rich-padding-fprint` procedure writes rendered padded text to `port`
+without appending a newline.
+|#
+  (define rich-padding-fprint
+    (lambda (port padding)
+      (pcheck ([output-port? port] [$rich-padding? padding])
+              (display (rich-padding-render padding) port))))
+
+  #|proc:rich-padding-fprintln
+The `rich-padding-fprintln` procedure writes rendered padded text to `port` and
+appends a newline.
+|#
+  (define rich-padding-fprintln
+    (lambda (port padding)
+      (pcheck ([output-port? port] [$rich-padding? padding])
+              (display (rich-padding-render padding) port)
               (newline port))))
 
   #|proc:make-rich-progress

@@ -402,6 +402,112 @@
      )
 
 
+(mat rich-align-render
+
+     (let ([a (rich-align "hi" 6)])
+       (and (rich-align? a)
+            (rich-align-style? 'left)
+            (rich-align-style? 'center)
+            (rich-align-style? 'right)
+            (not (rich-align-style? 'middle))
+            (equal? "hi    " (rich-align-render a))))
+
+     (equal? "  hi  "
+             (rich-align-render (rich-align "hi" 6 'center)))
+
+     (equal? "    hi"
+             (rich-align-render (rich-align "hi" 6 'right)))
+
+     (equal? "  a  \nlonger"
+             (rich-align-render (rich-align "a\nlonger" 5 'center)))
+
+     )
+
+
+(mat rich-align-print
+
+     (equal? "  hi  "
+             (with-output-to-string
+               (lambda ()
+                 (rich-align-print (rich-align "hi" 6 'center)))))
+
+     (equal? "  hi  \n"
+             (with-output-to-string
+               (lambda ()
+                 (rich-align-println (rich-align "hi" 6 'center)))))
+
+     (let ([port (open-output-string)])
+       (rich-align-fprint port (rich-align "hi" 6 'center))
+       (equal? "  hi  " (get-output-string port)))
+
+     (let ([port (open-output-string)])
+       (rich-align-fprintln port (rich-align "hi" 6 'center))
+       (equal? "  hi  \n" (get-output-string port)))
+
+     )
+
+
+(mat rich-align-errors
+
+     (error? (rich-align 123 6))
+     (error? (rich-align "hi" 0))
+     (error? (rich-align "hi" 6 'middle))
+     (error? (rich-align-render #f))
+     (error? (rich-align-fprint "not-a-port" (rich-align "hi" 6)))
+
+     )
+
+
+(mat rich-padding-render
+
+     (let ([p (rich-padding "x" 1)])
+       (and (rich-padding? p)
+            (equal? "   \n x \n   " (rich-padding-render p))))
+
+     (equal? "  x   \n  yy  "
+             (rich-padding-render (rich-padding "x\nyy" 0 2)))
+
+     (equal? "      \n   x  "
+             (rich-padding-render (rich-padding "x" 1 2 0 3)))
+
+     )
+
+
+(mat rich-padding-print
+
+     (equal? "  x  "
+             (with-output-to-string
+               (lambda ()
+                 (rich-padding-print (rich-padding "x" 0 2)))))
+
+     (equal? "  x  \n"
+             (with-output-to-string
+               (lambda ()
+                 (rich-padding-println (rich-padding "x" 0 2)))))
+
+     (let ([port (open-output-string)])
+       (rich-padding-fprint port (rich-padding "x" 0 2))
+       (equal? "  x  " (get-output-string port)))
+
+     (let ([port (open-output-string)])
+       (rich-padding-fprintln port (rich-padding "x" 0 2))
+       (equal? "  x  \n" (get-output-string port)))
+
+     )
+
+
+(mat rich-padding-errors
+
+     (error? (rich-padding 123 1))
+     (error? (rich-padding "x" -1))
+     (error? (rich-padding "x" 1 -1))
+     (error? (rich-padding "x" 1 2 3 -1))
+     (error? (rich-padding-render #f))
+     (error? (rich-padding-fprint "not-a-port" (rich-padding "x" 1)))
+
+     )
+
+
 (mat rich-progress-render
 
      (let ([p (make-rich-progress 10)])
