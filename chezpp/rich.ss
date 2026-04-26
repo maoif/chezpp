@@ -360,6 +360,11 @@
            (list? obj)
            (andmap string? obj))))
 
+  (define $rich-progress-bar-char?
+    (lambda (obj)
+      (and (string? obj)
+           (= (string-length obj) 1))))
+
   (define $two-digits
     (lambda (n)
       (if (< n 10)
@@ -440,7 +445,7 @@
       (min 3 width)))
 
   (define $rich-progress-pulse-bar
-    (lambda (task width)
+    (lambda (task width fill empty pulse)
       (let* ([pulse-width ($rich-progress-pulse-width width)]
              [max-start (- width pulse-width)]
              [start (if (= max-start 0)
@@ -451,23 +456,27 @@
                                     1e-9)))
                          (+ max-start 1)))]
              [end (+ start pulse-width)])
-        (let loop ([i 0] [chars '()])
+        (let loop ([i 0] [parts '()])
           (if (= i width)
-              (string-append "[" (list->string (reverse chars)) "]")
+              (string-append "[" (apply string-append (reverse parts)) "]")
               (loop (+ i 1)
-                    (cons (if (and (>= i start) (< i end)) #\# #\-)
-                          chars)))))))
+                    (cons (if (and (>= i start) (< i end)) pulse empty)
+                          parts)))))))
 
   (define $rich-progress-bar
-    (lambda (task completed total width)
-      (if total
-          (let ([filled (quotient (* completed width) total)])
-            (string-append
-             "["
-             (make-string filled #\#)
-             (make-string (- width filled) #\-)
-             "]"))
-          ($rich-progress-pulse-bar task width))))
+    (lambda (task column completed total width)
+      (let* ([spec (rich-progress-column-value column)]
+             [fill (vector-ref spec 0)]
+             [empty (vector-ref spec 1)]
+             [pulse (vector-ref spec 2)])
+        (if total
+            (let ([filled (quotient (* completed width) total)])
+              (string-append
+               "["
+               (apply string-append (make-list filled fill))
+               (apply string-append (make-list (- width filled) empty))
+               "]"))
+            ($rich-progress-pulse-bar task width fill empty pulse)))))
 
   (define $rich-progress-text-template
     (lambda (who template task)
@@ -490,7 +499,7 @@
                    'rich-progress-render
                    (rich-progress-column-value column)
                    task)]
-          [(bar) ($rich-progress-bar task completed total width)]
+          [(bar) ($rich-progress-bar task column completed total width)]
           [(percent) ($rich-progress-percent-string completed total)]
           [(complete) ($rich-progress-count-string completed total)]
           [(spinner) ($rich-progress-spinner-string task column)]
@@ -873,10 +882,20 @@ the supported task templates: `{description}`, `{completed}`, `{total}`, or
 
   #|proc:rich-progress-bar-column
 The `rich-progress-bar-column` procedure constructs a progress bar column.
+With no arguments it uses `#` for filled cells and `-` for empty cells. With
+two arguments it uses `fill` and `empty` for determinate bars. With three
+arguments, `pulse` controls the animated cell for indeterminate bars. Each
+character argument must be a one-character string.
 |#
   (define rich-progress-bar-column
-    (lambda ()
-      (mk-rich-progress-column 'bar #f)))
+    (case-lambda
+      [()
+       (rich-progress-bar-column "#" "-" "#")]
+      [(fill empty)
+       (rich-progress-bar-column fill empty fill)]
+      [(fill empty pulse)
+       (pcheck ([$rich-progress-bar-char? fill empty pulse])
+               (mk-rich-progress-column 'bar (vector fill empty pulse)))]))
 
   #|proc:rich-progress-percent-column
 The `rich-progress-percent-column` procedure constructs a percent column.

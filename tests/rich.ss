@@ -472,6 +472,23 @@
        (equal? "4 10 [####------] 4/10" (rich-progress-render p)))
 
      (let* ([p (make-rich-progress 10)]
+            [id (rich-progress-add-task! p "download" 10)])
+       (rich-progress-columns-set!
+        p
+        (list (rich-progress-bar-column "=" ".")))
+       (rich-progress-update! p id 4)
+       (equal? "[====......]" (rich-progress-render p)))
+
+     (parameterize ([rich-progress-current-time (lambda () 100)])
+       (let* ([p (make-rich-progress 10)]
+              [id (rich-progress-add-task! p "scan" #f)])
+         (rich-progress-columns-set!
+          p
+          (list (rich-progress-bar-column "=" "." "~")))
+         (rich-progress-advance! p id 3)
+         (equal? "[~~~.......]" (rich-progress-render p))))
+
+     (let* ([p (make-rich-progress 10)]
             [id (rich-progress-add-task! p "scan" #f)])
        (rich-progress-columns-set!
         p
@@ -623,6 +640,9 @@
      (error? (rich-progress-start! "not-a-port" (make-rich-progress) 1))
      (error? (rich-progress-start! (open-output-string) #f 1))
      (error? (rich-progress-start! (open-output-string) (make-rich-progress) 0))
+     (error? (rich-progress-bar-column "##" "-"))
+     (error? (rich-progress-bar-column "#" "--"))
+     (error? (rich-progress-bar-column "#" "-" "~~"))
      (error? (rich-progress-text-column "{unknown}"))
      (error? (rich-progress-columns-set! (make-rich-progress) '()))
      (error? (rich-progress-columns-set! (make-rich-progress) (list 'not-column)))
