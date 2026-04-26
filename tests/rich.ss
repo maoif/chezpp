@@ -173,3 +173,92 @@
      (error? (rich-table-fprint "not-a-port" (make-rich-table)))
 
      )
+
+
+(mat rich-panel-render
+
+     (let ([p (rich-panel "hello")])
+       (and (rich-panel? p)
+            (equal? (string-append
+                     "+-------+\n"
+                     "| hello |\n"
+                     "+-------+")
+                    (rich-panel-render p))))
+
+     (equal? (string-append
+              "+- Status -+\n"
+              "| hello    |\n"
+              "+----------+")
+             (rich-panel-render (rich-panel "hello" "Status")))
+
+     (equal? (string-append
+              "┌─ Status ─┐\n"
+              "│ hello    │\n"
+              "└──────────┘")
+             (rich-panel-render (rich-panel "hello" "Status" 'unicode)))
+
+     (equal? (string-append
+              "+-------+\n"
+              "| alpha |\n"
+              "| b     |\n"
+              "+-------+")
+             (rich-panel-render (rich-panel "alpha\nb")))
+
+     (string-contains?
+      (rich-panel-render
+       (rich-panel (rich-format "~a~a~a" (rich-style 'red) "error" rich-reset)))
+      "\033[31merror\033[0m")
+
+     )
+
+
+(mat rich-panel-print
+
+     (equal? (string-append
+              "+-------+\n"
+              "| hello |\n"
+              "+-------+")
+             (with-output-to-string
+               (lambda ()
+                 (rich-panel-print (rich-panel "hello")))))
+
+     (equal? (string-append
+              "+-------+\n"
+              "| hello |\n"
+              "+-------+\n")
+             (with-output-to-string
+               (lambda ()
+                 (rich-panel-println (rich-panel "hello")))))
+
+     (let ([p (open-output-string)])
+       (rich-panel-fprint p (rich-panel "hello"))
+       (equal? (string-append
+                "+-------+\n"
+                "| hello |\n"
+                "+-------+")
+               (get-output-string p)))
+
+     (let ([p (open-output-string)])
+       (rich-panel-fprintln p (rich-panel "hello"))
+       (equal? (string-append
+                "+-------+\n"
+                "| hello |\n"
+                "+-------+\n")
+               (get-output-string p)))
+
+     )
+
+
+(mat rich-panel-errors
+
+     (rich-panel-border-style? 'ascii)
+     (rich-panel-border-style? 'unicode)
+     (not (rich-panel-border-style? 'double))
+
+     (error? (rich-panel 123))
+     (error? (rich-panel "hello" 123))
+     (error? (rich-panel "hello" "Title" 'double))
+     (error? (rich-panel-render #f))
+     (error? (rich-panel-fprint "not-a-port" (rich-panel "hello")))
+
+     )

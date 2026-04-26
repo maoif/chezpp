@@ -18,7 +18,16 @@
           rich-table-print
           rich-table-println
           rich-table-fprint
-          rich-table-fprintln)
+          rich-table-fprintln
+
+          rich-panel
+          rich-panel?
+          rich-panel-border-style?
+          rich-panel-render
+          rich-panel-print
+          rich-panel-println
+          rich-panel-fprint
+          rich-panel-fprintln)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal))
@@ -29,6 +38,11 @@
   (define-record-type ($rich-table mk-rich-table $rich-table?)
     (fields (mutable columns rich-table-columns rich-table-columns-set!)
             (mutable rows rich-table-rows rich-table-rows-set!)))
+
+  (define-record-type ($rich-panel mk-rich-panel $rich-panel?)
+    (fields (immutable body rich-panel-body)
+            (immutable title rich-panel-title)
+            (immutable border-style rich-panel-border-style)))
 
   (define $style-code
     (lambda (who name)
@@ -109,6 +123,16 @@
           cell
           (format #f "~a" ($rich-render-arg cell)))))
 
+  (define $string-split-lines
+    (lambda (str)
+      (let ([len (string-length str)])
+        (let loop ([i 0] [start 0] [res '()])
+          (cond [(fx= i len)
+                 (reverse (cons (substring str start len) res))]
+                [(char=? (string-ref str i) #\newline)
+                 (loop (fx+ i 1) (fx+ i 1) (cons (substring str start i) res))]
+                [else (loop (fx+ i 1) start res)])))))
+
   (define $rich-table-widths
     (lambda (columns rows)
       (map (lambda (column cells)
@@ -158,6 +182,56 @@
                   (append (list border header border)
                           (map (lambda (row) ($rich-table-row row widths)) rows)
                           (list border))))))))
+
+  (define $rich-panel-border
+    (lambda (who style)
+      (case style
+        [(ascii) '#("+" "+" "+" "+" "-" "|" #\-)]
+        [(unicode) '#("┌" "┐" "└" "┘" "─" "│" #\─)]
+        [else (errorf who "unknown panel border style: ~a" style)])))
+
+  (define $rich-panel-top-border
+    (lambda (width title border)
+      (let ([tl (vector-ref border 0)]
+            [tr (vector-ref border 1)]
+            [h (vector-ref border 4)]
+            [hchar (vector-ref border 6)]
+            [inner-width (fx+ width 2)])
+        (if title
+            (let* ([prefix (string-append h " " title " " h)]
+                   [fill (fx- inner-width (string-length prefix))])
+              (string-append tl
+                             prefix
+                             (make-string (max 0 fill) hchar)
+                             tr))
+            (string-append tl (make-string inner-width hchar) tr)))))
+
+  (define $rich-panel-bottom-border
+    (lambda (width border)
+      (let ([bl (vector-ref border 2)]
+            [br (vector-ref border 3)]
+            [hchar (vector-ref border 6)])
+        (string-append bl (make-string (fx+ width 2) hchar) br))))
+
+  (define $rich-panel-row
+    (lambda (line width border)
+      (let ([v (vector-ref border 5)])
+        (string-append v " " ($pad-right line width) " " v))))
+
+  (define $rich-panel-lines
+    (lambda (panel)
+      (let* ([body-lines ($string-split-lines (rich-panel-body panel))]
+             [title (rich-panel-title panel)]
+             [style (rich-panel-border-style panel)]
+             [border ($rich-panel-border 'rich-panel-render style)]
+             [width (apply max
+                           (append (map string-length body-lines)
+                                   (if title
+                                       (list (fx+ (string-length title) 2))
+                                       '())))])
+        (append (list ($rich-panel-top-border width title border))
+                (map (lambda (line) ($rich-panel-row line width border)) body-lines)
+                (list ($rich-panel-bottom-border width border))))))
 
   #|proc:rich-enable-color?
 The `rich-enable-color?` parameter controls whether rich style values render
@@ -337,6 +411,84 @@ appends a newline.
     (lambda (port table)
       (pcheck ([output-port? port] [$rich-table? table])
               (display (rich-table-render table) port)
+              (newline port))))
+
+  #|proc:rich-panel-border-style?
+The `rich-panel-border-style?` procedure checks whether `obj` is a supported
+panel border style symbol.
+|#
+  (define rich-panel-border-style?
+    (lambda (obj)
+      (and (memq obj '(ascii unicode)) #t)))
+
+  #|proc:rich-panel
+The `rich-panel` procedure constructs a panel around `body`. The optional
+`title` is shown in the top border, and the optional `border-style` can be
+`ascii` or `unicode`.
+|#
+  (define-who rich-panel
+    (case-lambda
+      [(body) (rich-panel body #f 'ascii)]
+      [(body title) (rich-panel body title 'ascii)]
+      [(body title border-style)
+       (pcheck ([string? body] [symbol? border-style])
+               (when (and title (not (string? title)))
+                 (errorf who "expected title string or #f: ~a" title))
+               (unless (rich-panel-border-style? border-style)
+                 (errorf who "unknown panel border style: ~a" border-style))
+               (mk-rich-panel body title border-style))]))
+
+  #|proc:rich-panel?
+The `rich-panel?` procedure checks whether `obj` is a rich panel.
+|#
+  (define rich-panel?
+    (lambda (obj)
+      ($rich-panel? obj)))
+
+  #|proc:rich-panel-render
+The `rich-panel-render` procedure renders `panel` as a bordered string.
+|#
+  (define rich-panel-render
+    (lambda (panel)
+      (pcheck ([$rich-panel? panel])
+              ($string-join "\n" ($rich-panel-lines panel)))))
+
+  #|proc:rich-panel-print
+The `rich-panel-print` procedure writes the rendered panel to the current
+output port without appending a newline.
+|#
+  (define rich-panel-print
+    (lambda (panel)
+      (pcheck ([$rich-panel? panel])
+              (display (rich-panel-render panel)))))
+
+  #|proc:rich-panel-println
+The `rich-panel-println` procedure writes the rendered panel to the current
+output port and appends a newline.
+|#
+  (define rich-panel-println
+    (lambda (panel)
+      (pcheck ([$rich-panel? panel])
+              (display (rich-panel-render panel))
+              (newline))))
+
+  #|proc:rich-panel-fprint
+The `rich-panel-fprint` procedure writes the rendered panel to `port` without
+appending a newline.
+|#
+  (define rich-panel-fprint
+    (lambda (port panel)
+      (pcheck ([output-port? port] [$rich-panel? panel])
+              (display (rich-panel-render panel) port))))
+
+  #|proc:rich-panel-fprintln
+The `rich-panel-fprintln` procedure writes the rendered panel to `port` and
+appends a newline.
+|#
+  (define rich-panel-fprintln
+    (lambda (port panel)
+      (pcheck ([output-port? port] [$rich-panel? panel])
+              (display (rich-panel-render panel) port)
               (newline port))))
 
   )
