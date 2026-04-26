@@ -427,6 +427,13 @@
             (format #f "~a/s" (floor speed))
             "--/s"))))
 
+  (define $rich-progress-stop-if-complete!
+    (lambda (who task completed total)
+      (when (and total
+                 (= completed total)
+                 (not (rich-progress-task-stop-time task)))
+        (rich-progress-task-stop-time-set! task ($rich-progress-now who)))))
+
   (define $rich-progress-spinner-string
     (lambda (task column)
       (let* ([spec (rich-progress-column-value column)]
@@ -1015,6 +1022,11 @@ The `rich-progress-update!` procedure sets the completed amount for a task.
               (let ([task ($rich-progress-find-task who progress task-id)])
                 ($rich-progress-check-current who completed (rich-progress-task-total task))
                 (rich-progress-task-completed-set! task completed)
+                ($rich-progress-stop-if-complete!
+                 who
+                 task
+                 completed
+                 (rich-progress-task-total task))
                 #t))))
 
   #|proc:rich-progress-advance!
@@ -1028,6 +1040,11 @@ The `rich-progress-advance!` procedure increments a task's completed amount by
                      [completed (+ (rich-progress-task-completed task) amount)])
                 ($rich-progress-check-current who completed (rich-progress-task-total task))
                 (rich-progress-task-completed-set! task completed)
+                ($rich-progress-stop-if-complete!
+                 who
+                 task
+                 completed
+                 (rich-progress-task-total task))
                 #t))))
 
   #|proc:rich-progress-complete!
@@ -1041,6 +1058,7 @@ The `rich-progress-complete!` procedure marks a determinate task complete.
                 (unless total
                   (errorf who "cannot complete indeterminate task: ~a" task-id))
                 (rich-progress-task-completed-set! task total)
+                ($rich-progress-stop-if-complete! who task total total)
                 #t))))
 
   #|proc:rich-progress-task-description-set!
@@ -1071,6 +1089,11 @@ exceed a determinate total.
                  (rich-progress-task-completed task)
                  total)
                 (rich-progress-task-total-raw-set! task total)
+                ($rich-progress-stop-if-complete!
+                 who
+                 task
+                 (rich-progress-task-completed task)
+                 total)
                 #t))))
 
   #|proc:rich-progress-start-task!
