@@ -284,7 +284,7 @@
   |#
   (define rich-color-system?
     (lambda (x)
-      (and (memq x '(none standard 256 truecolor)) #t)))
+      (and (memq x '(auto none standard 256 truecolor)) #t)))
 
   (define $rich-color-system-option?
     (lambda (x)
@@ -345,14 +345,39 @@
                   entries)
                  theme))]))
 
-  #|proc:rich-theme
-  The `rich-theme` procedure constructs a mutable rich theme from association
-  entries.
+  #|macro:rich-theme
+  The `rich-theme` macro constructs a mutable rich theme and binds it to
+  `name`. Theme entries are written as `:key value` clauses.
   |#
-  (define rich-theme
-    (lambda entries
-      (pcheck ([list? entries])
-              (make-rich-theme entries))))
+  (define-syntax rich-theme
+    (lambda (stx)
+      (define keyword->name
+        (lambda (key)
+          (let* ([sym (syntax->datum key)]
+                 [str (and (symbol? sym) (symbol->string sym))]
+                 [len (if str (string-length str) 0)])
+            (if (and str (positive? len) (char=? (string-ref str 0) #\:))
+                (string->symbol (substring str 1 len))
+                (syntax-error key "invalid rich theme key")))))
+      (define build-entries
+        (lambda (clause*)
+          (let loop ([clause* clause*] [entry* '()])
+            (cond [(null? clause*) (reverse entry*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-theme form")]
+                  [else
+                   (let ([name (keyword->name (car clause*))]
+                         [value (cadr clause*)])
+                     (with-syntax ([key-name (datum->syntax (car clause*) name)]
+                                   [key-value value])
+                       (loop (cddr clause*)
+                             (cons #'(cons 'key-name key-value) entry*))))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (with-syntax ([(entry ...) (build-entries #'(clause ...))])
+           #'(define name (make-rich-theme (list entry ...))))]
+        [_ (syntax-error stx "invalid rich-theme form")])))
 
   #|proc:rich-theme?
   The `rich-theme?` procedure returns `#t` when its argument is a rich theme,
@@ -379,5 +404,5 @@
   |#
   (define rich-theme-set!
     (lambda (theme name value)
-      (pcheck ([rich-theme? theme] [symbol? name])
+      (pcheck ([rich-theme? theme] [symbol? name] [rich-style? value])
               (hashtable-set! (rich-theme-table theme) name value)))))

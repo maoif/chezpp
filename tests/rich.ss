@@ -1,5 +1,6 @@
 #!chezscheme
-(import (chezpp))
+(import (chezpp)
+        (chezpp rich private common))
 
 (mat rich-import
 
@@ -64,5 +65,37 @@
 
      ;; Background color forms must have exactly one color value.
      (error? (rich-style '(bg)))
+
+     )
+
+(mat rich-theme
+
+     (rich-color-system? 'auto)
+
+     (let ()
+       (rich-theme theme)
+       (rich-theme? theme))
+
+     (let ()
+       (rich-theme theme :error (rich-style 'red) :ok (rich-style 'green))
+       (and (equal? "\033[31m" (rich-style->ansi #f (rich-theme-ref theme 'error)))
+            (equal? "\033[32m" (rich-style->ansi #f (rich-theme-ref theme 'ok)))))
+
+     (let ([theme (make-rich-theme (list (cons 'error (rich-style 'red))))])
+       (rich-style? (rich-theme-ref theme 'error)))
+
+     (rich-output-target? (current-output-port))
+     (rich-output-target? (make-rich-console))
+
+     )
+
+(mat rich-theme-errors
+
+     ;; Theme alist values must be rich style objects.
+     (error? (make-rich-theme (list (cons 'error "red"))))
+
+     ;; Theme mutation values must be rich style objects.
+     (error? (let ([theme (make-rich-theme)])
+               (rich-theme-set! theme 'error "red")))
 
      )

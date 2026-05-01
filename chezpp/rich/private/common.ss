@@ -41,7 +41,7 @@
   |#
   (define rich-output-target?
     (lambda (x)
-      (output-port? x)))
+      (or (output-port? x) (record? x))))
 
   #|proc:rich-string-output
   The `rich-string-output` procedure calls `proc` with a fresh string output
