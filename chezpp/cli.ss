@@ -495,9 +495,9 @@
                (define opts-state (make-eq-hashtable))
                (define cmds-seen (make-list-builder))
                (define (leaf-command? cmd) (null? ((command-subcommands cmd))))
-               (trace-define (find-subcommand arg subcmds)
+               (define (find-subcommand arg subcmds)
                  (find (lambda (cmd) (string=? arg (command-name cmd))) subcmds))
-               (trace-define (split-opt-arg short? opt-arg)
+               (define (split-opt-arg short? opt-arg)
                  ;; --o, --o=v, --o=, --o=v=x=x=
                  (let ([pos= (string-search opt-arg "=")]
                        [len (string-length opt-arg)]
@@ -507,7 +507,7 @@
                                (substring opt-arg (fx1+ pos=) len))
                        ;; TODO #f enough?
                        (values (string->symbol (substring opt-arg split-point len)) #f))))
-               (trace-define (handle-opt-arg cmd opt opt-name v)
+               (define (handle-opt-arg cmd opt opt-name v)
                  (let ([number       (option-number opt)]
                        [value-number (option-value-number opt)]
                        [value-parser (option-value-parser opt)])
@@ -555,7 +555,7 @@
                      (println "adding value ~s for ~a" v opt-name)
                      ;; may override previous value
                      (eq-hashtable-set! opts-state opt-name (value-parser cmd opt v))])))
-               (trace-define (check-option-values cmd tbl)
+               (define (check-option-values cmd tbl)
                  (vector-for-each
                   (lambda (kv)
                     (let* ([o (car kv)] [opt (cdr kv)]
@@ -572,7 +572,7 @@
                         (println "check-option-values setting default of ~a to ~a" opt-name (option-default opt))
                         (eq-hashtable-set! opts-state opt-name (option-default opt)))))
                   (hashtable-cells tbl)))
-               (trace-define (check-positional-option-values cmd positionals)
+               (define (check-positional-option-values cmd positionals)
                  (for-each (lambda (opt)
                              (let ([number (option-number opt)] [opt-name (option-name opt)])
                                (assert (memq number '(1 +)))
@@ -580,7 +580,7 @@
                                  (println "error: positional argument ~a is required but not given" opt-name)
                                  (print-help-and-quit (cmds-seen)))))
                            positionals))
-               (trace-define (check-missing-subcommand cmd)
+               (define (check-missing-subcommand cmd)
                  (unless (command-maybe-no-subcommand? cmd)
                    (let ([subcmds ((command-subcommands cmd))])
                      (unless (null? subcmds)
@@ -593,7 +593,7 @@
 
 
                ;; main parse loop
-               (trace-let lp-cmd ([cmd cmd] [args args])
+               (let lp-cmd ([cmd cmd] [args args])
                  ;; short/long symbol -> option
                  (define-values (opts-table-short opts-table-long)
                    (let ([ht-short (make-eq-hashtable)] [ht-long (make-eq-hashtable)])
@@ -609,11 +609,11 @@
                                                       (string->symbol (option-long opt)) opt)))
                                ((command-options cmd)))
                      (values ht-short ht-long)))
-                 (println "opts-table-short ~a" (hashtable-cells opts-table-short))
-                 (println "opts-table-long  ~a" (hashtable-cells opts-table-long))
+                 ;;(println "opts-table-short ~a" (hashtable-cells opts-table-short))
+                 ;;(println "opts-table-long  ~a" (hashtable-cells opts-table-long))
                  (cmds-seen cmd)
 
-                 (trace-let lp-arg ([args args])
+                 (let lp-arg ([args args])
                    (if (null? args)
                        ;; call exec
                        ;; TODO handle args = '()
@@ -627,7 +627,7 @@
                            ((command-exec cmd)
                             (lambda (opt-name)
                               (pcheck ([symbol? opt-name])
-                                      (println "state table: ~s" (hashtable-cells opts-state))
+                                      ;;(println "state table: ~s" (hashtable-cells opts-state))
                                       (let ([v (eq-hashtable-ref opts-state opt-name *none*)])
                                         (if (eq? v *none*)
                                             (errorf 'command-exec-1 "option ~a does not exist" opt-name)
@@ -679,8 +679,8 @@
                                (let* ([positionals (filter option-positional? ((command-options cmd)))]
                                       [len-args (length args)]
                                       [len-positionals (length positionals)])
-                                 (println "positionals (len ~a) ~a" (length positionals) positionals)
-                                 (println "args        (len ~a) ~a" (length args) args)
+                                 ;;(println "positionals (len ~a) ~a" (length positionals) positionals)
+                                 ;;(println "args        (len ~a) ~a" (length args) args)
                                  (when (null? positionals)
                                    (begin (println "unknown arguments supplied: ~a" args)
                                           (print-help-and-quit (cmds-seen))))
@@ -689,9 +689,9 @@
                                         (let* ([rest (member "--" args)]
                                                [sink-args (cdr rest)]
                                                [non-sink-args (list-head args (fx- (length args) (length rest)))])
-                                          (println "all args --   ~a" args)
-                                          (println "non-sink-args ~a" non-sink-args)
-                                          (println "sink-args     ~a" sink-args)
+                                          ;;(println "all args --   ~a" args)
+                                          ;;(println "non-sink-args ~a" non-sink-args)
+                                          ;;(println "sink-args     ~a" sink-args)
                                           (unless (= (length non-sink-args) (fx1- len-positionals))
                                             (println "error: invalid number of arguments supplied: ~a" args)
                                             (print-help-and-quit (cmds-seen)))
@@ -714,8 +714,8 @@
                                         (let* ([non-sink-args (list-head args (fx1- len-positionals))]
                                                [sink-args     (list-tail args (fx1- len-positionals))]
                                                [opt-sink      (list-last positionals)])
-                                          (println "non-sink-args ~a" non-sink-args)
-                                          (println "sink-args     ~a" sink-args)
+                                          ;;(println "non-sink-args ~a" non-sink-args)
+                                          ;;(println "sink-args     ~a" sink-args)
                                           (for-each (lambda (opt arg)
                                                       (handle-opt-arg cmd opt (option-name opt) arg))
                                                     (list-head positionals (fx1- len-positionals)) non-sink-args)
@@ -773,7 +773,7 @@
        ;; Usage: CMD0 COMMAND
        ;; Usage: CMD0 [OPTIONS] CMD1 [OPTIONS] <POS0> <POS1> ...
        ;; For more info, run 'CMD0 CMD1 --help'
-       (println ">>> print-help-and-quit ~a" (map command-name cmds-seen))
+       ;;(println ">>> print-help-and-quit ~a" (map command-name cmds-seen))
        (display "Usage: ")
        (let loop ([cmds cmds-seen])
          (unless (null? cmds)
@@ -1075,7 +1075,7 @@
       ;; Usage: CMD0 COMMAND
       ;; Usage: CMD0 [OPTIONS] CMD1 [OPTIONS] <POS0> <POS1> ...
       ;; For more info, run 'CMD0 CMD1 --help'
-      (println ">>> print-help-and-quit ~a" (map command-name cmds-seen))
+      ;;(println ">>> print-help-and-quit ~a" (map command-name cmds-seen))
       (display "Usage: ")
       (let loop ([cmds cmds-seen])
         (unless (null? cmds)

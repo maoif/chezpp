@@ -355,33 +355,40 @@
 
             (define cmd1 (make-command 'cmd1))
             (command-exec-set! cmd1 exec-cmd1)
+            (command-help-set! cmd1 "Execute some command1")
 
             (define opt-args (make-option 'args))
             (option-positional?-set!  opt-args #t)
             (option-sink?-set!        opt-args #t)
             (option-value-parser-set! opt-args parser-string)
+            (option-help-set!         opt-args "Args to cmd1")
             (command-options-add! cmd1 opt-args)
 
             (define cmd2 (make-command 'cmd2))
+            (command-help-set! cmd2 "Execute some command2")
 
             (define cmd2-1 (make-command 'cmd2-1))
             (command-exec-set! cmd2-1 exec-cmd2-1)
+            (command-help-set! cmd2-1 "Execute some command2-1")
 
             (define opt0 (make-option 'foo))
             (option-short-set! opt0 "f")
             (option-long-set!  opt0 "foo")
             (option-default-set! opt0 "default0")
             (option-value-parser-set! opt0 parser-string)
+            (option-help-set!  opt0 "First option")
             (command-options-add! cmd2-1 opt0)
 
             (define cmd2-2 (make-command 'cmd2-2))
             (command-exec-set! cmd2-2 exec-cmd2-2)
+            (command-help-set! cmd2-2 "Execute some command2-2")
 
             (define opt1 (make-option 'bar))
             (option-short-set! opt1 "b")
             (option-long-set!  opt1 "bar")
             (option-default-set! opt1 "default1")
             (option-value-parser-set! opt1 parser-string)
+            (option-help-set!  opt1 "Second option")
             (command-options-add! cmd2-2 opt1)
 
             (command-subcommands-add! cmd2 cmd2-1 cmd2-2)
@@ -456,7 +463,7 @@
                (option-help-set! opt-debug  "Enable debug mode")
 
                (option-short-set! opt-config #f)
-               (option-short-set! opt-debug  #\D)
+               (option-short-set! opt-debug  "D")
 
                (option-value-parser-set! opt-config parser-string)
                (option-value-number-set! opt-config '1)
@@ -504,7 +511,9 @@
                (option-help-set! opt-digest "Show digests")
                (option-help-set! opt-filter "Filter output based on conditions provided")
 
+               (option-value-number-set! opt-all 0)
                (option-short-set! opt-digest #f)
+               (option-value-number-set! opt-digest 0)
 
                (option-value-parser-set! opt-filter parser-string)
                (option-value-number-set! opt-filter '1)
@@ -524,6 +533,7 @@
                (option-value-parser-set! opt-memory parser-natural)
 
                (option-value-name-set! opt-memory "bytes")
+               (option-value-number-set! opt-compress 0)
 
                (command-options-add! cmd-docker-image-build opt-file opt-memory opt-compress))
 
@@ -534,11 +544,14 @@
                (option-help-set! opt-all-tags "Download all tagged images in the repository")
                (option-help-set! opt-quiet    "Suppress verbose output")
 
+               (option-value-number-set! opt-all-tags 0)
+               (option-value-number-set! opt-quiet 0)
+
                (command-options-add! cmd-docker-image-pull opt-all-tags opt-quiet))
 
              #t)
 
-     '(run-cli-command! cmd-docker)
+     '(run-cli-command! cmd-docker '("--help"))
 
      )
 #!eof
