@@ -1090,11 +1090,6 @@ void *crypto_pkey_load_public_der(ptr bv, uint64_t start, uint64_t stop) {
   return pkey;
 }
 
-static ptr sign_digest_name(ptr alg, ptr digest) {
-  if (alg == Sstring_to_symbol("ed25519")) return Sfalse;
-  return digest;
-}
-
 ptr crypto_sign_message(ptr alg, ptr digest, void *ptr_pkey, ptr bv, uint64_t start,
                         uint64_t stop) {
   EVP_PKEY *pkey = (EVP_PKEY *)ptr_pkey;
