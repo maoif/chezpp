@@ -22,6 +22,19 @@
           rich-theme?
           rich-theme-ref
           rich-theme-set!
+          rich-segment
+          make-rich-segment
+          rich-segment?
+          rich-segment-text
+          rich-segment-style
+          rich-segment-control?
+          rich-segment-width
+          rich-segments-width
+          rich-segments->plain
+          rich-strip-ansi
+          rich-segment-wrap
+          rich-segment-crop
+          rich-segment-pad-right
 
           make-rich-console
           rich-console
@@ -38,5 +51,6 @@
           rich-renderable?)
   (import (chezpp chez)
           (chezpp rich style)
+          (chezpp rich segment)
           (chezpp rich renderable)
           (chezpp rich console)))

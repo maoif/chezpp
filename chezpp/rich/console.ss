@@ -14,6 +14,7 @@
           (chezpp utils)
           (chezpp rich private common)
           (chezpp rich style)
+          (chezpp rich segment)
           (chezpp rich renderable))
 
   (define-record-type rich-console-record
@@ -74,17 +75,52 @@
           (rich-console-output-port target)
           target)))
 
+  (define $rich-segment-list?
+    (lambda (x)
+      (and (list? x) (rich-list-every? rich-segment? x))))
+
+  (define $rich-segment-line-list?
+    (lambda (x)
+      (and (list? x) (rich-list-every? $rich-segment-list? x))))
+
+  (define $value->segment
+    (lambda (value)
+      (rich-segment
+       (if (string? value)
+           value
+           (rich-string-output
+            (lambda (port)
+              (if (char? value)
+                  (write-char value port)
+                  (display value port))))))))
+
+  (define $write-segment-line
+    (lambda (port line)
+      (display (rich-segments->plain line) port)))
+
+  (define $write-segment-lines
+    (lambda (port lines)
+      (let loop ([lines lines] [first? #t])
+        (unless (null? lines)
+          (unless first? (newline port))
+          ($write-segment-line port (car lines))
+          (loop (cdr lines) #f)))))
+
+  (define $write-rendered-value
+    (lambda (port value)
+      (cond [(string? value) (display value port)]
+            [($rich-segment-line-list? value) ($write-segment-lines port value)]
+            [else (display value port)])))
+
   (define $write-rich-value
     (lambda (port value)
       (cond [(rich-style? value) (void)]
             [(rich-reset? value) (void)]
-            [(string? value) (display value port)]
-            [(char? value) (write-char value port)]
             [else
              (let ([renderer (rich-renderer-for value)])
                (if renderer
-                   (display (renderer value) port)
-                   (display value port)))])))
+                   ($write-rendered-value port (renderer value))
+                   ($write-segment-line port (list ($value->segment value)))))])))
 
   #|proc:rich-print
   The `rich-print` procedure prints values to a rich console, an output port, or

@@ -105,3 +105,43 @@
                (rich-theme-set! theme 'error "red")))
 
      )
+
+(mat rich-segment
+
+     (let ([s (rich-segment "abc")])
+       (and (rich-segment? s)
+            (= 3 (rich-segment-width s))
+            (equal? "abc" (rich-segment-text s))))
+
+     (equal? 5
+             (rich-segments-width
+              (list (rich-segment "ab")
+                    (rich-segment "cde"))))
+
+     (equal? "abcdef"
+             (rich-segments->plain
+              (list (rich-segment "abc")
+                    (rich-segment "def"))))
+
+     (equal? "red"
+             (rich-strip-ansi "\033[31mred\033[0m"))
+
+     (equal? (list "ab" "cd" "e")
+             (map rich-segments->plain
+                  (rich-segment-wrap (list (rich-segment "abcde")) 2)))
+
+     (equal? "abc"
+             (rich-segments->plain
+              (rich-segment-crop (list (rich-segment "abcdef")) 3)))
+
+     )
+
+(mat rich-segment-errors
+
+     ;; Segment text must be a string.
+     (error? (rich-segment 123))
+
+     ;; Wrap width must be positive.
+     (error? (rich-segment-wrap (list (rich-segment "x")) 0))
+
+     )
