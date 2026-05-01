@@ -218,6 +218,35 @@
        (rich-print c (rich-style 'red) "x" (reset-style))
        (equal? "\033[31mx\033[0m" (get-output-string p)))
 
+     (let ()
+       (rich-register-renderer!
+        (lambda (value) (eq? value 'rich-render-styled-segment-test))
+        (lambda (value)
+          (list (list (rich-segment "x" (rich-style 'red))))))
+       (and (let ([p (open-output-string)])
+              (rich-console c
+                :output-port p
+                :color-system 'standard)
+              (rich-print c 'rich-render-styled-segment-test)
+              (equal? "\033[31mx\033[0m" (get-output-string p)))
+            (let ([p (open-output-string)])
+              (rich-console c
+                :output-port p
+                :color-system 'none)
+              (rich-print c 'rich-render-styled-segment-test)
+              (equal? "x" (get-output-string p)))
+            (equal? "x"
+                    (with-output-to-string
+                      (lambda ()
+                        (rich-print 'rich-render-styled-segment-test))))))
+
+     (let ([p (open-output-string)])
+       (rich-console c
+         :output-port p
+         :color-system 'standard)
+       (rich-print c (rich-style) (reset-style) "x")
+       (equal? "x" (get-output-string p)))
+
      )
 
 (mat rich-console-errors
@@ -230,5 +259,11 @@
 
      ;; Unknown constructor macro fields are rejected.
      (error? (eval '(let () (rich-console c :unknown 1) c)))
+
+     ;; Console input port must be an input port.
+     (error? (rich-console c :input-port "not-a-port"))
+
+     ;; Console color system must be supported.
+     (error? (rich-console c :color-system 'unsupported))
 
      )

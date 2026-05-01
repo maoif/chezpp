@@ -319,6 +319,16 @@
           ($write-segment-line port (car lines))
           (loop (cdr lines) #f)))))
 
+  (define $write-style-ansi
+    (lambda (port color-system style)
+      (if (eq? color-system 'none)
+          #f
+          (let ([ansi (rich-style->ansi color-system style)])
+            (and (not (string=? ansi ""))
+                 (begin
+                   (display ansi port)
+                   #t))))))
+
   (define $valid-rendered-value?
     (lambda (value)
       (or (string? value) ($rich-segment-line-list? value))))
@@ -334,6 +344,56 @@
       (let ([value ($check-rendered-value 'rich-print value)])
         (cond [(string? value) (display value port)]
               [else ($write-segment-lines port value)]))))
+
+  (define $write-segment-line/ansi
+    (lambda (port color-system line style-emitted?)
+      (let loop ([segments line] [style-emitted? style-emitted?])
+        (if (null? segments)
+            style-emitted?
+            (let* ([segment (car segments)]
+                   [style (rich-segment-style segment)]
+                   [style-emitted?
+                    (cond [(rich-style? style)
+                           (or ($write-style-ansi port color-system style)
+                               style-emitted?)]
+                          [(rich-reset? style)
+                           (when (and style-emitted?
+                                      (not (eq? color-system 'none)))
+                             (display rich-ansi-reset port))
+                           #f]
+                          [else style-emitted?])])
+              (display (rich-segment-text segment) port)
+              (let ([style-emitted?
+                     (if (and (rich-style? style)
+                              style-emitted?
+                              (not (eq? color-system 'none)))
+                         (begin
+                           (display rich-ansi-reset port)
+                           #f)
+                         style-emitted?)])
+                (loop (cdr segments) style-emitted?)))))))
+
+  (define $write-segment-lines/ansi
+    (lambda (port color-system lines style-emitted?)
+      (let loop ([lines lines] [first? #t] [style-emitted? style-emitted?])
+        (if (null? lines)
+            style-emitted?
+            (begin
+              (unless first? (newline port))
+              (loop (cdr lines)
+                    #f
+                    ($write-segment-line/ansi port color-system (car lines)
+                                             style-emitted?)))))))
+
+  (define $write-rendered-value/ansi
+    (lambda (port color-system value style-emitted?)
+      (let ([value ($check-rendered-value 'rich-print value)])
+        (cond [(string? value)
+               (display value port)
+               style-emitted?]
+              [else
+               ($write-segment-lines/ansi port color-system value
+                                         style-emitted?)]))))
 
   (define $write-rich-value/plain
     (lambda (port value)
@@ -359,16 +419,24 @@
               (cond [(rich-style? value)
                      (if (eq? color-system 'none)
                          (loop (cdr values) style-emitted?)
-                         (begin
-                           (display (rich-style->ansi color-system value) port)
-                           (loop (cdr values) #t)))]
+                         (loop (cdr values)
+                               (or ($write-style-ansi port color-system value)
+                                   style-emitted?)))]
                     [(rich-reset? value)
                      (when (and style-emitted? (not (eq? color-system 'none)))
                        (display rich-ansi-reset port))
                      (loop (cdr values) #f)]
                     [else
-                     ($write-rich-value/plain port value)
-                     (loop (cdr values) style-emitted?)])))))))
+                     (let ([renderer (rich-renderer-for value)])
+                       (loop (cdr values)
+                             (if renderer
+                                 ($write-rendered-value/ansi
+                                  port color-system (renderer value)
+                                  style-emitted?)
+                                 (begin
+                                   ($write-segment-line port
+                                                        (list ($value->segment value)))
+                                   style-emitted?))))])))))))
 
   (define $write-rich-values
     (lambda (target port values)
