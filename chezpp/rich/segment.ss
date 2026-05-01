@@ -31,10 +31,6 @@
     (lambda (x)
       (and (list? x) (rich-list-every? rich-segment? x))))
 
-  (define $substring-end
-    (lambda (str n)
-      (substring str 0 (min n (string-length str)))))
-
   (define $csi-open-char (integer->char 91))
 
   (define $semicolon-char (integer->char 59))

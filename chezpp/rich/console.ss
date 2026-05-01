@@ -106,13 +106,21 @@
           ($write-segment-line port (car lines))
           (loop (cdr lines) #f)))))
 
+  (define $valid-rendered-value?
+    (lambda (value)
+      (or (string? value) ($rich-segment-line-list? value))))
+
+  (define $check-rendered-value
+    (lambda (who value)
+      (if ($valid-rendered-value? value)
+          value
+          (errorf who "renderer returned invalid value: ~a" value))))
+
   (define $write-rendered-value
     (lambda (port value)
-      (cond [(string? value) (display value port)]
-            [($rich-segment-line-list? value) ($write-segment-lines port value)]
-            [else (errorf 'rich-print
-                          "renderer returned invalid value: ~a"
-                          value)])))
+      (let ([value ($check-rendered-value 'rich-print value)])
+        (cond [(string? value) (display value port)]
+              [else ($write-segment-lines port value)]))))
 
   (define $write-rich-value
     (lambda (port value)
@@ -171,7 +179,7 @@
       (pcheck ([rich-console? console])
               (let ([renderer (rich-renderer-for value)])
                 (if renderer
-                    (renderer value)
+                    ($check-rendered-value 'rich-render (renderer value))
                     value)))))
 
   #|proc:rich-export-text

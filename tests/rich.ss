@@ -182,4 +182,11 @@
                 (lambda (value) 123))
                (rich-print 'rich-render-invalid-test)))
 
+     ;; rich-render rejects invalid renderer results too.
+     (error? (begin
+               (rich-register-renderer!
+                (lambda (value) (eq? value 'rich-render-invalid-render-test))
+                (lambda (value) 123))
+               (rich-render (make-rich-console) 'rich-render-invalid-render-test)))
+
      )
