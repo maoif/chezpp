@@ -134,6 +134,37 @@
              (rich-segments->plain
               (rich-segment-crop (list (rich-segment "abcdef")) 3)))
 
+     (let* ([style (rich-style 'red)]
+            [lines (rich-segment-wrap (list (rich-segment "abcd" style)) 2)]
+            [first (car (car lines))]
+            [second (car (cadr lines))])
+       (and (eq? style (rich-segment-style first))
+            (eq? style (rich-segment-style second))
+            (equal? "ab" (rich-segment-text first))
+            (equal? "cd" (rich-segment-text second))))
+
+     (let* ([control (rich-segment "\033[31m" #f #t)]
+            [text (rich-segment "abcd")]
+            [wrapped (rich-segment-wrap (list control text) 2)]
+            [cropped (rich-segment-crop (list control text) 2)])
+       (and (= 0 (rich-segment-width control))
+            (rich-segment-control? (car (car wrapped)))
+            (equal? "\033[31mab" (rich-segments->plain (car wrapped)))
+            (equal? "cd" (rich-segments->plain (cadr wrapped)))
+            (rich-segment-control? (car cropped))
+            (equal? "\033[31mab" (rich-segments->plain cropped))))
+
+     (begin
+       (rich-register-renderer!
+        (lambda (value) (eq? value 'rich-render-segment-lines-test))
+        (lambda (value)
+          (list (list (rich-segment "ab"))
+                (list (rich-segment "cd")))))
+       (equal? "ab\ncd"
+               (with-output-to-string
+                 (lambda ()
+                   (rich-print 'rich-render-segment-lines-test)))))
+
      )
 
 (mat rich-segment-errors
@@ -143,5 +174,12 @@
 
      ;; Wrap width must be positive.
      (error? (rich-segment-wrap (list (rich-segment "x")) 0))
+
+     ;; Renderer results must be strings or segment-line lists.
+     (error? (begin
+               (rich-register-renderer!
+                (lambda (value) (eq? value 'rich-render-invalid-test))
+                (lambda (value) 123))
+               (rich-print 'rich-render-invalid-test)))
 
      )

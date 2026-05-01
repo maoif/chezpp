@@ -39,6 +39,47 @@
 
   (define $semicolon-char (integer->char 59))
 
+  (define $ansi-sgr-end
+    (lambda (text start)
+      (let ([len (string-length text)])
+        (and (char=? (string-ref text start) #\esc)
+             (< (+ start 2) len)
+             (char=? (string-ref text (+ start 1)) $csi-open-char)
+             (let scan ([i (+ start 2)])
+               (cond [(= i len) #f]
+                     [(char=? (string-ref text i) #\m) (+ i 1)]
+                     [(or (char-numeric? (string-ref text i))
+                          (char=? (string-ref text i) $semicolon-char))
+                      (scan (+ i 1))]
+                     [else #f]))))))
+
+  (define $substring-visible
+    (lambda (text start max-width)
+      (let ([len (string-length text)])
+        (let loop ([i start] [visible 0])
+          (cond [(= i len) (values len visible)]
+                [(= visible max-width) (values i visible)]
+                [($ansi-sgr-end text i) =>
+                 (lambda (end) (loop end visible))]
+                [else (loop (+ i 1) (+ visible 1))])))))
+
+  (define $split-text-visible
+    (lambda (text width)
+      (let ([len (string-length text)])
+        (let loop ([start 0] [out '()])
+          (if (= start len)
+              (reverse out)
+              (let-values ([(end visible) ($substring-visible text start width)])
+                (if (= end start)
+                    (loop (+ start 1) (cons (substring text start (+ start 1)) out))
+                    (loop end (cons (substring text start end) out)))))))))
+
+  (define $segment-copy
+    (lambda (segment text)
+      (rich-segment text
+                    (rich-segment-style segment)
+                    (rich-segment-control? segment))))
+
   #|proc:rich-segment?
   The `rich-segment?` procedure returns `#t` when its argument is a rich text
   segment, and `#f` otherwise.
@@ -160,17 +201,46 @@
   (define rich-segment-wrap
     (lambda (segments width)
       (pcheck ([$rich-segment-list? segments] [rich-positive-integer? width])
-              (let ([text (rich-segments->plain segments)])
-                (let ([len (string-length text)])
-                  (if (= len 0)
-                      (list '())
-                      (let loop ([i 0] [lines '()])
-                        (if (>= i len)
-                            (reverse lines)
-                            (let ([end (min len (+ i width))])
-                              (loop end
-                                    (cons (list (rich-segment (substring text i end)))
-                                          lines)))))))))))
+              (let loop-segments ([segments segments]
+                                  [line '()]
+                                  [line-width 0]
+                                  [lines '()])
+                (cond
+                 [(null? segments)
+                  (reverse (cons (reverse line) lines))]
+                 [(rich-segment-control? (car segments))
+                  (loop-segments (cdr segments)
+                                 (cons (car segments) line)
+                                 line-width
+                                 lines)]
+                 [else
+                  (let loop-pieces ([pieces ($split-text-visible
+                                             (rich-segment-text (car segments))
+                                             width)]
+                                    [line line]
+                                    [line-width line-width]
+                                    [lines lines])
+                    (cond
+                     [(null? pieces)
+                      (loop-segments (cdr segments) line line-width lines)]
+                     [else
+                      (let* ([piece (car pieces)]
+                             [piece-width (string-length (rich-strip-ansi piece))]
+                             [next-width (+ line-width piece-width)]
+                             [piece-segment ($segment-copy (car segments) piece)])
+                        (cond
+                         [(= piece-width 0)
+                          (loop-pieces (cdr pieces)
+                                       (cons piece-segment line)
+                                       line-width
+                                       lines)]
+                         [(> next-width width)
+                          (loop-pieces pieces '() 0 (cons (reverse line) lines))]
+                         [else
+                          (loop-pieces (cdr pieces)
+                                       (cons piece-segment line)
+                                       next-width
+                                       lines)]))]))])))))
 
   #|proc:rich-segment-crop
   The `rich-segment-crop` procedure crops `segments` to at most `width`
@@ -179,10 +249,23 @@
   (define rich-segment-crop
     (lambda (segments width)
       (pcheck ([$rich-segment-list? segments] [rich-nonnegative-integer? width])
-              (let ([text (rich-segments->plain segments)])
-                (if (= width 0)
-                    '()
-                    (list (rich-segment ($substring-end text width))))))))
+              (let loop ([segments segments] [left width] [out '()])
+                (cond [(null? segments) (reverse out)]
+                      [(rich-segment-control? (car segments))
+                       (loop (cdr segments) left (cons (car segments) out))]
+                      [(= left 0) (reverse out)]
+                      [else
+                       (let-values ([(end visible)
+                                     ($substring-visible
+                                      (rich-segment-text (car segments))
+                                      0
+                                      left)])
+                         (let ([text (substring (rich-segment-text (car segments)) 0 end)])
+                           (loop (cdr segments)
+                                 (- left visible)
+                                 (if (string=? text "")
+                                     out
+                                     (cons ($segment-copy (car segments) text) out)))))])))))
 
   #|proc:rich-segment-pad-right
   The `rich-segment-pad-right` procedure appends spaces to `segments` until

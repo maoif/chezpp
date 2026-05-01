@@ -110,7 +110,9 @@
     (lambda (port value)
       (cond [(string? value) (display value port)]
             [($rich-segment-line-list? value) ($write-segment-lines port value)]
-            [else (display value port)])))
+            [else (errorf 'rich-print
+                          "renderer returned invalid value: ~a"
+                          value)])))
 
   (define $write-rich-value
     (lambda (port value)
