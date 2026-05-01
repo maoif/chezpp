@@ -249,6 +249,23 @@
        (rich-print c (rich-style) (reset-style) "x")
        (equal? "x" (get-output-string p)))
 
+     (let ([p (open-output-string)])
+       (rich-console c
+         :output-port p
+         :color-system 'standard)
+       (rich-register-renderer!
+        (lambda (value) (eq? value 'rich-render-outer-style-test))
+        (lambda (value)
+          (list (list (rich-segment "S" (rich-style 'blue))))))
+       (rich-print c
+                   (rich-style 'red)
+                   "A"
+                   'rich-render-outer-style-test
+                   "B"
+                   (reset-style))
+       (equal? "\033[31mA\033[34mS\033[0m\033[31mB\033[0m"
+               (get-output-string p)))
+
      )
 
 (mat rich-console-errors
