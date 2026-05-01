@@ -39,6 +39,24 @@
           make-rich-console
           rich-console
           rich-console?
+          rich-console-output-port
+          rich-console-output-port-set!
+          rich-console-error-port
+          rich-console-error-port-set!
+          rich-console-input-port
+          rich-console-input-port-set!
+          rich-console-width
+          rich-console-width-set!
+          rich-console-color-system
+          rich-console-color-system-set!
+          rich-console-force-terminal?
+          rich-console-force-terminal?-set!
+          rich-console-soft-wrap?
+          rich-console-soft-wrap?-set!
+          rich-console-theme
+          rich-console-theme-set!
+          rich-console-ascii-only?
+          rich-console-ascii-only?-set!
           rich-print
           rich-println
           rich-fprint

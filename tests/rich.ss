@@ -190,3 +190,45 @@
                (rich-render (make-rich-console) 'rich-render-invalid-render-test)))
 
      )
+
+(mat rich-console
+
+     (let ([p (open-output-string)])
+       (let ([c (make-rich-console)])
+         (rich-console-output-port-set! c p)
+         (rich-console-width-set! c 12)
+         (rich-print c "ok")
+         (equal? "ok" (get-output-string p))))
+
+     (let ([p (open-output-string)])
+       (rich-console c
+         :output-port p
+         :width 20
+         :color-system 'none)
+       (and (rich-console? c)
+            (= 20 (rich-console-width c))
+            (begin
+              (rich-print c (rich-style 'red) "x" (reset-style))
+              (equal? "x" (get-output-string p)))))
+
+     (let ([p (open-output-string)])
+       (rich-console c
+         :output-port p
+         :color-system 'standard)
+       (rich-print c (rich-style 'red) "x" (reset-style))
+       (equal? "\033[31mx\033[0m" (get-output-string p)))
+
+     )
+
+(mat rich-console-errors
+
+     ;; Console width must be positive.
+     (error? (rich-console c :width 0))
+
+     ;; Console output port must be an output port.
+     (error? (rich-console c :output-port "not-a-port"))
+
+     ;; Unknown constructor macro fields are rejected.
+     (error? (eval '(let () (rich-console c :unknown 1) c)))
+
+     )
