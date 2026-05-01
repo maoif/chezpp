@@ -1,0 +1,11 @@
+*.bak
+*.o
+*.so
+*.wpo
+*.lib
+*.zip
+.worktrees/
+chez++
+chez++.ss
+libchezpp.so
+test_*
