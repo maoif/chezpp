@@ -27,7 +27,16 @@
   (define-record-type rich-reset-record
     (fields))
 
+  #|proc:rich-style?
+  The `rich-style?` procedure returns `#t` when its argument is a rich style
+  object, and `#f` otherwise.
+  |#
   (define rich-style? rich-style-record?)
+
+  #|proc:rich-reset?
+  The `rich-reset?` procedure returns `#t` when its argument is a rich style
+  reset object, and `#f` otherwise.
+  |#
   (define rich-reset? rich-reset-record?)
 
   #|proc:reset-style
@@ -56,6 +65,10 @@
             (mutable theme rich-console-theme rich-console-theme-set!)
             (mutable ascii-only? rich-console-ascii-only? rich-console-ascii-only?-set!)))
 
+  #|proc:rich-console?
+  The `rich-console?` procedure returns `#t` when its argument is a rich console
+  object, and `#f` otherwise.
+  |#
   (define rich-console? rich-console-record?)
 
   #|proc:make-rich-console
@@ -129,27 +142,49 @@
                   (for-each (lambda (value) ($write-rich-value port value)) values)
                   (newline port))))))
 
+  #|proc:rich-fprint
+  The `rich-fprint` procedure prints values to the given output port.
+  |#
   (define rich-fprint
     (lambda (port . values)
       (apply rich-print port values)))
 
+  #|proc:rich-fprintln
+  The `rich-fprintln` procedure prints values to the given output port and then
+  writes a newline.
+  |#
   (define rich-fprintln
     (lambda (port . values)
       (apply rich-println port values)))
 
+  #|proc:rich-render
+  The `rich-render` procedure renders a value for a rich console.
+  |#
   (define rich-render
     (lambda (console value)
       (pcheck ([rich-console? console])
               value)))
 
+  #|proc:rich-export-text
+  The `rich-export-text` procedure renders a value to plain text and returns the
+  result as a string.
+  |#
   (define rich-export-text
     (lambda (value)
       (call-with-string-output-port
         (lambda (port)
           (rich-print port value)))))
 
+  #|proc:rich-export-ansi
+  The `rich-export-ansi` procedure renders a value to ANSI text and returns the
+  result as a string.
+  |#
   (define rich-export-ansi rich-export-text)
 
+  #|proc:rich-register-renderer!
+  The `rich-register-renderer!` procedure registers a renderer predicate and
+  rendering procedure for future rich output.
+  |#
   (define rich-register-renderer!
     (lambda (pred renderer)
       (pcheck ([procedure? pred renderer])
