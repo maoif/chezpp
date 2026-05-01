@@ -508,4 +508,11 @@
   The `rich-export-ansi` procedure renders a value to ANSI text and returns the
   result as a string.
   |#
-  (define rich-export-ansi rich-export-text))
+  (define rich-export-ansi
+    (lambda (value)
+      (rich-string-output
+       (lambda (port)
+         (let ([console (make-rich-console)])
+           (rich-console-output-port-set! console port)
+           (rich-console-color-system-set! console 'standard)
+           (rich-print console value)))))))

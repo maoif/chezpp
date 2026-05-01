@@ -238,7 +238,9 @@
             (equal? "x"
                     (with-output-to-string
                       (lambda ()
-                        (rich-print 'rich-render-styled-segment-test))))))
+                        (rich-print 'rich-render-styled-segment-test))))
+            (equal? "\033[31mx\033[0m"
+                    (rich-export-ansi 'rich-render-styled-segment-test))))
 
      (let ([p (open-output-string)])
        (rich-console c
