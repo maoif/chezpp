@@ -31,6 +31,12 @@
      (rich-style? (rich-style 'bold 'red))
      (rich-reset? (reset-style))
 
+     (equal? 'red (rich-style-fg (rich-style 'red)))
+     (equal? 'blue (rich-style-fg (rich-style 'red 'blue)))
+     (equal? 'on-red (rich-style-bg (rich-style 'on-red)))
+     (equal? #xffaa00 (rich-style-fg (rich-style #xffaa00)))
+     (equal? #x202020 (rich-style-bg (rich-style '(bg #x202020))))
+
      (equal? "\033[1m\033[31m"
              (rich-style->ansi #f (rich-style 'bold 'red)))
 

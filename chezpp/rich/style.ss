@@ -117,8 +117,8 @@
         [else
          (let ([fg-code ($color-ref 'rich-style $named-fg opt)]
                [bg-code ($color-ref 'rich-style $named-bg opt)])
-           (cond [fg-code (values (cons 'ansi fg-code) bg bold? dim? italic? underline? blink? reverse? hidden? strike?)]
-                 [bg-code (values fg (cons 'ansi bg-code) bold? dim? italic? underline? blink? reverse? hidden? strike?)]
+           (cond [fg-code (values opt bg bold? dim? italic? underline? blink? reverse? hidden? strike?)]
+                 [bg-code (values fg opt bold? dim? italic? underline? blink? reverse? hidden? strike?)]
                  [else (errorf 'rich-style "unknown style option: ~a" opt)]))])))
 
   (define $apply-color-form
@@ -128,8 +128,8 @@
             (unless (rich-rgb-integer? rgb)
               (errorf 'rich-style "invalid RGB color: ~a" rgb))
             (case kind
-              [(fg) (values (cons 'rgb rgb) bg bold? dim? italic? underline? blink? reverse? hidden? strike?)]
-              [(bg) (values fg (cons 'rgb rgb) bold? dim? italic? underline? blink? reverse? hidden? strike?)]
+              [(fg) (values rgb bg bold? dim? italic? underline? blink? reverse? hidden? strike?)]
+              [(bg) (values fg rgb bold? dim? italic? underline? blink? reverse? hidden? strike?)]
               [else (errorf 'rich-style "invalid color form: ~a" opt)]))
           (errorf 'rich-style "invalid color form: ~a" opt))))
 
@@ -139,7 +139,7 @@
              ($apply-symbol-style opt fg bg bold? dim? italic? underline? blink? reverse? hidden? strike?)]
             [(integer? opt)
              (if (rich-rgb-integer? opt)
-                 (values (cons 'rgb opt) bg bold? dim? italic? underline? blink? reverse? hidden? strike?)
+                 (values opt bg bold? dim? italic? underline? blink? reverse? hidden? strike?)
                  (errorf 'rich-style "invalid RGB color: ~a" opt))]
             [(pair? opt)
              ($apply-color-form opt fg bg bold? dim? italic? underline? blink? reverse? hidden? strike?)]
@@ -292,14 +292,18 @@
 
   (define $color->ansi
     (lambda (fg? color)
-      (case (car color)
-        [(ansi) ($sgr (cdr color))]
-        [(rgb) ($rgb-sgr (if fg? "38" "48") (cdr color))]
-        [else ""])))
+      (cond [(integer? color)
+             ($rgb-sgr (if fg? "38" "48") color)]
+            [(symbol? color)
+             (let ([code ($color-ref 'rich-style (if fg? $named-fg $named-bg) color)])
+               (if code ($sgr code) ""))]
+            [else ""])))
 
   #|proc:rich-style->ansi
   The `rich-style->ansi` procedure renders a rich style object as ANSI SGR
-  escape sequences for `color-system`.
+  escape sequences for `color-system`. The `'none` color system suppresses ANSI
+  output; other accepted systems currently emit the available SGR and truecolor
+  sequences without RGB color downgrade.
   |#
   (define rich-style->ansi
     (lambda (color-system style)
