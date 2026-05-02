@@ -97,6 +97,24 @@
           rich-layout-items
           rich-layout-items-set!
           rich-layout-render
+          make-rich-table
+          rich-table
+          rich-table?
+          rich-table-title
+          rich-table-title-set!
+          rich-table-caption
+          rich-table-caption-set!
+          rich-table-box
+          rich-table-box-set!
+          rich-table-show-header?
+          rich-table-show-header?-set!
+          rich-table-show-lines?
+          rich-table-show-lines?-set!
+          rich-table-padding
+          rich-table-padding-set!
+          rich-table-add-column!
+          rich-table-add-row!
+          rich-table-render
 
           make-rich-console
           rich-console
@@ -137,4 +155,5 @@
           (chezpp rich text)
           (chezpp rich pretty)
           (chezpp rich console)
-          (chezpp rich basic)))
+          (chezpp rich basic)
+          (chezpp rich table)))

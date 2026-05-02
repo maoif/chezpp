@@ -299,6 +299,44 @@
 
      )
 
+(mat rich-table
+
+     (let ([t (make-rich-table)])
+       (rich-table-add-column! t "Name")
+       (rich-table-add-column! t "Status")
+       (rich-table-add-row! t "build" "ok")
+       (equal? (string-append
+                "+-------+--------+\n"
+                "| Name  | Status |\n"
+                "+-------+--------+\n"
+                "| build | ok     |\n"
+                "+-------+--------+")
+               (rich-export-text t)))
+
+     (let ()
+       (rich-table t
+         :title "Build"
+         :box 'rounded
+         :columns ("Name" "Status")
+         :rows (("compile" "ok")
+                ("test" "ok")))
+       (and (rich-table? t)
+            (string-contains? (rich-export-text t) "Build" "compile" "test")))
+
+     )
+
+(mat rich-table-errors
+
+     ;; Table rows must match the number of columns.
+     (error? (let ([t (make-rich-table)])
+               (rich-table-add-column! t "Name")
+               (rich-table-add-row! t "a" "b")))
+
+     ;; Table box style must be known.
+     (error? (eval '(let () (rich-table t :box 'unknown) t)))
+
+     )
+
 (mat rich-basic-errors
 
      ;; Rule width must be positive.
