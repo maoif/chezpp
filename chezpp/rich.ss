@@ -172,6 +172,26 @@
           rich-status-start!
           rich-status-stop!
           rich-status-render
+          make-rich-progress
+          rich-progress
+          rich-progress?
+          rich-progress-add-task!
+          rich-progress-update!
+          rich-progress-advance!
+          rich-progress-complete!
+          rich-progress-render
+          rich-progress-default-columns
+          rich-progress-description-column
+          rich-progress-bar-column
+          rich-progress-percentage-column
+          rich-progress-completed-column
+          rich-progress-elapsed-column
+          rich-progress-remaining-column
+          rich-progress-speed-column
+          rich-progress-spinner-column
+          rich-progress-task-description-set!
+          rich-progress-task-total-set!
+          rich-progress-task-visible?-set!
 
           make-rich-console
           rich-console
@@ -216,4 +236,5 @@
           (chezpp rich table)
           (chezpp rich panel)
           (chezpp rich tree)
-          (chezpp rich live)))
+          (chezpp rich live)
+          (chezpp rich progress)))

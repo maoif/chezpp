@@ -408,6 +408,37 @@
 
      )
 
+(mat rich-progress
+
+     (let ()
+       (rich-progress pr :width 10)
+       (let ([id (rich-progress-add-task! pr "download" 10)])
+         (rich-progress-update! pr id 4)
+         (string-contains? (rich-export-text pr) "download" "40%")))
+
+     (let ()
+       (rich-progress pr :width 10)
+       (let ([id (rich-progress-add-task! pr "build" #f)])
+         (rich-progress-advance! pr id 3)
+         (string-contains? (rich-export-text pr) "build" "3")))
+
+     )
+
+(mat rich-progress-errors
+
+     ;; Progress width must be positive.
+     (error? (rich-progress p :width 0))
+
+     ;; Progress updates require a known task id.
+     (error? (let ([p (make-rich-progress)])
+               (rich-progress-update! p 999 1)))
+
+     ;; Task totals must be positive or #f.
+     (error? (let ([p (make-rich-progress)])
+               (rich-progress-add-task! p "bad" 0)))
+
+     )
+
 (mat rich-table
 
      (let ([t (make-rich-table)])
