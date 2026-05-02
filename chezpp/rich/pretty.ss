@@ -18,7 +18,8 @@
         (rich-segment
          (rich-string-output
           (lambda (port)
-            (write value port))))))))
+            (parameterize ([print-graph #t])
+              (write value port)))))))))
 
   #|proc:rich-pretty
   The `rich-pretty` procedure renders `value` using the default rich pretty

@@ -202,10 +202,22 @@
        (rich-text-append! t "b")
        (equal? "ab" (rich-text-plain t)))
 
+     (let* ([red (rich-style 'red)]
+            [blue (rich-style 'blue)]
+            [t (make-rich-text)])
+       (rich-text-append! t "a" red)
+       (rich-text-append! t "b" blue)
+       (let ([segments (car (rich-text-render t))])
+         (and (equal? "ab" (rich-segments->plain segments))
+              (eq? red (rich-segment-style (car segments)))
+              (eq? blue (rich-segment-style (cadr segments))))))
+
      (let ([p (open-output-string)])
        (rich-console c :output-port p :color-system 'standard)
        (rich-print c (rich-text "ok" (rich-style 'green)))
        (equal? "\033[32mok\033[0m" (get-output-string p)))
+
+     (equal? "ok" (rich-export-text (rich-text "ok" (rich-style 'green))))
 
      )
 
@@ -214,6 +226,13 @@
      (equal? "(1 2 3)" (rich-export-text '(1 2 3)))
      (equal? "#(a b)" (rich-export-text '#(a b)))
      (equal? "\"x\"" (rich-export-text "x"))
+     (equal? "x" (with-output-to-string (lambda () (rich-print "x"))))
+     (equal? "(1 2 3)" (with-output-to-string
+                         (lambda () (rich-print '(1 2 3)))))
+
+     (let ([cycle (list 'a)])
+       (set-cdr! cycle cycle)
+       (equal? "#0=(a . #0#)" (rich-export-text cycle)))
 
      )
 

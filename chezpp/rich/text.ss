@@ -11,8 +11,9 @@
           (chezpp rich style)
           (chezpp rich segment))
 
-  (define-record-type (rich-text-record $make-rich-text $rich-text?)
-    (fields (mutable spans $rich-text-spans $rich-text-spans-set!)))
+  (define-record-type (rich-text-record $make-rich-text-record $rich-text?)
+    (fields (mutable spans $rich-text-spans $rich-text-spans-set!)
+            (mutable tail $rich-text-tail $rich-text-tail-set!)))
 
   (define $rich-text-style?
     (lambda (x)
@@ -21,6 +22,16 @@
   (define $rich-text-span
     (lambda (text style)
       (cons text style)))
+
+  (define $make-rich-text
+    (lambda (spans)
+      ($make-rich-text-record
+       spans
+       (and (pair? spans)
+            (let loop ([spans spans])
+              (if (null? (cdr spans))
+                  spans
+                  (loop (cdr spans))))))))
 
   #|proc:rich-text?
   The `rich-text?` procedure returns `#t` when its argument is a rich text
@@ -65,10 +76,14 @@
        (rich-text-append! rich-text text #f)]
       [(rich-text text style)
        (pcheck ([rich-text? rich-text] [string? text] [$rich-text-style? style])
-               ($rich-text-spans-set!
-                rich-text
-                (append ($rich-text-spans rich-text)
-                        (list ($rich-text-span text style))))
+               (let ([node (list ($rich-text-span text style))])
+                 (if ($rich-text-tail rich-text)
+                     (begin
+                       (set-cdr! ($rich-text-tail rich-text) node)
+                       ($rich-text-tail-set! rich-text node))
+                     (begin
+                       ($rich-text-spans-set! rich-text node)
+                       ($rich-text-tail-set! rich-text node))))
                rich-text)]))
 
   #|proc:rich-text-plain
