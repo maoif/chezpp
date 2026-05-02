@@ -299,6 +299,43 @@
 
      )
 
+(mat rich-panel-tree
+
+     (equal? (string-append
+              "+-------+\n"
+              "| hello |\n"
+              "+-------+")
+             (let ()
+               (rich-panel p :body "hello")
+               (rich-export-text p)))
+
+     (let ()
+       (rich-tree tr :label "root")
+       (let ([src (rich-tree-add! tr "src")])
+         (rich-tree-add! src "main.ss")
+         (rich-tree-add! tr "tests")
+         (equal? (string-append
+                  "root\n"
+                  "├── src\n"
+                  "│   └── main.ss\n"
+                  "└── tests")
+                 (rich-export-text tr))))
+
+     )
+
+(mat rich-panel-tree-errors
+
+     ;; Panel body is required.
+     (error? (eval '(let () (rich-panel p) p)))
+
+     ;; Tree label is required.
+     (error? (eval '(let () (rich-tree tr) tr)))
+
+     ;; Tree child labels must be printable values.
+     (error? (rich-tree-add! "not-a-tree" "x"))
+
+     )
+
 (mat rich-table
 
      (let ([t (make-rich-table)])

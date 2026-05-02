@@ -1,0 +1,235 @@
+#!chezscheme
+(library (chezpp rich tree)
+  (export make-rich-tree
+          rich-tree
+          rich-tree?
+          rich-tree-label
+          rich-tree-label-set!
+          rich-tree-children
+          rich-tree-add!
+          rich-tree-render)
+  (import (chezpp chez)
+          (chezpp utils)
+          (chezpp rich private common)
+          (chezpp rich segment)
+          (chezpp rich renderable)
+          (chezpp rich pretty))
+
+  (define-record-type (rich-tree-record $make-rich-tree-record $rich-tree?)
+    (fields (mutable label $rich-tree-label $rich-tree-label-set!)
+            (mutable children $rich-tree-children $rich-tree-children-set!)))
+
+  (define $rich-tree-list?
+    (lambda (x)
+      (and (list? x) (rich-list-every? rich-tree? x))))
+
+  (define $rich-segment-list?
+    (lambda (x)
+      (and (list? x) (rich-list-every? rich-segment? x))))
+
+  (define $rich-segment-line-list?
+    (lambda (x)
+      (and (list? x) (rich-list-every? $rich-segment-list? x))))
+
+  (define $append-one
+    (lambda (ls value)
+      (let loop ([ls ls] [out '()])
+        (if (null? ls)
+            (rich-reverse-append out (list value))
+            (loop (cdr ls) (cons (car ls) out))))))
+
+  (define $string-split-lines
+    (lambda (text)
+      (let ([len (string-length text)])
+        (let loop ([start 0] [i 0] [out '()])
+          (cond [(= i len)
+                 (reverse (cons (substring text start i) out))]
+                [(char=? (string-ref text i) #\newline)
+                 (loop (+ i 1) (+ i 1) (cons (substring text start i) out))]
+                [else
+                 (loop start (+ i 1) out)])))))
+
+  (define $string->segment-lines
+    (lambda (text)
+      (map (lambda (line) (list (rich-segment line)))
+           ($string-split-lines text))))
+
+  (define $rendered->segment-lines
+    (lambda (who value)
+      (cond [(string? value) ($string->segment-lines value)]
+            [($rich-segment-line-list? value) value]
+            [else (errorf who "renderer returned invalid value: ~a" value)])))
+
+  (define $value->segment-lines
+    (lambda (value)
+      (cond [(rich-renderer-for value) =>
+             (lambda (renderer)
+               ($rendered->segment-lines 'rich-tree-render (renderer value)))]
+            [(string? value)
+             ($string->segment-lines value)]
+            [(or (char? value) (number? value) (symbol? value))
+             ($string->segment-lines
+              (rich-string-output
+               (lambda (port)
+                 (if (char? value)
+                     (write-char value port)
+                     (display value port)))))]
+            [else
+             (rich-pretty-render value)])))
+
+  (define $value->plain-label
+    (lambda (value)
+      (let ([lines ($value->segment-lines value)])
+        (if (null? lines)
+            ""
+            (rich-segments->plain (car lines))))))
+
+  (define $unicode-guides
+    '#("├── " "└── " "│   " "    "))
+
+  (define $guide-branch
+    (lambda (guides last?)
+      (vector-ref guides (if last? 1 0))))
+
+  (define $guide-child-prefix
+    (lambda (guides last?)
+      (vector-ref guides (if last? 3 2))))
+
+  (define $render-node-children
+    (lambda (children prefix guides)
+      (let loop ([children children] [out '()])
+        (if (null? children)
+            (reverse out)
+            (let* ([child (car children)]
+                   [last? (null? (cdr children))]
+                   [line (list (rich-segment
+                                (string-append prefix
+                                               ($guide-branch guides last?)
+                                               ($value->plain-label
+                                                (rich-tree-label child)))))]
+                   [child-lines ($render-node-children
+                                 (rich-tree-children child)
+                                 (string-append prefix
+                                                ($guide-child-prefix guides last?))
+                                 guides)])
+              (loop (cdr children)
+                    (rich-reverse-append child-lines (cons line out))))))))
+
+  (define $rich-tree-render/guides
+    (lambda (tree guides)
+      (cons (list (rich-segment ($value->plain-label (rich-tree-label tree))))
+            ($render-node-children (rich-tree-children tree) "" guides))))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Tree
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-tree?
+  The `rich-tree?` procedure returns `#t` when its argument is a rich tree
+  object, and `#f` otherwise.
+  |#
+  (define rich-tree?
+    (lambda (x)
+      ($rich-tree? x)))
+
+  #|proc:make-rich-tree
+  The `make-rich-tree` procedure constructs a mutable tree node with `label`
+  and an initially empty child list.
+  |#
+  (define make-rich-tree
+    (case-lambda
+      [(label)
+       ($make-rich-tree-record label '())]
+      [(label children)
+       (pcheck ([$rich-tree-list? children])
+               ($make-rich-tree-record label children))]))
+
+  #|proc:rich-tree-label
+  The `rich-tree-label` procedure returns the label for `tree`.
+  |#
+  (define rich-tree-label
+    (lambda (tree)
+      (pcheck ([rich-tree? tree])
+              ($rich-tree-label tree))))
+
+  #|proc:rich-tree-label-set!
+  The `rich-tree-label-set!` procedure sets the label for `tree`.
+  |#
+  (define rich-tree-label-set!
+    (lambda (tree label)
+      (pcheck ([rich-tree? tree])
+              ($rich-tree-label-set! tree label))))
+
+  #|proc:rich-tree-children
+  The `rich-tree-children` procedure returns the child nodes for `tree`.
+  |#
+  (define rich-tree-children
+    (lambda (tree)
+      (pcheck ([rich-tree? tree])
+              ($rich-tree-children tree))))
+
+  #|proc:rich-tree-add!
+  The `rich-tree-add!` procedure appends a child node with `label` to `tree` and
+  returns the new child node.
+  |#
+  (define rich-tree-add!
+    (lambda (tree label)
+      (pcheck ([rich-tree? tree])
+              (let ([child (make-rich-tree label)])
+                ($rich-tree-children-set!
+                 tree
+                 ($append-one ($rich-tree-children tree) child))
+                child))))
+
+  #|proc:rich-tree-render
+  The `rich-tree-render` procedure renders `tree` as segment lines with Unicode
+  guide characters.
+  |#
+  (define rich-tree-render
+    (lambda (tree)
+      (pcheck ([rich-tree? tree])
+              ($rich-tree-render/guides tree $unicode-guides))))
+
+  #|macro:rich-tree
+  The `rich-tree` macro constructs a tree node and binds it to an identifier.
+  The `:label` field is required.
+  |#
+  (define-syntax rich-tree
+    (lambda (stx)
+      (define label-value
+        (lambda (clause*)
+          (let loop ([clause* clause*])
+            (cond [(null? clause*) #f]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-tree form")]
+                  [(eq? (syntax->datum (car clause*)) ':label)
+                   (cadr clause*)]
+                  [else (loop (cddr clause*))]))))
+      (define build-actions
+        (lambda (name clause*)
+          (let loop ([clause* clause*] [action* '()])
+            (cond [(null? clause*) (reverse action*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-tree form")]
+                  [else
+                   (let ([field (car clause*)]
+                         [value (cadr clause*)])
+                     (case (syntax->datum field)
+                       [(:label)
+                        (loop (cddr clause*) action*)]
+                       [else
+                        (syntax-error field "invalid rich-tree field")]))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (let ([label (label-value #'(clause ...))])
+           (unless label
+             (syntax-error stx "rich-tree requires :label"))
+           (with-syntax ([label-value label]
+                         [(action ...) (build-actions #'name #'(clause ...))])
+             #'(begin
+                 (define name (make-rich-tree label-value))
+                 action ...)))]
+        [_ (syntax-error stx "invalid rich-tree form")])))
+
+  (rich-register-renderer! rich-tree? rich-tree-render))

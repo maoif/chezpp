@@ -115,6 +115,32 @@
           rich-table-add-column!
           rich-table-add-row!
           rich-table-render
+          make-rich-panel
+          rich-panel
+          rich-panel?
+          rich-panel-body
+          rich-panel-body-set!
+          rich-panel-title
+          rich-panel-title-set!
+          rich-panel-subtitle
+          rich-panel-subtitle-set!
+          rich-panel-box
+          rich-panel-box-set!
+          rich-panel-padding
+          rich-panel-padding-set!
+          rich-panel-width
+          rich-panel-width-set!
+          rich-panel-height
+          rich-panel-height-set!
+          rich-panel-render
+          make-rich-tree
+          rich-tree
+          rich-tree?
+          rich-tree-label
+          rich-tree-label-set!
+          rich-tree-children
+          rich-tree-add!
+          rich-tree-render
 
           make-rich-console
           rich-console
@@ -156,4 +182,6 @@
           (chezpp rich pretty)
           (chezpp rich console)
           (chezpp rich basic)
-          (chezpp rich table)))
+          (chezpp rich table)
+          (chezpp rich panel)
+          (chezpp rich tree)))
