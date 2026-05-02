@@ -35,6 +35,14 @@
           rich-segment-wrap
           rich-segment-crop
           rich-segment-pad-right
+          make-rich-text
+          rich-text
+          rich-text?
+          rich-text-append!
+          rich-text-plain
+          rich-text-render
+          rich-pretty
+          rich-pretty-render
 
           make-rich-console
           rich-console
@@ -71,4 +79,6 @@
           (chezpp rich style)
           (chezpp rich segment)
           (chezpp rich renderable)
+          (chezpp rich text)
+          (chezpp rich pretty)
           (chezpp rich console)))

@@ -33,7 +33,9 @@
           (chezpp rich private common)
           (chezpp rich style)
           (chezpp rich segment)
-          (chezpp rich renderable))
+          (chezpp rich renderable)
+          (chezpp rich text)
+          (chezpp rich pretty))
 
   (define-record-type rich-console-record
     (fields (mutable output-port $rich-console-output-port $rich-console-output-port-set!)
@@ -296,6 +298,13 @@
     (lambda (x)
       (and (list? x) (rich-list-every? $rich-segment-list? x))))
 
+  (define $rich-direct-value?
+    (lambda (value)
+      (or (string? value)
+          (char? value)
+          (number? value)
+          (symbol? value))))
+
   (define $value->segment
     (lambda (value)
       (rich-segment
@@ -417,9 +426,13 @@
             [(rich-reset? value) (void)]
             [else
              (let ([renderer (rich-renderer-for value)])
-               (if renderer
-                   ($write-rendered-value port (renderer value))
-                   ($write-segment-line port (list ($value->segment value)))))])))
+               (cond [renderer
+                      ($write-rendered-value port (renderer value))]
+                     [($rich-direct-value? value)
+                      ($write-segment-line port (list ($value->segment value)))]
+                     [else
+                      ($write-rendered-value port
+                                             (rich-pretty-render value))]))])))
 
   (define $write-rich-values/plain
     (lambda (port values)
@@ -447,14 +460,19 @@
                      (let ([renderer (rich-renderer-for value)])
                        (loop (cdr values)
                              active-style
-                             (if renderer
-                                 ($write-rendered-value/ansi
-                                  port color-system active-style (renderer value)
-                                  style-emitted?)
-                                 (begin
-                                   ($write-segment-line port
-                                                        (list ($value->segment value)))
-                                   style-emitted?))))])))))))
+                             (cond [renderer
+                                    ($write-rendered-value/ansi
+                                     port color-system active-style (renderer value)
+                                     style-emitted?)]
+                                   [($rich-direct-value? value)
+                                    ($write-segment-line port
+                                                         (list ($value->segment value)))
+                                    style-emitted?]
+                                   [else
+                                    ($write-rendered-value/ansi
+                                     port color-system active-style
+                                     (rich-pretty-render value)
+                                     style-emitted?)])))])))))))
 
   (define $write-rich-values
     (lambda (target port values)
@@ -508,9 +526,15 @@
     (lambda (console value)
       (pcheck ([rich-console? console])
               (let ([renderer (rich-renderer-for value)])
-                (if renderer
-                    ($check-rendered-value 'rich-render (renderer value))
-                    value)))))
+                (cond [renderer
+                       ($check-rendered-value 'rich-render (renderer value))]
+                      [(or (rich-style? value)
+                           (rich-reset? value)
+                           ($rich-direct-value? value))
+                       value]
+                      [else
+                       ($check-rendered-value 'rich-render
+                                             (rich-pretty-render value))])))))
 
   #|proc:rich-export-text
   The `rich-export-text` procedure renders a value to plain text and returns the
@@ -520,7 +544,13 @@
     (lambda (value)
       (rich-string-output
        (lambda (port)
-         (rich-print port value)))))
+         (let ([renderer (rich-renderer-for value)])
+           (cond [renderer
+                  ($write-rendered-value port (renderer value))]
+                 [(or (rich-style? value) (rich-reset? value))
+                  (void)]
+                 [else
+                  ($write-rendered-value port (rich-pretty-render value))]))))))
 
   #|proc:rich-export-ansi
   The `rich-export-ansi` procedure renders a value to ANSI text and returns the
@@ -533,4 +563,6 @@
          (let ([console (make-rich-console)])
            (rich-console-output-port-set! console port)
            (rich-console-color-system-set! console 'standard)
-           (rich-print console value)))))))
+           (rich-print console value))))))
+
+  (rich-register-renderer! rich-text? rich-text-render))

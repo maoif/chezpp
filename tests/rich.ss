@@ -191,6 +191,32 @@
 
      )
 
+(mat rich-text
+
+     (let ([t (rich-text "hello" (rich-style 'green))])
+       (and (rich-text? t)
+            (equal? "hello" (rich-text-plain t))))
+
+     (let ([t (make-rich-text)])
+       (rich-text-append! t "a" (rich-style 'red))
+       (rich-text-append! t "b")
+       (equal? "ab" (rich-text-plain t)))
+
+     (let ([p (open-output-string)])
+       (rich-console c :output-port p :color-system 'standard)
+       (rich-print c (rich-text "ok" (rich-style 'green)))
+       (equal? "\033[32mok\033[0m" (get-output-string p)))
+
+     )
+
+(mat rich-pretty
+
+     (equal? "(1 2 3)" (rich-export-text '(1 2 3)))
+     (equal? "#(a b)" (rich-export-text '#(a b)))
+     (equal? "\"x\"" (rich-export-text "x"))
+
+     )
+
 (mat rich-console
 
      (let ([p (open-output-string)])
