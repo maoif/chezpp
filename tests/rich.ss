@@ -439,6 +439,35 @@
 
      )
 
+(mat rich-prompt
+
+     (let ([in (open-input-string "maoif\n")]
+           [out (open-output-string)])
+       (rich-console c :input-port in :output-port out :color-system 'none)
+       (equal? "maoif" (rich-prompt c "Name")))
+
+     (let ([in (open-input-string "\n")]
+           [out (open-output-string)])
+       (rich-console c :input-port in :output-port out :color-system 'none)
+       (equal? "default" (rich-prompt c "Name" "default")))
+
+     (let ([in (open-input-string "y\n")]
+           [out (open-output-string)])
+       (rich-console c :input-port in :output-port out :color-system 'none)
+       (rich-confirm c "Continue?"))
+
+     )
+
+(mat rich-prompt-errors
+
+     ;; Prompt choices must include the entered value.
+     (error? (let ([in (open-input-string "bad\n")]
+                   [out (open-output-string)])
+               (rich-console c :input-port in :output-port out :color-system 'none)
+               (rich-prompt c "Mode" #f '("fast" "slow"))))
+
+     )
+
 (mat rich-table
 
      (let ([t (make-rich-table)])

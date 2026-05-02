@@ -192,6 +192,9 @@
           rich-progress-task-description-set!
           rich-progress-task-total-set!
           rich-progress-task-visible?-set!
+          rich-prompt
+          rich-confirm
+          rich-password
 
           make-rich-console
           rich-console
@@ -237,4 +240,5 @@
           (chezpp rich panel)
           (chezpp rich tree)
           (chezpp rich live)
-          (chezpp rich progress)))
+          (chezpp rich progress)
+          (chezpp rich prompt)))
