@@ -236,6 +236,47 @@
 
      )
 
+(mat rich-basic-renderables
+
+     (equal? "---- Build ----"
+             (let ()
+               (rich-rule r :title "Build" :width 14)
+               (rich-export-text r)))
+
+     (equal? "  x  "
+             (let ()
+               (rich-padding p :body "x" :left 2 :right 2)
+               (rich-export-text p)))
+
+     (equal? "  x   "
+             (let ()
+               (rich-align a :body "x" :width 6 :align 'center)
+               (rich-export-text a)))
+
+     (equal? "a  bb\nccc"
+             (let ()
+               (rich-columns c :items ("a" "bb" "ccc") :width 5 :gap 2)
+               (rich-export-text c)))
+
+     (let ()
+       (rich-layout root :direction 'row :items ("top" "bottom"))
+       (string-contains? (rich-export-text root) "top" "bottom"))
+
+     )
+
+(mat rich-basic-errors
+
+     ;; Rule width must be positive.
+     (error? (eval '(let () (rich-rule r :width 0) r)))
+
+     ;; Padding values must be non-negative.
+     (error? (eval '(let () (rich-padding p :body "x" :left -1) p)))
+
+     ;; Alignment must be left, center, or right.
+     (error? (eval '(let () (rich-align a :body "x" :align 'middle) a)))
+
+     )
+
 (mat rich-console
 
      (let ([p (open-output-string)])

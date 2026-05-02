@@ -17,6 +17,8 @@
           rich-color-system?
           rich-style->ansi
           rich-ansi-reset
+          rich-box-style?
+          rich-box-chars
           rich-theme
           make-rich-theme
           rich-theme?
@@ -43,6 +45,58 @@
           rich-text-render
           rich-pretty
           rich-pretty-render
+          make-rich-rule
+          rich-rule
+          rich-rule?
+          rich-rule-title
+          rich-rule-title-set!
+          rich-rule-width
+          rich-rule-width-set!
+          rich-rule-style
+          rich-rule-style-set!
+          rich-rule-render
+          make-rich-padding
+          rich-padding
+          rich-padding?
+          rich-padding-body
+          rich-padding-body-set!
+          rich-padding-top
+          rich-padding-top-set!
+          rich-padding-right
+          rich-padding-right-set!
+          rich-padding-bottom
+          rich-padding-bottom-set!
+          rich-padding-left
+          rich-padding-left-set!
+          rich-padding-render
+          make-rich-align
+          rich-align
+          rich-align?
+          rich-align-body
+          rich-align-body-set!
+          rich-align-width
+          rich-align-width-set!
+          rich-align-align
+          rich-align-align-set!
+          rich-align-render
+          make-rich-columns
+          rich-columns
+          rich-columns?
+          rich-columns-items
+          rich-columns-items-set!
+          rich-columns-width
+          rich-columns-width-set!
+          rich-columns-gap
+          rich-columns-gap-set!
+          rich-columns-render
+          make-rich-layout
+          rich-layout
+          rich-layout?
+          rich-layout-direction
+          rich-layout-direction-set!
+          rich-layout-items
+          rich-layout-items-set!
+          rich-layout-render
 
           make-rich-console
           rich-console
@@ -77,8 +131,10 @@
           rich-renderable?)
   (import (chezpp chez)
           (chezpp rich style)
+          (chezpp rich box)
           (chezpp rich segment)
           (chezpp rich renderable)
           (chezpp rich text)
           (chezpp rich pretty)
-          (chezpp rich console)))
+          (chezpp rich console)
+          (chezpp rich basic)))

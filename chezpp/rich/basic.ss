@@ -1,0 +1,952 @@
+#!chezscheme
+(library (chezpp rich basic)
+  (export make-rich-rule
+          rich-rule
+          rich-rule?
+          rich-rule-title
+          rich-rule-title-set!
+          rich-rule-width
+          rich-rule-width-set!
+          rich-rule-style
+          rich-rule-style-set!
+          rich-rule-render
+          make-rich-padding
+          rich-padding
+          rich-padding?
+          rich-padding-body
+          rich-padding-body-set!
+          rich-padding-top
+          rich-padding-top-set!
+          rich-padding-right
+          rich-padding-right-set!
+          rich-padding-bottom
+          rich-padding-bottom-set!
+          rich-padding-left
+          rich-padding-left-set!
+          rich-padding-render
+          make-rich-align
+          rich-align
+          rich-align?
+          rich-align-body
+          rich-align-body-set!
+          rich-align-width
+          rich-align-width-set!
+          rich-align-align
+          rich-align-align-set!
+          rich-align-render
+          make-rich-columns
+          rich-columns
+          rich-columns?
+          rich-columns-items
+          rich-columns-items-set!
+          rich-columns-width
+          rich-columns-width-set!
+          rich-columns-gap
+          rich-columns-gap-set!
+          rich-columns-render
+          make-rich-layout
+          rich-layout
+          rich-layout?
+          rich-layout-direction
+          rich-layout-direction-set!
+          rich-layout-items
+          rich-layout-items-set!
+          rich-layout-render)
+  (import (chezpp chez)
+          (chezpp utils)
+          (chezpp rich private common)
+          (chezpp rich box)
+          (chezpp rich segment)
+          (chezpp rich renderable)
+          (chezpp rich pretty))
+
+  (define-record-type (rich-rule-record $make-rich-rule-record $rich-rule?)
+    (fields (mutable title $rich-rule-title $rich-rule-title-set!)
+            (mutable width $rich-rule-width $rich-rule-width-set!)
+            (mutable style $rich-rule-style $rich-rule-style-set!)))
+
+  (define-record-type (rich-padding-record $make-rich-padding-record $rich-padding?)
+    (fields (mutable body $rich-padding-body $rich-padding-body-set!)
+            (mutable top $rich-padding-top $rich-padding-top-set!)
+            (mutable right $rich-padding-right $rich-padding-right-set!)
+            (mutable bottom $rich-padding-bottom $rich-padding-bottom-set!)
+            (mutable left $rich-padding-left $rich-padding-left-set!)))
+
+  (define-record-type (rich-align-record $make-rich-align-record $rich-align?)
+    (fields (mutable body $rich-align-body $rich-align-body-set!)
+            (mutable width $rich-align-width $rich-align-width-set!)
+            (mutable align $rich-align-align $rich-align-align-set!)))
+
+  (define-record-type (rich-columns-record $make-rich-columns-record $rich-columns?)
+    (fields (mutable items $rich-columns-items $rich-columns-items-set!)
+            (mutable width $rich-columns-width $rich-columns-width-set!)
+            (mutable gap $rich-columns-gap $rich-columns-gap-set!)))
+
+  (define-record-type (rich-layout-record $make-rich-layout-record $rich-layout?)
+    (fields (mutable direction $rich-layout-direction $rich-layout-direction-set!)
+            (mutable items $rich-layout-items $rich-layout-items-set!)))
+
+  (define $rich-rule-title?
+    (lambda (x)
+      (or (not x) (string? x))))
+
+  (define $rich-align-value?
+    (lambda (x)
+      (memq x '(left center right))))
+
+  (define $rich-layout-direction?
+    (lambda (x)
+      (memq x '(row column))))
+
+  (define $rich-segment-list?
+    (lambda (x)
+      (and (list? x) (rich-list-every? rich-segment? x))))
+
+  (define $rich-segment-line-list?
+    (lambda (x)
+      (and (list? x) (rich-list-every? $rich-segment-list? x))))
+
+  (define $string-split-lines
+    (lambda (text)
+      (let ([len (string-length text)])
+        (let loop ([start 0] [i 0] [out '()])
+          (cond [(= i len)
+                 (reverse (cons (substring text start i) out))]
+                [(char=? (string-ref text i) #\newline)
+                 (loop (+ i 1) (+ i 1) (cons (substring text start i) out))]
+                [else
+                 (loop start (+ i 1) out)])))))
+
+  (define $string->segment-lines
+    (lambda (text)
+      (map (lambda (line) (list (rich-segment line)))
+           ($string-split-lines text))))
+
+  (define $rendered->segment-lines
+    (lambda (who value)
+      (cond [(string? value) ($string->segment-lines value)]
+            [($rich-segment-line-list? value) value]
+            [else (errorf who "renderer returned invalid value: ~a" value)])))
+
+  (define $value->segment-lines
+    (lambda (value)
+      (cond [(string? value)
+             ($string->segment-lines value)]
+            [(or (char? value) (number? value) (symbol? value))
+             ($string->segment-lines
+              (rich-string-output
+               (lambda (port)
+                 (if (char? value)
+                     (write-char value port)
+                     (display value port)))))]
+            [(rich-renderer-for value) =>
+             (lambda (renderer)
+               ($rendered->segment-lines 'rich-basic-render (renderer value)))]
+            [else
+             (rich-pretty-render value)])))
+
+  (define $segment-lines->plain-lines
+    (lambda (lines)
+      (map rich-segments->plain lines)))
+
+  (define $value->plain-lines
+    (lambda (value)
+      ($segment-lines->plain-lines ($value->segment-lines value))))
+
+  (define $make-space-segment
+    (lambda (width)
+      (rich-segment (make-string width #\space))))
+
+  (define $pad-line
+    (lambda (line left right)
+      (append (if (zero? left) '() (list ($make-space-segment left)))
+              line
+              (if (zero? right) '() (list ($make-space-segment right))))))
+
+  (define $blank-lines
+    (lambda (count)
+      (let loop ([count count] [out '()])
+        (if (zero? count)
+            out
+            (loop (- count 1) (cons '() out))))))
+
+  (define $string-repeat
+    (lambda (text count)
+      (let loop ([count count] [out '()])
+        (if (zero? count)
+            (apply string-append (reverse out))
+            (loop (- count 1) (cons text out))))))
+
+  (define $string-trim-right-spaces
+    (lambda (text)
+      (let loop ([i (- (string-length text) 1)])
+        (cond [(negative? i) ""]
+              [(char=? (string-ref text i) #\space) (loop (- i 1))]
+              [else (substring text 0 (+ i 1))]))))
+
+  (define $pad-string-right
+    (lambda (text width)
+      (let ([current (string-length text)])
+        (if (>= current width)
+            text
+            (string-append text (make-string (- width current) #\space))))))
+
+  (define $plain-lines-width
+    (lambda (lines)
+      (let loop ([lines lines] [width 0])
+        (if (null? lines)
+            width
+            (loop (cdr lines) (max width (string-length (car lines))))))))
+
+  (define $columns-render-row
+    (lambda (blocks gap)
+      (let ([height (let loop ([blocks blocks] [height 0])
+                      (if (null? blocks)
+                          height
+                          (loop (cdr blocks) (max height (length (caar blocks))))))]
+            [gap-text (make-string gap #\space)])
+        (let loop-lines ([i 0] [out '()])
+          (if (= i height)
+              (reverse out)
+              (let loop-blocks ([blocks blocks] [first? #t] [pieces '()])
+                (if (null? blocks)
+                    (loop-lines (+ i 1)
+                                (cons (list (rich-segment
+                                             ($string-trim-right-spaces
+                                              (apply string-append (reverse pieces)))))
+                                      out))
+                    (let* ([lines (caar blocks)]
+                           [width (cdar blocks)]
+                           [text (if (< i (length lines)) (list-ref lines i) "")]
+                           [padded ($pad-string-right text width)])
+                      (loop-blocks (cdr blocks)
+                                   #f
+                                   (cons padded
+                                         (if first?
+                                             pieces
+                                             (cons gap-text pieces))))))))))))
+
+  (define $column-block
+    (lambda (item)
+      (let ([lines ($value->plain-lines item)])
+        (cons lines ($plain-lines-width lines)))))
+
+  (define $pack-column-blocks
+    (lambda (blocks width gap)
+      (let loop ([blocks blocks]
+                 [row '()]
+                 [row-width 0]
+                 [rows '()])
+        (cond [(null? blocks)
+               (reverse (if (null? row) rows (cons (reverse row) rows)))]
+              [else
+               (let* ([block (car blocks)]
+                      [block-width (cdr block)]
+                      [next-width (if (null? row)
+                                      block-width
+                                      (+ row-width gap block-width))])
+                 (if (and (not (null? row)) (> next-width width))
+                     (loop blocks '() 0 (cons (reverse row) rows))
+                     (loop (cdr blocks)
+                           (cons block row)
+                           next-width
+                           rows)))]))))
+
+  (define $render-horizontal-blocks
+    (lambda (blocks gap)
+      (apply append
+             (map (lambda (row) ($columns-render-row row gap))
+                  ($pack-column-blocks blocks (most-positive-fixnum) gap)))))
+
+  (define $items->blocks
+    (lambda (items)
+      (map $column-block items)))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Rule
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-rule?
+  The `rich-rule?` procedure returns `#t` when its argument is a rich rule
+  object, and `#f` otherwise.
+  |#
+  (define rich-rule?
+    (lambda (x)
+      ($rich-rule? x)))
+
+  #|proc:make-rich-rule
+  The `make-rich-rule` procedure constructs a horizontal rule with an optional
+  `title`, positive `width`, and box `style`.
+  |#
+  (define make-rich-rule
+    (case-lambda
+      [()
+       (make-rich-rule #f 80 'ascii)]
+      [(title)
+       (make-rich-rule title 80 'ascii)]
+      [(title width)
+       (make-rich-rule title width 'ascii)]
+      [(title width style)
+       (pcheck ([$rich-rule-title? title]
+                [rich-positive-integer? width]
+                [rich-box-style? style])
+               ($make-rich-rule-record title width style))]))
+
+  #|proc:rich-rule-title
+  The `rich-rule-title` procedure returns the optional title for `rule`.
+  |#
+  (define rich-rule-title
+    (lambda (rule)
+      (pcheck ([rich-rule? rule])
+              ($rich-rule-title rule))))
+
+  #|proc:rich-rule-title-set!
+  The `rich-rule-title-set!` procedure sets the optional title for `rule`.
+  |#
+  (define rich-rule-title-set!
+    (lambda (rule title)
+      (pcheck ([rich-rule? rule] [$rich-rule-title? title])
+              ($rich-rule-title-set! rule title))))
+
+  #|proc:rich-rule-width
+  The `rich-rule-width` procedure returns the configured width for `rule`.
+  |#
+  (define rich-rule-width
+    (lambda (rule)
+      (pcheck ([rich-rule? rule])
+              ($rich-rule-width rule))))
+
+  #|proc:rich-rule-width-set!
+  The `rich-rule-width-set!` procedure sets the positive width for `rule`.
+  |#
+  (define rich-rule-width-set!
+    (lambda (rule width)
+      (pcheck ([rich-rule? rule] [rich-positive-integer? width])
+              ($rich-rule-width-set! rule width))))
+
+  #|proc:rich-rule-style
+  The `rich-rule-style` procedure returns the box style for `rule`.
+  |#
+  (define rich-rule-style
+    (lambda (rule)
+      (pcheck ([rich-rule? rule])
+              ($rich-rule-style rule))))
+
+  #|proc:rich-rule-style-set!
+  The `rich-rule-style-set!` procedure sets the box style for `rule`.
+  |#
+  (define rich-rule-style-set!
+    (lambda (rule style)
+      (pcheck ([rich-rule? rule] [rich-box-style? style])
+              ($rich-rule-style-set! rule style))))
+
+  #|proc:rich-rule-render
+  The `rich-rule-render` procedure renders `rule` as one segment line.
+  |#
+  (define rich-rule-render
+    (lambda (rule)
+      (pcheck ([rich-rule? rule])
+              (let* ([chars (rich-box-chars (rich-rule-style rule))]
+                     [h (vector-ref chars 4)]
+                     [title (rich-rule-title rule)]
+                     [width (rich-rule-width rule)]
+                     [text (if (and title (not (string=? title "")))
+                               (let* ([side (max 1 (quotient (- width (string-length title) 1) 2))]
+                                      [rule-text ($string-repeat h side)])
+                                 (string-append rule-text " " title " " rule-text))
+                               ($string-repeat h width))])
+                (list (list (rich-segment text)))))))
+
+  #|macro:rich-rule
+  The `rich-rule` macro constructs a rule and binds it to an identifier.
+  |#
+  (define-syntax rich-rule
+    (lambda (stx)
+      (define field->setter
+        (lambda (field)
+          (let ([datum (syntax->datum field)])
+            (case datum
+              [(:title) #'rich-rule-title-set!]
+              [(:width) #'rich-rule-width-set!]
+              [(:style) #'rich-rule-style-set!]
+              [else (syntax-error field "invalid rich-rule field")]))))
+      (define build-setters
+        (lambda (name clause*)
+          (let loop ([clause* clause*] [setter* '()])
+            (cond [(null? clause*) (reverse setter*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-rule form")]
+                  [else
+                   (let ([setter (field->setter (car clause*))]
+                         [value (cadr clause*)])
+                     (with-syntax ([rule-name name]
+                                   [set-rule-field! setter]
+                                   [field-value value])
+                       (loop (cddr clause*)
+                             (cons #'(set-rule-field! rule-name field-value)
+                                   setter*))))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
+           #'(begin
+               (define name (make-rich-rule))
+               setter ...))]
+        [_ (syntax-error stx "invalid rich-rule form")])))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Padding
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-padding?
+  The `rich-padding?` procedure returns `#t` when its argument is a rich padding
+  object, and `#f` otherwise.
+  |#
+  (define rich-padding?
+    (lambda (x)
+      ($rich-padding? x)))
+
+  #|proc:make-rich-padding
+  The `make-rich-padding` procedure constructs a padding renderable around
+  `body` with non-negative top, right, bottom, and left padding.
+  |#
+  (define make-rich-padding
+    (case-lambda
+      [()
+       (make-rich-padding "" 0 0 0 0)]
+      [(body)
+       (make-rich-padding body 0 0 0 0)]
+      [(body top right bottom left)
+       (pcheck ([rich-nonnegative-integer? top right bottom left])
+               ($make-rich-padding-record body top right bottom left))]))
+
+  #|proc:rich-padding-body
+  The `rich-padding-body` procedure returns the body for `padding`.
+  |#
+  (define rich-padding-body
+    (lambda (padding)
+      (pcheck ([rich-padding? padding])
+              ($rich-padding-body padding))))
+
+  #|proc:rich-padding-body-set!
+  The `rich-padding-body-set!` procedure sets the body for `padding`.
+  |#
+  (define rich-padding-body-set!
+    (lambda (padding body)
+      (pcheck ([rich-padding? padding])
+              ($rich-padding-body-set! padding body))))
+
+  #|proc:rich-padding-top
+  The `rich-padding-top` procedure returns the top padding for `padding`.
+  |#
+  (define rich-padding-top
+    (lambda (padding)
+      (pcheck ([rich-padding? padding])
+              ($rich-padding-top padding))))
+
+  #|proc:rich-padding-top-set!
+  The `rich-padding-top-set!` procedure sets the top padding for `padding`.
+  |#
+  (define rich-padding-top-set!
+    (lambda (padding top)
+      (pcheck ([rich-padding? padding] [rich-nonnegative-integer? top])
+              ($rich-padding-top-set! padding top))))
+
+  #|proc:rich-padding-right
+  The `rich-padding-right` procedure returns the right padding for `padding`.
+  |#
+  (define rich-padding-right
+    (lambda (padding)
+      (pcheck ([rich-padding? padding])
+              ($rich-padding-right padding))))
+
+  #|proc:rich-padding-right-set!
+  The `rich-padding-right-set!` procedure sets the right padding for `padding`.
+  |#
+  (define rich-padding-right-set!
+    (lambda (padding right)
+      (pcheck ([rich-padding? padding] [rich-nonnegative-integer? right])
+              ($rich-padding-right-set! padding right))))
+
+  #|proc:rich-padding-bottom
+  The `rich-padding-bottom` procedure returns the bottom padding for `padding`.
+  |#
+  (define rich-padding-bottom
+    (lambda (padding)
+      (pcheck ([rich-padding? padding])
+              ($rich-padding-bottom padding))))
+
+  #|proc:rich-padding-bottom-set!
+  The `rich-padding-bottom-set!` procedure sets the bottom padding for
+  `padding`.
+  |#
+  (define rich-padding-bottom-set!
+    (lambda (padding bottom)
+      (pcheck ([rich-padding? padding] [rich-nonnegative-integer? bottom])
+              ($rich-padding-bottom-set! padding bottom))))
+
+  #|proc:rich-padding-left
+  The `rich-padding-left` procedure returns the left padding for `padding`.
+  |#
+  (define rich-padding-left
+    (lambda (padding)
+      (pcheck ([rich-padding? padding])
+              ($rich-padding-left padding))))
+
+  #|proc:rich-padding-left-set!
+  The `rich-padding-left-set!` procedure sets the left padding for `padding`.
+  |#
+  (define rich-padding-left-set!
+    (lambda (padding left)
+      (pcheck ([rich-padding? padding] [rich-nonnegative-integer? left])
+              ($rich-padding-left-set! padding left))))
+
+  #|proc:rich-padding-render
+  The `rich-padding-render` procedure renders `padding` as segment lines.
+  |#
+  (define rich-padding-render
+    (lambda (padding)
+      (pcheck ([rich-padding? padding])
+              (append ($blank-lines (rich-padding-top padding))
+                      (map (lambda (line)
+                             ($pad-line line
+                                        (rich-padding-left padding)
+                                        (rich-padding-right padding)))
+                           ($value->segment-lines (rich-padding-body padding)))
+                      ($blank-lines (rich-padding-bottom padding))))))
+
+  #|macro:rich-padding
+  The `rich-padding` macro constructs a padding renderable and binds it to an
+  identifier.
+  |#
+  (define-syntax rich-padding
+    (lambda (stx)
+      (define field->setter
+        (lambda (field)
+          (let ([datum (syntax->datum field)])
+            (case datum
+              [(:body) #'rich-padding-body-set!]
+              [(:top) #'rich-padding-top-set!]
+              [(:right) #'rich-padding-right-set!]
+              [(:bottom) #'rich-padding-bottom-set!]
+              [(:left) #'rich-padding-left-set!]
+              [else (syntax-error field "invalid rich-padding field")]))))
+      (define build-setters
+        (lambda (name clause*)
+          (let loop ([clause* clause*] [setter* '()])
+            (cond [(null? clause*) (reverse setter*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-padding form")]
+                  [else
+                   (let ([setter (field->setter (car clause*))]
+                         [value (cadr clause*)])
+                     (with-syntax ([padding-name name]
+                                   [set-padding-field! setter]
+                                   [field-value value])
+                       (loop (cddr clause*)
+                             (cons #'(set-padding-field! padding-name field-value)
+                                   setter*))))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
+           #'(begin
+               (define name (make-rich-padding))
+               setter ...))]
+        [_ (syntax-error stx "invalid rich-padding form")])))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Alignment
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-align?
+  The `rich-align?` procedure returns `#t` when its argument is a rich alignment
+  object, and `#f` otherwise.
+  |#
+  (define rich-align?
+    (lambda (x)
+      ($rich-align? x)))
+
+  #|proc:make-rich-align
+  The `make-rich-align` procedure constructs an alignment renderable around
+  `body` with a positive `width` and an alignment of `left`, `center`, or
+  `right`.
+  |#
+  (define make-rich-align
+    (case-lambda
+      [()
+       (make-rich-align "" 80 'left)]
+      [(body)
+       (make-rich-align body 80 'left)]
+      [(body width align)
+       (pcheck ([rich-positive-integer? width] [$rich-align-value? align])
+               ($make-rich-align-record body width align))]))
+
+  #|proc:rich-align-body
+  The `rich-align-body` procedure returns the body for `align`.
+  |#
+  (define rich-align-body
+    (lambda (align)
+      (pcheck ([rich-align? align])
+              ($rich-align-body align))))
+
+  #|proc:rich-align-body-set!
+  The `rich-align-body-set!` procedure sets the body for `align`.
+  |#
+  (define rich-align-body-set!
+    (lambda (align body)
+      (pcheck ([rich-align? align])
+              ($rich-align-body-set! align body))))
+
+  #|proc:rich-align-width
+  The `rich-align-width` procedure returns the target width for `align`.
+  |#
+  (define rich-align-width
+    (lambda (align)
+      (pcheck ([rich-align? align])
+              ($rich-align-width align))))
+
+  #|proc:rich-align-width-set!
+  The `rich-align-width-set!` procedure sets the positive target width for
+  `align`.
+  |#
+  (define rich-align-width-set!
+    (lambda (align width)
+      (pcheck ([rich-align? align] [rich-positive-integer? width])
+              ($rich-align-width-set! align width))))
+
+  #|proc:rich-align-align
+  The `rich-align-align` procedure returns the alignment mode for `align`.
+  |#
+  (define rich-align-align
+    (lambda (align)
+      (pcheck ([rich-align? align])
+              ($rich-align-align align))))
+
+  #|proc:rich-align-align-set!
+  The `rich-align-align-set!` procedure sets the alignment mode for `align`.
+  |#
+  (define rich-align-align-set!
+    (lambda (align align-value)
+      (pcheck ([rich-align? align] [$rich-align-value? align-value])
+              ($rich-align-align-set! align align-value))))
+
+  #|proc:rich-align-render
+  The `rich-align-render` procedure renders `align` as segment lines.
+  |#
+  (define rich-align-render
+    (lambda (align)
+      (pcheck ([rich-align? align])
+              (let ([width (rich-align-width align)]
+                    [align-value (rich-align-align align)])
+                (map (lambda (line)
+                       (let ([current (rich-segments-width line)])
+                         (if (>= current width)
+                             line
+                             (let ([space (- width current)])
+                               (case align-value
+                                 [(left) ($pad-line line 0 space)]
+                                 [(right) ($pad-line line space 0)]
+                                 [(center)
+                                  (let ([left (quotient space 2)])
+                                    ($pad-line line left (- space left)))])))))
+                     ($value->segment-lines (rich-align-body align)))))))
+
+  #|macro:rich-align
+  The `rich-align` macro constructs an alignment renderable and binds it to an
+  identifier.
+  |#
+  (define-syntax rich-align
+    (lambda (stx)
+      (define field->setter
+        (lambda (field)
+          (let ([datum (syntax->datum field)])
+            (case datum
+              [(:body) #'rich-align-body-set!]
+              [(:width) #'rich-align-width-set!]
+              [(:align) #'rich-align-align-set!]
+              [else (syntax-error field "invalid rich-align field")]))))
+      (define build-setters
+        (lambda (name clause*)
+          (let loop ([clause* clause*] [setter* '()])
+            (cond [(null? clause*) (reverse setter*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-align form")]
+                  [else
+                   (let ([setter (field->setter (car clause*))]
+                         [value (cadr clause*)])
+                     (with-syntax ([align-name name]
+                                   [set-align-field! setter]
+                                   [field-value value])
+                       (loop (cddr clause*)
+                             (cons #'(set-align-field! align-name field-value)
+                                   setter*))))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
+           #'(begin
+               (define name (make-rich-align))
+               setter ...))]
+        [_ (syntax-error stx "invalid rich-align form")])))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Columns
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-columns?
+  The `rich-columns?` procedure returns `#t` when its argument is a rich columns
+  object, and `#f` otherwise.
+  |#
+  (define rich-columns?
+    (lambda (x)
+      ($rich-columns? x)))
+
+  #|proc:make-rich-columns
+  The `make-rich-columns` procedure constructs a column flow renderable from a
+  list of `items`, positive `width`, and non-negative `gap`.
+  |#
+  (define make-rich-columns
+    (case-lambda
+      [()
+       (make-rich-columns '() 80 2)]
+      [(items)
+       (make-rich-columns items 80 2)]
+      [(items width gap)
+       (pcheck ([list? items]
+                [rich-positive-integer? width]
+                [rich-nonnegative-integer? gap])
+               ($make-rich-columns-record items width gap))]))
+
+  #|proc:rich-columns-items
+  The `rich-columns-items` procedure returns the items for `columns`.
+  |#
+  (define rich-columns-items
+    (lambda (columns)
+      (pcheck ([rich-columns? columns])
+              ($rich-columns-items columns))))
+
+  #|proc:rich-columns-items-set!
+  The `rich-columns-items-set!` procedure sets the items for `columns`.
+  |#
+  (define rich-columns-items-set!
+    (lambda (columns items)
+      (pcheck ([rich-columns? columns] [list? items])
+              ($rich-columns-items-set! columns items))))
+
+  #|proc:rich-columns-width
+  The `rich-columns-width` procedure returns the flow width for `columns`.
+  |#
+  (define rich-columns-width
+    (lambda (columns)
+      (pcheck ([rich-columns? columns])
+              ($rich-columns-width columns))))
+
+  #|proc:rich-columns-width-set!
+  The `rich-columns-width-set!` procedure sets the positive flow width for
+  `columns`.
+  |#
+  (define rich-columns-width-set!
+    (lambda (columns width)
+      (pcheck ([rich-columns? columns] [rich-positive-integer? width])
+              ($rich-columns-width-set! columns width))))
+
+  #|proc:rich-columns-gap
+  The `rich-columns-gap` procedure returns the gap between columns.
+  |#
+  (define rich-columns-gap
+    (lambda (columns)
+      (pcheck ([rich-columns? columns])
+              ($rich-columns-gap columns))))
+
+  #|proc:rich-columns-gap-set!
+  The `rich-columns-gap-set!` procedure sets the non-negative gap between
+  columns.
+  |#
+  (define rich-columns-gap-set!
+    (lambda (columns gap)
+      (pcheck ([rich-columns? columns] [rich-nonnegative-integer? gap])
+              ($rich-columns-gap-set! columns gap))))
+
+  #|proc:rich-columns-render
+  The `rich-columns-render` procedure renders `columns` as wrapped column rows.
+  |#
+  (define rich-columns-render
+    (lambda (columns)
+      (pcheck ([rich-columns? columns])
+              (apply append
+                     (map (lambda (row)
+                            ($columns-render-row row (rich-columns-gap columns)))
+                          ($pack-column-blocks
+                           ($items->blocks (rich-columns-items columns))
+                           (rich-columns-width columns)
+                           (rich-columns-gap columns)))))))
+
+  #|macro:rich-columns
+  The `rich-columns` macro constructs a columns renderable and binds it to an
+  identifier. The `:items` field accepts either an expression or a parenthesized
+  literal item list such as `("a" "b")`.
+  |#
+  (define-syntax rich-columns
+    (lambda (stx)
+      (define field->setter
+        (lambda (field)
+          (let ([datum (syntax->datum field)])
+            (case datum
+              [(:items) #'rich-columns-items-set!]
+              [(:width) #'rich-columns-width-set!]
+              [(:gap) #'rich-columns-gap-set!]
+              [else (syntax-error field "invalid rich-columns field")]))))
+      (define field-value
+        (lambda (field value)
+          (if (eq? (syntax->datum field) ':items)
+              (syntax-case value ()
+                [(item ...) #'(list item ...)]
+                [_ value])
+              value)))
+      (define build-setters
+        (lambda (name clause*)
+          (let loop ([clause* clause*] [setter* '()])
+            (cond [(null? clause*) (reverse setter*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-columns form")]
+                  [else
+                   (let* ([field (car clause*)]
+                          [setter (field->setter field)]
+                          [value (field-value field (cadr clause*))])
+                     (with-syntax ([columns-name name]
+                                   [set-columns-field! setter]
+                                   [field-value value])
+                       (loop (cddr clause*)
+                             (cons #'(set-columns-field! columns-name field-value)
+                                   setter*))))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
+           #'(begin
+               (define name (make-rich-columns))
+               setter ...))]
+        [_ (syntax-error stx "invalid rich-columns form")])))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Layout
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-layout?
+  The `rich-layout?` procedure returns `#t` when its argument is a rich layout
+  object, and `#f` otherwise.
+  |#
+  (define rich-layout?
+    (lambda (x)
+      ($rich-layout? x)))
+
+  #|proc:make-rich-layout
+  The `make-rich-layout` procedure constructs a layout renderable with
+  direction `row` or `column` and a list of `items`.
+  |#
+  (define make-rich-layout
+    (case-lambda
+      [()
+       (make-rich-layout 'column '())]
+      [(direction items)
+       (pcheck ([$rich-layout-direction? direction] [list? items])
+               ($make-rich-layout-record direction items))]))
+
+  #|proc:rich-layout-direction
+  The `rich-layout-direction` procedure returns the direction for `layout`.
+  |#
+  (define rich-layout-direction
+    (lambda (layout)
+      (pcheck ([rich-layout? layout])
+              ($rich-layout-direction layout))))
+
+  #|proc:rich-layout-direction-set!
+  The `rich-layout-direction-set!` procedure sets the direction for `layout`.
+  |#
+  (define rich-layout-direction-set!
+    (lambda (layout direction)
+      (pcheck ([rich-layout? layout] [$rich-layout-direction? direction])
+              ($rich-layout-direction-set! layout direction))))
+
+  #|proc:rich-layout-items
+  The `rich-layout-items` procedure returns the items for `layout`.
+  |#
+  (define rich-layout-items
+    (lambda (layout)
+      (pcheck ([rich-layout? layout])
+              ($rich-layout-items layout))))
+
+  #|proc:rich-layout-items-set!
+  The `rich-layout-items-set!` procedure sets the items for `layout`.
+  |#
+  (define rich-layout-items-set!
+    (lambda (layout items)
+      (pcheck ([rich-layout? layout] [list? items])
+              ($rich-layout-items-set! layout items))))
+
+  #|proc:rich-layout-render
+  The `rich-layout-render` procedure renders `layout` as row or column segment
+  lines.
+  |#
+  (define rich-layout-render
+    (lambda (layout)
+      (pcheck ([rich-layout? layout])
+              (case (rich-layout-direction layout)
+                [(row)
+                 ($render-horizontal-blocks ($items->blocks (rich-layout-items layout)) 1)]
+                [(column)
+                 (apply append
+                        (map $value->segment-lines (rich-layout-items layout)))]))))
+
+  #|macro:rich-layout
+  The `rich-layout` macro constructs a layout renderable and binds it to an
+  identifier. The `:items` field accepts either an expression or a parenthesized
+  literal item list such as `("a" "b")`.
+  |#
+  (define-syntax rich-layout
+    (lambda (stx)
+      (define field->setter
+        (lambda (field)
+          (let ([datum (syntax->datum field)])
+            (case datum
+              [(:direction) #'rich-layout-direction-set!]
+              [(:items) #'rich-layout-items-set!]
+              [else (syntax-error field "invalid rich-layout field")]))))
+      (define field-value
+        (lambda (field value)
+          (if (eq? (syntax->datum field) ':items)
+              (syntax-case value ()
+                [(item ...) #'(list item ...)]
+                [_ value])
+              value)))
+      (define build-setters
+        (lambda (name clause*)
+          (let loop ([clause* clause*] [setter* '()])
+            (cond [(null? clause*) (reverse setter*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-layout form")]
+                  [else
+                   (let* ([field (car clause*)]
+                          [setter (field->setter field)]
+                          [value (field-value field (cadr clause*))])
+                     (with-syntax ([layout-name name]
+                                   [set-layout-field! setter]
+                                   [field-value value])
+                       (loop (cddr clause*)
+                             (cons #'(set-layout-field! layout-name field-value)
+                                   setter*))))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
+           #'(begin
+               (define name (make-rich-layout))
+               setter ...))]
+        [_ (syntax-error stx "invalid rich-layout form")])))
+
+  (rich-register-renderer! rich-rule? rich-rule-render)
+  (rich-register-renderer! rich-padding? rich-padding-render)
+  (rich-register-renderer! rich-align? rich-align-render)
+  (rich-register-renderer! rich-columns? rich-columns-render)
+  (rich-register-renderer! rich-layout? rich-layout-render))
