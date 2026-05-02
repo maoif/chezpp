@@ -110,44 +110,56 @@
 (define demo-status
   (lambda ()
     (demo-section "Status")
-    (let ([status (make-rich-status "warming up demo")])
-      (rich-status-frefresh! (current-output-port) status)
-      (flush-output-port)
-      (milisleep 80)
-      (rich-status-message-set! status "rendering examples")
-      (rich-status-frefresh! (current-output-port) status)
-      (flush-output-port)
-      (milisleep 80)
-      (rich-status-message-set! status "done")
-      (display "\r\033[2K")
-      (rich-status-ffinish! (current-output-port) status))))
+    (let ([port (current-output-port)]
+          [status (make-rich-status "warming up demo"
+                                    '("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧")
+                                    0.05)])
+      (dynamic-wind
+        (lambda () (rich-status-start! port status 50))
+        (lambda ()
+          (milisleep 220)
+          (rich-status-message-set! status "rendering examples")
+          (milisleep 220)
+          (rich-status-message-set! status "done")
+          (milisleep 120))
+        (lambda ()
+          (rich-status-stop! status)
+          (display "\r\033[2K" port)
+          (rich-status-ffinish! port status))))))
 
 (define demo-progress
   (lambda ()
     (demo-section "Progress")
     (let* ([progress (make-rich-progress 24)]
            [compile-id (rich-progress-add-task! progress "compile" 100)]
-           [test-id (rich-progress-add-task! progress "test" 80)])
+           [test-id (rich-progress-add-task! progress "test" 80)]
+           [port (current-output-port)])
       (rich-progress-columns-set!
        progress
-       (list (rich-progress-spinner-column)
+       (list (rich-progress-spinner-column
+              '("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧")
+              0.05)
              (rich-progress-text-column "{description}")
              (rich-progress-bar-column "=" "." "~")
              (rich-progress-percent-column)
              (rich-progress-complete-column)
              (rich-progress-elapsed-column)))
-      (let loop ([step 0])
-        (when (< step 4)
-          (rich-progress-update! progress compile-id (* step 25))
-          (rich-progress-update! progress test-id (* step 20))
-          (rich-progress-frefresh! (current-output-port) progress)
-          (flush-output-port)
-          (milisleep 80)
-          (loop (+ step 1))))
-      (rich-progress-complete! progress compile-id)
-      (rich-progress-complete! progress test-id)
-      (display "\r\033[2K\033[1A\r\033[2K")
-      (rich-progress-ffinish! (current-output-port) progress))))
+      (dynamic-wind
+        (lambda () (rich-progress-start! port progress 50))
+        (lambda ()
+          (let loop ([step 0])
+            (when (< step 5)
+              (rich-progress-update! progress compile-id (* step 20))
+              (rich-progress-update! progress test-id (* step 16))
+              (milisleep 150)
+              (loop (+ step 1))))
+          (rich-progress-complete! progress compile-id)
+          (rich-progress-complete! progress test-id)
+          (milisleep 120))
+        (lambda ()
+          (rich-progress-stop! progress)
+          (display "\r\033[2K\033[1A\r\033[2K" port)
+          (rich-progress-ffinish! port progress))))))
 
 (define main
   (lambda ()
