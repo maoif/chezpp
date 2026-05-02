@@ -332,6 +332,19 @@
          (rich-table-add-row! t 'rich-table-symbol-render-test)
          (string-contains? (rich-export-text t) "X")))
 
+     (let ([columns (vector "Name" "Status")]
+           [rows '(("build" "ok"))])
+       (rich-table t
+         :columns (vector->list columns)
+         :rows (map (lambda (row) row) rows))
+       (equal? (string-append
+                "+-------+--------+\n"
+                "| Name  | Status |\n"
+                "+-------+--------+\n"
+                "| build | ok     |\n"
+                "+-------+--------+")
+               (rich-export-text t)))
+
      )
 
 (mat rich-table-errors

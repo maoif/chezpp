@@ -476,10 +476,9 @@
   |#
   (define-syntax rich-table
     (lambda (stx)
-      (define ordinary-list-head?
+      (define expression-head?
         (lambda (datum)
-          (and (symbol? datum)
-               (memq datum '(list quote quasiquote cons append)))))
+          (symbol? datum)))
       (define setter-action
         (lambda (name setter value)
           (with-syntax ([table-name name]
@@ -507,7 +506,7 @@
              '()]
             [(head column ...)
              (let ([head-datum (syntax->datum #'head)])
-               (if (ordinary-list-head? head-datum)
+               (if (expression-head? head-datum)
                    (list (columns-expression-action name value))
                    (with-syntax ([table-name name])
                      (syntax->list
@@ -522,7 +521,7 @@
              '()]
             [(head row ...)
              (let ([head-datum (syntax->datum #'head)])
-               (cond [(ordinary-list-head? head-datum)
+               (cond [(expression-head? head-datum)
                       (list (rows-expression-action name value))]
                      [else
                       (syntax-case value ()
