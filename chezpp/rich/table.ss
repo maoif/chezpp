@@ -87,7 +87,10 @@
 
   (define $value->segment-lines
     (lambda (value)
-      (cond [(string? value)
+      (cond [(rich-renderer-for value) =>
+             (lambda (renderer)
+               ($rendered->segment-lines 'rich-table-render (renderer value)))]
+            [(string? value)
              ($string->segment-lines value)]
             [(or (char? value) (number? value) (symbol? value))
              ($string->segment-lines
@@ -96,9 +99,6 @@
                  (if (char? value)
                      (write-char value port)
                      (display value port)))))]
-            [(rich-renderer-for value) =>
-             (lambda (renderer)
-               ($rendered->segment-lines 'rich-table-render (renderer value)))]
             [else
              (rich-pretty-render value)])))
 

@@ -323,6 +323,15 @@
        (and (rich-table? t)
             (string-contains? (rich-export-text t) "Build" "compile" "test")))
 
+     (begin
+       (rich-register-renderer!
+        (lambda (value) (eq? value 'rich-table-symbol-render-test))
+        (lambda (value) (list (list (rich-segment "X")))))
+       (let ([t (make-rich-table)])
+         (rich-table-add-column! t "Name")
+         (rich-table-add-row! t 'rich-table-symbol-render-test)
+         (string-contains? (rich-export-text t) "X")))
+
      )
 
 (mat rich-table-errors
