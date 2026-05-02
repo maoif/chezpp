@@ -389,12 +389,44 @@
          (rich-live-refresh! live)
          (rich-live-renderable-set! live "two")
          (rich-live-refresh! live)
-         (string-contains? (get-output-string p) "one" "two")))
+         (equal? "one\r\033[2Ktwo" (get-output-string p))))
 
      (parameterize ([rich-current-time (lambda () 100)])
        (let ()
          (rich-status st :message "Working")
          (equal? "⠋ Working" (rich-export-text st))))
+
+     (equal? '("a Working" "b Working" "c Working")
+             (let ([now 0])
+               (parameterize ([rich-current-time (lambda () now)])
+                 (let ([status (make-rich-status "Working"
+                                                 (make-rich-console)
+                                                 '("a" "b" "c")
+                                                 1)])
+                   (let ([first (rich-export-text status)])
+                     (set! now 1)
+                     (let ([second (rich-export-text status)])
+                       (set! now 2)
+                       (list first second (rich-export-text status))))))))
+
+     (equal? "a Working\r\033[2Kb Working\r\033[2Kc Working"
+             (let ([now 0]
+                   [p (open-output-string)])
+               (parameterize ([rich-current-time (lambda () now)])
+                 (let* ([console (make-rich-console)]
+                        [status (make-rich-status "Working"
+                                                  console
+                                                  '("a" "b" "c")
+                                                  1)]
+                        [live (make-rich-live status console 0 #f)])
+                   (rich-console-output-port-set! console p)
+                   (rich-console-color-system-set! console 'none)
+                   (rich-live-refresh! live)
+                   (set! now 1)
+                   (rich-live-refresh! live)
+                   (set! now 2)
+                   (rich-live-refresh! live)
+                   (get-output-string p)))))
 
      )
 

@@ -364,8 +364,9 @@
       ($rich-status? x)))
 
   #|proc:make-rich-status
-  The `make-rich-status` procedure constructs a status spinner with `message`
-  and deterministic time hooks.
+  The `make-rich-status` procedure constructs a status renderable with
+  `message`, spinner frames, and deterministic time hooks. It does not start a
+  live refresh loop; use `rich-status-start!` to display a spinning status.
   |#
   (define make-rich-status
     (case-lambda
@@ -465,7 +466,8 @@
                             (rich-segment (rich-status-message status))))))))
 
   #|proc:rich-status-start!
-  The `rich-status-start!` procedure starts a live display for `status`.
+  The `rich-status-start!` procedure starts a live display for `status` so its
+  frame is refreshed at the status interval.
   |#
   (define rich-status-start!
     (lambda (status)
