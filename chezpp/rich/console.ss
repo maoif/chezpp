@@ -272,10 +272,12 @@
       (syntax-case stx ()
         [(_ name clause ...)
          (identifier? #'name)
-         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
-           #'(begin
-               (define name (make-rich-console))
-               setter ...))]
+         (with-syntax ([tmp (car (generate-temporaries #'(name)))])
+           (with-syntax ([(setter ...) (build-setters #'tmp #'(clause ...))])
+             #'(define name
+                 (let ([tmp (make-rich-console)])
+                   setter ...
+                   tmp))))]
         [_ (syntax-error stx "invalid rich-console form")])))
 
   (define $target+values

@@ -142,6 +142,36 @@
           rich-tree-add!
           rich-tree-render
           rich-tree-render/ascii
+          rich-current-time
+          rich-sleep
+          make-rich-live
+          rich-live
+          rich-live?
+          rich-live-renderable
+          rich-live-renderable-set!
+          rich-live-console
+          rich-live-console-set!
+          rich-live-refresh-rate
+          rich-live-refresh-rate-set!
+          rich-live-transient?
+          rich-live-transient?-set!
+          rich-live-start!
+          rich-live-refresh!
+          rich-live-stop!
+          make-rich-status
+          rich-status
+          rich-status?
+          rich-status-message
+          rich-status-message-set!
+          rich-status-console
+          rich-status-console-set!
+          rich-status-frames
+          rich-status-frames-set!
+          rich-status-interval
+          rich-status-interval-set!
+          rich-status-start!
+          rich-status-stop!
+          rich-status-render
 
           make-rich-console
           rich-console
@@ -185,4 +215,5 @@
           (chezpp rich basic)
           (chezpp rich table)
           (chezpp rich panel)
-          (chezpp rich tree)))
+          (chezpp rich tree)
+          (chezpp rich live)))

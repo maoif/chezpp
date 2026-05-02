@@ -1,0 +1,551 @@
+#!chezscheme
+(library (chezpp rich live)
+  (export rich-current-time
+          rich-sleep
+          make-rich-live
+          rich-live
+          rich-live?
+          rich-live-renderable
+          rich-live-renderable-set!
+          rich-live-console
+          rich-live-console-set!
+          rich-live-refresh-rate
+          rich-live-refresh-rate-set!
+          rich-live-transient?
+          rich-live-transient?-set!
+          rich-live-start!
+          rich-live-refresh!
+          rich-live-stop!
+          make-rich-status
+          rich-status
+          rich-status?
+          rich-status-message
+          rich-status-message-set!
+          rich-status-console
+          rich-status-console-set!
+          rich-status-frames
+          rich-status-frames-set!
+          rich-status-interval
+          rich-status-interval-set!
+          rich-status-start!
+          rich-status-stop!
+          rich-status-render)
+  (import (chezpp chez)
+          (chezpp utils)
+          (chezpp rich private common)
+          (chezpp rich style)
+          (chezpp rich segment)
+          (chezpp rich renderable)
+          (chezpp rich console))
+
+  (define-record-type (rich-live-record $make-rich-live-record $rich-live?)
+    (fields (mutable renderable $rich-live-renderable $rich-live-renderable-set!)
+            (mutable console $rich-live-console $rich-live-console-set!)
+            (mutable refresh-rate $rich-live-refresh-rate $rich-live-refresh-rate-set!)
+            (mutable transient? $rich-live-transient? $rich-live-transient?-set!)
+            (mutable started? $rich-live-started? $rich-live-started?-set!)
+            (mutable previous-line-count $rich-live-previous-line-count $rich-live-previous-line-count-set!)
+            (mutable thread $rich-live-thread $rich-live-thread-set!)
+            (mutable stop? $rich-live-stop? $rich-live-stop?-set!)))
+
+  (define-record-type (rich-status-record $make-rich-status-record $rich-status?)
+    (fields (mutable message $rich-status-message $rich-status-message-set!)
+            (mutable console $rich-status-console $rich-status-console-set!)
+            (mutable frames $rich-status-frames $rich-status-frames-set!)
+            (mutable interval $rich-status-interval $rich-status-interval-set!)
+            (mutable start-time $rich-status-start-time $rich-status-start-time-set!)
+            (mutable live $rich-status-live $rich-status-live-set!)))
+
+  (define $default-status-frames
+    '("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"))
+
+  (define $real-nonnegative?
+    (lambda (x)
+      (and (real? x) (not (negative? x)))))
+
+  (define $real-positive?
+    (lambda (x)
+      (and (real? x) (positive? x))))
+
+  (define $status-message?
+    (lambda (x)
+      (string? x)))
+
+  (define $string-list?
+    (lambda (x)
+      (and (list? x)
+           (not (null? x))
+           (rich-list-every? string? x))))
+
+  (define $time->seconds
+    (lambda (time)
+      (+ (time-second time)
+         (/ (time-nanosecond time) 1000000000.0))))
+
+  (define $round->exact
+    (lambda (value)
+      (let ([rounded (round value)])
+        (if (exact? rounded)
+            rounded
+            (inexact->exact rounded)))))
+
+  (define $default-sleep
+    (lambda (seconds)
+      ($sleep
+       (let* ([milliseconds (max 0 ($round->exact (* seconds 1000)))]
+              [sec (quotient milliseconds 1000)]
+              [nsec (* 1000000 (remainder milliseconds 1000))])
+         (make-time 'time-duration nsec sec)))))
+
+  (define $string-line-count
+    (lambda (text)
+      (let ([len (string-length text)])
+        (let loop ([i 0] [n 1])
+          (cond [(= i len) n]
+                [(char=? (string-ref text i) #\newline)
+                 (loop (+ i 1) (+ n 1))]
+                [else
+                 (loop (+ i 1) n)])))))
+
+  (define $rendered-line-count
+    (lambda (value)
+      ($string-line-count (rich-export-text value))))
+
+  (define $clear-live-output
+    (lambda (port line-count)
+      (when (positive? line-count)
+        (display "\r\033[2K" port)
+        (let loop ([n (- line-count 1)])
+          (when (positive? n)
+            (display "\033[1A\r\033[2K" port)
+            (loop (- n 1)))))))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Time Hooks
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-current-time
+  The `rich-current-time` parameter returns the current time in seconds for
+  live display and status rendering.
+  |#
+  (define rich-current-time
+    (make-parameter
+     (lambda ()
+       ($time->seconds (current-time)))))
+
+  #|proc:rich-sleep
+  The `rich-sleep` parameter returns the procedure used by live refresh threads
+  to sleep for a number of seconds.
+  |#
+  (define rich-sleep
+    (make-parameter $default-sleep))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Live
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-live?
+  The `rich-live?` procedure returns `#t` when its argument is a rich live
+  display object, and `#f` otherwise.
+  |#
+  (define rich-live?
+    (lambda (x)
+      ($rich-live? x)))
+
+  #|proc:make-rich-live
+  The `make-rich-live` procedure constructs a live display around `renderable`
+  using a fresh console, four refreshes per second, and non-transient output.
+  |#
+  (define make-rich-live
+    (case-lambda
+      [(renderable)
+       ($make-rich-live-record renderable (make-rich-console) 4 #f #f 0 #f #f)]
+      [(renderable console refresh-rate transient?)
+       (pcheck ([rich-console? console]
+                [$real-nonnegative? refresh-rate]
+                [boolean? transient?])
+               ($make-rich-live-record renderable console refresh-rate
+                                       transient? #f 0 #f #f))]))
+
+  #|proc:rich-live-renderable
+  The `rich-live-renderable` procedure returns the renderable for `live`.
+  |#
+  (define rich-live-renderable
+    (lambda (live)
+      (pcheck ([rich-live? live])
+              ($rich-live-renderable live))))
+
+  #|proc:rich-live-renderable-set!
+  The `rich-live-renderable-set!` procedure sets the renderable for `live`.
+  |#
+  (define rich-live-renderable-set!
+    (lambda (live renderable)
+      (pcheck ([rich-live? live])
+              ($rich-live-renderable-set! live renderable))))
+
+  #|proc:rich-live-console
+  The `rich-live-console` procedure returns the console for `live`.
+  |#
+  (define rich-live-console
+    (lambda (live)
+      (pcheck ([rich-live? live])
+              ($rich-live-console live))))
+
+  #|proc:rich-live-console-set!
+  The `rich-live-console-set!` procedure sets the console for `live`.
+  |#
+  (define rich-live-console-set!
+    (lambda (live console)
+      (pcheck ([rich-live? live] [rich-console? console])
+              ($rich-live-console-set! live console))))
+
+  #|proc:rich-live-refresh-rate
+  The `rich-live-refresh-rate` procedure returns refreshes per second for
+  `live`.
+  |#
+  (define rich-live-refresh-rate
+    (lambda (live)
+      (pcheck ([rich-live? live])
+              ($rich-live-refresh-rate live))))
+
+  #|proc:rich-live-refresh-rate-set!
+  The `rich-live-refresh-rate-set!` procedure sets refreshes per second for
+  `live`.
+  |#
+  (define rich-live-refresh-rate-set!
+    (lambda (live refresh-rate)
+      (pcheck ([rich-live? live] [$real-nonnegative? refresh-rate])
+              ($rich-live-refresh-rate-set! live refresh-rate))))
+
+  #|proc:rich-live-transient?
+  The `rich-live-transient?` procedure returns whether `live` clears output on
+  stop.
+  |#
+  (define rich-live-transient?
+    (lambda (live)
+      (pcheck ([rich-live? live])
+              ($rich-live-transient? live))))
+
+  #|proc:rich-live-transient?-set!
+  The `rich-live-transient?-set!` procedure sets whether `live` clears output
+  on stop.
+  |#
+  (define rich-live-transient?-set!
+    (lambda (live transient?)
+      (pcheck ([rich-live? live] [boolean? transient?])
+              ($rich-live-transient?-set! live transient?))))
+
+  #|proc:rich-live-refresh!
+  The `rich-live-refresh!` procedure clears the previous live output and writes
+  the current renderable to the live console.
+  |#
+  (define rich-live-refresh!
+    (lambda (live)
+      (pcheck ([rich-live? live])
+              (let* ([console (rich-live-console live)]
+                     [port (rich-console-output-port console)])
+                ($clear-live-output port ($rich-live-previous-line-count live))
+                (rich-print console (rich-live-renderable live))
+                (flush-output-port port)
+                ($rich-live-previous-line-count-set!
+                 live
+                 ($rendered-line-count (rich-live-renderable live)))
+                live))))
+
+  #|proc:rich-live-start!
+  The `rich-live-start!` procedure starts refreshing `live` and returns `live`.
+  |#
+  (define rich-live-start!
+    (lambda (live)
+      (pcheck ([rich-live? live])
+              (unless ($rich-live-started? live)
+                ($rich-live-started?-set! live #t)
+                ($rich-live-stop?-set! live #f)
+                (rich-live-refresh! live)
+                (when (positive? (rich-live-refresh-rate live))
+                  (let ([thread
+                         (fork-thread
+                          (lambda ()
+                            (let loop ()
+                              (unless ($rich-live-stop? live)
+                                ((rich-sleep) (/ 1 (rich-live-refresh-rate live)))
+                                (unless ($rich-live-stop? live)
+                                  (rich-live-refresh! live)
+                                  (loop))))))])
+                    ($rich-live-thread-set! live thread))))
+              live)))
+
+  #|proc:rich-live-stop!
+  The `rich-live-stop!` procedure stops refreshing `live` and returns `live`.
+  |#
+  (define rich-live-stop!
+    (lambda (live)
+      (pcheck ([rich-live? live])
+              (when ($rich-live-started? live)
+                ($rich-live-stop?-set! live #t)
+                (when ($rich-live-thread live)
+                  (thread-join ($rich-live-thread live))
+                  ($rich-live-thread-set! live #f))
+                (when (rich-live-transient? live)
+                  (let ([port (rich-console-output-port (rich-live-console live))])
+                    ($clear-live-output port ($rich-live-previous-line-count live))
+                    (flush-output-port port)
+                    ($rich-live-previous-line-count-set! live 0)))
+                ($rich-live-started?-set! live #f))
+              live)))
+
+  #|macro:rich-live
+  The `rich-live` macro constructs a live display and binds it to an identifier.
+  The `:renderable` field is required.
+  |#
+  (define-syntax rich-live
+    (lambda (stx)
+      (define field->setter
+        (lambda (field)
+          (let ([datum (syntax->datum field)])
+            (case datum
+              [(:renderable) #'rich-live-renderable-set!]
+              [(:console) #'rich-live-console-set!]
+              [(:refresh-rate) #'rich-live-refresh-rate-set!]
+              [(:transient?) #'rich-live-transient?-set!]
+              [else (syntax-error field "invalid rich-live field")]))))
+      (define renderable-value
+        (lambda (clause*)
+          (let loop ([clause* clause*])
+            (cond [(null? clause*) #f]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-live form")]
+                  [(eq? (syntax->datum (car clause*)) ':renderable)
+                   (cadr clause*)]
+                  [else
+                   (loop (cddr clause*))]))))
+      (define build-actions
+        (lambda (name clause*)
+          (let loop ([clause* clause*] [setter* '()])
+            (cond [(null? clause*) (reverse setter*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-live form")]
+                  [else
+                   (let ([field (car clause*)]
+                         [value (cadr clause*)])
+                     (if (eq? (syntax->datum field) ':renderable)
+                         (loop (cddr clause*) setter*)
+                         (with-syntax ([live-name name]
+                                       [set-live-field! (field->setter field)]
+                                       [field-value value])
+                           (loop (cddr clause*)
+                                 (cons #'(set-live-field! live-name field-value)
+                                       setter*)))))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (let ([renderable (renderable-value #'(clause ...))])
+           (unless renderable
+             (syntax-error stx "rich-live requires :renderable"))
+           (with-syntax ([tmp (car (generate-temporaries #'(name)))]
+                         [renderable-value renderable])
+             (with-syntax ([(action ...) (build-actions #'tmp #'(clause ...))])
+               #'(define name
+                   (let ([tmp (make-rich-live renderable-value)])
+                     action ...
+                     tmp)))))]
+        [_ (syntax-error stx "invalid rich-live form")])))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Status
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:rich-status?
+  The `rich-status?` procedure returns `#t` when its argument is a rich status
+  object, and `#f` otherwise.
+  |#
+  (define rich-status?
+    (lambda (x)
+      ($rich-status? x)))
+
+  #|proc:make-rich-status
+  The `make-rich-status` procedure constructs a status spinner with `message`
+  and deterministic time hooks.
+  |#
+  (define make-rich-status
+    (case-lambda
+      [(message)
+       (make-rich-status message (make-rich-console) $default-status-frames 0.1)]
+      [(message console frames interval)
+       (pcheck ([$status-message? message]
+                [rich-console? console]
+                [$string-list? frames]
+                [$real-positive? interval])
+               ($make-rich-status-record message console frames interval
+                                         ((rich-current-time))
+                                         #f))]))
+
+  #|proc:rich-status-message
+  The `rich-status-message` procedure returns the message for `status`.
+  |#
+  (define rich-status-message
+    (lambda (status)
+      (pcheck ([rich-status? status])
+              ($rich-status-message status))))
+
+  #|proc:rich-status-message-set!
+  The `rich-status-message-set!` procedure sets the message for `status`.
+  |#
+  (define rich-status-message-set!
+    (lambda (status message)
+      (pcheck ([rich-status? status] [$status-message? message])
+              ($rich-status-message-set! status message))))
+
+  #|proc:rich-status-console
+  The `rich-status-console` procedure returns the console for `status`.
+  |#
+  (define rich-status-console
+    (lambda (status)
+      (pcheck ([rich-status? status])
+              ($rich-status-console status))))
+
+  #|proc:rich-status-console-set!
+  The `rich-status-console-set!` procedure sets the console for `status`.
+  |#
+  (define rich-status-console-set!
+    (lambda (status console)
+      (pcheck ([rich-status? status] [rich-console? console])
+              ($rich-status-console-set! status console))))
+
+  #|proc:rich-status-frames
+  The `rich-status-frames` procedure returns the spinner frames for `status`.
+  |#
+  (define rich-status-frames
+    (lambda (status)
+      (pcheck ([rich-status? status])
+              ($rich-status-frames status))))
+
+  #|proc:rich-status-frames-set!
+  The `rich-status-frames-set!` procedure sets the spinner frames for `status`.
+  |#
+  (define rich-status-frames-set!
+    (lambda (status frames)
+      (pcheck ([rich-status? status] [$string-list? frames])
+              ($rich-status-frames-set! status frames))))
+
+  #|proc:rich-status-interval
+  The `rich-status-interval` procedure returns the spinner frame interval for
+  `status`.
+  |#
+  (define rich-status-interval
+    (lambda (status)
+      (pcheck ([rich-status? status])
+              ($rich-status-interval status))))
+
+  #|proc:rich-status-interval-set!
+  The `rich-status-interval-set!` procedure sets the spinner frame interval for
+  `status`.
+  |#
+  (define rich-status-interval-set!
+    (lambda (status interval)
+      (pcheck ([rich-status? status] [$real-positive? interval])
+              ($rich-status-interval-set! status interval))))
+
+  #|proc:rich-status-render
+  The `rich-status-render` procedure renders `status` as one segment line.
+  |#
+  (define rich-status-render
+    (lambda (status)
+      (pcheck ([rich-status? status])
+              (let* ([frames (rich-status-frames status)]
+                     [elapsed (max 0 (- ((rich-current-time))
+                                        ($rich-status-start-time status)))]
+                     [index (modulo (inexact->exact
+                                     (floor (/ elapsed
+                                               (rich-status-interval status))))
+                                    (length frames))]
+                     [frame (list-ref frames index)])
+                (list (list (rich-segment frame)
+                            (rich-segment " ")
+                            (rich-segment (rich-status-message status))))))))
+
+  #|proc:rich-status-start!
+  The `rich-status-start!` procedure starts a live display for `status`.
+  |#
+  (define rich-status-start!
+    (lambda (status)
+      (pcheck ([rich-status? status])
+              (unless ($rich-status-live status)
+                ($rich-status-start-time-set! status ((rich-current-time)))
+                (let ([live (make-rich-live status
+                                            (rich-status-console status)
+                                            (/ 1 (rich-status-interval status))
+                                            #f)])
+                  ($rich-status-live-set! status live)
+                  (rich-live-start! live)))
+              status)))
+
+  #|proc:rich-status-stop!
+  The `rich-status-stop!` procedure stops the live display for `status`.
+  |#
+  (define rich-status-stop!
+    (lambda (status)
+      (pcheck ([rich-status? status])
+              (when ($rich-status-live status)
+                (rich-live-stop! ($rich-status-live status))
+                ($rich-status-live-set! status #f))
+              status)))
+
+  #|macro:rich-status
+  The `rich-status` macro constructs a status spinner and binds it to an
+  identifier. The `:message` field is required.
+  |#
+  (define-syntax rich-status
+    (lambda (stx)
+      (define field->setter
+        (lambda (field)
+          (let ([datum (syntax->datum field)])
+            (case datum
+              [(:message) #'rich-status-message-set!]
+              [(:console) #'rich-status-console-set!]
+              [(:frames) #'rich-status-frames-set!]
+              [(:interval) #'rich-status-interval-set!]
+              [else (syntax-error field "invalid rich-status field")]))))
+      (define message-value
+        (lambda (clause*)
+          (let loop ([clause* clause*])
+            (cond [(null? clause*) #f]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-status form")]
+                  [(eq? (syntax->datum (car clause*)) ':message)
+                   (cadr clause*)]
+                  [else
+                   (loop (cddr clause*))]))))
+      (define build-actions
+        (lambda (name clause*)
+          (let loop ([clause* clause*] [setter* '()])
+            (cond [(null? clause*) (reverse setter*)]
+                  [(null? (cdr clause*))
+                   (syntax-error stx "invalid rich-status form")]
+                  [else
+                   (let ([field (car clause*)]
+                         [value (cadr clause*)])
+                     (if (eq? (syntax->datum field) ':message)
+                         (loop (cddr clause*) setter*)
+                         (with-syntax ([status-name name]
+                                       [set-status-field! (field->setter field)]
+                                       [field-value value])
+                           (loop (cddr clause*)
+                                 (cons #'(set-status-field! status-name field-value)
+                                       setter*)))))]))))
+      (syntax-case stx ()
+        [(_ name clause ...)
+         (identifier? #'name)
+         (let ([message (message-value #'(clause ...))])
+           (unless message
+             (syntax-error stx "rich-status requires :message"))
+           (with-syntax ([tmp (car (generate-temporaries #'(name)))]
+                         [message-value message])
+             (with-syntax ([(action ...) (build-actions #'tmp #'(clause ...))])
+               #'(define name
+                   (let ([tmp (make-rich-status message-value)])
+                     action ...
+                     tmp)))))]
+        [_ (syntax-error stx "invalid rich-status form")])))
+
+  (rich-register-renderer! rich-status? rich-status-render))

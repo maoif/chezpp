@@ -380,6 +380,34 @@
 
      )
 
+(mat rich-live-status
+
+     (let ([p (open-output-string)])
+       (rich-console c :output-port p :color-system 'none)
+       (rich-live live :console c :renderable "one")
+       (begin
+         (rich-live-refresh! live)
+         (rich-live-renderable-set! live "two")
+         (rich-live-refresh! live)
+         (string-contains? (get-output-string p) "one" "two")))
+
+     (parameterize ([rich-current-time (lambda () 100)])
+       (let ()
+         (rich-status st :message "Working")
+         (equal? "⠋ Working" (rich-export-text st))))
+
+     )
+
+(mat rich-live-errors
+
+     ;; Live refresh requires a rich-live object.
+     (error? (rich-live-refresh! "not-live"))
+
+     ;; Status message must be printable text.
+     (error? (rich-status s :message #f))
+
+     )
+
 (mat rich-table
 
      (let ([t (make-rich-table)])
