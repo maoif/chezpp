@@ -309,6 +309,15 @@
                (rich-panel p :body "hello")
                (rich-export-text p)))
 
+     (equal? (string-append
+              "+---+\n"
+              "| \033[31ma\033[0m |\n"
+              "| \033[31mb\033[0m |\n"
+              "+---+")
+             (let ()
+               (rich-panel p :body (rich-text "a\nb" (rich-style 'red)))
+               (rich-export-ansi p)))
+
      (let ()
        (rich-tree tr :label "root")
        (let ([src (rich-tree-add! tr "src")])

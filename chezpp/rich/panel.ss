@@ -67,10 +67,46 @@
       (map (lambda (line) (list (rich-segment line)))
            ($string-split-lines text))))
 
+  (define $segment-copy
+    (lambda (segment text)
+      (rich-segment text
+                    (rich-segment-style segment)
+                    (rich-segment-control? segment))))
+
+  (define $normalize-segment-line
+    (lambda (line)
+      (let loop-segments ([segments line] [line '()] [lines '()])
+        (if (null? segments)
+            (reverse (cons (reverse line) lines))
+            (let loop-pieces ([pieces ($string-split-lines
+                                       (rich-segment-text (car segments)))]
+                              [line line]
+                              [lines lines])
+              (cond [(null? pieces)
+                     (loop-segments (cdr segments) line lines)]
+                    [(null? (cdr pieces))
+                     (loop-segments (cdr segments)
+                                    (cons ($segment-copy (car segments)
+                                                         (car pieces))
+                                          line)
+                                    lines)]
+                    [else
+                     (loop-pieces (cdr pieces)
+                                  '()
+                                  (cons (reverse
+                                         (cons ($segment-copy (car segments)
+                                                              (car pieces))
+                                               line))
+                                        lines))]))))))
+
+  (define $normalize-segment-lines
+    (lambda (lines)
+      (apply append (map $normalize-segment-line lines))))
+
   (define $rendered->segment-lines
     (lambda (who value)
       (cond [(string? value) ($string->segment-lines value)]
-            [($rich-segment-line-list? value) value]
+            [($rich-segment-line-list? value) ($normalize-segment-lines value)]
             [else (errorf who "renderer returned invalid value: ~a" value)])))
 
   (define $value->segment-lines
