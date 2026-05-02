@@ -651,6 +651,27 @@
 
      )
 
+(mat rich-integration
+
+     (let ([out (open-output-string)])
+       (rich-console c :output-port out :color-system 'standard)
+       (rich-panel p :body "done" :box 'ascii)
+       (rich-print c
+                   (rich-style 'bold 'green)
+                   "pass"
+                   (reset-style)
+                   " "
+                   p)
+       (string-contains? (get-output-string out) "\033[1m" "pass" "+------+" "done"))
+
+     (let ()
+       (rich-table t
+         :columns ("Name" "Status")
+         :rows (("compile" "ok")))
+       (string-contains? (rich-export-ansi t) "compile" "ok"))
+
+     )
+
 (mat rich-console-errors
 
      ;; Console width must be positive.
