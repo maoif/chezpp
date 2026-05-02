@@ -334,6 +334,15 @@
        (rich-tree tr :label (rich-text "root" (rich-style 'red)))
        (equal? "\033[31mroot\033[0m" (rich-export-ansi tr)))
 
+     (let ()
+       (rich-tree tr :label "root")
+       (rich-tree-add! tr (rich-text "child1\nchild2" (rich-style 'red)))
+       (equal? (string-append
+                "root\n"
+                "└── \033[31mchild1\033[0m\n"
+                "    \033[31mchild2\033[0m")
+               (rich-export-ansi tr)))
+
      (let ([p (open-output-string)])
        (rich-tree tr :label "root")
        (rich-console c
@@ -357,7 +366,7 @@
      ;; Tree label is required.
      (error? (eval '(let () (rich-tree tr) tr)))
 
-     ;; Tree child labels must be printable values.
+     ;; Tree child insertion requires a tree receiver.
      (error? (rich-tree-add! "not-a-tree" "x"))
 
      )
