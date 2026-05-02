@@ -364,23 +364,26 @@
             style-emitted?
             (let* ([segment (car segments)]
                    [style (rich-segment-style segment)]
-                   [style-emitted?
-                    (cond [(rich-style? style)
-                           (or ($write-style-ansi port color-system style)
-                               style-emitted?)]
-                          [(rich-reset? style)
-                           (when (and style-emitted?
-                                      (not (eq? color-system 'none)))
-                             (display rich-ansi-reset port))
-                           #f]
-                          [else style-emitted?])])
-              (display (rich-segment-text segment) port)
-              (let ([style-emitted?
-                     (if (and (rich-style? style)
-                              style-emitted?
-                              (not (eq? color-system 'none)))
+                   [segment-style-emitted?
+                    (and (rich-style? style)
+                         ($write-style-ansi port color-system style))]
+                   [segment-reset-emitted?
+                    (and (rich-reset? style)
+                         style-emitted?
+                         (not (eq? color-system 'none))
                          (begin
                            (display rich-ansi-reset port)
+                           #t))]
+                   [style-emitted?
+                    (and (not segment-reset-emitted?)
+                         (or segment-style-emitted? style-emitted?))])
+              (display (rich-segment-text segment) port)
+              (let ([style-emitted?
+                     (if (and (or segment-style-emitted? segment-reset-emitted?)
+                              (not (eq? color-system 'none)))
+                         (begin
+                           (when segment-style-emitted?
+                             (display rich-ansi-reset port))
                            ($restore-active-style port color-system active-style)
                            (and active-style #t))
                          style-emitted?)])
