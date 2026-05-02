@@ -7,7 +7,8 @@
           rich-tree-label-set!
           rich-tree-children
           rich-tree-add!
-          rich-tree-render)
+          rich-tree-render
+          rich-tree-render/ascii)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp rich private common)
@@ -77,15 +78,11 @@
             [else
              (rich-pretty-render value)])))
 
-  (define $value->plain-label
-    (lambda (value)
-      (let ([lines ($value->segment-lines value)])
-        (if (null? lines)
-            ""
-            (rich-segments->plain (car lines))))))
-
   (define $unicode-guides
     '#("├── " "└── " "│   " "    "))
+
+  (define $ascii-guides
+    '#("|-- " "`-- " "|   " "    "))
 
   (define $guide-branch
     (lambda (guides last?)
@@ -95,6 +92,21 @@
     (lambda (guides last?)
       (vector-ref guides (if last? 3 2))))
 
+  (define $prefix-label-lines
+    (lambda (label first-prefix rest-prefix)
+      (let ([lines ($value->segment-lines label)])
+        (if (null? lines)
+            (list (list (rich-segment first-prefix)))
+            (let loop ([lines lines] [first? #t] [out '()])
+              (if (null? lines)
+                  (reverse out)
+                  (loop (cdr lines)
+                        #f
+                        (cons (cons (rich-segment
+                                     (if first? first-prefix rest-prefix))
+                                    (car lines))
+                              out))))))))
+
   (define $render-node-children
     (lambda (children prefix guides)
       (let loop ([children children] [out '()])
@@ -102,22 +114,25 @@
             (reverse out)
             (let* ([child (car children)]
                    [last? (null? (cdr children))]
-                   [line (list (rich-segment
-                                (string-append prefix
-                                               ($guide-branch guides last?)
-                                               ($value->plain-label
-                                                (rich-tree-label child)))))]
+                   [child-prefix (string-append
+                                  prefix
+                                  ($guide-child-prefix guides last?))]
+                   [label-lines ($prefix-label-lines
+                                 (rich-tree-label child)
+                                 (string-append prefix
+                                                ($guide-branch guides last?))
+                                 child-prefix)]
                    [child-lines ($render-node-children
                                  (rich-tree-children child)
-                                 (string-append prefix
-                                                ($guide-child-prefix guides last?))
+                                 child-prefix
                                  guides)])
               (loop (cdr children)
-                    (rich-reverse-append child-lines (cons line out))))))))
+                    (rich-reverse-append child-lines
+                                         (rich-reverse-append label-lines out))))))))
 
   (define $rich-tree-render/guides
     (lambda (tree guides)
-      (cons (list (rich-segment ($value->plain-label (rich-tree-label tree))))
+      (append ($prefix-label-lines (rich-tree-label tree) "" "")
             ($render-node-children (rich-tree-children tree) "" guides))))
 
   ;;;;===----------------------------------------------------------------------===
@@ -189,6 +204,15 @@
     (lambda (tree)
       (pcheck ([rich-tree? tree])
               ($rich-tree-render/guides tree $unicode-guides))))
+
+  #|proc:rich-tree-render/ascii
+  The `rich-tree-render/ascii` procedure renders `tree` as segment lines with
+  ASCII guide characters.
+  |#
+  (define rich-tree-render/ascii
+    (lambda (tree)
+      (pcheck ([rich-tree? tree])
+              ($rich-tree-render/guides tree $ascii-guides))))
 
   #|macro:rich-tree
   The `rich-tree` macro constructs a tree node and binds it to an identifier.

@@ -35,7 +35,8 @@
           (chezpp rich segment)
           (chezpp rich renderable)
           (chezpp rich text)
-          (chezpp rich pretty))
+          (chezpp rich pretty)
+          (chezpp rich tree))
 
   (define-record-type rich-console-record
     (fields (mutable output-port $rich-console-output-port $rich-console-output-port-set!)
@@ -460,7 +461,13 @@
                      (let ([renderer (rich-renderer-for value)])
                        (loop (cdr values)
                              active-style
-                             (cond [renderer
+                             (cond [(and (rich-tree? value)
+                                         (rich-console-ascii-only? console))
+                                    ($write-rendered-value/ansi
+                                     port color-system active-style
+                                     (rich-tree-render/ascii value)
+                                     style-emitted?)]
+                                   [renderer
                                     ($write-rendered-value/ansi
                                      port color-system active-style (renderer value)
                                      style-emitted?)]
@@ -526,7 +533,11 @@
     (lambda (console value)
       (pcheck ([rich-console? console])
               (let ([renderer (rich-renderer-for value)])
-                (cond [renderer
+                (cond [(and (rich-tree? value)
+                            (rich-console-ascii-only? console))
+                       ($check-rendered-value 'rich-render
+                                             (rich-tree-render/ascii value))]
+                      [renderer
                        ($check-rendered-value 'rich-render (renderer value))]
                       [(or (rich-style? value)
                            (rich-reset? value)

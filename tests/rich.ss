@@ -321,6 +321,32 @@
                   "└── tests")
                  (rich-export-text tr))))
 
+     (let ()
+       (rich-tree tr :label "root")
+       (rich-tree-add! tr "line1\nline2")
+       (equal? (string-append
+                "root\n"
+                "└── line1\n"
+                "    line2")
+               (rich-export-text tr)))
+
+     (let ()
+       (rich-tree tr :label (rich-text "root" (rich-style 'red)))
+       (equal? "\033[31mroot\033[0m" (rich-export-ansi tr)))
+
+     (let ([p (open-output-string)])
+       (rich-tree tr :label "root")
+       (rich-console c
+         :output-port p
+         :color-system 'none
+         :ascii-only? #t)
+       (rich-tree-add! tr "child")
+       (rich-print c tr)
+       (equal? (string-append
+                "root\n"
+                "`-- child")
+               (get-output-string p)))
+
      )
 
 (mat rich-panel-tree-errors

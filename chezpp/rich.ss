@@ -141,6 +141,7 @@
           rich-tree-children
           rich-tree-add!
           rich-tree-render
+          rich-tree-render/ascii
 
           make-rich-console
           rich-console
