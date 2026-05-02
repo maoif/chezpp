@@ -145,14 +145,6 @@
             [else
              (rich-pretty-render value)])))
 
-  (define $segment-lines->plain-lines
-    (lambda (lines)
-      (map rich-segments->plain lines)))
-
-  (define $value->plain-lines
-    (lambda (value)
-      ($segment-lines->plain-lines ($value->segment-lines value))))
-
   (define $make-space-segment
     (lambda (width)
       (rich-segment (make-string width #\space))))
@@ -177,26 +169,19 @@
             (apply string-append (reverse out))
             (loop (- count 1) (cons text out))))))
 
-  (define $string-trim-right-spaces
-    (lambda (text)
-      (let loop ([i (- (string-length text) 1)])
-        (cond [(negative? i) ""]
-              [(char=? (string-ref text i) #\space) (loop (- i 1))]
-              [else (substring text 0 (+ i 1))]))))
-
-  (define $pad-string-right
-    (lambda (text width)
-      (let ([current (string-length text)])
-        (if (>= current width)
-            text
-            (string-append text (make-string (- width current) #\space))))))
-
-  (define $plain-lines-width
+  (define $segment-lines-width
     (lambda (lines)
       (let loop ([lines lines] [width 0])
         (if (null? lines)
             width
-            (loop (cdr lines) (max width (string-length (car lines))))))))
+            (loop (cdr lines) (max width (rich-segments-width (car lines))))))))
+
+  (define $line-pad-right-to
+    (lambda (line width)
+      (let ([current (rich-segments-width line)])
+        (if (>= current width)
+            line
+            (append line (list ($make-space-segment (- width current))))))))
 
   (define $columns-render-row
     (lambda (blocks gap)
@@ -211,25 +196,24 @@
               (let loop-blocks ([blocks blocks] [first? #t] [pieces '()])
                 (if (null? blocks)
                     (loop-lines (+ i 1)
-                                (cons (list (rich-segment
-                                             ($string-trim-right-spaces
-                                              (apply string-append (reverse pieces)))))
-                                      out))
+                                (cons (apply append (reverse pieces)) out))
                     (let* ([lines (caar blocks)]
                            [width (cdar blocks)]
-                           [text (if (< i (length lines)) (list-ref lines i) "")]
-                           [padded ($pad-string-right text width)])
+                           [line (if (< i (length lines)) (list-ref lines i) '())]
+                           [last? (null? (cdr blocks))]
+                           [padded (if last? line ($line-pad-right-to line width))])
                       (loop-blocks (cdr blocks)
                                    #f
                                    (cons padded
                                          (if first?
                                              pieces
-                                             (cons gap-text pieces))))))))))))
+                                             (cons (list (rich-segment gap-text))
+                                                   pieces))))))))))))
 
   (define $column-block
     (lambda (item)
-      (let ([lines ($value->plain-lines item)])
-        (cons lines ($plain-lines-width lines)))))
+      (let ([lines ($value->segment-lines item)])
+        (cons lines ($segment-lines-width lines)))))
 
   (define $pack-column-blocks
     (lambda (blocks width gap)
@@ -351,9 +335,16 @@
                      [title (rich-rule-title rule)]
                      [width (rich-rule-width rule)]
                      [text (if (and title (not (string=? title "")))
-                               (let* ([side (max 1 (quotient (- width (string-length title) 1) 2))]
-                                      [rule-text ($string-repeat h side)])
-                                 (string-append rule-text " " title " " rule-text))
+                               (let* ([title-text (string-append " " title " ")]
+                                      [title-width (string-length title-text)])
+                                 (if (>= title-width width)
+                                     (substring title-text 0 width)
+                                     (let* ([space (- width title-width)]
+                                            [left (quotient space 2)]
+                                            [right (- space left)])
+                                       (string-append ($string-repeat h left)
+                                                      title-text
+                                                      ($string-repeat h right)))))
                                ($string-repeat h width))])
                 (list (list (rich-segment text)))))))
 
@@ -801,7 +792,14 @@
         (lambda (field value)
           (if (eq? (syntax->datum field) ':items)
               (syntax-case value ()
-                [(item ...) #'(list item ...)]
+                [() #''()]
+                [(head item ...)
+                 (let ([head-datum (syntax->datum #'head)])
+                   (if (and (symbol? head-datum)
+                            (memq head-datum '(list quote quasiquote cons append)))
+                       value
+                       (with-syntax ([first-item #'head])
+                         #'(list first-item item ...))))]
                 [_ value])
               value)))
       (define build-setters
@@ -917,7 +915,14 @@
         (lambda (field value)
           (if (eq? (syntax->datum field) ':items)
               (syntax-case value ()
-                [(item ...) #'(list item ...)]
+                [() #''()]
+                [(head item ...)
+                 (let ([head-datum (syntax->datum #'head)])
+                   (if (and (symbol? head-datum)
+                            (memq head-datum '(list quote quasiquote cons append)))
+                       value
+                       (with-syntax ([first-item #'head])
+                         #'(list first-item item ...))))]
                 [_ value])
               value)))
       (define build-setters

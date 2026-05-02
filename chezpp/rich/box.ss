@@ -28,4 +28,4 @@
   (define rich-box-chars
     (lambda (style)
       (pcheck ([rich-box-style? style])
-              (cdr (assq style $rich-box-styles))))))
+              (list->vector (vector->list (cdr (assq style $rich-box-styles))))))))

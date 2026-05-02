@@ -238,10 +238,16 @@
 
 (mat rich-basic-renderables
 
-     (equal? "---- Build ----"
+     (equal? "--- Build ----"
              (let ()
                (rich-rule r :title "Build" :width 14)
                (rich-export-text r)))
+
+     (= 14
+        (string-length
+         (let ()
+           (rich-rule r :title "Build" :width 14)
+           (rich-export-text r))))
 
      (equal? "  x  "
              (let ()
@@ -258,9 +264,38 @@
                (rich-columns c :items ("a" "bb" "ccc") :width 5 :gap 2)
                (rich-export-text c)))
 
+     (equal? "a  b"
+             (let ()
+               (rich-columns c :items (list "a" "b") :width 10 :gap 2)
+               (rich-export-text c)))
+
+     (equal? "\033[31mx\033[0m  y"
+             (let ()
+               (rich-columns c
+                 :items ((rich-text "x" (rich-style 'red)) "y")
+                 :width 10
+                 :gap 2)
+               (rich-export-ansi c)))
+
      (let ()
        (rich-layout root :direction 'row :items ("top" "bottom"))
        (string-contains? (rich-export-text root) "top" "bottom"))
+
+     (equal? "top bottom"
+             (let ()
+               (rich-layout root :direction 'row :items (list "top" "bottom"))
+               (rich-export-text root)))
+
+     (equal? "\033[31mtop\033[0m bottom"
+             (let ()
+               (rich-layout root
+                 :direction 'row
+                 :items ((rich-text "top" (rich-style 'red)) "bottom"))
+               (rich-export-ansi root)))
+
+     (let ([chars (rich-box-chars 'ascii)])
+       (vector-set! chars 0 "!")
+       (equal? "+" (vector-ref (rich-box-chars 'ascii) 0)))
 
      )
 
