@@ -869,8 +869,9 @@ configuration pairs.
                    (let ([short (option-effective-short opt)]
                          [long  (option-effective-long opt)])
                      (when short
-                       (unless (hashtable-ref shorts short #f)
-                         (hashtable-set! shorts short opt)))
+                       (when (hashtable-ref shorts short #f)
+                         (errorf 'run-cli-command! "duplicate short option -~a" short))
+                       (hashtable-set! shorts short opt))
                      (when long
                        (when (hashtable-ref longs long #f)
                          (errorf 'run-cli-command! "duplicate long option --~a" long))
@@ -1087,20 +1088,43 @@ configuration pairs.
                      (option-requires opt))))
        (option-list cmd))))
 
+  (define option-name-on-path?
+    (lambda (cmds name)
+      (exists (lambda (cmd)
+                (exists (lambda (opt)
+                          (or (eq? name (option-name opt))
+                              (memq name (option-alias opt))))
+                        (option-list cmd)))
+              cmds)))
+
   (define option-lookup-proc
-    (lambda (state)
+    (lambda (state visible-path)
       (lambda (name)
         (pcheck ([symbol? name])
+          (unless (option-name-on-path? visible-path name)
+            (errorf 'run-cli-command! "option ~a does not exist on selected command path" name))
           (let ([v (state-value state name)])
             (if (eq? v *none*)
                 (errorf 'run-cli-command! "option ~a does not exist on selected command path" name)
                 v))))))
 
   (define run-command-exec
-    (lambda (state cmd)
+    (lambda (state visible-path cmd)
       (if (command-exec cmd)
-          ((command-exec cmd) (option-lookup-proc state))
+          ((command-exec cmd) (option-lookup-proc state visible-path))
           *none*)))
+
+  (define run-command-path
+    (lambda (state path)
+      (validate-command-path-option-names! path)
+      (let lp ([cmds path] [visible '()] [last-result *none*])
+        (if (null? cmds)
+            (if (eq? last-result *none*) (void) last-result)
+            (let* ([cmd (car cmds)]
+                   [visible* (append visible (list cmd))]
+                   [ans (run-command-exec state visible* cmd)])
+              (lp (cdr cmds) visible*
+                  (if (eq? ans *none*) last-result ans)))))))
 
   (define explicit-help-option?
     (lambda (longs shorts arg)
@@ -1110,92 +1134,147 @@ configuration pairs.
             [(string=? arg "--help-commands") (hashtable-ref longs "help-commands" #f)]
             [else #f])))
 
-  (define print-help
+  (define $print-help
     (lambda (path all? commands?)
-      (define (join-path xs)
-        (if (null? xs)
-            ""
-            (let lp ([xs xs])
-              (if (null? (cdr xs))
-                  (car xs)
-                  (string-append (car xs) " " (lp (cdr xs)))))))
-      (define (value-name opt)
-        (or (option-value-name opt)
-            (string-append "<" (string-upcase (symbol->string (option-name opt))) ">")))
-      (define (positional-summary opt)
-        (string-append (value-name opt) (if (option-sink? opt) " ..." "")))
-      (define (option-summary opt)
-        (let* ([short (option-effective-short opt)]
-               [long (option-effective-long opt)]
-               [val (case (option-value-number opt)
-                      [(0) ""]
-                      [else (string-append "=" (value-name opt))])])
-          (cond [(and short long) (string-append "-" short val ", --" long val)]
-                [short (string-append "-" short val)]
-                [long (string-append "--" long val)]
-                [else (value-name opt)])))
-      (define (print-row name help)
-        (println "    ~a~a~a"
-                 name
-                 (make-string (max 1 (- 18 (string-length name))) #\space)
-                 help))
-      (define (print-command-paths prefix cmd)
-        (let ([path* (append prefix (list (command-name cmd)))])
-          (unless (null? prefix)
-            (print-row (join-path path*) (command-help cmd)))
-          (for-each (lambda (subcmd)
-                      (print-command-paths path* subcmd))
-                    (subcommand-list cmd))))
+      (define option-value-summary
+        (lambda (opt)
+          (let ([name (or (option-value-name opt)
+                          (string-append "<" (string-upcase (symbol->string (option-name opt))) ">"))])
+            (case (option-value-number opt)
+              [(0) ""]
+              [(1) (string-append "=" name)]
+              [(?) (string-append "[=" name "]")]
+              [(+) (string-append "=" name (string (option-value-seperator opt)) "...")]
+              [(*) (string-append "[=" name (string (option-value-seperator opt)) "...]")]
+              [else ""]))))
+      (define option-summary
+        (lambda (opt)
+          (let ([short (option-effective-short opt)]
+                [long (option-effective-long opt)]
+                [val (option-value-summary opt)])
+            (cond [(and short long) (string-append "-" short val ", --" long val)]
+                  [short (string-append "-" short val)]
+                  [long (string-append "--" long val)]
+                  [else (or (option-value-name opt)
+                            (string-append "<" (string-upcase (symbol->string (option-name opt))) ">"))]))))
+      (define positional-summary
+        (lambda (opt)
+          (string-append
+           (or (option-value-name opt)
+               (string-append "<" (string-upcase (symbol->string (option-name opt))) ">"))
+           (if (option-sink? opt) " ..." ""))))
+      (define print-usage
+        (lambda (path)
+          (display "Usage: ")
+          (let lp ([cmds path])
+            (unless (null? cmds)
+              (let ([cmd (car cmds)])
+                (display (command-name cmd))
+                (display " ")
+                (unless (null? (filter (lambda (opt) (not (option-positional? opt)))
+                                       (option-list cmd)))
+                  (display "[OPTIONS] "))
+                (for-each (lambda (opt)
+                            (display (positional-summary opt))
+                            (display " "))
+                          (filter option-positional? (option-list cmd)))
+                (when (and (null? (cdr cmds))
+                           (not (null? (subcommand-list cmd))))
+                  (display "COMMAND "))
+                (lp (cdr cmds)))))
+          (newline)))
+      (define print-section
+        (lambda (title rows)
+          (unless (null? rows)
+            (println "~a" title)
+            (for-each (lambda (row)
+                        (println "    ~a~a~a"
+                                 (car row)
+                                 (make-string (max 1 (- 18 (string-length (car row)))) #\space)
+                                 (cdr row)))
+                      rows)
+            (newline))))
+      (define group-by-category
+        (lambda (objects category-proc row-proc)
+          (let ([groups '()])
+            (for-each
+             (lambda (obj)
+               (let* ([cat (category-proc obj)]
+                      [row (row-proc obj)]
+                      [grp (find (lambda (grp)
+                                   (string=? (car grp) cat))
+                                 groups)])
+                 (if grp
+                     (set-cdr! grp (append (cdr grp) (list row)))
+                     (set! groups (append groups (list (cons cat (list row))))))))
+             objects)
+            groups)))
+      (define print-options-and-commands
+        (lambda (cmd all?)
+          (let* ([opts (filter (lambda (opt)
+                                 (and (not (option-positional? opt))
+                                      (or all? (not (option-hidden? opt)))))
+                               (option-list cmd))]
+                 [pos (filter option-positional? (option-list cmd))]
+                 [cmds (subcommand-list cmd)])
+            (print-section "ARGUMENTS"
+                           (map (lambda (opt)
+                                  (cons (positional-summary opt) (option-help opt)))
+                                pos))
+            (for-each
+             (lambda (grp)
+               (print-section (if (string=? (car grp) "") "OPTIONS" (car grp))
+                              (cdr grp)))
+             (group-by-category opts option-category
+                                (lambda (opt)
+                                  (cons (option-summary opt) (option-help opt)))))
+            (for-each
+             (lambda (grp)
+               (print-section (if (string=? (car grp) "") "COMMANDS" (car grp))
+                              (cdr grp)))
+             (group-by-category cmds command-category
+                                (lambda (cmd)
+                                  (cons (command-name cmd) (command-help cmd))))))))
+      (define print-command-paths
+        (lambda (prefix cmd)
+          (let ([path (append prefix (list (command-name cmd)))])
+            (unless (null? prefix)
+              (println "~a~a~a"
+                       (apply string-append
+                              (let lp ([xs path])
+                                (if (null? xs)
+                                    '()
+                                    (cons (car xs)
+                                          (if (null? (cdr xs))
+                                              '()
+                                              (cons " " (lp (cdr xs))))))))
+                       (if (string=? (command-help cmd) "") "" "  ")
+                       (command-help cmd)))
+            (for-each (lambda (subcmd)
+                        (print-command-paths path subcmd))
+                      (subcommand-list cmd)))))
       (let ([cmd (list-last path)]
             [top (car path)])
+        (when (eq? cmd top)
+          (unless (string=? (command-overview top) "")
+            (println "~a" (command-overview top)))
+          (unless (string=? (command-version top) "")
+            (println "Version: ~a" (command-version top)))
+          (unless (string=? (command-author top) "")
+            (println "Author: ~a" (command-author top)))
+          (unless (and (string=? (command-overview top) "")
+                       (string=? (command-version top) "")
+                       (string=? (command-author top) ""))
+            (newline)))
+        (print-usage path)
+        (newline)
         (if commands?
             (print-command-paths '() top)
-            (begin
-              (when (eq? cmd top)
-                (unless (string=? (command-overview top) "")
-                  (println "~a" (command-overview top)))
-                (unless (string=? (command-version top) "")
-                  (println "Version: ~a" (command-version top)))
-                (unless (string=? (command-author top) "")
-                  (println "Author: ~a" (command-author top)))
-                (unless (and (string=? (command-overview top) "")
-                             (string=? (command-version top) "")
-                             (string=? (command-author top) ""))
-                  (newline)))
-              (display "Usage: ")
-              (for-each (lambda (cmd*)
-                          (display (command-name cmd*))
-                          (display " ")
-                          (unless (null? (filter (lambda (opt) (not (option-positional? opt)))
-                                                 (option-list cmd*)))
-                            (display "[OPTIONS] ")))
-                        path)
-              (for-each (lambda (opt)
-                          (display (positional-summary opt))
-                          (display " "))
-                        (filter option-positional? (option-list cmd)))
-              (when (not (null? (subcommand-list cmd)))
-                (display "COMMAND "))
-              (newline)
-              (newline)
-              (let ([pos (filter option-positional? (option-list cmd))]
-                    [opts (filter (lambda (opt)
-                                    (and (not (option-positional? opt))
-                                         (or all? (not (option-hidden? opt)))))
-                                  (option-list cmd))]
-                    [cmds (subcommand-list cmd)])
-                (unless (null? pos)
-                  (println "ARGUMENTS")
-                  (for-each (lambda (opt) (print-row (positional-summary opt) (option-help opt))) pos)
-                  (newline))
-                (unless (null? opts)
-                  (println "OPTIONS")
-                  (for-each (lambda (opt) (print-row (option-summary opt) (option-help opt))) opts)
-                  (newline))
-                (unless (null? cmds)
-                  (println "COMMANDS")
-                  (for-each (lambda (cmd*) (print-row (command-name cmd*) (command-help cmd*))) cmds)
-                  (newline))))))))
+            (print-options-and-commands cmd all?)))))
+
+  (define print-help
+    (lambda (path all? commands?)
+      ($print-help path all? commands?)))
 
   #|proc:run-cli-command!
 The `run-cli-command!` procedure parses command-line arguments for `cmd`.
@@ -1222,18 +1301,15 @@ without running command exec procedures.
                   (define run-current
                     (lambda ()
                       (finalize-command! state cmd)
-                      (let ([ans (run-command-exec state cmd)])
-                        (if (eq? ans *none*) last-result ans))))
+                      (run-command-path state path)))
                   (let parse-args ([args args])
                     (cond
                      [(null? args)
-                      (validate-command-path-option-names! path)
                       (let ([subcmds (subcommand-list cmd)])
                         (cond [(or (null? subcmds)
                                    (command-maybe-no-subcommand? cmd)
                                    (command-exec cmd))
-                               (let ([ans (run-current)])
-                                 (return (if (eq? ans *none*) (void) ans)))]
+                               (return (run-current))]
                               [else
                                (errorf who "subcommand expected for command ~a" (command-name cmd))]))]
                      [else
@@ -1284,159 +1360,15 @@ without running command exec procedures.
                                               (subcommand-list cmd))])
                             (unless subcmd
                               (errorf who "unknown subcommand for ~a: ~a" (command-name cmd) arg))
-                            (let ([ans (run-current)])
-                              (parse-command subcmd (cdr args) (append path (list subcmd))
-                                             (if (eq? ans *none*) last-result ans))))]))]))))))))]))
+                            (finalize-command! state cmd)
+                            (parse-command subcmd (cdr args) (append path (list subcmd))
+                                           last-result))]))]))))))))]))
 
 
 
 ;;===----------------------------------------------------------------------===
 ;; help and debug output
 ;;===----------------------------------------------------------------------===
-
-
-  (define option-value-summary
-    (lambda (opt)
-      (let ([name (or (option-value-name opt)
-                      (string-append "<" (string-upcase (symbol->string (option-name opt))) ">"))])
-        (case (option-value-number opt)
-          [(0) ""]
-          [(1) (string-append "=" name)]
-          [(?) (string-append "[=" name "]")]
-          [(+) (string-append "=" name (string (option-value-seperator opt)) "...")]
-          [(*) (string-append "[=" name (string (option-value-seperator opt)) "...]")]
-          [else ""]))))
-
-  (define option-summary
-    (lambda (opt)
-      (let ([short (option-effective-short opt)]
-            [long (option-effective-long opt)]
-            [val (option-value-summary opt)])
-        (cond [(and short long) (string-append "-" short val ", --" long val)]
-              [short (string-append "-" short val)]
-              [long (string-append "--" long val)]
-              [else (or (option-value-name opt)
-                        (string-append "<" (string-upcase (symbol->string (option-name opt))) ">"))]))))
-
-  (define positional-summary
-    (lambda (opt)
-      (string-append
-       (or (option-value-name opt)
-           (string-append "<" (string-upcase (symbol->string (option-name opt))) ">"))
-       (if (option-sink? opt) " ..." ""))))
-
-  (define print-usage
-    (lambda (path)
-      (display "Usage: ")
-      (let lp ([cmds path])
-        (unless (null? cmds)
-          (let ([cmd (car cmds)])
-            (display (command-name cmd))
-            (display " ")
-            (unless (null? (filter (lambda (opt) (not (option-positional? opt)))
-                                   (option-list cmd)))
-              (display "[OPTIONS] "))
-            (let ([positionals (filter option-positional? (option-list cmd))])
-              (for-each (lambda (opt)
-                          (display (positional-summary opt))
-                          (display " "))
-                        positionals))
-            (when (and (null? (cdr cmds))
-                       (not (null? (subcommand-list cmd))))
-              (display "COMMAND "))
-            (lp (cdr cmds)))))
-      (newline)))
-
-  (define print-section
-    (lambda (title rows)
-      (unless (null? rows)
-        (println "~a" title)
-        (for-each (lambda (row)
-                    (println "    ~a~a~a"
-                             (car row)
-                             (make-string (max 1 (- 18 (string-length (car row)))) #\space)
-                             (cdr row)))
-                  rows)
-        (newline))))
-
-  (define group-by-category
-    (lambda (objects category-proc row-proc)
-      (let ([ht (make-hashtable string-hash string=?)])
-        (for-each (lambda (obj)
-                    (let ([cat (category-proc obj)])
-                      (hashtable-set! ht cat (cons (row-proc obj)
-                                                   (hashtable-ref ht cat '())))))
-                  objects)
-        ht)))
-
-  (define print-options-and-commands
-    (lambda (cmd all?)
-      (let* ([opts (filter (lambda (opt)
-                             (and (not (option-positional? opt))
-                                  (or all? (not (option-hidden? opt)))))
-                           (option-list cmd))]
-             [pos (filter option-positional? (option-list cmd))]
-             [cmds (subcommand-list cmd)])
-        (print-section "ARGUMENTS"
-                       (map (lambda (opt)
-                              (cons (positional-summary opt) (option-help opt)))
-                            pos))
-        (let ([ht (group-by-category opts option-category
-                                      (lambda (opt)
-                                        (cons (option-summary opt) (option-help opt))))])
-          (vector-for-each
-           (lambda (cat)
-             (print-section (if (string=? cat "") "OPTIONS" cat)
-                            (reverse (hashtable-ref ht cat '()))))
-           (hashtable-keys ht)))
-        (let ([ht (group-by-category cmds command-category
-                                      (lambda (cmd)
-                                        (cons (command-name cmd) (command-help cmd))))])
-          (vector-for-each
-           (lambda (cat)
-             (print-section (if (string=? cat "") "COMMANDS" cat)
-                            (reverse (hashtable-ref ht cat '()))))
-           (hashtable-keys ht))))))
-
-  (define print-command-paths
-    (lambda (prefix cmd)
-      (let ([path (append prefix (list (command-name cmd)))])
-        (unless (null? prefix)
-          (println "~a~a~a"
-                   (apply string-append
-                          (let lp ([xs path])
-                            (if (null? xs)
-                                '()
-                                (cons (car xs)
-                                      (if (null? (cdr xs))
-                                          '()
-                                          (cons " " (lp (cdr xs))))))))
-                   (if (string=? (command-help cmd) "") "" "  ")
-                   (command-help cmd)))
-        (for-each (lambda (subcmd)
-                    (print-command-paths path subcmd))
-                  (subcommand-list cmd)))))
-
-  (define $print-help
-    (lambda (path all? commands?)
-      (let ([cmd (list-last path)]
-            [top (car path)])
-        (when (eq? cmd top)
-          (unless (string=? (command-overview top) "")
-            (println "~a" (command-overview top)))
-          (unless (string=? (command-version top) "")
-            (println "Version: ~a" (command-version top)))
-          (unless (string=? (command-author top) "")
-            (println "Author: ~a" (command-author top)))
-          (unless (and (string=? (command-overview top) "")
-                       (string=? (command-version top) "")
-                       (string=? (command-author top) ""))
-            (newline)))
-        (print-usage path)
-        (newline)
-        (if commands?
-            (print-command-paths '() top)
-            (print-options-and-commands cmd all?)))))
 
   #|proc:dump-command
 The `dump-command` procedure prints command configuration recursively.
@@ -1495,6 +1427,8 @@ keywords accepted inside `cli-command`.
             [(flonum) #'parser-flonum]
             [(string) #'parser-string]
             [else x])))
+      (define (quoted-datum-form ctx x)
+        (datum->syntax ctx (syntax->datum x)))
       (define (forms opt-id cfgs)
         (let lp ([cfgs cfgs] [out '()])
           (if (null? cfgs)
@@ -1506,9 +1440,9 @@ keywords accepted inside `cli-command`.
                   [(:default)
                    (lp (cddr cfgs) (cons #`(option-default-set! #,opt-id #,(cadr cfgs)) out))]
                   [(:number)
-                   (lp (cddr cfgs) (cons #`(option-number-set! #,opt-id '#,(syntax->datum (cadr cfgs))) out))]
+                   (lp (cddr cfgs) (cons #`(option-number-set! #,opt-id '#,(quoted-datum-form opt-id (cadr cfgs))) out))]
                   [(:value-number)
-                   (lp (cddr cfgs) (cons #`(option-value-number-set! #,opt-id '#,(syntax->datum (cadr cfgs))) out))]
+                   (lp (cddr cfgs) (cons #`(option-value-number-set! #,opt-id '#,(quoted-datum-form opt-id (cadr cfgs))) out))]
                   [(:value-name)
                    (lp (cddr cfgs) (cons #`(option-value-name-set! #,opt-id #,(cadr cfgs)) out))]
                   [(:value-parser)
@@ -1534,7 +1468,7 @@ keywords accepted inside `cli-command`.
                   [(:callback)
                    (lp (cddr cfgs) (cons #`(option-callback-set! #,opt-id #,(cadr cfgs)) out))]
                   [(:alias)
-                   (lp (cddr cfgs) (cons #`(option-alias-set! #,opt-id '#,(syntax->datum (cadr cfgs))) out))]
+                   (lp (cddr cfgs) (cons #`(option-alias-set! #,opt-id '#,(quoted-datum-form opt-id (cadr cfgs))) out))]
                   [(:hidden)
                    (lp (cdr cfgs) (cons #`(option-hidden?-set! #,opt-id #t) out))]
                   [(:category)
@@ -1542,11 +1476,11 @@ keywords accepted inside `cli-command`.
                   [(:no-grouping)
                    (lp (cdr cfgs) (cons #`(option-no-grouping?-set! #,opt-id #t) out))]
                   [(:conflicts)
-                   (lp (cddr cfgs) (cons #`(option-conflicts-set! #,opt-id '#,(syntax->datum (cadr cfgs))) out))]
+                   (lp (cddr cfgs) (cons #`(option-conflicts-set! #,opt-id '#,(quoted-datum-form opt-id (cadr cfgs))) out))]
                   [(:overrides)
-                   (lp (cddr cfgs) (cons #`(option-overrides-set! #,opt-id '#,(syntax->datum (cadr cfgs))) out))]
+                   (lp (cddr cfgs) (cons #`(option-overrides-set! #,opt-id '#,(quoted-datum-form opt-id (cadr cfgs))) out))]
                   [(:requires)
-                   (lp (cddr cfgs) (cons #`(option-requires-set! #,opt-id '#,(syntax->datum (cadr cfgs))) out))]
+                   (lp (cddr cfgs) (cons #`(option-requires-set! #,opt-id '#,(quoted-datum-form opt-id (cadr cfgs))) out))]
                   [else (syntax-error (car cfgs) "unknown option keyword")])))))
       (syntax-case stx ()
         [(_ name cfg ...)
