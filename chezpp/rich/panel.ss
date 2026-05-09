@@ -371,8 +371,8 @@
                                             inner-width)))))))
 
   #|macro:rich-panel
-  The `rich-panel` macro constructs a panel and binds it to an identifier. The
-  `:body` field is required.
+  The `rich-panel` macro constructs and returns a panel. The `:body` field is
+  required.
   |#
   (define-syntax rich-panel
     (lambda (stx)
@@ -413,16 +413,16 @@
                    (let ([actions (field-action name (car clause*) (cadr clause*))])
                      (loop (cddr clause*) (rich-reverse-append actions action*)))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
+        [(_ clause ...)
          (let ([body (body-value #'(clause ...))])
            (unless body
              (syntax-error stx "rich-panel requires :body"))
-           (with-syntax ([body-value body]
-                         [(action ...) (build-actions #'name #'(clause ...))])
-             #'(begin
-                 (define name (make-rich-panel body-value))
-                 action ...)))]
+           (with-syntax ([tmp (car (generate-temporaries #'(rich-panel)))]
+                         [body-value body])
+             (with-syntax ([(action ...) (build-actions #'tmp #'(clause ...))])
+               #'(let ([tmp (make-rich-panel body-value)])
+                   action ...
+                   tmp))))]
         [_ (syntax-error stx "invalid rich-panel form")])))
 
   (rich-register-renderer! rich-panel? rich-panel-render))

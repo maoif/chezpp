@@ -1,165 +1,150 @@
-# Rich Library Design
+# Rich Design And Implementation
 
 Date: 2026-05-01
+Updated: 2026-05-09
 
 ## Goal
 
-Implement a ChezScheme terminal rendering library modeled on Python Rich. The
-target is a roughly one-to-one conceptual copy of Rich's core terminal features,
-adapted to Chezpp style and ChezScheme constraints.
+Rich is a ChezScheme terminal rendering library modeled on Python Rich's core
+features, adapted to Chezpp conventions. It provides styled output, structured
+renderables, live terminal refresh, progress bars, prompts, and export helpers
+through the public `(chezpp rich)` facade and the aggregate `(chezpp)` import.
 
-The design intentionally ignores the previous local `chezpp/rich.ss` work and
-starts from the Rich feature/API surface plus existing Chezpp conventions.
+The v1 scope intentionally excludes markup parsing, markdown, syntax
+highlighting, logging, traceback rendering, and concrete `inspect`/`json`
+modules. The implementation leaves room to add `inspect` and `json` later by
+using the same render registry and facade structure.
 
-## Scope
+## Public Shape
 
-Include:
+Rich has two layers:
 
-- Console printing and rendering.
-- Styles, colors, themes, styled text, segments, measurement, wrapping, and
-  cropping.
-- Renderables: table, panel, tree, rule, columns, padding, alignment, and
-  layout.
-- Live display, status/spinner, and progress.
-- Prompt and confirm input helpers.
-- Scheme datum pretty printing.
-- Export hooks for plain text and ANSI text, with room for HTML/SVG later.
-- Extension points for future `inspect` and `json` modules.
+- Procedural APIs: constructors, predicates, accessors, mutators, actions, and
+  print/export procedures.
+- Constructor macros: expression-returning builders for records with many
+  fields.
 
-Exclude for v1:
+Public procedures use `lambda` or `case-lambda`, never keyword arguments.
+Public procedures validate boundary values with `pcheck`. Public macros reject
+unknown fields at expansion time and rely on the same procedural setters for
+runtime validation.
 
-- BBCode-style markup.
-- Markdown.
-- Syntax highlighting.
-- Logging integration.
-- Traceback rendering.
-- `inspect` and `json` feature implementations.
-
-Reference surface:
-
-- Rich reference index: https://rich.readthedocs.io/en/latest/reference.html
-- Rich console API: https://rich.readthedocs.io/en/latest/reference/console.html
-- Rich table API: https://rich.readthedocs.io/en/latest/reference/table.html
-- Rich progress guide: https://rich.readthedocs.io/en/latest/progress.html
-- Rich live guide: https://rich.readthedocs.io/en/latest/live.html
-
-## Architecture
-
-`(chezpp rich)` is the public facade library. It re-exports stable public APIs
-from smaller implementation libraries:
-
-- `(chezpp rich style)`: style objects, symbolic colors, truecolor values,
-  ANSI emission, reset objects, and themes.
-- `(chezpp rich segment)`: text fragments with style metadata, control
-  segments, visible-width measurement, line splitting, wrapping, cropping, and
-  ANSI stripping.
-- `(chezpp rich console)`: console records, ports, terminal width, color policy,
-  output methods, render dispatch, and export entry points.
-- `(chezpp rich renderable)`: internal render protocol and custom renderer
-  registry.
-- `(chezpp rich text)`: styled text containers and helpers.
-- `(chezpp rich renderables)`: table, panel, tree, rule, columns, padding,
-  alignment, and layout records.
-- `(chezpp rich live)`: live refresh machinery, status/spinner, and progress.
-- `(chezpp rich prompt)`: prompt/confirm helpers.
-- `(chezpp rich pretty)`: width-aware Scheme datum rendering.
-
-The public facade hides most internal representation details. Internals can be
-split further if a source file becomes too large.
-
-## API Style
-
-All public procedures use `lambda` or `case-lambda`; no keyword arguments are
-used. Public procedures and macros use Chezpp documentation comments directly
-above implementation code. Public procedure boundaries use `pcheck`.
-
-The primitive procedural APIs follow existing Chezpp naming:
-
-- Constructors: `make-rich-console`, `make-rich-table`, `make-rich-panel`, etc.
-- Predicates: `rich-console?`, `rich-table?`, etc.
-- Accessors and mutators: `rich-table-title`, `rich-table-title-set!`, etc.
-- Actions: `rich-table-add-column!`, `rich-progress-advance!`,
-  `rich-live-start!`, etc.
-- Rendering/printing: `rich-render`, `rich-print`, `rich-println`,
-  `rich-fprint`, `rich-fprintln`.
-
-## Constructor Macros
-
-Records with many optional fields also get constructor macros using
-`[:field value]` clauses. The macro APIs are for construction only. Mutators
-remain ordinary procedures.
-
-Examples:
+Constructor macro clauses use Chez-style keyword symbols directly:
 
 ```scheme
-(rich-console
-  [:output-port (current-output-port)]
-  [:error-port (current-error-port)]
-  [:width 100]
-  [:color-system 'truecolor]
-  [:theme theme])
+(define console
+  (rich-console
+    :width 100
+    :color-system 'standard))
 
-(rich-table
-  [:title "Build"]
-  [:box 'rounded]
-  [:show-header? #t]
-  [:columns ("Name" "Status")]
-  [:rows (("compile" "ok")
-          ("test" "ok"))])
-
-(rich-progress
-  [:width 80]
-  [:columns (rich-progress-default-columns)]
-  [:tasks (["download" 1024]
-           ["compile" #f])])
+(define table
+  (rich-table
+    :title "Build"
+    :box 'rounded
+    :columns ("Name" "Status")
+    :rows (("compile" "ok")
+           ("test" "ok"))))
 ```
 
-Constructor macros expand to primitive constructors plus ordinary setter/add
-calls. Unknown fields are rejected at expansion time.
-Runtime values still pass through the same `pcheck` validation as procedural
-use.
+Constructor macros return the constructed value. They do not receive or define
+an identifier. Mutators remain ordinary procedures.
 
-## Style Model
+## Module Map
 
-`rich-style` returns an opaque style object. It does not return raw ANSI text.
-`reset-style` returns an opaque style-reset object. `rich-reset` is exported as
-a constant reset object.
+`(chezpp rich)` is the public Rich facade. `chezpp.ss` imports and exports it so
+users can also import the complete `(chezpp)` surface.
 
-`rich-style` accepts a variable number of symbolic options and color forms. It
-does not parse style strings. Later options override earlier conflicting
-options.
+Implementation libraries:
+
+- `(chezpp rich style)`: style records, reset objects, ANSI encoding fragments,
+  color validation, and themes.
+- `(chezpp rich segment)`: styled text segments, control segments, visible-width
+  measurement, wrapping, cropping, and ANSI stripping.
+- `(chezpp rich renderable)`: render protocol predicates and custom renderer
+  registry.
+- `(chezpp rich text)`: mutable styled text spans and rendering to segments.
+- `(chezpp rich pretty)`: Scheme datum rendering for values without custom
+  renderers.
+- `(chezpp rich console)`: console records, output targets, printing, export,
+  color policy, and final ANSI/plain encoding.
+- `(chezpp rich box)`: box-style metadata.
+- `(chezpp rich basic)`: rules, padding, alignment, columns, and layout.
+- `(chezpp rich panel)`: panel records and border rendering.
+- `(chezpp rich tree)`: tree records and guide rendering.
+- `(chezpp rich table)`: table records, rows, columns, measurement, and box
+  layout.
+- `(chezpp rich live)`: live refresh, status spinners, deterministic time hooks,
+  and refresh threads.
+- `(chezpp rich progress)`: progress records, task records, progress columns,
+  and progress rendering.
+- `(chezpp rich prompt)`: prompt, confirm, and password helpers.
+- `(chezpp rich private common)`: shared predicates and helpers that are not
+  part of the public API.
+
+## Rendering Model
+
+The renderer is segment-based. Layout code never measures raw ANSI strings.
+
+1. `rich-print`, `rich-render`, and export helpers receive ordinary Scheme
+   values, styles, reset objects, and renderables.
+2. Render dispatch converts renderables to segment lines. A segment line is a
+   list of `rich-segment` values.
+3. Layout components such as tables, panels, padding, alignment, wrapping, and
+   cropping operate on segment lines and visible widths.
+4. The console encoder resolves styles and themes, applies the color policy,
+   emits ANSI only for ANSI-capable output, and writes text to the selected
+   port.
+5. Plain-text export uses the same segment lines but strips style/control
+   effects where appropriate.
+
+Custom renderers are registered with `rich-register-renderer!` by predicate.
+They must return a string or segment-line list. Invalid renderer output is a
+runtime error.
+
+## Style And Theme
+
+`rich-style` returns an opaque style object. It accepts a variable number of
+symbols and color forms; it does not parse style strings. Later style options
+override earlier conflicting options.
 
 Examples:
 
 ```scheme
 (rich-style 'bold 'red)
 (rich-style 'italic #xffaa00 '(bg #x202020))
-(rich-style 'red 'blue)                ; blue wins
-(rich-style 'underline 'no-underline)  ; no-underline wins
+(rich-style 'red 'blue)               ; blue wins
+(rich-style 'underline 'no-underline) ; no-underline wins
 ```
 
-Style option categories:
+Supported style categories:
 
 - Attributes: `bold`, `dim`, `italic`, `underline`, `blink`, `reverse`,
-  `hidden`, `strike`, plus `no-...` disabling forms.
-- Foreground symbolic colors: `black`, `red`, `green`, `yellow`, `blue`,
-  `magenta`, `cyan`, `white`, `default`, and bright variants.
-- Background symbolic colors: either `on-red` style symbols or `(bg color)`.
-- Truecolor foreground: a raw integer from `#x000000` through `#xffffff`, or
-  `(fg #xrrggbb)`.
-- Truecolor background: `(bg #xrrggbb)`.
-- Theme aliases: symbols resolved through the active console theme.
+  `hidden`, `strike`, plus disabling forms such as `no-underline`.
+- Standard and bright foreground colors.
+- Background color symbols such as `on-red`.
+- Truecolor foreground integers from `#x000000` through `#xffffff`.
+- Truecolor color forms such as `(fg #x33ccff)` and `(bg #x202020)`.
 
-ANSI bytes are produced only by the console encoder.
+`reset-style` returns a reset object. `rich-print` and the console encoder use
+style/reset objects as state transitions in the argument stream.
 
-## Print Model
+Themes map symbols to `rich-style` objects:
 
-`rich-print` and related APIs do not take a format string. The first argument
-must be a rich console or an open output port. Remaining arguments are consumed
-in order and printed/rendered directly. Callers use Scheme `format` explicitly
-when formatting is desired.
+```scheme
+(define theme
+  (rich-theme
+    :ok (rich-style 'bold 'green)
+    :warn (rich-style 'yellow)))
+```
 
-Examples:
+## Console And Printing
+
+`rich-console` stores input/output/error ports, terminal width, color system,
+soft-wrap policy, force-terminal flag, ASCII-only flag, and theme. Console
+records are mutable through ordinary setters.
+
+`rich-print` and `rich-println` print argument values directly. They do not take
+a format string; callers use Scheme `format` explicitly:
 
 ```scheme
 (rich-print console
@@ -169,174 +154,173 @@ Examples:
             (format "~a" value)
             (reset-style)
             "\n")
-
-(rich-println console
-              (rich-style 'red)
-              "error"
-              (reset-style)
-              ": "
-              path)
-
-(rich-print port table)
 ```
 
-Print inputs may be strings, chars, numbers, symbols, bytevectors, pairs,
-vectors, records handled by pretty printing, style objects, reset objects, or
-rich renderables. Style objects affect following text until another style or
-reset object appears.
+If the first argument is a console or output port, it is used as the target. If
+not, printing defaults to `(current-output-port)` and prints all arguments.
 
-## Rendering Pipeline
+## Constructor Macros
 
-Rendering uses a segment pipeline:
+The constructor macros are expression builders:
 
-1. Public print/render APIs receive a sequence of values.
-2. Values normalize into text, style transitions, reset transitions,
-   renderables, or pretty-rendered data.
-3. Renderables emit logical lines of `rich-segment` values.
-4. Measurement computes visible width from segment text, independent of ANSI
-   bytes.
-5. Wrapping, cropping, padding, alignment, table layout, panel borders, and
-   layout splitting operate on segment lines.
-6. The console encoder resolves theme aliases, applies the active color policy,
-   emits ANSI as needed, and writes to the selected port.
-7. Export APIs use the same segment lines and choose a backend such as plain
-   text or ANSI text.
+- `rich-theme`
+- `rich-console`
+- `rich-rule`
+- `rich-padding`
+- `rich-align`
+- `rich-columns`
+- `rich-layout`
+- `rich-panel`
+- `rich-tree`
+- `rich-live`
+- `rich-status`
+- `rich-progress`
+- `rich-table`
 
-This avoids raw ANSI strings leaking into layout decisions.
+Each macro expands to a `let` with a generated temporary, a primitive
+constructor call, zero or more setter/action calls, and the temporary value as
+the final expression. Required fields are checked at expansion time when the
+field is syntactically absent. Runtime type checks stay in the primitive
+constructor and setter procedures.
 
-## Core Components
+Examples:
 
-### Console
+```scheme
+(define panel
+  (rich-panel
+    :title "Status"
+    :body (rich-text "ready" (rich-style 'green))
+    :box 'rounded))
 
-`rich-console` owns output port, error port, width, color system, force-terminal
-flag, soft-wrap flag, theme, and export buffers. It is responsible for render
-dispatch and final encoding.
+(define progress
+  (rich-progress
+    :width 40
+    :tasks (("download" 1024)
+            ("compile" #f))))
+```
 
-### Text And Segments
+Literal list fields are supported where they make code readable:
 
-`rich-text` stores styled spans and supports append, split, wrap, justify, crop,
-plain-text extraction, and conversion to segment lines.
+- `rich-table :columns ("Name" "Status")`
+- `rich-table :rows (("compile" "ok"))`
+- `rich-progress :tasks (("compile" #f))`
+- `rich-columns :items ("a" panel "b")`
+- `rich-layout :items ("left" "right")`
 
-`rich-segment` stores text, style metadata, and optional control metadata. It is
-the unit of measurement and output.
+Expression forms are also accepted:
 
-### Renderables
+```scheme
+(rich-table
+  :columns (vector->list column-vector)
+  :rows (map normalize-row rows))
+```
 
-`rich-table` supports columns, rows, title, caption, box style, padding,
-header/footer controls, row separators, cell justification, overflow behavior,
-and optional width constraints.
+## Renderables
 
-`rich-panel` frames another renderable with title, subtitle, box style, padding,
-and optional width/height constraints.
+`rich-rule` renders a horizontal rule with optional title, width, and box style.
 
-`rich-tree` stores a label and child nodes, with guide style and expanded flag.
+`rich-padding` wraps a renderable with top/right/bottom/left padding.
 
-`rich-rule` renders a horizontal rule with optional title and alignment.
+`rich-align` pads segment lines to a target width using left, center, or right
+alignment.
 
-`rich-columns` flows renderables into columns.
+`rich-columns` packs renderables into rows of columns using visible width and a
+configurable gap.
 
-`rich-padding` and `rich-align` wrap another renderable.
+`rich-layout` combines renderables as either a horizontal row or vertical
+column. It is intentionally small in v1 and can grow into a richer layout tree
+later.
 
-`rich-layout` splits terminal space into rows and columns for dashboard-style
-output.
+`rich-panel` frames a body renderable with a box style, title, subtitle,
+padding, and optional width/height.
 
-### Live, Status, And Progress
+`rich-tree` stores a label and children. Tree rendering supports Unicode guides
+and ASCII-only guides through console policy.
 
-`rich-live` manages refresh state for replacing terminal output. It tracks the
-renderable, target console/port, refresh rate, last rendered line count, and
-live thread.
+`rich-table` stores columns, rows, title, caption, box style, padding, header
+visibility, and row-line visibility. Rows must match the column count. Cells can
+be ordinary values or renderables.
 
-`rich-status` is a spinner plus message built on `rich-live`.
+## Live, Status, And Progress
 
-`rich-progress` manages tasks, task ids, totals, completed counts, start/stop
-times, visibility, and progress columns. Default columns include description,
-bar, percentage, completed/total, elapsed, remaining, speed, and spinner.
+`rich-live` owns a renderable, console, refresh rate, transient flag, previous
+line count, thread, and stop flag. `rich-live-refresh!` clears the previous live
+output with carriage-return / ANSI clear-line sequences and redraws the current
+renderable. Multi-line renderables are cleared by moving back up over the
+previous line count.
 
-Time and sleeping hooks are parameterized for deterministic tests.
+`make-rich-status` and `rich-status` construct a status renderable. They do not
+start a background refresh loop. `rich-status-render` computes the spinner frame
+from `rich-current-time`, start time, frame list, and interval. Use
+`rich-status-start!` to wrap the status in `rich-live` and refresh it in place.
 
-### Prompt
+`rich-progress` stores progress tasks. A task has an id, description, total,
+completed count, and visibility. Totals must be positive or `#f` for
+indeterminate tasks. Progress renders default columns for description, bar,
+percentage, completed/total, and indeterminate counts.
 
-Prompt APIs read from an input port and write through a console. They support
-prompt text, choices, defaults, confirmation, and password input. Password
-input raises an unsupported error when terminal no-echo control is unavailable.
+`rich-current-time` and `rich-sleep` are parameters so tests and examples can
+drive live/status behavior deterministically.
 
-### Pretty
+## Prompt And Password
 
-Pretty printing renders Scheme data with width-aware line breaks and optional
-style categories for pairs, vectors, strings, symbols, numbers, booleans, and
-records. Unknown records fall back to Chez's written representation unless a
-custom renderer is registered.
-
-## Extension Points
-
-Custom renderers can be registered by predicate. A renderer receives the console
-context, the value, and width constraints, and returns segment lines.
-
-Reserved modules:
-
-- `(chezpp rich inspect)`
-- `(chezpp rich json)`
-
-The facade does not export inspect/json user-facing APIs in v1, but the render
-registry and module structure do not block those additions later.
+Prompt helpers read from the console input port and write prompt text through
+the console output port. `rich-prompt` supports defaults and allowed choices.
+`rich-confirm` parses yes/no input. `rich-password` reads through the same port
+model; when no terminal no-echo support is available, it must fail clearly
+rather than silently echoing secrets.
 
 ## Error Handling
 
-Public APIs validate at boundaries using `pcheck`.
+Public API errors are either macro syntax errors or runtime validation errors.
 
-Expected runtime errors include:
+Macro errors:
 
-- Invalid style symbols or malformed color forms.
-- Color integers outside `#x000000` to `#xffffff`.
-- Closed ports or non-output ports passed to print APIs.
-- Invalid widths, negative padding, or impossible layout constraints.
-- Table row/column mismatch.
+- Unknown constructor fields.
+- Odd field/value clause counts.
+- Missing required fields such as `rich-panel :body`, `rich-tree :label`,
+  `rich-live :renderable`, and `rich-status :message`.
+
+Runtime validation errors:
+
+- Invalid style symbols, malformed color forms, and out-of-range RGB integers.
+- Non-port console ports.
+- Invalid widths, negative padding, and invalid alignment names.
+- Unknown box styles.
+- Table row/column mismatches.
 - Progress updates for unknown task ids.
-- Starting live/status/progress objects that are already live.
-- Invalid prompt choices or defaults.
+- Invalid progress totals.
+- Invalid prompt choices.
+- Invalid renderer return values.
 
-Constructor macro syntax errors include unknown fields and malformed
-`[:field value]` clauses.
+## Testing And Verification
 
-## Testing
+Rich tests live in `tests/rich.ss` and are run with:
 
-Add focused tests in `tests/rich.ss` and include `rich.ss` in `tests/Makefile`.
-When the library is added under `chezpp/`, add `(chezpp rich)` to `chezpp.ss`
-so it compiles with the full project.
+```sh
+cd tests
+make test-some TEST='rich'
+```
 
-Test groups:
+Important coverage:
 
-- Style construction, reset objects, truecolor validation, theme resolution, and
-  "later option wins".
-- Segment measurement, ANSI stripping, wrapping, cropping, padding, and
-  alignment.
-- Console output to string ports and color on/off policy.
-- Constructor macro expansion and unknown-field syntax errors.
-- Renderable output for table, panel, tree, rule, columns, padding, align, and
-  layout.
-- Live/status/progress using deterministic time and refresh hooks.
-- Prompt using input string ports and output string ports.
-- Pretty printing for representative Scheme data.
-- Negative tests with comments explaining the expected error case.
+- Style construction, color validation, reset, themes, and override order.
+- Segment width, wrapping, cropping, ANSI stripping, and renderer validation.
+- Console rendering with color enabled and disabled.
+- Expression-returning constructor macros and unknown-field errors.
+- Basic renderables, panels, trees, tables, live refresh, status frames,
+  progress tasks, prompts, and exports.
+- Negative tests include comments explaining the expected error case.
 
-Before claiming implementation complete, run targeted Rich tests and then the
-project build/test commands that are practical in the current workspace.
+Scheme files touched by Rich changes should pass the repository parenthesis
+checker. Examples should run through `./chez++ --script ...` after a rebuild.
 
-## Fixed Implementation Choices
+Full project validation is:
 
-Implementation libraries are Chez libraries under `chezpp/rich/`, but
-only `(chezpp rich)` is the supported user-facing import surface for v1.
+```sh
+make clean
+make
+```
 
-`rich-print` does not default to `(current-output-port)` when the first argument
-is not a console or port. Callers must pass the target explicitly.
-
-Both reset names are provided: `(reset-style)` constructs or returns a reset
-object, and `rich-reset` is a constant reset object.
-
-Initial box styles are `ascii`, `square`, `rounded`, `heavy`, and `double`.
-Unicode-capable consoles use Unicode boxes by default. Consoles configured for
-ascii output fall back to `ascii`.
-
-Password prompts are included in the API. On platforms where no terminal
-no-echo helper is available, password prompt calls raise a clear unsupported
-error rather than silently echoing input.
+Because tests load `chezpp.lib`, macro changes require a clean rebuild when the
+incremental whole-library step leaves stale compiled libraries.

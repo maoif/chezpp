@@ -349,7 +349,7 @@
                 (list (list (rich-segment text)))))))
 
   #|macro:rich-rule
-  The `rich-rule` macro constructs a rule and binds it to an identifier.
+  The `rich-rule` macro constructs and returns a rule.
   |#
   (define-syntax rich-rule
     (lambda (stx)
@@ -377,12 +377,12 @@
                              (cons #'(set-rule-field! rule-name field-value)
                                    setter*))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
-         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
-           #'(begin
-               (define name (make-rich-rule))
-               setter ...))]
+        [(_ clause ...)
+         (with-syntax ([tmp (car (generate-temporaries #'(rich-rule)))])
+           (with-syntax ([(setter ...) (build-setters #'tmp #'(clause ...))])
+             #'(let ([tmp (make-rich-rule)])
+                 setter ...
+                 tmp)))]
         [_ (syntax-error stx "invalid rich-rule form")])))
 
   ;;;;===----------------------------------------------------------------------===
@@ -507,8 +507,7 @@
                       ($blank-lines (rich-padding-bottom padding))))))
 
   #|macro:rich-padding
-  The `rich-padding` macro constructs a padding renderable and binds it to an
-  identifier.
+  The `rich-padding` macro constructs and returns a padding renderable.
   |#
   (define-syntax rich-padding
     (lambda (stx)
@@ -538,12 +537,12 @@
                              (cons #'(set-padding-field! padding-name field-value)
                                    setter*))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
-         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
-           #'(begin
-               (define name (make-rich-padding))
-               setter ...))]
+        [(_ clause ...)
+         (with-syntax ([tmp (car (generate-temporaries #'(rich-padding)))])
+           (with-syntax ([(setter ...) (build-setters #'tmp #'(clause ...))])
+             #'(let ([tmp (make-rich-padding)])
+                 setter ...
+                 tmp)))]
         [_ (syntax-error stx "invalid rich-padding form")])))
 
   ;;;;===----------------------------------------------------------------------===
@@ -644,8 +643,7 @@
                      ($value->segment-lines (rich-align-body align)))))))
 
   #|macro:rich-align
-  The `rich-align` macro constructs an alignment renderable and binds it to an
-  identifier.
+  The `rich-align` macro constructs and returns an alignment renderable.
   |#
   (define-syntax rich-align
     (lambda (stx)
@@ -673,12 +671,12 @@
                              (cons #'(set-align-field! align-name field-value)
                                    setter*))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
-         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
-           #'(begin
-               (define name (make-rich-align))
-               setter ...))]
+        [(_ clause ...)
+         (with-syntax ([tmp (car (generate-temporaries #'(rich-align)))])
+           (with-syntax ([(setter ...) (build-setters #'tmp #'(clause ...))])
+             #'(let ([tmp (make-rich-align)])
+                 setter ...
+                 tmp)))]
         [_ (syntax-error stx "invalid rich-align form")])))
 
   ;;;;===----------------------------------------------------------------------===
@@ -774,9 +772,9 @@
                            (rich-columns-gap columns)))))))
 
   #|macro:rich-columns
-  The `rich-columns` macro constructs a columns renderable and binds it to an
-  identifier. The `:items` field accepts either an expression or a parenthesized
-  literal item list such as `("a" "b")`.
+  The `rich-columns` macro constructs and returns a columns renderable. The
+  `:items` field accepts either an expression or a parenthesized literal item
+  list such as `("a" "b")`.
   |#
   (define-syntax rich-columns
     (lambda (stx)
@@ -819,12 +817,12 @@
                              (cons #'(set-columns-field! columns-name field-value)
                                    setter*))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
-         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
-           #'(begin
-               (define name (make-rich-columns))
-               setter ...))]
+        [(_ clause ...)
+         (with-syntax ([tmp (car (generate-temporaries #'(rich-columns)))])
+           (with-syntax ([(setter ...) (build-setters #'tmp #'(clause ...))])
+             #'(let ([tmp (make-rich-columns)])
+                 setter ...
+                 tmp)))]
         [_ (syntax-error stx "invalid rich-columns form")])))
 
   ;;;;===----------------------------------------------------------------------===
@@ -898,9 +896,9 @@
                         (map $value->segment-lines (rich-layout-items layout)))]))))
 
   #|macro:rich-layout
-  The `rich-layout` macro constructs a layout renderable and binds it to an
-  identifier. The `:items` field accepts either an expression or a parenthesized
-  literal item list such as `("a" "b")`.
+  The `rich-layout` macro constructs and returns a layout renderable. The
+  `:items` field accepts either an expression or a parenthesized literal item
+  list such as `("a" "b")`.
   |#
   (define-syntax rich-layout
     (lambda (stx)
@@ -942,12 +940,12 @@
                              (cons #'(set-layout-field! layout-name field-value)
                                    setter*))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
-         (with-syntax ([(setter ...) (build-setters #'name #'(clause ...))])
-           #'(begin
-               (define name (make-rich-layout))
-               setter ...))]
+        [(_ clause ...)
+         (with-syntax ([tmp (car (generate-temporaries #'(rich-layout)))])
+           (with-syntax ([(setter ...) (build-setters #'tmp #'(clause ...))])
+             #'(let ([tmp (make-rich-layout)])
+                 setter ...
+                 tmp)))]
         [_ (syntax-error stx "invalid rich-layout form")])))
 
   (rich-register-renderer! rich-rule? rich-rule-render)

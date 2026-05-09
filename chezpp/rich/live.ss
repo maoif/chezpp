@@ -295,8 +295,8 @@
               live)))
 
   #|macro:rich-live
-  The `rich-live` macro constructs a live display and binds it to an identifier.
-  The `:renderable` field is required.
+  The `rich-live` macro constructs and returns a live display. The
+  `:renderable` field is required.
   |#
   (define-syntax rich-live
     (lambda (stx)
@@ -337,18 +337,16 @@
                                  (cons #'(set-live-field! live-name field-value)
                                        setter*)))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
+        [(_ clause ...)
          (let ([renderable (renderable-value #'(clause ...))])
            (unless renderable
              (syntax-error stx "rich-live requires :renderable"))
-           (with-syntax ([tmp (car (generate-temporaries #'(name)))]
+           (with-syntax ([tmp (car (generate-temporaries #'(rich-live)))]
                          [renderable-value renderable])
              (with-syntax ([(action ...) (build-actions #'tmp #'(clause ...))])
-               #'(define name
-                   (let ([tmp (make-rich-live renderable-value)])
-                     action ...
-                     tmp)))))]
+               #'(let ([tmp (make-rich-live renderable-value)])
+                   action ...
+                   tmp))))]
         [_ (syntax-error stx "invalid rich-live form")])))
 
   ;;;;===----------------------------------------------------------------------===
@@ -494,8 +492,8 @@
               status)))
 
   #|macro:rich-status
-  The `rich-status` macro constructs a status spinner and binds it to an
-  identifier. The `:message` field is required.
+  The `rich-status` macro constructs and returns a status spinner. The
+  `:message` field is required.
   |#
   (define-syntax rich-status
     (lambda (stx)
@@ -536,18 +534,16 @@
                                  (cons #'(set-status-field! status-name field-value)
                                        setter*)))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
+        [(_ clause ...)
          (let ([message (message-value #'(clause ...))])
            (unless message
              (syntax-error stx "rich-status requires :message"))
-           (with-syntax ([tmp (car (generate-temporaries #'(name)))]
+           (with-syntax ([tmp (car (generate-temporaries #'(rich-status)))]
                          [message-value message])
              (with-syntax ([(action ...) (build-actions #'tmp #'(clause ...))])
-               #'(define name
-                   (let ([tmp (make-rich-status message-value)])
-                     action ...
-                     tmp)))))]
+               #'(let ([tmp (make-rich-status message-value)])
+                   action ...
+                   tmp))))]
         [_ (syntax-error stx "invalid rich-status form")])))
 
   (rich-register-renderer! rich-status? rich-status-render))

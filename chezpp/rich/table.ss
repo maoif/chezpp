@@ -470,9 +470,9 @@
                             '()))))))
 
   #|macro:rich-table
-  The `rich-table` macro constructs a table and binds it to an identifier. The
-  `:columns` and `:rows` fields accept ordinary list expressions or
-  parenthesized literal lists.
+  The `rich-table` macro constructs and returns a table. The `:columns` and
+  `:rows` fields accept ordinary list expressions or parenthesized literal
+  lists.
   |#
   (define-syntax rich-table
     (lambda (stx)
@@ -556,12 +556,12 @@
                    (let ([actions (field-actions name (car clause*) (cadr clause*))])
                      (loop (cddr clause*) (rich-reverse-append actions action*)))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
-         (with-syntax ([(action ...) (build-actions #'name #'(clause ...))])
-           #'(begin
-               (define name (make-rich-table))
-               action ...))]
+        [(_ clause ...)
+         (with-syntax ([tmp (car (generate-temporaries #'(rich-table)))])
+           (with-syntax ([(action ...) (build-actions #'tmp #'(clause ...))])
+             #'(let ([tmp (make-rich-table)])
+                 action ...
+                 tmp)))]
         [_ (syntax-error stx "invalid rich-table form")])))
 
   (rich-register-renderer! rich-table? rich-table-render))

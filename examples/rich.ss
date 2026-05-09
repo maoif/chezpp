@@ -61,11 +61,12 @@
 (rich-console-width-set! console 76)
 (rich-console-color-system-set! console 'standard)
 
-(rich-theme palette
-  :ok (rich-style 'bold 'green)
-  :warn (rich-style 'yellow)
-  :hot (rich-style 'bold #xff6600)
-  :dim (rich-style 'dim))
+(define palette
+  (rich-theme
+    :ok (rich-style 'bold 'green)
+    :warn (rich-style 'yellow)
+    :hot (rich-style 'bold #xff6600)
+    :dim (rich-style 'dim)))
 (rich-console-theme-set! console palette)
 
 (rich-print console
@@ -126,57 +127,66 @@
               "\n"))
 
 (section console "Rules, Padding, Alignment")
-(rich-rule centered-rule :title "centered heavy rule" :width 50 :style 'heavy)
-(rich-padding padded
-  :body (rich-text "padded body with styled text" (rich-style 'yellow))
-  :top 1
-  :right 4
-  :bottom 1
-  :left 4)
-(rich-align left-align :body "left aligned" :width 34 :align 'left)
-(rich-align center-align :body "center aligned" :width 34 :align 'center)
-(rich-align right-align :body "right aligned" :width 34 :align 'right)
+(define centered-rule
+  (rich-rule :title "centered heavy rule" :width 50 :style 'heavy))
+(define padded
+  (rich-padding
+    :body (rich-text "padded body with styled text" (rich-style 'yellow))
+    :top 1
+    :right 4
+    :bottom 1
+    :left 4))
+(define left-align (rich-align :body "left aligned" :width 34 :align 'left))
+(define center-align (rich-align :body "center aligned" :width 34 :align 'center))
+(define right-align (rich-align :body "right aligned" :width 34 :align 'right))
 (rich-print console centered-rule "\n" padded "\n")
 (rich-print console left-align "\n" center-align "\n" right-align "\n")
 
 (section console "Boxes, Panels, Tables")
-(rich-panel ascii-panel
-  :title "ascii"
-  :body "portable box"
-  :box 'ascii)
-(rich-panel rounded-panel
-  :title "rounded"
-  :body (rich-text "soft corners" (rich-style 'green))
-  :box 'rounded)
-(rich-panel heavy-panel
-  :title "heavy"
-  :body (rich-text "high contrast" (rich-style 'bold 'red))
-  :box 'heavy)
-(rich-panel double-panel
-  :title "double"
-  :body (rich-text "classic frame" (rich-style 'cyan))
-  :box 'double)
-(rich-columns box-columns
-  :items (ascii-panel rounded-panel heavy-panel double-panel)
-  :width 76
-  :gap 3)
+(define ascii-panel
+  (rich-panel
+    :title "ascii"
+    :body "portable box"
+    :box 'ascii))
+(define rounded-panel
+  (rich-panel
+    :title "rounded"
+    :body (rich-text "soft corners" (rich-style 'green))
+    :box 'rounded))
+(define heavy-panel
+  (rich-panel
+    :title "heavy"
+    :body (rich-text "high contrast" (rich-style 'bold 'red))
+    :box 'heavy))
+(define double-panel
+  (rich-panel
+    :title "double"
+    :body (rich-text "classic frame" (rich-style 'cyan))
+    :box 'double))
+(define box-columns
+  (rich-columns
+    :items (ascii-panel rounded-panel heavy-panel double-panel)
+    :width 76
+    :gap 3))
 (rich-print console box-columns "\n")
 
-(rich-table build-table
-  :title "Build Matrix"
-  :caption "Headers, captions, padding, show-lines, and styled cells"
-  :box 'double
-  :show-header? #t
-  :show-lines? #t
-  :padding 1
-  :columns ("Stage" "Status" "Notes")
-  :rows (("parse" (rich-text "ok" (rich-style 'green)) "reader + macro expansion")
-         ("compile" (rich-text "warm" (rich-style 'yellow)) "whole-program optimization")
-         ("test" (rich-text "pass" (rich-style 'bold 'green)) "rich, string, list")))
+(define build-table
+  (rich-table
+    :title "Build Matrix"
+    :caption "Headers, captions, padding, show-lines, and styled cells"
+    :box 'double
+    :show-header? #t
+    :show-lines? #t
+    :padding 1
+    :columns ("Stage" "Status" "Notes")
+    :rows (("parse" (rich-text "ok" (rich-style 'green)) "reader + macro expansion")
+           ("compile" (rich-text "warm" (rich-style 'yellow)) "whole-program optimization")
+           ("test" (rich-text "pass" (rich-style 'bold 'green)) "rich, string, list"))))
 (rich-print console build-table "\n")
 
 (section console "Tree And Pretty Printing")
-(rich-tree project-tree :label (rich-text "chezpp" (rich-style 'bold 'blue)))
+(define project-tree
+  (rich-tree :label (rich-text "chezpp" (rich-style 'bold 'blue))))
 (let ([rich-node (rich-tree-add! project-tree (rich-text "rich/" (rich-style 'cyan)))])
   (rich-tree-add! rich-node "style.ss")
   (rich-tree-add! rich-node "console.ss")
@@ -185,28 +195,32 @@
   (rich-tree-add! examples-node "rich.ss")
   (rich-tree-add! examples-node "rich-dashboard.ss"))
 (rich-print console project-tree "\n")
-(rich-panel pretty-panel
-  :title "pretty"
-  :body '(rich (styles . opaque) (segments . rendered) #(tables panels trees))
-  :box 'square)
+(define pretty-panel
+  (rich-panel
+    :title "pretty"
+    :body '(rich (styles . opaque) (segments . rendered) #(tables panels trees))
+    :box 'square))
 (rich-print console pretty-panel "\n")
 
 (section console "Columns And Layout")
-(rich-layout row-layout
-  :direction 'row
-  :items ((rich-text "left pane" (rich-style 'bold 'green))
-          (rich-text "middle pane" (rich-style 'bold 'yellow))
-          (rich-text "right pane" (rich-style 'bold 'cyan))))
-(rich-layout column-layout
-  :direction 'column
-  :items ((rich-text "top area" (rich-style 'magenta))
-          row-layout
-          (rich-text "bottom area" (rich-style 'blue))))
-(rich-panel layout-panel
-  :title "layout"
-  :body column-layout
-  :box 'rounded
-  :padding 2)
+(define row-layout
+  (rich-layout
+    :direction 'row
+    :items ((rich-text "left pane" (rich-style 'bold 'green))
+            (rich-text "middle pane" (rich-style 'bold 'yellow))
+            (rich-text "right pane" (rich-style 'bold 'cyan)))))
+(define column-layout
+  (rich-layout
+    :direction 'column
+    :items ((rich-text "top area" (rich-style 'magenta))
+            row-layout
+            (rich-text "bottom area" (rich-style 'blue)))))
+(define layout-panel
+  (rich-panel
+    :title "layout"
+    :body column-layout
+    :box 'rounded
+    :padding 2))
 (rich-print console layout-panel "\n")
 
 (section console "Live, Status, Progress")
@@ -236,10 +250,11 @@
 (section console "Exports And Custom Renderers")
 (let ([plain (rich-export-text build-table)]
       [ansi (rich-export-ansi (rich-text "exported ansi" (rich-style 'bold 'green)))])
-  (rich-table export-table
-    :box 'rounded
-    :columns ("Export" "Preview")
-    :rows (("text length" (number->string (string-length plain)))
-           ("ansi value" ansi)
-           ("renderer?" (if (rich-renderable? build-table) "registered" "plain"))))
+  (define export-table
+    (rich-table
+      :box 'rounded
+      :columns ("Export" "Preview")
+      :rows (("text length" (number->string (string-length plain)))
+             ("ansi value" ansi)
+             ("renderer?" (if (rich-renderable? build-table) "registered" "plain")))))
   (rich-print console export-table "\n"))

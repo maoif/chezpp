@@ -17,7 +17,7 @@
 
           p/and p/or p/not
 
-          procedure-variable-arity? procedure-name
+          procedure-arity procedure-variable-arity? procedure-name
 
           random-char random-string random-symbol random-datum random-list random-box
           random-bytevector random-u8vec
@@ -334,6 +334,46 @@
       (unless (procedure? proc)
         (errorf who "expected a procedure: ~a" proc))
       (lambda (x) (not (proc x)))))
+
+
+  #|proc:procedure-arity
+  The `procedure-arity` procedure returns the arity accepted by `proc`. A fixed
+  single arity is returned as a number. Multiple fixed arities are returned as
+  a list of numbers. Variable arity is returned as a list ending in `*`, where
+  numbers before `*` are accepted fixed arities below the variable lower bound.
+  |#
+  ;; (lambda (x) ...)
+  ;; (lambda (x y) ...)
+  ;; (lambda (x y . z) ...)
+  ;; (lambda x* ...)
+  ;; (case-lambda <lam> ...)
+  (define procedure-arity
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (let ([m (procedure-arity-mask proc)])
+                (if (> m 0)
+                    (let ([lb (make-list-builder)])
+                      (let loop ([m m] [i 0])
+                        (if (= m 0)
+                            (if (= 1 (length (lb)))
+                                (car (lb))
+                                (lb))
+                            (begin (when (logbit? 0 m)
+                                     (lb i))
+                                   (loop (ash m -1) (add1 i))))))
+                    (let ([lb (make-list-builder)])
+                      (let find-min ([i 0])
+                        (if (= (ash m (- i)) -1)
+                            (begin
+                              (when (positive? i)
+                                (let collect ([j 0])
+                                  (when (<= j i)
+                                    (when (logbit? j m)
+                                      (lb j))
+                                    (collect (add1 j)))))
+                              (lb '*)
+                              (lb))
+                            (find-min (add1 i))))))))))
 
 
   #|doc

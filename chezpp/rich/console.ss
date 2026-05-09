@@ -236,7 +236,7 @@
               ($rich-console-ascii-only?-set! console ascii-only?))))
 
   #|macro:rich-console
-  The `rich-console` macro constructs a console and binds it to an identifier.
+  The `rich-console` macro constructs and returns a console.
   |#
   (define-syntax rich-console
     (lambda (stx)
@@ -270,14 +270,12 @@
                              (cons #'(set-console-field! console-name field-value)
                                    setter*))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
-         (with-syntax ([tmp (car (generate-temporaries #'(name)))])
+        [(_ clause ...)
+         (with-syntax ([tmp (car (generate-temporaries #'(rich-console)))])
            (with-syntax ([(setter ...) (build-setters #'tmp #'(clause ...))])
-             #'(define name
-                 (let ([tmp (make-rich-console)])
-                   setter ...
-                   tmp))))]
+             #'(let ([tmp (make-rich-console)])
+                 setter ...
+                 tmp)))]
         [_ (syntax-error stx "invalid rich-console form")])))
 
   (define $target+values

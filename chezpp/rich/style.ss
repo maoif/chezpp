@@ -350,8 +350,8 @@
                  theme))]))
 
   #|macro:rich-theme
-  The `rich-theme` macro constructs a mutable rich theme and binds it to
-  `name`. Theme entries are written as `:key value` clauses.
+  The `rich-theme` macro constructs and returns a mutable rich theme. Theme
+  entries are written as `:key value` clauses.
   |#
   (define-syntax rich-theme
     (lambda (stx)
@@ -377,10 +377,9 @@
                        (loop (cddr clause*)
                              (cons #'(cons 'key-name key-value) entry*))))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
+        [(_ clause ...)
          (with-syntax ([(entry ...) (build-entries #'(clause ...))])
-           #'(define name (make-rich-theme (list entry ...))))]
+           #'(make-rich-theme (list entry ...)))]
         [_ (syntax-error stx "invalid rich-theme form")])))
 
   #|proc:rich-theme?

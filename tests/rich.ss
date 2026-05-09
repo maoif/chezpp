@@ -78,12 +78,14 @@
 
      (rich-color-system? 'auto)
 
-     (let ()
-       (rich-theme theme)
-       (rich-theme? theme))
+     (let ([theme (rich-theme :error (rich-style 'red) :ok (rich-style 'green))])
+       (and (rich-theme? theme)
+            (equal? "\033[31m" (rich-style->ansi #f (rich-theme-ref theme 'error)))
+            (equal? "\033[32m" (rich-style->ansi #f (rich-theme-ref theme 'ok)))))
 
-     (let ()
-       (rich-theme theme :error (rich-style 'red) :ok (rich-style 'green))
+     (rich-theme? (rich-theme))
+
+     (let ([theme (rich-theme :error (rich-style 'red) :ok (rich-style 'green))])
        (and (equal? "\033[31m" (rich-style->ansi #f (rich-theme-ref theme 'error)))
             (equal? "\033[32m" (rich-style->ansi #f (rich-theme-ref theme 'ok)))))
 
@@ -92,6 +94,67 @@
 
      (rich-output-target? (current-output-port))
      (rich-output-target? (make-rich-console))
+
+     )
+
+(mat rich-constructor-macros
+
+     (let ([p (open-output-string)])
+       (let ([c (rich-console :output-port p :color-system 'none)])
+         (and (rich-console? c)
+              (begin
+                (rich-print c (rich-style 'red) "x" (reset-style))
+                (equal? "x" (get-output-string p))))))
+
+     (equal? "--- Build ----"
+             (rich-export-text
+              (rich-rule :title "Build" :width 14)))
+
+     (equal? "  x  "
+             (rich-export-text
+              (rich-padding :body "x" :left 2 :right 2)))
+
+     (equal? "  x   "
+             (rich-export-text
+              (rich-align :body "x" :width 6 :align 'center)))
+
+     (equal? "a  bb\nccc"
+             (rich-export-text
+              (rich-columns :items ("a" "bb" "ccc") :width 5 :gap 2)))
+
+     (string-contains?
+      (rich-export-text
+       (rich-layout :direction 'row :items ("top" "bottom")))
+      "top"
+      "bottom")
+
+     (equal? "+-------+\n| hello |\n+-------+"
+             (rich-export-text
+              (rich-panel :body "hello")))
+
+     (let ([tr (rich-tree :label "root")])
+       (rich-tree-add! tr "child")
+       (equal? "root\n└── child" (rich-export-text tr)))
+
+     (let ([live (rich-live :renderable "one" :refresh-rate 0)])
+       (and (rich-live? live)
+            (equal? "one" (rich-live-renderable live))))
+
+     (parameterize ([rich-current-time (lambda () 0)])
+       (let ([status (rich-status :message "Working" :frames '("a" "b") :interval 1)])
+         (equal? "a Working" (rich-export-text status))))
+
+     (let ([progress (rich-progress :width 10 :tasks (("build" 4)))])
+       (string-contains? (rich-export-text progress) "build" "0%"))
+
+     (let ([table (rich-table
+                    :title "Build"
+                    :box 'rounded
+                    :columns ("Name" "Status")
+                    :rows (("compile" "ok")
+                           ("test" "ok")))])
+       (and (rich-table? table)
+            (string-contains? (rich-export-text table) "Build" "compile" "test")))
 
      )
 
@@ -213,9 +276,9 @@
               (eq? blue (rich-segment-style (cadr segments))))))
 
      (let ([p (open-output-string)])
-       (rich-console c :output-port p :color-system 'standard)
-       (rich-print c (rich-text "ok" (rich-style 'green)))
-       (equal? "\033[32mok\033[0m" (get-output-string p)))
+       (let ([c (rich-console :output-port p :color-system 'standard)])
+         (rich-print c (rich-text "ok" (rich-style 'green)))
+         (equal? "\033[32mok\033[0m" (get-output-string p))))
 
      (equal? "ok" (rich-export-text (rich-text "ok" (rich-style 'green))))
 
@@ -239,58 +302,48 @@
 (mat rich-basic-renderables
 
      (equal? "--- Build ----"
-             (let ()
-               (rich-rule r :title "Build" :width 14)
+             (let ([r (rich-rule :title "Build" :width 14)])
                (rich-export-text r)))
 
      (= 14
         (string-length
-         (let ()
-           (rich-rule r :title "Build" :width 14)
-           (rich-export-text r))))
+         (rich-export-text
+          (rich-rule :title "Build" :width 14))))
 
      (equal? "  x  "
-             (let ()
-               (rich-padding p :body "x" :left 2 :right 2)
+             (let ([p (rich-padding :body "x" :left 2 :right 2)])
                (rich-export-text p)))
 
      (equal? "  x   "
-             (let ()
-               (rich-align a :body "x" :width 6 :align 'center)
+             (let ([a (rich-align :body "x" :width 6 :align 'center)])
                (rich-export-text a)))
 
      (equal? "a  bb\nccc"
-             (let ()
-               (rich-columns c :items ("a" "bb" "ccc") :width 5 :gap 2)
+             (let ([c (rich-columns :items ("a" "bb" "ccc") :width 5 :gap 2)])
                (rich-export-text c)))
 
      (equal? "a  b"
-             (let ()
-               (rich-columns c :items (list "a" "b") :width 10 :gap 2)
+             (let ([c (rich-columns :items (list "a" "b") :width 10 :gap 2)])
                (rich-export-text c)))
 
      (equal? "\033[31mx\033[0m  y"
-             (let ()
-               (rich-columns c
-                 :items ((rich-text "x" (rich-style 'red)) "y")
-                 :width 10
-                 :gap 2)
+             (let ([c (rich-columns
+                        :items ((rich-text "x" (rich-style 'red)) "y")
+                        :width 10
+                        :gap 2)])
                (rich-export-ansi c)))
 
-     (let ()
-       (rich-layout root :direction 'row :items ("top" "bottom"))
+     (let ([root (rich-layout :direction 'row :items ("top" "bottom"))])
        (string-contains? (rich-export-text root) "top" "bottom"))
 
      (equal? "top bottom"
-             (let ()
-               (rich-layout root :direction 'row :items (list "top" "bottom"))
+             (let ([root (rich-layout :direction 'row :items (list "top" "bottom"))])
                (rich-export-text root)))
 
      (equal? "\033[31mtop\033[0m bottom"
-             (let ()
-               (rich-layout root
-                 :direction 'row
-                 :items ((rich-text "top" (rich-style 'red)) "bottom"))
+             (let ([root (rich-layout
+                           :direction 'row
+                           :items ((rich-text "top" (rich-style 'red)) "bottom"))])
                (rich-export-ansi root)))
 
      (let ([chars (rich-box-chars 'ascii)])
@@ -303,10 +356,9 @@
 
      (equal? (string-append
               "+-------+\n"
-              "| hello |\n"
+             "| hello |\n"
               "+-------+")
-             (let ()
-               (rich-panel p :body "hello")
+             (let ([p (rich-panel :body "hello")])
                (rich-export-text p)))
 
      (equal? (string-append
@@ -314,12 +366,10 @@
               "| \033[31ma\033[0m |\n"
               "| \033[31mb\033[0m |\n"
               "+---+")
-             (let ()
-               (rich-panel p :body (rich-text "a\nb" (rich-style 'red)))
+             (let ([p (rich-panel :body (rich-text "a\nb" (rich-style 'red)))])
                (rich-export-ansi p)))
 
-     (let ()
-       (rich-tree tr :label "root")
+     (let ([tr (rich-tree :label "root")])
        (let ([src (rich-tree-add! tr "src")])
          (rich-tree-add! src "main.ss")
          (rich-tree-add! tr "tests")
@@ -330,8 +380,7 @@
                   "└── tests")
                  (rich-export-text tr))))
 
-     (let ()
-       (rich-tree tr :label "root")
+     (let ([tr (rich-tree :label "root")])
        (rich-tree-add! tr "line1\nline2")
        (equal? (string-append
                 "root\n"
@@ -339,12 +388,10 @@
                 "    line2")
                (rich-export-text tr)))
 
-     (let ()
-       (rich-tree tr :label (rich-text "root" (rich-style 'red)))
+     (let ([tr (rich-tree :label (rich-text "root" (rich-style 'red)))])
        (equal? "\033[31mroot\033[0m" (rich-export-ansi tr)))
 
-     (let ()
-       (rich-tree tr :label "root")
+     (let ([tr (rich-tree :label "root")])
        (rich-tree-add! tr (rich-text "child1\nchild2" (rich-style 'red)))
        (equal? (string-append
                 "root\n"
@@ -352,28 +399,28 @@
                 "    \033[31mchild2\033[0m")
                (rich-export-ansi tr)))
 
-     (let ([p (open-output-string)])
-       (rich-tree tr :label "root")
-       (rich-console c
-         :output-port p
-         :color-system 'none
-         :ascii-only? #t)
+     (let ([p (open-output-string)]
+           [tr (rich-tree :label "root")])
+       (let ([c (rich-console
+                  :output-port p
+                  :color-system 'none
+                  :ascii-only? #t)])
        (rich-tree-add! tr "child")
        (rich-print c tr)
        (equal? (string-append
                 "root\n"
                 "`-- child")
-               (get-output-string p)))
+               (get-output-string p))))
 
      )
 
 (mat rich-panel-tree-errors
 
      ;; Panel body is required.
-     (error? (eval '(let () (rich-panel p) p)))
+     (error? (eval '(rich-panel)))
 
      ;; Tree label is required.
-     (error? (eval '(let () (rich-tree tr) tr)))
+     (error? (eval '(rich-tree)))
 
      ;; Tree child insertion requires a tree receiver.
      (error? (rich-tree-add! "not-a-tree" "x"))
@@ -383,17 +430,16 @@
 (mat rich-live-status
 
      (let ([p (open-output-string)])
-       (rich-console c :output-port p :color-system 'none)
-       (rich-live live :console c :renderable "one")
-       (begin
-         (rich-live-refresh! live)
-         (rich-live-renderable-set! live "two")
-         (rich-live-refresh! live)
-         (equal? "one\r\033[2Ktwo" (get-output-string p))))
+       (let* ([c (rich-console :output-port p :color-system 'none)]
+              [live (rich-live :console c :renderable "one")])
+         (begin
+           (rich-live-refresh! live)
+           (rich-live-renderable-set! live "two")
+           (rich-live-refresh! live)
+           (equal? "one\r\033[2Ktwo" (get-output-string p)))))
 
      (parameterize ([rich-current-time (lambda () 100)])
-       (let ()
-         (rich-status st :message "Working")
+       (let ([st (rich-status :message "Working")])
          (equal? "⠋ Working" (rich-export-text st))))
 
      (equal? '("a Working" "b Working" "c Working")
@@ -436,20 +482,18 @@
      (error? (rich-live-refresh! "not-live"))
 
      ;; Status message must be printable text.
-     (error? (rich-status s :message #f))
+     (error? (rich-status :message #f))
 
      )
 
 (mat rich-progress
 
-     (let ()
-       (rich-progress pr :width 10)
+     (let ([pr (rich-progress :width 10)])
        (let ([id (rich-progress-add-task! pr "download" 10)])
          (rich-progress-update! pr id 4)
          (string-contains? (rich-export-text pr) "download" "40%")))
 
-     (let ()
-       (rich-progress pr :width 10)
+     (let ([pr (rich-progress :width 10)])
        (let ([id (rich-progress-add-task! pr "build" #f)])
          (rich-progress-advance! pr id 3)
          (string-contains? (rich-export-text pr) "build" "3")))
@@ -459,7 +503,7 @@
 (mat rich-progress-errors
 
      ;; Progress width must be positive.
-     (error? (rich-progress p :width 0))
+     (error? (rich-progress :width 0))
 
      ;; Progress updates require a known task id.
      (error? (let ([p (make-rich-progress)])
@@ -475,17 +519,17 @@
 
      (let ([in (open-input-string "maoif\n")]
            [out (open-output-string)])
-       (rich-console c :input-port in :output-port out :color-system 'none)
+       (define c (rich-console :input-port in :output-port out :color-system 'none))
        (equal? "maoif" (rich-prompt c "Name")))
 
      (let ([in (open-input-string "\n")]
            [out (open-output-string)])
-       (rich-console c :input-port in :output-port out :color-system 'none)
+       (define c (rich-console :input-port in :output-port out :color-system 'none))
        (equal? "default" (rich-prompt c "Name" "default")))
 
      (let ([in (open-input-string "y\n")]
            [out (open-output-string)])
-       (rich-console c :input-port in :output-port out :color-system 'none)
+       (define c (rich-console :input-port in :output-port out :color-system 'none))
        (rich-confirm c "Continue?"))
 
      )
@@ -495,7 +539,7 @@
      ;; Prompt choices must include the entered value.
      (error? (let ([in (open-input-string "bad\n")]
                    [out (open-output-string)])
-               (rich-console c :input-port in :output-port out :color-system 'none)
+               (define c (rich-console :input-port in :output-port out :color-system 'none))
                (rich-prompt c "Mode" #f '("fast" "slow"))))
 
      )
@@ -514,13 +558,12 @@
                 "+-------+--------+")
                (rich-export-text t)))
 
-     (let ()
-       (rich-table t
-         :title "Build"
-         :box 'rounded
-         :columns ("Name" "Status")
-         :rows (("compile" "ok")
-                ("test" "ok")))
+     (let ([t (rich-table
+                :title "Build"
+                :box 'rounded
+                :columns ("Name" "Status")
+                :rows (("compile" "ok")
+                       ("test" "ok")))])
        (and (rich-table? t)
             (string-contains? (rich-export-text t) "Build" "compile" "test")))
 
@@ -535,9 +578,10 @@
 
      (let ([columns (vector "Name" "Status")]
            [rows '(("build" "ok"))])
-       (rich-table t
-         :columns (vector->list columns)
-         :rows (map (lambda (row) row) rows))
+       (define t
+         (rich-table
+           :columns (vector->list columns)
+           :rows (map (lambda (row) row) rows)))
        (equal? (string-append
                 "+-------+--------+\n"
                 "| Name  | Status |\n"
@@ -556,20 +600,20 @@
                (rich-table-add-row! t "a" "b")))
 
      ;; Table box style must be known.
-     (error? (eval '(let () (rich-table t :box 'unknown) t)))
+     (error? (eval '(rich-table :box 'unknown)))
 
      )
 
 (mat rich-basic-errors
 
      ;; Rule width must be positive.
-     (error? (eval '(let () (rich-rule r :width 0) r)))
+     (error? (eval '(rich-rule :width 0)))
 
      ;; Padding values must be non-negative.
-     (error? (eval '(let () (rich-padding p :body "x" :left -1) p)))
+     (error? (eval '(rich-padding :body "x" :left -1)))
 
      ;; Alignment must be left, center, or right.
-     (error? (eval '(let () (rich-align a :body "x" :align 'middle) a)))
+     (error? (eval '(rich-align :body "x" :align 'middle)))
 
      )
 
@@ -583,10 +627,11 @@
          (equal? "ok" (get-output-string p))))
 
      (let ([p (open-output-string)])
-       (rich-console c
-         :output-port p
-         :width 20
-         :color-system 'none)
+       (define c
+         (rich-console
+           :output-port p
+           :width 20
+           :color-system 'none))
        (and (rich-console? c)
             (= 20 (rich-console-width c))
             (begin
@@ -594,9 +639,10 @@
               (equal? "x" (get-output-string p)))))
 
      (let ([p (open-output-string)])
-       (rich-console c
-         :output-port p
-         :color-system 'standard)
+       (define c
+         (rich-console
+           :output-port p
+           :color-system 'standard))
        (rich-print c (rich-style 'red) "x" (reset-style))
        (equal? "\033[31mx\033[0m" (get-output-string p)))
 
@@ -606,15 +652,17 @@
         (lambda (value)
           (list (list (rich-segment "x" (rich-style 'red))))))
        (and (let ([p (open-output-string)])
-              (rich-console c
-                :output-port p
-                :color-system 'standard)
+              (define c
+                (rich-console
+                  :output-port p
+                  :color-system 'standard))
               (rich-print c 'rich-render-styled-segment-test)
               (equal? "\033[31mx\033[0m" (get-output-string p)))
             (let ([p (open-output-string)])
-              (rich-console c
-                :output-port p
-                :color-system 'none)
+              (define c
+                (rich-console
+                  :output-port p
+                  :color-system 'none))
               (rich-print c 'rich-render-styled-segment-test)
               (equal? "x" (get-output-string p)))
             (equal? "x"
@@ -625,16 +673,18 @@
                     (rich-export-ansi 'rich-render-styled-segment-test))))
 
      (let ([p (open-output-string)])
-       (rich-console c
-         :output-port p
-         :color-system 'standard)
+       (define c
+         (rich-console
+           :output-port p
+           :color-system 'standard))
        (rich-print c (rich-style) (reset-style) "x")
        (equal? "x" (get-output-string p)))
 
      (let ([p (open-output-string)])
-       (rich-console c
-         :output-port p
-         :color-system 'standard)
+       (define c
+         (rich-console
+           :output-port p
+           :color-system 'standard))
        (rich-register-renderer!
         (lambda (value) (eq? value 'rich-render-outer-style-test))
         (lambda (value)
@@ -649,9 +699,10 @@
                (get-output-string p)))
 
      (let ([p (open-output-string)])
-       (rich-console c
-         :output-port p
-         :color-system 'standard)
+       (define c
+         (rich-console
+           :output-port p
+           :color-system 'standard))
        (rich-register-renderer!
         (lambda (value) (eq? value 'rich-render-segment-reset-test))
         (lambda (value)
@@ -666,9 +717,10 @@
                (get-output-string p)))
 
      (let ([p (open-output-string)])
-       (rich-console c
-         :output-port p
-         :color-system 'standard)
+       (define c
+         (rich-console
+           :output-port p
+           :color-system 'standard))
        (rich-register-renderer!
         (lambda (value) (eq? value 'rich-render-empty-segment-style-test))
         (lambda (value)
@@ -686,8 +738,8 @@
 (mat rich-integration
 
      (let ([out (open-output-string)])
-       (rich-console c :output-port out :color-system 'standard)
-       (rich-panel p :body "done" :box 'ascii)
+       (define c (rich-console :output-port out :color-system 'standard))
+       (define p (rich-panel :body "done" :box 'ascii))
        (rich-print c
                    (rich-style 'bold 'green)
                    "pass"
@@ -696,10 +748,9 @@
                    p)
        (string-contains? (get-output-string out) "\033[1m" "pass" "+------+" "done"))
 
-     (let ()
-       (rich-table t
-         :columns ("Name" "Status")
-         :rows (("compile" "ok")))
+     (let ([t (rich-table
+                :columns ("Name" "Status")
+                :rows (("compile" "ok")))])
        (string-contains? (rich-export-ansi t) "compile" "ok"))
 
      )
@@ -707,18 +758,18 @@
 (mat rich-console-errors
 
      ;; Console width must be positive.
-     (error? (rich-console c :width 0))
+     (error? (rich-console :width 0))
 
      ;; Console output port must be an output port.
-     (error? (rich-console c :output-port "not-a-port"))
+     (error? (rich-console :output-port "not-a-port"))
 
      ;; Unknown constructor macro fields are rejected.
-     (error? (eval '(let () (rich-console c :unknown 1) c)))
+     (error? (eval '(rich-console :unknown 1)))
 
      ;; Console input port must be an input port.
-     (error? (rich-console c :input-port "not-a-port"))
+     (error? (rich-console :input-port "not-a-port"))
 
      ;; Console color system must be supported.
-     (error? (rich-console c :color-system 'unsupported))
+     (error? (rich-console :color-system 'unsupported))
 
      )

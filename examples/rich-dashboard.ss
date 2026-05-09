@@ -67,12 +67,13 @@
 (rich-console-color-system-set! console 'standard)
 (rich-console-force-terminal?-set! console #t)
 
-(rich-theme dashboard-theme
-  :good (rich-style 'bold 'green)
-  :busy (rich-style 'bold 'yellow)
-  :bad (rich-style 'bold 'red)
-  :muted (rich-style 'dim)
-  :accent (rich-style 'bold #x00b7ff))
+(define dashboard-theme
+  (rich-theme
+    :good (rich-style 'bold 'green)
+    :busy (rich-style 'bold 'yellow)
+    :bad (rich-style 'bold 'red)
+    :muted (rich-style 'dim)
+    :accent (rich-style 'bold #x00b7ff)))
 (rich-console-theme-set! console dashboard-theme)
 
 (rich-print console
@@ -119,60 +120,70 @@
               "\n"))
 
 (section console "Rules, Alignment, Padding")
-(rich-rule deploy-rule :title "release train" :width 58 :style 'rounded)
-(rich-align left :body "left: logs" :width 38 :align 'left)
-(rich-align center :body "center: service map" :width 38 :align 'center)
-(rich-align right :body "right: alerts" :width 38 :align 'right)
-(rich-padding spacer
-  :body (rich-text "padded command output" (rich-style 'green))
-  :top 1
-  :right 6
-  :bottom 1
-  :left 6)
+(define deploy-rule
+  (rich-rule :title "release train" :width 58 :style 'rounded))
+(define left (rich-align :body "left: logs" :width 38 :align 'left))
+(define center (rich-align :body "center: service map" :width 38 :align 'center))
+(define right (rich-align :body "right: alerts" :width 38 :align 'right))
+(define spacer
+  (rich-padding
+    :body (rich-text "padded command output" (rich-style 'green))
+    :top 1
+    :right 6
+    :bottom 1
+    :left 6))
 (rich-print console deploy-rule "\n" left "\n" center "\n" right "\n" spacer "\n")
 
 (section console "Panels, Boxes, Columns")
-(rich-panel api-panel
-  :title "api"
-  :body (rich-text "p95 82ms\nerrors 0.03%" (rich-style 'green))
-  :box 'ascii)
-(rich-panel queue-panel
-  :title "queue"
-  :body (rich-text "depth 142\nworkers 18" (rich-style 'yellow))
-  :box 'square)
-(rich-panel cache-panel
-  :title "cache"
-  :body (rich-text "hit 97%\nmiss 3%" (rich-style 'cyan))
-  :box 'rounded)
-(rich-panel deploy-panel
-  :title "deploy"
-  :body (rich-text "ring blue\nversion 42" (rich-style 'bold 'magenta))
-  :box 'double)
-(rich-panel alert-panel
-  :title "alerts"
-  :body (rich-text "none active" (rich-style 'bold 'green))
-  :box 'heavy)
-(rich-columns service-cards
-  :items (api-panel queue-panel cache-panel deploy-panel alert-panel )
-  :width 82
-  :gap 2)
+(define api-panel
+  (rich-panel
+    :title "api"
+    :body (rich-text "p95 82ms\nerrors 0.03%" (rich-style 'green))
+    :box 'ascii))
+(define queue-panel
+  (rich-panel
+    :title "queue"
+    :body (rich-text "depth 142\nworkers 18" (rich-style 'yellow))
+    :box 'square))
+(define cache-panel
+  (rich-panel
+    :title "cache"
+    :body (rich-text "hit 97%\nmiss 3%" (rich-style 'cyan))
+    :box 'rounded))
+(define deploy-panel
+  (rich-panel
+    :title "deploy"
+    :body (rich-text "ring blue\nversion 42" (rich-style 'bold 'magenta))
+    :box 'double))
+(define alert-panel
+  (rich-panel
+    :title "alerts"
+    :body (rich-text "none active" (rich-style 'bold 'green))
+    :box 'heavy))
+(define service-cards
+  (rich-columns
+    :items (api-panel queue-panel cache-panel deploy-panel alert-panel)
+    :width 82
+    :gap 2))
 (rich-print console service-cards "\n")
 
 (section console "Tables")
-(rich-table service-table
-  :title "Service Health"
-  :caption "Double box, styled cells, and multiline table values"
-  :box 'double
-  :show-header? #t
-  :show-lines? #t
-  :columns ("Service" "State" "Detail")
-  :rows (("api" (rich-text "green" (rich-theme-ref dashboard-theme 'good)) "p95 82ms")
-         ("queue" (rich-text "yellow" (rich-theme-ref dashboard-theme 'busy)) "142 jobs\n18 workers")
-         ("edge" (rich-text "green" (rich-theme-ref dashboard-theme 'good)) "2 regions")))
+(define service-table
+  (rich-table
+    :title "Service Health"
+    :caption "Double box, styled cells, and multiline table values"
+    :box 'double
+    :show-header? #t
+    :show-lines? #t
+    :columns ("Service" "State" "Detail")
+    :rows (("api" (rich-text "green" (rich-theme-ref dashboard-theme 'good)) "p95 82ms")
+           ("queue" (rich-text "yellow" (rich-theme-ref dashboard-theme 'busy)) "142 jobs\n18 workers")
+           ("edge" (rich-text "green" (rich-theme-ref dashboard-theme 'good)) "2 regions"))))
 (rich-print console service-table "\n")
 
 (section console "Tree, Layout, Pretty")
-(rich-tree topology :label (rich-text "platform" (rich-style 'bold 'blue)))
+(define topology
+  (rich-tree :label (rich-text "platform" (rich-style 'bold 'blue))))
 (let ([edge (rich-tree-add! topology "edge")])
   (rich-tree-add! edge "cdn")
   (rich-tree-add! edge "waf"))
@@ -181,22 +192,26 @@
   (rich-tree-add! core "queue")
   (rich-tree-add! core "database\nreplica"))
 (rich-print console topology "\n")
-(rich-layout horizontal
-  :direction 'row
-  :items ((rich-text "ingest" (rich-style 'green))
-          (rich-text "process" (rich-style 'yellow))
-          (rich-text "serve" (rich-style 'cyan))))
-(rich-layout vertical
-  :direction 'column
-  :items ("pipeline" horizontal "observability"))
-(rich-panel layout-panel
-  :title "layout"
-  :body vertical
-  :box 'rounded)
-(rich-panel pretty-panel
-  :title "pretty datum"
-  :body '(dashboard (region . us-east) (ring . blue) #(api queue edge))
-  :box 'square)
+(define horizontal
+  (rich-layout
+    :direction 'row
+    :items ((rich-text "ingest" (rich-style 'green))
+            (rich-text "process" (rich-style 'yellow))
+            (rich-text "serve" (rich-style 'cyan)))))
+(define vertical
+  (rich-layout
+    :direction 'column
+    :items ("pipeline" horizontal "observability")))
+(define layout-panel
+  (rich-panel
+    :title "layout"
+    :body vertical
+    :box 'rounded))
+(define pretty-panel
+  (rich-panel
+    :title "pretty datum"
+    :body '(dashboard (region . us-east) (ring . blue) #(api queue edge))
+    :box 'square))
 (rich-print console layout-panel "\n" pretty-panel "\n")
 
 (section console "Live Status And Progress")
@@ -226,11 +241,12 @@
 (section console "Exports")
 (let ([plain (rich-export-text service-table)]
       [ansi (rich-export-ansi (rich-text "dashboard ansi export" (rich-style 'bold 'green)))])
-  (rich-table export-table
-    :box 'rounded
-    :columns ("Capability" "Value")
-    :rows (("text export length" (number->string (string-length plain)))
-           ("ansi export" ansi)
-           ("registered renderer" (if (rich-renderable? service-table) "yes" "no"))
-           ("color system" (if (rich-color-system? 'standard) "standard" "unknown"))))
+  (define export-table
+    (rich-table
+      :box 'rounded
+      :columns ("Capability" "Value")
+      :rows (("text export length" (number->string (string-length plain)))
+             ("ansi export" ansi)
+             ("registered renderer" (if (rich-renderable? service-table) "yes" "no"))
+             ("color system" (if (rich-color-system? 'standard) "standard" "unknown")))))
   (rich-print console export-table "\n"))

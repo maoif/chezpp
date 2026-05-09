@@ -54,6 +54,7 @@
     [(_ expr ...) (mat/cf (testfile "testfile") expr ...)]))
 
 (define mat-output (make-parameter (current-output-port)))
+(define mat-verbose (make-parameter #f))
 
 (let ()
 
@@ -294,7 +295,8 @@
     [(name)
      (fprintf (mat-output) "Warning: empty mat for ~s.~%" name)]
     [(name . clauses)
-     (fprintf (mat-output) "~%Starting mat ~s.~%" name)
+     (when (mat-verbose)
+       (fprintf (mat-output) "~%Starting mat ~s.~%" name))
      ; release counters for reclaimed code objects between mat groups to reduce gc time
      (when (compile-profile) (profile-release-counters))
      (do ([clauses clauses (cdr clauses)]
@@ -310,8 +312,9 @@
                    (display-condition c (mat-output))
                    (reset))))
            (lambda ()
-             (pretty-print clause (mat-output))
-             (flush-output-port (mat-output))))
+             (when (mat-verbose)
+               (pretty-print clause (mat-output))
+               (flush-output-port (mat-output)))))
          (if (and (list? clause)
                   (= (length clause) 2)
                   (memq (car clause) '(sanitized-error? error? warning?)))

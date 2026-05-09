@@ -251,8 +251,8 @@
               ($rich-tree-render/guides tree $ascii-guides))))
 
   #|macro:rich-tree
-  The `rich-tree` macro constructs a tree node and binds it to an identifier.
-  The `:label` field is required.
+  The `rich-tree` macro constructs and returns a tree node. The `:label` field
+  is required.
   |#
   (define-syntax rich-tree
     (lambda (stx)
@@ -280,16 +280,16 @@
                        [else
                         (syntax-error field "invalid rich-tree field")]))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
+        [(_ clause ...)
          (let ([label (label-value #'(clause ...))])
            (unless label
              (syntax-error stx "rich-tree requires :label"))
-           (with-syntax ([label-value label]
-                         [(action ...) (build-actions #'name #'(clause ...))])
-             #'(begin
-                 (define name (make-rich-tree label-value))
-                 action ...)))]
+           (with-syntax ([tmp (car (generate-temporaries #'(rich-tree)))]
+                         [label-value label])
+             (with-syntax ([(action ...) (build-actions #'tmp #'(clause ...))])
+               #'(let ([tmp (make-rich-tree label-value)])
+                   action ...
+                   tmp))))]
         [_ (syntax-error stx "invalid rich-tree form")])))
 
   (rich-register-renderer! rich-tree? rich-tree-render))

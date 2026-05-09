@@ -358,8 +358,7 @@
                    ($visible-tasks progress)))))
 
   #|macro:rich-progress
-  The `rich-progress` macro constructs a progress display and binds it to an
-  identifier.
+  The `rich-progress` macro constructs and returns a progress display.
   |#
   (define-syntax rich-progress
     (lambda (stx)
@@ -380,6 +379,15 @@
                       (rich-progress-add-task! progress-name (car task) (cadr task)))
                     task-list))]
               [else (syntax-error field "invalid rich-progress field")]))))
+      (define task-list-value
+        (lambda (value)
+          (syntax-case value ()
+            [()
+             #''()]
+            [((description total) ...)
+             #'(list (list description total) ...)]
+            [_
+             value])))
       (define build-actions
         (lambda (name clause*)
           (let loop ([clause* clause*] [action* '()])
@@ -388,17 +396,19 @@
                    (syntax-error stx "invalid rich-progress form")]
                   [else
                    (loop (cddr clause*)
-                         (cons (field->action name (car clause*) (cadr clause*))
+                         (cons (field->action name
+                                              (car clause*)
+                                              (if (eq? (syntax->datum (car clause*)) ':tasks)
+                                                  (task-list-value (cadr clause*))
+                                                  (cadr clause*)))
                                action*))]))))
       (syntax-case stx ()
-        [(_ name clause ...)
-         (identifier? #'name)
-         (with-syntax ([tmp (car (generate-temporaries #'(name)))])
+        [(_ clause ...)
+         (with-syntax ([tmp (car (generate-temporaries #'(rich-progress)))])
            (with-syntax ([(action ...) (build-actions #'tmp #'(clause ...))])
-             #'(define name
-                 (let ([tmp (make-rich-progress)])
-                   action ...
-                   tmp))))]
+             #'(let ([tmp (make-rich-progress)])
+                 action ...
+                 tmp)))]
         [_ (syntax-error stx "invalid rich-progress form")])))
 
   (rich-register-renderer! rich-progress? rich-progress-render))
