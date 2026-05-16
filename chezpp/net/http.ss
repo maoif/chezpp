@@ -40,6 +40,7 @@
           http-accept
           http-accept/nonblocking
           http-serve
+          http-serve-loop
           http-register-handler!
           http-connection?
           http-connection-close
@@ -548,6 +549,31 @@
              (let ([n (string->number value)])
                (and n (exact? n) (integer? n) (>= n 0) n))))))
 
+  (define header-token-member?
+    (lambda (headers name token)
+      (let ([value (http-header-ref headers name #f)])
+        (and value
+             (let ([target (string-downcase token)])
+               (let loop ([rest (string-split value #\,)])
+                 (and (not (null? rest))
+                      (or (string=? (string-trim (string-downcase (car rest))) target)
+                          (loop (cdr rest))))))))))
+
+  (define chunked-transfer?
+    (lambda (headers)
+      (header-token-member? headers "Transfer-Encoding" "chunked")))
+
+  (define parse-chunk-size
+    (lambda (who line)
+      (let* ([semi (string-search line (string-ref ";" 0))]
+             [size-text (string-trim (if semi
+                                         (substring line 0 semi)
+                                         line))]
+             [n (string->number size-text 16)])
+        (unless (and n (exact? n) (integer? n) (>= n 0))
+          (raise-net-error who 'http "invalid HTTP chunk size" line))
+        n)))
+
   (define normalize-response-body
     (lambda (status method headers body)
       (if (or (string=? method "HEAD")
@@ -563,6 +589,16 @@
             out
             (loop (cdr rest)
                   (http-header-set out (caar rest) (cdar rest)))))))
+
+  (define http-header-remove
+    (lambda (headers name)
+      (let loop ([rest headers] [out '()])
+        (cond
+         [(null? rest) (reverse out)]
+         [(string-ci=? (caar rest) name)
+          (loop (cdr rest) out)]
+         [else
+          (loop (cdr rest) (cons (car rest) out))]))))
 
   (define merge-request-headers
     (lambda (request client)
@@ -626,10 +662,15 @@
 
   (define read-http-body/exact
     (lambda (who ip n)
-      (let ([bv (get-bytevector-n ip n)])
-        (when (eof-object? bv)
-          (errorf who "unexpected EOF while reading HTTP body"))
-        bv)))
+      (let ([bv (make-bytevector n 0)])
+        (let loop ([i 0])
+          (if (fx= i n)
+              bv
+              (let ([b (get-u8 ip)])
+                (when (eof-object? b)
+                  (errorf who "unexpected EOF while reading HTTP body"))
+                (bytevector-u8-set! bv i b)
+                (loop (fx1+ i))))))))
 
   (define read-http-body/to-eof
     (lambda (ip)
@@ -646,6 +687,35 @@
                         (fill (cdr rest) (fx+ i n))))))
               (let ([n (bytevector-length chunk)])
                 (loop (cons chunk parts) (fx+ total n))))))))
+
+  (define read-http-body/chunked
+    (lambda (who ip)
+      (let loop ([parts '()] [total 0])
+        (let ([line (read-http-line ip)])
+          (when (eof-object? line)
+            (raise-net-error who 'http "unexpected EOF while reading HTTP chunk size"))
+          (let ([size (parse-chunk-size who line)])
+            (if (= size 0)
+                (begin
+                  (let trailer-loop ()
+                    (let ([trailer (read-http-line ip)])
+                      (when (eof-object? trailer)
+                        (raise-net-error who 'http "unexpected EOF while reading HTTP trailers"))
+                      (unless (string=? trailer "")
+                        (trailer-loop))))
+                  (let ([out (make-bytevector total 0)])
+                    (let fill ([rest (reverse parts)] [i 0])
+                      (if (null? rest)
+                          out
+                          (let* ([part (car rest)]
+                                 [n (bytevector-length part)])
+                            (bytevector-copy! part 0 out i n)
+                            (fill (cdr rest) (fx+ i n)))))))
+                (let* ([chunk (read-http-body/exact who ip size)]
+                       [crlf (read-http-line ip)])
+                  (unless (string=? crlf "")
+                    (raise-net-error who 'http "invalid HTTP chunk terminator" crlf))
+                  (loop (cons chunk parts) (fx+ total size)))))))))
 
   (define parse-response-line
     (lambda (who line)
@@ -712,10 +782,25 @@
                           (http-header-set (http-response-headers response)
                                            "Connection"
                                            "close"))])
-        (if (http-header-ref headers "Content-Length" #f)
-            headers
-            (http-header-set headers "Content-Length"
-                             (number->string (bytevector-length body)))))))
+        (cond
+         [(chunked-transfer? headers)
+          (http-header-remove headers "Content-Length")]
+         [(http-header-ref headers "Content-Length" #f)
+          headers]
+         [else
+          (http-header-set headers "Content-Length"
+                           (number->string (bytevector-length body)))]))))
+
+  (define write-http-body/chunked
+    (lambda (op body)
+      (let ([len (bytevector-length body)])
+        (unless (fx= len 0)
+          (put-bytevector op
+                          (string->utf8
+                           (string-append (number->string len 16) "\r\n")))
+          (put-bytevector op body)
+          (put-bytevector op (string->utf8 "\r\n")))
+        (put-bytevector op (string->utf8 "0\r\n\r\n")))))
 
   (define write-response-port
     (lambda (op response)
@@ -728,8 +813,10 @@
                                  (http-response-reason response))))
         (write-header-lines op headers)
         (put-bytevector op (string->utf8 "\r\n"))
-        (unless (fx= 0 (bytevector-length body))
-          (put-bytevector op body))
+        (if (chunked-transfer? headers)
+            (write-http-body/chunked op body)
+            (unless (fx= 0 (bytevector-length body))
+              (put-bytevector op body)))
         (flush-output-port op))))
 
   (define read-http-response*
@@ -741,6 +828,8 @@
           (let* ([headers (read-http-headers who ip)]
                  [content-length (response-body-length headers)]
                  [body (cond
+                        [(chunked-transfer? headers)
+                         (read-http-body/chunked who ip)]
                         [content-length
                          (read-http-body/exact who ip content-length)]
                         [else
@@ -835,6 +924,7 @@
                  (= status 204)
                  (= status 304)
                  (http-header-ref (http-response-headers response) "Content-Length" #f)
+                 (chunked-transfer? (http-response-headers response))
                  (and (bytevector? body)
                       (fx= 0 (bytevector-length body))))))))
 
@@ -868,9 +958,7 @@
                     (raise-net-error who 'http "HTTP connect failed" address))))
               (if (string=? (uri-scheme u) "https")
                   (let ([ctx (or (http-client-tls-context client)
-                                 (let ([ctx (make-tls-context 'client)])
-                                   (tls-context-set-verify! ctx #f)
-                                   ctx))])
+                                 (make-tls-context 'client))])
                     (set! session
                           (call-with-http-timeout-translation
                            who
@@ -1027,6 +1115,33 @@
                                  (open-socket-output-port sock)
                                  #f
                                  #f))))
+
+  (define serve-http-connection
+    (lambda (who server conn)
+      (dynamic-wind
+        void
+        (lambda ()
+          (let loop ()
+            (let ([request (guard (c [(and (net-error? c)
+                                           (string=? (net-error-message c)
+                                                     "unexpected EOF while reading HTTP request"))
+                                      #f]
+                                  [else (raise c)])
+                             (http-read-request conn))])
+              (when request
+                (let* ([handler (or (lookup-handler server request)
+                                    default-handler)]
+                       [response (handler request)])
+                  (unless (http-response? response)
+                    (errorf who "HTTP handler must return an HTTP response, given ~s"
+                            response))
+                  (let-values ([(close? prepared)
+                                (server-prepare-response request response)])
+                    (http-write-response conn prepared)
+                    (unless close?
+                      (loop))))))))
+        (lambda ()
+          (http-connection-close conn)))))
 
   ;;===----------------------------------------------------------------------===
   ;; Data Model API
@@ -1200,7 +1315,7 @@ The `http-send` procedure sends an HTTP request with a configured client and ret
                            (http-client-timeout-ms client))))))
 
   #|proc:http-send/nonblocking
-The `http-send/nonblocking` procedure progresses an HTTP request without blocking and returns `#f` while the response is still pending.
+The `http-send/nonblocking` procedure progresses an HTTP request and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
 |#
   (define-who http-send/nonblocking
     (lambda (client request)
@@ -1238,7 +1353,7 @@ The `http-request` procedure sends a one-shot HTTP request without manually mana
              (http-close client))))]))
 
   #|proc:http-request/nonblocking
-The `http-request/nonblocking` procedure progresses a one-client HTTP request without blocking and returns `#f` while the response is still pending.
+The `http-request/nonblocking` procedure progresses a one-client HTTP request and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
 |#
   (define-who http-request/nonblocking
     (case-lambda
@@ -1324,7 +1439,7 @@ The `http-download` procedure downloads a response body to `path` and returns th
                  response))]))
 
   #|proc:http-download/nonblocking
-The `http-download/nonblocking` procedure progresses a download without blocking and returns `#f` while the response is still pending.
+The `http-download/nonblocking` procedure progresses a download and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
 |#
   (define-who http-download/nonblocking
     (lambda (client uri path)
@@ -1368,7 +1483,7 @@ The `http-upload` procedure uploads a file as a PUT request body and returns the
                          (read-u8vec path)))]))
 
   #|proc:http-upload/nonblocking
-The `http-upload/nonblocking` procedure progresses an upload without blocking and returns `#f` while the response is still pending.
+The `http-upload/nonblocking` procedure progresses an upload and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
 |#
   (define-who http-upload/nonblocking
     (lambda (client uri path)
@@ -1509,10 +1624,14 @@ The `http-read-request` procedure reads one HTTP request from an accepted connec
                               (parse-request-line who line)])
                   (let* ([headers (read-http-headers who (http-connection-input-port conn))]
                          [content-length (response-body-length headers)]
-                         [body (and content-length
-                                    (read-http-body/exact who
-                                                          (http-connection-input-port conn)
-                                                          content-length))]
+                         [body (cond
+                                [(chunked-transfer? headers)
+                                 (read-http-body/chunked who (http-connection-input-port conn))]
+                                [content-length
+                                 (read-http-body/exact who
+                                                       (http-connection-input-port conn)
+                                                       content-length)]
+                                [else #f])]
                          [u (request-target->uri who conn target headers)])
                     (make-http-request method u headers body)))))))
 
@@ -1562,23 +1681,33 @@ The `http-serve` procedure accepts one connection, dispatches requests through t
       (pcheck ([http-server? server])
               (ensure-server-open who server)
               (let ([conn (http-accept server)])
-                (dynamic-wind
-                  void
-                  (lambda ()
-                    (let loop ()
-                      (let* ([request (http-read-request conn)]
-                             [handler (or (lookup-handler server request)
-                                          default-handler)]
-                             [response (handler request)])
-                        (unless (http-response? response)
-                          (errorf who "HTTP handler must return an HTTP response, given ~s"
-                                  response))
-                        (let-values ([(close? prepared)
-                                      (server-prepare-response request response)])
-                          (http-write-response conn prepared)
-                          (if close?
-                              prepared
-                              (loop)))))
-                    )
-                  (lambda ()
-                    (http-connection-close conn))))))))
+                (serve-http-connection who server conn)))))
+
+  #|proc:http-serve-loop
+The `http-serve-loop` procedure repeatedly accepts and serves HTTP connections until the server is closed. If `threaded?` is true, each accepted connection is served in a new Scheme thread; otherwise connections are served serially.
+|#
+  (define-who http-serve-loop
+    (case-lambda
+      [(server) (http-serve-loop server #t)]
+      [(server threaded?)
+       (pcheck ([http-server? server] [boolean? threaded?])
+               (let loop ()
+                 (unless (http-server-closed? server)
+                   (let* ([ready (poll (list (make-poll-target
+                                               (http-server-socket server)
+                                               '(read error hup invalid)))
+                                       100)]
+                          [events (poll-target-ready-events (car ready))])
+                     (when (and (not (http-server-closed? server))
+                                (memq 'read events))
+                       (guard (c [else
+                                  (unless (http-server-closed? server)
+                                    (raise c))])
+                         (if threaded?
+                             (let ([conn (http-accept server)])
+                               (fork-thread
+                                (lambda ()
+                                  (serve-http-connection who server conn))))
+                             (http-serve server)))))
+                   (loop)))
+               server)])))

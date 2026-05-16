@@ -3,6 +3,9 @@
           ftp-open
           ftp-close
           ftp-cancel-pending!
+          ftp-verify-peer?
+          ftp-verify-host?
+          ftp-set-tls-verification!
           ftp-login!
           ftp-quit!
           ftp-list
@@ -412,19 +415,20 @@ The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoi
            (errorf who "timeout must be non-negative, given ~s" timeout-ms))
          (let ([u (normalize-ftp-uri who endpoint)])
            (let-values ([(user pass) (split-userinfo (uri-userinfo u))])
-             (%make-ftp-session u
-                                user
-                                pass
-                                (normalize-absolute-path
-                                 (if (or (not (uri-path u)) (string=? (uri-path u) ""))
-                                     "/"
-                                     (uri-path u)))
-                                #t
-                                timeout-ms
-                                #f
-                                #f
-                                #f
-                                #f))))]
+             (let ([secure? (string=? (uri-scheme u) "ftps")])
+               (%make-ftp-session u
+                                  user
+                                  pass
+                                  (normalize-absolute-path
+                                   (if (or (not (uri-path u)) (string=? (uri-path u) ""))
+                                       "/"
+                                       (uri-path u)))
+                                  #t
+                                  timeout-ms
+                                  secure?
+                                  secure?
+                                  #f
+                                  #f)))))]
       [(host port)
        (ftp-open host port #f ftp-default-timeout-ms)]
       [(host port secure?)
@@ -455,8 +459,35 @@ The `ftp-close` procedure marks an FTP session as closed.
               (ftp-session-closed?-set! session #t)
               session)))
 
+  #|proc:ftp-verify-peer?
+The `ftp-verify-peer?` procedure returns whether an FTPS session verifies the server certificate chain.
+|#
+  (define-who ftp-verify-peer?
+    (lambda (session)
+      (pcheck ([ftp-session? session])
+              (ftp-session-verify-peer? session))))
+
+  #|proc:ftp-verify-host?
+The `ftp-verify-host?` procedure returns whether an FTPS session verifies the server certificate hostname.
+|#
+  (define-who ftp-verify-host?
+    (lambda (session)
+      (pcheck ([ftp-session? session])
+              (ftp-session-verify-host? session))))
+
+  #|proc:ftp-set-tls-verification!
+The `ftp-set-tls-verification!` procedure sets FTPS certificate-chain and hostname verification flags on a session.
+|#
+  (define-who ftp-set-tls-verification!
+    (lambda (session verify-peer? verify-host?)
+      (pcheck ([ftp-session? session] [boolean? verify-peer? verify-host?])
+              (ensure-session-open who session)
+              (ftp-session-verify-peer?-set! session verify-peer?)
+              (ftp-session-verify-host?-set! session verify-host?)
+              session)))
+
   #|proc:ftp-cancel-pending!
-The `ftp-cancel-pending!` procedure cancels and discards the currently pending non-blocking FTP operation on a session, if any.
+The `ftp-cancel-pending!` procedure marks the currently pending non-blocking FTP operation cancelled, if any. FTP nonblocking operations run libcurl work in a Scheme worker thread, so libcurl cleanup happens when that worker returns.
 |#
   (define-who ftp-cancel-pending!
     (lambda (session)
@@ -544,7 +575,7 @@ The `ftp-list` procedure returns the names of entries in a remote directory.
                                    (cons line out))))))))]))
 
   #|proc:ftp-list/nonblocking
-The `ftp-list/nonblocking` procedure progresses a directory listing without blocking and returns `#f` while the listing is still pending.
+The `ftp-list/nonblocking` procedure progresses a directory listing and returns `#f` while the listing is still pending. The libcurl operation runs in a Scheme worker thread; cancellation marks the pending operation cancelled and cleanup happens when the worker returns.
 |#
   (define-who ftp-list/nonblocking
     (case-lambda
@@ -580,7 +611,7 @@ The `ftp-download` procedure downloads a remote file to a local pathname.
               local-path)))
 
   #|proc:ftp-download/nonblocking
-The `ftp-download/nonblocking` procedure progresses a file download without blocking and returns `#f` while the download is still pending.
+The `ftp-download/nonblocking` procedure progresses a file download and returns `#f` while the download is still pending. The libcurl operation runs in a Scheme worker thread; cancellation marks the pending operation cancelled and cleanup happens when the worker returns.
 |#
   (define-who ftp-download/nonblocking
     (lambda (session remote-path local-path)
@@ -613,7 +644,7 @@ The `ftp-upload` procedure uploads a local file to a remote pathname.
               remote-path)))
 
   #|proc:ftp-upload/nonblocking
-The `ftp-upload/nonblocking` procedure progresses a file upload without blocking and returns `#f` while the upload is still pending.
+The `ftp-upload/nonblocking` procedure progresses a file upload and returns `#f` while the upload is still pending. The libcurl operation runs in a Scheme worker thread; cancellation marks the pending operation cancelled and cleanup happens when the worker returns.
 |#
   (define-who ftp-upload/nonblocking
     (lambda (session local-path remote-path)

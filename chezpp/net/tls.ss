@@ -4,6 +4,7 @@
           close-tls-context
           tls-context-load-ca-file!
           tls-context-load-ca-path!
+          tls-context-load-default-ca!
           tls-context-load-cert!
           tls-context-load-private-key!
           tls-context-set-verify!
@@ -282,6 +283,17 @@ The `tls-context-load-ca-path!` procedure loads trusted CA certificates from a d
       (pcheck ([tls-context? ctx] [string? path])
               (ensure-context-open who ctx)
               (ensure-success who (ffi-net-tls-context-load-ca-path (tls-context-handle ctx) path)))))
+
+  #|proc:tls-context-load-default-ca!
+The `tls-context-load-default-ca!` procedure loads the platform default trusted certificate locations into a TLS context.
+|#
+  (define-who tls-context-load-default-ca!
+    (lambda (ctx)
+      (pcheck ([tls-context? ctx])
+              (ensure-context-open who ctx)
+              (ensure-success who
+                              (ffi-net-tls-context-load-default-ca
+                               (tls-context-handle ctx))))))
 
   #|proc:tls-context-load-cert!
 The `tls-context-load-cert!` procedure loads a TLS certificate from a pathname string or bytevector data.

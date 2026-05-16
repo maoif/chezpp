@@ -127,6 +127,27 @@
            (guard (c [else #f])
              (close-socket listener))))))
 
+(mat net-ftp-tls-verification-api
+     (let ([plain (ftp-open "ftp://127.0.0.1:21/")]
+           [secure (ftp-open "ftps://127.0.0.1:21/")])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and
+            (not (ftp-verify-peer? plain))
+            (not (ftp-verify-host? plain))
+            (ftp-verify-peer? secure)
+            (ftp-verify-host? secure)
+            (eq? (ftp-set-tls-verification! secure #f #f) secure)
+            (not (ftp-verify-peer? secure))
+            (not (ftp-verify-host? secure))
+            (eq? (ftp-set-tls-verification! secure #t #t) secure)
+            (ftp-verify-peer? secure)
+            (ftp-verify-host? secure)))
+         (lambda ()
+           (ftp-close plain)
+           (ftp-close secure)))))
+
 (mat net-ftp-timeout-validation
      (let ([endpoint "ftp://127.0.0.1:21/"])
        (and

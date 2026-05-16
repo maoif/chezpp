@@ -4,6 +4,7 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
 
 typedef struct {
   SSL_CTX *ctx;
@@ -201,7 +202,12 @@ uptr chezpp_net_tls_context_create(int mode) {
   ctx = SSL_CTX_new(method);
   if (ctx == NULL) return 0;
   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
-  SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+  if (mode == 0) {
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    (void)SSL_CTX_set_default_verify_paths(ctx);
+  } else {
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+  }
 
   wrapper = (chezpp_tls_context *)calloc(1, sizeof(chezpp_tls_context));
   if (wrapper == NULL) {
@@ -234,6 +240,14 @@ ptr chezpp_net_tls_context_load_ca_path(uptr handle, const char *path) {
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
   if (SSL_CTX_load_verify_locations(ctx->ctx, NULL, path) != 1)
     return openssl_error_status("failed to load CA path");
+  return Strue;
+}
+
+ptr chezpp_net_tls_context_load_default_ca(uptr handle) {
+  chezpp_tls_context *ctx = ctx_from_handle(handle);
+  if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
+  if (SSL_CTX_set_default_verify_paths(ctx->ctx) != 1)
+    return openssl_error_status("failed to load default TLS verify paths");
   return Strue;
 }
 
@@ -353,6 +367,12 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
       SSL_free(ssl);
       return openssl_error_status("failed to configure TLS SNI");
     }
+    if (X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), server_name) != 1 &&
+        SSL_set1_host(ssl, server_name) != 1) {
+      restore_socket_flags(fd, saved_flags, changed);
+      SSL_free(ssl);
+      return openssl_error_status("failed to configure TLS hostname verification");
+    }
   }
   if (SSL_set_fd(ssl, fd) != 1) {
     restore_socket_flags(fd, saved_flags, changed);
@@ -392,7 +412,10 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
         if (wait_rc == 0) return make_timeout_status("TLS client handshake timed out");
         return make_errno_status("error");
       default: {
-        ptr status = ssl_result_status(ssl, rc, "TLS client handshake failed");
+        long verify_result = SSL_get_verify_result(ssl);
+        ptr status = verify_result == X509_V_OK
+                         ? ssl_result_status(ssl, rc, "TLS client handshake failed")
+                         : make_error_status_message(X509_verify_cert_error_string(verify_result));
         restore_socket_flags(fd, saved_flags, changed);
         SSL_free(ssl);
         return status;

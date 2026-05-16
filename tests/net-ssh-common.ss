@@ -120,9 +120,16 @@
                     (format "ssh-keygen -q -t ed25519 -N '' -f ~a >/dev/null 2>&1"
                             host-key))
       (run-command! 'start-ssh-test-server
-                    (format "chmod 700 ~a && chmod 600 ~a ~a ~a >/dev/null 2>&1"
+                    (format "sh -c 'printf \"[127.0.0.1]:~a \" > ~a && ssh-keygen -y -f ~a >> ~a'"
+                            port
+                            (string-append ssh-dir "/known_hosts")
+                            host-key
+                            (string-append ssh-dir "/known_hosts")))
+      (run-command! 'start-ssh-test-server
+                    (format "chmod 700 ~a && chmod 600 ~a ~a ~a ~a >/dev/null 2>&1"
                             ssh-dir
                             (string-append ssh-dir "/id_ed25519")
+                            (string-append ssh-dir "/known_hosts")
                             authorized-keys
                             host-key))
       (write-bytevector-file

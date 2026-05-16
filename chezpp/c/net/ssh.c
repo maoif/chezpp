@@ -54,6 +54,8 @@ typedef int (*ssh_options_parse_config_fn)(ssh_session, const char *);
 typedef int (*ssh_connect_fn)(ssh_session);
 typedef void (*ssh_disconnect_fn)(ssh_session);
 typedef const char *(*ssh_get_error_fn)(void *);
+typedef enum ssh_known_hosts_e (*ssh_session_is_known_server_fn)(ssh_session);
+typedef int (*ssh_session_update_known_hosts_fn)(ssh_session);
 typedef int (*ssh_userauth_password_fn)(ssh_session, const char *, const char *);
 typedef int (*ssh_userauth_publickey_auto_fn)(ssh_session, const char *, const char *);
 typedef int (*ssh_userauth_agent_fn)(ssh_session, const char *);
@@ -106,6 +108,8 @@ static ssh_options_parse_config_fn p_ssh_options_parse_config = NULL;
 static ssh_connect_fn p_ssh_connect = NULL;
 static ssh_disconnect_fn p_ssh_disconnect = NULL;
 static ssh_get_error_fn p_ssh_get_error = NULL;
+static ssh_session_is_known_server_fn p_ssh_session_is_known_server = NULL;
+static ssh_session_update_known_hosts_fn p_ssh_session_update_known_hosts = NULL;
 static ssh_userauth_password_fn p_ssh_userauth_password = NULL;
 static ssh_userauth_publickey_auto_fn p_ssh_userauth_publickey_auto = NULL;
 static ssh_userauth_agent_fn p_ssh_userauth_agent = NULL;
@@ -179,6 +183,23 @@ static ptr make_error_status_message(const char *msg) {
 
 static ptr make_errno_status(void) { return make_status("error", errno_str()); }
 
+static int configure_default_ssh_paths(ssh_session session) {
+  const char *home = getenv("HOME");
+  char ssh_dir[PATH_MAX];
+  char known_hosts[PATH_MAX];
+  int n;
+
+  if (home == NULL || *home == 0) return 1;
+
+  n = snprintf(ssh_dir, sizeof(ssh_dir), "%s/.ssh", home);
+  if (n <= 0 || (size_t)n >= sizeof(ssh_dir)) return 1;
+  n = snprintf(known_hosts, sizeof(known_hosts), "%s/known_hosts", ssh_dir);
+  if (n <= 0 || (size_t)n >= sizeof(known_hosts)) return 1;
+
+  return p_ssh_options_set(session, SSH_OPTIONS_SSH_DIR, ssh_dir) == SSH_OK &&
+         p_ssh_options_set(session, SSH_OPTIONS_KNOWNHOSTS, known_hosts) == SSH_OK;
+}
+
 static int add_default_identities(ssh_session session) {
   static const char *names[] = {"id_ed25519", "id_ecdsa", "id_rsa", "id_dsa", NULL};
   const char *home = getenv("HOME");
@@ -221,6 +242,8 @@ static int ensure_ssh_loaded(void) {
       !load_symbol((void **)&p_ssh_connect, "ssh_connect") ||
       !load_symbol((void **)&p_ssh_disconnect, "ssh_disconnect") ||
       !load_symbol((void **)&p_ssh_get_error, "ssh_get_error") ||
+      !load_symbol((void **)&p_ssh_session_is_known_server, "ssh_session_is_known_server") ||
+      !load_symbol((void **)&p_ssh_session_update_known_hosts, "ssh_session_update_known_hosts") ||
       !load_symbol((void **)&p_ssh_userauth_password, "ssh_userauth_password") ||
       !load_symbol((void **)&p_ssh_userauth_publickey_auto, "ssh_userauth_publickey_auto") ||
       !load_symbol((void **)&p_ssh_userauth_agent, "ssh_userauth_agent") ||
@@ -970,7 +993,8 @@ static ptr scp_download_directory_to_path(chezpp_ssh_session *wrapper, ssh_scp s
   return status;
 }
 
-ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeout_ms) {
+ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeout_ms,
+                        int hostkey_policy) {
   ssh_session session;
   chezpp_ssh_session *wrapper;
   unsigned int uport;
@@ -996,6 +1020,12 @@ ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeou
     return status;
   }
 
+  if (!configure_default_ssh_paths(session)) {
+    ptr status = ssh_error_status(session, "failed to configure ssh known-host paths");
+    p_ssh_free(session);
+    return status;
+  }
+
   if (p_ssh_options_parse_config(session, NULL) != SSH_OK) {
     ptr status = ssh_error_status(session, "failed to parse ssh config");
     p_ssh_free(session);
@@ -1013,6 +1043,34 @@ ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeou
     p_ssh_disconnect(session);
     p_ssh_free(session);
     return status;
+  }
+
+  if (hostkey_policy != 2) {
+    enum ssh_known_hosts_e state = p_ssh_session_is_known_server(session);
+    switch (state) {
+    case SSH_KNOWN_HOSTS_OK:
+      break;
+    case SSH_KNOWN_HOSTS_NOT_FOUND:
+    case SSH_KNOWN_HOSTS_UNKNOWN:
+      if (hostkey_policy == 1 && p_ssh_session_update_known_hosts(session) == SSH_OK)
+        break;
+      p_ssh_disconnect(session);
+      p_ssh_free(session);
+      return make_error_status_message("SSH host key is not trusted");
+    case SSH_KNOWN_HOSTS_CHANGED:
+    case SSH_KNOWN_HOSTS_OTHER:
+      p_ssh_disconnect(session);
+      p_ssh_free(session);
+      return make_error_status_message("SSH host key mismatch");
+    case SSH_KNOWN_HOSTS_ERROR:
+    default:
+      {
+        ptr status = ssh_error_status(session, "failed to verify SSH host key");
+        p_ssh_disconnect(session);
+        p_ssh_free(session);
+        return status;
+      }
+    }
   }
 
   wrapper = (chezpp_ssh_session *)calloc(1, sizeof(chezpp_ssh_session));

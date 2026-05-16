@@ -90,6 +90,71 @@
            (guard (c [else #f])
              (close-socket listener)))))
 
+(mat net-ssh-known-hosts
+     ;; Negative test: strict host-key verification rejects a server when HOME
+     ;; has no known_hosts entry.
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (let ([empty-home (format "/tmp/chezpp-net-ssh-empty-home-~a" port)])
+         (dynamic-wind
+           (lambda () (mkdirs (string-append empty-home "/.ssh")))
+           (lambda ()
+             (with-env
+              "HOME"
+              empty-home
+              (lambda ()
+                (ssh-error-message-contains?
+                 "host key"
+                 (lambda ()
+                   (ssh-open "127.0.0.1" port user 2000))))))
+           (lambda ()
+             (stop-server)
+             (when (file-exists? empty-home)
+               (file-removetree empty-home #f))))))
+     ;; `accept-new` is an explicit bypass that trusts an unknown server once
+     ;; and records the host key in the configured known_hosts file.
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (let ([known-hosts (string-append home "/.ssh/known_hosts")])
+         (dynamic-wind
+           (lambda ()
+             (when (file-exists? known-hosts)
+               (delete-file known-hosts)))
+           (lambda ()
+             (with-env
+              "HOME"
+              home
+              (lambda ()
+                (let ([session (ssh-open-with-policy "127.0.0.1" port user 2000 'accept-new)])
+                  (dynamic-wind
+                    void
+                    (lambda ()
+                      (and (ssh-session? session)
+                           (file-exists? known-hosts)))
+                    (lambda ()
+                      (ssh-close session)))))))
+           (lambda ()
+             (stop-server)))))
+     ;; `insecure` is an explicit bypass that skips known-host verification.
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (let ([empty-home (format "/tmp/chezpp-net-ssh-insecure-home-~a" port)])
+         (dynamic-wind
+           (lambda () (mkdirs (string-append empty-home "/.ssh")))
+           (lambda ()
+             (with-env
+              "HOME"
+              empty-home
+              (lambda ()
+                (let ([session (ssh-open-with-policy "127.0.0.1" port user 2000 'insecure)])
+                  (dynamic-wind
+                    void
+                    (lambda ()
+                      (ssh-session? session))
+                    (lambda ()
+                      (ssh-close session)))))))
+           (lambda ()
+             (stop-server)
+             (when (file-exists? empty-home)
+               (file-removetree empty-home #f)))))))
+
 (mat net-ssh-timeout-validation
      (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
        (dynamic-wind

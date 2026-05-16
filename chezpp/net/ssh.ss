@@ -3,6 +3,7 @@
           ssh-channel?
           %ssh-session-handle
           ssh-open
+          ssh-open-with-policy
           ssh-close
           ssh-auth-password!
           ssh-auth-publickey!
@@ -194,7 +195,7 @@ The `%ssh-session-handle` procedure returns the foreign handle stored inside an 
               (ssh-session-handle session))))
 
   #|proc:ssh-open
-The `ssh-open` procedure opens a network SSH session to a remote host.
+The `ssh-open` procedure opens a network SSH session to a remote host using strict host-key verification.
 |#
   (define-who ssh-open
     (case-lambda
@@ -208,16 +209,30 @@ The `ssh-open` procedure opens a network SSH session to a remote host.
        (pcheck ([string? host] [fixnum? port])
                (check-port who port)
                (ensure-user-maybe who user)
-               (unless (fixnum? timeout-ms)
-                 (errorf who "expected timeout fixnum, given ~s" timeout-ms))
-               (when (fx< timeout-ms 0)
-                 (errorf who "timeout must be non-negative, given ~s" timeout-ms))
-               (let ([ans (ensure-success who 'ssh
-                                          (ffi-net-ssh-open host
-                                                            port
-                                                            (or user "")
-                                                            timeout-ms))])
-                 (%make-ssh-session ans host port user #f)))]))
+               (ssh-open-with-policy host port user timeout-ms 'strict))]))
+
+  #|proc:ssh-open-with-policy
+The `ssh-open-with-policy` procedure opens an SSH session using an explicit host-key policy. The policy must be one of `strict`, `accept-new`, or `insecure`.
+|#
+  (define-who ssh-open-with-policy
+    (lambda (host port user timeout-ms policy)
+      (pcheck ([string? host] [fixnum? port])
+              (check-port who port)
+              (ensure-user-maybe who user)
+              (check-timeout-ms who timeout-ms)
+              (let ([policy-int (case policy
+                                  [(strict) 0]
+                                  [(accept-new) 1]
+                                  [(insecure) 2]
+                                  [else
+                                   (errorf who "invalid SSH host-key policy ~s" policy)])])
+                (let ([ans (ensure-success who 'ssh
+                                           (ffi-net-ssh-open host
+                                                             port
+                                                             (or user "")
+                                                             timeout-ms
+                                                             policy-int))])
+                  (%make-ssh-session ans host port user #f))))))
 
   #|proc:ssh-close
 The `ssh-close` procedure closes an SSH session and releases its foreign resources.

@@ -11,7 +11,6 @@
                   (chezpp net ssh)
                   (chezpp net sftp)
                   (chezpp net scp)
-                  (chezpp net rpc)
                   (chezpp net grpc)
                   (chezpp net websocket)
                   (chezpp net http)

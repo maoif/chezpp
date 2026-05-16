@@ -108,6 +108,7 @@
           ffi-net-tls-context-free
           ffi-net-tls-context-load-ca-file
           ffi-net-tls-context-load-ca-path
+          ffi-net-tls-context-load-default-ca
           ffi-net-tls-context-load-cert-file
           ffi-net-tls-context-load-cert-bytes
           ffi-net-tls-context-load-key-file
@@ -211,7 +212,7 @@
                        (string string string int int int int int string string)
                        scheme-object))
   (define ffi-net-ssh-open
-    (foreign-procedure "chezpp_net_ssh_open" (string int string int) scheme-object))
+    (foreign-procedure "chezpp_net_ssh_open" (string int string int int) scheme-object))
   (define ffi-net-ssh-close
     (foreign-procedure "chezpp_net_ssh_close" (uptr) scheme-object))
   (define ffi-net-ssh-auth-password
@@ -356,6 +357,8 @@
     (foreign-procedure "chezpp_net_tls_context_load_ca_file" (uptr string) scheme-object))
   (define ffi-net-tls-context-load-ca-path
     (foreign-procedure "chezpp_net_tls_context_load_ca_path" (uptr string) scheme-object))
+  (define ffi-net-tls-context-load-default-ca
+    (foreign-procedure "chezpp_net_tls_context_load_default_ca" (uptr) scheme-object))
   (define ffi-net-tls-context-load-cert-file
     (foreign-procedure "chezpp_net_tls_context_load_cert_file" (uptr string int) scheme-object))
   (define ffi-net-tls-context-load-cert-bytes

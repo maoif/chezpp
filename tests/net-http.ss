@@ -92,6 +92,24 @@
                 (http-server-close server))
               (lambda () accept-count)))))
 
+(define start-raw-http-response-server
+  (lambda (response-bv)
+    (let ([listener (open-socket 'inet 'stream)])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values port
+                (fork-thread
+                 (lambda ()
+                   (let-values ([(client peer) (socket-accept listener)])
+                     (let ([op (open-socket-output-port client)])
+                       (put-bytevector op response-bv)
+                       (flush-output-port op)
+                       (close-port op))
+                     (close-socket client)
+                     (close-socket listener)))))))))
+
 (define await-http-nonblocking
   (lambda (thunk)
     (let loop ([i 0])
@@ -195,19 +213,19 @@
                     (equal? (http-response-body resp) payload))))))
      (let* ([download-path "/tmp/chezpp-net-download.bin"]
             [payload #vu8(1 2 3 4 5)])
-       (let-values ([(server port th)
-                     (start-http-dispatch-server
-                      (lambda (server)
-                        (http-register-handler!
-                         server
-                         'get
-                         "/download"
-                         (lambda (req)
-                           (make-http-response
-                            200
-                            "OK"
-                            '(("Content-Type" . "application/octet-stream"))
-                            payload)))))])
+      (let-values ([(server port th)
+                    (start-http-dispatch-server
+                     (lambda (server)
+                       (http-register-handler!
+                        server
+                        'get
+                        "/download"
+                        (lambda (req)
+                          (make-http-response
+                           200
+                           "OK"
+                           '(("Content-Type" . "application/octet-stream"))
+                           payload)))))])
          (let ([client (http-open)])
            (let ([resp (http-download client
                                       (format "http://127.0.0.1:~a/download" port)
@@ -246,6 +264,150 @@
                (thread-join th)
                (and (= (http-response-status resp) 200)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
+
+(mat net-https-verification
+     ;; Verified HTTPS succeeds when the local test certificate is trusted and
+     ;; the URI address matches the certificate IP subjectAltName.
+     (let ([server-ctx (make-test-http-verified-server-context)]
+           [client-ctx (make-test-http-verified-client-context)])
+       (let-values ([(server port th)
+                     (start-http-dispatch-server
+                      (lambda (server)
+                        (http-register-handler!
+                         server
+                         'get
+                         "/secure"
+                         (lambda (req)
+                           (make-http-response 200 "OK" '() "verified"))))
+                      server-ctx)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let ([client (http-open client-ctx)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (let ([resp (http-get client
+                                         (format "https://127.0.0.1:~a/secure" port))])
+                     (and (= (http-response-status resp) 200)
+                          (equal? (utf8->string (http-response-body resp)) "verified"))))
+                 (lambda () (http-close client)))))
+           (lambda ()
+             (http-server-close server)
+             (close-tls-context client-ctx)
+             (close-tls-context server-ctx)
+             (thread-join th)))))
+     ;; Negative test: a certificate for localhost must not verify for the
+     ;; numeric loopback address.
+     (let ([server-ctx (make-test-http-server-context)]
+           [client-ctx (make-test-http-cn-verified-client-context)])
+       (let-values ([(server port th)
+                     (start-http-dispatch-server
+                      (lambda (server)
+                        (http-register-handler!
+                         server
+                         'get
+                         "/secure"
+                         (lambda (req)
+                           (make-http-response 200 "OK" '() "unexpected"))))
+                      server-ctx)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let ([client (http-open client-ctx)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (http-error-message-contains?
+                    "mismatch"
+                    (lambda ()
+                      (http-get client
+                                (format "https://127.0.0.1:~a/secure" port)))))
+                 (lambda () (http-close client)))))
+           (lambda ()
+             (http-server-close server)
+             (close-tls-context client-ctx)
+             (close-tls-context server-ctx)
+             (thread-join th))))))
+
+(mat net-http-chunked-response
+     (let-values ([(port th)
+                   (start-raw-http-response-server
+                    (string->utf8
+                     "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nX-Trailer: done\r\n\r\n"))])
+       (let ([resp (http-get (format "http://127.0.0.1:~a/chunked" port))])
+         (thread-join th)
+         (and (= (http-response-status resp) 200)
+              (equal? (utf8->string (http-response-body resp)) "hello world")))))
+
+(mat net-http-chunked-request
+     (let-values ([(server port th)
+                   (start-http-connection-server
+                    (lambda (conn)
+                      (let ([req (http-read-request conn)])
+                        (http-write-response
+                         conn
+                         (make-http-response
+                          200
+                          "OK"
+                          `(("X-Body" . ,(utf8->string (http-request-body req))))
+                          "ok")))))])
+       (let ([sock (open-socket 'inet 'stream)])
+         (dynamic-wind
+           (lambda ()
+             (socket-connect! sock (make-socket-address 'inet "127.0.0.1" port)))
+           (lambda ()
+             (let ([ip (open-socket-input-port sock)]
+                   [op (open-socket-output-port sock)])
+               (put-bytevector
+                op
+                (string->utf8
+                 "POST /upload HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n4\r\nwiki\r\n5\r\npedia\r\n0\r\n\r\n"))
+               (flush-output-port op)
+               (let ([line (read-crlf-line ip)])
+                 (and (string-contains? line "200")
+                      (begin
+                        (thread-join th)
+                        #t)))))
+           (lambda ()
+             (guard (c [else #f])
+               (close-socket sock)))))))
+
+(mat net-http-chunked-response-writing
+     (let-values ([(server port th)
+                   (start-http-dispatch-server
+                    (lambda (server)
+                      (http-register-handler!
+                       server
+                       'get
+                       "/chunked"
+                       (lambda (req)
+                         (make-http-response
+                          200
+                          "OK"
+                          '(("Transfer-Encoding" . "chunked"))
+                          "chunked response")))))])
+       (let ([sock (open-socket 'inet 'stream)])
+         (dynamic-wind
+           (lambda ()
+             (socket-connect! sock (make-socket-address 'inet "127.0.0.1" port)))
+           (lambda ()
+             (let ([ip (open-socket-input-port sock)]
+                   [op (open-socket-output-port sock)])
+               (put-bytevector
+                op
+                (string->utf8
+                 "GET /chunked HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"))
+               (flush-output-port op)
+               (let ([raw (utf8->string (read-port->bytevector ip))])
+                 (and (string-contains? raw "Transfer-Encoding: chunked")
+                      (string-contains? raw "\r\n10\r\nchunked response\r\n0\r\n\r\n")
+                      (begin
+                        (thread-join th)
+                        #t)))))
+           (lambda ()
+             (guard (c [else #f])
+               (close-socket sock)))))))
 
 (mat net-http-reuse
      (call-with-values
@@ -694,4 +856,28 @@
            (lambda ()
              (http-close client)
              (stop)
+             (thread-join th))))))
+
+(mat net-http-serve-loop
+     (let* ([port (reserve-loopback-port)]
+            [server (http-listen "127.0.0.1" port)]
+            [count 0])
+       (http-register-handler!
+        server
+        'get
+        "/"
+        (lambda (req)
+          (set! count (+ count 1))
+          (make-http-response 200 "OK" '() "ok")))
+       (let ([th (fork-thread (lambda () (http-serve-loop server #t)))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let ([r1 (http-get (format "http://127.0.0.1:~a/" port))]
+                   [r2 (http-get (format "http://127.0.0.1:~a/" port))])
+               (and (= (http-response-status r1) 200)
+                    (= (http-response-status r2) 200)
+                    (= count 2))))
+           (lambda ()
+             (http-server-close server)
              (thread-join th))))))
