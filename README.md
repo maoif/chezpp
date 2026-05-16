@@ -10,6 +10,7 @@ Functionalities:
 - iter: iterator support (eliminating intermediate data structures when processing data through a series of procedures)
 - list: more list operations
 - match: powerful pattern matching
+- net: sockets, DNS, TLS, HTTP/HTTPS, FTP/FTPS, SSH/SFTP/SCP, WebSocket, and gRPC
 - os: OS utilities
 - string: more string operations
 - utils: miscellaneous useful procedures like type checking and random data generator
@@ -27,6 +28,23 @@ Functionalities:
   - support both textual and binary parsers
   - context-sensitive parsing using monadic `<bind>`
   - simple csv, json5, xml parsers
+
+## Network Library Status
+
+The `(chezpp net)` library currently re-exports these networking modules:
+
+- Core socket, address, DNS, and poll APIs.
+- URI and IP/CIDR utilities.
+- TLS contexts, client/server TLS sessions, and TLS ports.
+- HTTP/1.1 client/server APIs, including HTTPS, redirects, keep-alive reuse, downloads/uploads, chunked transfer decoding, and `http-serve-loop` for serving multiple connections.
+- FTP and FTPS APIs using libcurl.
+- SSH, SFTP, and SCP APIs using libssh.
+- WebSocket APIs using libwebsockets.
+- gRPC client/server APIs with unary and streaming calls.
+
+Transport security defaults are strict for new code. HTTPS/TLS enables certificate and hostname verification by default, FTPS verifies peer certificates and hostnames by default, and SSH uses strict known-host checking by default. Explicit bypass APIs are available for test fixtures, private deployments, and migration code that need to opt out.
+
+The older custom Chezpp RPC layer has been removed from the tracked public net library. Use `(chezpp net grpc)` for RPC-style APIs.
 
 # Installation and Usage
 
