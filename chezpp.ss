@@ -15,6 +15,7 @@
                   (chezpp control)
                   (chezpp for)
                   (chezpp iter)
+                  (chezpp transducer)
                   (chezpp io)
                   (chezpp file)
                   (chezpp path)
