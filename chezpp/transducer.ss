@@ -1217,76 +1217,163 @@
   traversal.
   |#
   (define list-transduce
-    (lambda (xform reducer arg0 . arg*)
-      (transduce/slice
-       'list-transduce
-       list?
-       run-list
-       run-list-slice
-       xform
-       reducer
-       arg0
-       arg*)))
+    (case-lambda
+      [(xform reducer arg0)
+       (transduce/slice 'list-transduce list? run-list run-list-slice
+                        xform reducer arg0 '())]
+      [(xform reducer arg0 arg1)
+       (transduce/slice 'list-transduce list? run-list run-list-slice
+                        xform reducer arg0 (list arg1))]
+      [(xform reducer arg0 arg1 arg2)
+       (transduce/slice 'list-transduce list? run-list run-list-slice
+                        xform reducer arg0 (list arg1 arg2))]
+      [(xform reducer arg0 arg1 arg2 arg3)
+       (transduce/slice 'list-transduce list? run-list run-list-slice
+                        xform reducer arg0 (list arg1 arg2 arg3))]
+      [(xform reducer arg0 arg1 arg2 arg3 arg4)
+       (transduce/slice 'list-transduce list? run-list run-list-slice
+                        xform reducer arg0 (list arg1 arg2 arg3 arg4))]))
 
   #|proc:vector-transduce
   The `vector-transduce` procedure transduces vector `source` with direct
   indexed traversal.
   |#
   (define vector-transduce
-    (lambda (xform reducer arg0 . arg*)
-      (transduce/slice
-       'vector-transduce
-       vector?
-       run-vector
-       (lambda (reducer acc source start stop step)
-         (run-index-slice 'vector-transduce
-                          (vector-length source)
-                          vector-ref
-                          reducer acc source start stop step))
-       xform
-       reducer
-       arg0
-       arg*)))
+    (case-lambda
+      [(xform reducer arg0)
+       (transduce/slice 'vector-transduce vector? run-vector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'vector-transduce
+                                           (vector-length source)
+                                           vector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 '())]
+      [(xform reducer arg0 arg1)
+       (transduce/slice 'vector-transduce vector? run-vector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'vector-transduce
+                                           (vector-length source)
+                                           vector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1))]
+      [(xform reducer arg0 arg1 arg2)
+       (transduce/slice 'vector-transduce vector? run-vector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'vector-transduce
+                                           (vector-length source)
+                                           vector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2))]
+      [(xform reducer arg0 arg1 arg2 arg3)
+       (transduce/slice 'vector-transduce vector? run-vector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'vector-transduce
+                                           (vector-length source)
+                                           vector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3))]
+      [(xform reducer arg0 arg1 arg2 arg3 arg4)
+       (transduce/slice 'vector-transduce vector? run-vector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'vector-transduce
+                                           (vector-length source)
+                                           vector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3 arg4))]))
 
   #|proc:bytevector-transduce
   The `bytevector-transduce` procedure transduces bytevector `source` by
   reading unsigned bytes.
   |#
   (define bytevector-transduce
-    (lambda (xform reducer arg0 . arg*)
-      (transduce/slice
-       'bytevector-transduce
-       bytevector?
-       run-bytevector
-       (lambda (reducer acc source start stop step)
-         (run-index-slice 'bytevector-transduce
-                          (bytevector-length source)
-                          bytevector-u8-ref
-                          reducer acc source start stop step))
-       xform
-       reducer
-       arg0
-       arg*)))
+    (case-lambda
+      [(xform reducer arg0)
+       (transduce/slice 'bytevector-transduce bytevector? run-bytevector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'bytevector-transduce
+                                           (bytevector-length source)
+                                           bytevector-u8-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 '())]
+      [(xform reducer arg0 arg1)
+       (transduce/slice 'bytevector-transduce bytevector? run-bytevector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'bytevector-transduce
+                                           (bytevector-length source)
+                                           bytevector-u8-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1))]
+      [(xform reducer arg0 arg1 arg2)
+       (transduce/slice 'bytevector-transduce bytevector? run-bytevector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'bytevector-transduce
+                                           (bytevector-length source)
+                                           bytevector-u8-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2))]
+      [(xform reducer arg0 arg1 arg2 arg3)
+       (transduce/slice 'bytevector-transduce bytevector? run-bytevector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'bytevector-transduce
+                                           (bytevector-length source)
+                                           bytevector-u8-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3))]
+      [(xform reducer arg0 arg1 arg2 arg3 arg4)
+       (transduce/slice 'bytevector-transduce bytevector? run-bytevector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'bytevector-transduce
+                                           (bytevector-length source)
+                                           bytevector-u8-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3 arg4))]))
 
   #|proc:string-transduce
   The `string-transduce` procedure transduces string `source` by reading
   characters.
   |#
   (define string-transduce
-    (lambda (xform reducer arg0 . arg*)
-      (transduce/slice
-       'string-transduce
-       string?
-       run-string
-       (lambda (reducer acc source start stop step)
-         (run-index-slice 'string-transduce
-                          (string-length source)
-                          string-ref
-                          reducer acc source start stop step))
-       xform
-       reducer
-       arg0
-       arg*)))
+    (case-lambda
+      [(xform reducer arg0)
+       (transduce/slice 'string-transduce string? run-string
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'string-transduce
+                                           (string-length source)
+                                           string-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 '())]
+      [(xform reducer arg0 arg1)
+       (transduce/slice 'string-transduce string? run-string
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'string-transduce
+                                           (string-length source)
+                                           string-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1))]
+      [(xform reducer arg0 arg1 arg2)
+       (transduce/slice 'string-transduce string? run-string
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'string-transduce
+                                           (string-length source)
+                                           string-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2))]
+      [(xform reducer arg0 arg1 arg2 arg3)
+       (transduce/slice 'string-transduce string? run-string
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'string-transduce
+                                           (string-length source)
+                                           string-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3))]
+      [(xform reducer arg0 arg1 arg2 arg3 arg4)
+       (transduce/slice 'string-transduce string? run-string
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'string-transduce
+                                           (string-length source)
+                                           string-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3 arg4))]))
 
   #|proc:iter-transduce
   The `iter-transduce` procedure transduces iterator `source` by repeatedly
@@ -1306,40 +1393,94 @@
   indexed traversal.
   |#
   (define fxvector-transduce
-    (lambda (xform reducer arg0 . arg*)
-      (transduce/slice
-       'fxvector-transduce
-       fxvector?
-       run-fxvector
-       (lambda (reducer acc source start stop step)
-         (run-index-slice 'fxvector-transduce
-                          (fxvector-length source)
-                          fxvector-ref
-                          reducer acc source start stop step))
-       xform
-       reducer
-       arg0
-       arg*)))
+    (case-lambda
+      [(xform reducer arg0)
+       (transduce/slice 'fxvector-transduce fxvector? run-fxvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'fxvector-transduce
+                                           (fxvector-length source)
+                                           fxvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 '())]
+      [(xform reducer arg0 arg1)
+       (transduce/slice 'fxvector-transduce fxvector? run-fxvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'fxvector-transduce
+                                           (fxvector-length source)
+                                           fxvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1))]
+      [(xform reducer arg0 arg1 arg2)
+       (transduce/slice 'fxvector-transduce fxvector? run-fxvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'fxvector-transduce
+                                           (fxvector-length source)
+                                           fxvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2))]
+      [(xform reducer arg0 arg1 arg2 arg3)
+       (transduce/slice 'fxvector-transduce fxvector? run-fxvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'fxvector-transduce
+                                           (fxvector-length source)
+                                           fxvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3))]
+      [(xform reducer arg0 arg1 arg2 arg3 arg4)
+       (transduce/slice 'fxvector-transduce fxvector? run-fxvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'fxvector-transduce
+                                           (fxvector-length source)
+                                           fxvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3 arg4))]))
 
   #|proc:flvector-transduce
   The `flvector-transduce` procedure transduces flvector `source` with direct
   indexed traversal.
   |#
   (define flvector-transduce
-    (lambda (xform reducer arg0 . arg*)
-      (transduce/slice
-       'flvector-transduce
-       flvector?
-       run-flvector
-       (lambda (reducer acc source start stop step)
-         (run-index-slice 'flvector-transduce
-                          (flvector-length source)
-                          flvector-ref
-                          reducer acc source start stop step))
-       xform
-       reducer
-       arg0
-       arg*)))
+    (case-lambda
+      [(xform reducer arg0)
+       (transduce/slice 'flvector-transduce flvector? run-flvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'flvector-transduce
+                                           (flvector-length source)
+                                           flvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 '())]
+      [(xform reducer arg0 arg1)
+       (transduce/slice 'flvector-transduce flvector? run-flvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'flvector-transduce
+                                           (flvector-length source)
+                                           flvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1))]
+      [(xform reducer arg0 arg1 arg2)
+       (transduce/slice 'flvector-transduce flvector? run-flvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'flvector-transduce
+                                           (flvector-length source)
+                                           flvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2))]
+      [(xform reducer arg0 arg1 arg2 arg3)
+       (transduce/slice 'flvector-transduce flvector? run-flvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'flvector-transduce
+                                           (flvector-length source)
+                                           flvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3))]
+      [(xform reducer arg0 arg1 arg2 arg3 arg4)
+       (transduce/slice 'flvector-transduce flvector? run-flvector
+                        (lambda (reducer acc source start stop step)
+                          (run-index-slice 'flvector-transduce
+                                           (flvector-length source)
+                                           flvector-ref
+                                           reducer acc source start stop step))
+                        xform reducer arg0 (list arg1 arg2 arg3 arg4))]))
 
   #|proc:hashtable-transduce
   The `hashtable-transduce` procedure transduces hashtable values with direct
