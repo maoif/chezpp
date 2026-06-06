@@ -17,6 +17,7 @@
                   (chezpp iter)
                   (chezpp io)
                   (chezpp file)
+                  (chezpp path)
                   (chezpp os)
 
                   (chezpp hashset)
