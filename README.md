@@ -8,6 +8,7 @@ Functionalities:
 - file: rich file and IO utilites, filesystem watcher
 - irregex: regex support
 - iter: iterator support (eliminating intermediate data structures when processing data through a series of procedures)
+- transducer: source-independent, composable algorithmic transformations
 - list: more list operations
 - match: powerful pattern matching
 - net: sockets, DNS, TLS, HTTP/HTTPS, FTP/FTPS, SSH/SFTP/SCP, WebSocket, and gRPC
