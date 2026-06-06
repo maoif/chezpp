@@ -16,6 +16,9 @@
             (eq? x (ensure-reduced x))))
      (= 11 (unreduced 11))
      (reduced? (ensure-reduced 12))
+     (let* ([proc (completion (preserving-reduced (rflist)))]
+            [acc (reduced '(done))])
+       (eq? acc (proc acc 'x)))
 
      (eduction? (eduction (tidentity) '(1 2 3)))
      (transducible? '(1 2 3))
@@ -32,6 +35,54 @@
      ;; constructors require symbolic names and procedures.
      (error? (make-transducer "map" (lambda (r) r)))
      (error? (make-reducer "list" (case-lambda [() '()] [(acc) acc] [(acc x) (cons x acc)]))))
+
+
+(mat transducer-public-boundaries
+
+     ;; source mode only accepts supported traversal modes.
+     (error? (current-transducer-source-mode 'unknown))
+
+     ;; composition helpers require transducer records.
+     (error? (tcompose (tidentity) (lambda (reducer) reducer)))
+     (error? (tchain (list (tidentity) (lambda (reducer) reducer))))
+
+     ;; mapping, filtering, and side-effect transducers require procedures.
+     (error? (tmap 12))
+     (error? (tmap/i 12))
+     (error? (tfilter 12))
+     (error? (tfilter/i 12))
+     (error? (tremove 12))
+     (error? (tkeep 12))
+     (error? (tkeep/i 12))
+     (error? (tmapcat 12))
+     (error? (ttap 12))
+     (error? (tinspect 'debug 12))
+
+     ;; stateful transducer bounds and predicates are checked at construction.
+     (error? (ttake -1))
+     (error? (tdrop -1))
+     (error? (ttake-while 12))
+     (error? (tdrop-while 12))
+     (error? (tpartition-all 0))
+     (error? (tdedupe-by 12))
+     (error? (tdistinct-by 12))
+
+     ;; terminal operations reject invalid reducers, callbacks, and sources.
+     (error? (transduce (tidentity) (lambda (acc x) acc) '(1 2)))
+     (error? (tfor-each (tidentity) 12 '(1 2)))
+     (error? (eduction (tidentity) 12))
+     (error? (source->iter 12))
+
+     ;; type-specific terminals reject sources outside their declared type.
+     (error? (list-transduce (tidentity) (rflist) '#(1 2)))
+     (error? (vector-transduce (tidentity) (rflist) '(1 2)))
+     (error? (bytevector-transduce (tidentity) (rflist) '(1 2)))
+     (error? (string-transduce (tidentity) (rflist) '(#\a #\b)))
+     (error? (fxvector-transduce (tidentity) (rflist) '#(1 2)))
+     (error? (flvector-transduce (tidentity) (rflist) '#(1.0 2.0)))
+     (error? (iter-transduce (tidentity) (rflist) '(1 2)))
+     (error? (hashtable-transduce (tidentity) (rflist) '(1 2)))
+     (error? (port-bytes-transduce (tidentity) (rflist) 12)))
 
 
 (mat transducer-basic-pipelines
