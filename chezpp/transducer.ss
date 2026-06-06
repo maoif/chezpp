@@ -307,6 +307,29 @@
          [(acc x) (cons x acc)])
        #f)))
 
+  (define make-list-builder-reducer
+    (lambda (name complete)
+      (let ([tag (gensym)])
+        (define builder-acc?
+          (lambda (acc)
+            (and (pair? acc) (eq? (car acc) tag))))
+        (mk-$reducer
+         name
+         (case-lambda
+           [() (cons tag (make-list-builder))]
+           [(acc)
+            (complete
+             (if (builder-acc? acc)
+                 ((cdr acc))
+                 (reverse acc)))]
+           [(acc x)
+            (if (builder-acc? acc)
+                (begin
+                  ((cdr acc) x)
+                  acc)
+                (cons x acc))])
+         #f))))
+
   #|proc:reduced
   The `reduced` procedure wraps `x` to request early termination from a
   transducer driver.
@@ -1578,9 +1601,7 @@
   |#
   (define rfvector
     (lambda ()
-      (make-list-like-reducer
-       'rfvector
-       (lambda (acc) (list->vector (reverse acc))))))
+      (make-list-builder-reducer 'rfvector list->vector)))
 
   #|proc:rfstring
   The `rfstring` procedure returns a reducer that accumulates characters into
@@ -1588,9 +1609,7 @@
   |#
   (define rfstring
     (lambda ()
-      (make-list-like-reducer
-       'rfstring
-       (lambda (acc) (list->string (reverse acc))))))
+      (make-list-builder-reducer 'rfstring list->string)))
 
   #|proc:rfbytevector
   The `rfbytevector` procedure returns a reducer that accumulates exact byte
