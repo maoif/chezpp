@@ -128,3 +128,162 @@
              (transduce (tidentity)
                         (rflist)
                         (eduction (tmap add1) '(1 2 3)))))
+
+
+(mat transducer-phase2-transforms
+
+     (equal? '((0 . a) (1 . b) (2 . c))
+             (into 'list (tmap/i cons) '(a b c)))
+
+     (equal? '(a c)
+             (into 'list
+                   (tfilter/i (lambda (i x) (even? i)))
+                   '(a b c d)))
+
+     (equal? '(0 2)
+             (into 'list
+                   (tkeep/i (lambda (i x) (and (even? i) i)))
+                   '(a b c d)))
+
+     (equal? '(uno 2 tres)
+             (into 'list
+                   (treplace '((1 . uno) (3 . tres)))
+                   '(1 2 3)))
+
+     (equal? '(1 2 3 4 #\a #\b)
+             (into 'list
+                   (tcat)
+                   '((1 2) #(3 4) "ab")))
+
+     (equal? '(1 1 2 2 3 3)
+             (into 'list
+                   (tmapcat (lambda (x) (list x x)))
+                   '(1 2 3)))
+
+     (equal? '(1 2 3 4 #\a)
+             (into 'list
+                   (tflatten)
+                   '(1 (2 #(3 (4))) "a")))
+
+     ;; replacement tables must be association lists.
+     (error? (treplace '#((1 . one)))))
+
+
+(mat transducer-phase2-stateful
+
+     (equal? '(#(1 2) #(3 4))
+             (into 'list (tpartition 2) '(1 2 3 4 5)))
+
+     (equal? '(#(1 2) #(3 4) #(5))
+             (into 'list (tpartition-all 2) '(1 2 3 4 5)))
+
+     (equal? '(#(1 1) #(2 2 2) #(3))
+             (into 'list (tpartition-by id) '(1 1 2 2 2 3)))
+
+     (equal? '(1 2 1)
+             (into 'list (tdedupe) '(1 1 2 2 1 1)))
+
+     (equal? '(-1 2 3)
+             (into 'list (tdedupe-by abs) '(-1 1 2 -2 3)))
+
+     (equal? '(1 2 3)
+             (into 'list (tdistinct) '(1 2 1 3 2)))
+
+     (equal? '(-1 -2 3)
+             (into 'list (tdistinct-by abs) '(-1 1 -2 2 3)))
+
+     (equal? '(a x b x c)
+             (into 'list (tinterpose 'x) '(a b c)))
+
+     (let ([seen '()])
+       (and (equal? '(1 2 3)
+                    (into 'list
+                          (ttap (lambda (x) (set! seen (cons x seen))))
+                          '(1 2 3)))
+            (equal? '(3 2 1) seen)))
+
+     (let ([seen '()])
+       (and (equal? '(a b)
+                    (into 'list
+                          (tinspect 'phase2
+                                    (lambda (who x)
+                                      (set! seen (cons (list who x) seen))))
+                          '(a b)))
+            (equal? '((phase2 b) (phase2 a)) seen)))
+
+     (let ([seen '()])
+       (tfor-each (tmap add1)
+                  (lambda (x) (set! seen (cons x seen)))
+                  '(1 2 3))
+       (equal? '(4 3 2) seen))
+
+     ;; partition sizes must be positive.
+     (error? (tpartition 0))
+     ;; partition-by requires a procedure.
+     (error? (tpartition-by 12)))
+
+
+(mat transducer-phase2-sources
+
+     (string=? "ABC"
+               (transduce (tmap char-upcase) (rfstring) "abc"))
+
+     (equal? #vu8(2 4 6)
+             (transduce (tmap (lambda (x) (fx* x 2)))
+                        (rfbytevector)
+                        #vu8(1 2 3)))
+
+     (equal? '(2 3 4)
+             (fxvector-transduce (tmap add1)
+                                 (rflist)
+                                 '#vfx(1 2 3)))
+
+     (= 6.5 (flvector-transduce (tidentity)
+                                (rfflsum)
+                                '#vfl(1.0 2.5 3.0)))
+
+     (let ([h (make-eq-hashtable)])
+       (hashtable-set! h 'a 10)
+       (hashtable-set! h 'b 20)
+       (= 30 (hashtable-transduce (tidentity) (rfsum) h)))
+
+     (let ([p (open-input-string "aa\nbbb\nc")])
+       (let ([res (port-lines-transduce (tmap string-length) (rflist) p)]
+             [open? (not (port-closed? p))])
+         (close-port p)
+         (and open? (equal? '(2 3 1) res))))
+
+     (let ([p (open-bytevector-input-port #vu8(1 2 3))])
+       (let ([res (port-bytes-transduce (tmap add1) (rflist) p)]
+             [open? (not (port-closed? p))])
+         (close-port p)
+         (and open? (equal? '(2 3 4) res))))
+
+     (equal? '(0 1 2)
+             (list-transduce (tidentity) (rflist) '(0 1 2 3 4) 3))
+
+     (equal? '(1 3)
+             (vector-transduce (tidentity) (rflist) '#(0 1 2 3 4) 1 5 2))
+
+     (equal? '(2 4)
+             (fxvector-transduce (tidentity) (rflist) '#vfx(0 1 2 3 4 5) 2 6 2))
+
+     (equal? '(1.5 3.5)
+             (flvector-transduce (tidentity) (rflist) '#vfl(0.5 1.5 2.5 3.5) 1 4 2))
+
+     (equal? '(2 4)
+             (bytevector-transduce (tidentity) (rflist) #vu8(0 1 2 3 4 5) 2 6 2))
+
+     (equal? '(#\b #\d)
+             (string-transduce (tidentity) (rflist) "abcdef" 1 5 2))
+
+     (iter? (source->iter '(1 2 3)))
+     (eq? 'direct (current-transducer-source-mode))
+     (equal? '(2 3 4)
+             (parameterize ([current-transducer-source-mode 'iter])
+               (transduce (tmap add1) (rflist) '#(1 2 3))))
+
+     ;; slice step must be positive.
+     (error? (vector-transduce (tidentity) (rflist) '#(1 2 3) 0 3 0))
+     ;; caller-owned textual ports are required for line traversal.
+     (error? (port-lines-transduce (tidentity) (rflist) 12)))

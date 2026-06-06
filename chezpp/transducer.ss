@@ -2,14 +2,21 @@
   (export transducer? reducer? reduced reduced? unreduced ensure-reduced
           preserving-reduced completion
           make-transducer transducer-name tidentity tcompose tchain
-          tmap tfilter tremove tkeep
+          tmap tmap/i tfilter tfilter/i tremove tkeep tkeep/i treplace
+          tcat tmapcat tflatten
           ttake tdrop ttake-while tdrop-while
-          transduce into
+          tpartition tpartition-all tpartition-by
+          tdedupe tdedupe-by tdistinct tdistinct-by tinterpose
+          ttap tinspect
+          transduce into tfor-each
           list-transduce vector-transduce bytevector-transduce
-          string-transduce iter-transduce
+          string-transduce iter-transduce fxvector-transduce
+          flvector-transduce hashtable-transduce
+          port-lines-transduce port-bytes-transduce
           make-reducer reducer-name rflist rfreverselist rfvector
-          rfcount rfsum rffxsum rfflsum
-          eduction eduction? transducible?)
+          rfstring rfbytevector rfcount rfsum rffxsum rfflsum
+          eduction eduction? transducible? source->iter
+          current-transducer-source-mode)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp iter)
@@ -68,6 +75,32 @@
     (lambda (x)
       (and (fixnum? x) (fx<= 0 x) (fx<= x 255))))
 
+  (define alist?
+    (lambda (x)
+      (and (list? x) (andmap pair? x))))
+
+  (define transducer-input-textual-port?
+    (lambda (x)
+      (and (input-port? x) (textual-port? x) (not (port-closed? x)))))
+
+  (define transducer-input-binary-port?
+    (lambda (x)
+      (and (input-port? x) (binary-port? x) (not (port-closed? x)))))
+
+  #|proc:current-transducer-source-mode
+  The `current-transducer-source-mode` parameter controls generic source
+  traversal. Supported values are `'direct` and `'iter`.
+  |#
+  (define current-transducer-source-mode
+    (make-parameter
+     'direct
+     (lambda (mode)
+       (case mode
+         [(direct iter) mode]
+         [else (errorf 'current-transducer-source-mode
+                       "unsupported source mode: ~a"
+                       mode)]))))
+
   (define source-end? reduced?)
 
   (define reducer-init
@@ -125,6 +158,28 @@
                 [else (loop (reducer-step reducer acc (string-ref str i))
                             (fx+ i 1))])))))
 
+  (define run-fxvector
+    (lambda (reducer acc vec)
+      (let ([len (fxvector-length vec)])
+        (let loop ([acc acc] [i 0])
+          (cond [(source-end? acc) acc]
+                [(fx= i len) acc]
+                [else (loop (reducer-step reducer acc (fxvector-ref vec i))
+                            (fx+ i 1))])))))
+
+  (define run-flvector
+    (lambda (reducer acc vec)
+      (let ([len (flvector-length vec)])
+        (let loop ([acc acc] [i 0])
+          (cond [(source-end? acc) acc]
+                [(fx= i len) acc]
+                [else (loop (reducer-step reducer acc (flvector-ref vec i))
+                            (fx+ i 1))])))))
+
+  (define run-hashtable
+    (lambda (reducer acc ht)
+      (run-vector reducer acc (hashtable-values ht))))
+
   (define run-iter
     (lambda (reducer acc iter)
       (let loop ([acc acc])
@@ -135,14 +190,75 @@
                   acc
                   (loop (reducer-step reducer acc x))))))))
 
+  (define run-port-lines
+    (lambda (reducer acc port)
+      (let loop ([acc acc])
+        (if (source-end? acc)
+            acc
+            (let ([x (get-line port)])
+              (if (eof-object? x)
+                  acc
+                  (loop (reducer-step reducer acc x))))))))
+
+  (define run-port-bytes
+    (lambda (reducer acc port)
+      (let loop ([acc acc])
+        (if (source-end? acc)
+            acc
+            (let ([x (get-u8 port)])
+              (if (eof-object? x)
+                  acc
+                  (loop (reducer-step reducer acc x))))))))
+
+  (define check-slice
+    (lambda (who start stop step len)
+      (unless (and (natural? start) (natural? stop) (positive-natural? step))
+        (errorf who "invalid slice start/stop/step: ~a ~a ~a" start stop step))
+      (when (> start stop)
+        (errorf who "slice start greater than stop: ~a > ~a" start stop))
+      (when (and len (> stop len))
+        (errorf who "slice stop exceeds source length: ~a > ~a" stop len))))
+
+  (define run-list-slice
+    (lambda (reducer acc ls start stop step)
+      (check-slice 'list-transduce start stop step #f)
+      (let loop ([acc acc] [ls ls] [i 0])
+        (cond [(source-end? acc) acc]
+              [(or (null? ls) (>= i stop)) acc]
+              [(and (>= i start) (zero? (modulo (- i start) step)))
+               (loop (reducer-step reducer acc (car ls)) (cdr ls) (+ i 1))]
+              [else (loop acc (cdr ls) (+ i 1))]))))
+
+  (define run-index-slice
+    (lambda (who len ref reducer acc source start stop step)
+      (check-slice who start stop step len)
+      (let loop ([acc acc] [i start])
+        (cond [(source-end? acc) acc]
+              [(>= i stop) acc]
+              [else (loop (reducer-step reducer acc (ref source i))
+                          (+ i step))]))))
+
   (define run-source
     (lambda (reducer acc source)
-      (cond [(list? source) (run-list reducer acc source)]
-            [(vector? source) (run-vector reducer acc source)]
-            [(bytevector? source) (run-bytevector reducer acc source)]
-            [(string? source) (run-string reducer acc source)]
-            [(iter? source) (run-iter reducer acc source)]
-            [else (errorf 'transduce "unsupported transducer source: ~a" source)])))
+      (if (and (eq? (current-transducer-source-mode) 'iter)
+               (not (iter? source)))
+          (run-iter reducer acc (source->iter source))
+          (cond [(list? source) (run-list reducer acc source)]
+                [(vector? source) (run-vector reducer acc source)]
+                [(bytevector? source) (run-bytevector reducer acc source)]
+                [(string? source) (run-string reducer acc source)]
+                [(fxvector? source) (run-fxvector reducer acc source)]
+                [(flvector? source) (run-flvector reducer acc source)]
+                [(hashtable? source) (run-hashtable reducer acc source)]
+                [(iter? source) (run-iter reducer acc source)]
+                [else (errorf 'transduce "unsupported transducer source: ~a" source)]))))
+
+  (define transduce-run
+    (lambda (who xform reducer init source runner)
+      (pcheck ([transducer? xform] [reducer? reducer])
+              (let ([effective (apply-transducer xform reducer)])
+                (finish-transduce effective
+                                  (runner effective init source))))))
 
   (define finish-transduce
     (lambda (reducer acc)
@@ -311,6 +427,28 @@
                     [(acc x) (reducer-step reducer acc (proc x))])
                   #f))))))
 
+  #|proc:tmap/i
+  The `tmap/i` procedure returns a transducer that emits `(proc i x)` for each
+  input value `x`, where `i` is the zero-based input index.
+  |#
+  (define tmap/i
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (make-transducer
+               'tmap/i
+               (lambda (reducer)
+                 (let ([i 0])
+                   (mk-$reducer
+                    'tmap/i
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc) (reducer-complete reducer acc)]
+                      [(acc x)
+                       (let ([j i])
+                         (set! i (+ i 1))
+                         (reducer-step reducer acc (proc j x)))])
+                    #f)))))))
+
   #|proc:tfilter
   The `tfilter` procedure returns a transducer that emits only values accepted
   by `pred`.
@@ -330,6 +468,30 @@
                                  (reducer-step reducer acc x)
                                  acc)])
                   #f))))))
+
+  #|proc:tfilter/i
+  The `tfilter/i` procedure returns a transducer that emits values accepted by
+  `(pred i x)`, where `i` is the zero-based input index.
+  |#
+  (define tfilter/i
+    (lambda (pred)
+      (pcheck ([procedure? pred])
+              (make-transducer
+               'tfilter/i
+               (lambda (reducer)
+                 (let ([i 0])
+                   (mk-$reducer
+                    'tfilter/i
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc) (reducer-complete reducer acc)]
+                      [(acc x)
+                       (let ([j i])
+                         (set! i (+ i 1))
+                         (if (pred j x)
+                             (reducer-step reducer acc x)
+                             acc))])
+                    #f)))))))
 
   #|proc:tremove
   The `tremove` procedure returns a transducer that emits only values rejected
@@ -359,6 +521,114 @@
                      (let ([y (proc x)])
                        (if y (reducer-step reducer acc y) acc))])
                   #f))))))
+
+  #|proc:tkeep/i
+  The `tkeep/i` procedure applies `(proc i x)` to each input and emits the
+  result only when it is not `#f`.
+  |#
+  (define tkeep/i
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (make-transducer
+               'tkeep/i
+               (lambda (reducer)
+                 (let ([i 0])
+                   (mk-$reducer
+                    'tkeep/i
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc) (reducer-complete reducer acc)]
+                      [(acc x)
+                       (let* ([j i]
+                              [y (begin (set! i (+ i 1)) (proc j x))])
+                         (if y (reducer-step reducer acc y) acc))])
+                    #f)))))))
+
+  #|proc:treplace
+  The `treplace` procedure returns a transducer that replaces input values
+  according to association list `alist` using `equal?`.
+  |#
+  (define treplace
+    (lambda (alist)
+      (pcheck ([alist? alist])
+              (tmap (lambda (x)
+                      (let ([cell (assoc x alist)])
+                        (if cell (cdr cell) x)))))))
+
+  (define flatten-emit
+    (lambda (reducer acc x)
+      (cond [(source-end? acc) acc]
+            [(list? x) (run-list reducer acc x)]
+            [(vector? x) (run-vector reducer acc x)]
+            [(bytevector? x) (run-bytevector reducer acc x)]
+            [(string? x) (run-string reducer acc x)]
+            [(fxvector? x) (run-fxvector reducer acc x)]
+            [(flvector? x) (run-flvector reducer acc x)]
+            [else (reducer-step reducer acc x)])))
+
+  (define flatten-rec
+    (lambda (reducer acc x)
+      (cond [(source-end? acc) acc]
+            [(list? x)
+             (let loop ([acc acc] [ls x])
+               (cond [(source-end? acc) acc]
+                     [(null? ls) acc]
+                     [else (loop (flatten-rec reducer acc (car ls)) (cdr ls))]))]
+            [(vector? x)
+             (let ([len (vector-length x)])
+               (let loop ([acc acc] [i 0])
+                 (cond [(source-end? acc) acc]
+                       [(fx= i len) acc]
+                       [else (loop (flatten-rec reducer acc (vector-ref x i))
+                                   (fx+ i 1))])))]
+            [(bytevector? x) (run-bytevector reducer acc x)]
+            [(string? x) (run-string reducer acc x)]
+            [(fxvector? x) (run-fxvector reducer acc x)]
+            [(flvector? x) (run-flvector reducer acc x)]
+            [else (reducer-step reducer acc x)])))
+
+  #|proc:tcat
+  The `tcat` procedure concatenates each input collection into the output
+  stream.
+  |#
+  (define tcat
+    (lambda ()
+      (make-transducer
+       'tcat
+       (lambda (reducer)
+         (mk-$reducer
+          'tcat
+          (case-lambda
+            [() (reducer-init reducer)]
+            [(acc) (reducer-complete reducer acc)]
+            [(acc x) (flatten-emit reducer acc x)])
+          #f)))))
+
+  #|proc:tmapcat
+  The `tmapcat` procedure maps `proc` over input values and concatenates each
+  produced collection.
+  |#
+  (define tmapcat
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (tcompose (tmap proc) (tcat)))))
+
+  #|proc:tflatten
+  The `tflatten` procedure recursively emits leaf values from nested supported
+  collections.
+  |#
+  (define tflatten
+    (lambda ()
+      (make-transducer
+       'tflatten
+       (lambda (reducer)
+         (mk-$reducer
+          'tflatten
+          (case-lambda
+            [() (reducer-init reducer)]
+            [(acc) (reducer-complete reducer acc)]
+            [(acc x) (flatten-rec reducer acc x)])
+          #f)))))
 
   #|proc:ttake
   The `ttake` procedure returns a stateful transducer that emits at most `n`
@@ -454,6 +724,235 @@
                              (reducer-step reducer acc x)))])
                     #f)))))))
 
+  (define buffer->vector
+    (lambda (buf)
+      (list->vector (reverse buf))))
+
+  #|proc:tpartition
+  The `tpartition` procedure emits vectors of exactly `n` values and drops the
+  trailing partial partition.
+  |#
+  (define tpartition
+    (lambda (n)
+      (pcheck ([positive-natural? n])
+              (make-transducer
+               'tpartition
+               (lambda (reducer)
+                 (let ([buf '()] [count 0])
+                   (mk-$reducer
+                    'tpartition
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc) (reducer-complete reducer acc)]
+                      [(acc x)
+                       (set! buf (cons x buf))
+                       (set! count (+ count 1))
+                       (if (= count n)
+                           (let ([chunk (buffer->vector buf)])
+                             (set! buf '())
+                             (set! count 0)
+                             (reducer-step reducer acc chunk))
+                           acc)])
+                    #f)))))))
+
+  #|proc:tpartition-all
+  The `tpartition-all` procedure emits vectors of up to `n` values, including
+  the trailing partial partition during completion.
+  |#
+  (define tpartition-all
+    (lambda (n)
+      (pcheck ([positive-natural? n])
+              (make-transducer
+               'tpartition-all
+               (lambda (reducer)
+                 (let ([buf '()] [count 0])
+                   (mk-$reducer
+                    'tpartition-all
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc)
+                       (let ([acc (if (> count 0)
+                                      (reducer-step reducer acc (buffer->vector buf))
+                                      acc)])
+                         (reducer-complete reducer (unreduced acc)))]
+                      [(acc x)
+                       (set! buf (cons x buf))
+                       (set! count (+ count 1))
+                       (if (= count n)
+                           (let ([chunk (buffer->vector buf)])
+                             (set! buf '())
+                             (set! count 0)
+                             (reducer-step reducer acc chunk))
+                           acc)])
+                    #f)))))))
+
+  #|proc:tpartition-by
+  The `tpartition-by` procedure starts a new vector partition whenever
+  `(proc x)` changes according to `equal?`.
+  |#
+  (define tpartition-by
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (make-transducer
+               'tpartition-by
+               (lambda (reducer)
+                 (let ([started? #f] [key #f] [buf '()])
+                   (mk-$reducer
+                    'tpartition-by
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc)
+                       (let ([acc (if started?
+                                      (reducer-step reducer acc (buffer->vector buf))
+                                      acc)])
+                         (reducer-complete reducer (unreduced acc)))]
+                      [(acc x)
+                       (let ([k (proc x)])
+                         (cond [(not started?)
+                                (set! started? #t)
+                                (set! key k)
+                                (set! buf (list x))
+                                acc]
+                               [(equal? k key)
+                                (set! buf (cons x buf))
+                                acc]
+                               [else
+                                (let ([chunk (buffer->vector buf)])
+                                  (set! key k)
+                                  (set! buf (list x))
+                                  (reducer-step reducer acc chunk))]))])
+                    #f)))))))
+
+  #|proc:tdedupe
+  The `tdedupe` procedure removes consecutive duplicate values using `equal?`.
+  |#
+  (define tdedupe
+    (lambda ()
+      (tdedupe-by id)))
+
+  #|proc:tdedupe-by
+  The `tdedupe-by` procedure removes consecutive values whose computed keys are
+  `equal?`.
+  |#
+  (define tdedupe-by
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (make-transducer
+               'tdedupe-by
+               (lambda (reducer)
+                 (let ([started? #f] [key #f])
+                   (mk-$reducer
+                    'tdedupe-by
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc) (reducer-complete reducer acc)]
+                      [(acc x)
+                       (let ([k (proc x)])
+                         (if (and started? (equal? k key))
+                             acc
+                             (begin
+                               (set! started? #t)
+                               (set! key k)
+                               (reducer-step reducer acc x))))])
+                    #f)))))))
+
+  #|proc:tdistinct
+  The `tdistinct` procedure emits only the first occurrence of each value using
+  `equal?`.
+  |#
+  (define tdistinct
+    (lambda ()
+      (tdistinct-by id)))
+
+  #|proc:tdistinct-by
+  The `tdistinct-by` procedure emits only the first occurrence of each computed
+  key using `equal?`.
+  |#
+  (define tdistinct-by
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (make-transducer
+               'tdistinct-by
+               (lambda (reducer)
+                 (let ([seen (make-hashtable equal-hash equal?)])
+                   (mk-$reducer
+                    'tdistinct-by
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc) (reducer-complete reducer acc)]
+                      [(acc x)
+                       (let ([k (proc x)])
+                         (if (hashtable-contains? seen k)
+                             acc
+                             (begin
+                               (hashtable-set! seen k #t)
+                               (reducer-step reducer acc x))))])
+                    #f)))))))
+
+  #|proc:tinterpose
+  The `tinterpose` procedure emits `sep` between input values.
+  |#
+  (define tinterpose
+    (lambda (sep)
+      (make-transducer
+       'tinterpose
+       (lambda (reducer)
+         (let ([first? #t])
+           (mk-$reducer
+            'tinterpose
+            (case-lambda
+              [() (reducer-init reducer)]
+              [(acc) (reducer-complete reducer acc)]
+              [(acc x)
+               (if first?
+                   (begin
+                     (set! first? #f)
+                     (reducer-step reducer acc x))
+                   (let ([acc (reducer-step reducer acc sep)])
+                     (if (reduced? acc)
+                         acc
+                         (reducer-step reducer acc x))))])
+            #f))))))
+
+  #|proc:ttap
+  The `ttap` procedure calls `(proc x)` for each input value, then emits `x`.
+  |#
+  (define ttap
+    (lambda (proc)
+      (pcheck ([procedure? proc])
+              (make-transducer
+               'ttap
+               (lambda (reducer)
+                 (mk-$reducer
+                  'ttap
+                  (case-lambda
+                    [() (reducer-init reducer)]
+                    [(acc) (reducer-complete reducer acc)]
+                    [(acc x)
+                     (proc x)
+                     (reducer-step reducer acc x)])
+                  #f))))))
+
+  #|proc:tinspect
+  The `tinspect` procedure calls `(proc who x)` for each input value, then
+  emits `x`.
+  |#
+  (define tinspect
+    (lambda (who proc)
+      (pcheck ([procedure? proc])
+              (make-transducer
+               'tinspect
+               (lambda (reducer)
+                 (mk-$reducer
+                  'tinspect
+                  (case-lambda
+                    [() (reducer-init reducer)]
+                    [(acc) (reducer-complete reducer acc)]
+                    [(acc x)
+                     (proc who x)
+                     (reducer-step reducer acc x)])
+                  #f))))))
+
   #|proc:transduce
   The `transduce` procedure runs `xform` over `source` using `reducer`. With
   three arguments, the reducer supplies the initial accumulator; with four
@@ -478,71 +977,142 @@
                 [(list) (transduce xform (rflist) source)]
                 [(reverse-list) (transduce xform (rfreverselist) source)]
                 [(vector) (transduce xform (rfvector) source)]
-                [(string)
-                 (transduce xform
-                            (make-list-like-reducer
-                             'rfstring
-                             (lambda (acc) (list->string (reverse acc))))
-                            source)]
-                [(bytevector)
-                 (transduce xform
-                            (make-list-like-reducer
-                             'rfbytevector
-                             (lambda (acc) (list->bytevector (reverse acc))))
-                            source)]
+                [(string) (transduce xform (rfstring) source)]
+                [(bytevector) (transduce xform (rfbytevector) source)]
                 [else (errorf 'into "unsupported transducer destination: ~a" to)]))))
+
+  (define slice-source-args
+    (lambda (who args source? run-all run-slice)
+      (case (length args)
+        [(1) (let ([source (car args)])
+               (if (source? source)
+                   (run-all source)
+                   (errorf who "invalid source: ~a" source)))]
+        [(2) (let ([source (car args)] [end (cadr args)])
+               (if (source? source)
+                   (run-slice source 0 end 1)
+                   (errorf who "invalid sliced source: ~a" source)))]
+        [(3) (let ([source (car args)] [start (cadr args)] [stop (caddr args)])
+               (if (source? source)
+                   (run-slice source start stop 1)
+                   (errorf who "invalid sliced source: ~a" source)))]
+        [(4) (let ([source (car args)] [start (cadr args)] [stop (caddr args)] [step (cadddr args)])
+               (if (source? source)
+                   (run-slice source start stop step)
+                   (errorf who "invalid sliced source: ~a" source)))]
+        [else (errorf who "invalid number of source arguments: ~a" args)])))
+
+  (define transduce/slice
+    (lambda (who source? run-all run-slice xform reducer arg0 arg*)
+      (pcheck ([transducer? xform] [reducer? reducer])
+              (if (source? arg0)
+                  (slice-source-args
+                   who
+                   (cons arg0 arg*)
+                   source?
+                   (lambda (source)
+                     (transduce-run who xform reducer (reducer-init reducer) source run-all))
+                   (lambda (source start stop step)
+                     (transduce-run
+                      who
+                      xform
+                      reducer
+                      (reducer-init reducer)
+                      source
+                      (lambda (effective acc source)
+                        (run-slice effective acc source start stop step)))))
+                  (let ([init arg0])
+                    (slice-source-args
+                     who
+                     arg*
+                     source?
+                     (lambda (source)
+                       (transduce-run who xform reducer init source run-all))
+                     (lambda (source start stop step)
+                       (transduce-run
+                        who
+                        xform
+                        reducer
+                        init
+                        source
+                        (lambda (effective acc source)
+                          (run-slice effective acc source start stop step))))))))))
 
   #|proc:list-transduce
   The `list-transduce` procedure transduces list `source` with direct pair
   traversal.
   |#
   (define list-transduce
-    (case-lambda
-      [(xform reducer source)
-       (pcheck ([list? source])
-               (transduce-default xform reducer source))]
-      [(xform reducer init source)
-       (pcheck ([list? source])
-               (transduce-explicit xform reducer init source))]))
+    (lambda (xform reducer arg0 . arg*)
+      (transduce/slice
+       'list-transduce
+       list?
+       run-list
+       run-list-slice
+       xform
+       reducer
+       arg0
+       arg*)))
 
   #|proc:vector-transduce
   The `vector-transduce` procedure transduces vector `source` with direct
   indexed traversal.
   |#
   (define vector-transduce
-    (case-lambda
-      [(xform reducer source)
-       (pcheck ([vector? source])
-               (transduce-default xform reducer source))]
-      [(xform reducer init source)
-       (pcheck ([vector? source])
-               (transduce-explicit xform reducer init source))]))
+    (lambda (xform reducer arg0 . arg*)
+      (transduce/slice
+       'vector-transduce
+       vector?
+       run-vector
+       (lambda (reducer acc source start stop step)
+         (run-index-slice 'vector-transduce
+                          (vector-length source)
+                          vector-ref
+                          reducer acc source start stop step))
+       xform
+       reducer
+       arg0
+       arg*)))
 
   #|proc:bytevector-transduce
   The `bytevector-transduce` procedure transduces bytevector `source` by
   reading unsigned bytes.
   |#
   (define bytevector-transduce
-    (case-lambda
-      [(xform reducer source)
-       (pcheck ([bytevector? source])
-               (transduce-default xform reducer source))]
-      [(xform reducer init source)
-       (pcheck ([bytevector? source])
-               (transduce-explicit xform reducer init source))]))
+    (lambda (xform reducer arg0 . arg*)
+      (transduce/slice
+       'bytevector-transduce
+       bytevector?
+       run-bytevector
+       (lambda (reducer acc source start stop step)
+         (run-index-slice 'bytevector-transduce
+                          (bytevector-length source)
+                          bytevector-u8-ref
+                          reducer acc source start stop step))
+       xform
+       reducer
+       arg0
+       arg*)))
 
   #|proc:string-transduce
   The `string-transduce` procedure transduces string `source` by reading
   characters.
   |#
   (define string-transduce
-    (case-lambda
-      [(xform reducer source)
-       (pcheck ([string? source])
-               (transduce-default xform reducer source))]
-      [(xform reducer init source)
-       (pcheck ([string? source])
-               (transduce-explicit xform reducer init source))]))
+    (lambda (xform reducer arg0 . arg*)
+      (transduce/slice
+       'string-transduce
+       string?
+       run-string
+       (lambda (reducer acc source start stop step)
+         (run-index-slice 'string-transduce
+                          (string-length source)
+                          string-ref
+                          reducer acc source start stop step))
+       xform
+       reducer
+       arg0
+       arg*)))
 
   #|proc:iter-transduce
   The `iter-transduce` procedure transduces iterator `source` by repeatedly
@@ -552,10 +1122,107 @@
     (case-lambda
       [(xform reducer source)
        (pcheck ([iter? source])
-               (transduce-default xform reducer source))]
+               (transduce-run 'iter-transduce xform reducer (reducer-init reducer) source run-iter))]
       [(xform reducer init source)
        (pcheck ([iter? source])
-               (transduce-explicit xform reducer init source))]))
+               (transduce-run 'iter-transduce xform reducer init source run-iter))]))
+
+  #|proc:fxvector-transduce
+  The `fxvector-transduce` procedure transduces fxvector `source` with direct
+  indexed traversal.
+  |#
+  (define fxvector-transduce
+    (lambda (xform reducer arg0 . arg*)
+      (transduce/slice
+       'fxvector-transduce
+       fxvector?
+       run-fxvector
+       (lambda (reducer acc source start stop step)
+         (run-index-slice 'fxvector-transduce
+                          (fxvector-length source)
+                          fxvector-ref
+                          reducer acc source start stop step))
+       xform
+       reducer
+       arg0
+       arg*)))
+
+  #|proc:flvector-transduce
+  The `flvector-transduce` procedure transduces flvector `source` with direct
+  indexed traversal.
+  |#
+  (define flvector-transduce
+    (lambda (xform reducer arg0 . arg*)
+      (transduce/slice
+       'flvector-transduce
+       flvector?
+       run-flvector
+       (lambda (reducer acc source start stop step)
+         (run-index-slice 'flvector-transduce
+                          (flvector-length source)
+                          flvector-ref
+                          reducer acc source start stop step))
+       xform
+       reducer
+       arg0
+       arg*)))
+
+  #|proc:hashtable-transduce
+  The `hashtable-transduce` procedure transduces hashtable values with direct
+  traversal over the hashtable values vector.
+  |#
+  (define hashtable-transduce
+    (case-lambda
+      [(xform reducer source)
+       (pcheck ([hashtable? source])
+               (transduce-run 'hashtable-transduce xform reducer (reducer-init reducer) source run-hashtable))]
+      [(xform reducer init source)
+       (pcheck ([hashtable? source])
+               (transduce-run 'hashtable-transduce xform reducer init source run-hashtable))]))
+
+  #|proc:port-lines-transduce
+  The `port-lines-transduce` procedure transduces lines from caller-owned
+  textual input port `source`. It does not close `source`.
+  |#
+  (define port-lines-transduce
+    (case-lambda
+      [(xform reducer source)
+       (pcheck ([transducer-input-textual-port? source])
+               (transduce-run 'port-lines-transduce xform reducer (reducer-init reducer) source run-port-lines))]
+      [(xform reducer init source)
+       (pcheck ([transducer-input-textual-port? source])
+               (transduce-run 'port-lines-transduce xform reducer init source run-port-lines))]))
+
+  #|proc:port-bytes-transduce
+  The `port-bytes-transduce` procedure transduces bytes from caller-owned
+  binary input port `source`. It does not close `source`.
+  |#
+  (define port-bytes-transduce
+    (case-lambda
+      [(xform reducer source)
+       (pcheck ([transducer-input-binary-port? source])
+               (transduce-run 'port-bytes-transduce xform reducer (reducer-init reducer) source run-port-bytes))]
+      [(xform reducer init source)
+       (pcheck ([transducer-input-binary-port? source])
+               (transduce-run 'port-bytes-transduce xform reducer init source run-port-bytes))]))
+
+  #|proc:tfor-each
+  The `tfor-each` procedure runs `proc` for side effects on each transformed
+  value from `source` and returns unspecified values.
+  |#
+  (define tfor-each
+    (lambda (xform proc source)
+      (pcheck ([transducer? xform] [procedure? proc])
+              (transduce
+               xform
+               (make-reducer
+                'tfor-each
+                (case-lambda
+                  [() (void)]
+                  [(acc) (void)]
+                  [(acc x) (proc x) acc]))
+               source)
+              (void))))
 
   #|proc:make-reducer
   The `make-reducer` procedure returns a reducer record named `name`. `proc`
@@ -599,6 +1266,26 @@
       (make-list-like-reducer
        'rfvector
        (lambda (acc) (list->vector (reverse acc))))))
+
+  #|proc:rfstring
+  The `rfstring` procedure returns a reducer that accumulates characters into
+  a string in input order.
+  |#
+  (define rfstring
+    (lambda ()
+      (make-list-like-reducer
+       'rfstring
+       (lambda (acc) (list->string (reverse acc))))))
+
+  #|proc:rfbytevector
+  The `rfbytevector` procedure returns a reducer that accumulates exact byte
+  values into a bytevector in input order.
+  |#
+  (define rfbytevector
+    (lambda ()
+      (make-list-like-reducer
+       'rfbytevector
+       (lambda (acc) (list->bytevector (reverse acc))))))
 
   #|proc:rfcount
   The `rfcount` procedure returns a reducer that counts transformed values.
@@ -663,6 +1350,48 @@
                   (mk-$eduction xform source)
                   (errorf 'eduction "unsupported transducer source: ~a" source)))))
 
+  (define transducer-bytevector->list
+    (lambda (bv)
+      (let ([len (bytevector-length bv)])
+        (let loop ([i (- len 1)] [acc '()])
+          (if (< i 0)
+              acc
+              (loop (- i 1) (cons (bytevector-u8-ref bv i) acc)))))))
+
+  (define transducer-fxvector->list
+    (lambda (vec)
+      (let ([len (fxvector-length vec)])
+        (let loop ([i (- len 1)] [acc '()])
+          (if (< i 0)
+              acc
+              (loop (- i 1) (cons (fxvector-ref vec i) acc)))))))
+
+  (define transducer-flvector->list
+    (lambda (vec)
+      (let ([len (flvector-length vec)])
+        (let loop ([i (- len 1)] [acc '()])
+          (if (< i 0)
+              acc
+              (loop (- i 1) (cons (flvector-ref vec i) acc)))))))
+
+  #|proc:source->iter
+  The `source->iter` procedure converts a supported Phase 2 transducer source
+  to an iterator for explicit interop or debug traversal.
+  |#
+  (define source->iter
+    (lambda (source)
+      (cond [(iter? source) source]
+            [(list? source) (list->iter source)]
+            [(vector? source) (vector->iter source)]
+            [(string? source) (string->iter source)]
+            [(bytevector? source) (list->iter (transducer-bytevector->list source))]
+            [(fxvector? source) (list->iter (transducer-fxvector->list source))]
+            [(flvector? source) (list->iter (transducer-flvector->list source))]
+            [(hashtable? source) (vector->iter (hashtable-values source))]
+            [(eduction? source)
+             (list->iter (transduce (tidentity) (rflist) source))]
+            [else (errorf 'source->iter "unsupported transducer source: ~a" source)])))
+
   #|proc:transducible?
   The `transducible?` procedure returns `#t` for Phase 1 sources accepted by
   `transduce`.
@@ -673,5 +1402,8 @@
           (vector? x)
           (bytevector? x)
           (string? x)
+          (fxvector? x)
+          (flvector? x)
+          (hashtable? x)
           (iter? x)
           (eduction? x)))))
