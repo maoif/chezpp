@@ -104,6 +104,15 @@
                              (ttake-while (lambda (x) (< x 6))))
                    '(0 1 2 3 4 5 6 7)))
 
+     (equal? '(a c e)
+             (into 'list (ttake-nth 2) '(a b c d e)))
+
+     (equal? '(b c d)
+             (into 'list (tslice 1 4) '(a b c d e)))
+
+     (equal? '(b d f)
+             (into 'list (tslice 1 6 2) '(a b c d e f g)))
+
      (equal? '(1 2 3)
              (into 'list
                    (tchain (list (tmap add1) (ttake 3)))
@@ -318,6 +327,15 @@
      (equal? '(2 3 4)
              (iter->list (source->iter (eduction (tmap add1) '(1 2 3)))))
 
+     (equal? '(1 2 3)
+             (iter->list (source->iter #vu8(1 2 3))))
+
+     (equal? '(1 2 3)
+             (iter->list (source->iter '#vfx(1 2 3))))
+
+     (equal? '(1.0 2.5)
+             (iter->list (source->iter '#vfl(1.0 2.5))))
+
      (= 8 (transduce1 (tfilter odd?) (rfsum) '(2 3 4 5)))
      (= 6.5 (transduce1 (tidentity) (rfflsum) '#vfl(1.0 2.5 3.0)))
 
@@ -329,6 +347,8 @@
 
      (= 1 (transduce (tidentity) (rfmin <) '(3 1 2)))
      (= 3 (transduce (tidentity) (rfmax <) '(3 1 2)))
+     (= 24 (transduce (tidentity) (rfproduct) '(2 3 4)))
+     (= 1 (transduce (tidentity) (rfproduct) '()))
      (eq? 'yes
           (transduce (tidentity)
                      (rfany (lambda (x) (and (symbol? x) 'yes)))
@@ -342,4 +362,7 @@
      ;; reducer predicates are required.
      (error? (rfany 12))
      (error? (rfevery 12))
-     (error? (rfmin 12)))
+     (error? (rfmin 12))
+     ;; slicing transducers require valid positive step values.
+     (error? (ttake-nth 0))
+     (error? (tslice 0 3 0)))

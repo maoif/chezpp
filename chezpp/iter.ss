@@ -1,6 +1,7 @@
 (library (chezpp iter)
   (export range
           list->iter vector->iter string->iter
+          bytevector->iter fxvector->iter flvector->iter
           port->iter port-lines->iter port-chars->iter port-data->iter
           file->iter file-lines->iter file-chars->iter file-data->iter
           iter->list
@@ -191,13 +192,66 @@
                       [vlen (string-length val)]
                       [stop (if (fx>= stop vlen) vlen stop)])
                  (mk-$iter
-                  (lambda ()
-                    (if (fx>= i stop)
-                        iter-end
-                        (let ([v (string-ref val i)])
-                          (set! i (fx+ i step))
-                          v)))
-                  (lambda () (set! i start)))))]))
+	                  (lambda ()
+	                    (if (fx>= i stop)
+	                        iter-end
+	                        (let ([v (string-ref val i)])
+	                          (set! i (fx+ i step))
+	                          v)))
+	                  (lambda () (set! i start)))))]))
+
+  (define define-indexed->iter
+    (lambda (who pred len-proc ref-proc)
+      (case-lambda
+        [(val)
+         (pcheck ([pred val])
+                 (let ([len (len-proc val)] [i 0])
+                   (mk-$iter
+                    (lambda ()
+                      (if (fx= i len)
+                          iter-end
+                          (let ([next (ref-proc val i)])
+                            (incr! i)
+                            next)))
+                    (lambda () (set! i 0)))))]
+        [(val stop)
+         (pcheck ([pred val])
+                 ((define-indexed->iter who pred len-proc ref-proc) val 0 stop 1))]
+        [(val start stop)
+         (pcheck ([pred val])
+                 ((define-indexed->iter who pred len-proc ref-proc) val start stop 1))]
+        [(val start stop step)
+         (pcheck ([pred val] [integer? start stop step])
+                 (let* ([i start]
+                        [vlen (len-proc val)]
+                        [stop (if (fx>= stop vlen) vlen stop)])
+                   (mk-$iter
+                    (lambda ()
+                      (if (fx>= i stop)
+                          iter-end
+                          (let ([v (ref-proc val i)])
+                            (set! i (fx+ i step))
+                            v)))
+                    (lambda () (set! i start)))))])))
+
+  #|proc:bytevector->iter
+  The `bytevector->iter` procedure returns an iterator over the unsigned bytes
+  in `val`.
+  |#
+  (define bytevector->iter
+    (define-indexed->iter 'bytevector->iter bytevector? bytevector-length bytevector-u8-ref))
+
+  #|proc:fxvector->iter
+  The `fxvector->iter` procedure returns an iterator over the fixnums in `val`.
+  |#
+  (define fxvector->iter
+    (define-indexed->iter 'fxvector->iter fxvector? fxvector-length fxvector-ref))
+
+  #|proc:flvector->iter
+  The `flvector->iter` procedure returns an iterator over the flonums in `val`.
+  |#
+  (define flvector->iter
+    (define-indexed->iter 'flvector->iter flvector? flvector-length flvector-ref))
 
 
 ;;;; ports are opened and closed by the caller

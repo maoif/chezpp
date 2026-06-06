@@ -45,6 +45,10 @@
      (eq? iter-end (iter-next! (string->iter "123" 0 0)))
      (eq? iter-end (iter-next! (string->iter "1234" 3 0)))
 
+     (eq? iter-end (iter-next! (bytevector->iter #vu8())))
+     (eq? iter-end (iter-next! (fxvector->iter '#vfx())))
+     (eq? iter-end (iter-next! (flvector->iter '#vfl())))
+
      (equal? (iter->list (range 0 100 5))
              (iter->list (list->iter (iota 100) 0 100 5)))
      (equal? (nums 0 100 2)
@@ -64,6 +68,21 @@
      (let ([s "abc123345jskljdla"])
        (equal? (iter->list (list->iter (string->list s) 1 30 3))
                (iter->list (string->iter s 1 30 3))))
+
+     (equal? '(1 2 3)
+             (iter->list (bytevector->iter #vu8(1 2 3))))
+     (equal? '(2 4)
+             (iter->list (bytevector->iter #vu8(0 1 2 3 4 5) 2 6 2)))
+
+     (equal? '(1 2 3)
+             (iter->list (fxvector->iter '#vfx(1 2 3))))
+     (equal? '(2 4)
+             (iter->list (fxvector->iter '#vfx(0 1 2 3 4 5) 2 6 2)))
+
+     (equal? '(1.0 2.5)
+             (iter->list (flvector->iter '#vfl(1.0 2.5))))
+     (equal? '(1.5 3.5)
+             (iter->list (flvector->iter '#vfl(0.5 1.5 2.5 3.5) 1 4 2)))
 
      )
 

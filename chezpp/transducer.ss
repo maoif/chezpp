@@ -4,7 +4,7 @@
           make-transducer transducer-name tidentity tcompose tchain
           tmap tmap/i tfilter tfilter/i tremove tkeep tkeep/i treplace
           tcat tmapcat tflatten
-          ttake tdrop ttake-while tdrop-while
+          ttake tdrop ttake-while tdrop-while ttake-nth tslice
           tpartition tpartition-all tpartition-by
           tdedupe tdedupe-by tdistinct tdistinct-by tinterpose
           ttap tinspect
@@ -14,7 +14,7 @@
           flvector-transduce hashtable-transduce
           port-lines-transduce port-bytes-transduce
           make-reducer reducer-name rflist rfreverselist rfvector
-          rfstring rfbytevector rfcount rfsum rffxsum rfflsum
+          rfstring rfbytevector rfcount rfsum rffxsum rfflsum rfproduct
           rfmin rfmax rfany rfevery
           eduction eduction? transducible? source->iter
           current-transducer-source-mode)
@@ -724,6 +724,69 @@
                              (set! dropping? #f)
                              (reducer-step reducer acc x)))])
                     #f)))))))
+
+  #|proc:ttake-nth
+  The `ttake-nth` procedure emits every `n`th input value, starting with index
+  zero.
+  |#
+  (define ttake-nth
+    (lambda (n)
+      (pcheck ([positive-natural? n])
+              (make-transducer
+               'ttake-nth
+               (lambda (reducer)
+                 (let ([i 0])
+                   (mk-$reducer
+                    'ttake-nth
+                    (case-lambda
+                      [() (reducer-init reducer)]
+                      [(acc) (reducer-complete reducer acc)]
+                      [(acc x)
+                       (let ([j i])
+                         (set! i (+ i 1))
+                         (if (zero? (modulo j n))
+                             (reducer-step reducer acc x)
+                             acc))])
+                    #f)))))))
+
+  (define tslice/check
+    (lambda (start stop step)
+      (unless (and (natural? start) (natural? stop) (positive-natural? step))
+        (errorf 'tslice "invalid slice start/stop/step: ~a ~a ~a" start stop step))
+      (when (> start stop)
+        (errorf 'tslice "slice start greater than stop: ~a > ~a" start stop))))
+
+  #|proc:tslice
+  The `tslice` procedure emits input values with indexes in `[start, stop)`.
+  With three arguments, `step` selects indexes by positive stride.
+  |#
+  (define tslice
+    (case-lambda
+      [(start stop) (tslice start stop 1)]
+      [(start stop step)
+       (tslice/check start stop step)
+       (make-transducer
+        'tslice
+        (lambda (reducer)
+          (let ([i 0])
+            (mk-$reducer
+             'tslice
+             (case-lambda
+               [() (reducer-init reducer)]
+               [(acc) (reducer-complete reducer acc)]
+               [(acc x)
+                (let ([j i])
+                  (set! i (+ i 1))
+                  (cond [(>= j stop) (reduced acc)]
+                        [(and (>= j start)
+                              (zero? (modulo (- j start) step)))
+                         (let ([next (reducer-step reducer acc x)])
+                           (if (or (reduced? next) (>= i stop))
+                               (ensure-reduced next)
+                               next))]
+                        [(>= i stop) (reduced acc)]
+                        [else acc]))])
+             #f))))]))
 
   (define buffer->vector
     (lambda (buf)
@@ -1449,6 +1512,19 @@
          [(acc) acc]
          [(acc x) (fl+ acc x)]))))
 
+  #|proc:rfproduct
+  The `rfproduct` procedure returns a reducer that multiplies transformed
+  numeric values with `*`.
+  |#
+  (define rfproduct
+    (lambda ()
+      (make-reducer
+       'rfproduct
+       (case-lambda
+         [() 1]
+         [(acc) acc]
+         [(acc x) (* acc x)]))))
+
   (define extrema-reducer
     (lambda (name better?)
       (make-reducer
@@ -1530,30 +1606,6 @@
                   (mk-$eduction xform source)
                   (errorf 'eduction "unsupported transducer source: ~a" source)))))
 
-  (define transducer-bytevector->list
-    (lambda (bv)
-      (let ([len (bytevector-length bv)])
-        (let loop ([i (- len 1)] [acc '()])
-          (if (< i 0)
-              acc
-              (loop (- i 1) (cons (bytevector-u8-ref bv i) acc)))))))
-
-  (define transducer-fxvector->list
-    (lambda (vec)
-      (let ([len (fxvector-length vec)])
-        (let loop ([i (- len 1)] [acc '()])
-          (if (< i 0)
-              acc
-              (loop (- i 1) (cons (fxvector-ref vec i) acc)))))))
-
-  (define transducer-flvector->list
-    (lambda (vec)
-      (let ([len (flvector-length vec)])
-        (let loop ([i (- len 1)] [acc '()])
-          (if (< i 0)
-              acc
-              (loop (- i 1) (cons (flvector-ref vec i) acc)))))))
-
   #|proc:source->iter
   The `source->iter` procedure converts a supported Phase 2 transducer source
   to an iterator for explicit interop or debug traversal.
@@ -1564,9 +1616,9 @@
             [(list? source) (list->iter source)]
             [(vector? source) (vector->iter source)]
             [(string? source) (string->iter source)]
-            [(bytevector? source) (list->iter (transducer-bytevector->list source))]
-            [(fxvector? source) (list->iter (transducer-fxvector->list source))]
-            [(flvector? source) (list->iter (transducer-flvector->list source))]
+            [(bytevector? source) (bytevector->iter source)]
+            [(fxvector? source) (fxvector->iter source)]
+            [(flvector? source) (flvector->iter source)]
             [(hashtable? source) (vector->iter (hashtable-values source))]
             [(eduction? source) (sequence (tidentity) source)]
             [else (errorf 'source->iter "unsupported transducer source: ~a" source)])))
