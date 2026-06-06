@@ -287,3 +287,59 @@
      (error? (vector-transduce (tidentity) (rflist) '#(1 2 3) 0 3 0))
      ;; caller-owned textual ports are required for line traversal.
      (error? (port-lines-transduce (tidentity) (rflist) 12)))
+
+
+(mat transducer-phase3-sequence
+
+     (let ([pulled 0])
+       (let ([iter (sequence (tcompose (ttap (lambda (x) (set! pulled (+ pulled 1))))
+                                       (ttake 2))
+                             '(1 2 3))])
+         (and (= 0 pulled)
+              (= 1 (iter-next! iter))
+              (= 1 pulled)
+              (= 2 (iter-next! iter))
+              (= 2 pulled)
+              (iter-end? (iter-next! iter))
+              (= 2 pulled))))
+
+     (let ([iter (sequence (tcompose (tdrop 2) (ttake 3))
+                           '(0 1 2 3 4 5 6))])
+       (and (= 2 (iter-next! iter))
+            (= 3 (iter-next! iter))
+            (= 4 (iter-next! iter))
+            (iter-end? (iter-next! iter))))
+
+     (equal? '(2 4)
+             (iter->list
+              (sequence (tmap add1)
+                        (eduction (tfilter odd?) '(1 2 3)))))
+
+     (equal? '(2 3 4)
+             (iter->list (source->iter (eduction (tmap add1) '(1 2 3)))))
+
+     (= 8 (transduce1 (tfilter odd?) (rfsum) '(2 3 4 5)))
+     (= 6.5 (transduce1 (tidentity) (rfflsum) '#vfl(1.0 2.5 3.0)))
+
+     ;; transduce1 rejects an empty transformed stream.
+     (error? (transduce1 (tfilter odd?) (rfsum) '(2 4 6))))
+
+
+(mat transducer-phase3-reducers
+
+     (= 1 (transduce (tidentity) (rfmin <) '(3 1 2)))
+     (= 3 (transduce (tidentity) (rfmax <) '(3 1 2)))
+     (eq? 'yes
+          (transduce (tidentity)
+                     (rfany (lambda (x) (and (symbol? x) 'yes)))
+                     '(1 2 ok 3)))
+     (not (transduce (tidentity) (rfany odd?) '(2 4 6)))
+     (transduce (tidentity) (rfevery positive?) '(1 2 3))
+     (not (transduce (tidentity) (rfevery positive?) '(1 -2 3)))
+
+     ;; rfmin errors when no values are reduced.
+     (error? (transduce (tidentity) (rfmin <) '()))
+     ;; reducer predicates are required.
+     (error? (rfany 12))
+     (error? (rfevery 12))
+     (error? (rfmin 12)))

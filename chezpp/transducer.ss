@@ -8,13 +8,14 @@
           tpartition tpartition-all tpartition-by
           tdedupe tdedupe-by tdistinct tdistinct-by tinterpose
           ttap tinspect
-          transduce into tfor-each
+          transduce transduce1 into sequence tfor-each
           list-transduce vector-transduce bytevector-transduce
           string-transduce iter-transduce fxvector-transduce
           flvector-transduce hashtable-transduce
           port-lines-transduce port-bytes-transduce
           make-reducer reducer-name rflist rfreverselist rfvector
           rfstring rfbytevector rfcount rfsum rffxsum rfflsum
+          rfmin rfmax rfany rfevery
           eduction eduction? transducible? source->iter
           current-transducer-source-mode)
   (import (chezpp chez)
@@ -965,6 +966,116 @@
       [(xform reducer init source)
        (transduce-explicit xform reducer init source)]))
 
+  #|proc:transduce1
+  The `transduce1` procedure runs `xform` over `source` using the first
+  transformed value as the initial accumulator for `reducer`.
+  |#
+  (define transduce1
+    (lambda (xform reducer source)
+      (pcheck ([transducer? xform] [reducer? reducer])
+              (let ([seen? #f])
+                (transduce
+                 xform
+                 (make-reducer
+                  'transduce1
+                  (case-lambda
+                    [() #f]
+                    [(acc)
+                     (if seen?
+                         (reducer-complete reducer acc)
+                         (errorf 'transduce1 "empty transformed source"))]
+                    [(acc x)
+                     (if seen?
+                         (reducer-step reducer acc x)
+                         (begin
+                           (set! seen? #t)
+                           x))]))
+                 #f
+                 source)))))
+
+  #|proc:sequence
+  The `sequence` procedure returns an iterator over the transformed values from
+  `source`. Values are pulled from `source` only as the returned iterator is
+  advanced.
+  |#
+  (define sequence
+    (lambda (xform source)
+      (pcheck ([transducer? xform])
+              (if (eduction? source)
+                  (sequence (tcompose ($eduction-xform source) xform)
+                            ($eduction-source source))
+                  (let ([upstream #f]
+                        [effective #f]
+                        [acc #f]
+                        [done? #f]
+                        [q-head '()]
+                        [q-tail '()])
+                    (define enqueue!
+                      (lambda (x)
+                        (let ([cell (cons x '())])
+                          (if (null? q-head)
+                              (begin
+                                (set! q-head cell)
+                                (set! q-tail cell))
+                              (begin
+                                (set-cdr! q-tail cell)
+                                (set! q-tail cell))))))
+                    (define dequeue!
+                      (lambda ()
+                        (let ([x (car q-head)])
+                          (set! q-head (cdr q-head))
+                          (when (null? q-head)
+                            (set! q-tail '()))
+                          x)))
+                    (define queue-empty?
+                      (lambda ()
+                        (null? q-head)))
+                    (define emit-reducer
+                      (make-reducer
+                       'sequence
+                       (case-lambda
+                         [() (void)]
+                         [(acc) acc]
+                         [(acc x) (enqueue! x) acc])))
+                    (define finalize-upstream!
+                      (lambda ()
+                        (when (and upstream (not (iter-finalized? upstream)))
+                          (iter-finalize! upstream))))
+                    (define reset-state!
+                      (lambda ()
+                        (when (and upstream (not (iter-finalized? upstream)))
+                          (iter-finalize! upstream))
+                        (set! upstream (source->iter source))
+                        (set! effective (apply-transducer xform emit-reducer))
+                        (set! acc (reducer-init effective))
+                        (set! done? #f)
+                        (set! q-head '())
+                        (set! q-tail '())))
+                    (define finish!
+                      (lambda ()
+                        (unless done?
+                          (set! done? #t)
+                          (set! acc (reducer-complete effective (unreduced acc)))
+                          (finalize-upstream!))))
+                    (define next!
+                      (lambda ()
+                        (let loop ()
+                          (cond [(not (queue-empty?)) (dequeue!)]
+                                [done? iter-end]
+                                [else
+                                 (let ([x (iter-next! upstream)])
+                                   (if (iter-end? x)
+                                       (begin
+                                         (finish!)
+                                         (loop))
+                                       (begin
+                                         (set! acc (reducer-step effective acc x))
+                                         (when (reduced? acc)
+                                           (finish!))
+                                         (loop))))]))))
+                    (reset-state!)
+                    (make-iter next! reset-state! finalize-upstream!))))))
+
   #|proc:into
   The `into` procedure transduces `source` into the destination named by `to`.
   Phase 1 supports `'list`, `'reverse-list`, `'vector`, `'string`, and
@@ -1338,6 +1449,75 @@
          [(acc) acc]
          [(acc x) (fl+ acc x)]))))
 
+  (define extrema-reducer
+    (lambda (name better?)
+      (make-reducer
+       name
+       (let ([seen? #f])
+         (case-lambda
+           [() #f]
+           [(acc)
+            (if seen?
+                acc
+                (errorf name "empty transformed source"))]
+           [(acc x)
+            (if seen?
+                (if (better? x acc) x acc)
+                (begin
+                  (set! seen? #t)
+                  x))])))))
+
+  #|proc:rfmin
+  The `rfmin` procedure returns a reducer that keeps the minimum value
+  according to `less?`.
+  |#
+  (define rfmin
+    (lambda (less?)
+      (pcheck ([procedure? less?])
+              (extrema-reducer 'rfmin less?))))
+
+  #|proc:rfmax
+  The `rfmax` procedure returns a reducer that keeps the maximum value
+  according to `less?`.
+  |#
+  (define rfmax
+    (lambda (less?)
+      (pcheck ([procedure? less?])
+              (extrema-reducer 'rfmax (lambda (x acc) (less? acc x))))))
+
+  #|proc:rfany
+  The `rfany` procedure returns the first true result from `(pred x)` and
+  terminates early. It returns `#f` if no value matches.
+  |#
+  (define rfany
+    (lambda (pred)
+      (pcheck ([procedure? pred])
+              (make-reducer
+               'rfany
+               (case-lambda
+                 [() #f]
+                 [(acc) acc]
+                 [(acc x)
+                  (let ([res (pred x)])
+                    (if res (reduced res) #f))])))))
+
+  #|proc:rfevery
+  The `rfevery` procedure returns `#f` and terminates early on the first value
+  rejected by `pred`; otherwise it returns `#t`.
+  |#
+  (define rfevery
+    (lambda (pred)
+      (pcheck ([procedure? pred])
+              (make-reducer
+               'rfevery
+               (case-lambda
+                 [() #t]
+                 [(acc) acc]
+                 [(acc x)
+                  (if (pred x)
+                      #t
+                      (reduced #f))])))))
+
   #|proc:eduction
   The `eduction` procedure returns an eduction record containing `xform` and
   `source`. Traversing the eduction applies `xform` before the terminal
@@ -1388,8 +1568,7 @@
             [(fxvector? source) (list->iter (transducer-fxvector->list source))]
             [(flvector? source) (list->iter (transducer-flvector->list source))]
             [(hashtable? source) (vector->iter (hashtable-values source))]
-            [(eduction? source)
-             (list->iter (transduce (tidentity) (rflist) source))]
+            [(eduction? source) (sequence (tidentity) source)]
             [else (errorf 'source->iter "unsupported transducer source: ~a" source)])))
 
   #|proc:transducible?

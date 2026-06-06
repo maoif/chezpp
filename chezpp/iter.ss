@@ -5,7 +5,7 @@
           file->iter file-lines->iter file-chars->iter file-data->iter
           iter->list
 
-          get-iter iter-end iter-end? iter-next! iter-reset! iter-finalize!
+          get-iter make-iter iter-end iter-end? iter-next! iter-reset! iter-finalize!
           (rename ($iter-finalized? iter-finalized?)
                   ($iter? iter?))
           iter-for-each iter-map iter-filter iter-take iter-drop iter-fold
@@ -36,6 +36,18 @@
                            (p next!-proc reset!-proc void (make-list-builder) #f))]))))
   (define iter-end (mk-$iter void void))
   (define iter-end? (sect eq? _ iter-end))
+
+  #|proc:make-iter
+  The `make-iter` procedure returns an iterator using `next!-proc`,
+  `reset!-proc`, and optional `fini-proc` procedures.
+  |#
+  (define make-iter
+    (case-lambda
+      [(next!-proc reset!-proc)
+       (mk-$iter next!-proc reset!-proc)]
+      [(next!-proc reset!-proc fini-proc)
+       (mk-$iter next!-proc reset!-proc fini-proc)]))
+
   ;; Get the next item from the iterator,
   ;; also run the item through the ops pipeline, if any.
   (define iter-next!
