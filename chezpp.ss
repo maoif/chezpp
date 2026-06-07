@@ -19,6 +19,7 @@
                   (chezpp io)
                   (chezpp file)
                   (chezpp path)
+                  (chezpp navigator)
                   (chezpp os)
 
                   (chezpp hashset)

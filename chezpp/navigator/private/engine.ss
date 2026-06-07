@@ -1,0 +1,450 @@
+(library (chezpp navigator private engine)
+  (export nav-select nav-select-one nav-select-first nav-select-count nav-selected?
+          nav-traverse nav-traverse/i nav-traverse->iter
+          nav-transform nav-transform/i nav-transform! nav-transform!/i
+          nav-setval nav-setval! nav-clearval nav-clearval!
+          nav-selected->list nav-selected->vector nav-selected-transduce
+          select-path transform-path transform-path!)
+  (import (chezscheme)
+          (chezpp iter)
+          (chezpp list)
+          (chezpp transducer)
+          (chezpp utils)
+          (chezpp navigator private core))
+
+  (define current-recursive-env (make-parameter #f))
+
+  (define collection?
+    (lambda (value)
+      (or (pair? value) (vector? value) (hashtable? value))))
+
+  (define emit-immediate-children
+    (lambda (value emit)
+      (cond [(pair? value)
+             (for-each emit value)]
+            [(vector? value)
+             (let ([len (vector-length value)])
+               (let loop ([i 0])
+                 (when (< i len)
+                   (emit (vector-ref value i))
+                   (loop (+ i 1)))))]
+            [(hashtable? value)
+             (let ([vals (hashtable-values value)])
+               (let ([len (vector-length vals)])
+                 (let loop ([i 0])
+                   (when (< i len)
+                     (emit (vector-ref vals i))
+                     (loop (+ i 1))))))]
+            [else (void)])))
+
+  (define emit-descendant-children
+    (lambda (value emit)
+      (emit-immediate-children
+       value
+       (lambda (child)
+         (emit child)
+         (when (collection? child)
+           (emit-descendant-children child emit))))))
+
+  (define emit-nav-children-tree
+    (lambda (value emit)
+      (emit-immediate-children
+       value
+       (lambda (child)
+         (when (collection? child)
+           (emit child))))
+      (emit-immediate-children
+       value
+       (lambda (child)
+         (when (collection? child)
+           (emit-descendant-children child emit))))))
+
+  (define nav-children-step?
+    (lambda (step)
+      (and ($navigator? step)
+           (eq? ($navigator-name step) 'nav-children))))
+
+  (define resolve-nav-ref
+    (lambda (who step)
+      (let ([env (current-recursive-env)])
+        (if env
+            (let ([binding (assq ($nav-ref-name step) ($recursive-nav-group-bindings env))])
+              (if binding
+                  (cdr binding)
+                  (nav-error who "unresolved recursive reference: ~s" ($nav-ref-name step))))
+            (nav-error who "unresolved recursive reference: ~s" ($nav-ref-name step))))))
+
+  (define run-select
+    (lambda (steps value emit)
+      (if (null? steps)
+          (emit value)
+          (let ([step (car steps)] [rest (cdr steps)])
+            (cond [($navigator? step)
+                   (if (and (null? rest) (nav-children-step? step))
+                       (emit-nav-children-tree value emit)
+                       (($navigator-select-proc step)
+                        value
+                        (lambda (child)
+                          (run-select rest child emit))))]
+                  [($recursive-nav-group? step)
+                   (parameterize ([current-recursive-env step])
+                     (run-select (append (nav-path-steps (nav-compile-path
+                                                          ($recursive-nav-group-root step)))
+                                         rest)
+                                 value
+                                 emit))]
+                  [($nav-ref? step)
+                   (run-select (append (nav-path-steps (nav-compile-path
+                                                        (resolve-nav-ref 'nav-select step)))
+                                       rest)
+                               value
+                               emit)]
+                  [($path? step)
+                   (run-select (append ($path-steps step) rest) value emit)]
+                  [else (nav-error 'nav-select "unsupported path step: ~s" step)])))))
+
+  (define select-path
+    (lambda (path data emit)
+      (run-select (nav-path-steps (nav-compile-path path)) data emit)))
+
+  (define run-transform
+    (lambda (steps value update)
+      (if (null? steps)
+          (update value)
+          (let ([step (car steps)] [rest (cdr steps)])
+            (cond [($navigator? step)
+                   (($navigator-transform-proc step)
+                    value
+                    (lambda (child)
+                      (run-transform rest child update)))]
+                  [($recursive-nav-group? step)
+                   (parameterize ([current-recursive-env step])
+                     (run-transform (append (nav-path-steps (nav-compile-path
+                                                             ($recursive-nav-group-root step)))
+                                            rest)
+                                    value
+                                    update))]
+                  [($nav-ref? step)
+                   (run-transform (append (nav-path-steps (nav-compile-path
+                                                           (resolve-nav-ref 'nav-transform step)))
+                                          rest)
+                                  value
+                                  update)]
+                  [($path? step)
+                   (run-transform (append ($path-steps step) rest) value update)]
+                  [else (nav-error 'nav-transform "unsupported path step: ~s" step)])))))
+
+  (define transform-path
+    (lambda (path proc data)
+      (run-transform (nav-path-steps (nav-compile-path path)) data proc)))
+
+  (define run-transform!
+    (lambda (steps value update!)
+      (if (null? steps)
+          (update! value)
+          (let ([step (car steps)] [rest (cdr steps)])
+            (cond [($navigator? step)
+                   (($navigator-transform!-proc step)
+                    value
+                    (lambda (child)
+                      (run-transform! rest child update!)))]
+                  [($recursive-nav-group? step)
+                   (parameterize ([current-recursive-env step])
+                     (run-transform! (append (nav-path-steps (nav-compile-path
+                                                              ($recursive-nav-group-root step)))
+                                             rest)
+                                     value
+                                     update!))]
+                  [($nav-ref? step)
+                   (run-transform! (append (nav-path-steps (nav-compile-path
+                                                            (resolve-nav-ref 'nav-transform! step)))
+                                           rest)
+                                   value
+                                   update!)]
+                  [($path? step)
+                   (run-transform! (append ($path-steps step) rest) value update!)]
+                  [else (nav-error 'nav-transform! "unsupported path step: ~s" step)])))))
+
+  (define run-clear
+    (lambda (steps value)
+      (if (null? steps)
+          nav-missing
+          (let ([step (car steps)] [rest (cdr steps)])
+            (cond [($navigator? step)
+                   (($navigator-clear-proc step)
+                    value
+                    (lambda (child)
+                      (run-clear rest child)))]
+                  [($recursive-nav-group? step)
+                   (parameterize ([current-recursive-env step])
+                     (run-clear (append (nav-path-steps (nav-compile-path
+                                                         ($recursive-nav-group-root step)))
+                                        rest)
+                                value))]
+                  [($nav-ref? step)
+                   (run-clear (append (nav-path-steps (nav-compile-path
+                                                       (resolve-nav-ref 'nav-clearval step)))
+                                      rest)
+                              value)]
+                  [($path? step)
+                   (run-clear (append ($path-steps step) rest) value)]
+                  [else (nav-error 'nav-clearval "unsupported path step: ~s" step)])))))
+
+  (define run-clear!
+    (lambda (steps value)
+      (if (null? steps)
+          nav-missing
+          (let ([step (car steps)] [rest (cdr steps)])
+            (cond [($navigator? step)
+                   (($navigator-clear!-proc step)
+                    value
+                    (lambda (child)
+                      (run-clear! rest child)))]
+                  [($recursive-nav-group? step)
+                   (parameterize ([current-recursive-env step])
+                     (run-clear! (append (nav-path-steps (nav-compile-path
+                                                          ($recursive-nav-group-root step)))
+                                         rest)
+                                 value))]
+                  [($nav-ref? step)
+                   (run-clear! (append (nav-path-steps (nav-compile-path
+                                                        (resolve-nav-ref 'nav-clearval! step)))
+                                       rest)
+                               value)]
+                  [($path? step)
+                   (run-clear! (append ($path-steps step) rest) value)]
+                  [else (nav-error 'nav-clearval! "unsupported path step: ~s" step)])))))
+
+  (define transform-path!
+    (lambda (path proc data)
+      (run-transform! (nav-path-steps (nav-compile-path path)) data proc)
+      data))
+
+  #|proc:nav-traverse
+  The `nav-traverse` procedure calls `proc` once for each value selected by
+  `path` from `data`, in traversal order.
+  |#
+  (define nav-traverse
+    (lambda (path data proc)
+      (pcheck ([procedure? proc])
+              (select-path path data proc))))
+
+  #|proc:nav-traverse/i
+  The `nav-traverse/i` procedure calls `proc` with the selected-value index and
+  selected value for each value selected by `path` from `data`.
+  |#
+  (define nav-traverse/i
+    (lambda (path data proc)
+      (pcheck ([procedure? proc])
+              (let ([index 0])
+                (nav-traverse path data
+                              (lambda (value)
+                                (proc index value)
+                                (set! index (+ index 1))))))))
+
+  #|proc:nav-select
+  The `nav-select` procedure returns a list of all values selected by `path`
+  from `data`.
+  |#
+  (define nav-select
+    (lambda (path data)
+      (let ([builder (make-list-builder)])
+        (nav-traverse path data builder)
+        (builder))))
+
+  #|proc:nav-selected->list
+  The `nav-selected->list` procedure returns a list of all values selected by
+  `path` from `data`.
+  |#
+  (define nav-selected->list nav-select)
+
+  #|proc:nav-select-count
+  The `nav-select-count` procedure returns the number of values selected by
+  `path` from `data`.
+  |#
+  (define nav-select-count
+    (lambda (path data)
+      (let ([count 0])
+        (nav-traverse path data
+                      (lambda (value)
+                        (set! count (+ count 1))))
+        count)))
+
+  #|proc:nav-selected?
+  The `nav-selected?` procedure returns `#t` when `path` selects at least one
+  value from `data`.
+  |#
+  (define nav-selected?
+    (lambda (path data)
+      (> (nav-select-count path data) 0)))
+
+  #|proc:nav-select-first
+  The `nav-select-first` procedure returns the first value selected by `path`
+  from `data`, or `default` when provided and no value is selected. Without a
+  default, it returns `#f` for no selection.
+  |#
+  (define nav-select-first
+    (case-lambda
+      [(path data) (nav-select-first path data #f)]
+      [(path data default)
+       (guard [exn [else default]]
+         (let ([found? #f] [result default])
+           (nav-traverse path data
+                         (lambda (value)
+                           (unless found?
+                             (set! found? #t)
+                             (set! result value))))
+           result))]))
+
+  #|proc:nav-select-one
+  The `nav-select-one` procedure returns the only value selected by `path` from
+  `data` and signals an error unless exactly one value is selected.
+  |#
+  (define nav-select-one
+    (lambda (path data)
+      (let ([count 0] [result #f])
+        (nav-traverse path data
+                      (lambda (value)
+                        (set! count (+ count 1))
+                        (set! result value)))
+        (if (= count 1)
+            result
+            (nav-error 'nav-select-one "expected one selected value, got ~s" count)))))
+
+  #|proc:nav-traverse->iter
+  The `nav-traverse->iter` procedure returns an iterator over the values
+  selected by `path` from `data`.
+  |#
+  (define nav-traverse->iter
+    (lambda (path data)
+      (list->iter (nav-select path data))))
+
+  #|proc:nav-selected->vector
+  The `nav-selected->vector` procedure returns a vector of all values selected
+  by `path` from `data`.
+  |#
+  (define nav-selected->vector
+    (lambda (path data)
+      (let ([items (make-vector 8)] [count 0])
+        (define grow!
+          (lambda ()
+            (let* ([old-len (vector-length items)]
+                   [new-items (make-vector (* old-len 2))])
+              (let loop ([i 0])
+                (when (< i old-len)
+                  (vector-set! new-items i (vector-ref items i))
+                  (loop (+ i 1))))
+              (set! items new-items))))
+        (select-path path data
+                     (lambda (value)
+                       (when (= count (vector-length items))
+                         (grow!))
+                       (vector-set! items count value)
+                       (set! count (+ count 1))))
+        (let ([out (make-vector count)])
+          (let loop ([i 0])
+            (when (< i count)
+              (vector-set! out i (vector-ref items i))
+              (loop (+ i 1))))
+          out))))
+
+  #|proc:nav-selected-transduce
+  The `nav-selected-transduce` procedure applies transducer `xform` and reducer
+  `reducer` to values selected by `path` from `data`.
+  |#
+  (define nav-selected-transduce
+    (case-lambda
+      [(path xform reducer data)
+       (nav-selected-transduce path xform reducer (reducer) data)]
+      [(path xform reducer init data)
+       (pcheck ([procedure? xform reducer])
+               (let ([step (xform reducer)]
+                     [acc init])
+                 (select-path path data
+                              (lambda (value)
+                                (set! acc (step acc value))))
+                 acc))]))
+
+  #|proc:nav-transform
+  The `nav-transform` procedure returns a rebuilt `data` value with each value
+  focused by `path` replaced by the result of applying `proc` to it.
+  |#
+  (define nav-transform
+    (lambda (path proc data)
+      (pcheck ([procedure? proc])
+              (transform-path path proc data))))
+
+  #|proc:nav-transform/i
+  The `nav-transform/i` procedure is like `nav-transform`, but `proc` receives
+  the selected-value index before the selected value.
+  |#
+  (define nav-transform/i
+    (lambda (path proc data)
+      (pcheck ([procedure? proc])
+              (let ([index 0])
+                (nav-transform path
+                               (lambda (value)
+                                 (let ([new-value (proc index value)])
+                                   (set! index (+ index 1))
+                                   new-value))
+                               data)))))
+
+  #|proc:nav-transform!
+  The `nav-transform!` procedure mutates locations focused by `path` in `data`
+  by applying `proc` to each old value, then returns `data`.
+  |#
+  (define nav-transform!
+    (lambda (path proc data)
+      (pcheck ([procedure? proc])
+              (transform-path! path proc data))))
+
+  #|proc:nav-transform!/i
+  The `nav-transform!/i` procedure is like `nav-transform!`, but `proc`
+  receives the selected-value index before the selected value.
+  |#
+  (define nav-transform!/i
+    (lambda (path proc data)
+      (pcheck ([procedure? proc])
+              (let ([index 0])
+                (nav-transform! path
+                                (lambda (value)
+                                  (let ([new-value (proc index value)])
+                                    (set! index (+ index 1))
+                                    new-value))
+                                data)))))
+
+  #|proc:nav-setval
+  The `nav-setval` procedure purely replaces each value focused by `path` with
+  `value` in `data`.
+  |#
+  (define nav-setval
+    (lambda (path value data)
+      (nav-transform path (lambda (old) value) data)))
+
+  #|proc:nav-setval!
+  The `nav-setval!` procedure mutates each value focused by `path` to `value`
+  in `data`, then returns `data`.
+  |#
+  (define nav-setval!
+    (lambda (path value data)
+      (nav-transform! path (lambda (old) value) data)))
+
+  #|proc:nav-clearval
+  The `nav-clearval` procedure removes or clears values focused by `path` from
+  `data` when the final navigator supports removal.
+  |#
+  (define nav-clearval
+    (lambda (path data)
+      (let ([result (run-clear (nav-path-steps (nav-compile-path path)) data)])
+        (if (nav-missing? result)
+            (nav-error 'nav-clearval "cannot remove root value")
+            result))))
+
+  #|proc:nav-clearval!
+  The `nav-clearval!` procedure mutates `data` to remove or clear values
+  focused by `path` when the final navigator supports removal.
+  |#
+  (define nav-clearval!
+    (lambda (path data)
+      (run-clear! (nav-path-steps (nav-compile-path path)) data)
+      data)))
