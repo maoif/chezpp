@@ -334,6 +334,22 @@
      (equal? '(1 2 3)
              (let ([iter (nav-traverse->iter nav-all '(1 2 3))])
                (iter->list iter)))
+     (let* ([count 0]
+            [lazy-nav (make-nav 'lazy
+                                (lambda (value emit)
+                                  (for-each
+                                   (lambda (item)
+                                     (set! count (+ count 1))
+                                     (when (> count 1)
+                                       (errorf 'lazy-nav "traversed too far"))
+                                     (emit item))
+                                   value))
+                                (lambda (value update) value)
+                                (lambda (value update!) value))])
+       (let ([iter (nav-traverse->iter lazy-nav '(a b c))])
+         (and (= count 0)
+              (eq? 'a (iter-next! iter))
+              (= count 1))))
      (= 6
         (nav-selected-transduce nav-all
                                 (lambda (reducer) reducer)

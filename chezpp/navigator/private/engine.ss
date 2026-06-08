@@ -316,7 +316,31 @@
   |#
   (define nav-traverse->iter
     (lambda (path data)
-      (list->iter (nav-select path data))))
+      (let ([compiled (nav-compile-path path)]
+            [resume #f]
+            [done? #f])
+        (define reset!
+          (lambda ()
+            (set! resume
+                  (lambda ()
+                    (call/cc
+                     (lambda (return)
+                       (select-path compiled data
+                                    (lambda (value)
+                                      (call/cc
+                                       (lambda (continue)
+                                         (set! resume continue)
+                                         (return value)))))
+                       (set! done? #t)
+                       iter-end))))
+            (set! done? #f)))
+        (reset!)
+        (make-iter
+         (lambda ()
+           (if done?
+               iter-end
+               (resume)))
+         reset!))))
 
   #|proc:nav-selected->vector
   The `nav-selected->vector` procedure returns a vector of all values selected
