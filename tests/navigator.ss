@@ -103,8 +103,24 @@
                                       '((name . Ada))
                                       'fallback))
      (eq? #f (nav-select-first nav-none '(a b c)))
+     (let ([head-then-error
+            (make-nav 'head-then-error
+                      (lambda (value emit)
+                        (emit (car value))
+                        (errorf 'head-then-error "traversed too far"))
+                      (lambda (value update) value)
+                      (lambda (value update!) value))])
+       (eq? 'a (nav-select-first head-then-error '(a b c))))
      (= 3 (nav-select-count nav-all '(a b c)))
      (nav-selected? (nav-key 'name) '((name . Ada)))
+     (let ([head-then-error
+            (make-nav 'head-then-error
+                      (lambda (value emit)
+                        (emit (car value))
+                        (errorf 'head-then-error "traversed too far"))
+                      (lambda (value update) value)
+                      (lambda (value update!) value))])
+       (nav-selected? head-then-error '(a b c)))
      (not (nav-selected? nav-none '(a b c)))
      (equal? '(0:a 1:b 2:c)
              (let ([lb (make-list-builder)])

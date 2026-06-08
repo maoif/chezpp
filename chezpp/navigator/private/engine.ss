@@ -285,7 +285,11 @@
   |#
   (define nav-selected?
     (lambda (path data)
-      (> (nav-select-count path data) 0)))
+      (guard [exn [else #f]]
+        (call/cc
+         (lambda (return)
+           (select-path path data (lambda (value) (return #t)))
+           #f)))))
 
   #|proc:nav-select-first
   The `nav-select-first` procedure returns the first value selected by `path`
@@ -297,13 +301,10 @@
       [(path data) (nav-select-first path data #f)]
       [(path data default)
        (guard [exn [else default]]
-         (let ([found? #f] [result default])
-           (nav-traverse path data
-                         (lambda (value)
-                           (unless found?
-                             (set! found? #t)
-                             (set! result value))))
-           result))]))
+         (call/cc
+          (lambda (return)
+            (select-path path data (lambda (value) (return value)))
+            default)))]))
 
   #|proc:nav-select-one
   The `nav-select-one` procedure returns the only value selected by `path` from
