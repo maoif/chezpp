@@ -75,149 +75,159 @@
             (nav-error who "unresolved recursive reference: ~s" ($nav-ref-name step))))))
 
   (define run-select
-    (lambda (steps value emit)
+    (lambda (steps tails value emit)
       (if (null? steps)
-          (emit value)
+          (if (null? tails)
+              (emit value)
+              (run-select (car tails) (cdr tails) value emit))
           (let ([step (car steps)] [rest (cdr steps)])
             (cond [($navigator? step)
-                   (if (and (null? rest) (nav-children-step? step))
+                   (if (and (null? rest) (null? tails) (nav-children-step? step))
                        (emit-nav-children-tree value emit)
                        (($navigator-select-proc step)
                         value
                         (lambda (child)
-                          (run-select rest child emit))))]
+                          (run-select rest tails child emit))))]
                   [($recursive-nav-group? step)
                    (parameterize ([current-recursive-env step])
-                     (run-select (append (nav-path-steps (nav-compile-path
-                                                          ($recursive-nav-group-root step)))
-                                         rest)
+                     (run-select (nav-path-steps (nav-compile-path
+                                                  ($recursive-nav-group-root step)))
+                                 (cons rest tails)
                                  value
                                  emit))]
                   [($nav-ref? step)
-                   (run-select (append (nav-path-steps (nav-compile-path
-                                                        (resolve-nav-ref 'nav-select step)))
-                                       rest)
+                   (run-select (nav-path-steps (nav-compile-path
+                                                (resolve-nav-ref 'nav-select step)))
+                               (cons rest tails)
                                value
                                emit)]
                   [($path? step)
-                   (run-select (append ($path-steps step) rest) value emit)]
+                   (run-select ($path-steps step) (cons rest tails) value emit)]
                   [else (nav-error 'nav-select "unsupported path step: ~s" step)])))))
 
   (define select-path
     (lambda (path data emit)
-      (run-select (nav-path-steps (nav-compile-path path)) data emit)))
+      (run-select (nav-path-steps (nav-compile-path path)) '() data emit)))
 
   (define run-transform
-    (lambda (steps value update)
+    (lambda (steps tails value update)
       (if (null? steps)
-          (update value)
+          (if (null? tails)
+              (update value)
+              (run-transform (car tails) (cdr tails) value update))
           (let ([step (car steps)] [rest (cdr steps)])
             (cond [($navigator? step)
                    (($navigator-transform-proc step)
                     value
                     (lambda (child)
-                      (run-transform rest child update)))]
+                      (run-transform rest tails child update)))]
                   [($recursive-nav-group? step)
                    (parameterize ([current-recursive-env step])
-                     (run-transform (append (nav-path-steps (nav-compile-path
-                                                             ($recursive-nav-group-root step)))
-                                            rest)
+                     (run-transform (nav-path-steps (nav-compile-path
+                                                     ($recursive-nav-group-root step)))
+                                    (cons rest tails)
                                     value
                                     update))]
                   [($nav-ref? step)
-                   (run-transform (append (nav-path-steps (nav-compile-path
-                                                           (resolve-nav-ref 'nav-transform step)))
-                                          rest)
+                   (run-transform (nav-path-steps (nav-compile-path
+                                                   (resolve-nav-ref 'nav-transform step)))
+                                  (cons rest tails)
                                   value
                                   update)]
                   [($path? step)
-                   (run-transform (append ($path-steps step) rest) value update)]
+                   (run-transform ($path-steps step) (cons rest tails) value update)]
                   [else (nav-error 'nav-transform "unsupported path step: ~s" step)])))))
 
   (define transform-path
     (lambda (path proc data)
-      (run-transform (nav-path-steps (nav-compile-path path)) data proc)))
+      (run-transform (nav-path-steps (nav-compile-path path)) '() data proc)))
 
   (define run-transform!
-    (lambda (steps value update!)
+    (lambda (steps tails value update!)
       (if (null? steps)
-          (update! value)
+          (if (null? tails)
+              (update! value)
+              (run-transform! (car tails) (cdr tails) value update!))
           (let ([step (car steps)] [rest (cdr steps)])
             (cond [($navigator? step)
                    (($navigator-transform!-proc step)
                     value
                     (lambda (child)
-                      (run-transform! rest child update!)))]
+                      (run-transform! rest tails child update!)))]
                   [($recursive-nav-group? step)
                    (parameterize ([current-recursive-env step])
-                     (run-transform! (append (nav-path-steps (nav-compile-path
-                                                              ($recursive-nav-group-root step)))
-                                             rest)
+                     (run-transform! (nav-path-steps (nav-compile-path
+                                                      ($recursive-nav-group-root step)))
+                                     (cons rest tails)
                                      value
                                      update!))]
                   [($nav-ref? step)
-                   (run-transform! (append (nav-path-steps (nav-compile-path
-                                                            (resolve-nav-ref 'nav-transform! step)))
-                                           rest)
+                   (run-transform! (nav-path-steps (nav-compile-path
+                                                    (resolve-nav-ref 'nav-transform! step)))
+                                   (cons rest tails)
                                    value
                                    update!)]
                   [($path? step)
-                   (run-transform! (append ($path-steps step) rest) value update!)]
+                   (run-transform! ($path-steps step) (cons rest tails) value update!)]
                   [else (nav-error 'nav-transform! "unsupported path step: ~s" step)])))))
 
   (define run-clear
-    (lambda (steps value)
+    (lambda (steps tails value)
       (if (null? steps)
-          nav-missing
+          (if (null? tails)
+              nav-missing
+              (run-clear (car tails) (cdr tails) value))
           (let ([step (car steps)] [rest (cdr steps)])
             (cond [($navigator? step)
                    (($navigator-clear-proc step)
                     value
                     (lambda (child)
-                      (run-clear rest child)))]
+                      (run-clear rest tails child)))]
                   [($recursive-nav-group? step)
                    (parameterize ([current-recursive-env step])
-                     (run-clear (append (nav-path-steps (nav-compile-path
-                                                         ($recursive-nav-group-root step)))
-                                        rest)
+                     (run-clear (nav-path-steps (nav-compile-path
+                                                 ($recursive-nav-group-root step)))
+                                (cons rest tails)
                                 value))]
                   [($nav-ref? step)
-                   (run-clear (append (nav-path-steps (nav-compile-path
-                                                       (resolve-nav-ref 'nav-clearval step)))
-                                      rest)
+                   (run-clear (nav-path-steps (nav-compile-path
+                                               (resolve-nav-ref 'nav-clearval step)))
+                              (cons rest tails)
                               value)]
                   [($path? step)
-                   (run-clear (append ($path-steps step) rest) value)]
+                   (run-clear ($path-steps step) (cons rest tails) value)]
                   [else (nav-error 'nav-clearval "unsupported path step: ~s" step)])))))
 
   (define run-clear!
-    (lambda (steps value)
+    (lambda (steps tails value)
       (if (null? steps)
-          nav-missing
+          (if (null? tails)
+              nav-missing
+              (run-clear! (car tails) (cdr tails) value))
           (let ([step (car steps)] [rest (cdr steps)])
             (cond [($navigator? step)
                    (($navigator-clear!-proc step)
                     value
                     (lambda (child)
-                      (run-clear! rest child)))]
+                      (run-clear! rest tails child)))]
                   [($recursive-nav-group? step)
                    (parameterize ([current-recursive-env step])
-                     (run-clear! (append (nav-path-steps (nav-compile-path
-                                                          ($recursive-nav-group-root step)))
-                                         rest)
+                     (run-clear! (nav-path-steps (nav-compile-path
+                                                  ($recursive-nav-group-root step)))
+                                 (cons rest tails)
                                  value))]
                   [($nav-ref? step)
-                   (run-clear! (append (nav-path-steps (nav-compile-path
-                                                        (resolve-nav-ref 'nav-clearval! step)))
-                                       rest)
+                   (run-clear! (nav-path-steps (nav-compile-path
+                                                (resolve-nav-ref 'nav-clearval! step)))
+                               (cons rest tails)
                                value)]
                   [($path? step)
-                   (run-clear! (append ($path-steps step) rest) value)]
+                   (run-clear! ($path-steps step) (cons rest tails) value)]
                   [else (nav-error 'nav-clearval! "unsupported path step: ~s" step)])))))
 
   (define transform-path!
     (lambda (path proc data)
-      (run-transform! (nav-path-steps (nav-compile-path path)) data proc)))
+      (run-transform! (nav-path-steps (nav-compile-path path)) '() data proc)))
 
   #|proc:nav-traverse
   The `nav-traverse` procedure calls `proc` once for each value selected by
@@ -458,7 +468,7 @@
   |#
   (define nav-clearval
     (lambda (path data)
-      (let ([result (run-clear (nav-path-steps (nav-compile-path path)) data)])
+      (let ([result (run-clear (nav-path-steps (nav-compile-path path)) '() data)])
         (if (nav-missing? result)
             (nav-error 'nav-clearval "cannot remove root value")
             result))))
@@ -469,5 +479,5 @@
   |#
   (define nav-clearval!
     (lambda (path data)
-      (run-clear! (nav-path-steps (nav-compile-path path)) data)
+      (run-clear! (nav-path-steps (nav-compile-path path)) '() data)
       data)))
