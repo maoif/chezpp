@@ -217,8 +217,7 @@
 
   (define transform-path!
     (lambda (path proc data)
-      (run-transform! (nav-path-steps (nav-compile-path path)) data proc)
-      data))
+      (run-transform! (nav-path-steps (nav-compile-path path)) data proc)))
 
   #|proc:nav-traverse
   The `nav-traverse` procedure calls `proc` once for each value selected by

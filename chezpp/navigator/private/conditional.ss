@@ -8,15 +8,13 @@
           (chezpp navigator private engine))
 
   (define make-conditional-nav
-    (lambda (name metadata select-proc transform-proc transform!-proc)
+    (lambda (name metadata select-proc transform-proc transform!-proc clear-proc clear!-proc)
       (make-$navigator name 'conditional metadata
                        select-proc
                        transform-proc
                        transform!-proc
-                       (lambda (value clear)
-                         (nav-error 'nav-clearval "conditional clear is not supported: ~s" value))
-                       (lambda (value clear!)
-                         (nav-error 'nav-clearval! "conditional clear! is not supported: ~s" value)))))
+                       clear-proc
+                       clear!-proc)))
 
   (define path-selected?
     (lambda (path value)
@@ -25,6 +23,14 @@
          (lambda (return)
            (select-path path value (lambda (child) (return #t)))
            #f)))))
+
+  (define clear-path
+    (lambda (path data)
+      (nav-clearval path data)))
+
+  (define clear-path!
+    (lambda (path data)
+      (nav-clearval! path data)))
 
   #|proc:nav-pred
   The `nav-pred` procedure returns a navigator that focuses the current value
@@ -41,7 +47,11 @@
                (lambda (value update)
                  (if (predicate value) (update value) value))
                (lambda (value update!)
-                 (if (predicate value) (update! value) value))))))
+                 (if (predicate value) (update! value) value))
+               (lambda (value clear)
+                 (if (predicate value) (clear value) value))
+               (lambda (value clear!)
+                 (if (predicate value) (clear! value) value))))))
 
   #|proc:nav-not-pred
   The `nav-not-pred` procedure returns a navigator that focuses the current
@@ -68,7 +78,13 @@
              (transform-path compiled update value)))
          (lambda (value update!)
            (guard [exn [else value]]
-             (transform-path! compiled update! value)))))))
+             (transform-path! compiled update! value)))
+         (lambda (value clear)
+           (guard [exn [else value]]
+             (clear-path compiled value)))
+         (lambda (value clear!)
+           (guard [exn [else value]]
+             (clear-path! compiled value)))))))
 
   #|proc:nav-must
   The `nav-must` procedure wraps `path` so selecting no values signals an error.
@@ -93,6 +109,14 @@
          (lambda (value update!)
            (if (path-selected? compiled value)
                (transform-path! compiled update! value)
+               (nav-error 'nav-must "required path selected no values")))
+         (lambda (value clear)
+           (if (path-selected? compiled value)
+               (clear-path compiled value)
+               (nav-error 'nav-must "required path selected no values")))
+         (lambda (value clear!)
+           (if (path-selected? compiled value)
+               (clear-path! compiled value)
                (nav-error 'nav-must "required path selected no values")))))))
 
   #|proc:nav-if
@@ -114,7 +138,11 @@
          (lambda (value update)
            (transform-path (choose value) update value))
          (lambda (value update!)
-           (transform-path! (choose value) update! value))))))
+           (transform-path! (choose value) update! value))
+         (lambda (value clear)
+           (clear-path (choose value) value))
+         (lambda (value clear!)
+           (clear-path! (choose value) value))))))
 
   #|proc:nav-when
   The `nav-when` procedure chooses `then-path` when `test-path` selects at
@@ -150,6 +178,14 @@
                  (loop (cdr paths) (transform-path (car paths) update value)))))
          (lambda (value update!)
            (for-each (lambda (path) (transform-path! path update! value)) compiled)
+           value)
+         (lambda (value clear)
+           (let loop ([paths compiled] [value value])
+             (if (null? paths)
+                 value
+                 (loop (cdr paths) (clear-path (car paths) value)))))
+         (lambda (value clear!)
+           (for-each (lambda (path) (clear-path! path value)) compiled)
            value)))))
 
   #|proc:nav-choice
@@ -172,4 +208,8 @@
          (lambda (value update)
            (transform-path (choose value) update value))
          (lambda (value update!)
-           (transform-path! (choose value) update! value)))))))
+           (transform-path! (choose value) update! value))
+         (lambda (value clear)
+           (clear-path (choose value) value))
+         (lambda (value clear!)
+           (clear-path! (choose value) value)))))))

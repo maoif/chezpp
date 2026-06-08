@@ -292,6 +292,39 @@
      (equal? '(1 2 root)
              (nav-select (nav-after (nav-path nav-children (nav-walker number?)))
                          '(root (1) (2))))
+     (let ([numbers-anywhere
+            (nav-rec numbers-anywhere
+              (nav-choice
+               (nav-path (nav-pred number?))
+               (nav-path nav-children numbers-anywhere)))])
+       (equal? '(a (2 b) #(3 (c 4)))
+               (nav-transform numbers-anywhere add1 '(a (1 b) #(2 (c 3))))))
+     (let ([root (vector 'a (list 1 'b) (vector 2 (list 'c 3)))]
+           [numbers-anywhere
+            (nav-rec numbers-anywhere
+              (nav-choice
+               (nav-path (nav-pred number?))
+               (nav-path nav-children numbers-anywhere)))])
+       (and (eq? root (nav-transform! numbers-anywhere add1 root))
+            (equal? root '#(a (2 b) #(3 (c 4))))))
+     (let ([drop-flags
+            (nav-rec drop-flags
+              (nav-choice
+               (nav-path (nav-key 'drop))
+               (nav-path nav-children drop-flags)))])
+       (equal? '((keep . 1) ((drop . 4) (keep . 3)))
+               (nav-clearval drop-flags '((keep . 1) (drop . 2) ((drop . 4) (keep . 3))))))
+     (let ([root (vector (ht 'keep 1 'drop 2) (list (ht 'drop 4 'keep 3)))]
+           [drop-flags
+            (nav-rec drop-flags
+              (nav-multi-path
+               (nav-path (nav-maybe (nav-key 'drop)))
+               (nav-path nav-children drop-flags)))])
+       (and (eq? root (nav-clearval! drop-flags root))
+            (not (hashtable-contains? (vector-ref root 0) 'drop))
+            (not (hashtable-contains? (car (vector-ref root 1)) 'drop))
+            (= 1 (ht-ref (vector-ref root 0) 'keep))
+            (= 3 (ht-ref (car (vector-ref root 1)) 'keep))))
      ;; negative: unresolved recursive references are rejected.
      (error? (nav-select (make-nav-ref 'missing) '(a b))))
 
