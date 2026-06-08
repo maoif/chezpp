@@ -322,6 +322,46 @@
              (nav-error 'nav-clearval! "association list key cannot be removed in place: ~s" key)]
             [else (nav-error 'nav-clearval! "unsupported keyed value: ~s" value)])))
 
+  (define submap-transform
+    (lambda (keys value update)
+      (cond [(hashtable? value)
+             (let ([subtable (make-eq-hashtable)])
+               (for-each
+                (lambda (key)
+                  (let ([selected (hashtable-ref value key nav-missing)])
+                    (if (nav-missing? selected)
+                        (nav-error 'nav-transform "missing key ~s in: ~s" key value)
+                        (hashtable-set! subtable key selected))))
+                keys)
+               (let ([updated (update subtable)]
+                     [copy (hashtable-copy value #t)])
+                 (for-each
+                  (lambda (key)
+                    (let ([selected (hashtable-ref updated key nav-missing)])
+                      (if (nav-missing? selected)
+                          (hashtable-delete! copy key)
+                          (hashtable-set! copy key selected))))
+                  keys)
+                 copy))]
+            [(alist? value)
+             (let ([updated
+                    (map update
+                         (map (lambda (key)
+                                (let ([entry (assq key value)])
+                                  (if entry
+                                      entry
+                                      (nav-error 'nav-transform
+                                                 "missing key ~s in: ~s"
+                                                 key value))))
+                              keys))])
+               (let loop ([xs value])
+                 (cond [(null? xs) '()]
+                       [(assq (caar xs) updated)
+                        => (lambda (entry)
+                             (cons entry (loop (cdr xs))))]
+                       [else (cons (car xs) (loop (cdr xs)))])))]
+            [else (nav-error 'nav-transform "unsupported keyed value: ~s" value)])))
+
   #|proc:nav-stay
   The `nav-stay` navigator focuses the current value unchanged.
   |#
@@ -719,7 +759,7 @@
                  keys)]
                [else (nav-error 'nav-submap "unsupported keyed value: ~s" value)]))
        (lambda (value update)
-         (nav-unsupported-error 'nav-transform nav-submap value 'transform))
+         (submap-transform keys value update))
        (lambda (value update!)
          (nav-unsupported-error 'nav-transform! nav-submap value 'transform!))
        (lambda (value clear)
