@@ -127,6 +127,32 @@
        indexes)
       value))
 
+  (define indexed-transform/default
+    (lambda (value index default update)
+      (let ([selected (indexed-ref/missing value index)])
+        (cond [(not (nav-missing? selected))
+               (indexed-transform value (list index) update)]
+              [(list? value)
+               (let loop ([xs value] [i 0])
+                 (cond [(pair? xs)
+                        (cons (car xs) (loop (cdr xs) (+ i 1)))]
+                       [(= i index)
+                        (list (update default))]
+                       [else
+                        (cons default (loop '() (+ i 1)))]))]
+              [(vector? value)
+               (let ([copy (make-vector (+ index 1) default)]
+                     [len (vector-length value)])
+                 (let loop ([i 0])
+                   (when (< i len)
+                     (vector-set! copy i (vector-ref value i))
+                     (loop (+ i 1))))
+                 (vector-set! copy index (update default))
+                 copy)]
+              [else
+               (nav-error 'nav-transform "cannot update missing index ~s in: ~s"
+                          index value)]))))
+
   (define emit-indexed-values
     (lambda (value emit)
       (cond [(list? value) (for-each emit value)]
@@ -488,11 +514,7 @@
                  (let ([selected (indexed-ref/missing value index)])
                    (emit (if (nav-missing? selected) default selected))))
                (lambda (value update)
-                 (let ([selected (indexed-ref/missing value index)])
-                   (if (nav-missing? selected)
-                       (nav-error 'nav-transform "cannot update missing index ~s in: ~s"
-                                  index value)
-                       (indexed-transform value (list index) update))))
+                 (indexed-transform/default value index default update))
                (lambda (value update!)
                  (let ([selected (indexed-ref/missing value index)])
                    (if (nav-missing? selected)
