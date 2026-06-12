@@ -64,7 +64,7 @@
 
   (define $handle-sink-error
     (lambda (logger condition)
-      (case ($logger-error-policy logger)
+      (case (logger-error-policy logger)
         [(raise) (raise condition)]
         [(ignore) (void)]
         [(stderr)
@@ -121,7 +121,9 @@
   (define logger-level
     (lambda (logger)
       (pcheck ([logger? logger])
-              ($logger-level logger))))
+              ($with-mutex
+               ($logger-lock logger)
+               (lambda () ($logger-level logger))))))
 
   #|proc:logger-level-set!
   The `logger-level-set!` procedure sets the threshold of `logger` to `level`.
@@ -188,7 +190,9 @@
   (define logger-filter
     (lambda (logger)
       (pcheck ([logger? logger])
-              ($logger-filter logger))))
+              ($with-mutex
+               ($logger-lock logger)
+               (lambda () ($logger-filter logger))))))
 
   #|proc:logger-filter-set!
   The `logger-filter-set!` procedure sets the filter of `logger` to
@@ -209,7 +213,9 @@
   (define logger-error-policy
     (lambda (logger)
       (pcheck ([logger? logger])
-              ($logger-error-policy logger))))
+              ($with-mutex
+               ($logger-lock logger)
+               (lambda () ($logger-error-policy logger))))))
 
   #|proc:logger-error-policy-set!
   The `logger-error-policy-set!` procedure sets the sink error policy of
@@ -229,10 +235,13 @@
   (define logger-enabled?
     (lambda (logger level)
       (pcheck ([logger? logger] [log-message-level? level])
-              (let ([threshold ($logger-level logger)])
-                (and (not (eq? threshold 'off))
-                     (log-level>=? level threshold)
-                     (not ($logger-closed? logger)))))))
+              ($with-mutex
+               ($logger-lock logger)
+               (lambda ()
+                 (let ([threshold ($logger-level logger)])
+                   (and (not (eq? threshold 'off))
+                        (log-level>=? level threshold)
+                        (not ($logger-closed? logger)))))))))
 
   #|proc:logger-dispatch!
   The `logger-dispatch!` procedure dispatches direct log fields from `logger`
@@ -247,18 +256,21 @@
                       [thread (log-current-thread-id)])
                   (let-values ([(name threshold sinks filter closed?) ($logger-snapshot logger)])
                     (unless closed?
-                      (when (or (not filter)
-                                (filter name level timestamp thread source kind payload args))
-                        (if ($logger-async-state logger)
-                            ((vector-ref ($logger-async-state logger) 0)
-                             logger name level timestamp thread source kind payload args sinks)
-                            (for-each
-                             (lambda (sink)
-                               ($call-with-sink-errors
-                                logger
-                                (lambda ()
-                                  (log-sink-write! sink name level timestamp thread source kind payload args))))
-                             sinks))))))))))
+                      ($call-with-sink-errors
+                       logger
+                       (lambda ()
+                         (when (or (not filter)
+                                   (filter name level timestamp thread source kind payload args))
+                           (if ($logger-async-state logger)
+                               ((vector-ref ($logger-async-state logger) 0)
+                                logger name level timestamp thread source kind payload args sinks)
+                               (for-each
+                                (lambda (sink)
+                                  ($call-with-sink-errors
+                                   logger
+                                   (lambda ()
+                                     (log-sink-write! sink name level timestamp thread source kind payload args))))
+                                sinks))))))))))))
 
   (define logger-dispatch-sync!
     (lambda (logger logger-name level timestamp thread source kind payload args sinks)

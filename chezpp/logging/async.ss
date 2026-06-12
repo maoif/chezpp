@@ -21,6 +21,7 @@
             (immutable queue $async-state-queue)
             (mutable head $async-state-head $async-state-head-set!)
             (mutable count $async-state-count $async-state-count-set!)
+            (mutable in-flight-count $async-state-in-flight-count $async-state-in-flight-count-set!)
             (mutable worker $async-state-worker $async-state-worker-set!)
             (mutable running? $async-state-running? $async-state-running?-set!)
             (mutable stopping? $async-state-stopping? $async-state-stopping?-set!)
@@ -86,8 +87,8 @@
                     (mutex-release lock)]
                    [(drop-oldest)
                     (let ([head ($async-state-head state)])
-                      (vector-set! ($async-state-queue state) head entry)
                       ($async-state-head-set! state (mod (+ head 1) ($async-state-queue-size state)))
+                      (vector-set! ($async-state-queue state) head entry)
                       ($async-state-dropped-count-set! state (+ ($async-state-dropped-count state) 1))
                       (condition-broadcast ($async-state-not-empty state))
                       (mutex-release lock))])])))))
@@ -99,10 +100,18 @@
           (vector-set! ($async-state-queue state) head #f)
           ($async-state-head-set! state (mod (+ head 1) ($async-state-queue-size state)))
           ($async-state-count-set! state (- ($async-state-count state) 1))
+          ($async-state-in-flight-count-set! state (+ ($async-state-in-flight-count state) 1))
           (condition-broadcast ($async-state-not-full state))
-          (when (= ($async-state-count state) 0)
-            (condition-broadcast ($async-state-drained state)))
           entry))))
+
+  (define $complete-entry!
+    (lambda (state)
+      (mutex-acquire ($async-state-lock state))
+      ($async-state-in-flight-count-set! state (- ($async-state-in-flight-count state) 1))
+      (when (and (= ($async-state-count state) 0)
+                 (= ($async-state-in-flight-count state) 0))
+        (condition-broadcast ($async-state-drained state)))
+      (mutex-release ($async-state-lock state))))
 
   (define $worker-loop
     (lambda (logger state)
@@ -117,21 +126,26 @@
                  ($async-state-stopping? state))
             (begin
               ($async-state-running?-set! state #f)
-              (condition-broadcast ($async-state-drained state))
+              (when (= ($async-state-in-flight-count state) 0)
+                (condition-broadcast ($async-state-drained state)))
               (condition-broadcast ($async-state-not-full state))
               (mutex-release ($async-state-lock state)))
             (let ([entry ($dequeue! state)])
               (mutex-release ($async-state-lock state))
-              (logger-dispatch-sync! logger
-                                     ($entry-ref entry 0)
-                                     ($entry-ref entry 1)
-                                     ($entry-ref entry 2)
-                                     ($entry-ref entry 3)
-                                     ($entry-ref entry 4)
-                                     ($entry-ref entry 5)
-                                     ($entry-ref entry 6)
-                                     ($entry-ref entry 7)
-                                     ($entry-ref entry 8))
+              (dynamic-wind
+                (lambda () (void))
+                (lambda ()
+                  (logger-dispatch-sync! logger
+                                         ($entry-ref entry 0)
+                                         ($entry-ref entry 1)
+                                         ($entry-ref entry 2)
+                                         ($entry-ref entry 3)
+                                         ($entry-ref entry 4)
+                                         ($entry-ref entry 5)
+                                         ($entry-ref entry 6)
+                                         ($entry-ref entry 7)
+                                         ($entry-ref entry 8)))
+                (lambda () ($complete-entry! state)))
               (loop))))))
 
   (define $flush!
@@ -139,7 +153,8 @@
       (let ([state ($require-async-state logger)])
         (mutex-acquire ($async-state-lock state))
         (let loop ()
-          (when (> ($async-state-count state) 0)
+          (when (or (> ($async-state-count state) 0)
+                    (> ($async-state-in-flight-count state) 0))
             (condition-wait ($async-state-drained state) ($async-state-lock state))
             (loop)))
         (mutex-release ($async-state-lock state))
@@ -175,6 +190,7 @@
                                                overflow-policy
                                                0
                                                (make-vector queue-size #f)
+                                               0
                                                0
                                                0
                                                #f

@@ -26,6 +26,15 @@
   (lambda (path)
     (when (file-exists? path) (delete-file path))))
 
+(define logging-wait-for
+  (lambda (ready?)
+    (let loop ([remaining 100])
+      (cond [(ready?) #t]
+            [(= remaining 0) #f]
+            [else
+             (milisleep 1)
+             (loop (- remaining 1))]))))
+
 
 (mat logging-levels
 
@@ -330,6 +339,15 @@
        (logger-log log 'info "x")
        #t)
 
+     ;; Error case: logger filter exceptions obey the logger error policy.
+     (let ([log (make-logger 'app)])
+       (logger-filter-set! log
+                           (lambda (logger-name level timestamp thread source kind payload args)
+                             (error 'filter "boom")))
+       (logger-error-policy-set! log 'ignore)
+       (logger-log log 'info "x")
+       #t)
+
      ;; Error case: raise policy propagates sink exceptions.
      (error? (let* ([bad-sink (make-log-procedure-sink
                                'bad
@@ -385,6 +403,94 @@
        (let ([text (get-output-string out)])
          (logger-close! log)
          (logging-string-contains? text "new")))
+
+     (let* ([lock (make-mutex 'logging-async-flush)]
+            [entered? #f]
+            [release? #f]
+            [flush-returned? #f]
+            [entered-cv (make-condition 'logging-async-flush-entered)]
+            [release-cv (make-condition 'logging-async-flush-release)]
+            [flush-cv (make-condition 'logging-async-flush-returned)]
+            [sink (make-log-procedure-sink
+                   'blocking
+                   (lambda (logger-name level timestamp thread source kind payload args)
+                     (mutex-acquire lock)
+                     (set! entered? #t)
+                     (condition-broadcast entered-cv)
+                     (let loop ()
+                       (unless release?
+                         (condition-wait release-cv lock)
+                         (loop)))
+                     (mutex-release lock)))]
+            [base (make-logger 'app)]
+            [log (make-async-logger base 2 'block)])
+       (logger-add-sink! log sink)
+       (async-logger-start! log)
+       (logger-log log 'info "in-flight")
+       (mutex-acquire lock)
+       (let wait-entered ()
+         (unless entered?
+           (condition-wait entered-cv lock)
+           (wait-entered)))
+       (mutex-release lock)
+       (logger-remove-sink! log sink)
+       (let ([flusher
+              (fork-thread
+               (lambda ()
+                 (logger-flush! log)
+                 (mutex-acquire lock)
+                 (set! flush-returned? #t)
+                 (condition-broadcast flush-cv)
+                 (mutex-release lock)))])
+         (let ([returned-early? (logging-wait-for (lambda () flush-returned?))])
+           (mutex-acquire lock)
+           (set! release? #t)
+           (condition-broadcast release-cv)
+           (mutex-release lock)
+           (thread-join flusher)
+           (logger-close! log)
+           (not returned-early?))))
+
+     (let* ([lock (make-mutex 'logging-async-drop-oldest)]
+            [entered? #f]
+            [release? #f]
+            [entered-cv (make-condition 'logging-async-drop-oldest-entered)]
+            [release-cv (make-condition 'logging-async-drop-oldest-release)]
+            [seen '()]
+            [sink (make-log-procedure-sink
+                   'blocking
+                   (lambda (logger-name level timestamp thread source kind payload args)
+                     (mutex-acquire lock)
+                     (when (string=? payload "hold")
+                       (set! entered? #t)
+                       (condition-broadcast entered-cv)
+                       (let loop ()
+                         (unless release?
+                           (condition-wait release-cv lock)
+                           (loop))))
+                     (set! seen (append seen (list payload)))
+                     (mutex-release lock)))]
+            [base (make-logger 'app)]
+            [log (make-async-logger base 2 'drop-oldest)])
+       (logger-add-sink! log sink)
+       (async-logger-start! log)
+       (logger-log log 'info "hold")
+       (mutex-acquire lock)
+       (let wait-entered ()
+         (unless entered?
+           (condition-wait entered-cv lock)
+           (wait-entered)))
+       (mutex-release lock)
+       (logger-log log 'info "old")
+       (logger-log log 'info "keep")
+       (logger-log log 'info "new")
+       (mutex-acquire lock)
+       (set! release? #t)
+       (condition-broadcast release-cv)
+       (mutex-release lock)
+       (logger-flush! log)
+       (logger-close! log)
+       (equal? seen '("hold" "keep" "new")))
 
      ;; Error case: async constructor rejects invalid queue size.
      (error? (make-async-logger (make-logger 'app) 0 'block))
