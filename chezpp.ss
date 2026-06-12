@@ -41,4 +41,5 @@
                   (chezpp net)
                   (chezpp concurrency)
                   (chezpp cli)
-                  (chezpp rich))))
+                  (chezpp rich)
+                  (chezpp logging))))

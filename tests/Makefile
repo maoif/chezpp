@@ -6,7 +6,7 @@ SRCS_TEST := record.ss datatype.ss match.ss for.ss control.ss os.ss iter.ss tran
              hashset.ss treemap.ss treeset.ss \
              bittree.ss bitvec.ss dset.ss \
              concurrency.ss \
-             cli.ss rich.ss hash.ss crypto.ss uuid.ss $(NET_TESTS)
+             cli.ss rich.ss logging.ss hash.ss crypto.ss uuid.ss $(NET_TESTS)
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      ?= $(SRCS_TEST)
 
