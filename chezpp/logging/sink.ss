@@ -57,6 +57,10 @@
     (lambda (x)
       (and (list? x) (andmap log-sink? x))))
 
+  (define $false-or-rich-palette?
+    (lambda (x)
+      (or (not x) (log-rich-palette? x))))
+
   (define $write-formatted-line
     (lambda (port formatter logger-name level timestamp thread source kind payload args)
       (display (log-ensure-newline
@@ -218,19 +222,31 @@
 
   #|proc:make-log-rich-console-sink
   The `make-log-rich-console-sink` procedure creates a sink named `name` that
-  writes through rich `console`.
+  writes through rich `console`. The `name` parameter is the sink name. The
+  `console` parameter is the rich console destination. When supplied, the
+  `palette` parameter is the rich logging palette used to style log messages by
+  level.
   |#
   (define make-log-rich-console-sink
-    (lambda (name console)
-      (pcheck ([log-symbol-or-string? name] [rich-console? console])
-              ($make-sink
-               name #f #f (make-log-rich-formatter)
-               (lambda (sink logger-name level timestamp thread source kind payload args)
-                 (let ([text (log-formatter-format ($log-sink-formatter sink)
-                                                   logger-name level timestamp thread source kind payload args)])
-                   (rich-println console text)))
-               (lambda (sink) (flush-output-port (rich-console-output-port console)))
-               (lambda (sink) (void))))))
+    (case-lambda
+      [(name console)
+       (make-log-rich-console-sink name console #f)]
+      [(name console palette)
+       (pcheck ([log-symbol-or-string? name]
+                [rich-console? console]
+                [$false-or-rich-palette? palette])
+               (let ([formatter
+                      (if palette
+                          (make-log-rich-formatter palette)
+                          (make-log-rich-formatter))])
+                 ($make-sink
+                  name #f #f formatter
+                  (lambda (sink logger-name level timestamp thread source kind payload args)
+                    (let ([text (log-formatter-format ($log-sink-formatter sink)
+                                                      logger-name level timestamp thread source kind payload args)])
+                      (rich-println console text)))
+                  (lambda (sink) (flush-output-port (rich-console-output-port console)))
+                  (lambda (sink) (void)))))]))
 
   #|proc:make-log-file-sink
   The `make-log-file-sink` procedure opens `path` for appending and creates a

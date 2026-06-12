@@ -318,6 +318,40 @@
        (log-sink-write! sink 'app 'warn #f #f #f 'message "plain" '())
        (string=? "[warn] app plain\n" (get-output-string out)))
 
+     (let* ([out (open-output-string)]
+            [console (rich-console :output-port out :color-system 'standard)]
+            [sink (make-log-rich-console-sink 'rich console)])
+       (log-sink-write! sink 'app 'warn #f #f #f 'message "colored" '())
+       (string=? "\033[33m[warn] app colored\033[0m\n" (get-output-string out)))
+
+     (let* ([out (open-output-string)]
+            [console (rich-console :output-port out :color-system 'standard)]
+            [palette (make-log-rich-palette
+                      (rich-style 'cyan)
+                      (rich-style 'blue)
+                      (rich-style 'magenta)
+                      (rich-style 'yellow)
+                      (rich-style 'red)
+                      (rich-style 'bold 'red))]
+            [sink (log-rich-console-sink
+                   :name 'rich
+                   :console console
+                   :palette palette)])
+       (and (log-rich-palette? palette)
+            (string=? "\033[35m" (rich-style->ansi 'standard (log-rich-palette-ref palette 'info)))
+            (begin
+              (log-sink-write! sink 'app 'info #f #f #f 'message "custom" '())
+              (string=? "\033[35m[info] app custom\033[0m\n" (get-output-string out)))))
+
+     ;; Error case: rich palettes require rich styles for every message level.
+     (error? (make-log-rich-palette
+              (rich-style 'cyan)
+              (rich-style 'blue)
+              'bad
+              (rich-style 'yellow)
+              (rich-style 'red)
+              (rich-style 'bold 'red)))
+
      (let* ([err (open-output-string)]
             [bad-sink (make-log-procedure-sink
                        'bad

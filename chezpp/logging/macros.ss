@@ -127,33 +127,37 @@
 
   #|macro:log-rich-console-sink
   The `log-rich-console-sink` macro constructs a configured rich console sink
-  from `:name`, `:console`, and optional configuration fields.
+  from `:name`, `:console`, and optional `:palette`, `:level`, `:filter`, and
+  `:formatter` fields.
   |#
   (define-syntax log-rich-console-sink
     (lambda (stx)
       (define parse
-        (lambda (items name console level filter formatter)
-          (cond [(null? items) (values name console level filter formatter)]
+        (lambda (items name console palette level filter formatter)
+          (cond [(null? items) (values name console palette level filter formatter)]
                 [(null? (cdr items)) (syntax-error stx "sink field requires one value")]
                 [else
                  (case (syntax->datum (car items))
-                   [(:name) (parse (cddr items) (cadr items) console level filter formatter)]
-                   [(:console) (parse (cddr items) name (cadr items) level filter formatter)]
-                   [(:level) (parse (cddr items) name console (cadr items) filter formatter)]
-                   [(:filter) (parse (cddr items) name console level (cadr items) formatter)]
-                   [(:formatter) (parse (cddr items) name console level filter (cadr items))]
+                   [(:name) (parse (cddr items) (cadr items) console palette level filter formatter)]
+                   [(:console) (parse (cddr items) name (cadr items) palette level filter formatter)]
+                   [(:palette) (parse (cddr items) name console (cadr items) level filter formatter)]
+                   [(:level) (parse (cddr items) name console palette (cadr items) filter formatter)]
+                   [(:filter) (parse (cddr items) name console palette level (cadr items) formatter)]
+                   [(:formatter) (parse (cddr items) name console palette level filter (cadr items))]
                    [else (syntax-error (car items) "invalid log sink field")])])))
       (syntax-case stx ()
         [(_ item ...)
-         (let-values ([(name console level filter formatter) (parse #'(item ...) #'#f #'#f #'#f #'#f #'#f)])
+         (let-values ([(name console palette level filter formatter)
+                       (parse #'(item ...) #'#f #'#f #'#f #'#f #'#f #'#f)])
            (unless name (syntax-error stx "log-rich-console-sink requires :name"))
            (unless console (syntax-error stx "log-rich-console-sink requires :console"))
            (with-syntax ([sink-name name]
                          [sink-console console]
+                         [sink-palette palette]
                          [sink-level level]
                          [sink-filter filter]
                          [sink-formatter formatter])
-             #'(let ([sink (make-log-rich-console-sink sink-name sink-console)])
+             #'(let ([sink (make-log-rich-console-sink sink-name sink-console sink-palette)])
                  (when sink-level (log-sink-level-set! sink sink-level))
                  (when sink-filter (log-sink-filter-set! sink sink-filter))
                  (when sink-formatter (log-sink-formatter-set! sink sink-formatter))

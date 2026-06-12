@@ -1,6 +1,9 @@
 #!chezscheme
 (library (chezpp logging formatter)
   (export log-formatter?
+          make-log-rich-palette
+          log-rich-palette?
+          log-rich-palette-ref
           make-log-pattern-formatter
           make-log-rich-formatter
           make-log-json-line-formatter
@@ -8,6 +11,7 @@
           log-formatter-format)
   (import (chezpp chez)
           (chezpp utils)
+          (chezpp rich)
           (chezpp logging level)
           (chezpp logging private common))
 
@@ -16,10 +20,55 @@
             (immutable data $log-formatter-data)
             (immutable proc $log-formatter-proc)))
 
+  (define-record-type $log-rich-palette
+    (fields (immutable trace $log-rich-palette-trace)
+            (immutable debug $log-rich-palette-debug)
+            (immutable info $log-rich-palette-info)
+            (immutable warn $log-rich-palette-warn)
+            (immutable error $log-rich-palette-error)
+            (immutable critical $log-rich-palette-critical)))
+
   #|proc:log-formatter?
   The `log-formatter?` procedure returns whether `x` is a log formatter.
   |#
   (define log-formatter? $log-formatter?)
+
+  #|proc:log-rich-palette?
+  The `log-rich-palette?` procedure returns whether `x` is a rich logging
+  palette.
+  |#
+  (define log-rich-palette? $log-rich-palette?)
+
+  #|proc:make-log-rich-palette
+  The `make-log-rich-palette` procedure creates a rich logging palette. The
+  `trace-style`, `debug-style`, `info-style`, `warn-style`, `error-style`, and
+  `critical-style` parameters are rich styles used to render messages at the
+  corresponding log levels.
+  |#
+  (define make-log-rich-palette
+    (lambda (trace-style debug-style info-style warn-style error-style critical-style)
+      (pcheck ([rich-style? trace-style debug-style info-style warn-style error-style critical-style])
+              (make-$log-rich-palette trace-style
+                                      debug-style
+                                      info-style
+                                      warn-style
+                                      error-style
+                                      critical-style))))
+
+  #|proc:log-rich-palette-ref
+  The `log-rich-palette-ref` procedure returns the rich style used by `palette`
+  for `level`.
+  |#
+  (define log-rich-palette-ref
+    (lambda (palette level)
+      (pcheck ([log-rich-palette? palette] [log-message-level? level])
+              (case level
+                [(trace) ($log-rich-palette-trace palette)]
+                [(debug) ($log-rich-palette-debug palette)]
+                [(info) ($log-rich-palette-info palette)]
+                [(warn) ($log-rich-palette-warn palette)]
+                [(error) ($log-rich-palette-error palette)]
+                [(critical) ($log-rich-palette-critical palette)]))))
 
   (define $short-level
     (lambda (level)
@@ -108,16 +157,31 @@
                                    (lambda (logger-name level timestamp thread source kind payload args)
                                      ($pattern-format pattern logger-name level timestamp thread source kind payload args))))))
 
+  (define $default-rich-palette
+    (make-log-rich-palette (rich-style 'dim)
+                           (rich-style 'blue)
+                           (rich-style 'green)
+                           (rich-style 'yellow)
+                           (rich-style 'red)
+                           (rich-style 'bold 'red)))
+
   #|proc:make-log-rich-formatter
-  The `make-log-rich-formatter` procedure creates the default rich formatter.
-  It currently produces the same textual content as the default plain formatter;
-  the rich console sink applies level styling when rendering it.
+  The `make-log-rich-formatter` procedure creates a rich formatter. When called
+  without arguments, it uses the default logging palette. When called with
+  `palette`, it uses that rich logging palette to style messages by level.
   |#
   (define make-log-rich-formatter
-    (lambda ()
-      (make-$log-formatter 'rich #f
-                           (lambda (logger-name level timestamp thread source kind payload args)
-                             ($pattern-format "[%L] %n %m" logger-name level timestamp thread source kind payload args)))))
+    (case-lambda
+      [()
+       (make-log-rich-formatter $default-rich-palette)]
+      [(palette)
+       (pcheck ([log-rich-palette? palette])
+               (make-$log-formatter 'rich palette
+                                    (lambda (logger-name level timestamp thread source kind payload args)
+                                      (rich-text
+                                       ($pattern-format "[%L] %n %m"
+                                                       logger-name level timestamp thread source kind payload args)
+                                       (log-rich-palette-ref palette level)))))]))
 
   #|proc:make-log-json-line-formatter
   The `make-log-json-line-formatter` procedure creates a formatter that returns
