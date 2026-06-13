@@ -42,4 +42,5 @@
                   (chezpp concurrency)
                   (chezpp cli)
                   (chezpp rich)
-                  (chezpp logging))))
+                  (chezpp logging)
+                  (chezpp benchmark))))
