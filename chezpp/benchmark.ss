@@ -29,7 +29,19 @@
 
           make-benchmark-reporter benchmark-text-reporter
           benchmark-datum-reporter benchmark-csv-reporter
-          benchmark-json-reporter benchmark-report
+          benchmark-json-reporter benchmark-rich-reporter benchmark-report
+          benchmark-save-baseline benchmark-load-baseline
+          benchmark-percent-difference benchmark-absolute-difference
+          benchmark-compare-results benchmark-comparison?
+          benchmark-comparison-name benchmark-comparison-metric
+          benchmark-comparison-baseline benchmark-comparison-current
+          benchmark-comparison-baseline-value benchmark-comparison-current-value
+          benchmark-comparison-absolute-difference
+          benchmark-comparison-percent-difference
+          benchmark-comparison-regression? benchmark-comparison-improvement?
+          benchmark-sample-cost-center-allocation-count
+          benchmark-sample-cost-center-instruction-count
+          benchmark-sample-cost-center-time-ns
 
           benchmark-result-name benchmark-result-args
           benchmark-result-template-args benchmark-result-samples
@@ -66,7 +78,9 @@
     (fields name suite args template-args iteration iterations sample
             (mutable user-data benchmark-state-user-data benchmark-state-set-user-data!)
             (mutable counters $benchmark-state-counters $benchmark-state-counters-set!)
-            (mutable timing-paused? $benchmark-state-timing-paused? $benchmark-state-timing-paused?-set!)))
+            (mutable timing-paused? $benchmark-state-timing-paused? $benchmark-state-timing-paused?-set!)
+            (mutable pause-start $benchmark-state-pause-start $benchmark-state-pause-start-set!)
+            (mutable paused-sstats $benchmark-state-paused-sstats $benchmark-state-paused-sstats-set!)))
 
   (define-record-type ($benchmark-sample $mk-benchmark-sample benchmark-sample?)
     (fields iterations sstats cost-center counters))
@@ -79,6 +93,10 @@
 
   (define-record-type ($benchmark-reporter $mk-benchmark-reporter benchmark-reporter?)
     (fields start result finish))
+
+  (define-record-type ($benchmark-comparison $mk-benchmark-comparison benchmark-comparison?)
+    (fields name metric baseline current baseline-value current-value absolute-difference
+            percent-difference regression? improvement?))
 
   (define-record-type ($benchmark-registry $mk-benchmark-registry benchmark-registry?)
     (fields (mutable benchmarks $benchmark-registry-benchmarks $benchmark-registry-benchmarks-set!)))
@@ -137,6 +155,23 @@
       (+ (* (time-second t) 1000000000)
          (time-nanosecond t))))
 
+  (define $ns->time
+    (lambda (ns)
+      (let ([ns (max 0 ns)])
+        (make-time 'time-duration
+                   (modulo ns 1000000000)
+                   (quotient ns 1000000000)))))
+
+  (define $zero-sstats
+    (lambda ()
+      (make-sstats (make-time 'time-duration 0 0)
+                   (make-time 'time-duration 0 0)
+                   0
+                   0
+                   (make-time 'time-duration 0 0)
+                   (make-time 'time-duration 0 0)
+                   0)))
+
   (define $nonnegative-time
     (lambda (t)
       (if (< ($time->ns t) 0)
@@ -156,6 +191,25 @@
                    ($nonnegative-time (sstats-gc-cpu s))
                    ($nonnegative-time (sstats-gc-real s))
                    ($nonnegative-count (sstats-gc-bytes s)))))
+
+  (define $sstats-add
+    (lambda (left right)
+      (make-sstats ($ns->time (+ ($time->ns (sstats-cpu left))
+                                 ($time->ns (sstats-cpu right))))
+                   ($ns->time (+ ($time->ns (sstats-real left))
+                                  ($time->ns (sstats-real right))))
+                   (+ (sstats-bytes left) (sstats-bytes right))
+                   (+ (sstats-gc-count left) (sstats-gc-count right))
+                   ($ns->time (+ ($time->ns (sstats-gc-cpu left))
+                                 ($time->ns (sstats-gc-cpu right))))
+                   ($ns->time (+ ($time->ns (sstats-gc-real left))
+                                  ($time->ns (sstats-gc-real right))))
+                   (+ (sstats-gc-bytes left) (sstats-gc-bytes right)))))
+
+  (define $make-benchmark-state
+    (lambda (name suite args template-args iteration iterations sample user-data counters timing-paused?)
+      ($mk-benchmark-state name suite args template-args iteration iterations sample
+                           user-data counters timing-paused? #f ($zero-sstats))))
 
   (define $sample-cpu-ns
     (lambda (sample)
@@ -214,12 +268,19 @@
   (define $summary-values
     (lambda (xs)
       (if (null? xs)
-          '((median . 0) (mean . 0) (min . 0) (max . 0) (stddev . 0))
-          `((median . ,($median xs))
-            (mean . ,($mean xs))
-            (min . ,(apply min xs))
-            (max . ,(apply max xs))
-            (stddev . ,($stddev xs))))))
+          '((median . 0) (mean . 0) (min . 0) (max . 0) (stddev . 0)
+            (confidence-interval . (0 0)))
+          (let* ([mean ($mean xs)]
+                 [stddev ($stddev xs)]
+                 [margin (if (null? (cdr xs))
+                             0
+                             (* 1.96 (/ stddev (sqrt (length xs)))))])
+            `((median . ,($median xs))
+              (mean . ,mean)
+              (min . ,(apply min xs))
+              (max . ,(apply max xs))
+              (stddev . ,stddev)
+              (confidence-interval . ,(list (- mean margin) (+ mean margin))))))))
 
   (define $merge-counters
     (lambda (samples)
@@ -239,6 +300,177 @@
                           (set-cdr! old (+ (cdr old) value))
                           (loop-counters (cdr counters) out))
                         (loop-counters (cdr counters) (cons (cons key value) out))))))))))
+
+  (define $string-replace
+    (lambda (text old new)
+      (let ([old-len (string-length old)]
+            [text-len (string-length text)]
+            [out (open-output-string)])
+        (let loop ([i 0])
+          (cond
+           [(>= i text-len)
+            (get-output-string out)]
+           [(and (<= (+ i old-len) text-len)
+                 (string=? old (substring text i (+ i old-len))))
+            (display new out)
+            (loop (+ i old-len))]
+           [else
+            (write-char (string-ref text i) out)
+            (loop (+ i 1))])))))
+
+  (define $display-string
+    (lambda (value)
+      (let ([out (open-output-string)])
+        (display value out)
+        (get-output-string out))))
+
+  (define $write-string
+    (lambda (value)
+      (let ([out (open-output-string)])
+        (write value out)
+        (get-output-string out))))
+
+  (define $csv-field
+    (lambda (value)
+      (let* ([text ($write-string value)]
+             [escaped ($string-replace text "\"" "\"\"")])
+        (string-append "\"" escaped "\""))))
+
+  (define $json-string
+    (lambda (text out)
+      (write-char (integer->char 34) out)
+      (let loop ([i 0])
+        (when (< i (string-length text))
+          (let ([ch (string-ref text i)])
+            (cond
+             [(char=? ch (integer->char 34)) (display "\\\"" out)]
+             [(char=? ch #\\) (display "\\\\" out)]
+             [(char=? ch #\newline) (display "\\n" out)]
+             [(char=? ch #\return) (display "\\r" out)]
+             [(char=? ch #\tab) (display "\\t" out)]
+             [else (write-char ch out)])
+            (loop (+ i 1)))))
+      (write-char (integer->char 34) out)))
+
+  (define $json-key
+    (lambda (key)
+      (if (symbol? key)
+          (symbol->string key)
+          ($display-string key))))
+
+  (define $alist?
+    (lambda (x)
+      (and (list? x)
+           (andmap pair? x))))
+
+  (define $write-json-list
+    (lambda (xs out)
+      (display "[" out)
+      (let loop ([xs xs] [first? #t])
+        (unless (null? xs)
+          (unless first? (display "," out))
+          ($write-json (car xs) out)
+          (loop (cdr xs) #f)))
+      (display "]" out)))
+
+  (define $write-json-object
+    (lambda (alist out)
+      (display "{" out)
+      (let loop ([alist alist] [first? #t])
+        (unless (null? alist)
+          (unless first? (display "," out))
+          ($json-string ($json-key (caar alist)) out)
+          (display ":" out)
+          ($write-json (cdar alist) out)
+          (loop (cdr alist) #f)))
+      (display "}" out)))
+
+  (define $write-json
+    (lambda (datum out)
+      (cond
+       [(eq? datum #t) (display "true" out)]
+       [(eq? datum #f) (display "false" out)]
+       [(number? datum) (display datum out)]
+       [(string? datum) ($json-string datum out)]
+       [(symbol? datum) ($json-string (symbol->string datum) out)]
+       [(null? datum) (display "[]" out)]
+       [($alist? datum) ($write-json-object datum out)]
+       [(list? datum) ($write-json-list datum out)]
+       [else ($json-string ($write-string datum) out)])))
+
+  (define $metric-mean
+    (lambda (result metric)
+      (let ([entry (assq metric (benchmark-result-summary result))])
+        (if entry
+            ($alist-ref (cdr entry) 'mean 0)
+            0))))
+
+  (define $find-result
+    (lambda (results name args template-args)
+      (let loop ([results results])
+        (cond
+         [(null? results) #f]
+         [(and (eq? name (benchmark-result-name (car results)))
+               (equal? args (benchmark-result-args (car results)))
+               (equal? template-args (benchmark-result-template-args (car results))))
+          (car results)]
+         [else (loop (cdr results))]))))
+
+  (define $sample->datum
+    (lambda (sample)
+      `((iterations . ,(benchmark-sample-iterations sample))
+        (cpu-ns . ,($time->ns (sstats-cpu (benchmark-sample-sstats sample))))
+        (real-ns . ,($time->ns (sstats-real (benchmark-sample-sstats sample))))
+        (bytes . ,(sstats-bytes (benchmark-sample-sstats sample)))
+        (gc-count . ,(sstats-gc-count (benchmark-sample-sstats sample)))
+        (gc-cpu-ns . ,($time->ns (sstats-gc-cpu (benchmark-sample-sstats sample))))
+        (gc-real-ns . ,($time->ns (sstats-gc-real (benchmark-sample-sstats sample))))
+        (gc-bytes . ,(sstats-gc-bytes (benchmark-sample-sstats sample)))
+        (cost-center . ,(benchmark-sample-cost-center sample))
+        (counters . ,(benchmark-sample-counters sample)))))
+
+  (define $datum->sample
+    (lambda (datum)
+      (let ([sstats (make-sstats ($ns->time ($alist-ref datum 'cpu-ns 0))
+                                 ($ns->time ($alist-ref datum 'real-ns 0))
+                                 ($alist-ref datum 'bytes 0)
+                                 ($alist-ref datum 'gc-count 0)
+                                 ($ns->time ($alist-ref datum 'gc-cpu-ns 0))
+                                 ($ns->time ($alist-ref datum 'gc-real-ns 0))
+                                 ($alist-ref datum 'gc-bytes 0))])
+        ($mk-benchmark-sample ($alist-ref datum 'iterations 0)
+                              sstats
+                              ($alist-ref datum 'cost-center #f)
+                              ($alist-ref datum 'counters '())))))
+
+  (define $result->datum
+    (lambda (result)
+      `((name . ,(benchmark-result-name result))
+        (args . ,(benchmark-result-args result))
+        (template-args . ,(benchmark-result-template-args result))
+        (samples . ,(map $sample->datum (benchmark-result-samples result)))
+        (summary . ,(benchmark-result-summary result))
+        (counters . ,(benchmark-result-counters result))
+        (error? . ,(and (benchmark-result-error result) #t)))))
+
+  (define $datum->result
+    (lambda (datum)
+      ($mk-benchmark-result ($alist-ref datum 'name)
+                            ($alist-ref datum 'args '())
+                            ($alist-ref datum 'template-args '())
+                            (map $datum->sample ($alist-ref datum 'samples '()))
+                            ($alist-ref datum 'summary '())
+                            ($alist-ref datum 'counters '())
+                            (and ($alist-ref datum 'error? #f) 'baseline-error))))
+
+  (define $result->json
+    (lambda (result)
+      `((name . ,(benchmark-result-name result))
+        (args . ,(benchmark-result-args result))
+        (template_args . ,(benchmark-result-template-args result))
+        (summary . ,(benchmark-result-summary result))
+        (counters . ,(benchmark-result-counters result))
+        (error . ,(and (benchmark-result-error result) #t)))))
 
   (define $symbol-append
     (lambda (left right)
@@ -278,7 +510,7 @@ iteration count, and `sample` is the current sample index.
   (define benchmark-state
     (lambda (name suite args template-args iteration iterations sample)
       (pcheck ([symbol? name] [list? args template-args] [natural? iteration iterations sample])
-              ($mk-benchmark-state name suite args template-args iteration iterations sample '() '() #f))))
+              ($make-benchmark-state name suite args template-args iteration iterations sample '() '() #f))))
 
   #|proc:benchmark-state-name
 The `benchmark-state-name` procedure returns the concrete run name stored in
@@ -567,6 +799,39 @@ stored in sample `sample`, or `#f` in v1.
       (pcheck ([benchmark-sample? sample])
               ($benchmark-sample-cost-center sample))))
 
+  #|proc:benchmark-sample-cost-center-allocation-count
+The `benchmark-sample-cost-center-allocation-count` procedure returns the
+optional allocation count stored in `sample` cost-center data, or `#f` when the
+sample has no allocation count.
+|#
+  (define benchmark-sample-cost-center-allocation-count
+    (lambda (sample)
+      (pcheck ([benchmark-sample? sample])
+              (let ([data ($benchmark-sample-cost-center sample)])
+                (and data ($alist-ref data 'allocation-count #f))))))
+
+  #|proc:benchmark-sample-cost-center-instruction-count
+The `benchmark-sample-cost-center-instruction-count` procedure returns the
+optional instruction count stored in `sample` cost-center data, or `#f` when
+the sample has no instruction count.
+|#
+  (define benchmark-sample-cost-center-instruction-count
+    (lambda (sample)
+      (pcheck ([benchmark-sample? sample])
+              (let ([data ($benchmark-sample-cost-center sample)])
+                (and data ($alist-ref data 'instruction-count #f))))))
+
+  #|proc:benchmark-sample-cost-center-time-ns
+The `benchmark-sample-cost-center-time-ns` procedure returns the optional
+cost-center CPU time in nanoseconds stored in `sample`, or `#f` when the sample
+has no cost-center time.
+|#
+  (define benchmark-sample-cost-center-time-ns
+    (lambda (sample)
+      (pcheck ([benchmark-sample? sample])
+              (let ([data ($benchmark-sample-cost-center sample)])
+                (and data ($alist-ref data 'time-ns #f))))))
+
   #|proc:benchmark-sample-counters
 The `benchmark-sample-counters` procedure returns the custom counter alist
 stored in sample `sample`.
@@ -585,6 +850,96 @@ callbacks. `start` receives `(results output-port)`, `result` receives
     (lambda (start result finish)
       (pcheck ([procedure? start result finish])
               ($mk-benchmark-reporter start result finish))))
+
+  #|proc:benchmark-comparison-name
+The `benchmark-comparison-name` procedure returns the benchmark name associated
+with comparison `comparison`.
+|#
+  (define benchmark-comparison-name
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-name comparison))))
+
+  #|proc:benchmark-comparison-metric
+The `benchmark-comparison-metric` procedure returns the summary metric compared
+by comparison `comparison`.
+|#
+  (define benchmark-comparison-metric
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-metric comparison))))
+
+  #|proc:benchmark-comparison-baseline
+The `benchmark-comparison-baseline` procedure returns the baseline result stored
+in comparison `comparison`.
+|#
+  (define benchmark-comparison-baseline
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-baseline comparison))))
+
+  #|proc:benchmark-comparison-current
+The `benchmark-comparison-current` procedure returns the current result stored
+in comparison `comparison`.
+|#
+  (define benchmark-comparison-current
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-current comparison))))
+
+  #|proc:benchmark-comparison-baseline-value
+The `benchmark-comparison-baseline-value` procedure returns the numeric
+baseline metric value stored in comparison `comparison`.
+|#
+  (define benchmark-comparison-baseline-value
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-baseline-value comparison))))
+
+  #|proc:benchmark-comparison-current-value
+The `benchmark-comparison-current-value` procedure returns the numeric current
+metric value stored in comparison `comparison`.
+|#
+  (define benchmark-comparison-current-value
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-current-value comparison))))
+
+  #|proc:benchmark-comparison-absolute-difference
+The `benchmark-comparison-absolute-difference` procedure returns
+`current - baseline` for comparison `comparison`.
+|#
+  (define benchmark-comparison-absolute-difference
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-absolute-difference comparison))))
+
+  #|proc:benchmark-comparison-percent-difference
+The `benchmark-comparison-percent-difference` procedure returns the percent
+difference for comparison `comparison`.
+|#
+  (define benchmark-comparison-percent-difference
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-percent-difference comparison))))
+
+  #|proc:benchmark-comparison-regression?
+The `benchmark-comparison-regression?` procedure returns whether comparison
+`comparison` exceeds the configured positive regression thresholds.
+|#
+  (define benchmark-comparison-regression?
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-regression? comparison))))
+
+  #|proc:benchmark-comparison-improvement?
+The `benchmark-comparison-improvement?` procedure returns whether comparison
+`comparison` exceeds the configured negative improvement thresholds.
+|#
+  (define benchmark-comparison-improvement?
+    (lambda (comparison)
+      (pcheck ([benchmark-comparison? comparison])
+              ($benchmark-comparison-improvement? comparison))))
 
   #|proc:benchmark-text-reporter
 The `benchmark-text-reporter` procedure returns the default plain textual
@@ -635,18 +990,64 @@ Scheme datum per result to the output port.
          (flush-output-port out)))))
 
   #|proc:benchmark-csv-reporter
-The `benchmark-csv-reporter` procedure is reserved for the v2 CSV reporter.
+The `benchmark-csv-reporter` procedure returns a reporter that writes benchmark
+results as comma-separated values. Each row contains the result name, argument
+data, template data, summary means, counters, and whether the result captured an
+error.
 |#
   (define benchmark-csv-reporter
     (lambda ()
-      (errorf 'benchmark-csv-reporter "CSV reporting is planned for benchmark v2")))
+      (make-benchmark-reporter
+       (lambda (results out)
+         (fprintf out "name,args,template_args,cpu_ns_mean,real_ns_mean,bytes_mean,counters,error~%"))
+       (lambda (result out)
+         (let* ([summary (benchmark-result-summary result)]
+                [cpu (cdr (assq 'mean (cdr (assq 'cpu-ns summary))))]
+                [real (cdr (assq 'mean (cdr (assq 'real-ns summary))))]
+                [bytes (cdr (assq 'mean (cdr (assq 'bytes summary))))])
+           (fprintf out "~a,~a,~a,~a,~a,~a,~a,~a~%"
+                    ($csv-field (benchmark-result-name result))
+                    ($csv-field (benchmark-result-args result))
+                    ($csv-field (benchmark-result-template-args result))
+                    ($csv-field cpu)
+                    ($csv-field real)
+                    ($csv-field bytes)
+                    ($csv-field (benchmark-result-counters result))
+                    ($csv-field (and (benchmark-result-error result) #t)))))
+       (lambda (results out)
+         (flush-output-port out)))))
 
   #|proc:benchmark-json-reporter
-The `benchmark-json-reporter` procedure is reserved for the v2 JSON reporter.
+The `benchmark-json-reporter` procedure returns a reporter that writes benchmark
+results as one JSON object containing a `results` array. The JSON writer is
+self-contained and supports the Scheme data emitted by benchmark results.
 |#
   (define benchmark-json-reporter
     (lambda ()
-      (errorf 'benchmark-json-reporter "JSON reporting is planned for benchmark v2")))
+      (let ([first? #t])
+        (make-benchmark-reporter
+         (lambda (results out)
+           (set! first? #t)
+           (display "{\"results\":[" out))
+         (lambda (result out)
+           (unless first?
+             (display "," out))
+           (set! first? #f)
+           ($write-json ($result->json result) out))
+         (lambda (results out)
+           (display "]}" out)
+           (newline out)
+           (flush-output-port out))))))
+
+  #|proc:benchmark-rich-reporter
+The `benchmark-rich-reporter` procedure returns a reporter compatible with v2's
+optional Rich reporting roadmap. It currently uses the text reporter without
+adding a dependency on `(chezpp rich)`, so benchmark users can opt into richer
+terminal rendering outside this library.
+|#
+  (define benchmark-rich-reporter
+    (lambda ()
+      (benchmark-text-reporter)))
 
   #|proc:make-benchmark-config
 The `make-benchmark-config` procedure creates a runner configuration. The
@@ -1159,16 +1560,16 @@ to run in the cdr.
       (pcheck ([benchmark? benchmark] [benchmark-config? config])
               (map (lambda (arg-row)
                      (let ([args (caddr arg-row)])
-                       (cons ($mk-benchmark-state ($benchmark-name benchmark)
-                                                  ($benchmark-suite-ref benchmark)
-                                                  args
-                                                  ($benchmark-template-args benchmark)
-                                                  0
-                                                  1
-                                                  0
-                                                  '()
-                                                  '()
-                                                  #f)
+                       (cons ($make-benchmark-state ($benchmark-name benchmark)
+                                                    ($benchmark-suite-ref benchmark)
+                                                    args
+                                                    ($benchmark-template-args benchmark)
+                                                    0
+                                                    1
+                                                    0
+                                                    '()
+                                                    '()
+                                                    #f)
                              benchmark)))
                    ($benchmark-args benchmark)))))
 
@@ -1241,16 +1642,16 @@ to `selector`, which may be `#f`, a symbol, a string, or a predicate procedure.
                [teardown (cadr setup-results)]
                [setup-value? (caddr setup-results)]
                [cleanup? #t]
-               [sample-state ($mk-benchmark-state ($benchmark-state-name state)
-                                                  ($benchmark-state-suite state)
-                                                  ($benchmark-state-args state)
-                                                  ($benchmark-state-template-args state)
-                                                  0
-                                                  iterations
-                                                  ($benchmark-state-sample state)
-                                                  (benchmark-state-user-data state)
-                                                  '()
-                                                  #f)])
+               [sample-state ($make-benchmark-state ($benchmark-state-name state)
+                                                    ($benchmark-state-suite state)
+                                                    ($benchmark-state-args state)
+                                                    ($benchmark-state-template-args state)
+                                                    0
+                                                    iterations
+                                                    ($benchmark-state-sample state)
+                                                    (benchmark-state-user-data state)
+                                                    '()
+                                                    #f)])
            (dynamic-wind
              (lambda () (void))
              (lambda ()
@@ -1260,11 +1661,14 @@ to `selector`, which may be `#f`, a symbol, a string, or a predicate procedure.
                  (let* ([after (statistics)]
                         [elapsed (sstats-difference after b2)]
                         [overhead (sstats-difference b2 b1)]
-                        [adjusted ($sanitize-sstats (sstats-difference elapsed overhead))])
+                        [active (sstats-difference elapsed ($benchmark-state-paused-sstats sample-state))]
+                        [adjusted ($sanitize-sstats (sstats-difference active overhead))])
                    ($mk-benchmark-sample iterations adjusted #f ($benchmark-state-counters sample-state)))))
              (lambda ()
                (when cleanup?
                  (set! cleanup? #f)
+                 (when ($benchmark-state-timing-paused? sample-state)
+                   (benchmark-resume-timing sample-state))
                  (when setup-value?
                    (teardown state setup-value))))))))))
 
@@ -1278,16 +1682,16 @@ to `selector`, which may be `#f`, a symbol, a string, or a predicate procedure.
   (define $choose-sample
     (lambda (benchmark state values config sample-index)
       (let loop ([iterations 1])
-        (let* ([sample-state ($mk-benchmark-state ($benchmark-state-name state)
-                                                  ($benchmark-state-suite state)
-                                                  ($benchmark-state-args state)
-                                                  ($benchmark-state-template-args state)
-                                                  0
-                                                  iterations
-                                                  sample-index
-                                                  (benchmark-state-user-data state)
-                                                  '()
-                                                  #f)]
+        (let* ([sample-state ($make-benchmark-state ($benchmark-state-name state)
+                                                    ($benchmark-state-suite state)
+                                                    ($benchmark-state-args state)
+                                                    ($benchmark-state-template-args state)
+                                                    0
+                                                    iterations
+                                                    sample-index
+                                                    (benchmark-state-user-data state)
+                                                    '()
+                                                    #f)]
                [sample ($measure-sample benchmark sample-state values iterations)]
                [target ($seconds->ns (benchmark-config-min-time config))])
           (if (or (zero? target)
@@ -1415,23 +1819,140 @@ and allocated-byte per-iteration summary alists from measured `samples`.
                 (real-ns . ,($summary-values (map $sample-real-ns samples)))
                 (bytes . ,($summary-values (map $sample-bytes samples)))))))
 
+  #|proc:benchmark-save-baseline
+The `benchmark-save-baseline` procedure writes benchmark `results` to file
+`path` as versioned Scheme data. The file can be read back with
+`benchmark-load-baseline`.
+|#
+  (define benchmark-save-baseline
+    (lambda (results path)
+      (pcheck ([list? results] [string? path])
+              (call-with-output-file path
+                (lambda (out)
+                  (write `((format . chezpp-benchmark-baseline)
+                           (version . 1)
+                           (results . ,(map $result->datum results)))
+                         out)
+                  (newline out))
+                'replace))))
+
+  #|proc:benchmark-load-baseline
+The `benchmark-load-baseline` procedure reads benchmark results previously
+written by `benchmark-save-baseline` from file `path`.
+|#
+  (define benchmark-load-baseline
+    (lambda (path)
+      (pcheck ([string? path])
+              (let ([datum (call-with-input-file path read)])
+                (unless (eq? ($alist-ref datum 'format #f) 'chezpp-benchmark-baseline)
+                  (errorf 'benchmark-load-baseline "invalid benchmark baseline file: ~a" path))
+                (map $datum->result ($alist-ref datum 'results '()))))))
+
+  #|proc:benchmark-absolute-difference
+The `benchmark-absolute-difference` procedure returns `current - baseline` for
+numeric measurements `baseline` and `current`.
+|#
+  (define benchmark-absolute-difference
+    (lambda (baseline current)
+      (pcheck ([number? baseline current])
+              (- current baseline))))
+
+  #|proc:benchmark-percent-difference
+The `benchmark-percent-difference` procedure returns the percent change from
+numeric measurement `baseline` to numeric measurement `current`. When
+`baseline` is zero, equal values return zero and non-equal values return
+positive or negative infinity.
+|#
+  (define benchmark-percent-difference
+    (lambda (baseline current)
+      (pcheck ([number? baseline current])
+              (cond
+               [(zero? baseline)
+                (cond
+                 [(zero? current) 0]
+                 [(positive? current) +inf.0]
+                 [else -inf.0])]
+               [else (* 100 (/ (- current baseline) baseline))]))))
+
+  #|proc:benchmark-compare-results
+The `benchmark-compare-results` procedure compares current benchmark `current`
+results with `baseline` results. `options` is an alist supporting `metric`,
+`threshold-percent`, `threshold-absolute`, and `noise-threshold-percent`.
+|#
+  (define benchmark-compare-results
+    (case-lambda
+      [(baseline current)
+       (benchmark-compare-results baseline current '())]
+      [(baseline current options)
+       (pcheck ([list? baseline current options])
+               (let ([metric ($option-ref options 'metric 'real-ns)]
+                     [threshold-percent ($option-ref options 'threshold-percent 5)]
+                     [threshold-absolute ($option-ref options 'threshold-absolute 0)]
+                     [noise-threshold-percent ($option-ref options 'noise-threshold-percent 0)])
+                 (let loop ([current current] [out '()])
+                   (if (null? current)
+                       (reverse out)
+                       (let* ([cur (car current)]
+                              [base ($find-result baseline
+                                                  (benchmark-result-name cur)
+                                                  (benchmark-result-args cur)
+                                                  (benchmark-result-template-args cur))])
+                         (if base
+                             (let* ([base-value ($metric-mean base metric)]
+                                    [cur-value ($metric-mean cur metric)]
+                                    [absolute (benchmark-absolute-difference base-value cur-value)]
+                                    [percent (benchmark-percent-difference base-value cur-value)]
+                                    [abs-percent (abs percent)]
+                                    [significant? (and (>= (abs absolute) threshold-absolute)
+                                                       (>= abs-percent noise-threshold-percent))]
+                                    [regression? (and significant?
+                                                      (positive? absolute)
+                                                      (>= percent threshold-percent))]
+                                    [improvement? (and significant?
+                                                       (negative? absolute)
+                                                       (>= (abs percent) threshold-percent))])
+                               (loop (cdr current)
+                                     (cons ($mk-benchmark-comparison
+                                            (benchmark-result-name cur)
+                                            metric
+                                            base
+                                            cur
+                                            base-value
+                                            cur-value
+                                            absolute
+                                            percent
+                                            regression?
+                                            improvement?)
+                                           out)))
+                             (loop (cdr current) out)))))))]))
+
   #|proc:benchmark-pause-timing
-The `benchmark-pause-timing` procedure marks timing as paused in `state`.
-Subtraction of paused deltas is reserved for the v2 measurement backend.
+The `benchmark-pause-timing` procedure pauses timing for measured benchmark
+`state`. Work performed while timing is paused is subtracted from the measured
+sample when `benchmark-resume-timing` is called.
 |#
   (define benchmark-pause-timing
     (lambda (state)
       (pcheck ([benchmark-state? state])
-              ($benchmark-state-timing-paused?-set! state #t))))
+              (unless ($benchmark-state-timing-paused? state)
+                ($benchmark-state-pause-start-set! state (statistics))
+                ($benchmark-state-timing-paused?-set! state #t)))))
 
   #|proc:benchmark-resume-timing
-The `benchmark-resume-timing` procedure marks timing as resumed in `state`.
-Subtraction of paused deltas is reserved for the v2 measurement backend.
+The `benchmark-resume-timing` procedure resumes timing for measured benchmark
+`state` and accumulates the elapsed paused statistics for later subtraction.
 |#
   (define benchmark-resume-timing
     (lambda (state)
       (pcheck ([benchmark-state? state])
-              ($benchmark-state-timing-paused?-set! state #f))))
+              (when ($benchmark-state-timing-paused? state)
+                (let* ([after (statistics)]
+                       [paused (sstats-difference after ($benchmark-state-pause-start state))])
+                  ($benchmark-state-paused-sstats-set!
+                   state
+                   ($sstats-add ($benchmark-state-paused-sstats state) paused))
+                  ($benchmark-state-pause-start-set! state #f)
+                  ($benchmark-state-timing-paused?-set! state #f))))))
 
   #|proc:benchmark-do-not-optimize
 The `benchmark-do-not-optimize` procedure returns `value` through Chez's

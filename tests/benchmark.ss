@@ -9,6 +9,18 @@
       (reporter . #f)
       (output . #f))))
 
+(define (benchmark-temp-file)
+  (format "benchmark-baseline-~a-~a.dat" (random 1000000) (time-nanosecond (current-time))))
+
+(define (benchmark-string-contains? text needle)
+  (let ([text-len (string-length text)]
+        [needle-len (string-length needle)])
+    (let loop ([i 0])
+      (cond
+       [(> (+ i needle-len) text-len) #f]
+       [(string=? needle (substring text i (+ i needle-len))) #t]
+       [else (loop (+ i 1))]))))
+
 (benchmark-clear-registry! (current-benchmark-registry))
 
 (define-benchmark bench-basic
@@ -69,6 +81,21 @@
    :max-iterations 1)
   (lambda (state n m)
     (benchmark-do-not-optimize (+ n m))))
+
+(define-benchmark bench-paused
+  (:args [n 1]
+   :warmup 0
+   :samples 1
+   :min-time 0
+   :max-iterations 1)
+  (lambda (state n)
+    (benchmark-pause-timing state)
+    (let loop ([i 0])
+      (when (< i 50000)
+        (benchmark-do-not-optimize i)
+        (loop (+ i 1))))
+    (benchmark-resume-timing state)
+    (benchmark-do-not-optimize n)))
 
 (define-benchmark-suite bench-suite
   (:suite-setup (lambda (state) 'suite-open)
@@ -146,3 +173,66 @@
          (and (string? text)
               (> (string-length text) 0)))))
 
+(mat benchmark-v2-reporters
+     (let ([out (open-output-string)])
+       (benchmark-report (benchmark-run (list bench-basic) (benchmark-test-config))
+                         (benchmark-csv-reporter)
+                         out)
+       (let ([text (get-output-string out)])
+         (and (string? text)
+              (benchmark-string-contains? text "name,args,template_args")
+              (benchmark-string-contains? text "bench-basic"))))
+     (let ([out (open-output-string)])
+       (benchmark-report (benchmark-run (list bench-basic) (benchmark-test-config))
+                         (benchmark-json-reporter)
+                         out)
+       (let ([text (get-output-string out)])
+         (and (string? text)
+              (benchmark-string-contains? text "\"results\"")
+              (benchmark-string-contains? text "\"bench-basic\""))))
+     (let ([reporter (benchmark-rich-reporter)])
+       (benchmark-reporter? reporter)))
+
+(mat benchmark-v2-baselines-and-comparison
+     (let* ([results (benchmark-run (list bench-basic) (benchmark-test-config))]
+            [path (benchmark-temp-file)])
+       (dynamic-wind
+         (lambda () (void))
+         (lambda ()
+           (benchmark-save-baseline results path)
+           (let ([loaded (benchmark-load-baseline path)])
+             (and (= (length loaded) (length results))
+                  (equal? (map benchmark-result-name loaded)
+                          (map benchmark-result-name results)))))
+         (lambda ()
+           (when (file-exists? path)
+             (delete-file path)))))
+     (let* ([base (benchmark-run (list bench-basic) (benchmark-test-config))]
+            [current (benchmark-run (list bench-basic) (benchmark-test-config))]
+            [comparisons (benchmark-compare-results base current
+                           '((metric . real-ns)
+                             (threshold-percent . 1000000)
+                             (threshold-absolute . 1000000000)
+                             (noise-threshold-percent . 1000000)))])
+       (and (= (length comparisons) (length current))
+            (andmap benchmark-comparison? comparisons)
+            (andmap (lambda (comparison)
+                      (and (benchmark-comparison-name comparison)
+                           (number? (benchmark-comparison-percent-difference comparison))
+                           (not (benchmark-comparison-regression? comparison))))
+                    comparisons)))
+     (= (benchmark-percent-difference 100 110) 10)
+     (= (benchmark-absolute-difference 100 90) -10))
+
+(mat benchmark-v2-summaries-and-pauses
+     (let* ([results (benchmark-run (list bench-basic) (benchmark-test-config))]
+            [summary (benchmark-result-summary (car results))]
+            [real (cdr (assq 'real-ns summary))])
+       (and (assq 'confidence-interval real)
+            (= (length (cdr (assq 'confidence-interval real))) 2)
+            #t))
+     (let* ([results (benchmark-run (list bench-paused) (benchmark-test-config))]
+            [sample (car (benchmark-result-samples (car results)))])
+       (and (benchmark-result? (car results))
+            (not (benchmark-result-error (car results)))
+            (if (benchmark-sample-sstats sample) #t #f))))
