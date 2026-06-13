@@ -302,6 +302,34 @@
            (logging-delete-if-exists "logging-rotate-test.out.2")
            ok)))
 
+     (let ([path "logging-rotate-zero-test.out"])
+       (logging-delete-if-exists path)
+       (logging-delete-if-exists "logging-rotate-zero-test.out.1")
+       (let ([sink (make-log-rotating-file-sink 'rot path 25 0)])
+         (log-sink-write! sink 'app 'info #f #f #f 'message "first-long-line" '())
+         (log-sink-write! sink 'app 'info #f #f #f 'message "second-long-line" '())
+         (log-sink-close! sink)
+         (let ([text (logging-read-file path)]
+               [backup? (file-exists? "logging-rotate-zero-test.out.1")])
+           (logging-delete-if-exists path)
+           (logging-delete-if-exists "logging-rotate-zero-test.out.1")
+           (and (not backup?)
+                (string=? "[info] app second-long-line\n" text)))))
+
+     (let ([path "logging-rotate-utf8-test.out"])
+       (logging-delete-if-exists path)
+       (logging-delete-if-exists "logging-rotate-utf8-test.out.1")
+       (let ([sink (make-log-rotating-file-sink 'rot path 26 1)]
+             [message (string (integer->char #x00e9))])
+         (log-sink-write! sink 'app 'info #f #f #f 'message "x" '())
+         (log-sink-write! sink 'app 'info #f #f #f 'message message '())
+         (log-sink-close! sink)
+         (let ([ok (and (file-exists? path)
+                        (file-exists? "logging-rotate-utf8-test.out.1"))])
+           (logging-delete-if-exists path)
+           (logging-delete-if-exists "logging-rotate-utf8-test.out.1")
+           ok)))
+
      (let* ([out (open-output-string)]
             [console (rich-console :output-port out :force-terminal? #f :color-system 'none)]
             [sink (make-log-rich-console-sink 'rich console)])

@@ -85,6 +85,7 @@
        ($logger-lock logger)
        (lambda ()
          (values ($logger-name logger)
+                 ($logger-level logger)
                  (list-copy ($logger-sinks logger))
                  ($logger-filter logger)
                  ($logger-closed? logger))))))
@@ -242,23 +243,24 @@
   (define logger-dispatch!
     (lambda (logger level source kind payload args)
       (pcheck ([logger? logger] [log-message-level? level] [list? args])
-              (when (logger-enabled? logger level)
-                (let ([timestamp (log-current-timestamp)]
-                      [thread (log-current-thread-id)])
-                  (let-values ([(name sinks filter closed?) ($logger-snapshot logger)])
-                    (unless closed?
-                      ($call-with-sink-errors
-                       logger
-                       (lambda ()
-                         (when (or (not filter)
-                                   (filter name level timestamp thread source kind payload args))
-                           (for-each
-                            (lambda (sink)
-                              ($call-with-sink-errors
-                               logger
-                               (lambda ()
-                                 (log-sink-write! sink name level timestamp thread source kind payload args))))
-                            sinks)))))))))))
+              (let-values ([(name threshold sinks filter closed?) ($logger-snapshot logger)])
+                (when (and (not closed?)
+                           (not (eq? threshold 'off))
+                           (log-level>=? level threshold))
+                  (let ([timestamp (log-current-timestamp)]
+                        [thread (log-current-thread-id)])
+                    ($call-with-sink-errors
+                     logger
+                     (lambda ()
+                       (when (or (not filter)
+                                 (filter name level timestamp thread source kind payload args))
+                         (for-each
+                          (lambda (sink)
+                            ($call-with-sink-errors
+                             logger
+                             (lambda ()
+                               (log-sink-write! sink name level timestamp thread source kind payload args))))
+                          sinks))))))))))
 
   #|proc:logger-log
   The `logger-log` procedure logs `message` at `level` through `logger`.

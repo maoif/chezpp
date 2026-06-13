@@ -67,6 +67,10 @@
                 (log-formatter-format formatter logger-name level timestamp thread source kind payload args))
                port)))
 
+  (define $string-byte-length
+    (lambda (text)
+      (bytevector-length (string->utf8 text))))
+
   #|proc:log-sink-name
   The `log-sink-name` procedure returns the name of `sink`.
   |#
@@ -289,14 +293,18 @@
                   (lambda ()
                     (flush-output-port port)
                     (close-port port)
-                    (when (and (> backup-count 0) (file-exists? (backup-path backup-count)))
-                      (delete-file (backup-path backup-count)))
-                    (do ([i (- backup-count 1) (- i 1)])
-                        ((<= i 0))
-                      (when (file-exists? (backup-path i))
-                        (rename-file (backup-path i) (backup-path (+ i 1)))))
-                    (when (and (> backup-count 0) (file-exists? path))
-                      (rename-file path (backup-path 1)))
+                    (if (= backup-count 0)
+                        (when (file-exists? path)
+                          (delete-file path))
+                        (begin
+                          (when (file-exists? (backup-path backup-count))
+                            (delete-file (backup-path backup-count)))
+                          (do ([i (- backup-count 1) (- i 1)])
+                              ((<= i 0))
+                            (when (file-exists? (backup-path i))
+                              (rename-file (backup-path i) (backup-path (+ i 1)))))
+                          (when (file-exists? path)
+                            (rename-file path (backup-path 1)))))
                     (set! port (open-file-output-port path
                                                       (file-options no-fail no-truncate)
                                                       (buffer-mode block)
@@ -308,7 +316,7 @@
                    (let ([line (log-ensure-newline
                                 (log-formatter-format ($log-sink-formatter sink)
                                                       logger-name level timestamp thread source kind payload args))])
-                     (when (> (+ (file-position port) (string-length line)) max-bytes)
+                     (when (> (+ (file-position port) ($string-byte-length line)) max-bytes)
                        (rotate!))
                      (display line port)))
                  (lambda (sink) (flush-output-port port))
