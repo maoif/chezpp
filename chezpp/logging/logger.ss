@@ -22,10 +22,7 @@
           logger-close!
           current-logger
           with-logger
-          logger-dispatch!
-          make-async-logger/internal
-          logger-async-state
-          logger-dispatch-sync!)
+          logger-dispatch!)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp logging level)
@@ -39,7 +36,6 @@
             (mutable filter $logger-filter $logger-filter-set!)
             (mutable error-policy $logger-error-policy $logger-error-policy-set!)
             (mutable closed? $logger-closed? $logger-closed?-set!)
-            (immutable async-state $logger-async-state)
             (immutable lock $logger-lock)))
 
   #|proc:logger?
@@ -48,8 +44,8 @@
   (define logger? $logger?)
 
   (define $make-logger
-    (lambda (name level sinks filter error-policy async-state)
-      (make-$logger name level sinks filter error-policy #f async-state (make-mutex name))))
+    (lambda (name level sinks filter error-policy)
+      (make-$logger name level sinks filter error-policy #f (make-mutex name))))
 
   (define $with-mutex
     (lambda (mtx thunk)
@@ -83,17 +79,12 @@
              (return (void)))
            thunk)))))
 
-  (define logger-async-state
-    (lambda (logger)
-      ($logger-async-state logger)))
-
   (define $logger-snapshot
     (lambda (logger)
       ($with-mutex
        ($logger-lock logger)
        (lambda ()
          (values ($logger-name logger)
-                 ($logger-level logger)
                  (list-copy ($logger-sinks logger))
                  ($logger-filter logger)
                  ($logger-closed? logger))))))
@@ -105,7 +96,7 @@
   (define make-logger
     (lambda (name)
       (pcheck ([log-symbol-or-string? name])
-              ($make-logger name 'info '() #f 'stderr #f))))
+              ($make-logger name 'info '() #f 'stderr))))
 
   #|proc:logger-name
   The `logger-name` procedure returns the name of `logger`.
@@ -254,33 +245,20 @@
               (when (logger-enabled? logger level)
                 (let ([timestamp (log-current-timestamp)]
                       [thread (log-current-thread-id)])
-                  (let-values ([(name threshold sinks filter closed?) ($logger-snapshot logger)])
+                  (let-values ([(name sinks filter closed?) ($logger-snapshot logger)])
                     (unless closed?
                       ($call-with-sink-errors
                        logger
                        (lambda ()
                          (when (or (not filter)
                                    (filter name level timestamp thread source kind payload args))
-                           (if ($logger-async-state logger)
-                               ((vector-ref ($logger-async-state logger) 0)
-                                logger name level timestamp thread source kind payload args sinks)
-                               (for-each
-                                (lambda (sink)
-                                  ($call-with-sink-errors
-                                   logger
-                                   (lambda ()
-                                     (log-sink-write! sink name level timestamp thread source kind payload args))))
-                                sinks))))))))))))
-
-  (define logger-dispatch-sync!
-    (lambda (logger logger-name level timestamp thread source kind payload args sinks)
-      (for-each
-       (lambda (sink)
-         ($call-with-sink-errors
-          logger
-          (lambda ()
-            (log-sink-write! sink logger-name level timestamp thread source kind payload args))))
-       sinks)))
+                           (for-each
+                            (lambda (sink)
+                              ($call-with-sink-errors
+                               logger
+                               (lambda ()
+                                 (log-sink-write! sink name level timestamp thread source kind payload args))))
+                            sinks)))))))))))
 
   #|proc:logger-log
   The `logger-log` procedure logs `message` at `level` through `logger`.
@@ -324,12 +302,10 @@
   (define logger-flush!
     (lambda (logger)
       (pcheck ([logger? logger])
-              (if ($logger-async-state logger)
-                  ((vector-ref ($logger-async-state logger) 1) logger)
-                  (for-each
-                   (lambda (sink)
-                     ($call-with-sink-errors logger (lambda () (log-sink-flush! sink))))
-                   (logger-sinks logger))))))
+              (for-each
+               (lambda (sink)
+                 ($call-with-sink-errors logger (lambda () (log-sink-flush! sink))))
+               (logger-sinks logger)))))
 
   #|proc:logger-close!
   The `logger-close!` procedure flushes and closes every sink attached to
@@ -338,8 +314,6 @@
   (define logger-close!
     (lambda (logger)
       (pcheck ([logger? logger])
-              (when ($logger-async-state logger)
-                ((vector-ref ($logger-async-state logger) 2) logger))
               (let ([sinks
                      ($with-mutex
                       ($logger-lock logger)
@@ -354,15 +328,6 @@
                    (lambda (sink)
                      ($call-with-sink-errors logger (lambda () (log-sink-close! sink))))
                    sinks))))))
-
-  (define make-async-logger/internal
-    (lambda (base async-state)
-      ($make-logger ($logger-name base)
-                    ($logger-level base)
-                    (logger-sinks base)
-                    ($logger-filter base)
-                    ($logger-error-policy base)
-                    async-state)))
 
   (define $default-logger (make-logger 'default))
   (define $current-logger (make-thread-parameter $default-logger))

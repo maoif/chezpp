@@ -4,7 +4,6 @@
           log-false-or-procedure?
           log-false-or-level?
           log-error-policy?
-          log-overflow-policy?
           log-display->string
           log-message->string
           log-ensure-newline
@@ -25,9 +24,6 @@
 
   (define log-error-policy?
     (lambda (x) (and (memq x '(raise stderr ignore)) #t)))
-
-  (define log-overflow-policy?
-    (lambda (x) (and (memq x '(block drop-newest drop-oldest)) #t)))
 
   (define log-display->string
     (lambda (x)

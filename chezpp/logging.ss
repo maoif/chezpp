@@ -6,12 +6,10 @@
           (chezpp logging formatter)
           (chezpp logging sink)
           (chezpp logging logger)
-          (chezpp logging async)
           (chezpp logging macros))
 
   (export (import (chezpp logging level)
                   (chezpp logging formatter)
                   (chezpp logging sink)
                   (chezpp logging logger)
-                  (chezpp logging async)
                   (chezpp logging macros))))
