@@ -233,11 +233,29 @@ association-list filters as `test-select`.
        (test-concrete-case-parameters concrete-case)
        (test-metadata-ref (test-concrete-case-metadata concrete-case) 'source #f))))
 
+  (define $requirement-skip-message
+    (lambda (metadata)
+      (let ([version (test-metadata-ref metadata 'requires-chez-version #f)]
+            [file (test-metadata-ref metadata 'requires-file #f)])
+        (cond
+         [(and version (chez-version<? (chez-version) version))
+          (format "requires Chez >= ~a.~a.~a" (car version) (cadr version) (caddr version))]
+         [(and file (not (file-exists? file)))
+          (format "requires file: ~a" file)]
+         [else #f]))))
+
+  (define $requirement-result
+    (lambda (concrete-case metadata)
+      (let ([message ($requirement-skip-message metadata)])
+        (and message
+             ($case-result concrete-case 'skipped message #f "" "")))))
+
   (define $run-runtime-case
     (lambda (concrete-case config)
       (let* ([metadata (test-concrete-case-metadata concrete-case)]
              [parameters (test-concrete-case-parameters concrete-case)])
         (cond
+         [($requirement-result concrete-case metadata)]
          [($rule-active? metadata 'skip-when parameters)
           ($case-result concrete-case 'skipped ($rule-message metadata 'skip-when) #f "" "")]
          [else
@@ -316,10 +334,11 @@ association-list filters as `test-select`.
 
   (define $run-expand-case
     (lambda (concrete-case config)
-      ($run-with-expected-condition
-       concrete-case
-       (lambda ()
-         (expand (test-descriptor-body (test-concrete-case-descriptor concrete-case)))))))
+      (or ($requirement-result concrete-case (test-concrete-case-metadata concrete-case))
+          ($run-with-expected-condition
+           concrete-case
+           (lambda ()
+             (expand (test-descriptor-body (test-concrete-case-descriptor concrete-case))))))))
 
   (define $compile-temp-path
     (lambda ()
@@ -337,28 +356,29 @@ association-list filters as `test-select`.
 
   (define $run-compile-case
     (lambda (concrete-case config)
-      ($run-with-expected-condition
-       concrete-case
-       (lambda ()
-         (let ([path ($compile-temp-path)])
-           (dynamic-wind
-             (lambda () #f)
-             (lambda ()
-               (call-with-output-file path
-                 (lambda (out)
-                   (for-each
-                    (lambda (form)
-                      (write form out)
-                      (newline out))
-                    (test-descriptor-body (test-concrete-case-descriptor concrete-case))))
-                 'replace)
-               (compile-file path))
-             (lambda ()
-               (when (file-exists? path)
-                 (delete-file path))
-               (let ([output-path ($compile-output-path path)])
-                 (when (file-exists? output-path)
-                   (delete-file output-path))))))))))
+      (or ($requirement-result concrete-case (test-concrete-case-metadata concrete-case))
+          ($run-with-expected-condition
+           concrete-case
+           (lambda ()
+             (let ([path ($compile-temp-path)])
+               (dynamic-wind
+                 (lambda () #f)
+                 (lambda ()
+                   (call-with-output-file path
+                     (lambda (out)
+                       (for-each
+                        (lambda (form)
+                          (write form out)
+                          (newline out))
+                        (test-descriptor-body (test-concrete-case-descriptor concrete-case))))
+                     'replace)
+                   (compile-file path))
+                 (lambda ()
+                   (when (file-exists? path)
+                     (delete-file path))
+                   (let ([output-path ($compile-output-path path)])
+                     (when (file-exists? output-path)
+                       (delete-file output-path)))))))))))
 
   (define $run-concrete-case
     (lambda (concrete-case config)

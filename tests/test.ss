@@ -242,3 +242,26 @@
     (let ([datum (read (open-input-string (get-output-string out)))])
       (and (pair? datum)
            (eq? (car datum) 'test-summary)))))
+
+(test-clear-registry! (current-test-registry))
+
+(test-case requirement/chez-version-pass
+  :requires-chez-version (0 0 0)
+  (test-true #t))
+
+(test-case requirement/chez-version-skip
+  :requires-chez-version (999 0 0)
+  (test-fail "must be skipped"))
+
+(test-case requirement/file-pass
+  :requires-file "test.ss"
+  (test-true #t))
+
+(test-case requirement/file-skip
+  :requires-file "missing-chezpp-test-file"
+  (test-fail "must be skipped"))
+
+(mat test-requirement-configs
+  (let ([results (test-run-registry (current-test-registry) (test-silent-config))])
+    (equal? (map test-result-status results)
+            '(passed skipped passed skipped))))

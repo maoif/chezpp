@@ -28,6 +28,7 @@
               (case (syntax->datum key)
                 [(:tags :parameterize :skip :xfail :xfail-strict :capture :stdout :stderr :output :raises)
                  1]
+                [(:requires-chez-version :requires-file) 1]
                 [(:skip-when :only-when :xfail-when) 2]
                 [else (syntax-error key "unknown test option")])))
           (define take
@@ -103,6 +104,17 @@
                  (if (identifier? mode)
                      #`(cons 'capture '#,mode)
                      #`(cons 'capture #,mode)))]
+              [(:requires-chez-version)
+               (unless (= (length rest) 1)
+                 (syntax-error key ":requires-chez-version expects one version list"))
+               (syntax-case (car rest) ()
+                 [(major minor patch)
+                  #'(cons 'requires-chez-version (list major minor patch))]
+                 [_ (syntax-error (car rest) "invalid :requires-chez-version form")])]
+              [(:requires-file)
+               (unless (= (length rest) 1)
+                 (syntax-error key ":requires-file expects one path"))
+               #`(cons 'requires-file #,(car rest))]
               [else (syntax-error key "unknown test option")]))))
       (define build-metadata
         (lambda (options)
