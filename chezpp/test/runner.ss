@@ -1,8 +1,10 @@
 #!chezscheme
 (library (chezpp test runner)
-  (export test-expand-parameters test-list test-select)
+  (export test-expand-parameters test-list test-select
+          test-run test-run-registry)
   (import (chezpp chez)
           (chezpp utils)
+          (chezpp test assertion)
           (chezpp test private common)
           (chezpp test descriptor))
 
@@ -179,5 +181,126 @@ association-list filters as `test-select`.
     (lambda (registry selectors)
       (pcheck ([test-registry? registry] [$test-selectors? selectors])
               (test-select registry selectors))))
+
+  (define $body-accepts-parameters?
+    (lambda (body)
+      (let ([arity (procedure-arity body)])
+        (cond
+         [(eq? arity #f) #t]
+         [(integer? arity) (not (fx= arity 0))]
+         [(list? arity) (or (memq 1 arity)
+                            (exists (lambda (entry)
+                                      (and (pair? entry)
+                                           (<= (car entry) 1)))
+                                    arity))]
+         [else #t]))))
+
+  (define $call-body
+    (lambda (body parameters)
+      (if ($body-accepts-parameters? body)
+          (body parameters)
+          (body))))
+
+  (define $rule-active?
+    (lambda (metadata key parameters)
+      (let ([rule (test-metadata-ref metadata key #f)])
+        (and rule
+             (let ([predicate (car rule)])
+               ;; Macro-generated metadata stores procedures directly, but
+               ;; low-level tests may use quoted lambda data.
+               ((if (procedure? predicate)
+                    predicate
+                    (eval predicate (environment '(chezscheme))))
+                parameters))))))
+
+  (define $rule-message
+    (lambda (metadata key)
+      (let ([rule (test-metadata-ref metadata key #f)])
+        (if rule (cdr rule) ""))))
+
+  (define $case-result
+    (lambda (concrete-case status message condition stdout stderr)
+      (make-test-result
+       (test-concrete-case-id concrete-case)
+       (test-concrete-case-name concrete-case)
+       status
+       message
+       condition
+       stdout
+       stderr
+       (test-concrete-case-parameters concrete-case)
+       (test-metadata-ref (test-concrete-case-metadata concrete-case) 'source #f))))
+
+  (define $run-runtime-case
+    (lambda (concrete-case config)
+      (let* ([metadata (test-concrete-case-metadata concrete-case)]
+             [parameters (test-concrete-case-parameters concrete-case)])
+        (cond
+         [($rule-active? metadata 'skip-when parameters)
+          ($case-result concrete-case 'skipped ($rule-message metadata 'skip-when) #f "" "")]
+         [else
+          (let ([xfail? ($rule-active? metadata 'xfail-when parameters)]
+                [xfail-message ($rule-message metadata 'xfail-when)])
+            (guard (condition
+                    [(test-failure? condition)
+                     (if xfail?
+                         ($case-result concrete-case 'xfail xfail-message condition "" "")
+                         ($case-result concrete-case 'failed
+                                       (test-failure-message condition)
+                                       condition
+                                       ""
+                                       ""))]
+                    [else
+                     (if xfail?
+                         ($case-result concrete-case 'xfail xfail-message condition "" "")
+                         ($case-result concrete-case 'errored
+                                       "unexpected condition"
+                                       condition
+                                       ""
+                                       ""))])
+              ($call-body
+               (test-descriptor-body (test-concrete-case-descriptor concrete-case))
+               parameters)
+              (if xfail?
+                  ($case-result concrete-case 'xpass xfail-message #f "" "")
+                  ($case-result concrete-case 'passed "" #f "" ""))))]))))
+
+  (define $run-concrete-case
+    (lambda (concrete-case config)
+      (case (test-descriptor-phase (test-concrete-case-descriptor concrete-case))
+        [(runtime) ($run-runtime-case concrete-case config)]
+        [else ($case-result concrete-case 'errored "unsupported test phase" #f "" "")])))
+
+  (define $stop-after-result?
+    (lambda (config result)
+      (and (test-config-stop-on-failure? config)
+           (memq (test-result-status result) '(failed errored xpass)))))
+
+  #|proc:test-run
+The `test-run` procedure executes test `descriptors` using runner `config` and
+returns a list of test result records.
+|#
+  (define test-run
+    (lambda (descriptors config)
+      (pcheck ([list? descriptors] [test-config? config])
+              (unless (andmap test-descriptor? descriptors)
+                (errorf 'test-run "descriptors must all be test descriptors: ~a" descriptors))
+              (let ([cases ($append-map test-expand-parameters descriptors)])
+                (let loop ([cases cases] [out '()])
+                  (if (null? cases)
+                      (reverse out)
+                      (let ([result ($run-concrete-case (car cases) config)])
+                        (if ($stop-after-result? config result)
+                            (reverse (cons result out))
+                            (loop (cdr cases) (cons result out))))))))))
+
+  #|proc:test-run-registry
+The `test-run-registry` procedure executes every descriptor registered in
+`registry` using runner `config` and returns a list of test result records.
+|#
+  (define test-run-registry
+    (lambda (registry config)
+      (pcheck ([test-registry? registry] [test-config? config])
+              (test-run (test-registry-descriptors registry) config))))
 
   )

@@ -104,3 +104,48 @@
     (test-register! registry (make-test-case 'beta/two (lambda () #t) '((tags . (slow)))))
     (equal? (map test-concrete-case-name (test-select registry '((include-tags . (slow)))))
             '(beta/two))))
+
+(define test-silent-config
+  (lambda ()
+    (test-config-with (default-test-config)
+      '((reporter . #f)
+        (output . #f)
+        (color . never)))))
+
+(mat test-runtime-runner
+  (let* ([descriptor (make-test-case 'pass (lambda () (test-true #t)) '())]
+         [results (test-run (list descriptor) (test-silent-config))])
+    (and (= (length results) 1)
+         (eq? (test-result-status (car results)) 'passed)))
+  (let* ([descriptor (make-test-case 'fail (lambda () (test-equal 1 2)) '())]
+         [results (test-run (list descriptor) (test-silent-config))])
+    (and (= (length results) 1)
+         (eq? (test-result-status (car results)) 'failed)
+         (test-failure? (test-result-condition (car results)))))
+  (let* ([descriptor (make-test-case 'error (lambda () (error 'boom "bad")) '())]
+         [results (test-run (list descriptor) (test-silent-config))])
+    (and (= (length results) 1)
+         (eq? (test-result-status (car results)) 'errored)))
+  (let* ([descriptor (make-test-case 'skip (lambda () (test-fail "must not run"))
+                                     '((skip-when . ((lambda (params) #t) . "disabled"))))]
+         [results (test-run (list descriptor) (test-silent-config))])
+    (and (= (length results) 1)
+         (eq? (test-result-status (car results)) 'skipped)))
+  (let* ([descriptor (make-test-case 'xfail (lambda () (test-equal 1 2))
+                                     '((xfail-when . ((lambda (params) #t) . "known bug"))))]
+         [results (test-run (list descriptor) (test-silent-config))])
+    (and (= (length results) 1)
+         (eq? (test-result-status (car results)) 'xfail)))
+  (let* ([descriptor (make-test-case 'xpass (lambda () (test-true #t))
+                                     '((xfail-when . ((lambda (params) #t) . "known bug"))))]
+         [results (test-run (list descriptor) (test-silent-config))])
+    (and (= (length results) 1)
+         (eq? (test-result-status (car results)) 'xpass)))
+  (let* ([descriptor (make-test-case 'param-pass
+                       (lambda (params)
+                         (test-= (cdr (assq 'expected params))
+                                 (+ (cdr (assq 'x params)) 1)))
+                       '((parameterize . (((x expected) (1 2) (2 3))))))]
+         [results (test-run (list descriptor) (test-silent-config))])
+    (and (= (length results) 2)
+         (andmap (lambda (result) (eq? (test-result-status result) 'passed)) results))))
