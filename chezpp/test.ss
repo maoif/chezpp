@@ -28,9 +28,11 @@
           test-assert test-assert-equal test-assert-raises
           test-assert-not-raises
           test-true test-false test-eq test-eqv test-equal test-=
-          test-pred test-raises test-not-raises test-fail)
+          test-pred test-raises test-not-raises test-fail
+          test-capture-ports)
   (import (chezpp chez)
           (chezpp test private common)
           (chezpp test assertion)
+          (chezpp test capture)
           (chezpp test descriptor)
           (chezpp test runner)))

@@ -5,6 +5,7 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp test assertion)
+          (chezpp test capture)
           (chezpp test private common)
           (chezpp test descriptor))
 
@@ -258,12 +259,26 @@ association-list filters as `test-select`.
                                        condition
                                        ""
                                        ""))])
-              ($call-body
-               (test-descriptor-body (test-concrete-case-descriptor concrete-case))
-               parameters)
-              (if xfail?
-                  ($case-result concrete-case 'xpass xfail-message #f "" "")
-                  ($case-result concrete-case 'passed "" #f "" ""))))]))))
+              (let ([capture-mode (test-metadata-ref metadata 'capture #f)]
+                    [body (lambda ()
+                            ($call-body
+                             (test-descriptor-body (test-concrete-case-descriptor concrete-case))
+                             parameters))])
+                (if capture-mode
+                    (call-with-values
+                      (lambda ()
+                        (test-capture-ports capture-mode body))
+                      (lambda (values-list stdout stderr)
+                        (test-check-output-expectations metadata stdout stderr)
+                        (if xfail?
+                            ($case-result concrete-case 'xpass xfail-message #f stdout stderr)
+                            ($case-result concrete-case 'passed "" #f stdout stderr))))
+                    (begin
+                      (body)
+                      (test-check-output-expectations metadata "" "")
+                      (if xfail?
+                          ($case-result concrete-case 'xpass xfail-message #f "" "")
+                          ($case-result concrete-case 'passed "" #f "" "")))))))]))))
 
   (define $run-concrete-case
     (lambda (concrete-case config)

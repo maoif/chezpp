@@ -149,3 +149,27 @@
          [results (test-run (list descriptor) (test-silent-config))])
     (and (= (length results) 2)
          (andmap (lambda (result) (eq? (test-result-status result) 'passed)) results))))
+
+(mat test-output-capture
+  (call-with-values
+    (lambda ()
+      (test-capture-ports
+       '(stdout stderr)
+       (lambda ()
+         (display "hello")
+         (display "bad" (current-error-port)))))
+    (lambda (values stdout stderr)
+      (and (equal? stdout "hello")
+           (equal? stderr "bad"))))
+  (let* ([descriptor (make-test-case 'stdout
+                       (lambda () (display "hello\n"))
+                       '((capture . stdout) (stdout . "hello\n")))]
+         [result (car (test-run (list descriptor) (test-silent-config)))])
+    (and (eq? (test-result-status result) 'passed)
+         (equal? (test-result-stdout result) "hello\n")))
+  (let* ([descriptor (make-test-case 'stdout-fail
+                       (lambda () (display "actual\n"))
+                       '((capture . stdout) (stdout . "expected\n")))]
+         [result (car (test-run (list descriptor) (test-silent-config)))])
+    (and (eq? (test-result-status result) 'failed)
+         (test-failure? (test-result-condition result)))))
