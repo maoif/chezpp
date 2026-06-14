@@ -1,7 +1,7 @@
 #!chezscheme
 (library (chezpp test runner)
   (export test-expand-parameters test-list test-select
-          test-run test-run-registry)
+          test-run test-run-registry test-run-files)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp test assertion)
@@ -486,5 +486,23 @@ The `test-run-registry` procedure executes every descriptor registered in
     (lambda (registry config)
       (pcheck ([test-registry? registry] [test-config? config])
               (test-run (test-registry-descriptors registry) config))))
+
+  #|proc:test-run-files
+The `test-run-files` procedure loads each path in `paths`, collects tests
+registered in a fresh registry, and executes them with `config`. `paths` is a
+list of file path strings, and `config` is a test runner configuration.
+|#
+  (define test-run-files
+    (lambda (paths config)
+      (pcheck ([list? paths] [test-config? config])
+              (let ([registry (make-test-registry)])
+                (parameterize ([current-test-registry registry])
+                  (for-each
+                   (lambda (path)
+                     (unless (string? path)
+                       (errorf 'test-run-files "path is not a string: ~a" path))
+                     (load path))
+                   paths)
+                  (test-run-registry registry config))))))
 
   )

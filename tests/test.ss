@@ -326,3 +326,24 @@
                  (test-summarize
                   (list (make-test-result 'a 'a 'passed "" #f "" "" '() #f))))
     (> (string-length (get-output-string out)) 0)))
+
+(define test-write-file
+  (lambda (path text)
+    (call-with-output-file path
+      (lambda (out) (display text out))
+      'replace)))
+
+(mat test-run-files
+  (let ([path "tmp-chezpp-test-run-file.ss"])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (test-write-file
+         path
+         "(import (chezpp) (chezpp test))\n(test-clear-registry! (current-test-registry))\n(test-case loaded (test-true #t))\n")
+        (let ([results (test-run-files (list path) (test-silent-config))])
+          (and (= (length results) 1)
+               (eq? (test-result-status (car results)) 'passed))))
+      (lambda ()
+        (when (file-exists? path)
+          (delete-file path))))))
