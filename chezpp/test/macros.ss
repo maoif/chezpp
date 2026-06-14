@@ -29,7 +29,7 @@
                 [(:tags :parameterize :skip :xfail :xfail-strict :capture :stdout :stderr :output :raises)
                  1]
                 [(:requires-chez-version :requires-file) 1]
-                [(:fixture :before :after) 1]
+                [(:fixture :before :after :condition-handler :warnings) 1]
                 [(:skip-when :only-when :xfail-when) 2]
                 [else (syntax-error key "unknown test option")])))
           (define take
@@ -123,9 +123,9 @@
                  [([name expr] ...)
                   #'(cons 'fixtures (list (cons 'name (lambda () expr)) ...))]
                  [_ (syntax-error (car rest) "invalid :fixture binding list")])]
-              [(:before :after)
+              [(:before :after :condition-handler :warnings)
                (unless (= (length rest) 1)
-                 (syntax-error key "test lifecycle option expects one procedure"))
+                 (syntax-error key "test option expects one expression"))
                #`(cons '#,(datum->syntax key (keyword->option-name datum)) #,(car rest))]
               [else (syntax-error key "unknown test option")]))))
       (define build-metadata

@@ -292,3 +292,22 @@
     (and (equal? (map test-result-status results) '(passed failed))
          (if (memq 'after test-fixture-log) #t #f)
          (if (memq 'after-fail test-fixture-log) #t #f))))
+
+(test-clear-registry! (current-test-registry))
+
+(test-case condition/custom-handler
+  :condition-handler
+  (lambda (condition)
+    (if (message-condition? condition)
+        'handled
+        'unhandled))
+  (raise (condition (make-message-condition "handled by test"))))
+
+(test-case condition/warning-as-error
+  :warnings 'error
+  (warningf 'condition/warning-as-error "warning should fail this test"))
+
+(mat test-condition-policies
+  (let ([results (test-run-registry (current-test-registry) (test-silent-config))])
+    (equal? (map test-result-status results)
+            '(passed failed))))

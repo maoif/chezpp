@@ -259,6 +259,41 @@ association-list filters as `test-select`.
        (test-concrete-case-parameters concrete-case)
        (test-metadata-ref (test-concrete-case-metadata concrete-case) 'source #f))))
 
+  (define $classify-condition
+    (lambda (metadata condition)
+      (let ([handler (test-metadata-ref metadata 'condition-handler #f)]
+            [warnings (test-metadata-ref metadata 'warnings 'allow)])
+        (cond
+         [handler
+          (case (handler condition)
+            [(handled) 'passed]
+            [(failed) 'failed]
+            [else 'errored])]
+         [(and (warning? condition) (eq? warnings 'error)) 'failed]
+         [(warning? condition) 'passed]
+         [(test-failure? condition) 'failed]
+         [else 'errored]))))
+
+  (define $condition-message
+    (lambda (status condition)
+      (cond
+       [(test-failure? condition) (test-failure-message condition)]
+       [(eq? status 'errored) "unexpected condition"]
+       [else ""])))
+
+  (define $condition-result
+    (lambda (concrete-case metadata condition xfail? xfail-message stdout stderr)
+      (let ([status ($classify-condition metadata condition)])
+        (cond
+         [xfail? ($case-result concrete-case 'xfail xfail-message condition stdout stderr)]
+         [else
+          ($case-result concrete-case
+                        status
+                        ($condition-message status condition)
+                        condition
+                        stdout
+                        stderr)]))))
+
   (define $requirement-skip-message
     (lambda (metadata)
       (let ([version (test-metadata-ref metadata 'requires-chez-version #f)]
@@ -288,22 +323,14 @@ association-list filters as `test-select`.
           (let ([xfail? ($rule-active? metadata 'xfail-when parameters)]
                 [xfail-message ($rule-message metadata 'xfail-when)])
             (guard (condition
-                    [(test-failure? condition)
-                     (if xfail?
-                         ($case-result concrete-case 'xfail xfail-message condition "" "")
-                         ($case-result concrete-case 'failed
-                                       (test-failure-message condition)
-                                       condition
-                                       ""
-                                       ""))]
                     [else
-                     (if xfail?
-                         ($case-result concrete-case 'xfail xfail-message condition "" "")
-                         ($case-result concrete-case 'errored
-                                       "unexpected condition"
-                                       condition
-                                       ""
-                                       ""))])
+                     ($condition-result concrete-case
+                                        metadata
+                                        condition
+                                        xfail?
+                                        xfail-message
+                                        ""
+                                        "")])
               (let ([capture-mode (test-metadata-ref metadata 'capture #f)]
                     [body (lambda ()
                             ($run-body-with-fixtures
@@ -344,18 +371,24 @@ association-list filters as `test-select`.
                     [else
                      (if (predicate condition)
                          ($case-result concrete-case 'passed "" condition "" "")
-                         ($case-result concrete-case 'failed "unexpected condition" condition "" ""))])
+                         ($condition-result concrete-case
+                                            metadata
+                                            condition
+                                            #f
+                                            ""
+                                            ""
+                                            ""))])
               (thunk)
               ($case-result concrete-case 'failed "expected condition was not raised" #f "" ""))
             (guard (condition
-                    [(test-failure? condition)
-                     ($case-result concrete-case 'failed
-                                   (test-failure-message condition)
-                                   condition
-                                   ""
-                                   "")]
                     [else
-                     ($case-result concrete-case 'errored "unexpected condition" condition "" "")])
+                     ($condition-result concrete-case
+                                        metadata
+                                        condition
+                                        #f
+                                        ""
+                                        ""
+                                        "")])
               (thunk)
               ($case-result concrete-case 'passed "" #f "" ""))))))
 
