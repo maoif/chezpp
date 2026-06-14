@@ -43,6 +43,11 @@
   (begin (test-pred string? "abc") #t)
   ;; Negative assertion test: failing truth assertion raises a framework failure.
   (test-failure? (guard (c [else c]) (test-true #f)))
+  ;; Negative assertion test: framework failures also carry a standard message condition.
+  (let ([condition (guard (c [else c]) (test-true #f))])
+    (and (test-failure? condition)
+         (message-condition? condition)
+         (equal? (condition-message condition) "expected true value")))
   ;; Negative assertion test: mismatched expected and actual values are recorded.
   (let ([condition (guard (c [else c]) (test-equal '(1) '(2)))])
     (and (test-failure? condition)

@@ -64,7 +64,8 @@ recorded for diagnostics.
   (define make-test-failure
     (lambda (message expected actual)
       (pcheck ([string? message])
-              (%make-test-failure message expected actual))))
+              (condition (%make-test-failure message expected actual)
+                         (make-message-condition message)))))
 
   #|proc:test-fail
 The `test-fail` procedure raises a framework assertion failure. `message` is a
