@@ -19,7 +19,7 @@
           test-result-stderr test-result-parameters test-result-source
           make-test-summary test-summary-total test-summary-passed
           test-summary-failed test-summary-errored test-summary-skipped
-          test-summary-xfail test-summary-xpass)
+          test-summary-xfail test-summary-xpass test-summary-results)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp test private common))
@@ -40,7 +40,7 @@
     (fields id name status message condition stdout stderr parameters source))
 
   (define-record-type ($test-summary $make-test-summary $test-summary?)
-    (fields total passed failed errored skipped xfail xpass))
+    (fields total passed failed errored skipped xfail xpass results))
 
   (define $descriptor-kind?
     (lambda (kind)
@@ -53,6 +53,10 @@
   (define $color-option?
     (lambda (color)
       (and (memq color '(auto always never)) #t)))
+
+  (define $test-id?
+    (lambda (value)
+      (or (natural? value) (symbol? value) (string? value))))
 
   (define $all-descriptors?
     (lambda (value)
@@ -454,7 +458,7 @@ message or `#f`, `condition` is the captured condition or `#f`, `stdout` and
 |#
   (define make-test-result
     (lambda (id name status message condition stdout stderr parameters source)
-      (pcheck ([natural? id] [symbol? name] [$result-status? status]
+      (pcheck ([$test-id? id] [symbol? name] [$result-status? status]
                [(lambda (value) (or (string? value) (not value))) message]
                [string? stdout stderr] [list? parameters])
               ($make-test-result id name status message condition stdout stderr parameters source))))
@@ -545,9 +549,12 @@ The `make-test-summary` procedure creates a summary from natural-number counts:
 `total`, `passed`, `failed`, `errored`, `skipped`, `xfail`, and `xpass`.
 |#
   (define make-test-summary
-    (lambda (total passed failed errored skipped xfail xpass)
-      (pcheck ([natural? total passed failed errored skipped xfail xpass])
-              ($make-test-summary total passed failed errored skipped xfail xpass))))
+    (case-lambda
+      [(total passed failed errored skipped xfail xpass)
+       (make-test-summary total passed failed errored skipped xfail xpass '())]
+      [(total passed failed errored skipped xfail xpass results)
+       (pcheck ([natural? total passed failed errored skipped xfail xpass] [list? results])
+               ($make-test-summary total passed failed errored skipped xfail xpass results))]))
 
   #|proc:test-summary-total
 The `test-summary-total` procedure returns the total test count stored in
@@ -611,5 +618,14 @@ The `test-summary-xpass` procedure returns the unexpected-pass count stored in
     (lambda (summary)
       (pcheck ([test-summary? summary])
               ($test-summary-xpass summary))))
+
+  #|proc:test-summary-results
+The `test-summary-results` procedure returns the result records stored in
+`summary`.
+|#
+  (define test-summary-results
+    (lambda (summary)
+      (pcheck ([test-summary? summary])
+              ($test-summary-results summary))))
 
   )

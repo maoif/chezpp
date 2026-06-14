@@ -7,7 +7,8 @@
           (chezpp test assertion)
           (chezpp test capture)
           (chezpp test private common)
-          (chezpp test descriptor))
+          (chezpp test descriptor)
+          (chezpp test reporter))
 
   (define $metadata-merge
     (lambda (parent child)
@@ -381,14 +382,21 @@ returns a list of test result records.
       (pcheck ([list? descriptors] [test-config? config])
               (unless (andmap test-descriptor? descriptors)
                 (errorf 'test-run "descriptors must all be test descriptors: ~a" descriptors))
-              (let ([cases ($append-map test-expand-parameters descriptors)])
-                (let loop ([cases cases] [out '()])
-                  (if (null? cases)
-                      (reverse out)
-                      (let ([result ($run-concrete-case (car cases) config)])
-                        (if ($stop-after-result? config result)
-                            (reverse (cons result out))
-                            (loop (cdr cases) (cons result out))))))))))
+              (let* ([cases ($append-map test-expand-parameters descriptors)]
+                     [results
+                      (let loop ([cases cases] [out '()])
+                        (if (null? cases)
+                            (reverse out)
+                            (let ([result ($run-concrete-case (car cases) config)])
+                              (if ($stop-after-result? config result)
+                                  (reverse (cons result out))
+                                  (loop (cdr cases) (cons result out))))))])
+                (when (and (test-config-reporter config)
+                           (test-config-output config))
+                  (test-report (test-config-reporter config)
+                               (test-config-output config)
+                               (test-summarize results)))
+                results))))
 
   #|proc:test-run-registry
 The `test-run-registry` procedure executes every descriptor registered in

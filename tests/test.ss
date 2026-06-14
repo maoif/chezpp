@@ -220,3 +220,25 @@
   (let ([selected (test-select (current-test-registry) '((include-tags . (suite-tag))))])
     (and (= (length selected) 1)
          (eq? (test-concrete-case-name (car selected)) 'suite-child))))
+
+(mat test-reporters
+  (let* ([results (list (make-test-result 'a 'a 'passed "" #f "" "" '() #f)
+                        (make-test-result 'b 'b 'failed "bad" #f "" "" '() #f))]
+         [summary (test-summarize results)])
+    (and (= (test-summary-total summary) 2)
+         (= (test-summary-passed summary) 1)
+         (= (test-summary-failed summary) 1)))
+  (let ([out (open-output-string)])
+    (test-report (test-text-reporter) out
+                 (test-summarize
+                  (list (make-test-result 'a 'a 'passed "" #f "" "" '() #f))))
+    (let ([text (get-output-string out)])
+      (and (string? text)
+           (> (string-length text) 0))))
+  (let ([out (open-output-string)])
+    (test-report (test-datum-reporter) out
+                 (test-summarize
+                  (list (make-test-result 'a 'a 'passed "" #f "" "" '() #f))))
+    (let ([datum (read (open-input-string (get-output-string out)))])
+      (and (pair? datum)
+           (eq? (car datum) 'test-summary)))))
