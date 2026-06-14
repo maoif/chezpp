@@ -173,3 +173,21 @@
          [result (car (test-run (list descriptor) (test-silent-config)))])
     (and (eq? (test-result-status result) 'failed)
          (test-failure? (test-result-condition result)))))
+
+(mat test-expand-and-compile-runner
+  (let* ([descriptor (make-test-expand 'expand-ok '(+ 1 2) '())]
+         [result (car (test-run (list descriptor) (test-silent-config)))])
+    (eq? (test-result-status result) 'passed))
+  (let* ([descriptor (make-test-expand 'expand-bad
+                       '(let ([x 1] [x 2]) x)
+                       '((raises . syntax-violation?)))]
+         [result (car (test-run (list descriptor) (test-silent-config)))])
+    (eq? (test-result-status result) 'passed))
+  (let* ([descriptor (make-test-compile 'compile-ok '((define x 1) (+ x 2)) '())]
+         [result (car (test-run (list descriptor) (test-silent-config)))])
+    (eq? (test-result-status result) 'passed))
+  (let* ([descriptor (make-test-compile 'compile-bad
+                       '((let ([x 1] [x 2]) x))
+                       '((raises . syntax-violation?)))]
+         [result (car (test-run (list descriptor) (test-silent-config)))])
+    (eq? (test-result-status result) 'passed)))

@@ -280,10 +280,80 @@ association-list filters as `test-select`.
                           ($case-result concrete-case 'xpass xfail-message #f "" "")
                           ($case-result concrete-case 'passed "" #f "" "")))))))]))))
 
+  (define $expected-condition-predicate
+    (lambda (metadata)
+      (let ([predicate (test-metadata-ref metadata 'raises #f)])
+        (cond
+         [(procedure? predicate) predicate]
+         [(symbol? predicate) (eval predicate (environment '(chezscheme)))]
+         [predicate (eval predicate (environment '(chezscheme)))]
+         [else #f]))))
+
+  (define $run-with-expected-condition
+    (lambda (concrete-case thunk)
+      (let* ([metadata (test-concrete-case-metadata concrete-case)]
+             [predicate ($expected-condition-predicate metadata)])
+        (if predicate
+            (guard (condition
+                    [else
+                     (if (predicate condition)
+                         ($case-result concrete-case 'passed "" condition "" "")
+                         ($case-result concrete-case 'failed "unexpected condition" condition "" ""))])
+              (thunk)
+              ($case-result concrete-case 'failed "expected condition was not raised" #f "" ""))
+            (guard (condition
+                    [(test-failure? condition)
+                     ($case-result concrete-case 'failed
+                                   (test-failure-message condition)
+                                   condition
+                                   ""
+                                   "")]
+                    [else
+                     ($case-result concrete-case 'errored "unexpected condition" condition "" "")])
+              (thunk)
+              ($case-result concrete-case 'passed "" #f "" ""))))))
+
+  (define $run-expand-case
+    (lambda (concrete-case config)
+      ($run-with-expected-condition
+       concrete-case
+       (lambda ()
+         (expand (test-descriptor-body (test-concrete-case-descriptor concrete-case)))))))
+
+  (define $compile-temp-path
+    (lambda ()
+      (format "test-compile-~a-~a.ss"
+              (random 1000000)
+              (time-nanosecond (current-time)))))
+
+  (define $run-compile-case
+    (lambda (concrete-case config)
+      ($run-with-expected-condition
+       concrete-case
+       (lambda ()
+         (let ([path ($compile-temp-path)])
+           (dynamic-wind
+             (lambda () #f)
+             (lambda ()
+               (call-with-output-file path
+                 (lambda (out)
+                   (for-each
+                    (lambda (form)
+                      (write form out)
+                      (newline out))
+                    (test-descriptor-body (test-concrete-case-descriptor concrete-case))))
+                 'replace)
+               (compile-file path))
+             (lambda ()
+               (when (file-exists? path)
+                 (delete-file path)))))))))
+
   (define $run-concrete-case
     (lambda (concrete-case config)
       (case (test-descriptor-phase (test-concrete-case-descriptor concrete-case))
         [(runtime) ($run-runtime-case concrete-case config)]
+        [(expand) ($run-expand-case concrete-case config)]
+        [(compile) ($run-compile-case concrete-case config)]
         [else ($case-result concrete-case 'errored "unsupported test phase" #f "" "")])))
 
   (define $stop-after-result?
