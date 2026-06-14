@@ -29,6 +29,7 @@
                 [(:tags :parameterize :skip :xfail :xfail-strict :capture :stdout :stderr :output :raises)
                  1]
                 [(:requires-chez-version :requires-file) 1]
+                [(:fixture :before :after) 1]
                 [(:skip-when :only-when :xfail-when) 2]
                 [else (syntax-error key "unknown test option")])))
           (define take
@@ -115,6 +116,17 @@
                (unless (= (length rest) 1)
                  (syntax-error key ":requires-file expects one path"))
                #`(cons 'requires-file #,(car rest))]
+              [(:fixture)
+               (unless (= (length rest) 1)
+                 (syntax-error key ":fixture expects one fixture binding list"))
+               (syntax-case (car rest) ()
+                 [([name expr] ...)
+                  #'(cons 'fixtures (list (cons 'name (lambda () expr)) ...))]
+                 [_ (syntax-error (car rest) "invalid :fixture binding list")])]
+              [(:before :after)
+               (unless (= (length rest) 1)
+                 (syntax-error key "test lifecycle option expects one procedure"))
+               #`(cons '#,(datum->syntax key (keyword->option-name datum)) #,(car rest))]
               [else (syntax-error key "unknown test option")]))))
       (define build-metadata
         (lambda (options)
@@ -129,6 +141,17 @@
              [(eq? (syntax->datum (caar options)) ':parameterize)
               (syntax-case (cadar options) ()
                 [([name ...] row ...)
+                 (loop (cdr options) (append (reverse #'(name ...)) out))]
+                [_ (loop (cdr options) out)])]
+             [else (loop (cdr options) out)]))))
+      (define fixture-names
+        (lambda (options)
+          (let loop ([options options] [out '()])
+            (cond
+             [(null? options) (reverse out)]
+             [(eq? (syntax->datum (caar options)) ':fixture)
+              (syntax-case (cadar options) ()
+                [([name expr] ...)
                  (loop (cdr options) (append (reverse #'(name ...)) out))]
                 [_ (loop (cdr options) out)])]
              [else (loop (cdr options) out)]))))
@@ -159,7 +182,9 @@
                          (make-test-case
                           'name
                           (lambda (params)
-                            #,(build-bindings (parameter-names options) body))
+                            #,(build-bindings
+                               (append (parameter-names options) (fixture-names options))
+                               body))
                           #,metadata)])
                     (test-register! (current-test-registry) descriptor)
                     descriptor)]

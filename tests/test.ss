@@ -265,3 +265,30 @@
   (let ([results (test-run-registry (current-test-registry) (test-silent-config))])
     (equal? (map test-result-status results)
             '(passed skipped passed skipped))))
+
+(define test-fixture-log '())
+
+(define test-record-fixture-event!
+  (lambda (event)
+    (set! test-fixture-log (cons event test-fixture-log))))
+
+(test-clear-registry! (current-test-registry))
+
+(test-case fixture/basic
+  :fixture ([value (begin (test-record-fixture-event! 'setup) 41)])
+  :after (lambda (params) (test-record-fixture-event! 'after))
+  (test-= 42 (+ value 1)))
+
+(test-case fixture/cleanup-on-failure
+  :fixture ([value (begin (test-record-fixture-event! 'setup-fail) 1)])
+  :after (lambda (params) (test-record-fixture-event! 'after-fail))
+  (test-equal 'expected value))
+
+(mat test-fixtures
+  (begin
+    (set! test-fixture-log '())
+    #t)
+  (let ([results (test-run-registry (current-test-registry) (test-silent-config))])
+    (and (equal? (map test-result-status results) '(passed failed))
+         (if (memq 'after test-fixture-log) #t #f)
+         (if (memq 'after-fail test-fixture-log) #t #f))))

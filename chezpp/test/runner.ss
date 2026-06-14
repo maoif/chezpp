@@ -220,6 +220,32 @@ association-list filters as `test-select`.
       (let ([rule (test-metadata-ref metadata key #f)])
         (if rule (cdr rule) ""))))
 
+  (define $setup-fixtures
+    (lambda (metadata)
+      (map (lambda (fixture)
+             (cons (car fixture) ((cdr fixture))))
+           (test-metadata-ref metadata 'fixtures '()))))
+
+  (define $teardown-fixtures
+    (lambda (metadata fixture-values)
+      (let ([after (test-metadata-ref metadata 'after #f)])
+        (when after
+          (after fixture-values)))))
+
+  (define $run-body-with-fixtures
+    (lambda (metadata body parameters)
+      (let ([fixture-values '()])
+        (dynamic-wind
+          (lambda ()
+            (set! fixture-values ($setup-fixtures metadata))
+            (let ([before (test-metadata-ref metadata 'before #f)])
+              (when before
+                (before fixture-values))))
+          (lambda ()
+            ($call-body body (append fixture-values parameters)))
+          (lambda ()
+            ($teardown-fixtures metadata fixture-values))))))
+
   (define $case-result
     (lambda (concrete-case status message condition stdout stderr)
       (make-test-result
@@ -280,7 +306,8 @@ association-list filters as `test-select`.
                                        ""))])
               (let ([capture-mode (test-metadata-ref metadata 'capture #f)]
                     [body (lambda ()
-                            ($call-body
+                            ($run-body-with-fixtures
+                             metadata
                              (test-descriptor-body (test-concrete-case-descriptor concrete-case))
                              parameters))])
                 (if capture-mode
