@@ -191,3 +191,32 @@
                        '((raises . syntax-violation?)))]
          [result (car (test-run (list descriptor) (test-silent-config)))])
     (eq? (test-result-status result) 'passed)))
+
+(test-clear-registry! (current-test-registry))
+
+(test-case macro/runtime-pass
+  :tags (macro fast)
+  :parameterize ([x expected]
+                 [1 2]
+                 [2 3])
+  (test-= expected (+ x 1)))
+
+(test-suite macro/suite
+  :tags (suite-tag)
+  (make-test-case 'suite-child (lambda () (test-true #t)) '()))
+
+(test-expand macro/expand-ok
+  '(+ 1 2))
+
+(test-compile macro/compile-ok
+  (define macro-compile-x 1)
+  (+ macro-compile-x 2))
+
+(mat test-definition-macros
+  (= (length (test-registry-descriptors (current-test-registry))) 4)
+  (let ([results (test-run-registry (current-test-registry) (test-silent-config))])
+    (and (= (length results) 5)
+         (andmap (lambda (result) (eq? (test-result-status result) 'passed)) results)))
+  (let ([selected (test-select (current-test-registry) '((include-tags . (suite-tag))))])
+    (and (= (length selected) 1)
+         (eq? (test-concrete-case-name (car selected)) 'suite-child))))

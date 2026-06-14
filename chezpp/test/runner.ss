@@ -326,6 +326,14 @@ association-list filters as `test-select`.
               (random 1000000)
               (time-nanosecond (current-time)))))
 
+  (define $compile-output-path
+    (lambda (path)
+      (let ([length (string-length path)])
+        (if (and (fx>= length 3)
+                 (string=? (substring path (fx- length 3) length) ".ss"))
+            (string-append (substring path 0 (fx- length 3)) ".so")
+            (string-append path ".so")))))
+
   (define $run-compile-case
     (lambda (concrete-case config)
       ($run-with-expected-condition
@@ -346,7 +354,10 @@ association-list filters as `test-select`.
                (compile-file path))
              (lambda ()
                (when (file-exists? path)
-                 (delete-file path)))))))))
+                 (delete-file path))
+               (let ([output-path ($compile-output-path path)])
+                 (when (file-exists? output-path)
+                   (delete-file output-path))))))))))
 
   (define $run-concrete-case
     (lambda (concrete-case config)
