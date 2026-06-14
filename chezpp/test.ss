@@ -31,7 +31,7 @@
           test-pred test-raises test-not-raises test-fail
           test-capture-ports
           test-reporter? make-test-reporter test-text-reporter
-          test-datum-reporter test-report test-summarize
+          test-datum-reporter test-progress-reporter test-report test-summarize
           test-suite test-case test-expand test-compile test)
   (import (chezpp chez)
           (chezpp test private common)

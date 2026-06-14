@@ -1,7 +1,7 @@
 #!chezscheme
 (library (chezpp test reporter)
   (export test-reporter? make-test-reporter test-text-reporter
-          test-datum-reporter test-report test-summarize)
+          test-datum-reporter test-progress-reporter test-report test-summarize)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp test descriptor))
@@ -57,6 +57,24 @@ The `test-summarize` procedure returns a summary record for `results`.
       (fprintf out "xpass: ~a\n" (test-summary-xpass summary))
       (fprintf out "total: ~a\n" (test-summary-total summary))))
 
+  (define $ansi-wrap
+    (lambda (color text enabled?)
+      (if enabled?
+          (string-append color text "\x1b;[0m")
+          text)))
+
+  (define $status-text
+    (lambda (status color)
+      (let ([enabled? (eq? color 'always)])
+        (case status
+          [(passed) ($ansi-wrap "\x1b;[32m" "." enabled?)]
+          [(failed) ($ansi-wrap "\x1b;[31m" "F" enabled?)]
+          [(errored) ($ansi-wrap "\x1b;[35m" "E" enabled?)]
+          [(skipped) ($ansi-wrap "\x1b;[33m" "s" enabled?)]
+          [(xfail) ($ansi-wrap "\x1b;[36m" "x" enabled?)]
+          [(xpass) ($ansi-wrap "\x1b;[31m" "X" enabled?)]
+          [else "?"]))))
+
   #|proc:test-text-reporter
 The `test-text-reporter` procedure returns a reporter that writes a plain text
 summary.
@@ -86,6 +104,25 @@ datum summary.
   (define test-datum-reporter
     (lambda ()
       (make-test-reporter 'datum $write-datum-summary)))
+
+  #|proc:test-progress-reporter
+The `test-progress-reporter` procedure returns a reporter that writes one
+status character per result followed by the standard text summary. `color` is
+`auto`, `always`, or `never`; only `always` forces ANSI styling.
+|#
+  (define test-progress-reporter
+    (lambda (color)
+      (unless (memq color '(auto always never))
+        (errorf 'test-progress-reporter "invalid color mode: ~a" color))
+      (make-test-reporter
+       'progress
+       (lambda (out summary)
+         (for-each
+          (lambda (result)
+            (display ($status-text (test-result-status result) color) out))
+          (test-summary-results summary))
+         (newline out)
+         ($write-text-summary out summary)))))
 
   #|proc:test-report
 The `test-report` procedure writes `summary` to `output-port` using `reporter`.

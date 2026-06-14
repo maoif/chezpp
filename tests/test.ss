@@ -311,3 +311,18 @@
   (let ([results (test-run-registry (current-test-registry) (test-silent-config))])
     (equal? (map test-result-status results)
             '(passed failed))))
+
+(mat test-styled-reporter
+  (test-reporter? (test-progress-reporter 'never))
+  (let ([out (open-output-string)])
+    (test-report (test-progress-reporter 'never) out
+                 (test-summarize
+                  (list (make-test-result 'a 'a 'passed "" #f "" "" '() #f)
+                        (make-test-result 'b 'b 'failed "bad" #f "" "" '() #f)
+                        (make-test-result 'c 'c 'skipped "skip" #f "" "" '() #f))))
+    (equal? (get-output-string out) ".Fs\npassed: 1\nfailed: 1\nerrored: 0\nskipped: 1\nxfail: 0\nxpass: 0\ntotal: 3\n"))
+  (let ([out (open-output-string)])
+    (test-report (test-progress-reporter 'always) out
+                 (test-summarize
+                  (list (make-test-result 'a 'a 'passed "" #f "" "" '() #f))))
+    (> (string-length (get-output-string out)) 0)))
