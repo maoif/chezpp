@@ -32,3 +32,31 @@
   (error? (make-test-case "bad" (lambda () #t) '()))
   ;; Public constructors reject non-procedure runtime bodies.
   (error? (make-test-case 'bad-body 'not-a-procedure '())))
+
+(mat test-assertions
+  (begin (test-true #t) #t)
+  (begin (test-false #f) #t)
+  (begin (test-eq 'a 'a) #t)
+  (begin (test-eqv 1 1) #t)
+  (begin (test-equal '(1 2) '(1 2)) #t)
+  (begin (test-= 3 (+ 1 2)) #t)
+  (begin (test-pred string? "abc") #t)
+  ;; Negative assertion test: failing truth assertion raises a framework failure.
+  (test-failure? (guard (c [else c]) (test-true #f)))
+  ;; Negative assertion test: mismatched expected and actual values are recorded.
+  (let ([condition (guard (c [else c]) (test-equal '(1) '(2)))])
+    (and (test-failure? condition)
+         (equal? (test-failure-expected condition) '(1))
+         (equal? (test-failure-actual condition) '(2))))
+  ;; Negative code test: expected violation is accepted.
+  (begin
+    (test-raises violation?
+      (lambda ()
+        (vector-ref '#(1 2 3) 9)))
+    #t)
+  ;; Negative assertion test: missing expected condition fails the assertion.
+  (test-failure?
+   (guard (c [else c])
+     (test-raises violation?
+       (lambda () 1))))
+  (begin (test-not-raises (lambda () (+ 1 2))) #t))
