@@ -12,6 +12,13 @@
 (define (benchmark-temp-file)
   (format "benchmark-baseline-~a-~a.dat" (random 1000000) (time-nanosecond (current-time))))
 
+(define (benchmark-write-datum-file path datum)
+  (call-with-output-file path
+    (lambda (out)
+      (write datum out)
+      (newline out))
+    'replace))
+
 (define (benchmark-string-contains? text needle)
   (let ([text-len (string-length text)]
         [needle-len (string-length needle)])
@@ -20,6 +27,58 @@
        [(> (+ i needle-len) text-len) #f]
        [(string=? needle (substring text i (+ i needle-len))) #t]
        [else (loop (+ i 1))]))))
+
+(define (benchmark-json-number-safe? text)
+  (let ([len (string-length text)])
+    (let loop ([i 0] [in-string? #f] [escaped? #f])
+      (cond
+       [(>= i len) #t]
+       [in-string?
+        (let ([ch (string-ref text i)])
+          (cond
+           [escaped? (loop (+ i 1) #t #f)]
+           [(char=? ch #\\) (loop (+ i 1) #t #t)]
+           [(char=? ch (integer->char 34)) (loop (+ i 1) #f #f)]
+           [else (loop (+ i 1) #t #f)]))]
+       [else
+        (let ([ch (string-ref text i)])
+          (cond
+           [(char=? ch (integer->char 34)) (loop (+ i 1) #t #f)]
+           [(and (char-numeric? ch)
+                 (< (+ i 1) len)
+                 (char=? (string-ref text (+ i 1)) #\/))
+            #f]
+           [(and (char=? ch #\+)
+                 (< (+ i 1) len)
+                 (char=? (string-ref text (+ i 1)) #\i))
+            #f]
+           [(and (char=? ch #\i)
+                 (< (+ i 2) len)
+                 (char=? (string-ref text (+ i 1)) #\n)
+                 (char=? (string-ref text (+ i 2)) #\f))
+            #f]
+           [(and (char=? ch #\-)
+                 (< (+ i 1) len)
+                 (char=? (string-ref text (+ i 1)) #\i))
+            #f]
+           [else (loop (+ i 1) #f #f)]))]))))
+
+(define (benchmark-json-string-control-safe? text)
+  (let ([len (string-length text)])
+    (let loop ([i 0] [in-string? #f] [escaped? #f])
+      (cond
+       [(>= i len) #t]
+       [in-string?
+        (let ([ch (string-ref text i)])
+          (cond
+           [escaped? (loop (+ i 1) #t #f)]
+           [(char=? ch #\\) (loop (+ i 1) #t #t)]
+           [(char=? ch (integer->char 34)) (loop (+ i 1) #f #f)]
+           [(< (char->integer ch) 32) #f]
+           [else (loop (+ i 1) #t #f)]))]
+       [(char=? (string-ref text i) (integer->char 34))
+        (loop (+ i 1) #t #f)]
+       [else (loop (+ i 1) #f #f)]))))
 
 (benchmark-clear-registry! (current-benchmark-registry))
 
@@ -81,6 +140,16 @@
    :max-iterations 1)
   (lambda (state n m)
     (benchmark-do-not-optimize (+ n m))))
+
+(define bench-control-string
+  (make-benchmark 'bench-control-string
+                  (lambda (state text)
+                    (benchmark-do-not-optimize text))
+                  `((args (text ,(string #\a #\backspace #\b)))
+                    (warmup . 0)
+                    (samples . 1)
+                    (min-time . 0)
+                    (max-iterations . 1))))
 
 (define-benchmark bench-paused
   (:args [n 1]
@@ -193,6 +262,23 @@
      (let ([reporter (benchmark-rich-reporter)])
        (benchmark-reporter? reporter)))
 
+(mat benchmark-v2-json-safety
+     (let ([out (open-output-string)])
+       (benchmark-report (benchmark-run (list bench-basic) (benchmark-test-config))
+                         (benchmark-json-reporter)
+                         out)
+       (let ([text (get-output-string out)])
+         (and (string? text)
+              (benchmark-json-number-safe? text))))
+     (let ([out (open-output-string)])
+       (benchmark-report (benchmark-run (list bench-control-string) (benchmark-test-config))
+                         (benchmark-json-reporter)
+                         out)
+       (let ([text (get-output-string out)])
+         (and (string? text)
+              (benchmark-json-string-control-safe? text)
+              (benchmark-string-contains? text "\\b")))))
+
 (mat benchmark-v2-baselines-and-comparison
      (let* ([results (benchmark-run (list bench-basic) (benchmark-test-config))]
             [path (benchmark-temp-file)])
@@ -223,6 +309,66 @@
                     comparisons)))
      (= (benchmark-percent-difference 100 110) 10)
      (= (benchmark-absolute-difference 100 90) -10))
+
+(mat benchmark-v2-baseline-error-roundtrip
+     (let* ([result (car (benchmark-run (list bench-error) (benchmark-test-config)))]
+            [path (benchmark-temp-file)])
+       (dynamic-wind
+         (lambda () (void))
+         (lambda ()
+           (benchmark-save-baseline (list result) path)
+           (let ([loaded (car (benchmark-load-baseline path))])
+             (and (benchmark-result-error loaded)
+                  (string=? (condition-message (benchmark-result-error loaded))
+                            (condition-message (benchmark-result-error result))))))
+         (lambda ()
+           (when (file-exists? path)
+             (delete-file path)))))
+     (let* ([result (car (benchmark-run (list bench-error) (benchmark-test-config)))]
+            [path (benchmark-temp-file)])
+       (dynamic-wind
+         (lambda () (void))
+         (lambda ()
+           (benchmark-write-datum-file
+            path
+            `((format . chezpp-benchmark-baseline)
+              (version . 1)
+              (results . (((name . legacy-error)
+                            (args . ())
+                            (template-args . ())
+                            (samples . ())
+                            (summary . ())
+                            (counters . ())
+                            (error? . #t))))))
+           (let ([loaded (car (benchmark-load-baseline path))])
+             (if (benchmark-result-error loaded) #t #f)))
+         (lambda ()
+           (when (file-exists? path)
+             (delete-file path))))))
+
+(mat benchmark-v2-baseline-malformed-version
+     ;; malformed file data should report the library's unsupported-version error
+     (let ([path (benchmark-temp-file)])
+       (dynamic-wind
+         (lambda () (void))
+         (lambda ()
+           (benchmark-write-datum-file
+            path
+            '((format . chezpp-benchmark-baseline)
+              (version . two)
+              (results . ())))
+           (guard (exn
+                   [else
+                    (benchmark-string-contains?
+                     (call-with-string-output-port
+                       (lambda (out)
+                         (display-condition exn out)))
+                     "unsupported benchmark baseline version")])
+             (benchmark-load-baseline path)
+             #f))
+         (lambda ()
+           (when (file-exists? path)
+             (delete-file path))))))
 
 (mat benchmark-v2-summaries-and-pauses
      (let* ([results (benchmark-run (list bench-basic) (benchmark-test-config))]

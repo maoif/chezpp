@@ -345,9 +345,16 @@
             (cond
              [(char=? ch (integer->char 34)) (display "\\\"" out)]
              [(char=? ch #\\) (display "\\\\" out)]
+             [(char=? ch #\backspace) (display "\\b" out)]
+             [(char=? ch #\page) (display "\\f" out)]
              [(char=? ch #\newline) (display "\\n" out)]
              [(char=? ch #\return) (display "\\r" out)]
              [(char=? ch #\tab) (display "\\t" out)]
+             [(< (char->integer ch) 32)
+              (display "\\u" out)
+              (let ([digits (number->string (char->integer ch) 16)])
+                (display (make-string (- 4 (string-length digits)) #\0) out)
+                (display digits out))]
              [else (write-char ch out)])
             (loop (+ i 1)))))
       (write-char (integer->char 34) out)))
@@ -357,6 +364,47 @@
       (if (symbol? key)
           (symbol->string key)
           ($display-string key))))
+
+  (define $json-number-string
+    (lambda (n)
+      (number->string (if (and (rational? n) (not (integer? n)))
+                          (exact->inexact n)
+                          n))))
+
+  (define $json-safe-number-string?
+    (lambda (text)
+      (let ([len (string-length text)])
+        (let loop ([i 0])
+          (cond
+           [(>= i len) #t]
+           [(char=? (string-ref text i) #\/) #f]
+           [(char=? (string-ref text i) #\i) #f]
+           [(and (char=? (string-ref text i) #\+)
+                 (< (+ i 1) len)
+                 (char=? (string-ref text (+ i 1)) #\i))
+            #f]
+           [(and (char=? (string-ref text i) #\-)
+                 (< (+ i 1) len)
+                 (char=? (string-ref text (+ i 1)) #\i))
+            #f]
+           [(and (char=? (string-ref text i) #\i)
+                 (< (+ i 2) len)
+                 (char=? (string-ref text (+ i 1)) #\n)
+                 (char=? (string-ref text (+ i 2)) #\f))
+            #f]
+           [(and (char=? (string-ref text i) #\n)
+                 (< (+ i 2) len)
+                 (char=? (string-ref text (+ i 1)) #\a)
+                 (char=? (string-ref text (+ i 2)) #\n))
+            #f]
+           [else (loop (+ i 1))])))))
+
+  (define $write-json-number
+    (lambda (n out)
+      (let ([text ($json-number-string n)])
+        (if ($json-safe-number-string? text)
+            (display text out)
+            ($json-string text out)))))
 
   (define $alist?
     (lambda (x)
@@ -390,13 +438,38 @@
       (cond
        [(eq? datum #t) (display "true" out)]
        [(eq? datum #f) (display "false" out)]
-       [(number? datum) (display datum out)]
+       [(number? datum) ($write-json-number datum out)]
        [(string? datum) ($json-string datum out)]
        [(symbol? datum) ($json-string (symbol->string datum) out)]
        [(null? datum) (display "[]" out)]
        [($alist? datum) ($write-json-object datum out)]
        [(list? datum) ($write-json-list datum out)]
        [else ($json-string ($write-string datum) out)])))
+
+  (define $condition->datum
+    (lambda (exn)
+      (if (condition? exn)
+          `((who . ,(condition-who exn))
+            (message . ,(condition-message exn))
+            (irritants . ,(condition-irritants exn)))
+          `((who . #f)
+            (message . ,($write-string exn))
+            (irritants . ())))))
+
+  (define $datum->condition
+    (lambda (datum)
+      (let* ([who ($alist-ref datum 'who #f)]
+             [message ($alist-ref datum 'message "benchmark baseline error")]
+             [irritants ($alist-ref datum 'irritants '())]
+             [parts (append (list (make-error)
+                                  (make-message-condition message))
+                            (if who
+                                (list (make-who-condition who))
+                                '())
+                            (if (null? irritants)
+                                '()
+                                (list (make-irritants-condition irritants))))])
+        (apply condition parts))))
 
   (define $metric-mean
     (lambda (result metric)
@@ -451,7 +524,8 @@
         (samples . ,(map $sample->datum (benchmark-result-samples result)))
         (summary . ,(benchmark-result-summary result))
         (counters . ,(benchmark-result-counters result))
-        (error? . ,(and (benchmark-result-error result) #t)))))
+        (error . ,(and (benchmark-result-error result)
+                       ($condition->datum (benchmark-result-error result)))))))
 
   (define $datum->result
     (lambda (datum)
@@ -461,7 +535,12 @@
                             (map $datum->sample ($alist-ref datum 'samples '()))
                             ($alist-ref datum 'summary '())
                             ($alist-ref datum 'counters '())
-                            (and ($alist-ref datum 'error? #f) 'baseline-error))))
+                            (let ([error-datum ($alist-ref datum 'error #f)])
+                              (cond
+                               [error-datum ($datum->condition error-datum)]
+                               [($alist-ref datum 'error? #f)
+                                ($datum->condition '())]
+                               [else #f])))))
 
   (define $result->json
     (lambda (result)
@@ -1846,6 +1925,10 @@ written by `benchmark-save-baseline` from file `path`.
               (let ([datum (call-with-input-file path read)])
                 (unless (eq? ($alist-ref datum 'format #f) 'chezpp-benchmark-baseline)
                   (errorf 'benchmark-load-baseline "invalid benchmark baseline file: ~a" path))
+                (let ([version ($alist-ref datum 'version #f)])
+                  (unless (and (number? version) (= version 1))
+                    (errorf 'benchmark-load-baseline "unsupported benchmark baseline version: ~a"
+                            version)))
                 (map $datum->result ($alist-ref datum 'results '()))))))
 
   #|proc:benchmark-absolute-difference
