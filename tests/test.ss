@@ -65,3 +65,42 @@
      (test-raises violation?
        (lambda () 1))))
   (begin (test-not-raises (lambda () (+ 1 2))) #t))
+
+(mat test-registry-and-expansion
+  (let ([registry (make-test-registry)]
+        [descriptor (make-test-case 'registered (lambda () #t) '())])
+    (test-register! registry descriptor)
+    (equal? (test-registry-descriptors registry) (list descriptor)))
+  (let ([registry (make-test-registry)])
+    (test-register! registry (make-test-case 'a (lambda () #t) '()))
+    (test-clear-registry! registry)
+    (null? (test-registry-descriptors registry)))
+  (let* ([descriptor (make-test-case 'param
+                       (lambda () #t)
+                       '((parameterize . (((x y) (1 2) (3 4))))))]
+         [cases (test-expand-parameters descriptor)])
+    (and (= (length cases) 2)
+         (equal? (map test-concrete-case-parameters cases)
+                 '(((x . 1) (y . 2))
+                   ((x . 3) (y . 4))))))
+  (let* ([descriptor (make-test-case 'product
+                       (lambda () #t)
+                       '((parameterize . (((x) (1) (2))
+                                          ((y) (a) (b))))))]
+         [cases (test-expand-parameters descriptor)])
+    (and (= (length cases) 4)
+         (equal? (map test-concrete-case-parameters cases)
+                 '(((x . 1) (y . a))
+                   ((x . 1) (y . b))
+                   ((x . 2) (y . a))
+                   ((x . 2) (y . b))))))
+  (let ([registry (make-test-registry)])
+    (test-register! registry (make-test-case 'alpha/one (lambda () #t) '((tags . (fast)))))
+    (test-register! registry (make-test-case 'beta/two (lambda () #t) '((tags . (slow)))))
+    (equal? (map test-concrete-case-name (test-select registry '((name-prefix . "alpha"))))
+            '(alpha/one)))
+  (let ([registry (make-test-registry)])
+    (test-register! registry (make-test-case 'alpha/one (lambda () #t) '((tags . (fast)))))
+    (test-register! registry (make-test-case 'beta/two (lambda () #t) '((tags . (slow)))))
+    (equal? (map test-concrete-case-name (test-select registry '((include-tags . (slow)))))
+            '(beta/two))))
