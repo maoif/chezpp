@@ -231,14 +231,14 @@ descriptors this is source data; for suites this is `#f`.
 
   #|proc:make-test-config
 The `make-test-config` procedure creates a test runner configuration.
-`reporter` is the reporter procedure or `#f`, `output` is the output port or
-`#f`, `xfail-strict?` controls whether unexpected passes fail the run,
+`reporter` is a reporter object or `#f`, `output` is the output port or `#f`,
+`xfail-strict?` controls whether unexpected passes fail the run,
 `stop-on-failure?` controls whether the runner stops at the first failure, and
 `color` is `auto`, `always`, or `never`.
 |#
   (define make-test-config
     (lambda (reporter output xfail-strict? stop-on-failure? color)
-      (pcheck ([(lambda (value) (or (procedure? value) (not value))) reporter]
+      (pcheck ([(lambda (value) (or (not value) (procedure? value) (record? value))) reporter]
                [(lambda (value) (or (output-port? value) (not value))) output]
                [boolean? xfail-strict? stop-on-failure?]
                [$color-option? color])
@@ -302,7 +302,7 @@ according to option association list `options`.
                         [else (errorf 'test-config-with "unknown config option: ~a" (car option))])))))))
 
   #|proc:test-config-reporter
-The `test-config-reporter` procedure returns the reporter procedure stored in
+The `test-config-reporter` procedure returns the reporter object stored in
 `config`, or `#f` when reporting is disabled.
 |#
   (define test-config-reporter

@@ -347,3 +347,19 @@
       (lambda ()
         (when (file-exists? path)
           (delete-file path))))))
+
+(mat test-main-api
+  (let ([path "tmp-chezpp-test-main-file.ss"])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (test-write-file
+         path
+         "(import (chezpp) (chezpp test))\n(test-clear-registry! (current-test-registry))\n(test-case main-loaded (test-true #t))\n")
+        (let ([out (open-output-string)])
+          (= (parameterize ([current-output-port out])
+               (test-main (list "--reporter" "datum" path)))
+             0)))
+      (lambda ()
+        (when (file-exists? path)
+          (delete-file path))))))

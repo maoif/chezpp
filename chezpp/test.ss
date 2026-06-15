@@ -23,7 +23,7 @@
           test-summary-failed test-summary-errored test-summary-skipped
           test-summary-xfail test-summary-xpass test-summary-results
           test-expand-parameters test-list test-select test-run test-run-registry
-          test-run-files
+          test-run-files test-main
           test-failure? test-failure-message test-failure-expected
           test-failure-actual make-test-failure
           test-assert test-assert-equal test-assert-raises

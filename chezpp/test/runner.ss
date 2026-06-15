@@ -1,7 +1,7 @@
 #!chezscheme
 (library (chezpp test runner)
   (export test-expand-parameters test-list test-select
-          test-run test-run-registry test-run-files)
+          test-run test-run-registry test-run-files test-main)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp test assertion)
@@ -504,5 +504,42 @@ list of file path strings, and `config` is a test runner configuration.
                      (load path))
                    paths)
                   (test-run-registry registry config))))))
+
+  (define $parse-test-main-argv
+    (lambda (argv)
+      (let loop ([argv argv] [reporter 'text] [files '()])
+        (cond
+         [(null? argv) (values reporter (reverse files))]
+         [(and (pair? (cdr argv)) (string=? (car argv) "--reporter"))
+          (loop (cddr argv) (string->symbol (cadr argv)) files)]
+         [else
+          (loop (cdr argv) reporter (cons (car argv) files))]))))
+
+  #|proc:test-main
+The `test-main` procedure runs test files described by `argv` and returns a
+process-style status code. `argv` is a list of strings; it accepts
+`--reporter text`, `--reporter datum`, and file paths.
+|#
+  (define test-main
+    (lambda (argv)
+      (pcheck ([list? argv])
+              (call-with-values
+                (lambda () ($parse-test-main-argv argv))
+                (lambda (reporter-name files)
+                  (let* ([reporter (case reporter-name
+                                     [(datum) (test-datum-reporter)]
+                                     [(progress) (test-progress-reporter 'auto)]
+                                     [else (test-text-reporter)])]
+                         [config (test-config-with
+                                  (default-test-config)
+                                  `((reporter . ,reporter)
+                                    (output . ,(current-output-port))))])
+                    (let ([results (test-run-files files config)])
+                      (if (exists (lambda (result)
+                                    (memq (test-result-status result)
+                                          '(failed errored xpass)))
+                                  results)
+                          1
+                          0))))))))
 
   )
