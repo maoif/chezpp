@@ -1501,49 +1501,68 @@ changed according to option alist `options`.
             (loop (if geometric? (* value step) (+ value step))
                   (cons value out))))))
 
-  (define $product
-    (lambda (dimensions)
-      (let loop ([dimensions dimensions])
-        (if (null? dimensions)
-            '(())
-            (let ([tail (loop (cdr dimensions))]
-                  [dimension (car dimensions)])
-              (apply append
-                     (map (lambda (value)
-                            (map (lambda (rest) (cons value rest)) tail))
-                          dimension)))))))
+  (define $duplicate-symbol?
+    (lambda (names)
+      (let loop ([names names] [seen '()])
+        (cond
+         [(null? names) #f]
+         [(memq (car names) seen) (car names)]
+         [else (loop (cdr names) (cons (car names) seen))]))))
 
-  (define $rows->args
-    (lambda (rows)
-      (map (lambda (row)
-             (let loop ([row row] [names '()] [values '()] [alist '()])
-               (cond
-                [(null? row)
-                 (list (reverse names) (reverse values) (reverse alist))]
-                [(or (null? (cdr row)) (not (symbol? (car row))))
-                 (errorf '$rows->args "invalid argument row: ~s" row)]
-                [else
-                 (loop (cddr row)
-                       (cons (car row) names)
-                       (cons (cadr row) values)
-                       (cons (cons (car row) (cadr row)) alist))])))
-           rows)))
+  (define $any-shared-symbol?
+    (lambda (left right)
+      (let loop ([left left])
+        (cond
+         [(null? left) #f]
+         [(memq (car left) right) (car left)]
+         [else (loop (cdr left))]))))
+
+  (define $zip-argument-row
+    (lambda (names values)
+      (let loop ([names names] [values values] [out '()])
+        (cond
+         [(and (null? names) (null? values)) (reverse out)]
+         [(or (null? names) (null? values))
+          (errorf '$zip-argument-row "argument value row length does not match names")]
+         [else
+          (loop (cdr names)
+                (cdr values)
+                (cons (cons (car names) (car values)) out))]))))
+
+  (define $args-spec->rows
+    (lambda (spec)
+      (unless (and (pair? spec) (list? (car spec)) (not (null? (car spec))))
+        (errorf '$args-spec->rows "invalid :args option: ~s" spec))
+      (let ([names (car spec)]
+            [value-rows (cdr spec)])
+        (unless (andmap symbol? names)
+          (errorf '$args-spec->rows "argument names must be symbols: ~s" names))
+        (let ([duplicate ($duplicate-symbol? names)])
+          (when duplicate
+            (errorf '$args-spec->rows "duplicate argument name: ~a" duplicate)))
+        (map (lambda (values)
+               (unless (list? values)
+                 (errorf '$args-spec->rows "invalid argument value row: ~s" values))
+               (list names values ($zip-argument-row names values)))
+             value-rows))))
 
   (define $normalize-arguments
     (lambda (options)
+      (when (assq 'arg-product options)
+        (errorf '$normalize-arguments ":arg-product has been removed; use repeated :args forms"))
       (let ([args-options (filter (lambda (option)
-                                    (memq (car option) '(args arg-range dense-arg-range arg-product)))
+                                    (memq (car option) '(args arg-range dense-arg-range)))
                                   options)])
         (if (null? args-options)
             (list (list '() '() '()))
-            (let loop ([options args-options] [rows (list (list '() '() '()))])
+            (let loop ([options args-options] [rows (list (list '() '() '()))] [seen-names '()])
               (if (null? options)
                   rows
                   (let* ([option (car options)]
                          [new-rows
                           (case (car option)
                             [(args)
-                             ($rows->args (cdr option))]
+                             ($args-spec->rows (cdr option))]
                             [(arg-range)
                              (let* ([spec (cdr option)]
                                     [name (car spec)]
@@ -1558,14 +1577,17 @@ changed according to option alist `options`.
                                (map (lambda (value)
                                       (list (list name) (list value) (list (cons name value))))
                                     values))]
-                            [(arg-product)
-                             (let* ([specs (cdr option)]
-                                    [names (map car specs)]
-                                    [dimensions (map cdr specs)])
-                               (map (lambda (values)
-                                      (list names values (map cons names values)))
-                                    ($product dimensions)))]
-                            [else (errorf '$normalize-arguments "unknown argument option: ~a" (car option))])])
+                            [else (errorf '$normalize-arguments "unknown argument option: ~a" (car option))])]
+                         [new-names (case (car option)
+                                      [(args) (cadr option)]
+                                      [(arg-range dense-arg-range) (list (cadr option))]
+                                      [else (if (null? new-rows) '() (car (car new-rows)))])]
+                         [duplicate ($duplicate-symbol? new-names)]
+                         [shared ($any-shared-symbol? new-names seen-names)])
+                    (when duplicate
+                      (errorf '$normalize-arguments "duplicate argument name: ~a" duplicate))
+                    (when shared
+                      (errorf '$normalize-arguments "duplicate argument name across argument options: ~a" shared))
                     (loop (cdr options)
                           (apply append
                                  (map (lambda (left)
@@ -1574,7 +1596,8 @@ changed according to option alist `options`.
                                                      (append (cadr left) (cadr right))
                                                      (append (caddr left) (caddr right))))
                                              new-rows))
-                                      rows))))))))))
+                                      rows))
+                          (append seen-names new-names)))))))))
 
   (define $argument-names
     (lambda (args)
@@ -1582,6 +1605,13 @@ changed according to option alist `options`.
           '()
           (car (car args)))))
 
+  #|macro:benchmark-options
+The `benchmark-options` macro converts benchmark option syntax into an option
+alist. `:args` receives a grouped table `([name ...] [value ...] ...)`; each
+`name` is an argument name and each value row supplies one concrete benchmark
+case. Repeated `:args` tables are expanded as a Cartesian product, and argument
+names must not be duplicated in one table or across argument options.
+|#
   (define-syntax benchmark-options
     (lambda (stx)
       (define keyword?
@@ -1596,64 +1626,121 @@ changed according to option alist `options`.
         (lambda (datum)
           (string->symbol (substring (symbol->string datum) 1
                                      (string-length (symbol->string datum))))))
-      (define parse-row
+      (define duplicate-symbol
+        (lambda (names)
+          (let loop ([names names] [seen '()])
+            (cond
+             [(null? names) #f]
+             [(memq (car names) seen) (car names)]
+             [else (loop (cdr names) (cons (car names) seen))]))))
+      (define shared-symbol
+        (lambda (left right)
+          (let loop ([left left])
+            (cond
+             [(null? left) #f]
+             [(memq (car left) right) (car left)]
+             [else (loop (cdr left))]))))
+      (define parse-old-row
         (lambda (row)
           (syntax-case row ()
             [(name value rest ...)
              (identifier? #'name)
              #'(name value rest ...)]
             [_ (syntax-error row "invalid benchmark argument row")])))
-      (define quote-row
-        (lambda (context row)
-          #`'#,(datum->syntax context (syntax->datum (parse-row row)))))
+      (define parse-args-spec
+        (lambda (key rest seen-names)
+          (unless (= (length rest) 1)
+            (syntax-error key ":args expects one grouped argument table"))
+          (let ([datum (syntax->datum (car rest))])
+            (unless (and (list? datum) (pair? datum) (list? (car datum)))
+              (syntax-error (car rest) ":args expects ([name ...] [value ...] ...)"))
+            (let ([names (car datum)]
+                  [value-rows (cdr datum)])
+              (when (null? names)
+                (syntax-error (car rest) ":args requires at least one argument name"))
+              (unless (andmap symbol? names)
+                (syntax-error (car rest) ":args names must be identifiers"))
+              (let ([duplicate (duplicate-symbol names)])
+                (when duplicate
+                  (syntax-error (car rest) (format "duplicate :args name: ~a" duplicate))))
+              (let ([shared (shared-symbol names seen-names)])
+                (when shared
+                  (syntax-error (car rest) (format "duplicate argument name across options: ~a" shared))))
+              (for-each (lambda (row)
+                          (unless (and (list? row) (= (length row) (length names)))
+                            (syntax-error (car rest) ":args value row length must match name list")))
+                        value-rows)
+              (values names
+                      #`(cons 'args '#,(datum->syntax key datum)))))))
       (define parse-option
-        (lambda (key rest)
+        (lambda (key rest seen-names)
           (let ([datum (syntax->datum key)])
             (case datum
               [(:args)
-               #`(cons 'args (list #,@(map (lambda (row) (quote-row key row)) rest)))]
+               (parse-args-spec key rest seen-names)]
               [(:arg-product)
-               #`(cons 'arg-product (list #,@(map (lambda (row) (quote-row key row)) rest)))]
+               (syntax-error key ":arg-product has been removed; use repeated :args forms")]
               [(:arg-range)
                (unless (= (length rest) 1)
                  (syntax-error key ":arg-range expects one row"))
-               #`(cons 'arg-range #,(quote-row key (car rest)))]
+               (let ([row (syntax->datum (parse-old-row (car rest)))])
+                 (when (memq (car row) seen-names)
+                   (syntax-error (car rest) (format "duplicate argument name across options: ~a" (car row))))
+                 (values (list (car row))
+                         #`(cons 'arg-range '#,(datum->syntax key row))))]
               [(:dense-arg-range)
                (unless (= (length rest) 1)
                  (syntax-error key ":dense-arg-range expects one row"))
-               #`(cons 'dense-arg-range #,(quote-row key (car rest)))]
+               (let ([row (syntax->datum (parse-old-row (car rest)))])
+                 (when (memq (car row) seen-names)
+                   (syntax-error (car rest) (format "duplicate argument name across options: ~a" (car row))))
+                 (values (list (car row))
+                         #`(cons 'dense-arg-range '#,(datum->syntax key row))))]
               [(:setup)
                (unless (= (length rest) 1)
                  (syntax-error key ":setup expects one expression"))
-               #`(cons 'setup #,(car rest))]
+               (values '() #`(cons 'setup #,(car rest)))]
               [(:teardown)
                (unless (= (length rest) 1)
                  (syntax-error key ":teardown expects one expression"))
-               #`(cons 'teardown #,(car rest))]
+               (values '() #`(cons 'teardown #,(car rest)))]
               [(:suite-setup)
                (unless (= (length rest) 1)
                  (syntax-error key ":suite-setup expects one expression"))
-               #`(cons 'suite-setup #,(car rest))]
+               (values '() #`(cons 'suite-setup #,(car rest)))]
               [(:suite-teardown)
                (unless (= (length rest) 1)
                  (syntax-error key ":suite-teardown expects one expression"))
-               #`(cons 'suite-teardown #,(car rest))]
+               (values '() #`(cons 'suite-teardown #,(car rest)))]
               [(:unit :complexity)
                (unless (= (length rest) 1)
                  (syntax-error key "benchmark option expects one value"))
-               (if (identifier? (car rest))
-                   #`(cons '#,(datum->syntax key (keyword->option-name datum))
-                           '#,(car rest))
-                   #`(cons '#,(datum->syntax key (keyword->option-name datum))
-                           #,(car rest)))]
+               (values '()
+                       (if (identifier? (car rest))
+                           #`(cons '#,(datum->syntax key (keyword->option-name datum))
+                                   '#,(car rest))
+                           #`(cons '#,(datum->syntax key (keyword->option-name datum))
+                                   #,(car rest))))]
               [(:throughput)
-               #`(cons 'throughput '#,(datum->syntax key (map syntax->datum rest)))]
+               (values '()
+                       #`(cons 'throughput '#,(datum->syntax key (map syntax->datum rest))))]
               [(:warmup :samples :min-time :max-iterations :reporter :output :filter :cost-center? :stop-on-error?)
                (unless (= (length rest) 1)
                  (syntax-error key "benchmark option expects one expression"))
-               #`(cons '#,(datum->syntax key (keyword->option-name datum))
-                       #,(car rest))]
+               (values '()
+                       #`(cons '#,(datum->syntax key (keyword->option-name datum))
+                               #,(car rest)))]
               [else (syntax-error key "unknown benchmark option")]))))
+      (define parse-options
+        (lambda (clauses)
+          (let loop ([clauses clauses] [seen-names '()] [out '()])
+            (if (null? clauses)
+                (reverse out)
+                (let-values ([(new-names option)
+                              (parse-option (caar clauses) (cdar clauses) seen-names)])
+                  (loop (cdr clauses)
+                        (append seen-names new-names)
+                        (cons option out)))))))
       (define split-options
         (lambda (items)
           (let loop ([items items] [key #f] [current '()] [out '()])
@@ -1674,16 +1761,16 @@ changed according to option alist `options`.
              [else (syntax-error (car items) "benchmark option list must begin with a keyword")]))))
       (syntax-case stx ()
         [(_ (item ...))
-         #`(list #,@(map (lambda (clause)
-                           (parse-option (car clause) (cdr clause)))
-                         (split-options #'(item ...))))]
+         #`(list #,@(parse-options (split-options #'(item ...))))]
         [_ (syntax-error stx "invalid benchmark-options form")])))
 
   #|macro:define-benchmark
 The `define-benchmark` macro defines and registers a benchmark descriptor named
 by `name`. `options` configures arguments, lifecycle hooks, and runner defaults;
-`body` is a procedure that receives state, argument values, and optional setup
-value.
+`body` is a procedure that receives state, argument values in option order, and
+optional setup value. Runtime arguments are configured with grouped `:args`
+tables such as `(:args ([size start] [1024 0] [2048 128]))`; repeated `:args`
+tables are expanded as a Cartesian product.
 |#
   (define-syntax define-benchmark
     (syntax-rules ()
@@ -1709,7 +1796,9 @@ and the setup value.
 
   #|macro:define-fixture-benchmark
 The `define-fixture-benchmark` macro defines and registers benchmark `name`
-using fixture descriptor `fixture`.
+using fixture descriptor `fixture`. `options` has the same argument syntax as
+`define-benchmark`; `body` receives state, argument values in option order, and
+the fixture setup value.
 |#
   (define-syntax define-fixture-benchmark
     (syntax-rules ()
@@ -1738,7 +1827,8 @@ containing the listed benchmark descriptors.
   #|macro:define-benchmark-template
 The `define-benchmark-template` macro defines a template procedure named by
 `name`. The generated procedure accepts template parameters `param ...` and
-returns a benchmark descriptor.
+returns a benchmark descriptor. `options` has the same grouped `:args` argument
+syntax as `define-benchmark`.
 |#
   (define-syntax define-benchmark-template
     (syntax-rules ()

@@ -20,7 +20,7 @@
 - Opaque records and public accessors for benchmark descriptors, fixtures, suites, states, samples, results, configs, and reporters.
 - Procedural registration APIs with a parameterized default registry.
 - Macro APIs for `define-benchmark`, `define-benchmark-fixture`, `define-fixture-benchmark`, `define-benchmark-suite`, `define-benchmark-template`, `instantiate-benchmark-template`, and `benchmark-options`.
-- Argument expansion for `:args`, `:arg-range`, `:dense-arg-range`, and `:arg-product`.
+- Argument expansion for grouped `:args`, `:arg-range`, and `:dense-arg-range`; repeated `:args` forms produce Cartesian products.
 - Sample-scoped setup/teardown, fixture setup/teardown, benchmark suite execution, and cleanup on body errors.
 - Warmup, measured samples, simple adaptive iteration growth to satisfy `min-time`, and capped iterations.
 - Summary alist containing CPU, real, and allocated-byte per-iteration statistics: `median`, `mean`, `min`, `max`, `stddev`, and `confidence-interval`.
@@ -89,7 +89,9 @@ Create `tests/benchmark.ss`:
 (benchmark-clear-registry! (current-benchmark-registry))
 
 (define-benchmark bench-basic
-  (:args [n 1] [n 2]
+  (:args ([n]
+          [1]
+          [2])
    :warmup 0
    :samples 2
    :min-time 0
@@ -106,7 +108,8 @@ Create `tests/benchmark.ss`:
                (vector-set! value 0 'closed))))
 
 (define-fixture-benchmark bench-with-fixture bench-fixture
-  (:args [n 3]
+  (:args ([n]
+          [3])
    :warmup 0
    :samples 1
    :min-time 0
@@ -115,7 +118,8 @@ Create `tests/benchmark.ss`:
     (benchmark-do-not-optimize (vector-ref value 0))))
 
 (define-benchmark-template bench-template (kind make-seq ref)
-  (:args [n 4]
+  (:args ([n]
+          [4])
    :warmup 0
    :samples 1
    :min-time 0
@@ -128,7 +132,8 @@ Create `tests/benchmark.ss`:
   ([vector make-vector vector-ref]))
 
 (define-benchmark bench-error
-  (:args [n 1]
+  (:args ([n]
+          [1])
    :warmup 0
    :samples 1
    :min-time 0
@@ -138,8 +143,12 @@ Create `tests/benchmark.ss`:
     (error 'bench-error "expected benchmark body error")))
 
 (define-benchmark bench-product
-  (:arg-product [n 1 2]
-                [m 10 20]
+  (:args ([n]
+          [1]
+          [2])
+   :args ([m]
+          [10]
+          [20])
    :warmup 0
    :samples 1
    :min-time 0
@@ -287,7 +296,7 @@ cost-center?: #f
 stop-on-error?: #f
 ```
 
-Option alists accept these symbols: `args`, `arg-range`, `dense-arg-range`, `arg-product`, `setup`, `teardown`, `warmup`, `samples`, `min-time`, `max-iterations`, `unit`, `throughput`, `complexity`, `reporter`, `output`, `filter`, `cost-center?`, `stop-on-error?`, `suite-setup`, `suite-teardown`, `template-args`.
+Option alists accept these symbols: `args`, `arg-range`, `dense-arg-range`, `setup`, `teardown`, `warmup`, `samples`, `min-time`, `max-iterations`, `unit`, `throughput`, `complexity`, `reporter`, `output`, `filter`, `cost-center?`, `stop-on-error?`, `suite-setup`, `suite-teardown`, `template-args`. `arg-product` has been removed; repeated grouped `args` options replace it.
 
 - [x] **Step 2: Run tests**
 
@@ -311,10 +320,11 @@ Historical red-step result: constructor and predicate errors were gone, while ma
 Implement `benchmark-options` as a syntax transformer that accepts option forms beginning with keyword symbols and emits an alist. Parse these v1 forms:
 
 ```scheme
-(:args [n 1] [n 2])
+(:args ([n]
+        [1]
+        [2]))
 (:arg-range [n 1 8 2])
 (:dense-arg-range [n 1 3 1])
-(:arg-product [n 1 2] [m 10 20])
 (:setup expr)
 (:teardown expr)
 (:warmup expr)
@@ -329,7 +339,7 @@ Implement `benchmark-options` as a syntax transformer that accepts option forms 
 (:complexity expr)
 ```
 
-Unknown keyword symbols must raise a syntax error.
+Unknown keyword symbols must raise a syntax error. Repeated `:args` forms are combined with Cartesian product order, and duplicate argument names are syntax errors.
 
 - [x] **Step 2: Implement registration macros**
 
@@ -357,7 +367,16 @@ Implement:
   ((n . 2) (m . 20)))
 ```
 
-for `:arg-product [n 1 2] [m 10 20]`.
+for:
+
+```scheme
+(:args ([n]
+        [1]
+        [2])
+ :args ([m]
+        [10]
+        [20]))
+```
 
 - [x] **Step 4: Run tests**
 

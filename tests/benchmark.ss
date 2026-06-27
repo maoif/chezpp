@@ -104,7 +104,9 @@
 (benchmark-clear-registry! (current-benchmark-registry))
 
 (define-benchmark bench-basic
-  (:args [n 1] [n 2]
+  (:args ([n]
+          [1]
+          [2])
    :warmup 0
    :samples 2
    :min-time 0
@@ -121,7 +123,8 @@
                (vector-set! value 0 'closed))))
 
 (define-fixture-benchmark bench-with-fixture bench-fixture
-  (:args [n 3]
+  (:args ([n]
+          [3])
    :warmup 0
    :samples 1
    :min-time 0
@@ -130,7 +133,8 @@
     (benchmark-do-not-optimize (vector-ref value 0))))
 
 (define-benchmark-template bench-template (kind make-seq ref)
-  (:args [n 4]
+  (:args ([n]
+          [4])
    :warmup 0
    :samples 1
    :min-time 0
@@ -143,7 +147,8 @@
   ([vector make-vector vector-ref]))
 
 (define-benchmark bench-error
-  (:args [n 1]
+  (:args ([n]
+          [1])
    :warmup 0
    :samples 1
    :min-time 0
@@ -153,8 +158,12 @@
     (error 'bench-error "expected benchmark body error")))
 
 (define-benchmark bench-product
-  (:arg-product [n 1 2]
-                [m 10 20]
+  (:args ([n]
+          [1]
+          [2])
+   :args ([m]
+          [10]
+          [20])
    :warmup 0
    :samples 1
    :min-time 0
@@ -162,18 +171,42 @@
   (lambda (state n m)
     (benchmark-do-not-optimize (+ n m))))
 
+(define-benchmark bench-nine-args
+  (:args ([a b c]
+          [1 2 3]
+          [4 5 6])
+   :args ([d e f]
+          [10 20 30]
+          [40 50 60])
+   :args ([g h i]
+          [100 200 300]
+          [400 500 600])
+   :warmup 0
+   :samples 1
+   :min-time 0
+   :max-iterations 1)
+  (lambda (state a b c d e f g h i)
+    (benchmark-state-counter-set!
+     state
+     'sum
+     (+ a b c d e f g h i))
+    (benchmark-do-not-optimize
+     (list a b c d e f g h i))))
+
 (define bench-control-string
   (make-benchmark 'bench-control-string
                   (lambda (state text)
                     (benchmark-do-not-optimize text))
-                  `((args (text ,(string #\a #\backspace #\b)))
+                  `((args (text)
+                          (,(string #\a #\backspace #\b)))
                     (warmup . 0)
                     (samples . 1)
                     (min-time . 0)
                     (max-iterations . 1))))
 
 (define-benchmark bench-paused
-  (:args [n 1]
+  (:args ([n]
+          [1])
    :warmup 0
    :samples 1
    :min-time 0
@@ -217,15 +250,49 @@
             (if (memq 'bench-template/vector names) #t #f)))
      (= (length (benchmark-expand bench-basic (benchmark-test-config))) 2)
      (= (length (benchmark-expand bench-product (benchmark-test-config))) 4)
+     (= (length (benchmark-expand bench-nine-args (benchmark-test-config))) 8)
      (equal? (map benchmark-state-args
                   (map car (benchmark-expand bench-product (benchmark-test-config))))
              '(((n . 1) (m . 10))
                ((n . 1) (m . 20))
                ((n . 2) (m . 10))
                ((n . 2) (m . 20))))
+     (equal? (map benchmark-state-args
+                  (map car (benchmark-expand bench-nine-args (benchmark-test-config))))
+             '(((a . 1) (b . 2) (c . 3) (d . 10) (e . 20) (f . 30) (g . 100) (h . 200) (i . 300))
+               ((a . 1) (b . 2) (c . 3) (d . 10) (e . 20) (f . 30) (g . 400) (h . 500) (i . 600))
+               ((a . 1) (b . 2) (c . 3) (d . 40) (e . 50) (f . 60) (g . 100) (h . 200) (i . 300))
+               ((a . 1) (b . 2) (c . 3) (d . 40) (e . 50) (f . 60) (g . 400) (h . 500) (i . 600))
+               ((a . 4) (b . 5) (c . 6) (d . 10) (e . 20) (f . 30) (g . 100) (h . 200) (i . 300))
+               ((a . 4) (b . 5) (c . 6) (d . 10) (e . 20) (f . 30) (g . 400) (h . 500) (i . 600))
+               ((a . 4) (b . 5) (c . 6) (d . 40) (e . 50) (f . 60) (g . 100) (h . 200) (i . 300))
+               ((a . 4) (b . 5) (c . 6) (d . 40) (e . 50) (f . 60) (g . 400) (h . 500) (i . 600))))
      (let* ([selected (benchmark-select (current-benchmark-registry) "bench-basic")]
             [names (map benchmark-name selected)])
        (equal? names '(bench-basic))))
+
+(mat benchmark-argument-syntax
+     ;; duplicate names in the same :args table are rejected
+     (error? (eval '(benchmark-options (:args ([n n]
+                                               [1 2])))))
+
+     ;; duplicate names across repeated :args tables are rejected
+     (error? (eval '(benchmark-options (:args ([n]
+                                               [1])
+                                        :args ([n]
+                                               [2])))))
+
+     ;; duplicate names across :args and range options are rejected
+     (error? (eval '(benchmark-options (:args ([n]
+                                               [1])
+                                        :arg-range [n 1 8 2]))))
+
+     ;; value rows must have the same width as the name row
+     (error? (eval '(benchmark-options (:args ([n m]
+                                               [1])))))
+
+     ;; :arg-product has been removed; repeated :args tables replace it
+     (error? (eval '(benchmark-options (:arg-product [n 1 2])))))
 
 (mat benchmark-runner
      (let ([results (benchmark-run (list bench-basic) (benchmark-test-config))])
@@ -246,6 +313,16 @@
      (let ([results (benchmark-run (list bench-error) (benchmark-test-config))])
        (and (= (length results) 1)
             (if (benchmark-result-error (car results)) #t #f))))
+
+(mat benchmark-argument-parameterize
+     (let ([results (benchmark-run (list bench-nine-args) (benchmark-test-config))])
+       (and (= (length results) 8)
+            (andmap (lambda (result)
+                      (let ([args (benchmark-result-args result)]
+                            [sample-count (length (benchmark-result-samples result))])
+                        (= (cdr (assq 'sum (benchmark-result-counters result)))
+                           (* sample-count (apply + (map cdr args))))))
+                    results))))
 
 (mat benchmark-reporters
      (let ([out (open-output-string)])
