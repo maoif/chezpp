@@ -55,7 +55,8 @@
           instantiate-benchmark-template benchmark-options)
   (import (chezpp chez)
           (chezpp utils)
-          (chezpp internal))
+          (chezpp internal)
+          (chezpp rich))
 
 
 ;;;;===----------------------------------------------------------------------===
@@ -477,6 +478,77 @@
         (if entry
             ($alist-ref (cdr entry) 'mean 0)
             0))))
+
+  (define $benchmark-report-value
+    (lambda (value)
+      (cond
+       [(number? value) (number->string value)]
+       [(symbol? value) (symbol->string value)]
+       [(string? value) value]
+       [(not value) ""]
+       [else ($write-string value)])))
+
+  (define $benchmark-result-iterations
+    (lambda (result)
+      (if (null? (benchmark-result-samples result))
+          0
+          (benchmark-sample-iterations
+           (car (benchmark-result-samples result))))))
+
+  (define $benchmark-result-column-value
+    (lambda (result key)
+      (case key
+        [(name) (benchmark-result-name result)]
+        [(args) (benchmark-result-args result)]
+        [(template-args) (benchmark-result-template-args result)]
+        [(iterations) ($benchmark-result-iterations result)]
+        [(cpu-ns) ($metric-mean result 'cpu-ns)]
+        [(real-ns) ($metric-mean result 'real-ns)]
+        [(bytes) ($metric-mean result 'bytes)]
+        [(counters) (benchmark-result-counters result)]
+        [(error) (and (benchmark-result-error result) #t)]
+        [else (errorf 'benchmark-rich-reporter "unknown result column: ~a" key)])))
+
+  (define $benchmark-result-column-justify
+    (lambda (key)
+      (case key
+        [(iterations cpu-ns real-ns bytes) 'right]
+        [else 'left])))
+
+  (define $benchmark-rich-default-columns
+    '((name . "name")
+      (args . "args")
+      (iterations . "iterations")
+      (cpu-ns . "cpu/ns")
+      (real-ns . "real/ns")
+      (bytes . "bytes/iter")
+      (counters . "counters")
+      (error . "error")))
+
+  (define $benchmark-rich-table
+    (lambda (results options)
+      (let ([table (make-rich-table)]
+            [columns ($option-ref options 'columns $benchmark-rich-default-columns)])
+        (rich-table-title-set! table ($option-ref options 'title "Benchmark results"))
+        (rich-table-caption-set! table ($option-ref options 'caption #f))
+        (rich-table-box-set! table ($option-ref options 'box 'ascii))
+        (rich-table-show-header?-set! table ($option-ref options 'show-header? #t))
+        (rich-table-show-lines?-set! table ($option-ref options 'show-lines? #t))
+        (rich-table-padding-set! table ($option-ref options 'padding 1))
+        (for-each (lambda (column)
+                    (rich-table-add-column! table
+                                            (cdr column)
+                                            ($benchmark-result-column-justify (car column))))
+                  columns)
+        (for-each (lambda (result)
+                    (apply rich-table-add-row!
+                           table
+                           (map (lambda (column)
+                                  ($benchmark-report-value
+                                   ($benchmark-result-column-value result (car column))))
+                                columns)))
+                  results)
+        table)))
 
   (define $find-result
     (lambda (results name args template-args)
@@ -1119,14 +1191,27 @@ self-contained and supports the Scheme data emitted by benchmark results.
            (flush-output-port out))))))
 
   #|proc:benchmark-rich-reporter
-The `benchmark-rich-reporter` procedure returns a reporter compatible with v2's
-optional Rich reporting roadmap. It currently uses the text reporter without
-adding a dependency on `(chezpp rich)`, so benchmark users can opt into richer
-terminal rendering outside this library.
+The `benchmark-rich-reporter` procedure returns a reporter that writes benchmark
+results as a rich table. `options` is an optional alist that customizes table
+style. Supported keys are `title`, `caption`, `box`, `show-header?`,
+`show-lines?`, `padding`, and `columns`. `columns` is an alist whose keys select
+result fields and whose values are column labels; supported field keys are
+`name`, `args`, `template-args`, `iterations`, `cpu-ns`, `real-ns`, `bytes`,
+`counters`, and `error`.
 |#
   (define benchmark-rich-reporter
-    (lambda ()
-      (benchmark-text-reporter)))
+    (case-lambda
+      [()
+       (benchmark-rich-reporter '())]
+      [(options)
+       (pcheck ([list? options])
+               (make-benchmark-reporter
+                $void-procedure
+                $void-procedure
+                (lambda (results out)
+                  (rich-print out ($benchmark-rich-table results options))
+                  (newline out)
+                  (flush-output-port out))))]))
 
   #|proc:make-benchmark-config
 The `make-benchmark-config` procedure creates a runner configuration. The
