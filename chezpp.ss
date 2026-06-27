@@ -33,7 +33,6 @@
                   (chezpp queue)
                   (chezpp heap)
                   (chezpp dset)
-                  (chezpp graph)
 
                   (chezpp uuid)
                   (chezpp hash)
