@@ -525,6 +525,79 @@
       (counters . "counters")
       (error . "error")))
 
+  (define $benchmark-text-default-columns
+    '((name . "name")
+      (iterations . "iterations")
+      (cpu-ns . "cpu/ns")
+      (real-ns . "real/ns")
+      (bytes . "bytes/iter")
+      (counters . "counters")))
+
+  (define $string-pad-left
+    (lambda (text width)
+      (let ([len (string-length text)])
+        (if (>= len width)
+            text
+            (string-append (make-string (- width len) #\space) text)))))
+
+  (define $string-pad-right
+    (lambda (text width)
+      (let ([len (string-length text)])
+        (if (>= len width)
+            text
+            (string-append text (make-string (- width len) #\space))))))
+
+  (define $benchmark-column-widths
+    (lambda (rows columns)
+      (map (lambda (column)
+             (let ([label (cdr column)])
+               (let loop ([rows rows] [width (string-length label)])
+                 (if (null? rows)
+                     width
+                     (loop (cdr rows)
+                           (max width
+                                (string-length (cdr (assq (car column) (car rows))))))))))
+           columns)))
+
+  (define $benchmark-format-row
+    (lambda (row columns widths)
+      (let loop ([columns columns] [widths widths] [out '()])
+        (if (null? columns)
+            (apply string-append (reverse out))
+            (let* ([key (caar columns)]
+                   [text (cdr (assq key row))]
+                   [width (car widths)]
+                   [formatted (if (eq? 'right ($benchmark-result-column-justify key))
+                                  ($string-pad-left text width)
+                                  ($string-pad-right text width))]
+                   [piece (if (null? out)
+                              formatted
+                              (string-append "  " formatted))])
+              (loop (cdr columns) (cdr widths) (cons piece out)))))))
+
+  (define $benchmark-results->rows
+    (lambda (results columns)
+      (map (lambda (result)
+             (map (lambda (column)
+                    (cons (car column)
+                          ($benchmark-report-value
+                           ($benchmark-result-column-value result (car column)))))
+                  columns))
+           results)))
+
+  (define $benchmark-text-lines
+    (lambda (results)
+      (let* ([columns $benchmark-text-default-columns]
+             [rows ($benchmark-results->rows results columns)]
+             [widths ($benchmark-column-widths rows columns)]
+             [header-row (map (lambda (column)
+                                (cons (car column) (cdr column)))
+                              columns)])
+        (cons ($benchmark-format-row header-row columns widths)
+              (map (lambda (row)
+                     ($benchmark-format-row row columns widths))
+                   rows)))))
+
   (define $benchmark-rich-table
     (lambda (results options)
       (let ([table (make-rich-table)]
@@ -1100,23 +1173,11 @@ reporter.
     (lambda ()
       (make-benchmark-reporter
        (lambda (results out)
-         (fprintf out "name iterations cpu/ns real/ns bytes/iter counters~%"))
-       (lambda (result out)
-         (let* ([summary (benchmark-result-summary result)]
-                [cpu (cdr (assq 'mean (cdr (assq 'cpu-ns summary))))]
-                [real (cdr (assq 'mean (cdr (assq 'real-ns summary))))]
-                [bytes (cdr (assq 'mean (cdr (assq 'bytes summary))))]
-                [iterations (if (null? (benchmark-result-samples result))
-                                0
-                                (benchmark-sample-iterations
-                                 (car (benchmark-result-samples result))))])
-           (fprintf out "~a ~a ~a ~a ~a ~s~%"
-                    (benchmark-result-name result)
-                    iterations
-                    cpu
-                    real
-                    bytes
-                    (benchmark-result-counters result))))
+         (for-each (lambda (line)
+                     (display line out)
+                     (newline out))
+                   ($benchmark-text-lines results)))
+       $void-procedure
        (lambda (results out)
          (flush-output-port out)))))
 

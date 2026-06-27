@@ -80,6 +80,27 @@
         (loop (+ i 1) #t #f)]
        [else (loop (+ i 1) #f #f)]))))
 
+(define (benchmark-string-lines text)
+  (let ([len (string-length text)])
+    (let loop ([start 0] [i 0] [out '()])
+      (cond
+       [(= i len)
+        (reverse (if (= start i)
+                     out
+                     (cons (substring text start i) out)))]
+       [(char=? (string-ref text i) #\newline)
+        (loop (+ i 1) (+ i 1) (cons (substring text start i) out))]
+       [else (loop start (+ i 1) out)]))))
+
+(define (benchmark-string-index text needle)
+  (let ([text-len (string-length text)]
+        [needle-len (string-length needle)])
+    (let loop ([i 0])
+      (cond
+       [(> (+ i needle-len) text-len) #f]
+       [(string=? needle (substring text i (+ i needle-len))) i]
+       [else (loop (+ i 1))]))))
+
 (benchmark-clear-registry! (current-benchmark-registry))
 
 (define-benchmark bench-basic
@@ -241,6 +262,30 @@
        (let ([text (get-output-string out)])
          (and (string? text)
               (> (string-length text) 0)))))
+
+(mat benchmark-text-reporter-alignment
+     (let ([out (open-output-string)])
+       (benchmark-report (benchmark-run (list bench-basic) (benchmark-test-config))
+                         (benchmark-text-reporter)
+                         out)
+       (let* ([lines (benchmark-string-lines (get-output-string out))]
+              [header (car lines)]
+              [row (cadr lines)]
+              [iterations-index (benchmark-string-index header "iterations")]
+              [cpu-index (benchmark-string-index header "cpu/ns")]
+              [real-index (benchmark-string-index header "real/ns")]
+              [bytes-index (benchmark-string-index header "bytes/iter")]
+              [counters-index (benchmark-string-index header "counters")])
+         (and iterations-index
+              cpu-index
+              real-index
+              bytes-index
+              counters-index
+              (char-numeric? (string-ref row (+ iterations-index 9)))
+              (char-numeric? (string-ref row (+ cpu-index 5)))
+              (char-numeric? (string-ref row (+ real-index 6)))
+              (char-numeric? (string-ref row (+ bytes-index 9)))
+              (char=? (string-ref row counters-index) (integer->char 40))))))
 
 (mat benchmark-v2-reporters
      (let ([out (open-output-string)])
