@@ -96,6 +96,15 @@
             [text (log-formatter-format fmt "api" 'critical "T0" 'th "src" 'format "~a=~a" '(status 500))])
        (string=? "C T0 th src % status=500" text))
 
+     (let* ([fmt (make-log-pattern-formatter "%t")]
+            [out (open-output-string)]
+            [sink (make-log-port-sink 'port out)]
+            [log (make-logger 'app)])
+       (log-sink-formatter-set! sink fmt)
+       (logger-add-sink! log sink)
+       (logger-log log 'info "threaded")
+       (string=? (format "~a\n" (get-thread-id)) (get-output-string out)))
+
      (let* ([fmt (make-log-pattern-formatter "%m")]
             [text (log-formatter-format fmt 'app 'debug #f #f #f 'values 'a '(b 3))])
        (string=? "a b 3" text))

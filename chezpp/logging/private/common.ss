@@ -56,6 +56,6 @@
     (lambda () (current-time)))
 
   (define log-current-thread-id
-    (lambda () #f))
+    (lambda () (get-thread-id)))
 
   )
