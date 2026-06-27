@@ -47,12 +47,11 @@
     (lambda (name level sinks filter error-policy)
       (make-$logger name level sinks filter error-policy #f (make-mutex name))))
 
-  (define $with-mutex
-    (lambda (mtx thunk)
-      (dynamic-wind
-        (lambda () (mutex-acquire mtx))
-        thunk
-        (lambda () (mutex-release mtx)))))
+  (define-syntax with-logger-mutex
+    (syntax-rules ()
+      [(_ logger body ...)
+       (with-mutex ($logger-lock logger)
+         body ...)]))
 
   (define $all-sinks?
     (lambda (x)
@@ -81,14 +80,12 @@
 
   (define $logger-snapshot
     (lambda (logger)
-      ($with-mutex
-       ($logger-lock logger)
-       (lambda ()
-         (values ($logger-name logger)
-                 ($logger-level logger)
-                 (list-copy ($logger-sinks logger))
-                 ($logger-filter logger)
-                 ($logger-closed? logger))))))
+      (with-logger-mutex logger
+        (values ($logger-name logger)
+                ($logger-level logger)
+                (list-copy ($logger-sinks logger))
+                ($logger-filter logger)
+                ($logger-closed? logger)))))
 
   #|proc:make-logger
   The `make-logger` procedure creates a synchronous logger named `name` with
@@ -113,9 +110,8 @@
   (define logger-level
     (lambda (logger)
       (pcheck ([logger? logger])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () ($logger-level logger))))))
+              (with-logger-mutex logger
+                ($logger-level logger)))))
 
   #|proc:logger-level-set!
   The `logger-level-set!` procedure sets the threshold of `logger` to `level`.
@@ -123,9 +119,8 @@
   (define logger-level-set!
     (lambda (logger level)
       (pcheck ([logger? logger] [log-level? level])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () ($logger-level-set! logger level))))))
+              (with-logger-mutex logger
+                ($logger-level-set! logger level)))))
 
   #|proc:logger-sinks
   The `logger-sinks` procedure returns a fresh list of the sinks attached to
@@ -134,9 +129,8 @@
   (define logger-sinks
     (lambda (logger)
       (pcheck ([logger? logger])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () (list-copy ($logger-sinks logger)))))))
+              (with-logger-mutex logger
+                (list-copy ($logger-sinks logger))))))
 
   #|proc:logger-sinks-set!
   The `logger-sinks-set!` procedure replaces the sinks attached to `logger`
@@ -145,9 +139,8 @@
   (define logger-sinks-set!
     (lambda (logger sinks)
       (pcheck ([logger? logger] [$all-sinks? sinks])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () ($logger-sinks-set! logger (list-copy sinks)))))))
+              (with-logger-mutex logger
+                ($logger-sinks-set! logger (list-copy sinks))))))
 
   #|proc:logger-add-sink!
   The `logger-add-sink!` procedure appends `sink` to `logger`.
@@ -155,9 +148,8 @@
   (define logger-add-sink!
     (lambda (logger sink)
       (pcheck ([logger? logger] [log-sink? sink])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () ($logger-sinks-set! logger (append ($logger-sinks logger) (list sink))))))))
+              (with-logger-mutex logger
+                ($logger-sinks-set! logger (append ($logger-sinks logger) (list sink)))))))
 
   #|proc:logger-remove-sink!
   The `logger-remove-sink!` procedure removes every sink from `logger` that is
@@ -166,14 +158,12 @@
   (define logger-remove-sink!
     (lambda (logger sink)
       (pcheck ([logger? logger] [log-sink? sink])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda ()
-                 ($logger-sinks-set! logger
-                                     (let loop ([sinks ($logger-sinks logger)])
-                                       (cond [(null? sinks) '()]
-                                             [(eq? (car sinks) sink) (loop (cdr sinks))]
-                                             [else (cons (car sinks) (loop (cdr sinks)))]))))))))
+              (with-logger-mutex logger
+                ($logger-sinks-set! logger
+                                    (let loop ([sinks ($logger-sinks logger)])
+                                      (cond [(null? sinks) '()]
+                                            [(eq? (car sinks) sink) (loop (cdr sinks))]
+                                            [else (cons (car sinks) (loop (cdr sinks)))])))))))
 
   #|proc:logger-filter
   The `logger-filter` procedure returns the filter procedure of `logger`, or
@@ -182,9 +172,8 @@
   (define logger-filter
     (lambda (logger)
       (pcheck ([logger? logger])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () ($logger-filter logger))))))
+              (with-logger-mutex logger
+                ($logger-filter logger)))))
 
   #|proc:logger-filter-set!
   The `logger-filter-set!` procedure sets the filter of `logger` to
@@ -194,9 +183,8 @@
   (define logger-filter-set!
     (lambda (logger filter-or-false)
       (pcheck ([logger? logger] [log-false-or-procedure? filter-or-false])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () ($logger-filter-set! logger filter-or-false))))))
+              (with-logger-mutex logger
+                ($logger-filter-set! logger filter-or-false)))))
 
   #|proc:logger-error-policy
   The `logger-error-policy` procedure returns the sink error policy of
@@ -205,9 +193,8 @@
   (define logger-error-policy
     (lambda (logger)
       (pcheck ([logger? logger])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () ($logger-error-policy logger))))))
+              (with-logger-mutex logger
+                ($logger-error-policy logger)))))
 
   #|proc:logger-error-policy-set!
   The `logger-error-policy-set!` procedure sets the sink error policy of
@@ -216,9 +203,8 @@
   (define logger-error-policy-set!
     (lambda (logger policy)
       (pcheck ([logger? logger] [log-error-policy? policy])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda () ($logger-error-policy-set! logger policy))))))
+              (with-logger-mutex logger
+                ($logger-error-policy-set! logger policy)))))
 
   #|proc:logger-enabled?
   The `logger-enabled?` procedure returns whether `logger` would emit a message
@@ -227,13 +213,11 @@
   (define logger-enabled?
     (lambda (logger level)
       (pcheck ([logger? logger] [log-message-level? level])
-              ($with-mutex
-               ($logger-lock logger)
-               (lambda ()
-                 (let ([threshold ($logger-level logger)])
-                   (and (not (eq? threshold 'off))
-                        (log-level>=? level threshold)
-                        (not ($logger-closed? logger)))))))))
+              (with-logger-mutex logger
+                (let ([threshold ($logger-level logger)])
+                  (and (not (eq? threshold 'off))
+                       (log-level>=? level threshold)
+                       (not ($logger-closed? logger))))))))
 
   #|proc:logger-dispatch!
   The `logger-dispatch!` procedure dispatches direct log fields from `logger`
@@ -317,14 +301,12 @@
     (lambda (logger)
       (pcheck ([logger? logger])
               (let ([sinks
-                     ($with-mutex
-                      ($logger-lock logger)
-                      (lambda ()
-                        (if ($logger-closed? logger)
-                            #f
-                            (begin
-                              ($logger-closed?-set! logger #t)
-                              (list-copy ($logger-sinks logger))))))])
+                     (with-logger-mutex logger
+                       (if ($logger-closed? logger)
+                           #f
+                           (begin
+                             ($logger-closed?-set! logger #t)
+                             (list-copy ($logger-sinks logger)))))])
                 (when sinks
                   (for-each
                    (lambda (sink)

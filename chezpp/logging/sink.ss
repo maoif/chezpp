@@ -46,12 +46,11 @@
     (lambda (name level filter formatter writer flusher closer)
       (make-$log-sink name level filter formatter writer flusher closer #f (make-mutex name))))
 
-  (define $with-mutex
-    (lambda (mtx thunk)
-      (dynamic-wind
-        (lambda () (mutex-acquire mtx))
-        thunk
-        (lambda () (mutex-release mtx)))))
+  (define-syntax with-sink-mutex
+    (syntax-rules ()
+      [(_ sink body ...)
+       (with-mutex ($log-sink-lock sink)
+         body ...)]))
 
   (define $all-sinks?
     (lambda (x)
@@ -86,9 +85,8 @@
   (define log-sink-level
     (lambda (sink)
       (pcheck ([log-sink? sink])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda () ($log-sink-level sink))))))
+              (with-sink-mutex sink
+                ($log-sink-level sink)))))
 
   #|proc:log-sink-level-set!
   The `log-sink-level-set!` procedure sets the threshold of `sink` to
@@ -97,9 +95,8 @@
   (define log-sink-level-set!
     (lambda (sink level-or-false)
       (pcheck ([log-sink? sink] [log-false-or-level? level-or-false])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda () ($log-sink-level-set! sink level-or-false))))))
+              (with-sink-mutex sink
+                ($log-sink-level-set! sink level-or-false)))))
 
   #|proc:log-sink-filter
   The `log-sink-filter` procedure returns the filter of `sink`, or `#f` when no
@@ -108,9 +105,8 @@
   (define log-sink-filter
     (lambda (sink)
       (pcheck ([log-sink? sink])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda () ($log-sink-filter sink))))))
+              (with-sink-mutex sink
+                ($log-sink-filter sink)))))
 
   #|proc:log-sink-filter-set!
   The `log-sink-filter-set!` procedure sets the filter of `sink` to
@@ -120,9 +116,8 @@
   (define log-sink-filter-set!
     (lambda (sink filter-or-false)
       (pcheck ([log-sink? sink] [log-false-or-procedure? filter-or-false])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda () ($log-sink-filter-set! sink filter-or-false))))))
+              (with-sink-mutex sink
+                ($log-sink-filter-set! sink filter-or-false)))))
 
   #|proc:log-sink-formatter
   The `log-sink-formatter` procedure returns the formatter used by `sink`.
@@ -130,9 +125,8 @@
   (define log-sink-formatter
     (lambda (sink)
       (pcheck ([log-sink? sink])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda () ($log-sink-formatter sink))))))
+              (with-sink-mutex sink
+                ($log-sink-formatter sink)))))
 
   #|proc:log-sink-formatter-set!
   The `log-sink-formatter-set!` procedure sets the formatter used by `sink`.
@@ -140,9 +134,8 @@
   (define log-sink-formatter-set!
     (lambda (sink formatter)
       (pcheck ([log-sink? sink] [log-formatter? formatter])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda () ($log-sink-formatter-set! sink formatter))))))
+              (with-sink-mutex sink
+                ($log-sink-formatter-set! sink formatter)))))
 
   #|proc:log-sink-closed?
   The `log-sink-closed?` procedure returns whether `sink` is closed.
@@ -150,9 +143,8 @@
   (define log-sink-closed?
     (lambda (sink)
       (pcheck ([log-sink? sink])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda () ($log-sink-closed? sink))))))
+              (with-sink-mutex sink
+                ($log-sink-closed? sink)))))
 
   #|proc:log-sink-write!
   The `log-sink-write!` procedure writes direct log data to `sink`. The
@@ -166,20 +158,18 @@
                [log-symbol-or-string? logger-name]
                [log-message-level? level]
                [list? args])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda ()
-                 (let ([sink-level ($log-sink-level sink)]
-                       [filter ($log-sink-filter sink)])
-                   (cond [($log-sink-closed? sink)
-                          (errorf 'log-sink-write! "log sink is closed: ~a" ($log-sink-name sink))]
-                         [(and sink-level (not (log-level>=? level sink-level))) (void)]
-                         [(and filter
-                               (not (filter logger-name level timestamp thread source kind payload args)))
-                          (void)]
-                         [else
-                          (($log-sink-writer sink)
-                           sink logger-name level timestamp thread source kind payload args)])))))))
+              (with-sink-mutex sink
+                (let ([sink-level ($log-sink-level sink)]
+                      [filter ($log-sink-filter sink)])
+                  (cond [($log-sink-closed? sink)
+                         (errorf 'log-sink-write! "log sink is closed: ~a" ($log-sink-name sink))]
+                        [(and sink-level (not (log-level>=? level sink-level))) (void)]
+                        [(and filter
+                              (not (filter logger-name level timestamp thread source kind payload args)))
+                         (void)]
+                        [else
+                         (($log-sink-writer sink)
+                          sink logger-name level timestamp thread source kind payload args)]))))))
 
   #|proc:log-sink-flush!
   The `log-sink-flush!` procedure flushes buffered output owned by `sink`.
@@ -187,11 +177,9 @@
   (define log-sink-flush!
     (lambda (sink)
       (pcheck ([log-sink? sink])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda ()
-                 (unless ($log-sink-closed? sink)
-                   (($log-sink-flusher sink) sink)))))))
+              (with-sink-mutex sink
+                (unless ($log-sink-closed? sink)
+                  (($log-sink-flusher sink) sink))))))
 
   #|proc:log-sink-close!
   The `log-sink-close!` procedure flushes and closes resources owned by `sink`.
@@ -200,13 +188,11 @@
   (define log-sink-close!
     (lambda (sink)
       (pcheck ([log-sink? sink])
-              ($with-mutex
-               ($log-sink-lock sink)
-               (lambda ()
-                 (unless ($log-sink-closed? sink)
-                   (($log-sink-flusher sink) sink)
-                   (($log-sink-closer sink) sink)
-                   ($log-sink-closed?-set! sink #t)))))))
+              (with-sink-mutex sink
+                (unless ($log-sink-closed? sink)
+                  (($log-sink-flusher sink) sink)
+                  (($log-sink-closer sink) sink)
+                  ($log-sink-closed?-set! sink #t))))))
 
   #|proc:make-log-port-sink
   The `make-log-port-sink` procedure creates a sink named `name` that writes
