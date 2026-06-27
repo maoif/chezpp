@@ -1,7 +1,7 @@
 NET_TESTS := net-core.ss net-http.ss net-ftp.ss net-ssh.ss net-sftp.ss net-scp.ss net-websocket.ss net-grpc.ss
 NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss
 
-SRCS_TEST := record.ss datatype.ss match.ss for.ss control.ss os.ss iter.ss transducer.ss file.ss path.ss navigator.ss \
+SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss os.ss iter.ss transducer.ss file.ss path.ss navigator.ss \
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
              hashset.ss treemap.ss treeset.ss \
              bittree.ss bitvec.ss dset.ss \
@@ -9,6 +9,7 @@ SRCS_TEST := record.ss datatype.ss match.ss for.ss control.ss os.ss iter.ss tran
              cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss uuid.ss $(NET_TESTS)
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      ?= $(SRCS_TEST)
+TEST_OBJS := $(addsuffix .so,$(basename $(TEST)))
 
 .PHONY: test
 test: test-all
@@ -23,7 +24,7 @@ mat.so: mat.sls
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
-$(OBJS_TEST): $(SRCS_TEST) $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
+$(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
@@ -50,7 +51,7 @@ test-all: mat.so $(OBJS_TEST)
 	exit $$status
 
 .PHONY: test-some
-test-some: mat.so $(OBJS_TEST)
+test-some: mat.so $(TEST_OBJS)
 	@rm -f *.out *.stdout *.stderr
 	@status=0; \
 	for item in $(TEST); do \

@@ -42,4 +42,5 @@
                   (chezpp cli)
                   (chezpp rich)
                   (chezpp logging)
-                  (chezpp benchmark))))
+                  (chezpp benchmark)
+                  (chezpp test))))
