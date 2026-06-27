@@ -319,23 +319,33 @@
          (close-port p)
          (and open? (equal? '(2 3 4) res))))
 
-     (equal? '(0 1 2)
-             (list-transduce (tidentity) (rflist) '(0 1 2 3 4) 3))
+     (equal? '(1 3)
+             (list-transduce (tslice 1 5 2) (rflist) '(0 1 2 3 4 5)))
 
      (equal? '(1 3)
-             (vector-transduce (tidentity) (rflist) '#(0 1 2 3 4) 1 5 2))
+             (vector-transduce (tslice 1 5 2) (rflist) '#(0 1 2 3 4)))
 
      (equal? '(2 4)
-             (fxvector-transduce (tidentity) (rflist) '#vfx(0 1 2 3 4 5) 2 6 2))
+             (fxvector-transduce (tslice 2 6 2) (rflist) '#vfx(0 1 2 3 4 5)))
 
      (equal? '(1.5 3.5)
-             (flvector-transduce (tidentity) (rflist) '#vfl(0.5 1.5 2.5 3.5) 1 4 2))
+             (flvector-transduce (tslice 1 4 2) (rflist) '#vfl(0.5 1.5 2.5 3.5)))
 
      (equal? '(2 4)
-             (bytevector-transduce (tidentity) (rflist) #vu8(0 1 2 3 4 5) 2 6 2))
+             (bytevector-transduce (tslice 2 6 2) (rflist) #vu8(0 1 2 3 4 5)))
 
      (equal? '(#\b #\d)
-             (string-transduce (tidentity) (rflist) "abcdef" 1 5 2))
+             (string-transduce (tslice 1 5 2) (rflist) "abcdef"))
+
+     (equal? '(b d)
+             (iter-transduce (tslice 1 5 2)
+                             (rflist)
+                             (list->iter '(a b c d e))))
+
+     (equal? '(b d)
+             (transduce (tslice 1 5 2)
+                        (rflist)
+                        (eduction (tidentity) '(a b c d e))))
 
      (iter? (source->iter '(1 2 3)))
      (eq? 'direct (current-transducer-source-mode))
@@ -344,7 +354,11 @@
                (transduce (tmap add1) (rflist) '#(1 2 3))))
 
      ;; slice step must be positive.
-     (error? (vector-transduce (tidentity) (rflist) '#(1 2 3) 0 3 0))
+     (error? (tslice 0 3 0))
+     ;; type-specific terminals no longer accept source slicing arities.
+     (error? (list-transduce (tidentity) (rflist) '(1 2 3) 2))
+     (error? (vector-transduce (tidentity) (rflist) '#(1 2 3) 0 3))
+     (error? (bytevector-transduce (tidentity) (rflist) #vu8(1 2 3) 0 3 1))
      ;; caller-owned textual ports are required for line traversal.
      (error? (port-lines-transduce (tidentity) (rflist) 12)))
 
