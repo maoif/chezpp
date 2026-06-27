@@ -54,6 +54,33 @@
     (lambda (color)
       (and (memq color '(auto always never)) #t)))
 
+  (define $reporter-option?
+    (lambda (reporter)
+      (or (not reporter) (procedure? reporter) (record? reporter))))
+
+  (define $output-option?
+    (lambda (output)
+      (or (output-port? output) (not output))))
+
+  (define $check-config-option
+    (lambda (option)
+      (unless (pair? option)
+        (errorf 'test-config-with "invalid config option: ~a" option))
+      (case (car option)
+        [(reporter)
+         (unless ($reporter-option? (cdr option))
+           (errorf 'test-config-with "invalid config option: ~a" option))]
+        [(output)
+         (unless ($output-option? (cdr option))
+           (errorf 'test-config-with "invalid config option: ~a" option))]
+        [(xfail-strict? stop-on-failure?)
+         (unless (boolean? (cdr option))
+           (errorf 'test-config-with "invalid config option: ~a" option))]
+        [(color)
+         (unless ($color-option? (cdr option))
+           (errorf 'test-config-with "invalid config option: ~a" option))]
+        [else (errorf 'test-config-with "unknown config option: ~a" (car option))])))
+
   (define $test-id?
     (lambda (value)
       (or (natural? value) (symbol? value) (string? value))))
@@ -238,8 +265,8 @@ The `make-test-config` procedure creates a test runner configuration.
 |#
   (define make-test-config
     (lambda (reporter output xfail-strict? stop-on-failure? color)
-      (pcheck ([(lambda (value) (or (not value) (procedure? value) (record? value))) reporter]
-               [(lambda (value) (or (output-port? value) (not value))) output]
+      (pcheck ([$reporter-option? reporter]
+               [$output-option? output]
                [boolean? xfail-strict? stop-on-failure?]
                [$color-option? color])
               ($make-test-config reporter output xfail-strict? stop-on-failure? color))))
@@ -254,7 +281,9 @@ configuration.
 
   #|proc:test-config-with
 The `test-config-with` procedure returns a copy of `config` with fields changed
-according to option association list `options`.
+according to option association list `options`. Each option is a pair whose car
+is one of `reporter`, `output`, `xfail-strict?`, `stop-on-failure?`, or `color`;
+each cdr must have the same type accepted by `make-test-config` for that field.
 |#
   (define test-config-with
     (lambda (config options)
@@ -263,6 +292,7 @@ according to option association list `options`.
                 (if (null? options)
                     config
                     (let ([option (car options)])
+                      ($check-config-option option)
                       (case (car option)
                         [(reporter)
                          (loop (cdr options)

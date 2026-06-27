@@ -1,6 +1,27 @@
 (import (chezpp)
         (chezpp test))
 
+(define test-string-contains?
+  (lambda (string needle)
+    (let ([string-length (string-length string)]
+          [needle-length (string-length needle)])
+      (let loop ([index 0])
+        (cond
+         [(fx> (fx+ index needle-length) string-length) #f]
+         [(string=? (substring string index (fx+ index needle-length)) needle) #t]
+         [else (loop (fx+ index 1))])))))
+
+(define test-error-message-contains?
+  (lambda (thunk needle)
+    (guard (condition
+            [else
+             (test-string-contains?
+              (call-with-string-output-port
+                (lambda (out) (display-condition condition out)))
+              needle)])
+      (thunk)
+      #f)))
+
 (mat test-descriptors
   (test-case-descriptor?
    (make-test-case 'sample (lambda () #t) '()))
@@ -31,7 +52,19 @@
   ;; Public constructors reject invalid names.
   (error? (make-test-case "bad" (lambda () #t) '()))
   ;; Public constructors reject non-procedure runtime bodies.
-  (error? (make-test-case 'bad-body 'not-a-procedure '())))
+  (error? (make-test-case 'bad-body 'not-a-procedure '()))
+  ;; Negative config test: option entries must be pairs.
+  (test-error-message-contains?
+   (lambda () (test-config-with (default-test-config) '(reporter)))
+   "invalid config option")
+  ;; Negative config test: xfail-strict? must be boolean.
+  (test-error-message-contains?
+   (lambda () (test-config-with (default-test-config) '((xfail-strict? . yes))))
+   "invalid config option")
+  ;; Negative config test: color must be auto, always, or never.
+  (test-error-message-contains?
+   (lambda () (test-config-with (default-test-config) '((color . sometimes))))
+   "invalid config option"))
 
 (mat test-assertions
   (begin (test-true #t) #t)
