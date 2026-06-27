@@ -1,21 +1,29 @@
 (library (chezpp transducer)
   (export transducer? reducer? reduced reduced? unreduced ensure-reduced
           preserving-reduced completion
+
           make-transducer transducer-name tidentity tcompose tchain
+
           tmap tmap/i tfilter tfilter/i tremove tkeep tkeep/i treplace
           tcat tmapcat tflatten
+
           ttake tdrop ttake-while tdrop-while ttake-nth tslice
           tpartition tpartition-all tpartition-by
           tdedupe tdedupe-by tdistinct tdistinct-by tinterpose
+
           ttap tinspect
+
           transduce transduce1 into sequence tfor-each
           list-transduce vector-transduce bytevector-transduce
           string-transduce iter-transduce fxvector-transduce
           flvector-transduce hashtable-transduce
           port-lines-transduce port-bytes-transduce
-          make-reducer reducer-name rflist rfreverselist rfvector
-          rfstring rfbytevector rfcount rfsum rffxsum rfflsum rfproduct
+
+          make-reducer reducer-name
+          rflist rfreverselist rfvector rfstring rfbytevector
+          rfcount rfsum rffxsum rfflsum rfproduct
           rfmin rfmax rfany rfevery
+
           eduction eduction? transducible? source->iter
           current-transducer-source-mode)
   (import (chezpp chez)
