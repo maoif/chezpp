@@ -254,6 +254,63 @@
     (and (= (length selected) 1)
          (eq? (test-concrete-case-name (car selected)) 'suite-child))))
 
+(test-clear-registry! (current-test-registry))
+
+(test-case macro/parameterize-product
+  :parameterize ([x]
+                 [1]
+                 [2])
+  :parameterize ([y z]
+                 [10 11]
+                 [20 21])
+  (test-true
+   (or (and (= x 1) (= y 10) (= z 11))
+       (and (= x 1) (= y 20) (= z 21))
+       (and (= x 2) (= y 10) (= z 11))
+       (and (= x 2) (= y 20) (= z 21)))))
+
+(test-case macro/parameterize-duplicate-row-name
+  :parameterize ([x x]
+                 [1 2]
+                 [3 4])
+  ;; Duplicate parameter names in one table preserve both alist entries; body
+  ;; bindings use the first matching parameter value.
+  (test-true (or (= x 1) (= x 3))))
+
+(test-case macro/parameterize-duplicate-table-name
+  :parameterize ([x]
+                 [left])
+  :parameterize ([x y]
+                 [right paired])
+  ;; Duplicate parameter names across tables preserve both alist entries; body
+  ;; bindings use the first matching parameter value in table order.
+  (test-eq x 'left)
+  (test-eq y 'paired))
+
+(mat test-parameterize-macros
+  (let ([cases (test-select (current-test-registry)
+                            '((name-prefix . "macro/parameterize-product")))])
+    (and (= (length cases) 4)
+         (equal? (map test-concrete-case-parameters cases)
+                 '(((x . 1) (y . 10) (z . 11))
+                   ((x . 1) (y . 20) (z . 21))
+                   ((x . 2) (y . 10) (z . 11))
+                   ((x . 2) (y . 20) (z . 21))))))
+  (let ([cases (test-select (current-test-registry)
+                            '((name-prefix . "macro/parameterize-duplicate-row-name")))])
+    (and (= (length cases) 2)
+         (equal? (map test-concrete-case-parameters cases)
+                 '(((x . 1) (x . 2))
+                   ((x . 3) (x . 4))))))
+  (let ([cases (test-select (current-test-registry)
+                            '((name-prefix . "macro/parameterize-duplicate-table-name")))])
+    (and (= (length cases) 1)
+         (equal? (map test-concrete-case-parameters cases)
+                 '(((x . left) (x . right) (y . paired))))))
+  (let ([results (test-run-registry (current-test-registry) (test-silent-config))])
+    (and (= (length results) 7)
+         (andmap (lambda (result) (eq? (test-result-status result) 'passed)) results))))
+
 (mat test-reporters
   (let* ([results (list (make-test-result 'a 'a 'passed "" #f "" "" '() #f)
                         (make-test-result 'b 'b 'failed "bad" #f "" "" '() #f))]

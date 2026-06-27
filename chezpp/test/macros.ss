@@ -130,9 +130,31 @@
               [else (syntax-error key "unknown test option")]))))
       (define build-metadata
         (lambda (options)
-          #`(list #,@(map (lambda (option)
-                            (parse-option (car option) (cdr option)))
-                          options))))
+          (let loop ([options options] [entries '()] [parameterize-tables '()])
+            (cond
+             [(null? options)
+              #`(list #,@(reverse entries)
+                      #,@(if (null? parameterize-tables)
+                             '()
+                             (list #`(cons 'parameterize
+                                           (append #,@(reverse parameterize-tables))))))]
+             [(eq? (syntax->datum (caar options)) ':parameterize)
+              (syntax-case (cadar options) ()
+                [([name ...] row ...)
+                 (loop (cdr options)
+                       entries
+                       (cons #`(list (cons '(name ...)
+                                           (list #,@(map (lambda (row)
+                                                           (quote-row (caar options) row))
+                                                         #'(row ...)))))
+                             parameterize-tables))]
+                [_ (loop (cdr options)
+                         (cons (parse-option (caar options) (cdar options)) entries)
+                         parameterize-tables)])]
+             [else
+              (loop (cdr options)
+                    (cons (parse-option (caar options) (cdar options)) entries)
+                    parameterize-tables)]))))
       (define parameter-names
         (lambda (options)
           (let loop ([options options] [out '()])
