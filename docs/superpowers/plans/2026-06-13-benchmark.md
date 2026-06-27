@@ -1,10 +1,12 @@
 # Benchmark Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Goal:** Build `(chezpp benchmark)` as an in-process benchmark definition, execution, and reporting library matching v1 of the benchmark design, with v2 reporting/comparison work documented as the next roadmap phase.
+**Goal:** Build `(chezpp benchmark)` as an in-process benchmark definition, execution, reporting, baseline, and comparison library.
 
-**Architecture:** v1 lives in `chezpp/benchmark.ss` as a single public library split by internal comment sections for records, option parsing, expansion, runner, summaries, reporters, and macros. The runner uses Chez `statistics`/`sstats-difference` and `black-box`, returns structured records, and keeps CLI, persisted baselines, JSON, CSV, and rich comparison features in v2.
+**Current status:** Implemented. `(chezpp benchmark)` is imported by `chezpp.ss`, covered by `tests/benchmark.ss`, and demonstrated by `examples/benchmark.ss`. The original v1 core is complete, and several v2 items are also implemented: aligned text output, a customizable Rich table reporter, CSV/JSON reporters, Scheme-data baselines, comparison helpers, confidence intervals, measured pause/resume subtraction, baseline error round-tripping, and JSON safety fixes.
+
+**Architecture:** The library lives in `chezpp/benchmark.ss` as a single public library split by internal comment sections for records, option parsing, expansion, runner, summaries, reporters, baselines, comparisons, and macros. The runner uses Chez `statistics`/`sstats-difference` and `black-box`, returns structured records, and keeps cost-center-specific instrumentation deferred. Text and Rich reporters share internal result formatting helpers, with Rich output rendered through `(chezpp rich)`.
 
 **Tech Stack:** ChezScheme libraries, Chez records, Chez `statistics`, `black-box`, Chezpp `pcheck`, existing `mat` test harness, `make clean && make`, and `tests/make test-some`.
 
@@ -12,7 +14,7 @@
 
 ## Roadmap
 
-### v1: In-Process Core Implemented By This Plan
+### Implemented Core
 
 - Public library `(chezpp benchmark)` imported from `chezpp.ss`.
 - Opaque records and public accessors for benchmark descriptors, fixtures, suites, states, samples, results, configs, and reporters.
@@ -21,21 +23,20 @@
 - Argument expansion for `:args`, `:arg-range`, `:dense-arg-range`, and `:arg-product`.
 - Sample-scoped setup/teardown, fixture setup/teardown, benchmark suite execution, and cleanup on body errors.
 - Warmup, measured samples, simple adaptive iteration growth to satisfy `min-time`, and capped iterations.
-- Summary alist containing CPU, real, and allocated-byte per-iteration statistics: `median`, `mean`, `min`, `max`, and `stddev`.
-- Default text reporter and datum reporter.
+- Summary alist containing CPU, real, and allocated-byte per-iteration statistics: `median`, `mean`, `min`, `max`, `stddev`, and `confidence-interval`.
+- Aligned default text reporter, datum reporter, CSV reporter, JSON reporter, and customizable Rich table reporter.
 - `benchmark-do-not-optimize` using Chez `black-box` and weak `benchmark-clobber-memory`.
-- `benchmark-pause-timing` and `benchmark-resume-timing` exported as state markers for future subtraction, but v1 runner does not subtract paused deltas.
-- Cost-center mode is deferred. `benchmark-config-cost-center?` exists and samples return `#f` for cost-center data.
+- `benchmark-pause-timing` and `benchmark-resume-timing` subtract paused `statistics` deltas from measured samples.
+- Scheme-data baseline save/load with version validation, error condition preservation, and compatibility with legacy v1 `(error? . #t)` baselines.
+- Result comparison helpers for percent differences, absolute thresholds, and noise thresholds.
+- JSON writer safety for non-JSON numeric values and all string control characters.
+- Console example under `examples/benchmark.ss` covering multiple inputs, templates, fixtures, suites, reporters, and comparisons.
 
-### v2: Reporting And Comparison Roadmap
+### Remaining Roadmap
 
-- CSV and JSON reporters once repo JSON support is stable.
-- Persisted baseline files represented as Scheme data first, JSON later.
-- Result comparison helpers for percent difference, absolute thresholds, and noise thresholds.
-- Optional richer summaries such as confidence intervals after v1 sample behavior is proven.
-- Optional Rich reporter when `(chezpp rich)` is available without making `(chezpp benchmark)` depend on terminal features.
-- Implement measured pause/resume subtraction with deterministic fake measurement injection.
-- Add explicit cost-center sample fields once instrumentation expectations and tests are stable.
+- Optional JSON baseline file format if a stable repo-level JSON parser/writer becomes available.
+- Explicit cost-center sample fields once instrumentation expectations and tests are stable.
+- Deterministic fake measurement injection for deeper pause/resume tests.
 
 ---
 
@@ -45,6 +46,7 @@
 - Modify `tests/Makefile`: add `benchmark.ss` to `SRCS_TEST`.
 - Modify `chezpp/benchmark.ss`: replace the empty shell with the full public implementation.
 - Modify `chezpp.ss`: import/export `(chezpp benchmark)` from the aggregate Chezpp library.
+- Create `examples/benchmark.ss`: runnable console example for multiple inputs, templates, fixtures, suites, reporters, and comparisons.
 - Keep implementation in one file for v1. Split into `(chezpp benchmark core)`, `(chezpp benchmark runner)`, `(chezpp benchmark reporter)`, and `(chezpp benchmark syntax)` only if the file becomes hard to maintain after v1.
 
 ---
@@ -55,7 +57,7 @@
 - Create: `tests/benchmark.ss`
 - Modify: `tests/Makefile`
 
-- [ ] **Step 1: Add benchmark to test build list**
+- [x] **Step 1: Add benchmark to test build list**
 
 Modify `tests/Makefile` so `SRCS_TEST` includes `benchmark.ss` near the other public library tests:
 
@@ -68,7 +70,7 @@ SRCS_TEST := record.ss datatype.ss match.ss for.ss control.ss os.ss iter.ss tran
              cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss uuid.ss $(NET_TESTS)
 ```
 
-- [ ] **Step 2: Write failing tests**
+- [x] **Step 2: Write failing tests**
 
 Create `tests/benchmark.ss`:
 
@@ -221,7 +223,7 @@ Create `tests/benchmark.ss`:
               (> (string-length text) 0)))))
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -229,7 +231,7 @@ Run:
 cd tests && make test-some TEST='benchmark'
 ```
 
-Expected: compilation fails because `(chezpp benchmark)` exports no benchmark APIs yet.
+Historical red-step result: compilation failed because `(chezpp benchmark)` did not export the benchmark APIs yet. Current state: benchmark tests compile and run.
 
 ---
 
@@ -238,7 +240,7 @@ Expected: compilation fails because `(chezpp benchmark)` exports no benchmark AP
 **Files:**
 - Modify: `chezpp/benchmark.ss`
 
-- [ ] **Step 1: Implement public exports, records, accessors, constructors, registry, and option parsing**
+- [x] **Step 1: Implement public exports, records, accessors, constructors, registry, and option parsing**
 
 Replace `chezpp/benchmark.ss` with a full library exporting the v1 API. Implement records with stable public accessors and internal `$` constructors. Use public documentation comments immediately above exported procedures and macros. Use `pcheck` on public procedures.
 
@@ -287,7 +289,7 @@ stop-on-error?: #f
 
 Option alists accept these symbols: `args`, `arg-range`, `dense-arg-range`, `arg-product`, `setup`, `teardown`, `warmup`, `samples`, `min-time`, `max-iterations`, `unit`, `throughput`, `complexity`, `reporter`, `output`, `filter`, `cost-center?`, `stop-on-error?`, `suite-setup`, `suite-teardown`, `template-args`.
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run:
 
@@ -295,7 +297,7 @@ Run:
 cd tests && make test-some TEST='benchmark'
 ```
 
-Expected: tests still fail on missing macros/runner, but core constructor and predicate errors are gone.
+Historical red-step result: constructor and predicate errors were gone, while macro and runner coverage still failed. Current state: this task is complete.
 
 ---
 
@@ -304,7 +306,7 @@ Expected: tests still fail on missing macros/runner, but core constructor and pr
 **Files:**
 - Modify: `chezpp/benchmark.ss`
 
-- [ ] **Step 1: Implement option macros**
+- [x] **Step 1: Implement option macros**
 
 Implement `benchmark-options` as a syntax transformer that accepts option forms beginning with keyword symbols and emits an alist. Parse these v1 forms:
 
@@ -329,7 +331,7 @@ Implement `benchmark-options` as a syntax transformer that accepts option forms 
 
 Unknown keyword symbols must raise a syntax error.
 
-- [ ] **Step 2: Implement registration macros**
+- [x] **Step 2: Implement registration macros**
 
 Implement:
 
@@ -344,7 +346,7 @@ Implement:
 
 `define-benchmark` and fixture/template instantiation must define a variable and register the resulting benchmark in `current-benchmark-registry`.
 
-- [ ] **Step 3: Implement `benchmark-expand`**
+- [x] **Step 3: Implement `benchmark-expand`**
 
 `benchmark-expand` returns a list of pairs. The car is the constructed state for the concrete run and the cdr is the benchmark descriptor variant to run. Expansion must preserve source order and produce:
 
@@ -357,7 +359,7 @@ Implement:
 
 for `:arg-product [n 1 2] [m 10 20]`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run:
 
@@ -365,7 +367,7 @@ Run:
 cd tests && make test-some TEST='benchmark'
 ```
 
-Expected: expansion and registry tests pass; runner/reporter tests still fail until Task 4.
+Historical red-step result: expansion and registry tests passed, while runner/reporter coverage still failed until Task 4. Current state: this task is complete.
 
 ---
 
@@ -374,11 +376,11 @@ Expected: expansion and registry tests pass; runner/reporter tests still fail un
 **Files:**
 - Modify: `chezpp/benchmark.ss`
 
-- [ ] **Step 1: Implement measurement helpers**
+- [x] **Step 1: Implement measurement helpers**
 
 Use Chez `statistics`, `sstats-difference`, and exact nanosecond conversion. Provide sanitizers that turn negative time/count values into zero. Store the sanitized `sstats` in each sample.
 
-- [ ] **Step 2: Implement lifecycle-safe sample execution**
+- [x] **Step 2: Implement lifecycle-safe sample execution**
 
 For each sample:
 
@@ -389,11 +391,11 @@ For each sample:
 
 Use `dynamic-wind` or guarded cleanup to ensure teardown runs after body errors.
 
-- [ ] **Step 3: Implement warmup and measured samples**
+- [x] **Step 3: Implement warmup and measured samples**
 
 Run `warmup` samples before measured samples. For measured samples, start with one iteration and double until the measured real time reaches `min-time` or `max-iterations` is reached. For tests, `(min-time . 0)` and `(max-iterations . 1)` keep execution deterministic.
 
-- [ ] **Step 4: Implement summaries and counters**
+- [x] **Step 4: Implement summaries and counters**
 
 `benchmark-summarize` computes `cpu-ns`, `real-ns`, and `bytes` entries. Each entry is an alist:
 
@@ -403,11 +405,11 @@ Run `warmup` samples before measured samples. For measured samples, start with o
 
 Merge sample counters by summing numeric values with the same key.
 
-- [ ] **Step 5: Implement reporters**
+- [x] **Step 5: Implement reporters**
 
 `benchmark-text-reporter` writes a plain header and one row per result. `benchmark-datum-reporter` writes one Scheme datum per result. `benchmark-report` accepts `(results reporter output-port)`.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run:
 
@@ -426,11 +428,11 @@ Expected: benchmark tests pass with empty stdout/stderr except the test harness 
 - Modify: `chezpp/benchmark.ss`
 - Modify: `tests/benchmark.ss`
 
-- [ ] **Step 1: Add aggregate import**
+- [x] **Step 1: Add aggregate import**
 
 Add `(chezpp benchmark)` to the `chezpp.ss` export import list near `logging`.
 
-- [ ] **Step 2: Check Scheme parentheses**
+- [x] **Step 2: Check Scheme parentheses**
 
 Run:
 
@@ -440,7 +442,7 @@ python3 check_parentheses.py chezpp/benchmark.ss tests/benchmark.ss
 
 Expected: balanced parentheses reported for both files, or no error output depending on script behavior.
 
-- [ ] **Step 3: Build project**
+- [x] **Step 3: Build project**
 
 Run from repo root:
 
@@ -450,7 +452,7 @@ make clean && make
 
 Expected: exit 0.
 
-- [ ] **Step 4: Run benchmark tests**
+- [x] **Step 4: Run benchmark tests**
 
 Run:
 
@@ -460,7 +462,7 @@ cd tests && make test-some TEST='benchmark'
 
 Expected: exit 0 and no `Bug` or `Error` output.
 
-- [ ] **Step 5: Review diff**
+- [x] **Step 5: Review diff**
 
 Run:
 
@@ -472,8 +474,82 @@ Expected: roadmap v1/v2 is explicit in the plan, benchmark APIs are documented a
 
 ---
 
+### Current Status Update: Follow-Up Work Completed
+
+**Files:**
+- Modified: `chezpp/benchmark.ss`
+- Modified: `tests/benchmark.ss`
+- Created: `examples/benchmark.ss`
+
+- [x] **Step 1: Harden JSON output**
+
+`benchmark-json-reporter` now writes valid JSON for all strings containing control characters U+0000 through U+001F. Common escapes are emitted for quote, backslash, backspace, form feed, newline, return, and tab; other control characters use `\u00XX`. Non-JSON numeric spellings such as infinities and NaN are serialized as JSON strings.
+
+- [x] **Step 2: Preserve baseline errors**
+
+Baseline files still use version `1`. New files serialize benchmark errors as structured condition data under `error`, while old v1 baselines containing `(error? . #t)` remain compatible and reload as error results.
+
+- [x] **Step 3: Validate baseline versions from file input**
+
+`benchmark-load-baseline` validates that the baseline `version` field is numeric before comparing it with `=`, so malformed files report `unsupported benchmark baseline version` instead of a Chez primitive numeric error.
+
+- [x] **Step 4: Add regression tests**
+
+`tests/benchmark.ss` covers CSV/JSON reporters, JSON number/string safety, baseline save/load, legacy `error?` compatibility, malformed baseline versions, comparisons, confidence intervals, and pause/resume behavior.
+
+- [x] **Step 5: Add runnable examples**
+
+`examples/benchmark.ss` demonstrates explicit input rows, product inputs, fixtures, benchmark templates, suite execution, text/CSV/JSON reporters, and baseline comparison output printed to the console.
+
+- [x] **Step 6: Verify current state**
+
+Fresh verification used during the latest updates:
+
+```bash
+python3 check_parentheses.py chezpp/benchmark.ss tests/benchmark.ss
+python3 check_parentheses.py examples/benchmark.ss
+make clean && make
+cd tests && make test-some TEST='benchmark'
+./chez++ -q --script examples/benchmark.ss
+```
+
+---
+
+### Current Status Update: Rich And Text Reporter Follow-Up
+
+**Files:**
+- Modified and committed: `chezpp/benchmark.ss`
+- Modified and committed: `tests/benchmark.ss`
+- Modified locally by request, not committed: `examples/benchmark.ss`
+
+- [x] **Step 1: Implement customizable Rich reporter**
+
+`benchmark-rich-reporter` now accepts an optional style alist and renders a completed `(chezpp rich)` table at reporter finish time. Supported style keys are `title`, `caption`, `box`, `show-header?`, `show-lines?`, `padding`, and `columns`; columns can select result fields such as `name`, `args`, `iterations`, `cpu-ns`, `real-ns`, `bytes`, `counters`, and `error`.
+
+- [x] **Step 2: Align text reporter output**
+
+`benchmark-text-reporter` now formats all rows using computed column widths. Text output keeps plain ASCII formatting, with left-aligned text columns and right-aligned numeric metric columns.
+
+- [x] **Step 3: Update runnable example locally**
+
+`examples/benchmark.ss` was updated to demonstrate `benchmark-rich-reporter` with custom columns and to use the rich reporter for suite output. This example change is intentionally left uncommitted per the request.
+
+- [x] **Step 4: Verify reporter updates**
+
+Fresh verification used for the reporter updates:
+
+```bash
+python3 check_parentheses.py chezpp/benchmark.ss tests/benchmark.ss
+make clean && make
+cd tests && make clean && make test-some TEST='benchmark'
+python3 check_parentheses.py examples/benchmark.ss
+./chez++ -q --script examples/benchmark.ss
+```
+
+---
+
 ## Self-Review
 
-- Spec coverage: v1 core is covered by Tasks 1-5. v2 reporting/comparison is documented in the roadmap and intentionally not implemented in v1.
+- Spec coverage: v1 core is covered by Tasks 1-5. Implemented v2 follow-up work is captured in the current status updates. Remaining deferred work is limited to optional JSON baseline format, cost-center instrumentation, and deeper deterministic pause/resume tests.
 - Placeholder scan: no `TBD`, `TODO`, or unspecified implementation steps remain in this plan.
 - Type consistency: public names in tests match the names exported by `chezpp/benchmark.ss`; config and result accessors match the design document.
