@@ -286,7 +286,8 @@
   (define nav-selected?
     (lambda (path data)
       (guard [exn [else #f]]
-        (call/cc
+        ;; Use a one-shot continuation to stop traversal after the first focus.
+        (call/1cc
          (lambda (return)
            (select-path path data (lambda (value) (return #t)))
            #f)))))
@@ -301,7 +302,8 @@
       [(path data) (nav-select-first path data #f)]
       [(path data default)
        (guard [exn [else default]]
-         (call/cc
+         ;; Use a one-shot continuation to return the first selected value.
+         (call/1cc
           (lambda (return)
             (select-path path data (lambda (value) (return value)))
             default)))]))

@@ -36,7 +36,8 @@
   (define leaf?
     (lambda (value)
       (or (and (pair? value) (not (list? value)))
-          (call/cc
+          ;; Use a one-shot continuation to stop after discovering one child.
+          (call/1cc
            (lambda (return)
              (emit-children value (lambda (child) (return #f)))
              #t)))))

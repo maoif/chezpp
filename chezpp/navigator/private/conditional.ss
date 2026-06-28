@@ -19,7 +19,8 @@
   (define path-selected?
     (lambda (path value)
       (guard [exn [else #f]]
-        (call/cc
+        ;; Use a one-shot continuation to stop traversal after the first focus.
+        (call/1cc
          (lambda (return)
            (select-path path value (lambda (child) (return #t)))
            #f)))))

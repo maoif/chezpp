@@ -399,6 +399,34 @@
                                 0
                                 '(1 2 3))))
 
+(mat navigator-continuations
+     (let ([visited 0])
+       (let ([lazy-nav (make-nav 'lazy-first
+                                 (lambda (value emit)
+                                   (for-each
+                                    (lambda (item)
+                                      (set! visited (+ visited 1))
+                                      (emit item))
+                                    value))
+                                 (lambda (value update) value)
+                                 (lambda (value update!) value))])
+         (and (eq? 'a (nav-select-first lazy-nav '(a b c)))
+              (= visited 1))))
+     (let ([visited 0])
+       (let ([lazy-nav (make-nav 'lazy-selected?
+                                 (lambda (value emit)
+                                   (for-each
+                                    (lambda (item)
+                                      (set! visited (+ visited 1))
+                                      (emit item))
+                                    value))
+                                 (lambda (value update) value)
+                                 (lambda (value update!) value))])
+         (and (nav-selected? lazy-nav '(a b c))
+              (= visited 1))))
+     (equal? '(a b c)
+             (iter->list (nav-traverse->iter nav/all '(a b c)))))
+
 (mat navigator-facade
      (equal? '(Ada)
              (nav-select (nav-path (nav/key 'user) (nav/key 'name))
