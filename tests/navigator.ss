@@ -32,6 +32,78 @@
       (and (= (length ks) (length keys))
            (andmap (lambda (key) (memq key ks)) keys)))))
 
+(define-record-type (ixbox make-ixbox ixbox?)
+  (fields (mutable items)))
+
+(define ixbox-copy-items
+  (lambda (box)
+    (vector-copy (ixbox-items box))))
+
+(define ixbox-length
+  (lambda (box)
+    (vector-length (ixbox-items box))))
+
+(define ixbox-ref
+  (lambda (box index)
+    (vector-ref (ixbox-items box) index)))
+
+(define ixbox-set
+  (lambda (box index value)
+    (let ([items (ixbox-copy-items box)])
+      (vector-set! items index value)
+      (make-ixbox items))))
+
+(define ixbox-set!
+  (lambda (box index value)
+    (vector-set! (ixbox-items box) index value)
+    box))
+
+(define-record-type (kvbox make-kvbox kvbox?)
+  (fields (mutable entries)))
+
+(define kvbox-ref
+  (lambda (box key default)
+    (let ([entry (assq key (kvbox-entries box))])
+      (if entry (cdr entry) default))))
+
+(define kvbox-set
+  (lambda (box key value)
+    (let loop ([entries (kvbox-entries box)])
+      (cond [(null? entries) (make-kvbox (list (cons key value)))]
+            [(eq? (caar entries) key)
+             (make-kvbox (cons (cons key value) (cdr entries)))]
+            [else
+             (let ([tail (loop (cdr entries))])
+               (make-kvbox (cons (car entries) (kvbox-entries tail))))]))))
+
+(define kvbox-set!
+  (lambda (box key value)
+    (let loop ([entries (kvbox-entries box)])
+      (cond [(null? entries)
+             (kvbox-entries-set! box (cons (cons key value) (kvbox-entries box)))]
+            [(eq? (caar entries) key)
+             (set-cdr! (car entries) value)]
+            [else (loop (cdr entries))]))
+    box))
+
+(define kvbox-delete
+  (lambda (box key)
+    (let loop ([entries (kvbox-entries box)])
+      (cond [(null? entries) (make-kvbox '())]
+            [(eq? (caar entries) key) (make-kvbox (cdr entries))]
+            [else
+             (let ([tail (loop (cdr entries))])
+               (make-kvbox (cons (car entries) (kvbox-entries tail))))]))))
+
+(define kvbox-delete!
+  (lambda (box key)
+    (kvbox-entries-set! box (kvbox-entries (kvbox-delete box key)))
+    box))
+
+(define kvbox->entries
+  (lambda (box)
+    (kvbox-entries box)))
+
 (mat navigator-core
      (nav? nav/stay)
      (nav-path? nav-empty-path)
@@ -290,6 +362,59 @@
      (error? (nav-clearval (nav/nth 1) "abc"))
      ;; negative: association list mutation cannot remove the head cell safely.
      (error? (nav-clearval! (nav/key 'name) '((name . Ada)))))
+
+(mat navigator-custom-containers
+     (begin
+       (nav-register-indexed!
+        ixbox?
+        ixbox-length
+        ixbox-ref
+        ixbox-set
+        ixbox-set!)
+       #t)
+     (equal? '(a b c) (nav-select nav/all (make-ixbox '#(a b c))))
+     (equal? '(b) (nav-select (nav/nth 1) (make-ixbox '#(a b c))))
+     (equal? '(0 1 2) (nav-select nav/keys (make-ixbox '#(a b c))))
+     (equal? '((0 . a) (1 . b) (2 . c))
+             (nav-select nav/entries (make-ixbox '#(a b c))))
+     (let ([box (nav-transform nav/all
+                               (lambda (value)
+                                 (string->symbol
+                                  (string-upcase (symbol->string value))))
+                               (make-ixbox '#(a b)))])
+       (equal? '#(A B) (ixbox-items box)))
+     (let ([box (make-ixbox '#(a b c))])
+       (and (eq? box (nav-setval! (nav/nth 1) 'B box))
+            (equal? '#(a B c) (ixbox-items box)))))
+
+(mat navigator-custom-maps
+     (begin
+       (nav-register-keyed!
+        kvbox?
+        kvbox-ref
+        kvbox-set
+        kvbox-set!
+        kvbox-delete
+        kvbox-delete!
+        kvbox->entries)
+       #t)
+     (equal? '(Ada) (nav-select (nav/key 'name) (make-kvbox '((name . Ada) (age . 37)))))
+     (equal? '(name age) (nav-select nav/keys (make-kvbox '((name . Ada) (age . 37)))))
+     (equal? '(Ada 37) (nav-select nav/all (make-kvbox '((name . Ada) (age . 37)))))
+     (equal? '((name . Ada) (age . 37))
+             (nav-select nav/entries (make-kvbox '((name . Ada) (age . 37)))))
+     (let ([box (nav-setval (nav/key 'age) 38 (make-kvbox '((name . Ada) (age . 37))))])
+       (equal? '((name . Ada) (age . 38)) (kvbox-entries box)))
+     (let ([box (nav-setval (nav/key/default 'active #f) #t (make-kvbox '((name . Ada))))])
+       (equal? '((name . Ada) (active . #t)) (kvbox-entries box)))
+     (let ([box (make-kvbox '((name . Ada) (age . 37)))])
+       (and (eq? box (nav-setval! (nav/key 'age) 38 box))
+            (equal? '((name . Ada) (age . 38)) (kvbox-entries box))))
+     (let ([box (nav-clearval (nav/key 'age) (make-kvbox '((name . Ada) (age . 37))))])
+       (equal? '((name . Ada)) (kvbox-entries box)))
+     (let ([box (make-kvbox '((name . Ada) (age . 37)))])
+       (and (eq? box (nav-clearval! (nav/key 'age) box))
+            (equal? '((name . Ada)) (kvbox-entries box)))))
 
 (mat navigator-recursive
      (equal? '((1 b) #(2 (c 3)) 1 b 2 (c 3) c 3)

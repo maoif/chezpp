@@ -3,6 +3,7 @@
   (import (chezscheme)
           (chezpp utils)
           (chezpp navigator private core)
+          (chezpp navigator private data)
           (chezpp navigator private engine))
 
   (define make-recursive-nav-group
@@ -15,22 +16,17 @@
 
   (define emit-children
     (lambda (value emit)
-      (cond [(pair? value)
+      (cond [(and (pair? value) (not (alist? value)))
              (when (list? value)
                (for-each emit value))]
-            [(vector? value)
-             (let ([len (vector-length value)])
+            [(indexed-supported? value)
+             (let ([len (indexed-length value)])
                (let loop ([i 0])
                  (when (< i len)
-                   (emit (vector-ref value i))
+                   (emit (indexed-ref/missing value i))
                    (loop (+ i 1)))))]
-            [(hashtable? value)
-             (let ([vals (hashtable-values value)])
-               (let ([len (vector-length vals)])
-                 (let loop ([i 0])
-                   (when (< i len)
-                     (emit (vector-ref vals i))
-                     (loop (+ i 1))))))]
+            [(keyed-values value)
+             => (lambda (values) (for-each emit values))]
             [else (void)])))
 
   (define leaf?
@@ -100,29 +96,27 @@
      (lambda (value update)
        (cond [(and (pair? value) (list? value))
               (remove-missing-values (map update value))]
-             [(vector? value)
-              (let* ([len (vector-length value)]
-                     [copy (make-vector len)])
-                (let loop ([i 0])
-                  (when (< i len)
-                    (let ([new-value (update (vector-ref value i))])
-                      (vector-set! copy i (if (nav-missing? new-value)
-                                              (vector-ref value i)
-                                              new-value)))
-                    (loop (+ i 1))))
-                copy)]
-             [(hashtable? value)
-              (let ([copy (hashtable-copy value #t)])
-                (let-values ([(keys vals) (hashtable-entries value)])
-                  (let ([len (vector-length keys)])
-                    (let loop ([i 0])
-                      (when (< i len)
-                        (let ([new-value (update (vector-ref vals i))])
-                          (if (nav-missing? new-value)
-                              (hashtable-delete! copy (vector-ref keys i))
-                              (hashtable-set! copy (vector-ref keys i) new-value)))
-                        (loop (+ i 1))))))
-                copy)]
+             [(indexed-supported? value)
+              (let ([len (indexed-length value)])
+                (let loop ([i 0] [value value])
+                  (if (= i len)
+                      value
+                      (let* ([old (indexed-ref/missing value i)]
+                             [new-value (update old)])
+                        (loop (+ i 1)
+                              (if (nav-missing? new-value)
+                                  value
+                                  (indexed-set value i new-value)))))))]
+             [(keyed-entries value)
+              => (lambda (entries)
+                   (let loop ([entries entries] [value value])
+                     (if (null? entries)
+                         value
+                         (let ([new-value (update (cdar entries))])
+                           (loop (cdr entries)
+                                 (if (nav-missing? new-value)
+                                     (keyed-delete value (caar entries))
+                                     (keyed-set value (caar entries) new-value)))))))]
              [else value]))
      (lambda (value update!)
        (cond [(and (pair? value) (list? value))
@@ -133,63 +127,60 @@
                       (set-car! xs new-value)))
                   (loop (cdr xs))))
               value]
-             [(vector? value)
-              (let ([len (vector-length value)])
+             [(indexed-supported? value)
+              (let ([len (indexed-length value)])
                 (let loop ([i 0])
                   (when (< i len)
-                    (let ([new-value (update! (vector-ref value i))])
+                    (let ([new-value (update! (indexed-ref/missing value i))])
                       (unless (nav-missing? new-value)
-                        (vector-set! value i new-value)))
+                        (indexed-set! value i new-value)))
                     (loop (+ i 1)))))
               value]
-             [(hashtable? value)
-              (let-values ([(keys vals) (hashtable-entries value)])
-                (let ([len (vector-length keys)])
-                  (let loop ([i 0])
-                    (when (< i len)
-                      (let ([new-value (update! (vector-ref vals i))])
+             [(keyed-entries value)
+              => (lambda (entries)
+                   (for-each
+                    (lambda (entry)
+                      (let ([new-value (update! (cdr entry))])
                         (if (nav-missing? new-value)
-                            (hashtable-delete! value (vector-ref keys i))
-                            (hashtable-set! value (vector-ref keys i) new-value)))
-                      (loop (+ i 1))))))
-              value]
+                            (keyed-delete! value (car entry))
+                            (keyed-set! value (car entry) new-value))))
+                    entries)
+                   value)]
              [else value]))
      (lambda (value clear)
        (cond [(and (pair? value) (list? value))
               (remove-missing-values
                (map clear value))]
-             [(vector? value) value]
-             [(hashtable? value)
-              (let ([copy (hashtable-copy value #t)])
-                (let-values ([(keys vals) (hashtable-entries value)])
-                  (let ([len (vector-length keys)])
-                    (let loop ([i 0])
-                      (when (< i len)
-                        (when (nav-missing? (clear (vector-ref vals i)))
-                          (hashtable-delete! copy (vector-ref keys i)))
-                        (loop (+ i 1))))))
-                copy)]
+             [(indexed-supported? value) value]
+             [(keyed-entries value)
+              => (lambda (entries)
+                   (let loop ([entries entries] [value value])
+                     (if (null? entries)
+                         value
+                         (loop (cdr entries)
+                               (if (nav-missing? (clear (cdar entries)))
+                                   (keyed-delete value (caar entries))
+                                   value)))))]
              [else value]))
      (lambda (value clear!)
-       (cond [(hashtable? value)
-              (let-values ([(keys vals) (hashtable-entries value)])
-                (let ([len (vector-length keys)])
-                  (let loop ([i 0])
-                    (when (< i len)
-                      (when (nav-missing? (clear! (vector-ref vals i)))
-                        (hashtable-delete! value (vector-ref keys i)))
-                      (loop (+ i 1))))))
-              value]
-             [(and (pair? value) (list? value))
+       (cond [(and (pair? value) (list? value))
               (for-each clear! value)
               value]
-             [(vector? value)
-              (let ([len (vector-length value)])
+             [(indexed-supported? value)
+              (let ([len (indexed-length value)])
                 (let loop ([i 0])
                   (when (< i len)
-                    (clear! (vector-ref value i))
+                    (clear! (indexed-ref/missing value i))
                     (loop (+ i 1)))))
               value]
+             [(keyed-entries value)
+              => (lambda (entries)
+                   (for-each
+                    (lambda (entry)
+                      (when (nav-missing? (clear! (cdr entry)))
+                        (keyed-delete! value (car entry))))
+                    entries)
+                   value)]
              [else value]))))
 
   #|proc:nav/leaves

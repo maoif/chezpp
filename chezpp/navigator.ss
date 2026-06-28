@@ -11,6 +11,7 @@
           nav/stay nav/none nav/all nav/values nav/keys nav/entries
           nav/nth nav/nth/default nav/first nav/second nav/last nav/slice
           nav/key nav/key/default nav/key-values nav/submap nav/car nav/cdr
+          nav-register-indexed! nav-register-keyed!
 
           nav/pred nav/not-pred nav/must nav/maybe nav/if nav/when nav/unless
           nav/multi-path nav/choice

@@ -1,7 +1,8 @@
 (library (chezpp navigator private basic)
   (export nav/stay nav/none nav/all nav/values nav/keys nav/entries
           nav/nth nav/nth/default nav/first nav/second nav/last nav/slice
-          nav/key nav/key/default nav/key-values nav/submap nav/car nav/cdr)
+          nav/key nav/key/default nav/key-values nav/submap nav/car nav/cdr
+          nav-register-indexed! nav-register-keyed!)
   (import (chezscheme)
           (chezpp utils)
           (chezpp navigator private core)
@@ -34,41 +35,15 @@
 
   (define indexed-transform
     (lambda (value indexes update)
-      (cond [(list? value)
-             (let loop ([xs value] [i 0])
-               (cond [(null? xs) '()]
-                     [(memv i indexes)
-                      (cons (update (car xs)) (loop (cdr xs) (+ i 1)))]
-                     [else (cons (car xs) (loop (cdr xs) (+ i 1)))]))]
-            [(vector? value)
-             (let ([copy (vector-copy value)])
-               (for-each (lambda (i)
-                           (vector-set! copy i (update (vector-ref value i))))
-                         indexes)
-               copy)]
-            [(string? value)
-             (let ([copy (string-copy value)])
-               (for-each (lambda (i)
-                           (let ([new-char (update (string-ref value i))])
-                             (if (char? new-char)
-                                 (string-set! copy i new-char)
-                                 (nav-error 'nav-transform
-                                            "string element is not a char: ~s"
-                                            new-char))))
-                         indexes)
-               copy)]
-            [(bytevector? value)
-             (let ([copy (bytevector-copy value)])
-               (for-each (lambda (i)
-                           (let ([new-byte (update (bytevector-u8-ref value i))])
-                             (if (byte? new-byte)
-                                 (bytevector-u8-set! copy i new-byte)
-                                 (nav-error 'nav-transform
-                                            "bytevector element is not a byte: ~s"
-                                            new-byte))))
-                         indexes)
-               copy)]
-            [else (nav-error 'nav-transform "unsupported indexed value: ~s" value)])))
+      (let loop ([indexes indexes] [value value])
+        (if (null? indexes)
+            value
+            (let* ([index (car indexes)]
+                   [old (indexed-ref/missing value index)])
+              (if (nav-missing? old)
+                  (nav-error 'nav-transform "index ~s out of range for: ~s" index value)
+                  (loop (cdr indexes)
+                        (indexed-set value index (update old)))))))))
 
   (define indexed-transform!
     (lambda (value indexes update!)
@@ -109,68 +84,42 @@
 
   (define emit-indexed-values
     (lambda (value emit)
-      (cond [(list? value) (for-each emit value)]
-            [(vector? value)
-             (let ([len (vector-length value)])
+      (cond [(indexed-supported? value)
+             (let ([len (indexed-length value)])
                (let loop ([i 0])
                  (when (< i len)
-                   (emit (vector-ref value i))
+                   (emit (indexed-ref/missing value i))
                    (loop (+ i 1)))))]
-            [(string? value)
-             (let ([len (string-length value)])
-               (let loop ([i 0])
-                 (when (< i len)
-                   (emit (string-ref value i))
-                   (loop (+ i 1)))))]
-            [(bytevector? value)
-             (let ([len (bytevector-length value)])
-               (let loop ([i 0])
-                 (when (< i len)
-                   (emit (bytevector-u8-ref value i))
-                   (loop (+ i 1)))))]
-            [(hashtable? value)
-             (let-values ([(keys vals) (hashtable-entries value)])
-               (let ([len (vector-length vals)])
-                 (let loop ([i 0])
-                   (when (< i len)
-                     (emit (vector-ref vals i))
-                     (loop (+ i 1))))))]
+            [(keyed-values value)
+             => (lambda (values) (for-each emit values))]
             [else (nav-error 'nav/all "unsupported collection: ~s" value)])))
 
   (define transform-all-values
     (lambda (value update)
-      (cond [(hashtable? value)
-             (let ([copy (hashtable-copy value #t)])
-               (let-values ([(keys vals) (hashtable-entries value)])
-                 (let ([len (vector-length keys)])
-                   (let loop ([i 0])
-                     (when (< i len)
-                       (hashtable-set! copy (vector-ref keys i)
-                                       (update (vector-ref vals i)))
-                       (loop (+ i 1))))))
-               copy)]
-            [else
-             (let ([len (indexed-length value)])
-               (if len
-                   (indexed-transform value (index-list len) update)
-                   (nav-error 'nav-transform "unsupported collection: ~s" value)))])))
+      (cond [(indexed-supported? value)
+             (indexed-transform value (index-list (indexed-length value)) update)]
+            [(keyed-entries value)
+             => (lambda (entries)
+                  (let loop ([entries entries] [value value])
+                    (if (null? entries)
+                        value
+                        (loop (cdr entries)
+                              (keyed-set value (caar entries)
+                                         (update (cdar entries)))))))]
+            [else (nav-error 'nav-transform "unsupported collection: ~s" value)])))
 
   (define transform-all-values!
     (lambda (value update!)
-      (cond [(hashtable? value)
-             (let-values ([(keys vals) (hashtable-entries value)])
-               (let ([len (vector-length keys)])
-                 (let loop ([i 0])
-                   (when (< i len)
-                     (hashtable-set! value (vector-ref keys i)
-                                     (update! (vector-ref vals i)))
-                     (loop (+ i 1))))))
-             value]
-            [else
-             (let ([len (indexed-length value)])
-               (if len
-                   (indexed-transform! value (index-list len) update!)
-                   (nav-error 'nav-transform! "unsupported collection: ~s" value)))])))
+      (cond [(indexed-supported? value)
+             (indexed-transform! value (index-list (indexed-length value)) update!)]
+            [(keyed-entries value)
+             => (lambda (entries)
+                  (for-each
+                   (lambda (entry)
+                     (keyed-set! value (car entry) (update! (cdr entry))))
+                   entries)
+                  value)]
+            [else (nav-error 'nav-transform! "unsupported collection: ~s" value)])))
 
   (define emit-alist-key-values
     (lambda (alist key emit)
@@ -185,54 +134,25 @@
 
   (define key-ref/missing
     (lambda (value key)
-      (cond [(hashtable? value) (hashtable-ref value key nav-missing)]
-            [(alist? value) (alist-ref/missing value key)]
-            [else (nav-error 'nav/key "unsupported keyed value: ~s" value)])))
+      (keyed-ref/missing value key)))
 
   (define key-transform
     (lambda (key default insert? value update)
-      (cond [(hashtable? value)
-             (let ([old (hashtable-ref value key nav-missing)])
-               (cond [(nav-missing? old)
-                      (if insert?
-                          (let ([copy (hashtable-copy value #t)])
-                            (hashtable-set! copy key (update default))
-                            copy)
-                          (nav-error 'nav-transform "missing key ~s in: ~s" key value))]
-                     [else
-                      (let ([copy (hashtable-copy value #t)])
-                        (hashtable-set! copy key (update old))
-                        copy)]))]
-            [(alist? value)
-             (let loop ([xs value])
-               (cond [(null? xs)
-                      (if insert?
-                          (list (cons key (update default)))
-                          (nav-error 'nav-transform "missing key ~s in: ~s" key value))]
-                     [(eq? (caar xs) key)
-                      (cons (cons key (update (cdar xs))) (cdr xs))]
-                     [else (cons (car xs) (loop (cdr xs)))]))]
-            [else (nav-error 'nav-transform "unsupported keyed value: ~s" value)])))
+      (let ([old (keyed-ref/missing value key)])
+        (cond [(nav-missing? old)
+               (if insert?
+                   (keyed-set value key (update default))
+                   (nav-error 'nav-transform "missing key ~s in: ~s" key value))]
+              [else (keyed-set value key (update old))]))))
 
   (define key-transform!
     (lambda (key default insert? value update!)
-      (cond [(hashtable? value)
-             (let ([old (hashtable-ref value key nav-missing)])
-               (cond [(nav-missing? old)
-                      (if insert?
-                          (hashtable-set! value key (update! default))
-                          (nav-error 'nav-transform! "missing key ~s in: ~s" key value))]
-                     [else (hashtable-set! value key (update! old))])
-               value)]
-            [(alist? value)
-             (let loop ([xs value])
-               (cond [(null? xs)
-                      (nav-error 'nav-transform! "missing key ~s in: ~s" key value)]
-                     [(eq? (caar xs) key)
-                      (set-cdr! (car xs) (update! (cdar xs)))
-                      value]
-                     [else (loop (cdr xs))]))]
-            [else (nav-error 'nav-transform! "unsupported keyed value: ~s" value)])))
+      (let ([old (keyed-ref/missing value key)])
+        (cond [(nav-missing? old)
+               (if insert?
+                   (keyed-set! value key (update! default))
+                   (nav-error 'nav-transform! "missing key ~s in: ~s" key value))]
+              [else (keyed-set! value key (update! old))]))))
 
   (define list-remove-index
     (lambda (value index)
@@ -242,30 +162,13 @@
               [(= i 0) (cdr xs)]
               [else (cons (car xs) (loop (cdr xs) (- i 1)))]))))
 
-  (define alist-remove-key
-    (lambda (key value)
-      (let loop ([xs value])
-        (cond [(null? xs) '()]
-              [(eq? (caar xs) key) (cdr xs)]
-              [else (cons (car xs) (loop (cdr xs)))]))))
-
   (define key-clear
     (lambda (key value)
-      (cond [(hashtable? value)
-             (let ([copy (hashtable-copy value #t)])
-               (hashtable-delete! copy key)
-               copy)]
-            [(alist? value) (alist-remove-key key value)]
-            [else (nav-error 'nav-clearval "unsupported keyed value: ~s" value)])))
+      (keyed-delete value key)))
 
   (define key-clear!
     (lambda (key value)
-      (cond [(hashtable? value)
-             (hashtable-delete! value key)
-             value]
-            [(alist? value)
-             (nav-error 'nav-clearval! "association list key cannot be removed in place: ~s" key)]
-            [else (nav-error 'nav-clearval! "unsupported keyed value: ~s" value)])))
+      (keyed-delete! value key)))
 
   (define submap-transform
     (lambda (keys value update)
@@ -273,21 +176,20 @@
              (let ([subtable (make-eq-hashtable)])
                (for-each
                 (lambda (key)
-                  (let ([selected (hashtable-ref value key nav-missing)])
+                  (let ([selected (keyed-ref/missing value key)])
                     (if (nav-missing? selected)
                         (nav-error 'nav-transform "missing key ~s in: ~s" key value)
                         (hashtable-set! subtable key selected))))
                 keys)
-               (let ([updated (update subtable)]
-                     [copy (hashtable-copy value #t)])
-                 (for-each
-                  (lambda (key)
-                    (let ([selected (hashtable-ref updated key nav-missing)])
-                      (if (nav-missing? selected)
-                          (hashtable-delete! copy key)
-                          (hashtable-set! copy key selected))))
-                  keys)
-                 copy))]
+               (let ([updated (update subtable)])
+                 (let loop ([keys keys] [value value])
+                   (if (null? keys)
+                       value
+                       (let ([selected (hashtable-ref updated (car keys) nav-missing)])
+                         (loop (cdr keys)
+                               (if (nav-missing? selected)
+                                   (keyed-delete value (car keys))
+                                   (keyed-set value (car keys) selected))))))))]
             [(alist? value)
              (let ([updated
                     (map update
@@ -305,6 +207,26 @@
                         => (lambda (entry)
                              (cons entry (loop (cdr xs))))]
                        [else (cons (car xs) (loop (cdr xs)))])))]
+            [(keyed-supported? value)
+             (let ([updated (update (let loop ([keys keys] [entries '()])
+                                      (if (null? keys)
+                                          (reverse entries)
+                                          (let ([selected (keyed-ref/missing value (car keys))])
+                                            (if (nav-missing? selected)
+                                                (nav-error 'nav-transform
+                                                           "missing key ~s in: ~s"
+                                                           (car keys) value)
+                                                (loop (cdr keys)
+                                                      (cons (cons (car keys) selected)
+                                                            entries)))))))])
+               (let loop ([keys keys] [value value])
+                 (if (null? keys)
+                     value
+                     (let ([entry (assq (car keys) updated)])
+                       (loop (cdr keys)
+                             (if entry
+                                 (keyed-set value (car keys) (cdr entry))
+                                 (keyed-delete value (car keys))))))))]
             [else (nav-error 'nav-transform "unsupported keyed value: ~s" value)])))
 
   #|proc:nav/stay
@@ -362,32 +284,26 @@
     (make-basic-nav
      'nav/keys 'nav/keys
      (lambda (value emit)
-       (cond [(or (list? value) (vector? value) (string? value) (bytevector? value))
+       (cond [(indexed-supported? value)
               (let ([len (indexed-length value)])
                 (let loop ([i 0])
                   (when (< i len)
                     (emit i)
                     (loop (+ i 1)))))]
-             [(hashtable? value)
-              (let ([keys (hashtable-keys value)])
-                (let ([len (vector-length keys)])
-                  (let loop ([i 0])
-                    (when (< i len)
-                      (emit (vector-ref keys i))
-                      (loop (+ i 1))))))]
+             [(keyed-keys value)
+              => (lambda (keys) (for-each emit keys))]
              [else (nav-error 'nav/keys "unsupported collection: ~s" value)]))
      (lambda (value update)
-       (cond [(hashtable? value)
-              (let ([copy (make-eq-hashtable)])
-                (let-values ([(keys vals) (hashtable-entries value)])
-                  (let ([len (vector-length keys)])
-                    (let loop ([i 0])
-                      (when (< i len)
-                        (hashtable-set! copy (update (vector-ref keys i))
-                                        (vector-ref vals i))
-                        (loop (+ i 1))))))
-                copy)]
-             [(indexed-length value) value]
+       (cond [(indexed-supported? value) value]
+             [(keyed-entries value)
+              => (lambda (entries)
+                   (let loop ([entries entries] [copy #f])
+                     (cond [(null? entries) (or copy value)]
+                           [else
+                            (let* ([entry (car entries)]
+                                   [new-key (update (car entry))]
+                                   [next (keyed-set (or copy value) new-key (cdr entry))])
+                              (loop (cdr entries) next))])))]
              [else (nav-error 'nav-transform "unsupported collection: ~s" value)]))
      (lambda (value update!)
        (nav-error 'nav-transform! "navigator nav/keys does not support mutation for: ~s" value))
@@ -401,49 +317,24 @@
     (make-basic-nav
      'nav/entries 'nav/entries
      (lambda (value emit)
-       (cond [(list? value)
-              (let loop ([xs value] [i 0])
-                (unless (null? xs)
-                  (emit (cons i (car xs)))
-                  (loop (cdr xs) (+ i 1))))]
-             [(vector? value)
-              (let ([len (vector-length value)])
+       (cond [(indexed-supported? value)
+              (let ([len (indexed-length value)])
                 (let loop ([i 0])
                   (when (< i len)
-                    (emit (cons i (vector-ref value i)))
+                    (emit (cons i (indexed-ref/missing value i)))
                     (loop (+ i 1)))))]
-             [(string? value)
-              (let ([len (string-length value)])
-                (let loop ([i 0])
-                  (when (< i len)
-                    (emit (cons i (string-ref value i)))
-                    (loop (+ i 1)))))]
-             [(bytevector? value)
-              (let ([len (bytevector-length value)])
-                (let loop ([i 0])
-                  (when (< i len)
-                    (emit (cons i (bytevector-u8-ref value i)))
-                    (loop (+ i 1)))))]
-             [(hashtable? value)
-              (let-values ([(keys vals) (hashtable-entries value)])
-                (let ([len (vector-length keys)])
-                  (let loop ([i 0])
-                    (when (< i len)
-                      (emit (cons (vector-ref keys i) (vector-ref vals i)))
-                      (loop (+ i 1))))))]
+             [(keyed-entries value)
+              => (lambda (entries) (for-each emit entries))]
              [else (nav-error 'nav/entries "unsupported collection: ~s" value)]))
      (lambda (value update)
-       (cond [(hashtable? value)
-              (let ([copy (make-eq-hashtable)])
-                (let-values ([(keys vals) (hashtable-entries value)])
-                  (let ([len (vector-length keys)])
-                    (let loop ([i 0])
-                      (when (< i len)
-                        (let ([entry (update (cons (vector-ref keys i)
-                                                   (vector-ref vals i)))])
-                          (hashtable-set! copy (car entry) (cdr entry)))
-                        (loop (+ i 1))))))
-                copy)]
+       (cond [(keyed-entries value)
+              => (lambda (entries)
+                   (let loop ([entries entries] [copy #f])
+                     (cond [(null? entries) (or copy value)]
+                           [else
+                            (let ([entry (update (car entries))])
+                              (loop (cdr entries)
+                                    (keyed-set (or copy value) (car entry) (cdr entry))))])))]
              [else (transform-all-values value update)]))
      (lambda (value update!)
        (nav-error 'nav-transform! "navigator nav/entries does not support mutation for: ~s" value))
@@ -688,7 +579,7 @@
                 (let ([table (make-eq-hashtable)])
                   (for-each
                    (lambda (key)
-                     (let ([selected (hashtable-ref value key nav-missing)])
+                     (let ([selected (keyed-ref/missing value key)])
                        (if (nav-missing? selected)
                            (nav-error 'nav/submap "missing key ~s in: ~s" key value)
                            (hashtable-set! table key selected))))
@@ -702,6 +593,15 @@
                          (emit entry)
                          (nav-error 'nav/submap "missing key ~s in: ~s" key value))))
                  keys)]
+               [(keyed-supported? value)
+                (let loop ([keys keys] [entries '()])
+                  (if (null? keys)
+                      (emit (reverse entries))
+                      (let ([selected (keyed-ref/missing value (car keys))])
+                        (if (nav-missing? selected)
+                            (nav-error 'nav/submap "missing key ~s in: ~s" (car keys) value)
+                            (loop (cdr keys)
+                                  (cons (cons (car keys) selected) entries))))))]
                [else (nav-error 'nav/submap "unsupported keyed value: ~s" value)]))
        (lambda (value update)
          (submap-transform keys value update))
