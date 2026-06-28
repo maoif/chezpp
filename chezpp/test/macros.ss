@@ -166,6 +166,22 @@
                  (loop (cdr options) (append (reverse #'(name ...)) out))]
                 [_ (loop (cdr options) out)])]
              [else (loop (cdr options) out)]))))
+      (define check-duplicate-parameter-names
+        (lambda (options)
+          (let loop-options ([options options] [seen '()])
+            (cond
+             [(null? options) #t]
+             [(eq? (syntax->datum (caar options)) ':parameterize)
+              (syntax-case (cadar options) ()
+                [([name ...] row ...)
+                 (let loop-names ([names #'(name ...)] [seen seen])
+                   (cond
+                    [(null? names) (loop-options (cdr options) seen)]
+                    [(ormap (lambda (id) (free-identifier=? id (car names))) seen)
+                     (syntax-error (car names) "duplicate parameter name")]
+                    [else (loop-names (cdr names) (cons (car names) seen))]))]
+                [_ (loop-options (cdr options) seen)])]
+             [else (loop-options (cdr options) seen)]))))
       (define fixture-names
         (lambda (options)
           (let loop ([options options] [out '()])
@@ -197,6 +213,7 @@
       (syntax-case stx ()
         [(_ kind name item ...)
          (let-values ([(options body) (split-items #'(item ...))])
+           (check-duplicate-parameter-names options)
            (let ([metadata (build-metadata options)])
              (case (syntax->datum #'kind)
                [(case)
