@@ -74,6 +74,16 @@
                   (nav-error who "unresolved recursive reference: ~s" ($nav-ref-name step))))
             (nav-error who "unresolved recursive reference: ~s" ($nav-ref-name step))))))
 
+  ;; The engine keeps two path cursors. `steps` is the path segment currently
+  ;; being executed. `tails` is a stack of suspended outer suffixes. When a step
+  ;; expands to an inner path, recursive group, or recursive reference, the
+  ;; current `rest` must resume after that inner path finishes, so it is pushed
+  ;; onto `tails`. The push allocates one pair per dynamic path expansion; that
+  ;; is the continuation state needed to preserve nested-path order.
+  (define push-tail
+    (lambda (rest tails)
+      (cons rest tails)))
+
   (define run-select
     (lambda (steps tails value emit)
       (if (null? steps)
@@ -92,17 +102,17 @@
                    (parameterize ([current-recursive-env step])
                      (run-select (nav-path-steps (nav-compile-path
                                                   ($recursive-nav-group-root step)))
-                                 (cons rest tails)
+                                 (push-tail rest tails)
                                  value
                                  emit))]
                   [($nav-ref? step)
                    (run-select (nav-path-steps (nav-compile-path
                                                 (resolve-nav-ref 'nav-select step)))
-                               (cons rest tails)
+                               (push-tail rest tails)
                                value
                                emit)]
                   [($path? step)
-                   (run-select ($path-steps step) (cons rest tails) value emit)]
+                   (run-select ($path-steps step) (push-tail rest tails) value emit)]
                   [else (nav-error 'nav-select "unsupported path step: ~s" step)])))))
 
   (define select-path
@@ -125,17 +135,17 @@
                    (parameterize ([current-recursive-env step])
                      (run-transform (nav-path-steps (nav-compile-path
                                                      ($recursive-nav-group-root step)))
-                                    (cons rest tails)
+                                    (push-tail rest tails)
                                     value
                                     update))]
                   [($nav-ref? step)
                    (run-transform (nav-path-steps (nav-compile-path
                                                    (resolve-nav-ref 'nav-transform step)))
-                                  (cons rest tails)
+                                  (push-tail rest tails)
                                   value
                                   update)]
                   [($path? step)
-                   (run-transform ($path-steps step) (cons rest tails) value update)]
+                   (run-transform ($path-steps step) (push-tail rest tails) value update)]
                   [else (nav-error 'nav-transform "unsupported path step: ~s" step)])))))
 
   (define transform-path
@@ -158,17 +168,17 @@
                    (parameterize ([current-recursive-env step])
                      (run-transform! (nav-path-steps (nav-compile-path
                                                       ($recursive-nav-group-root step)))
-                                     (cons rest tails)
+                                     (push-tail rest tails)
                                      value
                                      update!))]
                   [($nav-ref? step)
                    (run-transform! (nav-path-steps (nav-compile-path
                                                     (resolve-nav-ref 'nav-transform! step)))
-                                   (cons rest tails)
+                                   (push-tail rest tails)
                                    value
                                    update!)]
                   [($path? step)
-                   (run-transform! ($path-steps step) (cons rest tails) value update!)]
+                   (run-transform! ($path-steps step) (push-tail rest tails) value update!)]
                   [else (nav-error 'nav-transform! "unsupported path step: ~s" step)])))))
 
   (define run-clear
@@ -187,15 +197,15 @@
                    (parameterize ([current-recursive-env step])
                      (run-clear (nav-path-steps (nav-compile-path
                                                  ($recursive-nav-group-root step)))
-                                (cons rest tails)
+                                (push-tail rest tails)
                                 value))]
                   [($nav-ref? step)
                    (run-clear (nav-path-steps (nav-compile-path
                                                (resolve-nav-ref 'nav-clearval step)))
-                              (cons rest tails)
+                              (push-tail rest tails)
                               value)]
                   [($path? step)
-                   (run-clear ($path-steps step) (cons rest tails) value)]
+                   (run-clear ($path-steps step) (push-tail rest tails) value)]
                   [else (nav-error 'nav-clearval "unsupported path step: ~s" step)])))))
 
   (define run-clear!
@@ -214,15 +224,15 @@
                    (parameterize ([current-recursive-env step])
                      (run-clear! (nav-path-steps (nav-compile-path
                                                   ($recursive-nav-group-root step)))
-                                 (cons rest tails)
+                                 (push-tail rest tails)
                                  value))]
                   [($nav-ref? step)
                    (run-clear! (nav-path-steps (nav-compile-path
                                                 (resolve-nav-ref 'nav-clearval! step)))
-                               (cons rest tails)
+                               (push-tail rest tails)
                                value)]
                   [($path? step)
-                   (run-clear! ($path-steps step) (cons rest tails) value)]
+                   (run-clear! ($path-steps step) (push-tail rest tails) value)]
                   [else (nav-error 'nav-clearval! "unsupported path step: ~s" step)])))))
 
   (define transform-path!
