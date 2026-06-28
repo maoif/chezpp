@@ -162,13 +162,48 @@
               [(= i 0) (cdr xs)]
               [else (cons (car xs) (loop (cdr xs) (- i 1)))]))))
 
+  (define indexed-clear
+    (lambda (index value clear)
+      (let ([old (indexed-ref/missing value index)])
+        (if (nav-missing? old)
+            (nav-error 'nav-clearval "index ~s out of range for: ~s" index value)
+            (let ([new-value (clear old)])
+              (if (nav-missing? new-value)
+                  (if (list? value)
+                      (list-remove-index value index)
+                      (unsupported-clear 'nav-clearval value))
+                  (indexed-set value index new-value)))))))
+
+  (define indexed-clear!
+    (lambda (index value clear!)
+      (let ([old (indexed-ref/missing value index)])
+        (if (nav-missing? old)
+            (nav-error 'nav-clearval! "index ~s out of range for: ~s" index value)
+            (let ([new-value (clear! old)])
+              (if (nav-missing? new-value)
+                  (unsupported-clear 'nav-clearval! value)
+                  (indexed-set! value index new-value))
+              value)))))
+
   (define key-clear
-    (lambda (key value)
-      (keyed-delete value key)))
+    (lambda (key value clear)
+      (let ([old (keyed-ref/missing value key)])
+        (if (nav-missing? old)
+            (nav-error 'nav-clearval "missing key ~s in: ~s" key value)
+            (let ([new-value (clear old)])
+              (if (nav-missing? new-value)
+                  (keyed-delete value key)
+                  (keyed-set value key new-value)))))))
 
   (define key-clear!
-    (lambda (key value)
-      (keyed-delete! value key)))
+    (lambda (key value clear!)
+      (let ([old (keyed-ref/missing value key)])
+        (if (nav-missing? old)
+            (nav-error 'nav-clearval! "missing key ~s in: ~s" key value)
+            (let ([new-value (clear! old)])
+              (when (nav-missing? new-value)
+                (keyed-delete! value key))
+              value)))))
 
   (define submap-transform
     (lambda (keys value update)
@@ -369,11 +404,9 @@
                          (indexed-set! value index (update! selected))
                          value))))
                (lambda (value clear)
-                 (if (list? value)
-                     (list-remove-index value index)
-                     (unsupported-clear 'nav-clearval value)))
+                 (indexed-clear index value clear))
                (lambda (value clear!)
-                 (unsupported-clear 'nav-clearval! value))))))
+                 (indexed-clear! index value clear!))))))
 
   #|proc:nav/nth/default
   The `nav/nth/default` procedure returns a navigator that focuses zero-based
@@ -509,8 +542,8 @@
          (key-transform key nav-missing #f value update))
        (lambda (value update!)
          (key-transform! key nav-missing #f value update!))
-       (lambda (value clear) (key-clear key value))
-       (lambda (value clear!) (key-clear! key value)))))
+       (lambda (value clear) (key-clear key value clear))
+       (lambda (value clear!) (key-clear! key value clear!)))))
 
   #|proc:nav/key/default
   The `nav/key/default` procedure returns a navigator that focuses the value for
@@ -529,8 +562,8 @@
           (key-transform key default #t value update))
         (lambda (value update!)
           (key-transform! key default #t value update!))
-        (lambda (value clear) (key-clear key value))
-        (lambda (value clear!) (key-clear! key value)))]))
+        (lambda (value clear) (key-clear key value clear))
+        (lambda (value clear!) (key-clear! key value clear!)))]))
 
   #|proc:nav/key-values
   The `nav/key-values` procedure returns a navigator that focuses the values for
@@ -561,9 +594,12 @@
          (let loop ([keys keys] [value value])
            (if (null? keys)
                value
-               (loop (cdr keys) (key-clear (car keys) value)))))
+               (loop (cdr keys)
+                     (key-clear (car keys) value (lambda (child) nav-missing))))))
        (lambda (value clear!)
-         (for-each (lambda (key) (key-clear! key value)) keys)
+         (for-each (lambda (key)
+                     (key-clear! key value (lambda (child) nav-missing)))
+                   keys)
          value))))
 
   #|proc:nav/submap
@@ -611,9 +647,12 @@
          (let loop ([keys keys] [value value])
            (if (null? keys)
                value
-               (loop (cdr keys) (key-clear (car keys) value)))))
+               (loop (cdr keys)
+                     (key-clear (car keys) value (lambda (child) nav-missing))))))
        (lambda (value clear!)
-         (for-each (lambda (key) (key-clear! key value)) keys)
+         (for-each (lambda (key)
+                     (key-clear! key value (lambda (child) nav-missing)))
+                   keys)
          value))))
 
   #|proc:nav/car

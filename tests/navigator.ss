@@ -32,6 +32,19 @@
       (and (= (length ks) (length keys))
            (andmap (lambda (key) (memq key ks)) keys)))))
 
+(define any?
+  (lambda (predicate items)
+    (and (ormap predicate items) #t)))
+
+(define member-equal?
+  (lambda (value items)
+    (and (member value items) #t)))
+
+(define same-items?
+  (lambda (left right)
+    (and (= (length left) (length right))
+         (andmap (lambda (item) (member-equal? item right)) left))))
+
 (define fxvector->list*
   (lambda (vec)
     (let ([len (fxvector-length vec)])
@@ -47,6 +60,109 @@
         (if (= i len)
             (reverse items)
             (loop (+ i 1) (cons (flvector-ref vec i) items)))))))
+
+(define deep-mixed-data
+  (lambda ()
+    (ht 'root
+        (vector
+         (list 'branch
+               (ht 'bytes (bytevector 10 20 30)
+                   'fxs (fxvector 1 2 3)
+                   'fls (flvector 1.5 2.5 3.5)
+                   'leaf 'done))
+         'atom
+         (list (ht 'items (vector (bytevector 7 8)
+                                  (fxvector 4 5)
+                                  (flvector 4.5 5.5))))))))
+
+(define deep-count-data
+  (lambda ()
+    (ht 'root
+        (vector
+         (list (ht 'items (vector
+                           (list (ht 'n 1))
+                           (list (ht 'n 2))
+                           (list (ht 'n 3)))))))))
+
+(define deep-drop-data
+  (lambda ()
+    (ht 'root
+        (list
+         (list 'atom
+               (ht 'keep 1
+                   'drop 2
+                   'nested (list (ht 'drop 3 'keep 4))))))))
+
+(define deep-mutable-drop-data
+  (lambda ()
+    (ht 'root
+        (ht 'branch
+            (ht 'nested
+                (ht 'drop 3 'keep 4))))))
+
+(define deep-byte-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+            (nav/key 'bytes) (nav/nth 1)))
+
+(define deep-fx-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+            (nav/key 'fxs) (nav/nth 2)))
+
+(define deep-fl-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+            (nav/key 'fls) (nav/nth 0)))
+
+(define deep-numbers-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 0) (nav/key 'items)
+            nav/all (nav/nth 0) (nav/key 'n)))
+
+(define deep-drop-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1) (nav/key 'drop)))
+
+(define deep-nested-drop-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1) (nav/key 'nested)
+            (nav/nth 0) (nav/key 'drop)))
+
+(define deep-mutable-drop-path
+  (nav-path (nav/key 'root) (nav/key 'branch) (nav/key 'nested) (nav/key 'drop)))
+
+(define deep-pair-data
+  (lambda ()
+    (ht 'root
+        (vector
+         (list 'outer
+               (cons (ht 'left (bytevector 1 2 3))
+                     (ht 'right (fxvector 8 9))))))))
+
+(define deep-choice-data
+  (lambda (has-primary?)
+    (ht 'root
+        (vector
+         (list
+          (if has-primary?
+              (ht 'primary (list (flvector 6.5 7.5))
+                  'fallback (list (fxvector 4 5)))
+              (ht 'fallback (list (fxvector 4 5)))))))))
+
+(define deep-custom-record-data
+  (lambda ()
+    (vector
+     (list
+      (ht 'node (make-ixbox (vector (ht 'value 41))))))))
+
+(define deep-pair-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)))
+
+(define deep-choice-primary-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 0)
+            (nav/key 'primary) (nav/nth 0) (nav/nth 1)))
+
+(define deep-choice-fallback-path
+  (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 0)
+            (nav/key 'fallback) (nav/nth 0) (nav/nth 1)))
+
+(define deep-custom-record-path
+  (nav-path (nav/nth 0) (nav/nth 0) (nav/key 'node)))
 
 (define-record-type (ixbox make-ixbox ixbox?)
   (fields (mutable items)))
@@ -598,6 +714,268 @@
                                 (lambda (acc value) (+ acc value))
                                 0
                                 '(1 2 3))))
+
+(mat navigator-deep-actions
+     (equal? '(20) (nav-select deep-byte-path (deep-mixed-data)))
+     (= 1.5 (nav-select-one deep-fl-path (deep-mixed-data)))
+     (= 3 (nav-select-first deep-fx-path (deep-mixed-data) 'missing))
+     (= 3 (nav-select-count deep-numbers-path (deep-count-data)))
+     (nav-selected? deep-byte-path (deep-mixed-data))
+     (equal? '(1 2 3)
+             (let ([lb (make-list-builder)])
+               (nav-traverse deep-numbers-path (deep-count-data) lb)
+               (lb)))
+     (equal? '((0 . 1) (1 . 2) (2 . 3))
+             (let ([lb (make-list-builder)])
+               (nav-traverse/i deep-numbers-path
+                               (deep-count-data)
+                               (lambda (i value)
+                                 (lb (cons i value))))
+               (lb)))
+     (equal? '(1 2 3)
+             (let ([iter (nav-traverse->iter deep-numbers-path
+                                             (deep-count-data))])
+               (iter->list iter)))
+     (equal? '(1 2 3)
+             (nav-selected->list deep-numbers-path (deep-count-data)))
+     (equal? '#(1 2 3)
+             (nav-selected->vector deep-numbers-path (deep-count-data)))
+     (= 6
+        (nav-selected-transduce deep-numbers-path
+                                (lambda (reducer) reducer)
+                                (case-lambda
+                                  [() 0]
+                                  [(acc value) (+ acc value)])
+                                (deep-count-data)))
+     (let ([updated (nav-transform deep-fx-path add1 (deep-mixed-data))])
+       (equal? '(1 2 4)
+               (fxvector->list*
+                (nav-select-one
+                 (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+                           (nav/key 'fxs))
+                 updated))))
+     (equal? '(1 3 5)
+             (nav-select deep-numbers-path
+                         (nav-transform/i deep-numbers-path
+                                          (lambda (i value) (+ value i))
+                                          (deep-count-data))))
+     (let ([updated (nav-setval deep-byte-path 99 (deep-mixed-data))])
+       (= 99 (nav-select-one deep-byte-path updated)))
+     (let* ([old (deep-drop-data)]
+            [old-table (nav-select-one
+                        (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1))
+                        old)]
+            [updated (nav-clearval deep-drop-path old)]
+            [new-table (nav-select-one
+                        (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1))
+                        updated)])
+       (and (hashtable-contains? old-table 'drop)
+            (not (hashtable-contains? new-table 'drop))
+            (= 1 (ht-ref new-table 'keep))))
+     (let ([data (deep-mixed-data)])
+       (and (eq? data (nav-transform! deep-byte-path add1 data))
+            (= 21 (nav-select-one deep-byte-path data))))
+     (let ([data (deep-count-data)])
+       (and (eq? data (nav-transform!/i deep-numbers-path
+                                        (lambda (i value) (+ value i))
+                                        data))
+            (equal? '(1 3 5) (nav-select deep-numbers-path data))))
+     (let ([data (deep-mixed-data)])
+       (and (eq? data (nav-setval! deep-fl-path 9.5 data))
+            (= 9.5 (nav-select-one deep-fl-path data))))
+     (let ([data (deep-mutable-drop-data)])
+       (and (eq? data (nav-clearval! deep-mutable-drop-path data))
+            (not (hashtable-contains?
+                  (nav-select-one
+                   (nav-path (nav/key 'root) (nav/key 'branch) (nav/key 'nested))
+                   data)
+                  'drop)))))
+
+(mat navigator-deep-basic-navigators
+     (let ([data (deep-mixed-data)])
+       (eq? (ht-ref data 'root)
+            (nav-select-one (nav-path nav/stay (nav/key 'root)) data)))
+     (equal? '()
+             (nav-select (nav-path (nav/key 'root) (nav/nth 0) nav/none
+                                   (nav/key 'bytes))
+                         (deep-mixed-data)))
+     (= 3 (nav-select-count (nav-path (nav/key 'root) (nav/nth 2) (nav/nth 0)
+                                      (nav/key 'items) nav/values)
+                            (deep-mixed-data)))
+     (same-items? '(bytes fxs fls leaf)
+             (let ([keys (nav-select (nav-path (nav/key 'root) (nav/nth 0)
+                                               (nav/nth 1) nav/keys)
+                                     (deep-mixed-data))])
+               (filter (lambda (key) (memq key '(bytes fxs fls leaf))) keys)))
+     (let ([entries (nav-select (nav-path (nav/key 'root) (nav/nth 0)
+                                          (nav/nth 1) nav/entries)
+                                (deep-mixed-data))])
+       (and (= 4 (length entries))
+            (and (assq 'bytes entries) #t)
+            (and (assq 'fxs entries) #t)
+            (and (assq 'fls entries) #t)
+            (and (assq 'leaf entries) #t)))
+     (equal? '(#vu8(7 8))
+             (nav-select (nav-path (nav/key 'root) (nav/nth 2) (nav/nth 0)
+                                   (nav/key 'items) nav/first)
+                         (deep-mixed-data)))
+     (equal? '(#vfx(4 5))
+             (nav-select (nav-path (nav/key 'root) (nav/nth 2) (nav/nth 0)
+                                   (nav/key 'items) nav/second)
+                         (deep-mixed-data)))
+     (equal? '(#vfl(4.5 5.5))
+             (nav-select (nav-path (nav/key 'root) (nav/nth 2) (nav/nth 0)
+                                   (nav/key 'items) nav/last)
+                         (deep-mixed-data)))
+     (equal? '(#vfx(4 5) #vfl(4.5 5.5))
+             (nav-select (nav-path (nav/key 'root) (nav/nth 2) (nav/nth 0)
+                                   (nav/key 'items) (nav/slice 1 3))
+                         (deep-mixed-data)))
+     (equal? '(fallback)
+             (nav-select (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+                                   (nav/key/default 'missing 'fallback))
+                         (deep-mixed-data)))
+     (equal? '(#vfx(1 2 3) done)
+             (nav-select (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+                                   (nav/key-values 'fxs 'leaf))
+                         (deep-mixed-data)))
+     (let ([selected (nav-select (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+                                           (nav/submap 'bytes 'leaf))
+                                 (deep-mixed-data))])
+       (and (= 1 (length selected))
+            (hashtable? (car selected))
+            (hashtable-contains? (car selected) 'bytes)
+            (hashtable-contains? (car selected) 'leaf)
+            (equal? '(10 20 30)
+                    (bytevector->u8-list (ht-ref (car selected) 'bytes)))))
+     (let ([pair (nav-select-one deep-pair-path (deep-pair-data))])
+       (let ([left (nav-select-one (nav-path deep-pair-path nav/car)
+                                   (deep-pair-data))]
+             [right (nav-select-one (nav-path deep-pair-path nav/cdr)
+                                    (deep-pair-data))])
+         (and (hashtable? left)
+              (hashtable? right)
+              (equal? '(1 2 3) (bytevector->u8-list (ht-ref left 'left)))
+              (equal? '(8 9) (fxvector->list* (ht-ref right 'right))))))
+     (equal? '(pad pad target)
+             (nav-select-one
+              (nav/key 'root)
+              (nav-transform (nav-path (nav/key 'root) (nav/nth/default 2 'pad))
+                             (lambda (value) 'target)
+                             (ht 'root '(pad))))))
+
+(mat navigator-deep-conditional-navigators
+     (equal? '(10 20 30)
+             (nav-select (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+                                   (nav/key 'bytes) nav/all (nav/pred even?))
+                         (deep-mixed-data)))
+     (equal? '(1 3)
+             (nav-select (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+                                   (nav/key 'fxs) nav/all
+                                   (nav/not-pred (lambda (n) (= n 2))))
+                         (deep-mixed-data)))
+     (= 20
+        (nav-select-one (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+                                  (nav/key 'bytes) (nav/must (nav/nth 1)))
+                        (deep-mixed-data)))
+     (equal? '()
+             (nav-select (nav-path (nav/key 'root) (nav/nth 0) (nav/nth 1)
+                                   (nav/maybe (nav/key 'missing)))
+                         (deep-mixed-data)))
+     (= 7.5
+        (nav-select-one (nav-path (nav/if deep-choice-primary-path
+                                          deep-choice-primary-path
+                                          deep-choice-fallback-path))
+                        (deep-choice-data #t)))
+     (= 5
+        (nav-select-one (nav-path (nav/if deep-choice-primary-path
+                                          deep-choice-primary-path
+                                          deep-choice-fallback-path))
+                        (deep-choice-data #f)))
+     (equal? '(7.5)
+             (nav-select (nav/when deep-choice-primary-path deep-choice-primary-path)
+                         (deep-choice-data #t)))
+     (equal? '(5)
+             (nav-select (nav/unless deep-choice-primary-path deep-choice-fallback-path)
+                         (deep-choice-data #f)))
+     (equal? '(3 1.5)
+             (nav-select (nav/multi-path deep-fx-path deep-fl-path)
+                         (deep-mixed-data)))
+     (= 5
+        (nav-select-one (nav/choice deep-choice-primary-path deep-choice-fallback-path)
+                        (deep-choice-data #f))))
+
+(mat navigator-deep-custom-navigators
+     (let ([box-items (nav/getter 'box-items ixbox-items)])
+       (let ([selected (nav-select-one (nav-path deep-custom-record-path box-items)
+                                       (deep-custom-record-data))])
+         (and (vector? selected)
+              (= 1 (vector-length selected))
+              (= 41 (ht-ref (vector-ref selected 0) 'value)))))
+     (let ([box-first (nav/getter-setter
+                       'box-first
+                       (lambda (box) (vector-ref (ixbox-items box) 0))
+                       (lambda (box value)
+                         (make-ixbox (vector value))))])
+       (let ([updated (nav-transform (nav-path deep-custom-record-path box-first
+                                               (nav/key 'value))
+                                      add1
+                                      (deep-custom-record-data))])
+         (= 42
+            (nav-select-one (nav-path deep-custom-record-path box-first
+                                      (nav/key 'value))
+                            updated))))
+     (let ([box-first (nav/getter-setter!
+                       'box-first!
+                       (lambda (box) (vector-ref (ixbox-items box) 0))
+                       (lambda (box value)
+                         (make-ixbox (vector value)))
+                       (lambda (box value)
+                         (vector-set! (ixbox-items box) 0 value)))])
+       (let ([data (deep-custom-record-data)])
+         (and (eq? data (nav-transform! (nav-path deep-custom-record-path box-first
+                                                  (nav/key 'value))
+                                         add1
+                                         data))
+              (= 42
+                 (nav-select-one (nav-path deep-custom-record-path box-first
+                                           (nav/key 'value))
+                                 data))))))
+
+(mat navigator-deep-recursive-navigators
+     (same-items? '(10 20 30 1 2 3 1.5 2.5 3.5 7 8 4 5 4.5 5.5)
+             (nav-select (nav/walker number?) (deep-mixed-data)))
+     (let ([selected (nav-select (nav-path (nav/key 'root) nav/children)
+                                 (deep-mixed-data))])
+       (and (pair? selected)
+            (any? vector? selected)
+            (any? list? selected)
+            (any? hashtable? selected)))
+     (same-items? '(branch 10 20 30 1 2 3 1.5 2.5 3.5 done atom 7 8 4 5 4.5 5.5)
+             (nav-select nav/leaves (deep-mixed-data)))
+     (let ([numbers-anywhere
+            (nav/rec numbers-anywhere
+              (nav/choice
+               (nav-path (nav/pred number?))
+               (nav-path nav/children numbers-anywhere)))])
+       (same-items? '(10 20 30 1 2 3 1.5 2.5 3.5 7 8 4 5 4.5 5.5)
+               (nav-select numbers-anywhere (deep-mixed-data))))
+     (let ([numbers-anywhere
+            (nav/letrec
+             ([number-node (nav/choice
+                            (nav-path (nav/pred number?))
+                            (nav-path nav/children number-node))])
+             number-node)])
+       (same-items? '(10 20 30 1 2 3 1.5 2.5 3.5 7 8 4 5 4.5 5.5)
+               (nav-select numbers-anywhere (deep-mixed-data))))
+     (let ([selected (nav-select (nav/before deep-byte-path)
+                                 (deep-mixed-data))])
+       (and (hashtable? (car selected))
+            (= 20 (cadr selected))))
+     (let ([selected (nav-select (nav/after deep-byte-path)
+                                 (deep-mixed-data))])
+       (and (= 20 (car selected))
+            (hashtable? (cadr selected)))))
 
 (mat navigator-continuations
      (let ([visited 0])
