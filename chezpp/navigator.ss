@@ -8,17 +8,17 @@
           nav-transform nav-transform/i nav-transform! nav-transform!/i
           nav-setval nav-setval! nav-clearval nav-clearval!
 
-          nav-stay nav-none nav-all nav-values nav-keys nav-entries
-          nav-nth nav-nth/default nav-first nav-second nav-last nav-slice
-          nav-key nav-key/default nav-key-values nav-submap nav-car nav-cdr
+          nav/stay nav/none nav/all nav/values nav/keys nav/entries
+          nav/nth nav/nth/default nav/first nav/second nav/last nav/slice
+          nav/key nav/key/default nav/key-values nav/submap nav/car nav/cdr
 
-          nav-pred nav-not-pred nav-must nav-maybe nav-if nav-when nav-unless
-          nav-multi-path nav-choice
+          nav/pred nav/not-pred nav/must nav/maybe nav/if nav/when nav/unless
+          nav/multi-path nav/choice
 
-          nav-getter nav-getter-setter nav-getter-setter!
+          nav/getter nav/getter-setter nav/getter-setter!
 
-          nav-walker nav-rec nav-letrec nav-children nav-leaves
-          nav-before nav-after
+          nav/walker nav/rec nav/letrec nav/children nav/leaves
+          nav/before nav/after
 
           make-nav-ref
 

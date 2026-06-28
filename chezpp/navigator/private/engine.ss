@@ -62,7 +62,7 @@
   (define nav-children-step?
     (lambda (step)
       (and ($navigator? step)
-           (eq? ($navigator-name step) 'nav-children))))
+           (eq? ($navigator-name step) 'nav/children))))
 
   (define resolve-nav-ref
     (lambda (who step)

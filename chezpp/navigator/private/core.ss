@@ -127,13 +127,13 @@
   (define nav-key-proc
     (let ([proc #f])
       (case-lambda
-        [() (or proc (nav-error 'nav-key "nav-key is not installed"))]
+        [() (or proc (nav-error 'nav/key "nav/key is not installed"))]
         [(p) (set! proc p)])))
 
   (define nav-nth-proc
     (let ([proc #f])
       (case-lambda
-        [() (or proc (nav-error 'nav-nth "nav-nth is not installed"))]
+        [() (or proc (nav-error 'nav/nth "nav/nth is not installed"))]
         [(p) (set! proc p)])))
 
   (define install-nav-key-proc!
@@ -210,7 +210,7 @@
     (lambda (x)
       (cond [($navigator? x) ($navigator-name x)]
             [($path? x) 'nav-path]
-            [($recursive-nav-group? x) 'nav-letrec]
+            [($recursive-nav-group? x) 'nav/letrec]
             [($nav-ref? x) ($nav-ref-name x)]
             [else #f])))
 
@@ -220,7 +220,7 @@
             [($path? x) `(nav-path ,@(map recur ($path-steps x)))]
             [($nav-ref? x) `(nav-ref ,($nav-ref-name x))]
             [($recursive-nav-group? x)
-             `(nav-letrec ,(map (lambda (binding)
+             `(nav/letrec ,(map (lambda (binding)
                                   (list (car binding) (recur (cdr binding))))
                                 ($recursive-nav-group-bindings x))
                           ,(recur ($recursive-nav-group-root x)))]

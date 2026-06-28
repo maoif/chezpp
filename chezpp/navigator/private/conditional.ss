@@ -1,6 +1,6 @@
 (library (chezpp navigator private conditional)
-  (export nav-pred nav-not-pred nav-must nav-maybe nav-if nav-when nav-unless
-          nav-multi-path nav-choice)
+  (export nav/pred nav/not-pred nav/must nav/maybe nav/if nav/when nav/unless
+          nav/multi-path nav/choice)
   (import (chezscheme)
           (chezpp utils)
           (chezpp navigator private core)
@@ -32,15 +32,15 @@
     (lambda (path data)
       (nav-clearval! path data)))
 
-  #|proc:nav-pred
-  The `nav-pred` procedure returns a navigator that focuses the current value
+  #|proc:nav/pred
+  The `nav/pred` procedure returns a navigator that focuses the current value
   only when `predicate` returns true for that value.
   |#
-  (define nav-pred
+  (define nav/pred
     (lambda (predicate)
       (pcheck ([procedure? predicate])
               (make-conditional-nav
-               'nav-pred '(nav-pred)
+               'nav/pred '(nav/pred)
                (lambda (value emit)
                  (when (predicate value)
                    (emit value)))
@@ -53,23 +53,23 @@
                (lambda (value clear!)
                  (if (predicate value) (clear! value) value))))))
 
-  #|proc:nav-not-pred
-  The `nav-not-pred` procedure returns a navigator that focuses the current
+  #|proc:nav/not-pred
+  The `nav/not-pred` procedure returns a navigator that focuses the current
   value only when `predicate` returns false for that value.
   |#
-  (define nav-not-pred
+  (define nav/not-pred
     (lambda (predicate)
       (pcheck ([procedure? predicate])
-              (nav-pred (lambda (value) (not (predicate value)))))))
+              (nav/pred (lambda (value) (not (predicate value)))))))
 
-  #|proc:nav-maybe
-  The `nav-maybe` procedure wraps `path` so missing selections become no-ops.
+  #|proc:nav/maybe
+  The `nav/maybe` procedure wraps `path` so missing selections become no-ops.
   |#
-  (define nav-maybe
+  (define nav/maybe
     (lambda (path)
       (let ([compiled (nav-compile-path path)])
         (make-conditional-nav
-         'nav-maybe '(nav-maybe)
+         'nav/maybe '(nav/maybe)
          (lambda (value emit)
            (guard [exn [else (void)]]
              (select-path compiled value emit)))
@@ -86,14 +86,14 @@
            (guard [exn [else value]]
              (clear-path! compiled value)))))))
 
-  #|proc:nav-must
-  The `nav-must` procedure wraps `path` so selecting no values signals an error.
+  #|proc:nav/must
+  The `nav/must` procedure wraps `path` so selecting no values signals an error.
   |#
-  (define nav-must
+  (define nav/must
     (lambda (path)
       (let ([compiled (nav-compile-path path)])
         (make-conditional-nav
-         'nav-must '(nav-must)
+         'nav/must '(nav/must)
          (lambda (value emit)
            (let ([count 0])
              (select-path compiled value
@@ -101,29 +101,29 @@
                             (set! count (+ count 1))
                             (emit child)))
              (when (= count 0)
-               (nav-error 'nav-must "required path selected no values"))))
+               (nav-error 'nav/must "required path selected no values"))))
          (lambda (value update)
            (if (path-selected? compiled value)
                (transform-path compiled update value)
-               (nav-error 'nav-must "required path selected no values")))
+               (nav-error 'nav/must "required path selected no values")))
          (lambda (value update!)
            (if (path-selected? compiled value)
                (transform-path! compiled update! value)
-               (nav-error 'nav-must "required path selected no values")))
+               (nav-error 'nav/must "required path selected no values")))
          (lambda (value clear)
            (if (path-selected? compiled value)
                (clear-path compiled value)
-               (nav-error 'nav-must "required path selected no values")))
+               (nav-error 'nav/must "required path selected no values")))
          (lambda (value clear!)
            (if (path-selected? compiled value)
                (clear-path! compiled value)
-               (nav-error 'nav-must "required path selected no values")))))))
+               (nav-error 'nav/must "required path selected no values")))))))
 
-  #|proc:nav-if
-  The `nav-if` procedure chooses `then-path` when `test-path` selects at least
+  #|proc:nav/if
+  The `nav/if` procedure chooses `then-path` when `test-path` selects at least
   one value from the current focus, otherwise it chooses `else-path`.
   |#
-  (define nav-if
+  (define nav/if
     (lambda (test-path then-path else-path)
       (let ([test (nav-compile-path test-path)]
             [then (nav-compile-path then-path)]
@@ -132,7 +132,7 @@
           (lambda (value)
             (if (path-selected? test value) then else-path)))
         (make-conditional-nav
-         'nav-if '(nav-if)
+         'nav/if '(nav/if)
          (lambda (value emit)
            (select-path (choose value) value emit))
          (lambda (value update)
@@ -144,31 +144,31 @@
          (lambda (value clear!)
            (clear-path! (choose value) value))))))
 
-  #|proc:nav-when
-  The `nav-when` procedure chooses `then-path` when `test-path` selects at
+  #|proc:nav/when
+  The `nav/when` procedure chooses `then-path` when `test-path` selects at
   least one value; otherwise it selects nothing.
   |#
-  (define nav-when
+  (define nav/when
     (lambda (test-path then-path)
-      (nav-if test-path then-path nav-none)))
+      (nav/if test-path then-path nav/none)))
 
-  #|proc:nav-unless
-  The `nav-unless` procedure chooses `then-path` when `test-path` selects no
+  #|proc:nav/unless
+  The `nav/unless` procedure chooses `then-path` when `test-path` selects no
   values; otherwise it selects nothing.
   |#
-  (define nav-unless
+  (define nav/unless
     (lambda (test-path then-path)
-      (nav-if test-path nav-none then-path)))
+      (nav/if test-path nav/none then-path)))
 
-  #|proc:nav-multi-path
-  The `nav-multi-path` procedure returns a navigator that focuses all values
+  #|proc:nav/multi-path
+  The `nav/multi-path` procedure returns a navigator that focuses all values
   selected by each path in `paths`, preserving path order.
   |#
-  (define nav-multi-path
+  (define nav/multi-path
     (lambda paths
       (let ([compiled (map nav-compile-path paths)])
         (make-conditional-nav
-         'nav-multi-path '(nav-multi-path)
+         'nav/multi-path '(nav/multi-path)
          (lambda (value emit)
            (for-each (lambda (path) (select-path path value emit)) compiled))
          (lambda (value update)
@@ -188,21 +188,21 @@
            (for-each (lambda (path) (clear-path! path value)) compiled)
            value)))))
 
-  #|proc:nav-choice
-  The `nav-choice` procedure returns a navigator that uses the first path in
+  #|proc:nav/choice
+  The `nav/choice` procedure returns a navigator that uses the first path in
   `paths` that selects at least one value.
   |#
-  (define nav-choice
+  (define nav/choice
     (lambda paths
       (let ([compiled (map nav-compile-path paths)])
         (define choose
           (lambda (value)
             (let loop ([paths compiled])
-              (cond [(null? paths) nav-none]
+              (cond [(null? paths) nav/none]
                     [(path-selected? (car paths) value) (car paths)]
                     [else (loop (cdr paths))]))))
         (make-conditional-nav
-         'nav-choice '(nav-choice)
+         'nav/choice '(nav/choice)
          (lambda (value emit)
            (select-path (choose value) value emit))
          (lambda (value update)

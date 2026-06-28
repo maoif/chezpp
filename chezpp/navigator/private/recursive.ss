@@ -1,5 +1,5 @@
 (library (chezpp navigator private recursive)
-  (export nav-rec nav-letrec nav-children nav-leaves nav-walker nav-before nav-after)
+  (export nav/rec nav/letrec nav/children nav/leaves nav/walker nav/before nav/after)
   (import (chezscheme)
           (chezpp utils)
           (chezpp navigator private core)
@@ -10,7 +10,7 @@
       (let loop ([names (map car bindings)] [seen '()])
         (cond [(null? names) (make-$recursive-nav-group bindings root)]
               [(memq (car names) seen)
-               (nav-error 'nav-letrec "duplicate recursive navigator name: ~s" (car names))]
+               (nav-error 'nav/letrec "duplicate recursive navigator name: ~s" (car names))]
               [else (loop (cdr names) (cons (car names) seen))]))))
 
   (define emit-children
@@ -86,14 +86,14 @@
       (lambda (value clear!)
         (nav-error 'nav-clearval! "recursive navigator ~s does not support clear! yet" name))))
 
-  #|proc:nav-children
-  The `nav-children` navigator focuses immediate children of supported nested
+  #|proc:nav/children
+  The `nav/children` navigator focuses immediate children of supported nested
   values when composed with later path steps. As a final selection step, it
   focuses collection descendants in tree order.
   |#
-  (define nav-children
+  (define nav/children
     (make-tree-nav
-     'nav-children 'nav-children
+     'nav/children 'nav/children
      (lambda (value emit)
        (emit-children value emit))
      (lambda (value update)
@@ -191,92 +191,92 @@
               value]
              [else value]))))
 
-  #|proc:nav-leaves
-  The `nav-leaves` navigator focuses nested values with no supported children.
+  #|proc:nav/leaves
+  The `nav/leaves` navigator focuses nested values with no supported children.
   |#
-  (define nav-leaves
+  (define nav/leaves
     (make-tree-nav
-     'nav-leaves 'nav-leaves
+     'nav/leaves 'nav/leaves
      (lambda (value emit)
        (let walk ([value value])
          (if (leaf? value)
              (emit value)
              (emit-children value walk))))
-     (tree-unsupported-transform 'nav-leaves)
-     (tree-unsupported-transform! 'nav-leaves)
-     (tree-unsupported-clear 'nav-leaves)
-     (tree-unsupported-clear! 'nav-leaves)))
+     (tree-unsupported-transform 'nav/leaves)
+     (tree-unsupported-transform! 'nav/leaves)
+     (tree-unsupported-clear 'nav/leaves)
+     (tree-unsupported-clear! 'nav/leaves)))
 
-  #|proc:nav-walker
-  The `nav-walker` procedure returns a navigator that recursively walks nested
+  #|proc:nav/walker
+  The `nav/walker` procedure returns a navigator that recursively walks nested
   values and focuses every value for which `predicate` returns true.
   |#
-  (define nav-walker
+  (define nav/walker
     (lambda (predicate)
      (pcheck ([procedure? predicate])
              (make-tree-nav
-              'nav-walker '(nav-walker)
+              'nav/walker '(nav/walker)
               (lambda (value emit)
                 (let walk ([value value])
                   (when (predicate value)
                     (emit value))
                   (emit-children value walk)))
-              (tree-unsupported-transform 'nav-walker)
-              (tree-unsupported-transform! 'nav-walker)
-              (tree-unsupported-clear 'nav-walker)
-              (tree-unsupported-clear! 'nav-walker)))))
+              (tree-unsupported-transform 'nav/walker)
+              (tree-unsupported-transform! 'nav/walker)
+              (tree-unsupported-clear 'nav/walker)
+              (tree-unsupported-clear! 'nav/walker)))))
 
-  #|proc:nav-before
-  The `nav-before` procedure returns a navigator that focuses the current value
+  #|proc:nav/before
+  The `nav/before` procedure returns a navigator that focuses the current value
   before values selected by `path`.
   |#
-  (define nav-before
+  (define nav/before
     (lambda (path)
       (let ([compiled (nav-compile-path path)])
         (make-tree-nav
-         'nav-before '(nav-before)
+         'nav/before '(nav/before)
          (lambda (value emit)
            (emit-current-focus value emit)
            (select-path compiled value emit))
-         (tree-unsupported-transform 'nav-before)
-         (tree-unsupported-transform! 'nav-before)
-         (tree-unsupported-clear 'nav-before)
-         (tree-unsupported-clear! 'nav-before)))))
+         (tree-unsupported-transform 'nav/before)
+         (tree-unsupported-transform! 'nav/before)
+         (tree-unsupported-clear 'nav/before)
+         (tree-unsupported-clear! 'nav/before)))))
 
-  #|proc:nav-after
-  The `nav-after` procedure returns a navigator that focuses values selected by
+  #|proc:nav/after
+  The `nav/after` procedure returns a navigator that focuses values selected by
   `path` before focusing the current value.
   |#
-  (define nav-after
+  (define nav/after
     (lambda (path)
       (let ([compiled (nav-compile-path path)])
         (make-tree-nav
-         'nav-after '(nav-after)
+         'nav/after '(nav/after)
          (lambda (value emit)
            (select-path compiled value emit)
            (emit-current-focus value emit))
-         (tree-unsupported-transform 'nav-after)
-         (tree-unsupported-transform! 'nav-after)
-         (tree-unsupported-clear 'nav-after)
-         (tree-unsupported-clear! 'nav-after)))))
+         (tree-unsupported-transform 'nav/after)
+         (tree-unsupported-transform! 'nav/after)
+         (tree-unsupported-clear 'nav/after)
+         (tree-unsupported-clear! 'nav/after)))))
 
-  #|macro:nav-rec
-  The `nav-rec` macro creates a recursive navigator named by identifier `name`
+  #|macro:nav/rec
+  The `nav/rec` macro creates a recursive navigator named by identifier `name`
   whose body is `body`.
   |#
-  (define-syntax nav-rec
+  (define-syntax nav/rec
     (lambda (stx)
       (syntax-case stx ()
         [(_ name body)
          (identifier? #'name)
-         #'(nav-letrec ([name body]) name)]
-        [_ (syntax-error stx "invalid nav-rec form:")])))
+         #'(nav/letrec ([name body]) name)]
+        [_ (syntax-error stx "invalid nav/rec form:")])))
 
-  #|macro:nav-letrec
-  The `nav-letrec` macro creates a mutually recursive navigator group from
+  #|macro:nav/letrec
+  The `nav/letrec` macro creates a mutually recursive navigator group from
   bindings and returns `root`.
   |#
-  (define-syntax nav-letrec
+  (define-syntax nav/letrec
     (lambda (stx)
       (syntax-case stx ()
         [(_ ([name body] ...) root)
@@ -285,4 +285,4 @@
              (make-recursive-nav-group
               (list (cons 'name body) ...)
               root))]
-        [_ (syntax-error stx "invalid nav-letrec form:")]))))
+        [_ (syntax-error stx "invalid nav/letrec form:")]))))
