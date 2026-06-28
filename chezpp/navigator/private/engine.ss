@@ -16,7 +16,11 @@
 
   (define collection?
     (lambda (value)
-      (or (pair? value) (vector? value) (hashtable? value))))
+      (or (pair? value)
+          (vector? value)
+          (fxvector? value)
+          (flvector? value)
+          (hashtable? value))))
 
   (define emit-immediate-children
     (lambda (value emit)
@@ -27,6 +31,18 @@
                (let loop ([i 0])
                  (when (< i len)
                    (emit (vector-ref value i))
+                   (loop (+ i 1)))))]
+            [(fxvector? value)
+             (let ([len (fxvector-length value)])
+               (let loop ([i 0])
+                 (when (< i len)
+                   (emit (fxvector-ref value i))
+                   (loop (+ i 1)))))]
+            [(flvector? value)
+             (let ([len (flvector-length value)])
+               (let loop ([i 0])
+                 (when (< i len)
+                   (emit (flvector-ref value i))
                    (loop (+ i 1)))))]
             [(hashtable? value)
              (let ([vals (hashtable-values value)])

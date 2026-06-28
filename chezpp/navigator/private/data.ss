@@ -34,6 +34,14 @@
     (lambda (x)
       (and (integer? x) (<= 0 x) (<= x 255))))
 
+  (define fixnum-value?
+    (lambda (x)
+      (fixnum? x)))
+
+  (define flonum-value?
+    (lambda (x)
+      (flonum? x)))
+
   #|proc:nav-register-indexed!
   The `nav-register-indexed!` procedure registers an indexed container type for
   built-in indexed navigators. The `predicate` procedure receives a value and
@@ -95,6 +103,8 @@
     (lambda (value)
       (cond [(list? value) (length value)]
             [(vector? value) (vector-length value)]
+            [(fxvector? value) (fxvector-length value)]
+            [(flvector? value) (flvector-length value)]
             [(string? value) (string-length value)]
             [(bytevector? value) (bytevector-length value)]
             [(find-indexed-protocol value)
@@ -112,6 +122,10 @@
              (if (< index (length value)) (list-ref value index) nav-missing)]
             [(vector? value)
              (if (< index (vector-length value)) (vector-ref value index) nav-missing)]
+            [(fxvector? value)
+             (if (< index (fxvector-length value)) (fxvector-ref value index) nav-missing)]
+            [(flvector? value)
+             (if (< index (flvector-length value)) (flvector-ref value index) nav-missing)]
             [(string? value)
              (if (< index (string-length value)) (string-ref value index) nav-missing)]
             [(bytevector? value)
@@ -135,6 +149,22 @@
              (let ([copy (vector-copy value)])
                (vector-set! copy index new-value)
                copy)]
+            [(fxvector? value)
+             (if (fixnum-value? new-value)
+                 (let ([copy (fxvector-copy value)])
+                   (fxvector-set! copy index new-value)
+                   copy)
+                 (nav-error 'nav-transform
+                            "fxvector element is not a fixnum: ~s"
+                            new-value))]
+            [(flvector? value)
+             (if (flonum-value? new-value)
+                 (let ([copy (flvector-copy value)])
+                   (flvector-set! copy index new-value)
+                   copy)
+                 (nav-error 'nav-transform
+                            "flvector element is not a flonum: ~s"
+                            new-value))]
             [(string? value)
              (if (char? new-value)
                  (let ([copy (string-copy value)])
@@ -165,6 +195,18 @@
                      [(= i 0) (set-car! xs new-value)]
                      [else (loop (cdr xs) (- i 1))]))]
             [(vector? value) (vector-set! value index new-value)]
+            [(fxvector? value)
+             (if (fixnum-value? new-value)
+                 (fxvector-set! value index new-value)
+                 (nav-error 'nav-transform!
+                            "fxvector element is not a fixnum: ~s"
+                            new-value))]
+            [(flvector? value)
+             (if (flonum-value? new-value)
+                 (flvector-set! value index new-value)
+                 (nav-error 'nav-transform!
+                            "flvector element is not a flonum: ~s"
+                            new-value))]
             [(string? value)
              (if (char? new-value)
                  (string-set! value index new-value)

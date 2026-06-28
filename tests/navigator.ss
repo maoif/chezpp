@@ -32,6 +32,22 @@
       (and (= (length ks) (length keys))
            (andmap (lambda (key) (memq key ks)) keys)))))
 
+(define fxvector->list*
+  (lambda (vec)
+    (let ([len (fxvector-length vec)])
+      (let loop ([i 0] [items '()])
+        (if (= i len)
+            (reverse items)
+            (loop (+ i 1) (cons (fxvector-ref vec i) items)))))))
+
+(define flvector->list*
+  (lambda (vec)
+    (let ([len (flvector-length vec)])
+      (let loop ([i 0] [items '()])
+        (if (= i len)
+            (reverse items)
+            (loop (+ i 1) (cons (flvector-ref vec i) items)))))))
+
 (define-record-type (ixbox make-ixbox ixbox?)
   (fields (mutable items)))
 
@@ -294,6 +310,65 @@
      (error? (nav-transform! nav/all add1 1))
      ;; negative: string mutation must receive characters.
      (error? (nav-transform! nav/all (lambda (ch) 65) (string-copy "ab"))))
+
+(mat navigator-numeric-vector-fastpaths
+     (equal? '(1 2 3) (nav-select nav/all (fxvector 1 2 3)))
+     (equal? '(1.5 2.5 3.5) (nav-select nav/all (flvector 1.5 2.5 3.5)))
+     (equal? '(2) (nav-select (nav/nth 1) (fxvector 1 2 3)))
+     (equal? '(2.5) (nav-select (nav/nth 1) (flvector 1.5 2.5 3.5)))
+     (equal? '(3) (nav-select nav/last (fxvector 1 2 3)))
+     (equal? '(3.5) (nav-select nav/last (flvector 1.5 2.5 3.5)))
+     (equal? '(2 4) (nav-select (nav/slice 1 5 2) (fxvector 1 2 3 4 5)))
+     (equal? '(2.5 4.5) (nav-select (nav/slice 1 5 2) (flvector 1.5 2.5 3.5 4.5 5.5)))
+     (equal? '(0 1 2) (nav-select nav/keys (fxvector 1 2 3)))
+     (equal? '(0 1 2) (nav-select nav/keys (flvector 1.5 2.5 3.5)))
+     (equal? '((0 . 1) (1 . 2) (2 . 3))
+             (nav-select nav/entries (fxvector 1 2 3)))
+     (equal? '((0 . 1.5) (1 . 2.5) (2 . 3.5))
+             (nav-select nav/entries (flvector 1.5 2.5 3.5)))
+     (let* ([old (fxvector 1 2 3)]
+            [new (nav-transform nav/all add1 old)])
+       (and (not (eq? old new))
+            (equal? '(1 2 3) (fxvector->list* old))
+            (equal? '(2 3 4) (fxvector->list* new))))
+     (let* ([old (flvector 1.5 2.5 3.5)]
+            [new (nav-transform nav/all (lambda (x) (+ x 1.0)) old)])
+       (and (not (eq? old new))
+            (equal? '(1.5 2.5 3.5) (flvector->list* old))
+            (equal? '(2.5 3.5 4.5) (flvector->list* new))))
+     (equal? '(1 9 3)
+             (fxvector->list* (nav-setval (nav/nth 1) 9 (fxvector 1 2 3))))
+     (equal? '(1.5 9.5 3.5)
+             (flvector->list* (nav-setval (nav/nth 1) 9.5 (flvector 1.5 2.5 3.5))))
+     (let ([v (fxvector 1 2 3)])
+       (and (eq? v (nav-transform! nav/all add1 v))
+            (equal? '(2 3 4) (fxvector->list* v))))
+     (let ([v (flvector 1.5 2.5 3.5)])
+       (and (eq? v (nav-transform! nav/all (lambda (x) (+ x 1.0)) v))
+            (equal? '(2.5 3.5 4.5) (flvector->list* v))))
+     (let ([v (fxvector 1 2 3)])
+       (and (eq? v (nav-setval! (nav/nth 1) 9 v))
+            (equal? '(1 9 3) (fxvector->list* v))))
+     (let ([v (flvector 1.5 2.5 3.5)])
+       (and (eq? v (nav-setval! (nav/nth 1) 9.5 v))
+            (equal? '(1.5 9.5 3.5) (flvector->list* v))))
+     (let ([selected (nav-select nav/children (list (fxvector 1 2) (flvector 1.5 2.5)))])
+       (and (= 6 (length selected))
+            (fxvector? (car selected))
+            (flvector? (cadr selected))
+            (equal? '(1 2) (fxvector->list* (car selected)))
+            (equal? '(1.5 2.5) (flvector->list* (cadr selected)))
+            (equal? '(1 2 1.5 2.5) (cddr selected))))
+     (equal? '(1 2 1.5 2.5)
+             (nav-select nav/leaves (list (fxvector 1 2) (flvector 1.5 2.5))))
+     ;; negative: pure fxvector transform must return fixnums.
+     (error? (nav-transform nav/all (lambda (n) (+ n 0.5)) (fxvector 1)))
+     ;; negative: pure flvector transform must return flonums.
+     (error? (nav-transform nav/all (lambda (x) 1) (flvector 1.5)))
+     ;; negative: mutating fxvector transform must return fixnums.
+     (error? (nav-transform! nav/all (lambda (n) (+ n 0.5)) (fxvector 1)))
+     ;; negative: mutating flvector transform must return flonums.
+     (error? (nav-transform! nav/all (lambda (x) 1) (flvector 1.5))))
 
 (mat navigator-conditional
      (equal? '(1 2 3) (nav-select (nav-path nav/all (nav/pred number?)) '(a 1 b 2 3 c)))
