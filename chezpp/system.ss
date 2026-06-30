@@ -6,19 +6,25 @@
           os-error?)
   (import (chezpp chez)
           (chezpp system common)
+          (except (chezpp system darwin) darwin?)
           (chezpp system filesystem)
           (chezpp system info)
+          (except (chezpp system linux) linux?)
           (chezpp system process)
           (chezpp system signal)
           (chezpp system user)
+          (except (chezpp system windows) windows?)
           (chezpp utils))
 
   (export (import (chezpp system common)
+                  (except (chezpp system darwin) darwin?)
                   (chezpp system filesystem)
                   (chezpp system info)
+                  (except (chezpp system linux) linux?)
                   (chezpp system process)
                   (chezpp system signal)
-                  (chezpp system user)))
+                  (chezpp system user)
+                  (except (chezpp system windows) windows?)))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; OS errors

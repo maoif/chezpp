@@ -72,3 +72,19 @@
      (boolean? (unix?))
      (boolean? (windows?))
      (boolean? (darwin?)))
+
+(mat system-platform-modules
+
+     (and (memq (system-platform) '(linux darwin windows unknown)) #t)
+     (boolean? (linux?))
+     (boolean? (darwin?))
+     (boolean? (windows?)))
+
+;; Error case: unimplemented platform stubs should raise unsupported.
+(mat system-platform-stubs
+
+     (if (linux?)
+         (guard (c [(system-unsupported-error? c) #t] [else #f])
+           (windows-system-version)
+           #f)
+         #t))
