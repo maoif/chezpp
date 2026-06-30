@@ -75,7 +75,7 @@ static ptr _getgr(struct group *p) {
 
   char **gmems = p->gr_mem;
   int len = 0;
-  while (gmems != NULL) {
+  while (gmems != NULL && *gmems != NULL) {
     len++;
     gmems++;
   }
@@ -90,7 +90,7 @@ static ptr _getgr(struct group *p) {
 
   len = 0;
   gmems = p->gr_mem;
-  while (gmems != NULL) {
+  while (gmems != NULL && *gmems != NULL) {
     Svector_set(vmem, len, Sstring(*gmems));
     len++;
     gmems++;
@@ -117,7 +117,7 @@ int chezpp_getgid() { return getgid(); }
 
 int chezpp_geteuid() { return geteuid(); }
 
-int chezpp_getegid() { return geteuid(); }
+int chezpp_getegid() { return getegid(); }
 
 
 

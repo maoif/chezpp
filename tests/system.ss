@@ -7,6 +7,31 @@
      (<= 0 (geteuid))
      (<= 0 (getegid)))
 
+(mat current-ids
+
+     (let ([uid (getuid)]
+           [gid (getgid)]
+           [euid (geteuid)]
+           [egid (getegid)])
+       (and (integer? uid)
+            (integer? gid)
+            (integer? euid)
+            (integer? egid)
+            (<= 0 uid)
+            (<= 0 gid)
+            (<= 0 euid)
+            (<= 0 egid))))
+
+(mat user-group-roundtrip
+
+     (let* ([uid (getuid)]
+            [name (uid->user uid)])
+       (= uid (user->uid name)))
+
+     (let* ([gid (getgid)]
+            [name (gid->group gid)])
+       (= gid (group->gid name))))
+
 (mat process-ids
 
      (< 1 (getpid))
