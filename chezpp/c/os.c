@@ -36,8 +36,11 @@ int chezpp_cpu_count();
 //
 //=======================================================================
 
-static ptr _getpw(struct passwd *p) {
+static ptr _getpw(const char *operation, ptr context, struct passwd *p) {
   if (p == NULL) {
+    if (errno == 0) {
+      return chezpp_not_found_result(operation, context);
+    }
     return errno_str();
   }
 
@@ -54,17 +57,27 @@ static ptr _getpw(struct passwd *p) {
 }
 
 ptr chezpp_getpwnam(const char *name) {
+  errno = 0;
   struct passwd *p = getpwnam(name);
-  return _getpw(p);
+  ptr context = Scons(Scons(Sstring("name"), Sstring(name)), Snil);
+  if (p == NULL) {
+    return chezpp_not_found_result("getpwnam", context);
+  }
+  return _getpw("getpwnam", context, p);
 }
 
 ptr chezpp_getpwuid(int uid) {
+  errno = 0;
   struct passwd *p = getpwuid(uid);
-  return _getpw(p);
+  ptr context = Scons(Scons(Sstring("uid"), Sfixnum(uid)), Snil);
+  return _getpw("getpwuid", context, p);
 }
 
-static ptr _getgr(struct group *p) {
+static ptr _getgr(const char *operation, ptr context, struct group *p) {
   if (p == NULL) {
+    if (errno == 0) {
+      return chezpp_not_found_result(operation, context);
+    }
     return errno_str();
   }
 
@@ -102,13 +115,20 @@ static ptr _getgr(struct group *p) {
 }
 
 ptr chezpp_getgrnam(const char *name) {
+  errno = 0;
   struct group *p = getgrnam(name);
-  return _getgr(p);
+  ptr context = Scons(Scons(Sstring("name"), Sstring(name)), Snil);
+  if (p == NULL) {
+    return chezpp_not_found_result("getgrnam", context);
+  }
+  return _getgr("getgrnam", context, p);
 }
 
 ptr chezpp_getgrgid(int gid) {
+  errno = 0;
   struct group *p = getgrgid(gid);
-  return _getgr(p);
+  ptr context = Scons(Scons(Sstring("gid"), Sfixnum(gid)), Snil);
+  return _getgr("getgrgid", context, p);
 }
 
 int chezpp_getuid() { return getuid(); }
