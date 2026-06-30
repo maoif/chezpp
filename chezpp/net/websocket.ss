@@ -21,7 +21,7 @@
           websocket-message-data
           call-with-websocket)
   (import (chezpp chez)
-          (chezpp os)
+          (chezpp system)
           (chezpp utils)
           (chezpp net uri)
           (chezpp net errors)

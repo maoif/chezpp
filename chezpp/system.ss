@@ -1,4 +1,4 @@
-(library (chezpp os)
+(library (chezpp system)
   (export sleep milisleep nanosleep
 
           unix? windows? darwin?

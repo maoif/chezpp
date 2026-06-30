@@ -20,7 +20,7 @@
           (chezpp utils)
           (chezpp dlist)
           (chezpp concurrency)
-          (chezpp os)
+          (chezpp system)
           (chezpp io)
           (chezpp internal))
 

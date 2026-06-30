@@ -15,7 +15,7 @@
   (import (chezpp chez)
           (chezpp list)
           (chezpp hashset)
-          (chezpp os)
+          (chezpp system)
           (chezpp utils)
           (chezpp internal))
 

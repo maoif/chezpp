@@ -25,7 +25,7 @@
           open-sftp-input-port
           open-sftp-output-port)
   (import (chezpp chez)
-          (chezpp os)
+          (chezpp system)
           (chezpp utils)
           (chezpp net errors)
           (chezpp net ffi)

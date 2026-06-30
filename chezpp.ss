@@ -20,7 +20,7 @@
                   (chezpp file)
                   (chezpp path)
                   (chezpp navigator)
-                  (chezpp os)
+                  (chezpp system)
 
                   (chezpp hashset)
                   (chezpp dlist)
