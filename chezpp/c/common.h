@@ -29,5 +29,6 @@ ptr chezpp_not_found_result(const char *operation, ptr context);
 ptr chezpp_unsupported_result(const char *operation);
 
 ptr chezpp_filesystem_info(const char *path);
+ptr chezpp_send_signal(int pid, int sig);
 
 char *expand_pathname(const char *inpath);

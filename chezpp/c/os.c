@@ -5,6 +5,9 @@
 #include <grp.h>
 #include <pwd.h>
 #include <link.h>
+#if defined(__unix__) || defined(__APPLE__)
+#include <signal.h>
+#endif
 #include <string.h>
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/stat.h>
@@ -28,6 +31,7 @@ ptr chezpp_fork();
 ptr chezpp_vfork();
 int chezpp_getppid();
 ptr chezpp_shared_object_list();
+ptr chezpp_send_signal(int pid, int sig);
 
 ptr chezpp_hostname();
 ptr chezpp_cpu_arch();
@@ -187,6 +191,20 @@ ptr chezpp_shared_object_list() {
   dl_iterate_phdr(shared_object_list_callback, &objs);
   
   return objs;
+}
+
+ptr chezpp_send_signal(int pid, int sig) {
+#if defined(__unix__) || defined(__APPLE__)
+  if (kill(pid, sig) != 0) {
+    return chezpp_errno_result("send-signal", Snil);
+  }
+
+  return chezpp_ok(Strue);
+#else
+  (void)pid;
+  (void)sig;
+  return chezpp_unsupported_result("send-signal");
+#endif
 }
 
 
