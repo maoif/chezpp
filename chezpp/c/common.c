@@ -15,6 +15,39 @@ ptr errno_str_vector() {
   return v;
 }
 
+ptr chezpp_ok(ptr value) {
+  ptr v = Smake_vector(2, Sfalse);
+  Svector_set(v, 0, Sstring("ok"));
+  Svector_set(v, 1, value);
+  return v;
+}
+
+ptr chezpp_errno_result(const char *operation, ptr context) {
+  ptr v = Smake_vector(5, Sfalse);
+  int code = errno;
+  Svector_set(v, 0, Sstring("errno"));
+  Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
+  Svector_set(v, 2, Sfixnum(code));
+  Svector_set(v, 3, code == 0 ? Sstring("internal error") : Sstring(strerror(code)));
+  Svector_set(v, 4, context);
+  return v;
+}
+
+ptr chezpp_not_found_result(const char *operation, ptr context) {
+  ptr v = Smake_vector(3, Sfalse);
+  Svector_set(v, 0, Sstring("not-found"));
+  Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
+  Svector_set(v, 2, context);
+  return v;
+}
+
+ptr chezpp_unsupported_result(const char *operation) {
+  ptr v = Smake_vector(2, Sfalse);
+  Svector_set(v, 0, Sstring("unsupported"));
+  Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
+  return v;
+}
+
 // from ChezScheme: io.c
 // The caller has to free the returned pointer.
 #define DIRMARKERP(c) ((c) == '/')

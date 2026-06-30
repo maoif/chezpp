@@ -23,4 +23,9 @@
 ptr errno_str();
 ptr errno_str_vector();
 
+ptr chezpp_ok(ptr value);
+ptr chezpp_errno_result(const char *operation, ptr context);
+ptr chezpp_not_found_result(const char *operation, ptr context);
+ptr chezpp_unsupported_result(const char *operation);
+
 char *expand_pathname(const char *inpath);
