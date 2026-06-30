@@ -6,6 +6,10 @@
 #include <pwd.h>
 #include <link.h>
 #include <string.h>
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#endif
 #include <sys/utsname.h>
 
 
@@ -28,6 +32,7 @@ ptr chezpp_shared_object_list();
 ptr chezpp_hostname();
 ptr chezpp_cpu_arch();
 int chezpp_cpu_count();
+ptr chezpp_filesystem_info(const char *path);
 
 
 //=======================================================================
@@ -218,4 +223,48 @@ int chezpp_cpu_count() {
   }
 
   return (int) num_cores;
+}
+
+
+//=======================================================================
+//
+// filesystem info
+//
+//=======================================================================
+
+
+ptr chezpp_filesystem_info(const char *path) {
+#if defined(__unix__) || defined(__APPLE__)
+  struct statvfs vfs;
+  if (statvfs(path, &vfs) != 0) {
+    return chezpp_errno_result("filesystem-info", Snil);
+  }
+
+  struct stat st;
+  if (stat(path, &st) != 0) {
+    return chezpp_errno_result("filesystem-info", Snil);
+  }
+
+  ptr v = Smake_vector(11, Sfalse);
+  Svector_set(v, 0, Sstring(path));
+  Svector_set(v, 1, Sunsigned64((Suint64_t)st.st_dev));
+  Svector_set(v, 2, Sunsigned64((Suint64_t)st.st_ino));
+  Svector_set(v, 3, Sfalse);
+  Svector_set(v, 4, Sunsigned64((Suint64_t)vfs.f_frsize));
+  Svector_set(v, 5, Sunsigned64((Suint64_t)vfs.f_blocks));
+  Svector_set(v, 6, Sunsigned64((Suint64_t)vfs.f_bfree));
+  Svector_set(v, 7, Sunsigned64((Suint64_t)vfs.f_bavail));
+  Svector_set(v, 8, Sunsigned64((Suint64_t)vfs.f_files));
+  Svector_set(v, 9, Sunsigned64((Suint64_t)vfs.f_ffree));
+#ifdef ST_RDONLY
+  Svector_set(v, 10, (vfs.f_flag & ST_RDONLY) ? Strue : Sfalse);
+#else
+  Svector_set(v, 10, Sfalse);
+#endif
+
+  return chezpp_ok(v);
+#else
+  (void)path;
+  return chezpp_unsupported_result("filesystem-info");
+#endif
 }

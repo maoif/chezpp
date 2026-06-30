@@ -6,11 +6,13 @@
           os-error?)
   (import (chezpp chez)
           (chezpp system common)
+          (chezpp system filesystem)
           (chezpp system info)
           (chezpp system user)
           (chezpp utils))
 
   (export (import (chezpp system common)
+                  (chezpp system filesystem)
                   (chezpp system info)
                   (chezpp system user)))
 
