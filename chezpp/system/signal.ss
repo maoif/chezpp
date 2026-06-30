@@ -1,5 +1,6 @@
 (library (chezpp system signal)
   (export signal? signal signal-name signal-number signal->string string->signal signal-list
+          hup int quit kill usr1 usr2 alrm term chld pipe
           send-signal send-process-signal send-process-group-signal
           signal-mask signal-mask-set! signal-block! signal-unblock! wait-signal)
   (import (chezpp chez)
@@ -39,9 +40,24 @@ The `sig` parameter is a signal record returned by `signal`, `string->signal`, o
           (make-signal 'chld 17)
           (make-signal 'pipe 13)))
 
+  (define hup 'hup)
+  (define int 'int)
+  (define quit 'quit)
+  (define kill 'kill)
+  (define usr1 'usr1)
+  (define usr2 'usr2)
+  (define alrm 'alrm)
+  (define term 'term)
+  (define chld 'chld)
+  (define pipe 'pipe)
+
   (define $signal-input?
     (lambda (x)
       (or (signal? x) (symbol? x) (string? x) (integer? x))))
+
+  (define $positive-integer?
+    (lambda (x)
+      (and (integer? x) (> x 0))))
 
   (define $string-prefix?
     (lambda (prefix str)
@@ -101,13 +117,7 @@ The `spec` form may be a bare identifier such as `term`, a quoted symbol such as
 |#
   (define-syntax signal
     (lambda (stx)
-      (syntax-case stx (quote)
-        [(_ (quote datum))
-         #'(%signal 'datum)]
-        [(_ spec)
-         (and (identifier? #'spec)
-              (memq (syntax->datum #'spec) '(hup int quit kill usr1 usr2 alrm term chld pipe)))
-         #'(%signal 'spec)]
+      (syntax-case stx ()
         [(_ spec)
          #'(%signal spec)])))
 
@@ -134,7 +144,7 @@ The `signal-list` procedure returns the list of known signal records.
 |#
   (define signal-list
     (lambda ()
-      $signal-table))
+      (list-copy $signal-table)))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; signal operations
@@ -150,7 +160,7 @@ The `sig` parameter is a signal record, symbol, string, or integer signal number
 |#
   (define-who send-signal
     (lambda (pid sig)
-      (pcheck ([integer? pid] [$signal-input? sig])
+      (pcheck ([$positive-integer? pid] [$signal-input? sig])
               (ffi-result-ref ($send-signal-ffi pid (signal-number ($signal-ref who sig)))))))
 
   #|proc:send-process-signal
@@ -171,7 +181,7 @@ The `sig` parameter is a signal record, symbol, string, or integer signal number
 |#
   (define-who send-process-group-signal
     (lambda (process-group-id sig)
-      (pcheck ([integer? process-group-id] [$signal-input? sig])
+      (pcheck ([$positive-integer? process-group-id] [$signal-input? sig])
               (ffi-result-ref ($send-signal-ffi (- process-group-id) (signal-number ($signal-ref who sig)))))))
 
   #|proc:signal-mask
