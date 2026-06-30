@@ -23,8 +23,8 @@ ptr chezpp_ok(ptr value) {
 }
 
 ptr chezpp_errno_result(const char *operation, ptr context) {
-  ptr v = Smake_vector(5, Sfalse);
   int code = errno;
+  ptr v = Smake_vector(5, Sfalse);
   Svector_set(v, 0, Sstring("errno"));
   Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
   Svector_set(v, 2, Sfixnum(code));

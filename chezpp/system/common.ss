@@ -147,15 +147,19 @@ The `context` parameter is an association list with additional failure details.
   #|proc:make-system-permission-error
 The `make-system-permission-error` procedure constructs a system error condition for a permission failure.
 The `operation` parameter is a symbol naming the operation that failed, or `#f` when unknown.
+The `code` parameter is an integer error code, or `#f` when no code is available.
 The `message` parameter is a string describing the failure.
 The `context` parameter is an association list with additional failure details.
 |#
   (define make-system-permission-error
     (case-lambda
       [(operation message)
-       (make-system-permission-error operation message '())]
+       (make-system-permission-error operation #f message '())]
       [(operation message context)
-       ($make-special-system-error %make-system-permission-error operation message context)]))
+       (make-system-permission-error operation #f message context)]
+      [(operation code message context)
+       (pcheck ([$system-operation? operation] [$system-code? code] [string? message] [$system-context? context])
+               (%make-system-permission-error operation code message context))]))
 
   #|proc:make-system-timeout-error
 The `make-system-timeout-error` procedure constructs a system error condition for a timeout.
@@ -216,7 +220,7 @@ The `message` parameter is a string describing the failure.
   (define $errno-condition
     (lambda (operation code message context)
       (if (memv code '(1 13))
-          (raise (make-system-permission-error operation message context))
+          (raise (make-system-permission-error operation code message context))
           (raise (make-system-error operation code message context)))))
 
   #|proc:ffi-result-ref

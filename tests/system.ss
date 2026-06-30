@@ -21,8 +21,10 @@
      (system-not-found-error? (guard (c [else c])
                                 (ffi-result-ref '#("not-found" "test-op" ((path . "/missing"))))))
 
-     (system-permission-error? (guard (c [else c])
-                                 (ffi-result-ref '#("errno" "test-op" 13 "permission denied" ((path . "/")))))))
+     (let ([c (guard (c [else c])
+                (ffi-result-ref '#("errno" "test-op" 13 "permission denied" ((path . "/")))))])
+       (and (system-permission-error? c)
+            (= 13 (system-error-code c)))))
 
 (mat user-credentials
 
