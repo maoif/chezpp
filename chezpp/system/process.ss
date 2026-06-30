@@ -262,6 +262,11 @@ The `status` parameter is a process exit-status record.
             (if (and (symbol? datum) (memq datum literal-option-values))
                 #`'#,(datum->syntax stx datum)
                 stx))))
+      (define parse-command-word
+        (lambda (stx)
+          (if (identifier? stx)
+              #`'#,(datum->syntax stx (symbol->string (syntax->datum stx)))
+              stx)))
       (define parse-forms
         (lambda (stx forms)
           (let parse-args ([rest forms] [args '()])
@@ -312,22 +317,23 @@ The `status` parameter is a process exit-status record.
                (let ([command (car command+args)]
                      [arguments (cdr command+args)])
                  (with-syntax ([command command]
-                               [(argument ...) arguments]
+                               [command-expr (parse-command-word command)]
+                               [(argument ...) (map parse-command-word arguments)]
                                [(option ...) option-forms]
                                [check check?])
                    (case kind
                      [(run-process)
-                      #'(%run-process 'run-process command (list argument ...) (list option ...) check)]
+                      #'(%run-process 'run-process command-expr (list argument ...) (list option ...) check)]
                      [(capture-process)
-                      #'(%capture-process 'capture-process command (list argument ...) (list option ...) check)]
+                      #'(%capture-process 'capture-process command-expr (list argument ...) (list option ...) check)]
                      [(shell-command)
                       (unless (null? arguments)
                         (syntax-error stx "shell-command accepts one command expression"))
-                      #'(%run-shell-command 'shell-command command (list option ...) check)]
+                      #'(%run-shell-command 'shell-command command-expr (list option ...) check)]
                      [(capture-shell-command)
                       (unless (null? arguments)
                         (syntax-error stx "capture-shell-command accepts one command expression"))
-                      #'(%capture-shell-command 'capture-shell-command command (list option ...) check)]
+                      #'(%capture-shell-command 'capture-shell-command command-expr (list option ...) check)]
                      [else
                       (syntax-error #'kind "unknown process macro kind")])))))]))))
 
