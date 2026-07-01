@@ -46,43 +46,6 @@ The `condition` parameter is the object to test.
 ;;;; processes
 ;;;;===----------------------------------------------------------------------===
 
-  #|proc:fork
-The `fork` procedure creates a child process and returns the child process ID in the parent and `0` in the child.
-|#
-  (define-who fork
-    (let ([ffi (foreign-procedure "chezpp_fork" () ptr)])
-      (lambda ()
-        (let ([x (ffi)])
-          (if (string? x)
-              ($err-os who x)
-              x)))))
-
-  #|proc:vfork
-The `vfork` procedure creates a child process using the operating system `vfork` operation and returns as `fork` does.
-|#
-  (define-who vfork
-    (let ([ffi (foreign-procedure "chezpp_vfork" () ptr)])
-      (lambda ()
-        (let ([x (ffi)])
-          (if (string? x)
-              ($err-os who x)
-              x)))))
-
-  #|proc:getpid
-The `getpid` procedure returns the process ID of the calling process.
-|#
-  (define getpid get-process-id)
-
-  #|proc:gettid
-The `gettid` procedure returns the thread ID of the calling thread.
-|#
-  (define gettid get-thread-id)
-
-  #|proc:getppid
-The `getppid` procedure returns the parent process ID of the calling process.
-|#
-  (define getppid (foreign-procedure "chezpp_getppid" () int))
-
   #|proc:shared-object-list
 The `shared-object-list` procedure returns a list of shared objects currently loaded by the process, in load order.
 |#

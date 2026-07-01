@@ -1,31 +1,22 @@
 (library (chezpp system process)
   (export process-exit-status? process-exit-status-kind process-exit-status-code process-exit-success?
+          process? process-pid process-command process-arguments process-stdin
+          process-stdout process-stderr process-status process-running?
+          spawn-process spawn-shell-command process-wait process-wait/no-hang
+          process-wait/timeout process-kill process-terminate process-interrupt
+          process-close-ports! make-pipe pipe-processes run-pipeline
+          fork vfork getpid gettid getppid
           process-result? process-result-status process-result-stdout process-result-stderr process-result-pid process-result-command
-          run-process run-process/check capture-process capture-process/check shell-command capture-shell-command)
+          run-process run-process/check capture-process capture-process/check shell-command
+          capture-shell-command capture-pipeline)
   (import (chezpp chez)
           (chezpp system common)
+          (chezpp system process expert)
           (chezpp utils))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; process result records
 ;;;;===----------------------------------------------------------------------===
-
-  #|proc:process-exit-status?
-The `process-exit-status?` procedure returns `#t` when its argument is a process exit-status record, otherwise `#f`.
-The `object` parameter is the object to test.
-|#
-  #|proc:process-exit-status-kind
-The `process-exit-status-kind` procedure returns the status kind stored in `status`.
-The `status` parameter is a process exit-status record.
-|#
-  #|proc:process-exit-status-code
-The `process-exit-status-code` procedure returns the numeric exit code stored in `status`.
-The `status` parameter is a process exit-status record.
-|#
-  (define-record-type ($process-exit-status make-process-exit-status process-exit-status?)
-    (nongenerative)
-    (fields (immutable kind process-exit-status-kind)
-            (immutable code process-exit-status-code)))
 
   #|proc:process-result?
 The `process-result?` procedure returns `#t` when its argument is a process result record, otherwise `#f`.
@@ -59,18 +50,8 @@ The `result` parameter is a process result record.
             (immutable pid process-result-pid)
             (immutable command process-result-command)))
 
-  #|proc:process-exit-success?
-The `process-exit-success?` procedure returns `#t` when `status` represents a successful process exit, otherwise `#f`.
-The `status` parameter is a process exit-status record.
-|#
-  (define process-exit-success?
-    (lambda (status)
-      (pcheck ([process-exit-status? status])
-              (and (eq? 'exit (process-exit-status-kind status))
-                   (= 0 (process-exit-status-code status))))))
-
 ;;;;===----------------------------------------------------------------------===
-;;;; temporary shell bootstrap
+;;;; process backend
 ;;;;===----------------------------------------------------------------------===
 
   (define $string-list?
@@ -86,92 +67,6 @@ The `status` parameter is a process exit-status record.
       (let ([a (assq key options)])
         (if a (cdr a) default))))
 
-  (define $close-port/quiet
-    (lambda (p)
-      (guard (c [else #f])
-        (close-port p))))
-
-  (define $slurp-text-port
-    (lambda (ip)
-      (call-with-string-output-port
-       (lambda (op)
-         (let loop ()
-           (let ([c (read-char ip)])
-             (unless (eof-object? c)
-               (write-char c op)
-               (loop))))))))
-
-  (define $shell-quote
-    (lambda (s)
-      (call-with-string-output-port
-       (lambda (op)
-         (write-char #\' op)
-         (let ([n (string-length s)])
-           (let loop ([i 0])
-             (when (< i n)
-               (let ([c (string-ref s i)])
-                 (if (char=? c #\')
-                     (display "'\\''" op)
-                     (write-char c op)))
-               (loop (+ i 1)))))
-         (write-char #\' op)))))
-
-  (define $join-shell-words
-    (lambda (words)
-      (call-with-string-output-port
-       (lambda (op)
-         (unless (null? words)
-           (display (car words) op)
-           (for-each (lambda (word)
-                       (write-char #\space op)
-                       (display word op))
-                     (cdr words)))))))
-
-  (define $argv->shell-command
-    (lambda (program arguments)
-      ($join-shell-words (map $shell-quote (cons program arguments)))))
-
-  (define $capture-status-marker "\n__CHEZPP_PROCESS_STATUS__:")
-
-  (define $string-last-index
-    (lambda (s needle)
-      (let ([slen (string-length s)]
-            [nlen (string-length needle)])
-        (let loop ([i 0] [last #f])
-          (if (> (+ i nlen) slen)
-              last
-              (let ([match?
-                     (let check ([j 0])
-                       (cond [(= j nlen) #t]
-                             [(char=? (string-ref s (+ i j)) (string-ref needle j))
-                              (check (+ j 1))]
-                             [else #f]))])
-                (loop (+ i 1) (if match? i last))))))))
-
-  (define $string-index-from
-    (lambda (s ch start)
-      (let ([n (string-length s)])
-        (let loop ([i start])
-          (cond [(= i n) #f]
-                [(char=? (string-ref s i) ch) i]
-                [else (loop (+ i 1))])))))
-
-  (define $capture-command-wrapper
-    (lambda (command)
-      (string-append "( " command " ); __chezpp_status=$?; printf '\\n__CHEZPP_PROCESS_STATUS__:%s\\n' \"$__chezpp_status\" >&2; exit \"$__chezpp_status\"")))
-
-  (define $split-stderr-status
-    (lambda (stderr)
-      (let ([pos ($string-last-index stderr $capture-status-marker)])
-        (if pos
-            (let* ([code-start (+ pos (string-length $capture-status-marker))]
-                   [code-end (or ($string-index-from stderr #\newline code-start)
-                                 (string-length stderr))]
-                   [code (string->number (substring stderr code-start code-end))])
-              (values (substring stderr 0 pos)
-                      (make-process-exit-status 'exit (if (integer? code) code 1))))
-            (values stderr (make-process-exit-status 'exit 1))))))
-
   (define $raise-exit-error
     (lambda (who command status)
       (raise (make-system-exit-error who
@@ -185,52 +80,160 @@ The `status` parameter is a process exit-status record.
       (unless (process-exit-success? status)
         ($raise-exit-error who command status))))
 
-  (define %run-shell-command
-    (lambda (who command options check?)
-      (pcheck ([string? command] [$option-alist? options] [boolean? check?])
-              (let* ([code (system command)]
-                     [status (make-process-exit-status 'exit code)])
-                (when check?
-                  ($check-status who command status))
-                status))))
+  (define $status-accepted?
+    (lambda (status success)
+      (cond [(not success) #t]
+            [(procedure? success) (success status)]
+            [(list? success)
+             (and (eq? 'exit (process-exit-status-kind status))
+                  (memv (process-exit-status-code status) success))]
+            [else #f])))
 
-  (define %capture-shell-command
-    (lambda (who command options check?)
-      (pcheck ([string? command] [$option-alist? options] [boolean? check?])
-              (let ([stdout-mode ($option-ref options 'stdout 'capture)]
-                    [stderr-mode ($option-ref options 'stderr 'capture)])
-                (let-values ([(to-stdin from-stdout from-stderr pid)
-                              (open-process-ports ($capture-command-wrapper command)
-                                                  (buffer-mode block)
-                                                  (native-transcoder))])
-                  (guard (c [else
-                             ($close-port/quiet to-stdin)
-                             ($close-port/quiet from-stdout)
-                             ($close-port/quiet from-stderr)
-                             (raise c)])
-                    ($close-port/quiet to-stdin)
-                    (let* ([stdout ($slurp-text-port from-stdout)]
-                           [stderr/status ($slurp-text-port from-stderr)])
-                      ($close-port/quiet from-stdout)
-                      ($close-port/quiet from-stderr)
-                      (let-values ([(stderr status) ($split-stderr-status stderr/status)])
-                        (when check?
-                          ($check-status who command status))
-                        (make-process-result status
-                                             (if (eq? stdout-mode 'capture) stdout #f)
-                                             (if (eq? stderr-mode 'capture) stderr #f)
-                                             pid
-                                             command)))))))))
+  (define $check-accepted-status
+    (lambda (who command status options check?)
+      (let ([success ($option-ref options 'success (if check? '(0) #f))])
+        (unless ($status-accepted? status success)
+          ($raise-exit-error who command status)))))
+
+  (define $wait-status->exit-status
+    (lambda (raw)
+      (cond [(fx= (fxand raw #x7f) 0)
+             (make-process-exit-status 'exit (fxsrl raw 8))]
+            [(fx= (fxand raw #x7f) #x7f)
+             (make-process-exit-status 'stopped (fxsrl raw 8))]
+            [else
+             (make-process-exit-status 'signal (fxand raw #x7f))])))
+
+  (define $stdin-payload
+    (lambda (options)
+      (let ([stdin ($option-ref options 'stdin 'null)])
+        (cond [(or (not stdin) (eq? stdin 'null) (eq? stdin 'inherit)) #f]
+              [(string? stdin) (string->utf8 stdin)]
+              [(bytevector? stdin) stdin]
+              [else (errorf 'process "unsupported stdin option: ~a" stdin)]))))
+
+  (define $env-option
+    (lambda (options)
+      (let ([env ($option-ref options 'env #f)])
+        (if env env #f))))
+
+  (define $cwd-option
+    (lambda (options)
+      (let ([cwd ($option-ref options 'cwd #f)])
+        (if cwd cwd ""))))
+
+  (define $timeout-option
+    (lambda (options)
+      (let ([timeout ($option-ref options 'timeout #f)])
+        (if timeout timeout -1))))
+
+  (define $capture-stdout?
+    (lambda (options default)
+      (eq? 'capture ($option-ref options 'stdout default))))
+
+  (define $capture-stderr?
+    (lambda (options default)
+      (eq? 'capture ($option-ref options 'stderr default))))
+
+  (define $null-stdout?
+    (lambda (options)
+      (eq? 'null ($option-ref options 'stdout 'inherit))))
+
+  (define $null-stderr?
+    (lambda (options)
+      (eq? 'null ($option-ref options 'stderr 'inherit))))
+
+  (define $stderr-to-stdout?
+    (lambda (options)
+      (eq? 'stdout ($option-ref options 'stderr 'inherit))))
+
+  (define $spawn-capture-ffi
+    (foreign-procedure "chezpp_spawn_capture"
+                       (ptr ptr string ptr int int int int int int)
+                       ptr))
+
+  (define $spawn-pipeline-capture-ffi
+    (foreign-procedure "chezpp_spawn_pipeline_capture" (ptr int) ptr))
+
+  (define $capture-vector->result
+    (lambda (command result options check? who)
+      (let* ([pid (vector-ref result 0)]
+             [status ($wait-status->exit-status (vector-ref result 1))]
+             [stdout-mode ($option-ref options 'stdout 'capture)]
+             [stderr-mode ($option-ref options 'stderr 'capture)])
+        ($check-accepted-status who command status options check?)
+        (make-process-result status
+                             (if (eq? stdout-mode 'capture) (vector-ref result 2) #f)
+                             (if (eq? stderr-mode 'capture) (vector-ref result 3) #f)
+                             pid
+                             command))))
+
+  (define $run-vector->status
+    (lambda (command result options check? who)
+      (let ([status ($wait-status->exit-status (vector-ref result 1))])
+        ($check-accepted-status who command status options check?)
+        status)))
+
+  (define $spawn-capture
+    (lambda (argv options capture-default)
+      (ffi-result-ref
+       ($spawn-capture-ffi argv
+                           ($env-option options)
+                           ($cwd-option options)
+                           ($stdin-payload options)
+                           (if ($capture-stdout? options capture-default) 1 0)
+                           (if ($capture-stderr? options capture-default) 1 0)
+                           (if ($null-stdout? options) 1 0)
+                           (if ($null-stderr? options) 1 0)
+                           (if ($stderr-to-stdout? options) 1 0)
+                           ($timeout-option options)))))
 
   (define %run-process
     (lambda (who program arguments options check?)
       (pcheck ([string? program] [$string-list? arguments] [$option-alist? options] [boolean? check?])
-              (%run-shell-command who ($argv->shell-command program arguments) options check?))))
+              ($run-vector->status program
+                                  ($spawn-capture (cons program arguments) options 'inherit)
+                                  options
+                                  check?
+                                  who))))
 
   (define %capture-process
     (lambda (who program arguments options check?)
       (pcheck ([string? program] [$string-list? arguments] [$option-alist? options] [boolean? check?])
-              (%capture-shell-command who ($argv->shell-command program arguments) options check?))))
+              ($capture-vector->result program
+                                      ($spawn-capture (cons program arguments) options 'capture)
+                                      options
+                                      check?
+                                      who))))
+
+  (define %run-shell-command
+    (lambda (who command options check?)
+      (pcheck ([string? command] [$option-alist? options] [boolean? check?])
+              ($run-vector->status command
+                                  ($spawn-capture (list "sh" "-c" command) options 'inherit)
+                                  options
+                                  check?
+                                  who))))
+
+  (define %capture-shell-command
+    (lambda (who command options check?)
+      (pcheck ([string? command] [$option-alist? options] [boolean? check?])
+              ($capture-vector->result command
+                                      ($spawn-capture (list "sh" "-c" command) options 'capture)
+                                      options
+                                      check?
+                                      who))))
+
+  #|proc:capture-pipeline
+The `capture-pipeline` procedure runs string-list process specs as a pipeline.
+The `process-specs` parameter is a list of nonempty string lists.
+|#
+  (define capture-pipeline
+    (lambda (process-specs)
+      (pcheck ([list? process-specs])
+              (let ([result (ffi-result-ref ($spawn-pipeline-capture-ffi process-specs -1))])
+                ($capture-vector->result 'pipeline result '((stdout . capture)) #f
+                                        'capture-pipeline)))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; process macros

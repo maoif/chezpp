@@ -48,6 +48,14 @@ ptr chezpp_unsupported_result(const char *operation) {
   return v;
 }
 
+ptr chezpp_timeout_result(const char *operation, ptr context) {
+  ptr v = Smake_vector(3, Sfalse);
+  Svector_set(v, 0, Sstring("timeout"));
+  Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
+  Svector_set(v, 2, context);
+  return v;
+}
+
 // from ChezScheme: io.c
 // The caller has to free the returned pointer.
 #define DIRMARKERP(c) ((c) == '/')

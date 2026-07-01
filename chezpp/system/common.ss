@@ -225,7 +225,8 @@ The `message` parameter is a string describing the failure.
 
   #|proc:ffi-result-ref
 The `ffi-result-ref` procedure decodes a tagged C FFI result vector.
-The `result` parameter is a vector tagged with a string: `"ok"` returns its value, `"errno"` raises a system error, `"not-found"` raises a not-found error, and `"unsupported"` raises an unsupported error.
+The `result` parameter is a vector tagged with a string from a C helper.
+The `"ok"` tag returns a value; error tags raise system conditions.
 |#
   (define ffi-result-ref
     (lambda (result)
@@ -244,5 +245,8 @@ The `result` parameter is a vector tagged with a string: `"ok"` returns its valu
                                                        ($context-or-empty (vector-ref result 2))))]
                   [(and (string? tag) (string=? tag "unsupported") (fx= 2 (vector-length result)))
                    (raise (make-system-unsupported-error ($operation->symbol (vector-ref result 1)) "unsupported"))]
+                  [(and (string? tag) (string=? tag "timeout") (fx= 3 (vector-length result)))
+                   (raise (make-system-timeout-error ($operation->symbol (vector-ref result 1)) "timeout"
+                                                     ($context-or-empty (vector-ref result 2))))]
                   [else (errorf 'ffi-result-ref "invalid FFI result: ~a" result)])))))
   )

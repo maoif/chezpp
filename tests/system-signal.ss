@@ -41,3 +41,10 @@
      (guard (c [(error? c) #t] [else #f])
        (send-process-group-signal -1 term)
        #f))
+
+(mat signal-send-child
+
+     (let ([p (spawn-process "sh" '("-c" "sleep 5") '((stdout . null) (stderr . null)))])
+       (send-process-signal p term)
+       (let ([status (process-wait/timeout p 1000)])
+         (eq? 'signal (process-exit-status-kind status)))))

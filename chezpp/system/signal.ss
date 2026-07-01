@@ -5,6 +5,7 @@
           signal-mask signal-mask-set! signal-block! signal-unblock! wait-signal)
   (import (chezpp chez)
           (chezpp system common)
+          (chezpp system process expert)
           (chezpp utils))
 
 ;;;;===----------------------------------------------------------------------===
@@ -165,14 +166,14 @@ The `sig` parameter is a signal record, symbol, string, or integer signal number
 
   #|proc:send-process-signal
 The `send-process-signal` procedure sends `sig` to `process`.
-The `process` parameter is reserved for a future Chezpp process object.
+The `process` parameter is a Chezpp process object.
 The `sig` parameter is a signal record, symbol, string, or integer signal number accepted by `signal`.
 |#
   (define-who send-process-signal
     (lambda (process sig)
-      (pcheck ([$signal-input? sig])
-              ($signal-ref who sig)
-              (raise-system-unsupported who "process signal sending is unsupported until process objects are available"))))
+      (pcheck ([process? process] [$signal-input? sig])
+              (ffi-result-ref ($send-signal-ffi (process-pid process)
+                                                (signal-number ($signal-ref who sig)))))))
 
   #|proc:send-process-group-signal
 The `send-process-group-signal` procedure sends `sig` to process group `process-group-id`.
