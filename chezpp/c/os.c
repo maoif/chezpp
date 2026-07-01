@@ -44,6 +44,7 @@ ptr chezpp_spawn_process(ptr argv, ptr env, const char *cwd,
                          int stdin_null, int stdout_null, int stderr_null);
 ptr chezpp_waitpid(int pid, int nohang);
 ptr chezpp_make_pipe();
+ptr chezpp_spawn_pipeline(ptr specs);
 ptr chezpp_spawn_pipeline_capture(ptr specs, int timeout_ms);
 
 ptr chezpp_hostname();
@@ -807,6 +808,129 @@ ptr chezpp_make_pipe() {
   return chezpp_ok(v);
 #else
   return chezpp_unsupported_result("make-pipe");
+#endif
+}
+
+ptr chezpp_spawn_pipeline(ptr specs) {
+#if defined(__unix__) || defined(__APPLE__)
+  int count = list_length(specs);
+  if (count <= 0) {
+    errno = EINVAL;
+    return chezpp_errno_result("spawn-pipeline", Snil);
+  }
+
+  char ***argvs = (char ***)calloc((size_t)count, sizeof(char **));
+  pid_t *pids = (pid_t *)calloc((size_t)count, sizeof(pid_t));
+  int (*pipes)[2] = NULL;
+  if (argvs == NULL || pids == NULL) {
+    free(argvs);
+    free(pids);
+    errno = ENOMEM;
+    return chezpp_errno_result("spawn-pipeline", Snil);
+  }
+  if (count > 1) {
+    pipes = (int (*)[2])calloc((size_t)(count - 1), sizeof(int[2]));
+    if (pipes == NULL) {
+      free(argvs);
+      free(pids);
+      errno = ENOMEM;
+      return chezpp_errno_result("spawn-pipeline", Snil);
+    }
+    for (int i = 0; i < count - 1; i += 1) {
+      pipes[i][0] = -1;
+      pipes[i][1] = -1;
+      if (make_pipe(pipes[i]) != 0) {
+        for (int j = 0; j <= i; j += 1) {
+          close_fd(&pipes[j][0]);
+          close_fd(&pipes[j][1]);
+        }
+        free(argvs);
+        free(pids);
+        free(pipes);
+        return chezpp_errno_result("spawn-pipeline", Snil);
+      }
+    }
+  }
+
+  ptr ls = specs;
+  for (int i = 0; i < count; i += 1) {
+    argvs[i] = argv_from_list(Scar(ls));
+    if (argvs[i] == NULL) {
+      for (int j = 0; j < count; j += 1) free_string_array(argvs[j]);
+      if (pipes != NULL) {
+        for (int j = 0; j < count - 1; j += 1) {
+          close_fd(&pipes[j][0]);
+          close_fd(&pipes[j][1]);
+        }
+      }
+      free(argvs);
+      free(pids);
+      free(pipes);
+      errno = EINVAL;
+      return chezpp_errno_result("spawn-pipeline", Snil);
+    }
+    ls = Scdr(ls);
+  }
+
+  int spawned = 0;
+  for (int i = 0; i < count; i += 1) {
+    posix_spawn_file_actions_t actions;
+    int rc = posix_spawn_file_actions_init(&actions);
+    if (rc == 0 && i > 0) {
+      rc = posix_spawn_file_actions_adddup2(&actions, pipes[i - 1][0], STDIN_FILENO);
+    }
+    if (rc == 0 && i < count - 1) {
+      rc = posix_spawn_file_actions_adddup2(&actions, pipes[i][1], STDOUT_FILENO);
+    }
+    if (rc == 0) {
+      for (int j = 0; j < count - 1; j += 1) {
+        posix_spawn_file_actions_addclose(&actions, pipes[j][0]);
+        posix_spawn_file_actions_addclose(&actions, pipes[j][1]);
+      }
+    }
+    if (rc == 0) rc = posix_spawnp(&pids[i], argvs[i][0], &actions, NULL, argvs[i], environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (rc != 0) {
+      errno = rc;
+      for (int j = 0; j < spawned; j += 1) kill(pids[j], SIGKILL);
+      for (int j = 0; j < spawned; j += 1) {
+        int status;
+        (void)wait_pid_block(pids[j], &status);
+      }
+      for (int j = 0; j < count; j += 1) free_string_array(argvs[j]);
+      if (pipes != NULL) {
+        for (int j = 0; j < count - 1; j += 1) {
+          close_fd(&pipes[j][0]);
+          close_fd(&pipes[j][1]);
+        }
+      }
+      free(argvs);
+      free(pids);
+      free(pipes);
+      return chezpp_errno_result("spawn-pipeline", Snil);
+    }
+    spawned += 1;
+  }
+
+  if (pipes != NULL) {
+    for (int j = 0; j < count - 1; j += 1) {
+      close_fd(&pipes[j][0]);
+      close_fd(&pipes[j][1]);
+    }
+  }
+
+  ptr v = Smake_vector(count, Sfalse);
+  for (int i = 0; i < count; i += 1) {
+    Svector_set(v, i, Sinteger((iptr)pids[i]));
+  }
+  for (int j = 0; j < count; j += 1) free_string_array(argvs[j]);
+  free(argvs);
+  free(pids);
+  free(pipes);
+  return chezpp_ok(v);
+#else
+  (void)specs;
+  return chezpp_unsupported_result("spawn-pipeline");
 #endif
 }
 

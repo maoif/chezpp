@@ -81,3 +81,14 @@
                             (list "tr" "a-z" "A-Z")))])
        (and (= 1 (length statuses))
             (process-exit-success? (car statuses)))))
+
+(mat process-pipe-processes
+
+     (let* ([processes (pipe-processes
+                        (list (list "printf" "abc")
+                              (list "sh" "-c" "cat >/dev/null"))
+                        '())]
+            [statuses (map process-wait processes)])
+       (and (= 2 (length processes))
+            (andmap process? processes)
+            (andmap process-exit-success? statuses))))

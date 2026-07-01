@@ -129,6 +129,9 @@ The `process` parameter is a process object.
   (define $make-pipe-ffi
     (foreign-procedure "chezpp_make_pipe" () ptr))
 
+  (define $spawn-pipeline-ffi
+    (foreign-procedure "chezpp_spawn_pipeline" (ptr) ptr))
+
   (define $spawn-pipeline-capture-ffi
     (foreign-procedure "chezpp_spawn_pipeline_capture" (ptr int) ptr))
 
@@ -297,7 +300,17 @@ The `options` parameter is reserved for future live process pipeline options.
   (define pipe-processes
     (lambda (process-specs options)
       (pcheck ([list? process-specs] [list? options])
-              (raise-system-unsupported 'pipe-processes "pipeline process objects are not implemented"))))
+              (let ([pids (ffi-result-ref ($spawn-pipeline-ffi process-specs))])
+                (let loop ([i 0] [specs process-specs] [out '()])
+                  (if (fx= i (vector-length pids))
+                      (reverse out)
+                      (loop (fx+ i 1)
+                            (cdr specs)
+                            (cons (make-process (vector-ref pids i)
+                                                (car (car specs))
+                                                (list-copy (cdr (car specs)))
+                                                #f #f #f #f)
+                                  out))))))))
 
   #|proc:run-pipeline
 The `run-pipeline` procedure runs string-list process specs as a pipeline.

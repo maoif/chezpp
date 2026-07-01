@@ -39,6 +39,7 @@ ptr chezpp_spawn_process(ptr argv, ptr env, const char *cwd,
                          int stdin_null, int stdout_null, int stderr_null);
 ptr chezpp_waitpid(int pid, int nohang);
 ptr chezpp_make_pipe();
+ptr chezpp_spawn_pipeline(ptr specs);
 ptr chezpp_spawn_pipeline_capture(ptr specs, int timeout_ms);
 
 char *expand_pathname(const char *inpath);
