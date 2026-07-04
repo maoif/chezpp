@@ -10,13 +10,18 @@
             (integer? (filesystem-info-blocks-free info))
             (integer? (filesystem-info-blocks-available info))
             (or (not (filesystem-info-device info))
-                (integer? (filesystem-info-device info)))
-            (or (not (filesystem-info-inode info))
-                (integer? (filesystem-info-inode info)))))
+                (integer? (filesystem-info-device info)))))
 
      (<= 0 (filesystem-total-bytes "."))
      (<= 0 (filesystem-free-bytes "."))
-     (<= 0 (filesystem-available-bytes ".")))
+     (<= 0 (filesystem-available-bytes "."))
+
+     (integer? (file-inode "."))
+
+     ;; Error case: filesystem-info-inode is intentionally not exported.
+     (guard (c [else #t])
+       (eval 'filesystem-info-inode)
+       #f))
 
 (mat mounted-filesystems-basic
 

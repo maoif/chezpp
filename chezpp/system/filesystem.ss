@@ -1,6 +1,6 @@
 (library (chezpp system filesystem)
   (export filesystem-info? filesystem-info
-          filesystem-info-path filesystem-info-device filesystem-info-inode filesystem-info-type
+          filesystem-info-path filesystem-info-device filesystem-info-type
           filesystem-info-block-size filesystem-info-blocks filesystem-info-blocks-free filesystem-info-blocks-available
           filesystem-info-files filesystem-info-files-free filesystem-info-read-only?
           filesystem-total-bytes filesystem-free-bytes filesystem-available-bytes
@@ -25,10 +25,6 @@ The `info` parameter is a filesystem information record returned by `filesystem-
 |#
   #|proc:filesystem-info-device
 The `filesystem-info-device` procedure returns the device number for the queried path, or `#f` when unavailable.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
-  #|proc:filesystem-info-inode
-The `filesystem-info-inode` procedure returns the inode number for the queried path, or `#f` when unavailable.
 The `info` parameter is a filesystem information record returned by `filesystem-info`.
 |#
   #|proc:filesystem-info-type
@@ -67,7 +63,6 @@ The `info` parameter is a filesystem information record returned by `filesystem-
     (nongenerative)
     (fields (immutable path filesystem-info-path)
             (immutable device filesystem-info-device)
-            (immutable inode filesystem-info-inode)
             (immutable type filesystem-info-type)
             (immutable block-size filesystem-info-block-size)
             (immutable blocks filesystem-info-blocks)
@@ -91,8 +86,7 @@ The `info` parameter is a filesystem information record returned by `filesystem-
                             (vector-ref v 6)
                             (vector-ref v 7)
                             (vector-ref v 8)
-                            (vector-ref v 9)
-                            (vector-ref v 10))))
+                            (vector-ref v 9))))
 
   #|proc:filesystem-info
 The `filesystem-info` procedure returns filesystem capacity and identity information for `path`.

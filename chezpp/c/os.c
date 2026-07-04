@@ -1129,21 +1129,20 @@ ptr chezpp_filesystem_info(const char *path) {
     return chezpp_errno_result("filesystem-info", Snil);
   }
 
-  ptr v = Smake_vector(11, Sfalse);
+  ptr v = Smake_vector(10, Sfalse);
   Svector_set(v, 0, Sstring(path));
   Svector_set(v, 1, Sunsigned64((Suint64_t)st.st_dev));
-  Svector_set(v, 2, Sunsigned64((Suint64_t)st.st_ino));
-  Svector_set(v, 3, Sfalse);
-  Svector_set(v, 4, Sunsigned64((Suint64_t)vfs.f_frsize));
-  Svector_set(v, 5, Sunsigned64((Suint64_t)vfs.f_blocks));
-  Svector_set(v, 6, Sunsigned64((Suint64_t)vfs.f_bfree));
-  Svector_set(v, 7, Sunsigned64((Suint64_t)vfs.f_bavail));
-  Svector_set(v, 8, Sunsigned64((Suint64_t)vfs.f_files));
-  Svector_set(v, 9, Sunsigned64((Suint64_t)vfs.f_ffree));
+  Svector_set(v, 2, Sfalse);
+  Svector_set(v, 3, Sunsigned64((Suint64_t)vfs.f_frsize));
+  Svector_set(v, 4, Sunsigned64((Suint64_t)vfs.f_blocks));
+  Svector_set(v, 5, Sunsigned64((Suint64_t)vfs.f_bfree));
+  Svector_set(v, 6, Sunsigned64((Suint64_t)vfs.f_bavail));
+  Svector_set(v, 7, Sunsigned64((Suint64_t)vfs.f_files));
+  Svector_set(v, 8, Sunsigned64((Suint64_t)vfs.f_ffree));
 #ifdef ST_RDONLY
-  Svector_set(v, 10, (vfs.f_flag & ST_RDONLY) ? Strue : Sfalse);
+  Svector_set(v, 9, (vfs.f_flag & ST_RDONLY) ? Strue : Sfalse);
 #else
-  Svector_set(v, 10, Sfalse);
+  Svector_set(v, 9, Sfalse);
 #endif
 
   return chezpp_ok(v);
