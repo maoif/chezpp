@@ -294,8 +294,10 @@ The `make-pipe` procedure returns input and output ports backed by an OS pipe.
 
   #|proc:pipe-processes
 The `pipe-processes` procedure starts process specs as a live pipeline.
-The `process-specs` parameter is reserved for future live process pipelines.
-The `options` parameter is reserved for future live process pipeline options.
+The `process-specs` parameter is a list of nonempty string lists.
+The `options` parameter is reserved and should currently be the empty list.
+The procedure returns process objects immediately and does not wait for them.
+Callers should wait for or terminate the returned processes.
 |#
   (define pipe-processes
     (lambda (process-specs options)
@@ -313,8 +315,10 @@ The `options` parameter is reserved for future live process pipeline options.
                                   out))))))))
 
   #|proc:run-pipeline
-The `run-pipeline` procedure runs string-list process specs as a pipeline.
+The `run-pipeline` procedure runs process specs as a pipeline and waits.
 The `process-specs` parameter is a list of nonempty string lists.
+Unlike `pipe-processes`, this procedure does not return live process objects.
+It returns a list containing the final process exit status.
 |#
   (define run-pipeline
     (lambda (process-specs)
