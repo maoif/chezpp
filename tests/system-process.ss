@@ -44,6 +44,104 @@
        (and (process-exit-success? (process-result-status r))
             (string=? "abc" (process-result-stdout r)))))
 
+(mat process-option-surface
+
+     (let ([r (capture-process "cat"
+                :stdin (string->utf8 "bytes")
+                :stdout capture
+                :stderr capture)])
+       (and (process-exit-success? (process-result-status r))
+            (string=? "bytes" (process-result-stdout r))))
+
+     (let ([r (capture-process "/bin/sh" "-c" "printf \"$CHEZPP_PROCESS_TEST\""
+                :env '(("CHEZPP_PROCESS_TEST" . "env-ok"))
+                :env-mode replace
+                :stdout capture
+                :stderr capture)])
+       (and (process-exit-success? (process-result-status r))
+            (string=? "env-ok" (process-result-stdout r))))
+
+     (let ([r (capture-process "/bin/sh" "-c" "pwd"
+                :cwd "/tmp"
+                :stdout capture
+                :stderr capture)])
+       (and (process-exit-success? (process-result-status r))
+            (string=? "/tmp\n" (process-result-stdout r))))
+
+     (let ([r (capture-process "/bin/sh" "-c" "printf out; printf err >&2"
+                :stdout capture
+                :stderr stdout)])
+       (and (process-exit-success? (process-result-status r))
+            (string=? "outerr" (process-result-stdout r))
+            (not (process-result-stderr r))))
+
+     (let ([s (run-process "/bin/sh" "-c" "exit 7"
+                :stdin null
+                :stdout null
+                :stderr null
+                :success '(7))])
+       (and (eq? 'exit (process-exit-status-kind s))
+            (= 7 (process-exit-status-code s))))
+
+     (let ([r (capture-process/check "/bin/sh" "-c" "exit 7"
+                :stdout null
+                :stderr null
+                :success (lambda (status)
+                           (= 7 (process-exit-status-code status))))])
+       (and (process-result? r)
+            (= 7 (process-exit-status-code (process-result-status r))))))
+
+(mat process-shell-helpers
+
+     (let ([s (shell-command "exit 7"
+                :stdout null
+                :stderr null
+                :success '(7))])
+       (and (eq? 'exit (process-exit-status-kind s))
+            (= 7 (process-exit-status-code s))))
+
+     (let ([r (capture-shell-command "printf shell"
+                :stdout capture
+                :stderr capture)])
+       (and (process-result? r)
+            (process-exit-success? (process-result-status r))
+            (string=? "shell" (process-result-stdout r)))))
+
+(mat process-spawn-apis
+
+     (let* ([p (spawn-process "sleep" '("1")
+                              '((stdin . null) (stdout . null) (stderr . null)))]
+            [running-before (process-running? p)])
+       (process-terminate p)
+       (let ([status (process-wait p)])
+         (and (process? p)
+              running-before
+              (process-exit-status? status)
+              (not (process-running? p)))))
+
+     (let* ([p (spawn-process "sleep" '("1")
+                              '((stdin . null) (stdout . null) (stderr . null)))]
+            [status (process-wait/no-hang p)])
+       (process-kill p 15)
+       (let ([final-status (process-wait p)])
+         (and (not status)
+              (process-exit-status? final-status))))
+
+     (let* ([p (spawn-process "true" '()
+                              '((stdin . null) (stdout . null) (stderr . null)))]
+            [status (process-wait/timeout p 1000)])
+       (and (process-exit-success? status)
+            (process-exit-success? (process-wait/no-hang p))))
+
+     (let* ([p (spawn-shell-command "exit 0"
+                                    '((stdin . null) (stdout . null) (stderr . null)))]
+            [status (process-wait p)])
+       (and (process? p)
+            (process-exit-success? status)
+            (not (process-stdin p))
+            (not (process-stdout p))
+            (not (process-stderr p)))))
+
 ;; Error case: a missing executable should return an errno tagged result.
 (mat process-ffi-result-tags
 
@@ -81,6 +179,18 @@
                (list (list "printf" "abc")
                      (list "tr" "a-z" "A-Z")))])
        (and (process-result? r)
+            (string=? "ABC" (process-result-stdout r))))
+
+     (let ([r (capture-pipeline
+               (list (list "printf" "abc")
+                     (list "cat")
+                     (list "cat")
+                     (list "cat")
+                     (list "cat")
+                     (list "cat")
+                     (list "cat")
+                     (list "tr" "a-z" "A-Z")))])
+       (and (process-result? r)
             (string=? "ABC" (process-result-stdout r)))))
 
 (mat process-expert-pipes
@@ -97,6 +207,17 @@
                       (list (list "printf" "abc")
                             (list "tr" "a-z" "A-Z")))])
        (and (= 1 (length statuses))
+            (process-exit-success? (car statuses))))
+
+     (let ([statuses (run-pipeline
+                      (list (list "printf" "abc")
+                            (list "cat")
+                            (list "cat")
+                            (list "cat")
+                            (list "cat")
+                            (list "cat")
+                            (list "tr" "a-z" "A-Z")))])
+       (and (= 1 (length statuses))
             (process-exit-success? (car statuses)))))
 
 (mat process-pipe-processes
@@ -107,5 +228,18 @@
                         '())]
             [statuses (map process-wait processes)])
        (and (= 2 (length processes))
+            (andmap process? processes)
+            (andmap process-exit-success? statuses)))
+
+     (let* ([processes (pipe-processes
+                        (list (list "printf" "abc")
+                              (list "cat")
+                              (list "cat")
+                              (list "cat")
+                              (list "cat")
+                              (list "sh" "-c" "cat >/dev/null"))
+                        '())]
+            [statuses (map process-wait processes)])
+       (and (= 6 (length processes))
             (andmap process? processes)
             (andmap process-exit-success? statuses))))
