@@ -1,6 +1,14 @@
 (library (chezpp system common)
-  (export system-error?
+  (export
+          ;; base system conditions
+          system-error?
           make-system-error
+          system-error-operation
+          system-error-code
+          system-error-message
+          system-error-context
+
+          ;; specialized system conditions
           system-unsupported-error?
           make-system-unsupported-error
           system-not-found-error?
@@ -11,10 +19,8 @@
           make-system-timeout-error
           system-exit-error?
           make-system-exit-error
-          system-error-operation
-          system-error-code
-          system-error-message
-          system-error-context
+
+          ;; raising and FFI helpers
           raise-system-error
           raise-system-unsupported
           ffi-result-ref)

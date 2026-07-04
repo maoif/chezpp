@@ -1,8 +1,16 @@
 (library (chezpp system)
-  (export fork vfork
-          getpid gettid getppid
+  (export
+          ;; raw process APIs retained at the facade
+          fork
+          vfork
+          getpid
+          gettid
+          getppid
+
+          ;; dynamic loader information
           shared-object-list
 
+          ;; compatibility condition predicate
           os-error?)
   (import (chezpp chez)
           (chezpp system common)
@@ -16,7 +24,9 @@
           (except (chezpp system windows) windows?)
           (chezpp utils))
 
-  (export (import (chezpp system common)
+  (export
+          ;; focused system libraries re-exported by the facade
+          (import (chezpp system common)
                   (except (chezpp system darwin) darwin?)
                   (chezpp system filesystem)
                   (chezpp system info)

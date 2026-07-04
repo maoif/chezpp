@@ -1,9 +1,22 @@
 (library (chezpp system linux)
-  (export linux?
+  (export
+          ;; platform predicate
+          linux?
+
+          ;; Linux filesystem helpers
           linux-procfs-mounted?
-          linux-mounted-filesystems linux-filesystem-info
-          linux-signal-list linux-send-signal
-          linux-system-uptime linux-memory-info linux-load-average linux-os-release)
+          linux-mounted-filesystems
+          linux-filesystem-info
+
+          ;; Linux signal helpers
+          linux-signal-list
+          linux-send-signal
+
+          ;; Linux system information
+          linux-system-uptime
+          linux-memory-info
+          linux-load-average
+          linux-os-release)
   (import (chezpp chez)
           (chezpp string)
           (chezpp system common)

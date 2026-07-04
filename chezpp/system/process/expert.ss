@@ -1,12 +1,45 @@
 (library (chezpp system process expert)
-  (export process-exit-status? process-exit-status-kind process-exit-status-code
-          process-exit-success? make-process-exit-status
-          process? process-pid process-command process-arguments process-stdin
-          process-stdout process-stderr process-status process-running?
-          spawn-process spawn-shell-command process-wait process-wait/no-hang
-          process-wait/timeout process-kill process-terminate process-interrupt
-          process-close-ports! make-pipe pipe-processes run-pipeline
-          fork vfork getpid gettid getppid)
+  (export
+          ;; exit status records
+          process-exit-status?
+          process-exit-status-kind
+          process-exit-status-code
+          process-exit-success?
+          make-process-exit-status
+
+          ;; process records
+          process?
+          process-pid
+          process-command
+          process-arguments
+          process-stdin
+          process-stdout
+          process-stderr
+          process-status
+          process-running?
+
+          ;; process creation and waiting
+          spawn-process
+          spawn-shell-command
+          process-wait
+          process-wait/no-hang
+          process-wait/timeout
+          process-kill
+          process-terminate
+          process-interrupt
+          process-close-ports!
+
+          ;; pipes and pipelines
+          make-pipe
+          pipe-processes
+          run-pipeline
+
+          ;; raw process APIs
+          fork
+          vfork
+          getpid
+          gettid
+          getppid)
   (import (chezpp chez)
           (chezpp system common)
           (chezpp system info)

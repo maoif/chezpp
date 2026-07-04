@@ -1,5 +1,12 @@
 (library (chezpp system windows)
-  (export windows? windows-system-version windows-memory-info windows-filesystem-info)
+  (export
+          ;; platform predicate
+          windows?
+
+          ;; Windows system information stubs
+          windows-system-version
+          windows-memory-info
+          windows-filesystem-info)
   (import (chezpp chez)
           (chezpp system common)
           (only (chezpp system info) system-platform)

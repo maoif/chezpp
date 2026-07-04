@@ -1,11 +1,26 @@
 (library (chezpp system info)
-  (export sleep milisleep nanosleep
-          sleep-seconds sleep-milliseconds sleep-nanoseconds
+  (export
+          ;; time
+          sleep
+          milisleep
+          nanosleep
+          sleep-seconds
+          sleep-milliseconds
+          sleep-nanoseconds
 
-          unix? windows? darwin? linux?
-          hostname system-hostname
-          cpu-arch cpu-count
-          system-machine system-platform)
+          ;; platform predicates
+          unix?
+          windows?
+          darwin?
+          linux?
+          system-platform
+
+          ;; host information
+          hostname
+          system-hostname
+          cpu-arch
+          cpu-count
+          system-machine)
   (import (chezpp chez)
           (chezpp private os)
           (chezpp utils))

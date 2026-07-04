@@ -1,5 +1,12 @@
 (library (chezpp system darwin)
-  (export darwin? darwin-system-version darwin-memory-info darwin-filesystem-info)
+  (export
+          ;; platform predicate
+          darwin?
+
+          ;; Darwin system information stubs
+          darwin-system-version
+          darwin-memory-info
+          darwin-filesystem-info)
   (import (chezpp chez)
           (chezpp system common)
           (only (chezpp system info) system-platform)
