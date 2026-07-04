@@ -287,6 +287,8 @@ static void free_string_array(char **items) {
   free(items);
 }
 
+// Converts a nonempty Scheme list of strings into a NULL-terminated argv array.
+// The caller owns the returned array and must release it with free_string_array.
 static char **argv_from_list(ptr argv) {
   int argc = list_length(argv);
   if (argc <= 0) return NULL;
@@ -305,6 +307,8 @@ static char **argv_from_list(ptr argv) {
   return out;
 }
 
+// Converts an option alist of string pairs into a NULL-terminated environment.
+// A false or empty Scheme value means inherit the process environment.
 static char **env_from_alist(ptr env) {
   if (env == Sfalse || env == Snil) return environ;
   int count = list_length(env);
@@ -465,6 +469,8 @@ static ptr reap_timeout(pid_t pid, const char *operation) {
   return chezpp_timeout_result(operation, pid_context(pid));
 }
 
+// Drains captured stdout/stderr while polling waitpid so a child cannot block
+// on a full pipe. On timeout, the child is terminated and reaped before return.
 static ptr capture_child(pid_t pid, int stdout_fd, int stderr_fd, int timeout_ms,
                          const char *operation) {
   byte_buffer out = {0};
@@ -619,6 +625,8 @@ static ptr capture_child(pid_t pid, int stdout_fd, int stderr_fd, int timeout_ms
   return chezpp_ok(v);
 }
 
+// Spawns argv directly, optionally feeds stdin, captures requested output, and
+// waits for completion. Shell parsing is intentionally left to Scheme wrappers.
 ptr chezpp_spawn_capture(ptr argv, ptr env, const char *cwd,
                          ptr stdin_payload, int capture_stdout, int capture_stderr,
                          int stdout_null, int stderr_null, int stderr_to_stdout,
@@ -732,6 +740,8 @@ ptr chezpp_spawn_capture(ptr argv, ptr env, const char *cwd,
 #endif
 }
 
+// Spawns argv directly and returns the child pid without waiting. The process
+// object in Scheme owns waiting; this helper only configures null stdio modes.
 ptr chezpp_spawn_process(ptr argv, ptr env, const char *cwd,
                          int stdin_null, int stdout_null, int stderr_null) {
 #if defined(__unix__) || defined(__APPLE__)
@@ -811,6 +821,8 @@ ptr chezpp_make_pipe() {
 #endif
 }
 
+// Starts every process in a pipeline and connects adjacent stdout/stdin pipes.
+// The caller receives process ids and is responsible for waiting on them.
 ptr chezpp_spawn_pipeline(ptr specs) {
 #if defined(__unix__) || defined(__APPLE__)
   int count = list_length(specs);
@@ -934,6 +946,8 @@ ptr chezpp_spawn_pipeline(ptr specs) {
 #endif
 }
 
+// Runs a pipeline to completion while capturing the final process stdout. The
+// returned status is for the last process, matching the high-level Scheme API.
 ptr chezpp_spawn_pipeline_capture(ptr specs, int timeout_ms) {
 #if defined(__unix__) || defined(__APPLE__)
   int count = list_length(specs);
