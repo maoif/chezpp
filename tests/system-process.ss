@@ -44,6 +44,23 @@
        (and (process-exit-success? (process-result-status r))
             (string=? "abc" (process-result-stdout r)))))
 
+;; Error case: a missing executable should return an errno tagged result.
+(mat process-ffi-result-tags
+
+     (let ([raw ((foreign-procedure "chezpp_spawn_capture"
+                                    (ptr ptr string ptr int int int int int int)
+                                    ptr)
+                 (list "sh" "-c" "true") #f "" #f 0 0 0 0 0 -1)])
+       (and (vector? raw)
+            (eq? 'ok (vector-ref raw 0))))
+
+     (let ([raw ((foreign-procedure "chezpp_spawn_capture"
+                                    (ptr ptr string ptr int int int int int int)
+                                    ptr)
+                 (list "definitely-not-a-chezpp-test-command") #f "" #f 0 0 0 0 0 -1)])
+       (and (vector? raw)
+            (eq? 'errno (vector-ref raw 0)))))
+
 ;; Error case: check variant should raise for nonzero exit status.
 (mat process-check-errors
 

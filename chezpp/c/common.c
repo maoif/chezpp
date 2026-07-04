@@ -15,9 +15,13 @@ ptr errno_str_vector() {
   return v;
 }
 
+static ptr symbol_or_false(const char *name) {
+  return name == NULL ? Sfalse : Sstring_to_symbol(name);
+}
+
 ptr chezpp_ok(ptr value) {
   ptr v = Smake_vector(2, Sfalse);
-  Svector_set(v, 0, Sstring("ok"));
+  Svector_set(v, 0, Sstring_to_symbol("ok"));
   Svector_set(v, 1, value);
   return v;
 }
@@ -25,8 +29,8 @@ ptr chezpp_ok(ptr value) {
 ptr chezpp_errno_result(const char *operation, ptr context) {
   int code = errno;
   ptr v = Smake_vector(5, Sfalse);
-  Svector_set(v, 0, Sstring("errno"));
-  Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
+  Svector_set(v, 0, Sstring_to_symbol("errno"));
+  Svector_set(v, 1, symbol_or_false(operation));
   Svector_set(v, 2, Sfixnum(code));
   Svector_set(v, 3, code == 0 ? Sstring("internal error") : Sstring(strerror(code)));
   Svector_set(v, 4, context);
@@ -35,23 +39,23 @@ ptr chezpp_errno_result(const char *operation, ptr context) {
 
 ptr chezpp_not_found_result(const char *operation, ptr context) {
   ptr v = Smake_vector(3, Sfalse);
-  Svector_set(v, 0, Sstring("not-found"));
-  Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
+  Svector_set(v, 0, Sstring_to_symbol("not-found"));
+  Svector_set(v, 1, symbol_or_false(operation));
   Svector_set(v, 2, context);
   return v;
 }
 
 ptr chezpp_unsupported_result(const char *operation) {
   ptr v = Smake_vector(2, Sfalse);
-  Svector_set(v, 0, Sstring("unsupported"));
-  Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
+  Svector_set(v, 0, Sstring_to_symbol("unsupported"));
+  Svector_set(v, 1, symbol_or_false(operation));
   return v;
 }
 
 ptr chezpp_timeout_result(const char *operation, ptr context) {
   ptr v = Smake_vector(3, Sfalse);
-  Svector_set(v, 0, Sstring("timeout"));
-  Svector_set(v, 1, operation == NULL ? Sfalse : Sstring(operation));
+  Svector_set(v, 0, Sstring_to_symbol("timeout"));
+  Svector_set(v, 1, symbol_or_false(operation));
   Svector_set(v, 2, context);
   return v;
 }

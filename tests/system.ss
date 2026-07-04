@@ -16,13 +16,13 @@
             (string? (system-error-message c))
             (pair? (system-error-context c))))
 
-     (eq? 'value (ffi-result-ref '#("ok" value)))
+     (eq? 'value (ffi-result-ref '#(ok value)))
 
      (system-not-found-error? (guard (c [else c])
-                                (ffi-result-ref '#("not-found" "test-op" ((path . "/missing"))))))
+                                (ffi-result-ref '#(not-found test-op ((path . "/missing"))))))
 
      (let ([c (guard (c [else c])
-                (ffi-result-ref '#("errno" "test-op" 13 "permission denied" ((path . "/")))))])
+                (ffi-result-ref '#(errno test-op 13 "permission denied" ((path . "/")))))])
        (and (system-permission-error? c)
             (= 13 (system-error-code c)))))
 

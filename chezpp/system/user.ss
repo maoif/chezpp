@@ -35,11 +35,7 @@
               [(and (vector? x)
                     (fx< 0 (vector-length x))
                     (let ([tag (vector-ref x 0)])
-                      (and (string? tag)
-                           (or (string=? tag "ok")
-                               (string=? tag "errno")
-                               (string=? tag "not-found")
-                               (string=? tag "unsupported")))))
+                      (memq tag '(ok errno not-found unsupported))))
                (ffi-result-ref x)]
               [else x]))))
 
