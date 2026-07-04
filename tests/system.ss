@@ -24,7 +24,29 @@
      (let ([c (guard (c [else c])
                 (ffi-result-ref '#(errno test-op 13 "permission denied" ((path . "/")))))])
        (and (system-permission-error? c)
-            (= 13 (system-error-code c)))))
+            (= 13 (system-error-code c))))
+
+     (let ([c (make-system-error 'test-op 5 "io error" '((path . "/tmp")))])
+       (and (system-error? c)
+            (eq? 'test-op (system-error-operation c))
+            (= 5 (system-error-code c))))
+
+     (system-not-found-error?
+      (make-system-not-found-error 'lookup "missing" '((name . "missing"))))
+
+     (system-timeout-error?
+      (make-system-timeout-error 'wait "timed out" '((timeout . 10))))
+
+     (system-exit-error?
+      (make-system-exit-error 'run-process "failed" '((status . 1))))
+
+     (system-unsupported-error?
+      (make-system-unsupported-error 'feature "unsupported"))
+
+     ;; Error case: malformed FFI result vectors should be rejected.
+     (guard (c [else #t])
+       (ffi-result-ref '#(bad value))
+       #f))
 
 (mat user-credentials
 
@@ -69,9 +91,14 @@
      (string? (hostname))
      (string? (cpu-arch))
      (<= 1 (cpu-count))
+     (string? (system-hostname))
+     (symbol? (system-machine))
      (boolean? (unix?))
      (boolean? (windows?))
-     (boolean? (darwin?)))
+     (boolean? (darwin?))
+     (begin (sleep-seconds 0) #t)
+     (begin (sleep-milliseconds 0) #t)
+     (begin (sleep-nanoseconds 0) #t))
 
 (mat system-platform-modules
 
@@ -87,4 +114,40 @@
          (guard (c [(system-unsupported-error? c) #t] [else #f])
            (windows-system-version)
            #f)
+         #t))
+
+(mat system-linux-apis
+
+     (if (linux?)
+         (boolean? (linux-procfs-mounted?))
+         #t)
+
+     (if (linux?)
+         (filesystem-info? (linux-filesystem-info "."))
+         #t)
+
+     (if (linux?)
+         (list? (linux-mounted-filesystems))
+         #t)
+
+     (if (linux?)
+         (exists (lambda (sig) (eq? 'term (signal-name sig))) (linux-signal-list))
+         #t)
+
+     (if (and (linux?) (linux-procfs-mounted?))
+         (number? (linux-system-uptime))
+         #t)
+
+     (if (and (linux?) (linux-procfs-mounted?))
+         (list? (linux-memory-info))
+         #t)
+
+     (if (and (linux?) (linux-procfs-mounted?))
+         (let ([loads (linux-load-average)])
+           (and (= 3 (length loads))
+                (andmap number? loads)))
+         #t)
+
+     (if (linux?)
+         (list? (linux-os-release))
          #t))

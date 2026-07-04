@@ -2,10 +2,51 @@
 
 (mat system-user-current
 
-     (unix-user? (user-ref (getuid)))
-     (unix-user? (user-ref (uid->user-name (getuid))))
-     (unix-group? (group-ref (getgid)))
-     (unix-group? (group-ref (gid->group-name (getgid)))))
+     (let ([u (user-ref (getuid))])
+       (and (unix-user? u)
+            (string? (unix-user-name u))
+            (= (getuid) (unix-user-uid u))
+            (= (getgid) (unix-user-gid u))
+            (string? (unix-user-dir u))
+            (string? (unix-user-shell u))))
+
+     (unix-user? (getuser (uid->user-name (getuid))))
+
+     (let ([g (group-ref (getgid))])
+       (and (unix-group? g)
+            (string? (unix-group-name g))
+            (= (getgid) (unix-group-gid g))
+            (or (vector? (unix-group-mems g))
+                (not (unix-group-mems g)))))
+
+     (unix-group? (getgroup (gid->group-name (getgid))))
+
+     (unix-user? (current-user))
+     (unix-group? (current-group)))
+
+(mat system-user-conversions
+
+     (let ([name (uid->user-name (getuid))])
+       (and (string? name)
+            (= (getuid) (user-name->uid name))
+            (= (getuid) (user->uid name))))
+
+     (let ([name (gid->group-name (getgid))])
+       (and (string? name)
+            (= (getgid) (group-name->gid name))
+            (= (getgid) (group->gid name))))
+
+     (string? (get-user-dir (getuid)))
+     (string? (get-user-dir (uid->user-name (getuid))))
+     (string? (get-user-shell (getuid)))
+     (string? (get-user-shell (uid->user-name (getuid))))
+     (integer? (get-user-group (getuid)))
+     (integer? (get-user-group (uid->user-name (getuid))))
+
+     (user-exists? (getuid))
+     (user-exists? (uid->user-name (getuid)))
+     (group-exists? (getgid))
+     (group-exists? (gid->group-name (getgid))))
 
 ;; Error case: looking up an impossible user name should report not-found.
 (mat system-user-missing
@@ -16,4 +57,14 @@
 
      (guard (c [(system-not-found-error? c) #t] [else #f])
        (group-ref "__chezpp_group_that_should_not_exist__")
-       #f))
+       #f)
+
+     (eq? 'missing (user-ref/default "__chezpp_user_that_should_not_exist__"
+                                     'missing))
+
+     (eq? 'missing (group-ref/default "__chezpp_group_that_should_not_exist__"
+                                      'missing))
+
+     (not (user-exists? "__chezpp_user_that_should_not_exist__"))
+
+     (not (group-exists? "__chezpp_group_that_should_not_exist__")))
