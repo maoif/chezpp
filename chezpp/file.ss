@@ -450,28 +450,32 @@
     (case-lambda
       [(p) (get-u32 p 'little)]
       [(p end)
-       (let* ([count 4] [bv (bv32)]
-              [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
-                                  (if (fx< c count)
-                                      ($no-enough-data who 'u32)
-                                      (get))))])
-         (case end
-           [big    (go (lambda () (bytevector-u32-ref bv 0 (endianness big))))]
-           [little (go (lambda () (bytevector-u32-ref bv 0 (endianness little))))]
-           [else ($bad-endianness who end)]))]))
+       (pcheck-input-binary-port
+        (p)
+        (let* ([count 4] [bv (bv32)]
+               [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
+                                   (if (fx< c count)
+                                       ($no-enough-data who 'u32)
+                                       (get))))])
+          (case end
+            [big    (go (lambda () (bytevector-u32-ref bv 0 (endianness big))))]
+            [little (go (lambda () (bytevector-u32-ref bv 0 (endianness little))))]
+            [else ($bad-endianness who end)])))]))
   (define-who get-u64
     (case-lambda
       [(p) (get-u64 p 'little)]
       [(p end)
-       (let* ([count 8] [bv (bv64)]
-              [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
-                                  (if (fx< c count)
-                                      ($no-enough-data who 'u64)
-                                      (get))))])
-         (case end
-           [big    (go (lambda () (bytevector-u64-ref bv 0 (endianness big))))]
-           [little (go (lambda () (bytevector-u64-ref bv 0 (endianness little))))]
-           [else ($bad-endianness who end)]))]))
+       (pcheck-input-binary-port
+        (p)
+        (let* ([count 8] [bv (bv64)]
+               [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
+                                   (if (fx< c count)
+                                       ($no-enough-data who 'u64)
+                                       (get))))])
+          (case end
+            [big    (go (lambda () (bytevector-u64-ref bv 0 (endianness big))))]
+            [little (go (lambda () (bytevector-u64-ref bv 0 (endianness little))))]
+            [else ($bad-endianness who end)])))]))
 
   (define-who get-s16
     (case-lambda
@@ -492,28 +496,32 @@
     (case-lambda
       [(p) (get-s32 p 'little)]
       [(p end)
-       (let* ([count 4] [bv (bv32)]
-              [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
-                                  (if (fx< c count)
-                                      ($no-enough-data who 's32)
-                                      (get))))])
-         (case end
-           [big    (go (lambda () (bytevector-s32-ref bv 0 (endianness big))))]
-           [little (go (lambda () (bytevector-s32-ref bv 0 (endianness little))))]
-           [else ($bad-endianness who end)]))]))
+       (pcheck-input-binary-port
+        (p)
+        (let* ([count 4] [bv (bv32)]
+               [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
+                                   (if (fx< c count)
+                                       ($no-enough-data who 's32)
+                                       (get))))])
+          (case end
+            [big    (go (lambda () (bytevector-s32-ref bv 0 (endianness big))))]
+            [little (go (lambda () (bytevector-s32-ref bv 0 (endianness little))))]
+            [else ($bad-endianness who end)])))]))
   (define-who get-s64
     (case-lambda
       [(p) (get-s64 p 'little)]
       [(p end)
-       (let* ([count 8] [bv (bv64)]
-              [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
-                                  (if (fx< c count)
-                                      ($no-enough-data who 's64)
-                                      (get))))])
-         (case end
-           [big    (go (lambda () (bytevector-s64-ref bv 0 (endianness big))))]
-           [little (go (lambda () (bytevector-s64-ref bv 0 (endianness little))))]
-           [else ($bad-endianness who end)]))]))
+       (pcheck-input-binary-port
+        (p)
+        (let* ([count 8] [bv (bv64)]
+               [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
+                                   (if (fx< c count)
+                                       ($no-enough-data who 's64)
+                                       (get))))])
+          (case end
+            [big    (go (lambda () (bytevector-s64-ref bv 0 (endianness big))))]
+            [little (go (lambda () (bytevector-s64-ref bv 0 (endianness little))))]
+            [else ($bad-endianness who end)])))]))
 
   (define-who put-u16
     (case-lambda

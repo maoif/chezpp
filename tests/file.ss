@@ -492,6 +492,17 @@
      (error? (test-put/get (ash 1 34) (iota 1024) put-s32 get-s32))
      (error? (test-put/get (ash 1 66) (iota 1024) put-s64 get-s64))
 
+     ;; error case: get-u32 requires an open binary input port.
+     (error? (get-u32 (open-string-input-port "abcd")))
+
+     ;; error case: get-u64 requires an open binary input port.
+     (error? (get-u64 (open-string-input-port "abcdefgh")))
+
+     ;; error case: get-s32 requires an open binary input port.
+     (error? (get-s32 (open-string-input-port "abcd")))
+
+     ;; error case: get-s64 requires an open binary input port.
+     (error? (get-s64 (open-string-input-port "abcdefgh")))
 
      ;; TODO test multi-thread
 
