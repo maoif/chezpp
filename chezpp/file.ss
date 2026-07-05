@@ -1344,38 +1344,42 @@
 
   (define $link/copy-helper
     (lambda (who link/copy-what overwrite?)
-      (lambda (src dest)
-        (if (file-exists? dest #f)
-            (let ([overwrite/error
-                   (lambda (dest)
-                     (if (file-exists? dest #f)
-                         (if overwrite?
-                             ;; `dest` is file or symlink to file
-                             ;; If `dest` is symlink, always overwrite the symlink itself.
-                             ;; This is different from `cp` semantics,
-                             ;; but it matches `ln` semantics.
-                             (begin (delete-file dest)
-                                    (link/copy-what src dest))
-                             ($err-file-exists who dest))
-                         (link/copy-what src dest)))])
-              (if (file-directory? dest #t)
-                  (let ([newd (path-build dest (path-last src))])
-                    (if (file-directory? newd #t)
-                        ($err-directory-exists who newd)
-                        (overwrite/error newd)))
-                  (overwrite/error dest)))
-            (link/copy-what src dest)))))
+      (case-lambda
+        [(src dest) (($link/copy-helper who link/copy-what overwrite?) src dest src)]
+        [(src dest name-src)
+         (if (file-exists? dest #f)
+             (let ([overwrite/error
+                    (lambda (dest)
+                      (if (file-exists? dest #f)
+                          (if overwrite?
+                              ;; `dest` is file or symlink to file
+                              ;; If `dest` is symlink, always overwrite the symlink itself.
+                              ;; This is different from `cp` semantics,
+                              ;; but it matches `ln` semantics.
+                              (begin (delete-file dest)
+                                     (link/copy-what src dest))
+                              ($err-file-exists who dest))
+                          (link/copy-what src dest)))])
+               (if (file-directory? dest #t)
+                   (let ([newd (path-build dest (path-last name-src))])
+                     (if (file-directory? newd #t)
+                         ($err-directory-exists who newd)
+                         (overwrite/error newd)))
+                   (overwrite/error dest)))
+             (link/copy-what src dest))])))
 
   ;; Symlinks can also have hard links.
   (define $file-link
-    (lambda (who src dest overwrite?)
-      (let* ([$link (let ([ffi (foreign-procedure "chezpp_link" (string string) scheme-object)])
-                      (lambda (src dest)
-                        (let ([x (ffi src dest)])
-                          (when (string? x)
-                            ($err-file who x)))))]
-             [link ($link/copy-helper who $link overwrite?)])
-        (link src dest))))
+    (case-lambda
+      [(who src dest overwrite?) ($file-link who src dest overwrite? src)]
+      [(who src dest overwrite? name-src)
+       (let* ([$link (let ([ffi (foreign-procedure "chezpp_link" (string string) scheme-object)])
+                       (lambda (src dest)
+                         (let ([x (ffi src dest)])
+                           (when (string? x)
+                             ($err-file who x)))))]
+              [link ($link/copy-helper who $link overwrite?)])
+         (link src dest name-src))]))
 
   ;; TODO use macro in the following?
   #|doc
@@ -1390,7 +1394,7 @@
                            [(lambda (x) (file-exists? x follow-link?)) src])
                           (if (file-symbolic-link? src)
                               (if follow-link?
-                                  ($file-link who (readlink2 src #t) dest #f)
+                                  ($file-link who (readlink2 src #t) dest #f src)
                                   ($file-link who src dest #f))
                               ($file-link who src dest #f)))]))
 
@@ -1405,7 +1409,7 @@
                            [(lambda (x) (file-exists? x follow-link?)) src])
                           (if (file-symbolic-link? src)
                               (if follow-link?
-                                  ($file-link who (readlink2 src #t) dest #t)
+                                  ($file-link who (readlink2 src #t) dest #t src)
                                   ($file-link who src dest #t))
                               ($file-link who src dest #t)))]))
 
@@ -1602,29 +1606,25 @@
 
 
   (define $file-copy
-    (lambda (who src dest overwrite?)
-      ;; `src` can only be regular or symlink
-      (let ([copy-file ($link/copy-helper who (lambda (src dest)
-                                                (call-with-port (open-file-input-port src)
-                                                  (lambda (pin)
-                                                    (call-with-port (open-file-output-port dest)
-                                                      (lambda (pout)
-                                                        ($copy-port who pin pout))))))
-                                          overwrite?)]
-            [copy-link ($link/copy-helper who file-symlink overwrite?)])
-        (cond
-         [(file-symbolic-link? src)
-          ;; readlink src, and reshape `dest`
-          (let ([ln (readlink src)] [dest (if (file-directory? dest #t)
-                                              (let ([newd (path-build dest (path-last src))])
-                                                (if (file-directory? newd #t)
-                                                    ($err-directory-exists who newd)
-                                                    newd))
-                                              dest)])
-            (copy-link ln dest))]
-         [(file-regular? src #f)
-          (copy-file src dest)]
-         [else (unreachable! who)]))))
+    (case-lambda
+      [(who src dest overwrite?) ($file-copy who src dest overwrite? src)]
+      [(who src dest overwrite? name-src)
+       ;; `src` can only be regular or symlink
+       (let ([copy-file ($link/copy-helper who (lambda (src dest)
+                                                 (call-with-port (open-file-input-port src)
+                                                   (lambda (pin)
+                                                     (call-with-port (open-file-output-port dest)
+                                                       (lambda (pout)
+                                                         ($copy-port who pin pout))))))
+                                           overwrite?)]
+             [copy-link ($link/copy-helper who file-symlink overwrite?)])
+         (cond
+          [(file-symbolic-link? src)
+           (let ([ln (readlink src)])
+             (copy-link ln dest name-src))]
+          [(file-regular? src #f)
+           (copy-file src dest name-src)]
+          [else (unreachable! who)]))]))
 
 
   #|doc
@@ -1639,8 +1639,9 @@
        (pcheck ([string? src dest] [boolean? follow-link?]
                 [(lambda (x) (file-exists? x follow-link?)) src])
                (if (file-symbolic-link? src)
-                   (let ([src (if follow-link? (readlink2 src #t) src)])
-                     ($file-copy who src dest #f))
+                   (if follow-link?
+                       ($file-copy who (readlink2 src #t) dest #f src)
+                       ($file-copy who src dest #f))
                    ($file-copy who src dest #f)))]))
 
 
@@ -1654,8 +1655,9 @@
        (pcheck ([string? src dest] [boolean? follow-link?]
                 [(lambda (x) (file-exists? x follow-link?)) src])
                (if (file-symbolic-link? src)
-                   (let ([src (if follow-link? (readlink2 src #t) src)])
-                     ($file-copy who src dest #t))
+                   (if follow-link?
+                       ($file-copy who (readlink2 src #t) dest #t src)
+                       ($file-copy who src dest #t))
                    ($file-copy who src dest #t)))]))
 
 

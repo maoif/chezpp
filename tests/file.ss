@@ -836,6 +836,12 @@
      (= 3 (file-nlinks (atdir "src/src1.ss")))
      (= 3 (file-nlinks (atdir "src1.cp")))
 
+     ;; following a source symlink into a destination directory should use the link basename.
+     (begin (file-link (atdir "tests/src1") (atdir "src/native"))
+            (and (file-exists? (atdir "src/native/src1"))
+                 (= (file-nlinks (atdir "src/src1.ss"))
+                    (file-nlinks (atdir "src/native/src1")))))
+
      ;; dest is file
      (error? (file-link (atdir "tests/src1") (atdir "src1.cp")))
      (not (error? (file-link! (atdir "tests/src1") (atdir "src1.cp"))))
@@ -846,9 +852,9 @@
 
      ;; dest is symlink to file
      (begin (file-link (atdir "tests/src1") (atdir "tests/src2"))
-            (= 4 (file-nlinks (atdir "tests/src2"))))
+            (= 5 (file-nlinks (atdir "tests/src2"))))
      (begin (file-link (atdir "tests/src1.ln") (atdir "tests/src3"))
-            (= 5 (file-nlinks (atdir "tests/src3"))))
+            (= 6 (file-nlinks (atdir "tests/src3"))))
 
      ;; dest is symlink to file (not follow)
      (begin (file-link (atdir "tests/src1.ln") (atdir "tests/src2.ln") #f)
@@ -979,6 +985,12 @@
             (string=? (read-string (atdir "src1")) (read-string (atdir "tests/src1"))))
      (begin (file-copy (atdir "tests/src1.ln") (atdir "src11"))
             (string=? (read-string (atdir "src11")) (read-string (atdir "tests/src1.ln"))))
+
+     ;; following a source symlink into a destination directory should use the link basename.
+     (begin (file-copy (atdir "tests/src1") (atdir "src/native"))
+            (and (file-regular? (atdir "src/native/src1"))
+                 (string=? (read-string (atdir "tests/src1"))
+                           (read-string (atdir "src/native/src1")))))
 
      ;; src is symlink to file, no follow
      (begin (file-copy (atdir "tests/src1") (atdir "src1.ln") #f)
