@@ -775,6 +775,18 @@
      (let-values ([(ln pdir) (readlink (d1d2d3 "ln3") #t)])
        (and (string=? ln "../../f1") (string=? pdir (path-build dir "d1/d2/d3"))))
 
+     ;; error case: recursive readlink should detect a direct symlink cycle.
+     (error? (let ([cycle (path-build dir "cycle")])
+               (file-symlink "cycle" cycle)
+               (readlink2 cycle #t)))
+
+     ;; error case: recursive readlink should detect an indirect symlink cycle.
+     (error? (let ([a (path-build dir "cycle-a")]
+                   [b (path-build dir "cycle-b")])
+               (file-symlink "cycle-b" a)
+               (file-symlink "cycle-a" b)
+               (readlink2 a #t)))
+
      (file-removetree dir))
 
 

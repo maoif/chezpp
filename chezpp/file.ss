@@ -1284,6 +1284,9 @@
   (define file-exists?-no-follow (lambda (path) (file-exists? path #f)))
   (define $touch-empty-file (lambda (path) (call-with-port (open-file-output-port path) (lambda (x) (void)))))
 
+  (define $path-seen?
+    (lambda (path seen)
+      (exists (lambda (p) (string=? p path)) seen)))
 
   (define $readlink
     (let ([ffi (let ([ffi-readlink (foreign-procedure "chezpp_readlink" (string) scheme-object)])
@@ -1297,16 +1300,18 @@
         [(who path recursive?)
          ;; we don't care about whether the link is dangling or not
          (pcheck ([file-exists?-no-follow path] [file-symbolic-link? path])
-                 (let loop ([path path])
-                   (let* ([ln (ffi who path)]
-                          [target (path-build (path-parent path) ln)])
-                     (if (file-symbolic-link? target)
-                         (if recursive?
-                             (loop target)
-                             ln)
-                         (if recursive?
-                             (values ln (path-parent path))
-                             ln)))))])))
+                 (let loop ([path path] [seen '()])
+                   (if ($path-seen? path seen)
+                       (errorf who "symlink cycle detected at: ~a" path)
+                       (let* ([ln (ffi who path)]
+                              [target (path-build (path-parent path) ln)])
+                         (if (file-symbolic-link? target)
+                             (if recursive?
+                                 (loop target (cons path seen))
+                                 ln)
+                             (if recursive?
+                                 (values ln (path-parent path))
+                                 ln))))))])))
 
 
   #|doc
