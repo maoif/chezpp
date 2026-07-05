@@ -688,6 +688,13 @@
      (begin (create-fstree "./fstree")
             #t)
 
+     ;; error case: non-overwrite creator should reject an existing root directory.
+     (error? (create-fstree "./fstree"))
+
+     ;; overwrite creator should accept an existing root directory.
+     (begin (create-fstree! "./fstree")
+            (file-directory? "./fstree"))
+
      (file-directory? "./fstree")
      (file-directory? "./fstree/src")
      (file-directory? "./fstree/src/native")
@@ -719,13 +726,6 @@
      (equal? lines (read-lines "./fstree/src/native/ranstr"))
      (equal? testsrc1 (read-string "./fstree/tests/test1.ss"))
      (equal? testsrc2 (read-string "./fstree/tests/test2.ss"))
-
-
-     ;; file already exists
-     (error? (create-fstree "./fstree"))
-
-     (begin (create-fstree! "./fstree")
-            #t)
 
      (file-removetree "./fstree")
      (not (file-exists? "./fstree"))

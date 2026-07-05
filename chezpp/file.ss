@@ -2000,12 +2000,14 @@
                  (lambda (who pdir ow?)
                    (pcheck ([string? pdir] [boolean? ow?])
                            (if (file-exists? pdir)
-                               (unless (file-directory? pdir)
-                                 ($err-file-exists who pdir))
+                               (if ow?
+                                   (unless (file-directory? pdir)
+                                     ($err-file-exists who pdir))
+                                   ($err-directory-exists who pdir))
                                (mkdir pdir))
                            (if ow?
-                               #,(parse-decls #t #'mk  #'pdir #'(decl* ...))
-                               #,(parse-decls #f #'mk! #'pdir #'(decl* ...))))))
+                               #,(parse-decls #t #'mk! #'pdir #'(decl* ...))
+                               #,(parse-decls #f #'mk  #'pdir #'(decl* ...))))))
 
                (define-who mk  (lambda (pdir) ($mk who pdir #f)))
                (define-who mk! (lambda (pdir) ($mk who pdir #t)))))])))
