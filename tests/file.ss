@@ -1293,6 +1293,14 @@
 
 (mat fswatcher
 
+     ;; nonblocking watcher should return #f when no event is available.
+     (let ([fsw (make-fswatcher #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (not (fswatcher-next! fsw)))
+         (lambda () (close-fswatcher fsw))))
+
      ;; file
      (begin (define f1 ($random-file))
             (define fsw1 (make-fswatcher))

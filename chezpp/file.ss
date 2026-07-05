@@ -2150,10 +2150,13 @@
        (pcheck ([$fswatcher? fsw] [$fswatcher-open? fsw] [natural? timeout])
                (let ([res ($fsw-next! who ($fswatcher-id fsw))]
                      [ht ($fswatcher-paths fsw)])
-                 ;; res: (vector fid mask ?name) -> (vector path event-symbols ?name)
-                 (vector-set! res 0 (hashtable-ref ht (vector-ref res 0) #f))
-                 ;;(vector-set! res 1 (fswatcher-mask->symbols (vector-ref res 1)))
-                 res))]))
+                 (if res
+                     (begin
+                       ;; res: (vector fid mask ?name) -> (vector path event-symbols ?name)
+                       (vector-set! res 0 (hashtable-ref ht (vector-ref res 0) #f))
+                       ;;(vector-set! res 1 (fswatcher-mask->symbols (vector-ref res 1)))
+                       res)
+                     #f)))]))
 
 
   #|doc
