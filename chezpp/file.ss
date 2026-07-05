@@ -836,24 +836,28 @@
               [else (format "~,2f GiB" (inexact (/ size 1G)))]))))
 
 
+  (define $mode-any-set?
+    (lambda (path follow-link? bits)
+      (not (fx= 0 (fxlogand (get-mode path follow-link?) bits)))))
+
   (define-who file-readable?
     (case-lambda [(path) (file-readable? path #t)]
                  [(path follow-link?)
-                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
-                          (let ([m (get-mode path follow-link?)])
-                            (fxlogbit? 8 m)))]))
+                  (pcheck ([string? path] [boolean? follow-link?]
+                           [(lambda (x) (file-exists? x follow-link?)) path])
+                          ($mode-any-set? path follow-link? #o444))]))
   (define-who file-writable?
     (case-lambda [(path) (file-writable? path #t)]
                  [(path follow-link?)
-                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
-                          (let ([m (get-mode path follow-link?)])
-                            (fxlogbit? 7 m)))]))
+                  (pcheck ([string? path] [boolean? follow-link?]
+                           [(lambda (x) (file-exists? x follow-link?)) path])
+                          ($mode-any-set? path follow-link? #o222))]))
   (define-who file-executable?
     (case-lambda [(path) (file-executable? path #t)]
                  [(path follow-link?)
-                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
-                          (let ([m (get-mode path follow-link?)])
-                            (fxlogbit? 6 m)))]))
+                  (pcheck ([string? path] [boolean? follow-link?]
+                           [(lambda (x) (file-exists? x follow-link?)) path])
+                          ($mode-any-set? path follow-link? #o111))]))
 
   (define-who file-hidden?
     (case-lambda [(path) (file-hidden? path #t)]

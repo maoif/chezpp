@@ -519,6 +519,53 @@
      )
 
 
+(mat file-access
+
+     ;; any read bit should make a file readable under mode-bit semantics.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o004)
+           (and (file-readable? p)
+                (file-readable? p #t)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     ;; file without read bits should not report readable.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o000)
+           (not (file-readable? p)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     ;; any write bit should make a file writable under mode-bit semantics.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-string p "x")
+           (file-chmod p #o002)
+           (file-writable? p))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     ;; any execute bit should make a file executable under mode-bit semantics.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-string p "#!/bin/sh\nexit 0\n")
+           (file-chmod p #o001)
+           (file-executable? p))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     ;; error case: access predicates require an existing path.
+     (error? (file-readable? "file_access_does_not_exist")))
+
+
 (mat file-chmod
 
      (error? (file-mode->symbols ""))
