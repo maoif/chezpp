@@ -492,6 +492,17 @@
      (error? (test-put/get (ash 1 34) (iota 1024) put-s32 get-s32))
      (error? (test-put/get (ash 1 66) (iota 1024) put-s64 get-s64))
 
+     ;; error case: get-u32 requires an open binary input port.
+     (error? (get-u32 (open-string-input-port "abcd")))
+
+     ;; error case: get-u64 requires an open binary input port.
+     (error? (get-u64 (open-string-input-port "abcdefgh")))
+
+     ;; error case: get-s32 requires an open binary input port.
+     (error? (get-s32 (open-string-input-port "abcd")))
+
+     ;; error case: get-s64 requires an open binary input port.
+     (error? (get-s64 (open-string-input-port "abcdefgh")))
 
      ;; TODO test multi-thread
 
@@ -517,6 +528,53 @@
      (eq? 'FT_chardev (file-type "/dev/random"))
      (eq? 'FT_chardev (file-type "/dev/null"))
      )
+
+
+(mat file-access
+
+     ;; any read bit should make a file readable under mode-bit semantics.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o004)
+           (and (file-readable? p)
+                (file-readable? p #t)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     ;; file without read bits should not report readable.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o000)
+           (not (file-readable? p)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     ;; any write bit should make a file writable under mode-bit semantics.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-string p "x")
+           (file-chmod p #o002)
+           (file-writable? p))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     ;; any execute bit should make a file executable under mode-bit semantics.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (write-string p "#!/bin/sh\nexit 0\n")
+           (file-chmod p #o001)
+           (file-executable? p))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     ;; error case: access predicates require an existing path.
+     (error? (file-readable? "file_access_does_not_exist")))
 
 
 (mat file-chmod
@@ -549,6 +607,49 @@
      (= #o421 (symbols->file-mode '() '(r) '(w) '(x)))
      (= #o5562 (symbols->file-mode '(t su) '(x r) '(w r) '(w)))
      (= #o7777 (symbols->file-mode '(su sg t) '(r w x) '(r w x) '(r w x)))
+
+     ;; convenience chmod APIs should pass the path through to the shared implementation.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o644)
+           (file-chmod-u p '(+ x))
+           (fxlogbit? 6 (get-mode p)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o600)
+           (file-chmod-g p '(+ r))
+           (fxlogbit? 5 (get-mode p)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o600)
+           (file-chmod-o p '(+ r))
+           (fxlogbit? 2 (get-mode p)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o600)
+           (file-chmod-a p '(+ x))
+           (and (fxlogbit? 6 (get-mode p))
+                (fxlogbit? 3 (get-mode p))
+                (fxlogbit? 0 (get-mode p))))
+         (lambda () (when (file-exists? p) (delete-file p)))))
 
      )
 
@@ -587,6 +688,13 @@
      (begin (create-fstree "./fstree")
             #t)
 
+     ;; error case: non-overwrite creator should reject an existing root directory.
+     (error? (create-fstree "./fstree"))
+
+     ;; overwrite creator should accept an existing root directory.
+     (begin (create-fstree! "./fstree")
+            (file-directory? "./fstree"))
+
      (file-directory? "./fstree")
      (file-directory? "./fstree/src")
      (file-directory? "./fstree/src/native")
@@ -618,13 +726,6 @@
      (equal? lines (read-lines "./fstree/src/native/ranstr"))
      (equal? testsrc1 (read-string "./fstree/tests/test1.ss"))
      (equal? testsrc2 (read-string "./fstree/tests/test2.ss"))
-
-
-     ;; file already exists
-     (error? (create-fstree "./fstree"))
-
-     (begin (create-fstree! "./fstree")
-            #t)
 
      (file-removetree "./fstree")
      (not (file-exists? "./fstree"))
@@ -732,6 +833,18 @@
      (let-values ([(ln pdir) (readlink (d1d2d3 "ln3") #t)])
        (and (string=? ln "../../f1") (string=? pdir (path-build dir "d1/d2/d3"))))
 
+     ;; error case: recursive readlink should detect a direct symlink cycle.
+     (error? (let ([cycle (path-build dir "cycle")])
+               (file-symlink "cycle" cycle)
+               (readlink2 cycle #t)))
+
+     ;; error case: recursive readlink should detect an indirect symlink cycle.
+     (error? (let ([a (path-build dir "cycle-a")]
+                   [b (path-build dir "cycle-b")])
+               (file-symlink "cycle-b" a)
+               (file-symlink "cycle-a" b)
+               (readlink2 a #t)))
+
      (file-removetree dir))
 
 
@@ -781,6 +894,12 @@
      (= 3 (file-nlinks (atdir "src/src1.ss")))
      (= 3 (file-nlinks (atdir "src1.cp")))
 
+     ;; following a source symlink into a destination directory should use the link basename.
+     (begin (file-link (atdir "tests/src1") (atdir "src/native"))
+            (and (file-exists? (atdir "src/native/src1"))
+                 (= (file-nlinks (atdir "src/src1.ss"))
+                    (file-nlinks (atdir "src/native/src1")))))
+
      ;; dest is file
      (error? (file-link (atdir "tests/src1") (atdir "src1.cp")))
      (not (error? (file-link! (atdir "tests/src1") (atdir "src1.cp"))))
@@ -791,9 +910,9 @@
 
      ;; dest is symlink to file
      (begin (file-link (atdir "tests/src1") (atdir "tests/src2"))
-            (= 4 (file-nlinks (atdir "tests/src2"))))
+            (= 5 (file-nlinks (atdir "tests/src2"))))
      (begin (file-link (atdir "tests/src1.ln") (atdir "tests/src3"))
-            (= 5 (file-nlinks (atdir "tests/src3"))))
+            (= 6 (file-nlinks (atdir "tests/src3"))))
 
      ;; dest is symlink to file (not follow)
      (begin (file-link (atdir "tests/src1.ln") (atdir "tests/src2.ln") #f)
@@ -924,6 +1043,12 @@
             (string=? (read-string (atdir "src1")) (read-string (atdir "tests/src1"))))
      (begin (file-copy (atdir "tests/src1.ln") (atdir "src11"))
             (string=? (read-string (atdir "src11")) (read-string (atdir "tests/src1.ln"))))
+
+     ;; following a source symlink into a destination directory should use the link basename.
+     (begin (file-copy (atdir "tests/src1") (atdir "src/native"))
+            (and (file-regular? (atdir "src/native/src1"))
+                 (string=? (read-string (atdir "tests/src1"))
+                           (read-string (atdir "src/native/src1")))))
 
      ;; src is symlink to file, no follow
      (begin (file-copy (atdir "tests/src1") (atdir "src1.ln") #f)
@@ -1189,12 +1314,74 @@
      (equal? str (read-string (atdir1 "tests/test2.ss")))
      (equal? big (read-datum-fasl (atdir1 "src/big1")))
 
+     ;; error case: moving a symlink to a directory must move the link, not remove the target tree.
+     (let ([root "move_symlink_root"]
+           [target "move_symlink_target"]
+           [dest "move_symlink_dest"])
+       (dynamic-wind
+         (lambda ()
+           (when (file-exists? root #f) (file-removetree root #f))
+           (when (file-exists? target #f) (file-removetree target #f))
+           (when (file-exists? dest #f)
+             (if (file-directory? dest #f)
+                 (file-removetree dest #f)
+                 (delete-file dest #f))))
+         (lambda ()
+           (mkdir root)
+           (mkdir target)
+           (write-string (path-build target "keep.txt") "keep")
+           (file-symlink (path-build ".." target) (path-build root "target-link"))
+           (file-move (path-build root "target-link") dest)
+           (and (file-symbolic-link? dest)
+                (file-directory? target)
+                (string=? "keep" (read-string (path-build target "keep.txt")))))
+         (lambda ()
+           (when (file-exists? root #f) (file-removetree root #f))
+           (when (file-exists? target #f) (file-removetree target #f))
+           (when (file-exists? dest #f)
+             (if (file-directory? dest #f)
+                 (file-removetree dest #f)
+                 (delete-file dest #f))))))
 
      (file-removetree dir1)
      )
 
 
+(mat file-removetree-symlink-safety
+
+     (begin (define dir "removetree_symlink_test")
+            (define target "removetree_symlink_target")
+            (define atdir (lambda (x) (path-build dir x)))
+            (define attarget (lambda (x) (path-build target x)))
+            (when (file-exists? dir #f) (file-removetree dir #f))
+            (when (file-exists? target #f) (file-removetree target #f))
+            (mkdir dir)
+            (mkdir target)
+            (write-string (attarget "keep.txt") "keep")
+            (file-symlink (path-build ".." target) (atdir "target-link"))
+            #t)
+
+     ;; error case: a symlink to a directory must not be accepted as a tree root.
+     (error? (file-removetree (atdir "target-link") #t))
+
+     ;; the target directory and file must survive the failed removal.
+     (and (file-directory? target)
+          (string=? "keep" (read-string (attarget "keep.txt"))))
+
+     (begin (file-removetree dir #t)
+            (file-removetree target #t)
+            #t))
+
+
 (mat fswatcher
+
+     ;; nonblocking watcher should return #f when no event is available.
+     (let ([fsw (make-fswatcher #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (not (fswatcher-next! fsw)))
+         (lambda () (close-fswatcher fsw))))
 
      ;; file
      (begin (define f1 ($random-file))

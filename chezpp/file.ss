@@ -97,6 +97,10 @@
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+  #|proc:read-lines
+  The `read-lines` procedure reads the text file at `path` and returns a list of lines.
+  The `path` parameter is the filesystem path string to read.
+  |#
   (define read-lines
     (lambda (path)
       (pcheck-file
@@ -110,6 +114,10 @@
                      (lb)
                      (begin (lb x)
                             (loop)))))))))))
+  #|proc:read-string
+  The `read-string` procedure reads the text file at `path` and returns its contents.
+  The `path` parameter is the filesystem path string to read.
+  |#
   (define read-string
     (lambda (path)
       (pcheck-file
@@ -118,6 +126,10 @@
          (lambda (p)
            (let ([x (get-string-all p)])
              (if (eof-object? x) "" x)))))))
+  #|proc:read-chars
+  The `read-chars` procedure reads the text file at `path` and returns a list of chars.
+  The `path` parameter is the filesystem path string to read.
+  |#
   (define read-chars
     (lambda (path)
       (pcheck-file
@@ -131,6 +143,10 @@
                      (lb)
                      (begin (lb x)
                             (loop)))))))))))
+  #|proc:read-data
+  The `read-data` procedure reads datums from `path` and returns them as a list.
+  The `path` parameter is the filesystem path string to read.
+  |#
   (define read-data
     (lambda (path)
       (pcheck-file
@@ -144,12 +160,20 @@
                      (lb)
                      (begin (lb x)
                             (loop)))))))))))
+  #|proc:read-datum
+  The `read-datum` procedure reads one datum from the text file at `path`.
+  The `path` parameter is the filesystem path string to read.
+  |#
   (define read-datum
     (lambda (path)
       (pcheck-file
        (path)
        (call-with-input-file path
          (lambda (p) (get-datum p))))))
+  #|proc:read-data-fasl
+  The `read-data-fasl` procedure reads fasl datums from `path` as a list.
+  The `path` parameter is the filesystem path string to read.
+  |#
   (define read-data-fasl
     (lambda (path)
       (pcheck-file
@@ -163,12 +187,20 @@
                      (lb)
                      (begin (lb x)
                             (loop)))))))))))
+  #|proc:read-datum-fasl
+  The `read-datum-fasl` procedure reads one fasl datum from `path`.
+  The `path` parameter is the filesystem path string to read.
+  |#
   (define read-datum-fasl
     (lambda (path)
       (pcheck-file
        (path)
        (call-with-port (open-file-input-port path)
          (lambda (p) (fasl-read p))))))
+  #|proc:read-u8vec
+  The `read-u8vec` procedure reads the binary file at `path` as a bytevector.
+  The `path` parameter is the filesystem path string to read.
+  |#
   (define read-u8vec
     (lambda (path)
       (pcheck-file
@@ -277,79 +309,223 @@
          ($write-helper who path mode #t do-write)))))
 
   ;; error by default when file already exist
+  #|proc:write-lines
+  The `write-lines` procedure writes `lines` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `lines` parameter is the list of strings to write, one per line.
+  The procedure errors if the file already exists.
+  |#
   (define-who write-lines
     (lambda (path lines)
       ($write-lines who path 'error lines)))
+  #|proc:write-string
+  The `write-string` procedure writes `str` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `str` parameter is the string to write.
+  The procedure errors if the file already exists.
+  |#
   (define-who write-string
     (lambda (path str)
       ($write-string who path 'error str)))
+  #|proc:write-chars
+  The `write-chars` procedure writes `chars` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `chars` parameter is the list of characters to write.
+  The procedure errors if the file already exists.
+  |#
   (define-who write-chars
     (lambda (path chars)
       ($write-chars who path 'error chars)))
+  #|proc:write-data
+  The `write-data` procedure writes each datum in `data` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `data` parameter is the list of datums to write.
+  The procedure errors if the file already exists.
+  |#
   (define-who write-data
     (lambda (path data)
       ($write-data who path 'error data)))
+  #|proc:write-datum
+  The `write-datum` procedure writes `datum` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `datum` parameter is the datum to write.
+  The procedure errors if the file already exists.
+  |#
   (define-who write-datum
     (lambda (path datum)
       ($write-datum who path 'error datum)))
+  #|proc:write-data-fasl
+  The `write-data-fasl` procedure writes each datum in `data` to binary `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `data` parameter is the list of datums to write in fasl format.
+  The procedure errors if the file already exists.
+  |#
   (define-who write-data-fasl
     (lambda (path data)
       ($write-data-fasl who path 'error data)))
+  #|proc:write-datum-fasl
+  The `write-datum-fasl` procedure writes `datum` to binary `path` in fasl format.
+  The `path` parameter is the filesystem path string to write.
+  The `datum` parameter is the datum to write.
+  The procedure errors if the file already exists.
+  |#
   (define-who write-datum-fasl
     (lambda (path datum)
       ($write-datum-fasl who path 'error datum)))
+  #|proc:write-u8vec
+  The `write-u8vec` procedure writes `u8vec` to the binary file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `u8vec` parameter is the bytevector to write.
+  The procedure errors if the file already exists.
+  |#
   (define-who write-u8vec
     (lambda (path u8vec)
       ($write-u8vec who path 'error u8vec)))
 
   ;; truncate by default
+  #|proc:write-lines!
+  The `write-lines!` procedure writes `lines` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `lines` parameter is the list of strings to write, one per line.
+  The procedure truncates the file if it already exists.
+  |#
   (define-who write-lines!
     (lambda (path lines)
       ($write-lines who path 'truncate lines)))
+  #|proc:write-string!
+  The `write-string!` procedure writes `str` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `str` parameter is the string to write.
+  The procedure truncates the file if it already exists.
+  |#
   (define-who write-string!
     (lambda (path str)
       ($write-string who path 'truncate str)))
+  #|proc:write-chars!
+  The `write-chars!` procedure writes `chars` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `chars` parameter is the list of characters to write.
+  The procedure truncates the file if it already exists.
+  |#
   (define-who write-chars!
     (lambda (path chars)
       ($write-chars who path 'truncate chars)))
+  #|proc:write-data!
+  The `write-data!` procedure writes each datum in `data` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `data` parameter is the list of datums to write.
+  The procedure truncates the file if it already exists.
+  |#
   (define-who write-data!
     (lambda (path data)
       ($write-data who path 'truncate data)))
+  #|proc:write-datum!
+  The `write-datum!` procedure writes `datum` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `datum` parameter is the datum to write.
+  The procedure truncates the file if it already exists.
+  |#
   (define-who write-datum!
     (lambda (path datum)
       ($write-datum who path 'truncate datum)))
+  #|proc:write-data-fasl!
+  The `write-data-fasl!` procedure writes each datum in `data` to binary `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `data` parameter is the list of datums to write in fasl format.
+  The procedure truncates the file if it already exists.
+  |#
   (define-who write-data-fasl!
     (lambda (path data)
       ($write-data-fasl who path 'truncate data)))
+  #|proc:write-datum-fasl!
+  The `write-datum-fasl!` procedure writes `datum` to binary `path` in fasl format.
+  The `path` parameter is the filesystem path string to write.
+  The `datum` parameter is the datum to write.
+  The procedure truncates the file if it already exists.
+  |#
   (define-who write-datum-fasl!
     (lambda (path datum)
       ($write-datum-fasl who path 'truncate datum)))
+  #|proc:write-u8vec!
+  The `write-u8vec!` procedure writes `u8vec` to the binary file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `u8vec` parameter is the bytevector to write.
+  The procedure truncates the file if it already exists.
+  |#
   (define-who write-u8vec!
     (lambda (path u8vec)
       ($write-u8vec who path 'truncate u8vec)))
 
   ;; append by default
+  #|proc:write-lines>>
+  The `write-lines>>` procedure writes `lines` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `lines` parameter is the list of strings to write, one per line.
+  The procedure appends to the file if it already exists.
+  |#
   (define-who write-lines>>
     (lambda (path lines)
       ($write-lines who path 'append lines)))
+  #|proc:write-string>>
+  The `write-string>>` procedure writes `str` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `str` parameter is the string to write.
+  The procedure appends to the file if it already exists.
+  |#
   (define-who write-string>>
     (lambda (path str)
       ($write-string who path 'append str)))
+  #|proc:write-chars>>
+  The `write-chars>>` procedure writes `chars` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `chars` parameter is the list of characters to write.
+  The procedure appends to the file if it already exists.
+  |#
   (define-who write-chars>>
     (lambda (path chars)
       ($write-chars who path 'append chars)))
+  #|proc:write-data>>
+  The `write-data>>` procedure writes each datum in `data` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `data` parameter is the list of datums to write.
+  The procedure appends to the file if it already exists.
+  |#
   (define-who write-data>>
     (lambda (path data)
       ($write-data who path 'append data)))
+  #|proc:write-datum>>
+  The `write-datum>>` procedure writes `datum` to the text file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `datum` parameter is the datum to write.
+  The procedure appends to the file if it already exists.
+  |#
   (define-who write-datum>>
     (lambda (path datum)
       ($write-datum who path 'append datum)))
+  #|proc:write-data-fasl>>
+  The `write-data-fasl>>` procedure writes each datum in `data` to binary `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `data` parameter is the list of datums to write in fasl format.
+  The procedure appends to the file if it already exists.
+  |#
   (define-who write-data-fasl>>
     (lambda (path data)
       ($write-data-fasl who path 'append data)))
+  #|proc:write-datum-fasl>>
+  The `write-datum-fasl>>` procedure writes `datum` to binary `path` in fasl format.
+  The `path` parameter is the filesystem path string to write.
+  The `datum` parameter is the datum to write.
+  The procedure appends to the file if it already exists.
+  |#
   (define-who write-datum-fasl>>
     (lambda (path datum)
       ($write-datum-fasl who path 'append datum)))
+  #|proc:write-u8vec>>
+  The `write-u8vec>>` procedure writes `u8vec` to the binary file at `path`.
+  The `path` parameter is the filesystem path string to write.
+  The `u8vec` parameter is the bytevector to write.
+  The procedure appends to the file if it already exists.
+  |#
   (define-who write-u8vec>>
     (lambda (path u8vec)
       ($write-u8vec who path 'append u8vec)))
@@ -431,6 +607,11 @@
   ;; All subsequent procedures raise an exception when there are no enough
   ;; bytes to make up the number.
 
+  #|proc:get-u16
+  The `get-u16` procedure reads an unsigned 16-bit integer from binary input port `p`.
+  The `p` parameter is the binary input port to read.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who get-u16
     (case-lambda
       [(p) (get-u16 p 'little)]
@@ -446,33 +627,52 @@
             [big    (go (lambda () (bytevector-u16-ref bv 0 (endianness big))))]
             [little (go (lambda () (bytevector-u16-ref bv 0 (endianness little))))]
             [else ($bad-endianness who end)])))]))
+  #|proc:get-u32
+  The `get-u32` procedure reads an unsigned 32-bit integer from binary input port `p`.
+  The `p` parameter is the binary input port to read.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who get-u32
     (case-lambda
       [(p) (get-u32 p 'little)]
       [(p end)
-       (let* ([count 4] [bv (bv32)]
-              [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
-                                  (if (fx< c count)
-                                      ($no-enough-data who 'u32)
-                                      (get))))])
-         (case end
-           [big    (go (lambda () (bytevector-u32-ref bv 0 (endianness big))))]
-           [little (go (lambda () (bytevector-u32-ref bv 0 (endianness little))))]
-           [else ($bad-endianness who end)]))]))
+       (pcheck-input-binary-port
+        (p)
+        (let* ([count 4] [bv (bv32)]
+               [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
+                                   (if (fx< c count)
+                                       ($no-enough-data who 'u32)
+                                       (get))))])
+          (case end
+            [big    (go (lambda () (bytevector-u32-ref bv 0 (endianness big))))]
+            [little (go (lambda () (bytevector-u32-ref bv 0 (endianness little))))]
+            [else ($bad-endianness who end)])))]))
+  #|proc:get-u64
+  The `get-u64` procedure reads an unsigned 64-bit integer from binary input port `p`.
+  The `p` parameter is the binary input port to read.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who get-u64
     (case-lambda
       [(p) (get-u64 p 'little)]
       [(p end)
-       (let* ([count 8] [bv (bv64)]
-              [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
-                                  (if (fx< c count)
-                                      ($no-enough-data who 'u64)
-                                      (get))))])
-         (case end
-           [big    (go (lambda () (bytevector-u64-ref bv 0 (endianness big))))]
-           [little (go (lambda () (bytevector-u64-ref bv 0 (endianness little))))]
-           [else ($bad-endianness who end)]))]))
+       (pcheck-input-binary-port
+        (p)
+        (let* ([count 8] [bv (bv64)]
+               [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
+                                   (if (fx< c count)
+                                       ($no-enough-data who 'u64)
+                                       (get))))])
+          (case end
+            [big    (go (lambda () (bytevector-u64-ref bv 0 (endianness big))))]
+            [little (go (lambda () (bytevector-u64-ref bv 0 (endianness little))))]
+            [else ($bad-endianness who end)])))]))
 
+  #|proc:get-s16
+  The `get-s16` procedure reads a signed 16-bit integer from binary input port `p`.
+  The `p` parameter is the binary input port to read.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who get-s16
     (case-lambda
       [(p) (get-s16 p 'little)]
@@ -488,33 +688,53 @@
             [big    (go (lambda () (bytevector-s16-ref bv 0 (endianness big))))]
             [little (go (lambda () (bytevector-s16-ref bv 0 (endianness little))))]
             [else ($bad-endianness who end)])))]))
+  #|proc:get-s32
+  The `get-s32` procedure reads a signed 32-bit integer from binary input port `p`.
+  The `p` parameter is the binary input port to read.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who get-s32
     (case-lambda
       [(p) (get-s32 p 'little)]
       [(p end)
-       (let* ([count 4] [bv (bv32)]
-              [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
-                                  (if (fx< c count)
-                                      ($no-enough-data who 's32)
-                                      (get))))])
-         (case end
-           [big    (go (lambda () (bytevector-s32-ref bv 0 (endianness big))))]
-           [little (go (lambda () (bytevector-s32-ref bv 0 (endianness little))))]
-           [else ($bad-endianness who end)]))]))
+       (pcheck-input-binary-port
+        (p)
+        (let* ([count 4] [bv (bv32)]
+               [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
+                                   (if (fx< c count)
+                                       ($no-enough-data who 's32)
+                                       (get))))])
+          (case end
+            [big    (go (lambda () (bytevector-s32-ref bv 0 (endianness big))))]
+            [little (go (lambda () (bytevector-s32-ref bv 0 (endianness little))))]
+            [else ($bad-endianness who end)])))]))
+  #|proc:get-s64
+  The `get-s64` procedure reads a signed 64-bit integer from binary input port `p`.
+  The `p` parameter is the binary input port to read.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who get-s64
     (case-lambda
       [(p) (get-s64 p 'little)]
       [(p end)
-       (let* ([count 8] [bv (bv64)]
-              [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
-                                  (if (fx< c count)
-                                      ($no-enough-data who 's64)
-                                      (get))))])
-         (case end
-           [big    (go (lambda () (bytevector-s64-ref bv 0 (endianness big))))]
-           [little (go (lambda () (bytevector-s64-ref bv 0 (endianness little))))]
-           [else ($bad-endianness who end)]))]))
+       (pcheck-input-binary-port
+        (p)
+        (let* ([count 8] [bv (bv64)]
+               [go (lambda (get) (let ([c (get-bytevector-n! p bv 0 count)])
+                                   (if (fx< c count)
+                                       ($no-enough-data who 's64)
+                                       (get))))])
+          (case end
+            [big    (go (lambda () (bytevector-s64-ref bv 0 (endianness big))))]
+            [little (go (lambda () (bytevector-s64-ref bv 0 (endianness little))))]
+            [else ($bad-endianness who end)])))]))
 
+  #|proc:put-u16
+  The `put-u16` procedure writes unsigned 16-bit integer `n` to binary output port `p`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the unsigned 16-bit width.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who put-u16
     (case-lambda
       [(p n) (put-u16 p n 'little)]
@@ -530,6 +750,12 @@
                         (put-bytevector p bv)]
                 [else ($bad-endianness who end)]))
             ($invalid-value who n 'u16)))]))
+  #|proc:put-u32
+  The `put-u32` procedure writes unsigned 32-bit integer `n` to binary output port `p`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the unsigned 32-bit width.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who put-u32
     (case-lambda
       [(p n) (put-u32 p n 'little)]
@@ -545,6 +771,12 @@
                         (put-bytevector p bv)]
                 [else ($bad-endianness who end)]))
             ($invalid-value who n 'u32)))]))
+  #|proc:put-u64
+  The `put-u64` procedure writes unsigned 64-bit integer `n` to binary output port `p`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the unsigned 64-bit width.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who put-u64
     (case-lambda
       [(p n) (put-u64 p n 'little)]
@@ -561,6 +793,12 @@
                 [else ($bad-endianness who end)]))
             ($invalid-value who n 'u64)))]))
 
+  #|proc:put-s16
+  The `put-s16` procedure writes signed 16-bit integer `n` to binary output port `p`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the signed 16-bit width.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who put-s16
     (case-lambda
       [(p n) (put-s16 p n 'little)]
@@ -576,6 +814,12 @@
                         (put-bytevector p bv)]
                 [else ($bad-endianness who end)]))
             ($invalid-value who n 's16)))]))
+  #|proc:put-s32
+  The `put-s32` procedure writes signed 32-bit integer `n` to binary output port `p`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the signed 32-bit width.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who put-s32
     (case-lambda
       [(p n) (put-s32 p n 'little)]
@@ -591,6 +835,12 @@
                         (put-bytevector p bv)]
                 [else ($bad-endianness who end)]))
             ($invalid-value who n 's32)))]))
+  #|proc:put-s64
+  The `put-s64` procedure writes signed 64-bit integer `n` to binary output port `p`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the signed 64-bit width.
+  The `end` parameter is `'little` by default and may be `'big`.
+  |#
   (define-who put-s64
     (case-lambda
       [(p n) (put-s64 p n 'little)]
@@ -609,18 +859,72 @@
 
 
   ;; big-endian aliases
+  #|proc:GET-U16
+  The `GET-U16` procedure is a big-endian alias for `get-u16`.
+  The `p` parameter is the binary input port to read.
+  |#
   (define GET-U16 (lambda (p) (get-u16 p 'big)))
+  #|proc:GET-U32
+  The `GET-U32` procedure is a big-endian alias for `get-u32`.
+  The `p` parameter is the binary input port to read.
+  |#
   (define GET-U32 (lambda (p) (get-u32 p 'big)))
+  #|proc:GET-U64
+  The `GET-U64` procedure is a big-endian alias for `get-u64`.
+  The `p` parameter is the binary input port to read.
+  |#
   (define GET-U64 (lambda (p) (get-u64 p 'big)))
+  #|proc:GET-S16
+  The `GET-S16` procedure is a big-endian alias for `get-s16`.
+  The `p` parameter is the binary input port to read.
+  |#
   (define GET-S16 (lambda (p) (get-s16 p 'big)))
+  #|proc:GET-S32
+  The `GET-S32` procedure is a big-endian alias for `get-s32`.
+  The `p` parameter is the binary input port to read.
+  |#
   (define GET-S32 (lambda (p) (get-s32 p 'big)))
+  #|proc:GET-S64
+  The `GET-S64` procedure is a big-endian alias for `get-s64`.
+  The `p` parameter is the binary input port to read.
+  |#
   (define GET-S64 (lambda (p) (get-s64 p 'big)))
 
+  #|proc:PUT-U16
+  The `PUT-U16` procedure is a big-endian alias for `put-u16`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the unsigned 16-bit width.
+  |#
   (define PUT-U16 (lambda (p n) (put-u16 p n 'big)))
+  #|proc:PUT-U32
+  The `PUT-U32` procedure is a big-endian alias for `put-u32`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the unsigned 32-bit width.
+  |#
   (define PUT-U32 (lambda (p n) (put-u32 p n 'big)))
+  #|proc:PUT-U64
+  The `PUT-U64` procedure is a big-endian alias for `put-u64`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the unsigned 64-bit width.
+  |#
   (define PUT-U64 (lambda (p n) (put-u64 p n 'big)))
+  #|proc:PUT-S16
+  The `PUT-S16` procedure is a big-endian alias for `put-s16`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the signed 16-bit width.
+  |#
   (define PUT-S16 (lambda (p n) (put-s16 p n 'big)))
+  #|proc:PUT-S32
+  The `PUT-S32` procedure is a big-endian alias for `put-s32`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the signed 32-bit width.
+  |#
   (define PUT-S32 (lambda (p n) (put-s32 p n 'big)))
+  #|proc:PUT-S64
+  The `PUT-S64` procedure is a big-endian alias for `put-s64`.
+  The `p` parameter is the binary output port to write.
+  The `n` parameter must fit the signed 64-bit width.
+  |#
   (define PUT-S64 (lambda (p n) (put-s64 p n 'big)))
 
 
@@ -631,7 +935,7 @@
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  #|doc
+  #|proc:make-path
   Build paths. A multi-arity variant of builtin `path-build`.
   |#
   (define make-path
@@ -821,7 +1125,7 @@
   (define-who file-size
     (lambda (path) ($file-size who path)))
 
-  #|doc
+  #|proc:file-size-h
   Return a human-readable string of the file size.
   |#
   (define-who file-size-h
@@ -836,24 +1140,28 @@
               [else (format "~,2f GiB" (inexact (/ size 1G)))]))))
 
 
+  (define $mode-any-set?
+    (lambda (path follow-link? bits)
+      (not (fx= 0 (fxlogand (get-mode path follow-link?) bits)))))
+
   (define-who file-readable?
     (case-lambda [(path) (file-readable? path #t)]
                  [(path follow-link?)
-                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
-                          (let ([m (get-mode path follow-link?)])
-                            (fxlogbit? 8 m)))]))
+                  (pcheck ([string? path] [boolean? follow-link?]
+                           [(lambda (x) (file-exists? x follow-link?)) path])
+                          ($mode-any-set? path follow-link? #o444))]))
   (define-who file-writable?
     (case-lambda [(path) (file-writable? path #t)]
                  [(path follow-link?)
-                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
-                          (let ([m (get-mode path follow-link?)])
-                            (fxlogbit? 7 m)))]))
+                  (pcheck ([string? path] [boolean? follow-link?]
+                           [(lambda (x) (file-exists? x follow-link?)) path])
+                          ($mode-any-set? path follow-link? #o222))]))
   (define-who file-executable?
     (case-lambda [(path) (file-executable? path #t)]
                  [(path follow-link?)
-                  (pcheck ([(lambda (x) (file-exists? x follow-link?)) path])
-                          (let ([m (get-mode path follow-link?)])
-                            (fxlogbit? 6 m)))]))
+                  (pcheck ([string? path] [boolean? follow-link?]
+                           [(lambda (x) (file-exists? x follow-link?)) path])
+                          ($mode-any-set? path follow-link? #o111))]))
 
   (define-who file-hidden?
     (case-lambda [(path) (file-hidden? path #t)]
@@ -869,7 +1177,7 @@
                                    (char=? #\. (string-ref path 0))))]
                            [else (todo who)]))]))
 
-  #|doc
+  #|proc:file-special?
   A file is special if it is either a socket, a block/character device, or a FIFO.
   |#
   (define-who file-special?
@@ -881,7 +1189,7 @@
                  (bool (memq t '(FT_socket FT_block FT_chardev FT_fifo)))))]))
 
 
-  #|doc
+  #|proc:same-file?
   Test whether the two paths, `path1` and `path2`, refer to the same file.
 
   On Linux, this procedure compares the files' inodes and their filesystem IDs.
@@ -902,7 +1210,7 @@
                  (and (= inode1 inode2) (= major1 major2) (= minor1 minor2))))]))
 
 
-  #|doc
+  #|proc:same-file-contents?
   Test whether two files have the same content.
   `path1` and `path2` must point to regular files. File contents are compared byte by byte.
   Symlinks are always followed.
@@ -994,7 +1302,7 @@
        ($file-chmod who path '() umode gmode omode)]
       [(who path smode umode gmode omode)
        (pcheck ([file-exists? path]
-                [list? smode umode gmode omode])
+                [(lambda (x) (or (not x) (list? x))) smode umode gmode omode])
                (let* ([m (get-mode path #t)]
                       [sm (file-mode->symbols m)]
                       [filter-mode (lambda (mode i)
@@ -1015,7 +1323,7 @@
                          (chmod path (symbols->file-mode s u g o)))))]))
 
 
-  #|doc
+  #|proc:file-chmod
   Change the permission bits of a file.
 
   If `path` is a symlink, it is always dereferenced.
@@ -1057,41 +1365,41 @@
     (lambda (path mode . rest)
       (apply $file-chmod who path mode rest)))
 
-  #|doc
+  #|proc:file-chmod-s
   Change the special mode only.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-s
     (lambda (path mode)
-      ($file-chmod who mode #f #f #f)))
-  #|doc
+      ($file-chmod who path mode #f #f #f)))
+  #|proc:file-chmod-u
   Change user mode only.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-u
     (lambda (path mode)
-      ($file-chmod who #f mode #f #f)))
-  #|doc
+      ($file-chmod who path #f mode #f #f)))
+  #|proc:file-chmod-g
   Change group mode only.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-g
     (lambda (path mode)
-      ($file-chmod who #f #f mode #f)))
-  #|doc
+      ($file-chmod who path #f #f mode #f)))
+  #|proc:file-chmod-o
   Change others mode only.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-o
     (lambda (path mode)
-      ($file-chmod who #f #f #f mode)))
-  #|doc
+      ($file-chmod who path #f #f #f mode)))
+  #|proc:file-chmod-a
   Change all modes except the special mode.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-a
     (lambda (path mode)
-      ($file-chmod who #f mode mode mode)))
+      ($file-chmod who path #f mode mode mode)))
 
 
 
@@ -1104,7 +1412,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  #|doc
+  #|proc:walk-files
   Traverse the filesystem tree rooted at `path`.
   This is similar to Python's os.walk() method.
 
@@ -1127,7 +1435,7 @@
   If `top-down?` is #f, `walk-files` calls `proc` after all of the subdirectories are visited in 2,
   hence in a bottom-up manner.
 
-  In top-down mode, one can set entries in 2 to #f to disable the visit of the corresponding entries.
+  In top-down mode, one can set entries in 2 to #f to disable visits of those entries.
   In bottom-up mode, this behavior has no effect.
   |#
   (define-who walk-files
@@ -1170,7 +1478,7 @@
                                        (lp (cdr ds))
                                        #f)))))))))]))
 
-  #|doc
+  #|proc:print-file-tree
   Print the file tree rooted at `path`.
   `path` must be a valid directory.
   |#
@@ -1185,7 +1493,7 @@
                                     path))))
 
 
-  #|doc
+  #|proc:file-find
   Find file using a predicate.
   Return the path of the first found file,
   or #f if no matching file is found.
@@ -1213,7 +1521,7 @@
          res)]))
 
   ;; TODO lazy (iter/stream) file-find-all
-  #|doc
+  #|proc:file-find-all
   Like `file-find`, but return a list of all found file.
 
   `follow-link?` determines whether `file-find*` descends into a symlink
@@ -1239,7 +1547,7 @@
          (lb))]))
 
 
-  #|doc
+  #|proc:file-map
   Map `proc` over all files found under `path`, recursively,
   the result of `proc` is collected into a list and returned.
   |#
@@ -1261,7 +1569,7 @@
          (lb))]))
 
 
-  #|doc
+  #|proc:file-for-each
   Apply `proc` over all files found under `path`, recursively.
   This procedure is for effect only.
   |#
@@ -1284,6 +1592,9 @@
   (define file-exists?-no-follow (lambda (path) (file-exists? path #f)))
   (define $touch-empty-file (lambda (path) (call-with-port (open-file-output-port path) (lambda (x) (void)))))
 
+  (define $path-seen?
+    (lambda (path seen)
+      (exists (lambda (p) (string=? p path)) seen)))
 
   (define $readlink
     (let ([ffi (let ([ffi-readlink (foreign-procedure "chezpp_readlink" (string) scheme-object)])
@@ -1297,19 +1608,21 @@
         [(who path recursive?)
          ;; we don't care about whether the link is dangling or not
          (pcheck ([file-exists?-no-follow path] [file-symbolic-link? path])
-                 (let loop ([path path])
-                   (let* ([ln (ffi who path)]
-                          [target (path-build (path-parent path) ln)])
-                     (if (file-symbolic-link? target)
-                         (if recursive?
-                             (loop target)
-                             ln)
-                         (if recursive?
-                             (values ln (path-parent path))
-                             ln)))))])))
+                 (let loop ([path path] [seen '()])
+                   (if ($path-seen? path seen)
+                       (errorf who "symlink cycle detected at: ~a" path)
+                       (let* ([ln (ffi who path)]
+                              [target (path-build (path-parent path) ln)])
+                         (if (file-symbolic-link? target)
+                             (if recursive?
+                                 (loop target (cons path seen))
+                                 ln)
+                             (if recursive?
+                                 (values ln (path-parent path))
+                                 ln))))))])))
 
 
-  #|doc
+  #|proc:readlink
   Return the content of a symbolic link.
 
   If `recursive?`, then the dereference continues until a non-symlink target is met,
@@ -1321,7 +1634,7 @@
     (case-lambda [(path) ($readlink who path #f)]
                  [(path recursive?) ($readlink who path recursive?)]))
 
-  #|doc
+  #|proc:readlink2
   Similar to `readlink`, with the difference being if `recursive?`,
   the return value is the path built with link's parent directory and the symlink content.
   |#
@@ -1339,41 +1652,45 @@
 
   (define $link/copy-helper
     (lambda (who link/copy-what overwrite?)
-      (lambda (src dest)
-        (if (file-exists? dest #f)
-            (let ([overwrite/error
-                   (lambda (dest)
-                     (if (file-exists? dest #f)
-                         (if overwrite?
-                             ;; `dest` is file or symlink to file
-                             ;; If `dest` is symlink, always overwrite the symlink itself.
-                             ;; This is different from `cp` semantics,
-                             ;; but it matches `ln` semantics.
-                             (begin (delete-file dest)
-                                    (link/copy-what src dest))
-                             ($err-file-exists who dest))
-                         (link/copy-what src dest)))])
-              (if (file-directory? dest #t)
-                  (let ([newd (path-build dest (path-last src))])
-                    (if (file-directory? newd #t)
-                        ($err-directory-exists who newd)
-                        (overwrite/error newd)))
-                  (overwrite/error dest)))
-            (link/copy-what src dest)))))
+      (case-lambda
+        [(src dest) (($link/copy-helper who link/copy-what overwrite?) src dest src)]
+        [(src dest name-src)
+         (if (file-exists? dest #f)
+             (let ([overwrite/error
+                    (lambda (dest)
+                      (if (file-exists? dest #f)
+                          (if overwrite?
+                              ;; `dest` is file or symlink to file
+                              ;; If `dest` is symlink, always overwrite the symlink itself.
+                              ;; This is different from `cp` semantics,
+                              ;; but it matches `ln` semantics.
+                              (begin (delete-file dest)
+                                     (link/copy-what src dest))
+                              ($err-file-exists who dest))
+                          (link/copy-what src dest)))])
+               (if (file-directory? dest #t)
+                   (let ([newd (path-build dest (path-last name-src))])
+                     (if (file-directory? newd #t)
+                         ($err-directory-exists who newd)
+                         (overwrite/error newd)))
+                   (overwrite/error dest)))
+             (link/copy-what src dest))])))
 
   ;; Symlinks can also have hard links.
   (define $file-link
-    (lambda (who src dest overwrite?)
-      (let* ([$link (let ([ffi (foreign-procedure "chezpp_link" (string string) scheme-object)])
-                      (lambda (src dest)
-                        (let ([x (ffi src dest)])
-                          (when (string? x)
-                            ($err-file who x)))))]
-             [link ($link/copy-helper who $link overwrite?)])
-        (link src dest))))
+    (case-lambda
+      [(who src dest overwrite?) ($file-link who src dest overwrite? src)]
+      [(who src dest overwrite? name-src)
+       (let* ([$link (let ([ffi (foreign-procedure "chezpp_link" (string string) scheme-object)])
+                       (lambda (src dest)
+                         (let ([x (ffi src dest)])
+                           (when (string? x)
+                             ($err-file who x)))))]
+              [link ($link/copy-helper who $link overwrite?)])
+         (link src dest name-src))]))
 
   ;; TODO use macro in the following?
-  #|doc
+  #|proc:file-link
   Create a hard link from `src` to `dest`.
 
   Symlinks are followed recursively if `follow-link?` is #t.
@@ -1385,12 +1702,12 @@
                            [(lambda (x) (file-exists? x follow-link?)) src])
                           (if (file-symbolic-link? src)
                               (if follow-link?
-                                  ($file-link who (readlink2 src #t) dest #f)
+                                  ($file-link who (readlink2 src #t) dest #f src)
                                   ($file-link who src dest #f))
                               ($file-link who src dest #f)))]))
 
 
-  #|doc
+  #|proc:file-link!
   Similar to `file-link`, but if `dest` already exists, it is overwritten.
   |#
   (define-who file-link!
@@ -1400,7 +1717,7 @@
                            [(lambda (x) (file-exists? x follow-link?)) src])
                           (if (file-symbolic-link? src)
                               (if follow-link?
-                                  ($file-link who (readlink2 src #t) dest #t)
+                                  ($file-link who (readlink2 src #t) dest #t src)
                                   ($file-link who src dest #t))
                               ($file-link who src dest #t)))]))
 
@@ -1416,7 +1733,7 @@
         (link src dest))))
 
 
-  #|doc
+  #|proc:file-symlink
   Create a symbolic link from `src` to `dest`.
   `src` must be a string and is written as is to `dest` as the symlink content.
   |#
@@ -1426,7 +1743,7 @@
               ($file-symlink who src dest #f))))
 
 
-  #|doc
+  #|proc:file-symlink!
   Similar to `file-symlink`, but if `dest` already exists, it is overwritten.
   |#
   (define-who file-symlink!
@@ -1467,7 +1784,7 @@
 
 
   ;; how to convert arbirary time to epoch time?
-  #|doc
+  #|proc:file-touch
   Change the last access and modification times of a file to `time`.
   `time` is the UTC time type ('time-utc) as can be made by `make-time`.
   By default, it is the current time as returned by `(current-time)`.
@@ -1490,7 +1807,7 @@
        ($file-touch who path time time follow-link? force?)]))
 
 
-  #|doc
+  #|proc:file-touch-atime
   Similar to `file-touch`, but updates last access time only.
   The other one is left unchanged.
   |#
@@ -1506,7 +1823,7 @@
        ($file-touch who path time #f follow-link? force?)]))
 
 
-  #|doc
+  #|proc:file-touch-mtime
   Similar to `file-touch`, but updates last modification time only.
   The other one is left unchanged.
   |#
@@ -1525,7 +1842,7 @@
 
 ;;;; copies and moves
 
-  #|doc
+  #|proc:file-copymode
   Copy the permission bits from `src` to `dest`.
 
   If `src` or `dest` is a symlink, it is always dereferenced.
@@ -1537,8 +1854,9 @@
                 (chmod dest m)))))
 
 
-  #|doc
-  Copy the metadata (permission bits, last access time, last modification time) from `src` to `dest`.
+  #|proc:file-copymeta
+  Copy metadata from `src` to `dest`.
+  Metadata includes permission bits, last access time, and last modification time.
 
   If `follow-link?` is #f and `src` is a symlink, the metadata excluding the permission bits
   of the symlink per se is copied. Permission bits are copied from the symlink target.
@@ -1585,7 +1903,7 @@
                                  [else (errorf who "ports do not have the same type")])))))
 
 
-  #|doc
+  #|proc:copy-port
   Copy data from input port `pin` to output port `pout`.
   `pin` and `pout` must be either both binary port or both textual port.
 
@@ -1597,32 +1915,28 @@
 
 
   (define $file-copy
-    (lambda (who src dest overwrite?)
-      ;; `src` can only be regular or symlink
-      (let ([copy-file ($link/copy-helper who (lambda (src dest)
-                                                (call-with-port (open-file-input-port src)
-                                                  (lambda (pin)
-                                                    (call-with-port (open-file-output-port dest)
-                                                      (lambda (pout)
-                                                        ($copy-port who pin pout))))))
-                                          overwrite?)]
-            [copy-link ($link/copy-helper who file-symlink overwrite?)])
-        (cond
-         [(file-symbolic-link? src)
-          ;; readlink src, and reshape `dest`
-          (let ([ln (readlink src)] [dest (if (file-directory? dest #t)
-                                              (let ([newd (path-build dest (path-last src))])
-                                                (if (file-directory? newd #t)
-                                                    ($err-directory-exists who newd)
-                                                    newd))
-                                              dest)])
-            (copy-link ln dest))]
-         [(file-regular? src #f)
-          (copy-file src dest)]
-         [else (unreachable! who)]))))
+    (case-lambda
+      [(who src dest overwrite?) ($file-copy who src dest overwrite? src)]
+      [(who src dest overwrite? name-src)
+       ;; `src` can only be regular or symlink
+       (let ([copy-file ($link/copy-helper who (lambda (src dest)
+                                                 (call-with-port (open-file-input-port src)
+                                                   (lambda (pin)
+                                                     (call-with-port (open-file-output-port dest)
+                                                       (lambda (pout)
+                                                         ($copy-port who pin pout))))))
+                                           overwrite?)]
+             [copy-link ($link/copy-helper who file-symlink overwrite?)])
+         (cond
+          [(file-symbolic-link? src)
+           (let ([ln (readlink src)])
+             (copy-link ln dest name-src))]
+          [(file-regular? src #f)
+           (copy-file src dest name-src)]
+          [else (unreachable! who)]))]))
 
 
-  #|doc
+  #|proc:file-copy
   Copy a single regular file from `src` to `dest`.
 
   `follow-link?`: copy the symlink per se or copy the file it points to (default: #t).
@@ -1634,12 +1948,13 @@
        (pcheck ([string? src dest] [boolean? follow-link?]
                 [(lambda (x) (file-exists? x follow-link?)) src])
                (if (file-symbolic-link? src)
-                   (let ([src (if follow-link? (readlink2 src #t) src)])
-                     ($file-copy who src dest #f))
+                   (if follow-link?
+                       ($file-copy who (readlink2 src #t) dest #f src)
+                       ($file-copy who src dest #f))
                    ($file-copy who src dest #f)))]))
 
 
-  #|doc
+  #|proc:file-copy!
   Similar to `file-copy`, but overwrites `dest` if it exists.
   |#
   (define-who file-copy!
@@ -1649,13 +1964,14 @@
        (pcheck ([string? src dest] [boolean? follow-link?]
                 [(lambda (x) (file-exists? x follow-link?)) src])
                (if (file-symbolic-link? src)
-                   (let ([src (if follow-link? (readlink2 src #t) src)])
-                     ($file-copy who src dest #t))
+                   (if follow-link?
+                       ($file-copy who (readlink2 src #t) dest #t src)
+                       ($file-copy who src dest #t))
                    ($file-copy who src dest #t)))]))
 
 
 
-  #|doc
+  #|proc:file-copytree
   Copy a directory recursively from `src` to `dest`.
 
   It is an error if `src` is not a directory.
@@ -1706,26 +2022,39 @@
                          (errorf who "destination's parent directory doesn't exist: ~a" (path-parent dest))))))]))
 
 
-  #|doc
+  #|proc:file-move
   Move a single file or directory from `src` to `dest`.
 
   `copy` is the procedure used to copy individual files.
   It is `file-copy` with `follow-link?` set to #f by default.
   |#
+  (define $try-rename-file
+    (lambda (src dest)
+      (guard (e [(error? e) #f])
+        (rename-file src dest)
+        #t)))
+
   (define-who file-move
     (case-lambda
       [(src dest)
        (file-move src dest (lambda (src dest) (file-copy src dest #f)))]
       [(src dest copy)
        (pcheck ([string? src dest] [file-exists? src] [procedure? copy])
-               (if (file-directory? src)
+               (if (and (file-directory? src #f)
+                        (not (file-symbolic-link? src)))
                    (begin (file-copytree src dest copy)
                           (file-removetree src))
-                   (begin (copy src dest)
-                          (delete-file src))))]))
+                   (if (file-directory? dest #t)
+                       (begin (copy src dest)
+                              (delete-file src))
+                       (if (and (not (file-exists? dest #f))
+                                ($try-rename-file src dest))
+                           #t
+                           (begin (copy src dest)
+                                  (delete-file src))))))]))
 
 
-  #|doc
+  #|proc:file-removetree
   Remove a directory, recursively.
   It is an error if `path` is not a directory.
 
@@ -1740,9 +2069,10 @@
     (case-lambda
       [(path) (file-removetree path #f)]
       [(path err?)
-       (pcheck ([file-exists? path] [file-directory? path])
-               (if (file-exists? path)
-                   (if (file-directory? path)
+       (pcheck ([string? path] [boolean? err?])
+               (if (file-exists? path #f)
+                   (if (and (file-directory? path #f)
+                            (not (file-symbolic-link? path)))
                        (guard (e [(error? e) (if err? (raise e) #f)])
                          (walk-files (lambda (dir dirs files)
                                        (for-each (lambda (x) (delete-file x err?)) files)
@@ -1755,7 +2085,7 @@
                    (when err? ($err-file-not-found who path))))]))
 
 
-  #|doc
+  #|proc:mkdirs
   Create directory; also create all intermediate directories as needed.
   |#
   (define-who mkdirs
@@ -1777,12 +2107,12 @@
 
 
 
-  #|doc
+  #|macro:define-file-tree
   `define-file-tree` defines two procedures that, when called with a valid path `pdir`,
   will create a file tree rooted at `pdir`.
   The first procedure, named `create-<tree-name>`, operates in non-overwrite mode:
   if the target file tree exists, it raises an error.
-  If you want to overwrite the file tree when it exists, use the second procedure: `create-<tree-name>!`.
+  Use the second procedure, `create-<tree-name>!`, to overwrite an existing tree.
 
   An error is raised if parent of `pdir` does not exist.
 
@@ -1967,12 +2297,14 @@
                  (lambda (who pdir ow?)
                    (pcheck ([string? pdir] [boolean? ow?])
                            (if (file-exists? pdir)
-                               (unless (file-directory? pdir)
-                                 ($err-file-exists who pdir))
+                               (if ow?
+                                   (unless (file-directory? pdir)
+                                     ($err-file-exists who pdir))
+                                   ($err-directory-exists who pdir))
                                (mkdir pdir))
                            (if ow?
-                               #,(parse-decls #t #'mk  #'pdir #'(decl* ...))
-                               #,(parse-decls #f #'mk! #'pdir #'(decl* ...))))))
+                               #,(parse-decls #t #'mk! #'pdir #'(decl* ...))
+                               #,(parse-decls #f #'mk  #'pdir #'(decl* ...))))))
 
                (define-who mk  (lambda (pdir) ($mk who pdir #f)))
                (define-who mk! (lambda (pdir) ($mk who pdir #t)))))])))
@@ -2025,7 +2357,7 @@
               x)))))
 
 
-  #|doc
+  #|macro:fswatcher-mask
   Filesystem events bitmask that can be given to `fswatcher-add!` or returned by `fswatcher-next!`.
   Use expressions like `(fswatcher-mask FSW_access FSW_modify)` to make the right bitmask.
   |#
@@ -2063,7 +2395,7 @@
     (fields (mutable open?) (immutable id) (immutable paths)))
 
 
-  #|doc
+  #|proc:make-fswatcher
   Create a new filesystem watcher object.
   If `block?` is #f and if there's current no events available,
   `fswatcher-next!` returns #f immediately.
@@ -2077,7 +2409,7 @@
                  (make-$fswatcher #t id (make-eqv-hashtable))))]))
 
 
-  #|doc
+  #|proc:close-fswatcher
   Close the given fswatcher object.
   |#
   (define-who close-fswatcher
@@ -2087,7 +2419,7 @@
               ($fswatcher-open?-set! fsw #f))))
 
 
-  #|doc
+  #|proc:fswatcher-add!
   Add a new path to the watch list of the fswatcher object.
   If `path` is a directory, it is not watched recursively.
   If multiple paths that point to the same file are given, only the first path is recorded and
@@ -2097,7 +2429,8 @@
   (fswatcher-mask FSW_access FSW_open FSW_modify FSW_close FSW_delete_self)
 
   The default set of events for a directory is:
-  (fswatcher-mask FSW_access FSW_open FSW_modify FSW_close FSW_create FSW_delete FSW_delete_self FSW_excl_unlink)
+  (fswatcher-mask FSW_access FSW_open FSW_modify FSW_close FSW_create FSW_delete
+                  FSW_delete_self FSW_excl_unlink)
   |#
   (define-who fswatcher-add!
     (case-lambda
@@ -2119,7 +2452,7 @@
                    (hashtable-set! ht fid path))))]))
 
 
-  #|doc
+  #|proc:fswatcher-next!
   Return the next available filesystem event of the fswatcher object.
   The return value is a vector consisting of three values:
   1. the path of the file/dir that triggered the event,
@@ -2136,13 +2469,16 @@
        (pcheck ([$fswatcher? fsw] [$fswatcher-open? fsw] [natural? timeout])
                (let ([res ($fsw-next! who ($fswatcher-id fsw))]
                      [ht ($fswatcher-paths fsw)])
-                 ;; res: (vector fid mask ?name) -> (vector path event-symbols ?name)
-                 (vector-set! res 0 (hashtable-ref ht (vector-ref res 0) #f))
-                 ;;(vector-set! res 1 (fswatcher-mask->symbols (vector-ref res 1)))
-                 res))]))
+                 (if res
+                     (begin
+                       ;; res: (vector fid mask ?name) -> (vector path event-symbols ?name)
+                       (vector-set! res 0 (hashtable-ref ht (vector-ref res 0) #f))
+                       ;;(vector-set! res 1 (fswatcher-mask->symbols (vector-ref res 1)))
+                       res)
+                     #f)))]))
 
 
-  #|doc
+  #|proc:fswatcher-remove!
   Remove the given path from the watch list of the fswatcher object.
   `path` must be a valid path that has been added to the watch list of the fswatcher object already.
   |#
