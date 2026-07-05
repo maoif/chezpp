@@ -1232,9 +1232,63 @@
      (equal? str (read-string (atdir1 "tests/test2.ss")))
      (equal? big (read-datum-fasl (atdir1 "src/big1")))
 
+     ;; error case: moving a symlink to a directory must move the link, not remove the target tree.
+     (let ([root "move_symlink_root"]
+           [target "move_symlink_target"]
+           [dest "move_symlink_dest"])
+       (dynamic-wind
+         (lambda ()
+           (when (file-exists? root #f) (file-removetree root #f))
+           (when (file-exists? target #f) (file-removetree target #f))
+           (when (file-exists? dest #f)
+             (if (file-directory? dest #f)
+                 (file-removetree dest #f)
+                 (delete-file dest #f))))
+         (lambda ()
+           (mkdir root)
+           (mkdir target)
+           (write-string (path-build target "keep.txt") "keep")
+           (file-symlink (path-build ".." target) (path-build root "target-link"))
+           (file-move (path-build root "target-link") dest)
+           (and (file-symbolic-link? dest)
+                (file-directory? target)
+                (string=? "keep" (read-string (path-build target "keep.txt")))))
+         (lambda ()
+           (when (file-exists? root #f) (file-removetree root #f))
+           (when (file-exists? target #f) (file-removetree target #f))
+           (when (file-exists? dest #f)
+             (if (file-directory? dest #f)
+                 (file-removetree dest #f)
+                 (delete-file dest #f))))))
 
      (file-removetree dir1)
      )
+
+
+(mat file-removetree-symlink-safety
+
+     (begin (define dir "removetree_symlink_test")
+            (define target "removetree_symlink_target")
+            (define atdir (lambda (x) (path-build dir x)))
+            (define attarget (lambda (x) (path-build target x)))
+            (when (file-exists? dir #f) (file-removetree dir #f))
+            (when (file-exists? target #f) (file-removetree target #f))
+            (mkdir dir)
+            (mkdir target)
+            (write-string (attarget "keep.txt") "keep")
+            (file-symlink (path-build ".." target) (atdir "target-link"))
+            #t)
+
+     ;; error case: a symlink to a directory must not be accepted as a tree root.
+     (error? (file-removetree (atdir "target-link") #t))
+
+     ;; the target directory and file must survive the failed removal.
+     (and (file-directory? target)
+          (string=? "keep" (read-string (attarget "keep.txt"))))
+
+     (begin (file-removetree dir #t)
+            (file-removetree target #t)
+            #t))
 
 
 (mat fswatcher

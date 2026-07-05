@@ -1712,17 +1712,30 @@
   `copy` is the procedure used to copy individual files.
   It is `file-copy` with `follow-link?` set to #f by default.
   |#
+  (define $try-rename-file
+    (lambda (src dest)
+      (guard (e [(error? e) #f])
+        (rename-file src dest)
+        #t)))
+
   (define-who file-move
     (case-lambda
       [(src dest)
        (file-move src dest (lambda (src dest) (file-copy src dest #f)))]
       [(src dest copy)
        (pcheck ([string? src dest] [file-exists? src] [procedure? copy])
-               (if (file-directory? src)
+               (if (and (file-directory? src #f)
+                        (not (file-symbolic-link? src)))
                    (begin (file-copytree src dest copy)
                           (file-removetree src))
-                   (begin (copy src dest)
-                          (delete-file src))))]))
+                   (if (file-directory? dest #t)
+                       (begin (copy src dest)
+                              (delete-file src))
+                       (if (and (not (file-exists? dest #f))
+                                ($try-rename-file src dest))
+                           #t
+                           (begin (copy src dest)
+                                  (delete-file src))))))]))
 
 
   #|doc
@@ -1740,9 +1753,10 @@
     (case-lambda
       [(path) (file-removetree path #f)]
       [(path err?)
-       (pcheck ([file-exists? path] [file-directory? path])
-               (if (file-exists? path)
-                   (if (file-directory? path)
+       (pcheck ([string? path] [boolean? err?])
+               (if (file-exists? path #f)
+                   (if (and (file-directory? path #f)
+                            (not (file-symbolic-link? path)))
                        (guard (e [(error? e) (if err? (raise e) #f)])
                          (walk-files (lambda (dir dirs files)
                                        (for-each (lambda (x) (delete-file x err?)) files)
