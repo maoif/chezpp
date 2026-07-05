@@ -550,6 +550,49 @@
      (= #o5562 (symbols->file-mode '(t su) '(x r) '(w r) '(w)))
      (= #o7777 (symbols->file-mode '(su sg t) '(r w x) '(r w x) '(r w x)))
 
+     ;; convenience chmod APIs should pass the path through to the shared implementation.
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o644)
+           (file-chmod-u p '(+ x))
+           (fxlogbit? 6 (get-mode p)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o600)
+           (file-chmod-g p '(+ r))
+           (fxlogbit? 5 (get-mode p)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o600)
+           (file-chmod-o p '(+ r))
+           (fxlogbit? 2 (get-mode p)))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
+     (let ([p ($random-file)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (file-touch p)
+           (file-chmod p #o600)
+           (file-chmod-a p '(+ x))
+           (and (fxlogbit? 6 (get-mode p))
+                (fxlogbit? 3 (get-mode p))
+                (fxlogbit? 0 (get-mode p))))
+         (lambda () (when (file-exists? p) (delete-file p)))))
+
      )
 
 

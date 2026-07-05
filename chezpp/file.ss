@@ -994,7 +994,7 @@
        ($file-chmod who path '() umode gmode omode)]
       [(who path smode umode gmode omode)
        (pcheck ([file-exists? path]
-                [list? smode umode gmode omode])
+                [(lambda (x) (or (not x) (list? x))) smode umode gmode omode])
                (let* ([m (get-mode path #t)]
                       [sm (file-mode->symbols m)]
                       [filter-mode (lambda (mode i)
@@ -1063,35 +1063,35 @@
   |#
   (define-who file-chmod-s
     (lambda (path mode)
-      ($file-chmod who mode #f #f #f)))
+      ($file-chmod who path mode #f #f #f)))
   #|doc
   Change user mode only.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-u
     (lambda (path mode)
-      ($file-chmod who #f mode #f #f)))
+      ($file-chmod who path #f mode #f #f)))
   #|doc
   Change group mode only.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-g
     (lambda (path mode)
-      ($file-chmod who #f #f mode #f)))
+      ($file-chmod who path #f #f mode #f)))
   #|doc
   Change others mode only.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-o
     (lambda (path mode)
-      ($file-chmod who #f #f #f mode)))
+      ($file-chmod who path #f #f #f mode)))
   #|doc
   Change all modes except the special mode.
   `mode` must be in symbolic form.
   |#
   (define-who file-chmod-a
     (lambda (path mode)
-      ($file-chmod who #f mode mode mode)))
+      ($file-chmod who path #f mode mode mode)))
 
 
 
