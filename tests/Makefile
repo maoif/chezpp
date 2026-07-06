@@ -33,6 +33,15 @@ $(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
+parser.so: parser.ss ../chezpp.lib ../chez++
+	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
+	rm -f "$$stdout" "$$stderr"; \
+	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	status=$$?; \
+	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
+	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
+	if [ $$status -ne 0 ]; then exit $$status; fi
+
 .PHONY: test-all
 test-all: mat.so $(OBJS_TEST)
 	@rm -f *.out *.stdout *.stderr

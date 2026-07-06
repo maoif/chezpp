@@ -1,12 +1,7 @@
-(import (chezpp)
-        (chezpp parser combinator)
-        (chezpp parser csv)
-        (chezpp parser json5)
-        (chezpp parser xml)
-
-        (chezpp parser wasm)
-        (chezpp parser jclass)
-        (chezpp parser elf))
+(import (chezpp chez)
+        (chezpp list)
+        (chezpp utils)
+        (chezpp parser combinator))
 
 (define runT
   (case-lambda
@@ -371,60 +366,44 @@
                         (loop (cdr b*) (fx+ shift 7) n))))))
             #t)
 
-     (define-syntax test-leb128
-       (syntax-rules ()
-         [(_ bits)
-          (and (andmap (lambda (n)
-                         (= n (decode-uleb128 (encode-uleb128 n))))
-                       (random-list (lambda () (random (expt 2 bits))) 20 21))
-               ;; signed, +
-               (andmap (lambda (n)
-                         (= n (decode-sleb128 bits (encode-sleb128 bits n))))
-                       (random-list (lambda () (random (expt 2 bits))) 20 21))
-               ;; signed, -
-               (andmap (lambda (n)
-                         (let ([n (- n)])
-                           (= n (decode-sleb128 bits (encode-sleb128 bits n)))))
-                       (random-list (lambda () (random (expt 2 bits))) 20 21)))]))
+     (begin
+       (define test-leb128
+         (lambda (bits)
+           (and (andmap (lambda (n)
+                          (= n (decode-uleb128 (encode-uleb128 n))))
+                        (random-list (lambda () (random (expt 2 bits))) 20 21))
+                (andmap (lambda (n)
+                          (= n (decode-sleb128 bits (encode-sleb128 bits n))))
+                        (random-list (lambda () (random (expt 2 bits))) 20 21))
+                (andmap (lambda (n)
+                          (let ([n (- n)])
+                            (= n (decode-sleb128 bits (encode-sleb128 bits n)))))
+                        (random-list (lambda () (random (expt 2 bits))) 20 21)))))
+       #t)
 
      (test-leb128 32)
      (test-leb128 64)
      (test-leb128 128)
 
-     (define-syntax test-<leb128>
-       (syntax-rules ()
-         [(_ bits)
-          ;; (n ...) -> ((lebn ...) ...) -> (lebn ... ...) -> #vu8(...)
-          (and (let* ([n* (random-list (lambda () (random (expt 2 bits))) 20 21)]
-                      [bv (apply bytevector
-                                 (apply append
-                                        (map (lambda (n)
-                                               (encode-uleb128 n))
-                                             n*)))]
-                      [res (equal? n*
-                                   (runB (<rep> <uleb128> 20) bv))])
-                 (println res)
-                 res)
-               (let* ([n* (random-list (lambda () (random (expt 2 bits))) 20 21)]
-                      [bv (apply bytevector
-                                 (apply append
-                                        (map (lambda (n)
-                                               (encode-sleb128 bits n))
-                                             n*)))]
-                      [res (equal? n*
-                                   (runB (<rep> (<sleb128> bits) 20) bv))])
-                 (println res)
-                 res)
-               (let* ([n* (random-list (lambda () (- (random (expt 2 bits)))) 20 21)]
-                      [bv (apply bytevector
-                                 (apply append
-                                        (map (lambda (n)
-                                               (encode-sleb128 bits n))
-                                             n*)))]
-                      [res (equal? n*
-                                   (runB (<rep> (<sleb128> bits) 20) bv))])
-                 (println res)
-                 res))]))
+     (begin
+       (define test-<leb128>
+         (lambda (bits)
+           (and (let* ([n* (random-list (lambda () (random (expt 2 bits))) 20 21)]
+                       [bv (apply bytevector
+                                  (apply append
+                                         (map (lambda (n) (encode-uleb128 n)) n*)))])
+                  (equal? n* (runB (<rep> <uleb128> 20) bv)))
+                (let* ([n* (random-list (lambda () (random (expt 2 bits))) 20 21)]
+                       [bv (apply bytevector
+                                  (apply append
+                                         (map (lambda (n) (encode-sleb128 bits n)) n*)))])
+                  (equal? n* (runB (<rep> (<sleb128> bits) 20) bv)))
+                (let* ([n* (random-list (lambda () (- (random (expt 2 bits)))) 20 21)]
+                       [bv (apply bytevector
+                                  (apply append
+                                         (map (lambda (n) (encode-sleb128 bits n)) n*)))])
+                  (equal? n* (runB (<rep> (<sleb128> bits) 20) bv))))))
+       #t)
 
      (test-<leb128> 32)
      (test-<leb128> 64)
