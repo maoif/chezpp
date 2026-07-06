@@ -1086,7 +1086,8 @@ For simplicity, "PC" in the following documentation means "parser combinator".
 
 
   #|doc
-  `p*` must be a (possibly empty) list of parsers.
+  `p*` must be a non-empty list of parsers.
+  Calling `</>` with no parsers creates a parser that always fails.
 
   `</>` takes a list of parsers as input, and returns a parser that when invoked,
   will try every parser in `p*` one by one, from left to right.
@@ -1099,7 +1100,7 @@ For simplicity, "PC" in the following documentation means "parser combinator".
   (define (</> . p*)
     (lambda (inp state lvl)
       (if (null? p*)
-          (values #t '() inp)
+          (values #f #f "empty choice")
           (let ([old-inp (save-input inp)])
             (let loop ([p* p*] [err #f])
               (if (null? p*)
