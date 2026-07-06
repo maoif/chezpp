@@ -2,7 +2,6 @@
 (putenv "LIBCHEZPP" "@LIBCHEZPP@")
 (load "@CHEZPP_LIB@")
 (load "@FIBER_LIB@")
-(load "@COMBINATOR_LIB@")
 (import (chezpp))
 
 (define load-file*

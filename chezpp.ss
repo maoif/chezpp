@@ -1,8 +1,7 @@
 (library (chezpp)
   (export)
   (import (chezscheme)
-          (chezpp concurrency fiber)
-          (chezpp parser combinator))
+          (chezpp concurrency fiber))
 
   (export (import (chezpp chez)
                   (chezpp match)
@@ -43,4 +42,5 @@
                   (chezpp rich)
                   (chezpp logging)
                   (chezpp benchmark)
-                  (chezpp test))))
+                  (chezpp test)
+                  (chezpp parser))))
