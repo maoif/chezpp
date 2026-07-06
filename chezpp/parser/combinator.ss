@@ -965,6 +965,12 @@ For simplicity, "PC" in the following documentation means "parser combinator".
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
+  (define ensure-progress
+    (lambda (who inp0 inp1)
+      (when (= (input-pos inp0) (input-pos inp1))
+        (errorf who "parser succeeded without consuming input"))))
+
+
   #|doc
   `p` must be a parser.
 
@@ -983,7 +989,8 @@ For simplicity, "PC" in the following documentation means "parser combinator".
         (let loop ([inp inp] [old-inp (save-input inp)])
           (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
             (if stt
-                (begin (lb val)
+                (begin (ensure-progress who old-inp inp1)
+                       (lb val)
                        (loop inp1 (save-input inp1)))
                 (values #t (lb) old-inp)))))))
 
@@ -1001,17 +1008,20 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (lambda (inp state lvl)
       (let ([lb (make-list-builder)])
         ;; 1st
-        (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
-          (if stt
-              (begin (lb val)
-                     (let loop ([inp inp1] [old-inp (save-input inp1)])
-                       (let-values ([(stt val inp2) (parser-call p inp state (fx1+ lvl))])
-                         (if stt
-                             (begin (lb val)
-                                    (loop inp2 (save-input inp2)))
-                             ;; need to backtrack when the last `p` fails
-                             (values #t (lb) old-inp)))))
-              (values #f #f (format "failed ~a: ~a" who inp1)))))))
+        (let ([old-inp (save-input inp)])
+          (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
+            (if stt
+                (begin (ensure-progress who old-inp inp1)
+                       (lb val)
+                       (let loop ([inp inp1] [old-inp (save-input inp1)])
+                         (let-values ([(stt val inp2) (parser-call p inp state (fx1+ lvl))])
+                           (if stt
+                               (begin (ensure-progress who old-inp inp2)
+                                      (lb val)
+                                      (loop inp2 (save-input inp2)))
+                               ;; need to backtrack when the last `p` fails
+                               (values #t (lb) old-inp)))))
+                (values #f #f (format "failed ~a: ~a" who inp1))))))))
 
 
   #|doc
