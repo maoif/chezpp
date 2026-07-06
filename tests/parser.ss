@@ -620,10 +620,13 @@
      ;; Empty choice should fail rather than act as a zero-width successful parser.
      (error? (runT (</>) "abc"))
 
-     ;; Digit parsers are ASCII-only; non-ASCII numeric characters are rejected.
-     (let ([arabic-indic-one (string (integer->char #x0661))])
-       (and (error? (runT <digit> arabic-indic-one))
-            (error? (runT <digit10> arabic-indic-one))))
+     (begin (define arabic-indic-one (string (integer->char #x0661))) #t)
+
+     ;; error: digit parser rejects non-ASCII numeric characters.
+     (error? (runT <digit> arabic-indic-one))
+
+     ;; error: numeric digit parser rejects non-ASCII numeric characters.
+     (error? (runT <digit10> arabic-indic-one))
 
      ;; Repetition over zero-width success is an invalid parser shape.
      (error? (runT (<many> (<result> 1)) ""))

@@ -619,9 +619,24 @@ For simplicity, "PC" in the following documentation means "parser combinator".
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
+  (define ascii-digit?
+    (lambda (c) (char<=? #\0 c #\9)))
+
+  (define ascii-bindigit?
+    (lambda (c) (or (char=? c #\0) (char=? c #\1))))
+
+  (define ascii-octdigit?
+    (lambda (c) (char<=? #\0 c #\7)))
+
+  (define ascii-hexdigit?
+    (lambda (c)
+      (or (ascii-digit? c)
+          (char<=? #\a c #\f)
+          (char<=? #\A c #\F))))
+
   (define-who char->num
     (lambda (c)
-      (if (char<=? #\0 c #\9)
+      (if (ascii-digit? c)
           (fx- (char->integer c) 48)
           (errorf who "not a digit: ~a" c))))
 
@@ -704,41 +719,39 @@ For simplicity, "PC" in the following documentation means "parser combinator".
   Parse a deciaml digit and return the corresponding character.
   |#
   (define <digit>
-    (<satisfy-char> char-numeric? "not a digit"))
+    (<satisfy-char> ascii-digit? "not a digit"))
 
   #|doc
   Parse a binary digit and return the corresponding character.
   |#
   (define <bindigit>
-    (<satisfy-char> (lambda (x) (or (char=? x #\0) (char=? x #\1)))))
+    (<satisfy-char> ascii-bindigit? "not a binary digit"))
 
   #|doc
   Parse a hex digit and return the corresponding character.
   |#
   (define <hexdigit>
-    (<satisfy-char> (lambda (x) (or (char-numeric? x)
-                                    (char<=? #\a x #\f)
-                                    (char<=? #\A x #\F)))))
+    (<satisfy-char> ascii-hexdigit? "not a hexadecimal digit"))
 
   #|doc
   Parse a lower hex digit and return the corresponding character.
   |#
   (define <lower-hexdigit>
-    (<satisfy-char> (lambda (x) (or (char-numeric? x)
+    (<satisfy-char> (lambda (x) (or (ascii-digit? x)
                                     (char<=? #\a x #\f)))))
 
   #|doc
   Parse an upper hex digit and return the corresponding character.
   |#
   (define <upper-hexdigit>
-    (<satisfy-char> (lambda (x) (or (char-numeric? x)
+    (<satisfy-char> (lambda (x) (or (ascii-digit? x)
                                     (char<=? #\A x #\F)))))
 
   #|doc
   Parse a octal digit and return the corresponding character.
   |#
   (define <octdigit>
-    (<satisfy-char> (lambda (x) (char<=? #\0 x #\7))))
+    (<satisfy-char> ascii-octdigit? "not an octal digit"))
 
   #|doc
   `<one-of>` takes a string and returns a parser that succeeds when the current
@@ -1417,7 +1430,11 @@ For simplicity, "PC" in the following documentation means "parser combinator".
 
 
   ;; TODO These can be placed in the front at o=3, but not at o=2.
-  (define c->n (lambda (c) (fx- (char->integer c) 48)))
+  (define c->n
+    (lambda (c)
+      (if (ascii-digit? c)
+          (fx- (char->integer c) 48)
+          (errorf 'c->n "not an ASCII digit: ~a" c))))
   (define hexc->n
     (lambda (c)
       (cond [(char<=? #\a c #\f) (fx- (char->integer c) 87)]
