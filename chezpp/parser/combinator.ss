@@ -276,12 +276,11 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (case-lambda
       [(inp) (advance! inp 1)]
       [(inp n)
-       (let ([len (input-len inp)] [pos (input-pos inp)])
-         (if (= len pos)
-             (errorf who "already at eof")
-             (input-pos-set! inp (if (>= (+ pos n) len)
-                                     len
-                                     (+ pos n)))))]))
+       (pcheck ([natural? n])
+               (let ([len (input-len inp)] [pos (input-pos inp)])
+                 (cond [(zero? n) (void)]
+                       [(= len pos) (errorf who "already at eof")]
+                       [else (input-pos-set! inp (min len (+ pos n)))])))]))
 
   (define update-line/col!
     (lambda (inp c)
