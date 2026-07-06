@@ -417,6 +417,16 @@
              (runB (<u8*> 1 2 3) (u8vec 1 2 3)))
      (error? (runB (<u8*> 1 2 3) (u8vec 1 3 3)))
 
+     ;; Large 64-bit immediate values are valid even when they are not fixnums.
+     (= #xffffffffffffffff
+        (runB (<uimm64> #xffffffffffffffff)
+              (u8vec #xff #xff #xff #xff #xff #xff #xff #xff)))
+
+     ;; Float immediates require flonum arguments and support infinities.
+     (error? (runB (<fimm32le> 1) (u8vec #x00 #x00 #x80 #x3f)))
+     (bool (runB (<fimm32le> +inf.0) (u8vec #x00 #x00 #x80 #x7f)))
+     (bool (runB (<fimm64be> -inf.0) (u8vec #xff #xf0 0 0 0 0 0 0)))
+
      ;; TODO errors
 
      )
@@ -595,5 +605,21 @@
      ;; TODO states <map-st> <bind-st>
 
      ;; TODO [not]-followed-by
+
+     ;; Empty string parser should succeed without advancing or raising EOF.
+     (equal? "" (runT (<string> "") ""))
+     (equal? '("" #\a) (runT (<~> (<string> "") <item>) "a"))
+
+     ;; Empty choice should fail rather than act as a zero-width successful parser.
+     (error? (runT (</>) "abc"))
+
+     ;; Digit parsers are ASCII-only; non-ASCII numeric characters are rejected.
+     (let ([arabic-indic-one (string (integer->char #x0661))])
+       (and (error? (runT <digit> arabic-indic-one))
+            (error? (runT <digit10> arabic-indic-one))))
+
+     ;; Repetition over zero-width success is an invalid parser shape.
+     (error? (runT (<many> (<result> 1)) ""))
+     (error? (runT (<some> (<result> 1)) ""))
 
      )
