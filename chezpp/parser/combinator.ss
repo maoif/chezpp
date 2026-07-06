@@ -562,7 +562,6 @@ For simplicity, "PC" in the following documentation means "parser combinator".
       (when (or (>= n (input-len inp)) (< n 0))
         (errorf who "invaid position ~a, should be between ~a and ~a" n 0 (input-len inp)))
       (let ([new-inp (save-input inp)])
-        (printf "~a: ~a~n" who n)
         (input-pos-set! new-inp n)
         (let-values ([(stt val inp1) (parser-call p new-inp state (fx1+ lvl))])
           (if stt
