@@ -422,10 +422,17 @@
         (runB (<uimm64> #xffffffffffffffff)
               (u8vec #xff #xff #xff #xff #xff #xff #xff #xff)))
 
+     ;; Inexact integral integer immediates are rejected before matching.
+     (error? (runB (<uimm8> 1.0) (u8vec 1)))
+     (error? (runB (<uimm64> 1.0) (u8vec 1 0 0 0 0 0 0 0)))
+
      ;; Float immediates require flonum arguments and support infinities.
      (error? (runB (<fimm32le> 1) (u8vec #x00 #x00 #x80 #x3f)))
      (bool (runB (<fimm32le> +inf.0) (u8vec #x00 #x00 #x80 #x7f)))
      (bool (runB (<fimm64be> -inf.0) (u8vec #xff #xf0 0 0 0 0 0 0)))
+
+     ;; NaN float immediates are rejected because numeric equality cannot match NaN.
+     (error? (runB (<fimm32le> +nan.0) (u8vec 0 0 0 0)))
 
      ;; TODO errors
 

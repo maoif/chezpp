@@ -385,6 +385,18 @@ For simplicity, "PC" in the following documentation means "parser combinator".
                        (begin (advance! inp step) #t)
                        #f))
                  #f))))]))
+  (define-syntax gen-peek/generic!
+    (syntax-rules ()
+      [(_ name ref step endian)
+       (define name
+         (lambda (inp x)
+           (let ([len (input-len inp)] [pos (input-pos inp)])
+             (if (< (+ pos step -1) len)
+                 (let ([y (ref (binary-input-data inp) pos endian)])
+                   (if (= x y)
+                       (begin (advance! inp step) #t)
+                       #f))
+                 #f))))]))
   (define-syntax gen-fpeek!
     (syntax-rules ()
       [(_ name ref step endian)
@@ -399,19 +411,19 @@ For simplicity, "PC" in the following documentation means "parser combinator".
                  #f))))]))
   (gen-peek! peek-u16le! bytevector-u16-ref 2 (endianness little))
   (gen-peek! peek-u32le! bytevector-u32-ref 4 (endianness little))
-  (gen-peek! peek-u64le! bytevector-u64-ref 8 (endianness little))
+  (gen-peek/generic! peek-u64le! bytevector-u64-ref 8 (endianness little))
   (gen-peek! peek-s16le! bytevector-s16-ref 2 (endianness little))
   (gen-peek! peek-s32le! bytevector-s32-ref 4 (endianness little))
-  (gen-peek! peek-s64le! bytevector-s64-ref 8 (endianness little))
+  (gen-peek/generic! peek-s64le! bytevector-s64-ref 8 (endianness little))
   (gen-fpeek! peek-f32le! bytevector-ieee-single-ref 4 (endianness little))
   (gen-fpeek! peek-f64le! bytevector-ieee-double-ref 8 (endianness little))
 
   (gen-peek! peek-u16be! bytevector-u16-ref 2 (endianness big))
   (gen-peek! peek-u32be! bytevector-u32-ref 4 (endianness big))
-  (gen-peek! peek-u64be! bytevector-u64-ref 8 (endianness big))
+  (gen-peek/generic! peek-u64be! bytevector-u64-ref 8 (endianness big))
   (gen-peek! peek-s16be! bytevector-s16-ref 2 (endianness big))
   (gen-peek! peek-s32be! bytevector-s32-ref 4 (endianness big))
-  (gen-peek! peek-s64be! bytevector-s64-ref 8 (endianness big))
+  (gen-peek/generic! peek-s64be! bytevector-s64-ref 8 (endianness big))
   (gen-fpeek! peek-f32be! bytevector-ieee-single-ref 4 (endianness big))
   (gen-fpeek! peek-f64be! bytevector-ieee-double-ref 8 (endianness big))
 
@@ -776,17 +788,19 @@ For simplicity, "PC" in the following documentation means "parser combinator".
              (if v
                  (values #t x inp)
                  (values #f #f (format "~a: expected ~a" who x))))))]))
-  ;; TODO rethink the ranges
-  (define u8?  (lambda (x) (<= 0 x (sub1 (expt 2 8)))))
-  (define u16? (lambda (x) (<= 0 x (sub1 (expt 2 16)))))
-  (define u32? (lambda (x) (<= 0 x (sub1 (expt 2 32)))))
-  (define u64? (lambda (x) (<= 0 x (sub1 (expt 2 64)))))
-  (define s8?  (lambda (x) (<= (- (expt 2 7))  x (sub1 (expt 2 7)))))
-  (define s16? (lambda (x) (<= (- (expt 2 15)) x (sub1 (expt 2 15)))))
-  (define s32? (lambda (x) (<= (- (expt 2 31)) x (sub1 (expt 2 31)))))
-  (define s64? (lambda (x) (<= (- (expt 2 63)) x (sub1 (expt 2 63)))))
-  (define f32? (lambda (x) (<= (- (expt 2 31)) x (sub1 (expt 2 31)))))
-  (define f64? (lambda (x) (<= (- (expt 2 63)) x (sub1 (expt 2 63)))))
+  (define int-in-range?
+    (lambda (x lo hi)
+      (and (integer? x) (exact? x) (<= lo x hi))))
+  (define u8?  (lambda (x) (int-in-range? x 0 (sub1 (expt 2 8)))))
+  (define u16? (lambda (x) (int-in-range? x 0 (sub1 (expt 2 16)))))
+  (define u32? (lambda (x) (int-in-range? x 0 (sub1 (expt 2 32)))))
+  (define u64? (lambda (x) (int-in-range? x 0 (sub1 (expt 2 64)))))
+  (define s8?  (lambda (x) (int-in-range? x (- (expt 2 7))  (sub1 (expt 2 7)))))
+  (define s16? (lambda (x) (int-in-range? x (- (expt 2 15)) (sub1 (expt 2 15)))))
+  (define s32? (lambda (x) (int-in-range? x (- (expt 2 31)) (sub1 (expt 2 31)))))
+  (define s64? (lambda (x) (int-in-range? x (- (expt 2 63)) (sub1 (expt 2 63)))))
+  (define f32? (lambda (x) (and (flonum? x) (not (nan? x)))))
+  (define f64? (lambda (x) (and (flonum? x) (not (nan? x)))))
 
   ;; TODO maybe merge the two gen macros
   ;; TODO rename these since they also change the inp state
