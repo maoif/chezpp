@@ -546,27 +546,25 @@ For simplicity, "PC" in the following documentation means "parser combinator".
       (values #t (input-pos inp) inp)))
 
 
-  #|doc
-  `n` must be a natural number; `p` must be a parser.
-
-  `<pos-at>` takes a natural number `n` and a parser `p` as input, and returns
-  a parser that will temporarily set the current input position to `n` and call
-  `p` from there. If `p` succeeds, its parse value is returned and the input position
-  is restored to where it was before the returned parser is called.
-  The returned parser fails if `n` is greater than or equal to the input length, or
-  when `p` fails.
+  #|proc:<pos-at>
+  The `<pos-at>` procedure takes natural number `n` and parser `p`, and returns a parser.
+  The parser temporarily sets the input position to `n`, runs `p`, and restores the
+  original input position when `p` succeeds. The parser fails when `p` fails.
+  It is an error when `n` is greater than or equal to the input length at parse time.
   |#
   (define-who (<pos-at> n p)
-    (lambda (inp state lvl)
-      ;; TODO error report
-      (when (or (>= n (input-len inp)) (< n 0))
-        (errorf who "invaid position ~a, should be between ~a and ~a" n 0 (input-len inp)))
-      (let ([new-inp (save-input inp)])
-        (input-pos-set! new-inp n)
-        (let-values ([(stt val inp1) (parser-call p new-inp state (fx1+ lvl))])
-          (if stt
-              (values #t val inp)
-              (values #f #f (format "failed ~a: ~a" who inp1)))))))
+    (pcheck ([natural? n] [parser? p])
+            (lambda (inp state lvl)
+              ;; TODO error report
+              (when (>= n (input-len inp))
+                (errorf who "invaid position ~a, should be between ~a and ~a"
+                        n 0 (input-len inp)))
+              (let ([new-inp (save-input inp)])
+                (input-pos-set! new-inp n)
+                (let-values ([(stt val inp1) (parser-call p new-inp state (fx1+ lvl))])
+                  (if stt
+                      (values #t val inp)
+                      (values #f #f (format "failed ~a: ~a" who inp1))))))))
 
 
   #|doc
@@ -663,32 +661,29 @@ For simplicity, "PC" in the following documentation means "parser combinator".
       [(f)     (<satisfy> <item> f "failed predicate")]
       [(f msg) (<satisfy> <item> f msg)]))
 
-  #|doc
-  `c` must be a character.
-
-  `<char>` takes a character `c` and returns a parser that parses `c` specifically.
-  That is, the returned parser succeeds when the current character is `c`,
-  and fails otherwise.
-  When successful, `c` is returned.
+  #|proc:<char>
+  The `<char>` procedure takes character `c` and returns a textual parser.
+  The parser matches exactly `c` at the current input position and returns `c`.
+  It fails when the current character is not `c`.
   |#
   (define-who (<char> c)
-    (lambda (inp state lvl)
-      (if (peek-char! inp c)
-          (values #t c inp)
-          (values #f #f (format "~a: expected ~a" who c)))))
+    (pcheck ([char? c])
+            (lambda (inp state lvl)
+              (if (peek-char! inp c)
+                  (values #t c inp)
+                  (values #f #f (format "~a: expected ~a" who c))))))
 
-  #|doc
-  `str` must be a string.
-
-  `<string>` takes a string `str` and returns a parser that parses `str` specifically.
-  That is, the returned parser succeeds when there is a string equal to `str` in the input.
-  In this case, a newly allocated string equal to `str` is returned.
+  #|proc:<string>
+  The `<string>` procedure takes string `str` and returns a textual parser.
+  The parser matches exactly `str` at the current input position and returns a fresh
+  string containing the matched characters.
   |#
   (define-who (<string> str)
-    (lambda (inp state lvl)
-      (if (peek-string! inp str)
-          (values #t (string-copy str) inp)
-          (values #f #f (format "~a: expected ~a" who str)))))
+    (pcheck ([string? str])
+            (lambda (inp state lvl)
+              (if (peek-string! inp str)
+                  (values #t (string-copy str) inp)
+                  (values #f #f (format "~a: expected ~a" who str))))))
 
   #|doc
   Parse and return an arbirary letter character.
@@ -813,6 +808,10 @@ For simplicity, "PC" in the following documentation means "parser combinator".
   (define s64? (lambda (x) (int-in-range? x (- (expt 2 63)) (sub1 (expt 2 63)))))
   (define f32? (lambda (x) (and (flonum? x) (not (nan? x)))))
   (define f64? (lambda (x) (and (flonum? x) (not (nan? x)))))
+  (define parser? (lambda (x) (or (procedure? x) (lazy-parser? x))))
+  (define sleb128-len? (lambda (x) (and (fixnum? x) (fx> x 0))))
+  (define all-u8? (lambda (x*) (andmap u8? x*)))
+  (define all-parsers? (lambda (x*) (andmap parser? x*)))
 
   ;; TODO maybe merge the two gen macros
   ;; TODO rename these since they also change the inp state
@@ -880,26 +879,26 @@ For simplicity, "PC" in the following documentation means "parser combinator".
   ;; return a copy of the list of bytes if successful
   (define ($<u8*> who)
     (lambda b*
-      (for-each (lambda (x) (unless (<= 0 x 255)
-                              (errorf who "not a valid byte: ~a" x)))
-                b*)
-      (lambda (inp state lvl)
-        (let loop ([u8* b*])
-          (if (null? u8*)
-              (values #t (list-copy b*) inp)
-              (if (peek-u8! inp (car u8*))
-                  (loop (cdr u8*))
-                  (values #f #f (format "~a: expected ~a" who (car u8*)))))))))
+      (pcheck ([all-u8? b*])
+              (lambda (inp state lvl)
+                (let loop ([u8* b*])
+                  (if (null? u8*)
+                      (values #t (list-copy b*) inp)
+                      (if (peek-u8! inp (car u8*))
+                          (loop (cdr u8*))
+                          (values #f #f (format "~a: expected ~a" who (car u8*))))))))))
 
-  #|doc
-  `<u8*>` takes a single list of byte values (fixnums between 0 and 255 inclusive)
-  and returns a binary parser that tries to parse exactly these bytes in sequence
-  in the input. If the parser succeeds, a copy of the given list of bytes is returned,
+  #|proc:<u8*>
+  The `<u8*>` procedure takes byte values `b*`, each an integer from 0 to 255, and returns
+  a binary parser. The parser matches exactly those bytes in order and returns a fresh
+  list containing the matched bytes.
   |#
   (define-who <u8*> ($<u8*> who))
 
-  #|doc
-  `<bytes>` is an alias of `<u8*>`.
+  #|proc:<bytes>
+  The `<bytes>` procedure takes byte values `b*`, each an integer from 0 to 255, and
+  returns a binary parser. The parser matches exactly those bytes in order and returns a
+  fresh list containing the matched bytes.
   |#
   (define-who <bytes> ($<u8*> who))
 
@@ -928,23 +927,22 @@ For simplicity, "PC" in the following documentation means "parser combinator".
                           (values #f #f (format "~a: expected ~a (~a)" who (string-ref c* i) b)))))))))
 
 
-  #|doc
-  `n` must be a natural number.
-
-  `<u8vec>` takes a natural number `n` as input and returns a parser that when invoked,
-  will parse the next `n` bytes and return them in a bytevector.
-  It is an error if the remaining bytes in the input are less than `n` bytes.
+  #|proc:<u8vec>
+  The `<u8vec>` procedure takes natural number `n` and returns a binary parser.
+  The parser consumes the next `n` bytes and returns them in a fresh bytevector.
+  It is an error when fewer than `n` bytes remain in the input.
   |#
   (define-who (<u8vec> n)
-    (lambda (inp state lvl)
-      (let ([len (input-len inp)] [pos (input-pos inp)])
-        ;; TODO how to report error?
-        (when (< n 0) (errorf who "invalid count: ~a" n))
-        (when (> (+ pos n) len) (errorf who "count is too long: ~a + ~a > ~a" pos n len))
-        (let ([bv (make-bytevector n 0)] [data (binary-input-data inp)])
-          (bytevector-copy! data pos bv 0 n)
-          (input-pos-set! inp (+ pos n))
-          (values #t bv inp)))))
+    (pcheck ([natural? n])
+            (lambda (inp state lvl)
+              (let ([len (input-len inp)] [pos (input-pos inp)])
+                ;; TODO how to report error?
+                (when (> (+ pos n) len)
+                  (errorf who "count is too long: ~a + ~a > ~a" pos n len))
+                (let ([bv (make-bytevector n 0)] [data (binary-input-data inp)])
+                  (bytevector-copy! data pos bv 0 n)
+                  (input-pos-set! inp (+ pos n))
+                  (values #t bv inp))))))
 
 
   #|doc
@@ -964,23 +962,26 @@ For simplicity, "PC" in the following documentation means "parser combinator".
               (values #f #f (format "~a: failed to read next byte" who)))))))
 
 
-  #|doc
-  Return a parser that parses a signed LEB128-encoded number that is `len` bits long.
+  #|proc:<sleb128>
+  The `<sleb128>` procedure takes positive fixnum bit length `len`.
+  It returns a binary parser that reads a signed LEB128-encoded integer.
+  The parser interprets the sign bit using `len` bits and returns the decoded integer.
   |#
   (define-who (<sleb128> len)
-    (lambda (inp state lvl)
-      (let loop ([shift 0] [n 0])
-        (let ([b (peek-u8 inp)])
-          (if b
-              (let* ([bits (fxlogand b #x7f)] [cont (fxsrl (fxlogand b #x80) 7)]
-                     [n (+ n (ash bits shift))])
-                (if (fx= cont 0)
-                    (let ([res (if (and (fx< shift len) (logbit? 6 b))
-                                   (logor n (ash -1 (fx+ 7 shift)))
-                                   n)])
-                      (values #t res inp))
-                    (loop (fx+ shift 7) n)))
-              (values #f #f (format "~a: failed to read next byte" who)))))))
+    (pcheck ([sleb128-len? len])
+            (lambda (inp state lvl)
+              (let loop ([shift 0] [n 0])
+                (let ([b (peek-u8 inp)])
+                  (if b
+                      (let* ([bits (fxlogand b #x7f)] [cont (fxsrl (fxlogand b #x80) 7)]
+                             [n (+ n (ash bits shift))])
+                        (if (fx= cont 0)
+                            (let ([res (if (and (fx< shift len) (logbit? 6 b))
+                                           (logor n (ash -1 (fx+ 7 shift)))
+                                           n)])
+                              (values #t res inp))
+                            (loop (fx+ shift 7) n)))
+                      (values #f #f (format "~a: failed to read next byte" who))))))))
 
 
 
@@ -997,57 +998,50 @@ For simplicity, "PC" in the following documentation means "parser combinator".
         (errorf who "parser succeeded without consuming input"))))
 
 
-  #|doc
-  `p` must be a parser.
-
-  `<many>` takes a parser `p` and returns a parser that when invoked,
-  will run `p` as many times as possible, until it fails.
-  The last failure is ignored and the parser values of previous successful runs are
-  collected into a list and returned.
-  If `p` fails the first time it is run, `'()` is returned.
-  This means the parser returned by `<many>` never fails.
-
-  `<many>` is like the `*` operator in regular expression.
+  #|proc:<many>
+  The `<many>` procedure takes parser `p` and returns a parser that runs `p` repeatedly.
+  The parser `p` must consume input whenever it succeeds; otherwise an error is raised.
+  It returns a list of values produced by successful runs of `p`.
+  If `p` fails before any successful run, the returned parser succeeds with `'()`.
   |#
   (define-who (<many> p)
-    (lambda (inp state lvl)
-      (let ([lb (make-list-builder)])
-        (let loop ([inp inp] [old-inp (save-input inp)])
-          (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
-            (if stt
-                (begin (ensure-progress who old-inp inp1)
-                       (lb val)
-                       (loop inp1 (save-input inp1)))
-                (values #t (lb) old-inp)))))))
+    (pcheck ([parser? p])
+            (lambda (inp state lvl)
+              (let ([lb (make-list-builder)])
+                (let loop ([inp inp] [old-inp (save-input inp)])
+                  (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
+                    (if stt
+                        (begin (ensure-progress who old-inp inp1)
+                               (lb val)
+                               (loop inp1 (save-input inp1)))
+                        (values #t (lb) old-inp))))))))
 
 
-  #|doc
-  `p` must be a parser.
-
-  `<some>` is similar to `<many>`, with the difference that `p` must succeed at least once
-  in the parser returned by `<some>`.
-  Parser values of successful runs of `p` are collected into a list and returned.
-
-  `<some>` is like the `+` operator in regular expression.
+  #|proc:<some>
+  The `<some>` procedure takes parser `p` and returns a parser that runs `p` one or more
+  times. The parser `p` must consume input whenever it succeeds; otherwise an error is
+  raised. It returns a list of values produced by successful runs of `p`.
   |#
   (define-who (<some> p)
-    (lambda (inp state lvl)
-      (let ([lb (make-list-builder)])
-        ;; 1st
-        (let ([old-inp (save-input inp)])
-          (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
-            (if stt
-                (begin (ensure-progress who old-inp inp1)
-                       (lb val)
-                       (let loop ([inp inp1] [old-inp (save-input inp1)])
-                         (let-values ([(stt val inp2) (parser-call p inp state (fx1+ lvl))])
-                           (if stt
-                               (begin (ensure-progress who old-inp inp2)
-                                      (lb val)
-                                      (loop inp2 (save-input inp2)))
-                               ;; need to backtrack when the last `p` fails
-                               (values #t (lb) old-inp)))))
-                (values #f #f (format "failed ~a: ~a" who inp1))))))))
+    (pcheck ([parser? p])
+            (lambda (inp state lvl)
+              (let ([lb (make-list-builder)])
+                ;; 1st
+                (let ([old-inp (save-input inp)])
+                  (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
+                    (if stt
+                        (begin (ensure-progress who old-inp inp1)
+                               (lb val)
+                               (let loop ([inp inp1] [old-inp (save-input inp1)])
+                                 (let-values ([(stt val inp2)
+                                               (parser-call p inp state (fx1+ lvl))])
+                                   (if stt
+                                       (begin (ensure-progress who old-inp inp2)
+                                              (lb val)
+                                              (loop inp2 (save-input inp2)))
+                                       ;; need to backtrack when the last `p` fails
+                                       (values #t (lb) old-inp)))))
+                        (values #f #f (format "failed ~a: ~a" who inp1)))))))))
 
 
   #|doc
@@ -1070,16 +1064,14 @@ For simplicity, "PC" in the following documentation means "parser combinator".
               (values #t '() old-inp))))))
 
 
-  #|doc
-  `p` must be a parser; `n` must be a natural number.
-
-  `<rep>` takes a parser `p` and a natural number `n` as input, and returns
-  a parser that repeatedly invokes `p` `n` times.
-  If all runs of `p` succeed, the `n` parse values are returned in a list in order.
-  If any attempt of `p` fails, the returned parser fails.
+  #|proc:<rep>
+  The `<rep>` procedure takes parser `p` and natural number `n`, and returns a parser.
+  The returned parser repeatedly invokes `p` exactly `n` times.
+  If all runs of `p` succeed, it returns the `n` parse values in a list.
+  If any run of `p` fails, the returned parser fails.
   |#
   (define-who (<rep> p n)
-    (pcheck ([procedure? p] [natural? n])
+    (pcheck ([parser? p] [natural? n])
             (lambda (inp state lvl)
               (let ([lb (make-list-builder)])
                 (let loop ([i 0] [inp1 inp])
@@ -1092,211 +1084,182 @@ For simplicity, "PC" in the following documentation means "parser combinator".
                             (values #f #f (format "failed ~a: ~a" who inp2))))))))))
 
 
-  #|doc
-  `p` must be a parser; `n` must be a natural number.
-
-  `<skip>` takes a parser `p` and a natural number `n` as input, and returns
-  a parser that repeatedly invokes `p` `n` times.
-  If all runs of `p` succeed, the `n` parse values are ignored and `'()` is returned.
-  If any attempt of `p` fails, the returned parser fails.
+  #|proc:<skip>
+  The `<skip>` procedure takes parser `p` and natural number `n`, and returns a parser.
+  The parser runs `p` exactly `n` times, ignores the values, and returns `'()`.
+  It fails when any run of `p` fails.
   |#
   (define-who (<skip> p n)
-    (lambda (inp state lvl)
-      (let loop ([i 0] [inp1 inp])
-        (if (fx= i n)
-            (values #t '() inp1)
-            (let-values ([(stt val inp2) (parser-call p inp1 state (fx1+ lvl))])
-              (if stt
-                  (loop (fx1+ i) inp2)
-                  (values #f #f (format "failed ~a: ~a" who inp2))))))))
+    (pcheck ([parser? p] [natural? n])
+            (lambda (inp state lvl)
+              (let loop ([i 0] [inp1 inp])
+                (if (fx= i n)
+                    (values #t '() inp1)
+                    (let-values ([(stt val inp2) (parser-call p inp1 state (fx1+ lvl))])
+                      (if stt
+                          (loop (fx1+ i) inp2)
+                          (values #f #f (format "failed ~a: ~a" who inp2)))))))))
 
 
-  #|doc
-  `p*` must be a non-empty list of parsers.
-  Calling `</>` with no parsers creates a parser that always fails.
-
-  `</>` takes a list of parsers as input, and returns a parser that when invoked,
-  will try every parser in `p*` one by one, from left to right.
-  The returned parser succeeds when one of the parser succeeds and its parse value
-  is returned. The returned parser fails when all parsers are tried but none of them
-  succeed.
-
-  `</>` is like the `|` operator in regular expression, but implements left-biased choice.
+  #|proc:</>
+  The `</>` procedure takes zero or more parsers and returns a left-biased choice parser.
+  The returned parser tries each parser from left to right. If no parser is supplied, the
+  returned parser always fails.
   |#
   (define (</> . p*)
-    (lambda (inp state lvl)
-      (if (null? p*)
-          (values #f #f "empty choice")
-          (let ([old-inp (save-input inp)])
-            (let loop ([p* p*] [err #f])
+    (pcheck ([all-parsers? p*])
+            (lambda (inp state lvl)
               (if (null? p*)
-                  (values #f #f (format "failed </>: ~a" err))
-                  (let-values ([(stt val inp1) (parser-call (car p*) (save-input old-inp) state (fx1+ lvl))])
-                    (if stt
-                        (values #t val inp1)
-                        (loop (cdr p*) inp1)))))))))
+                  (values #f #f "empty choice")
+                  (let ([old-inp (save-input inp)])
+                    (let loop ([p* p*] [err #f])
+                      (if (null? p*)
+                          (values #f #f (format "failed </>: ~a" err))
+                          (let-values ([(stt val inp1)
+                                        (parser-call (car p*) (save-input old-inp)
+                                                     state (fx1+ lvl))])
+                            (if stt
+                                (values #t val inp1)
+                                (loop (cdr p*) inp1))))))))))
 
 
-  #|doc
-  `p*` must be a (possibly empty) list of parsers.
-
-  `<~>` takes a list of parsers as input, and returns a parser that when invoked,
-  will run all parsers in `p*` in sequence.
-  The returned parser succeeds when all parsers in `p*` succeed and their parse values
-  are returned in a list. The returned parser fails when any one of the parsers fails.
+  #|proc:<~>
+  The `<~>` procedure takes zero or more parsers `p*` and returns a sequence parser.
+  The returned parser runs each parser in order, returns a list of their values when all
+  parsers succeed, and fails when any parser fails.
   |#
   (define-who (<~> . p*)
-    (lambda (inp state lvl)
-      (let ([lb (make-list-builder)])
-        (let loop ([inp1 inp] [p* p*])
-          (if (null? p*)
-              (values #t (lb) inp1)
-              (let-values ([(stt val inp2) (parser-call (car p*) inp1 state (fx1+ lvl))])
-                (if stt
-                    (begin (lb val)
-                           (loop inp2 (cdr p*)))
-                    (values #f #f (format "failed ~a: ~a" who inp2)))))))))
+    (pcheck ([all-parsers? p*])
+            (lambda (inp state lvl)
+              (let ([lb (make-list-builder)])
+                (let loop ([inp1 inp] [p* p*])
+                  (if (null? p*)
+                      (values #t (lb) inp1)
+                      (let-values ([(stt val inp2)
+                                    (parser-call (car p*) inp1 state (fx1+ lvl))])
+                        (if stt
+                            (begin (lb val)
+                                   (loop inp2 (cdr p*)))
+                            (values #f #f (format "failed ~a: ~a" who inp2))))))))))
 
 
-  #|doc
-  `p*` must be a (possibly empty) list of parsers;
-  `n` must be a number between 0 and length of `p*` - 1, inclusive.
-
-  `<~n>` takes a natural number `n` and a list of parsers `p*` as input,
-  and returns a parser that behaves just like the parser returned by `<~>`,
-  except that when the returned parser succeeds, only the parse value of the
-  `n`th parser in `p*` is returned.
+  #|proc:<~n>
+  The `<~n>` procedure takes natural number `n` and zero or more parsers `p*`.
+  It returns a sequence parser like `<~>`, except success returns only the value from
+  parser index `n`. It is an error when `n` is outside the supplied parser range.
   |#
   (define-who (<~n> n . p*)
-    (lambda (inp state lvl)
-      (let* ([p* p*] [len (length p*)] [v #f])
-        (if (<= 0 n (fx1- len))
-            (let loop ([i 0] [p* p*] [inp inp])
-              (if (null? p*)
-                  (values #t v inp)
-                  (let-values ([(stt val inp1) (parser-call (car p*) inp state (fx1+ lvl))])
-                    (if stt
-                        (begin (when (fx= i n) (set! v val))
-                               (loop (fx1+ i) (cdr p*) inp1))
-                        (values #f #f (format "failed ~a: ~a" who inp1))))))
-            (errorf who "bad parser index ~a (must be between 0 and ~a)" n (fx1- len))))))
+    (pcheck ([natural? n] [all-parsers? p*])
+            (lambda (inp state lvl)
+              (let* ([p* p*] [len (length p*)] [v #f])
+                (if (<= 0 n (fx1- len))
+                    (let loop ([i 0] [p* p*] [inp inp])
+                      (if (null? p*)
+                          (values #t v inp)
+                          (let-values ([(stt val inp1)
+                                        (parser-call (car p*) inp state (fx1+ lvl))])
+                            (if stt
+                                (begin (when (fx= i n) (set! v val))
+                                       (loop (fx1+ i) (cdr p*) inp1))
+                                (values #f #f (format "failed ~a: ~a" who inp1))))))
+                    (errorf who "bad parser index ~a (must be between 0 and ~a)"
+                            n (fx1- len)))))))
 
 
-  #|doc
-  `p` must be a parser; `f` must be a unary function that returns one value.
-
-  `<map>` takes a semantic function `f` and a parser `p` as input, and returns a parser
-  that when invoked, will invoke `p`. If `p` succeeds, `f` is applied to its parse value,
-  and `f`'s return value is returned.
-  The returned parser fails if `p` fails. Its behavior is undefined if `f` fails in any way.
+  #|proc:<map>
+  The `<map>` procedure takes function `f` and parser `p`, and returns a parser.
+  The function `f` must accept one parse value and return one value. When `p` succeeds,
+  the returned parser applies `f` to the parse value and returns the result.
   |#
   (define-who (<map> f p)
-    (lambda (inp state lvl)
-      (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
-        (if stt
-            (values #t (f val) inp1)
-            (values #f #f (format "failed ~a: ~a" who inp1))))))
+    (pcheck ([procedure? f] [parser? p])
+            (lambda (inp state lvl)
+              (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
+                (if stt
+                    (values #t (f val) inp1)
+                    (values #f #f (format "failed ~a: ~a" who inp1)))))))
 
 
-  #|doc
-  `p` must be a parser; `f` must be a binary function that returns one value.
-
-  `<map-st>` is similar to `<map>`, with the difference that `<map-st>`'s first argument
-  must be a binary function that will receive both the parse value of `p` (if it succeeds)
-  and the implicit state value that is created when the parse action begins.
-  That's why there's "-st" in the procedure's name (meaning "state").
-  This PC is useful when implementing stateful parsing.
+  #|proc:<map-st>
+  The `<map-st>` procedure takes function `f` and parser `p`, and returns a parser.
+  The function `f` must accept a parse value and the parser state, and return one value.
+  When `p` succeeds, the returned parser applies `f` and returns the result.
   |#
   (define-who (<map-st> f p)
-    (lambda (inp state lvl)
-      (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
-        (if stt
-            (values #t (f val state) inp1)
-            (values #f #f (format "failed ~a: ~a" who inp1))))))
+    (pcheck ([procedure? f] [parser? p])
+            (lambda (inp state lvl)
+              (let-values ([(stt val inp1) (parser-call p inp state (fx1+ lvl))])
+                (if stt
+                    (values #t (f val state) inp1)
+                    (values #f #f (format "failed ~a: ~a" who inp1)))))))
 
 
-  #|doc
-  `p` must be a parser; `f` must be a unary function that returns one value,
-  and the value must be a parser.
-
-  `<bind>` takes a parser `p` and a unary function `f` as input and returns a
-  parser that will first run `p`, obtain its parse value, then apply `f` to the
-  parse value to obtain a new parser, and run the new parser.
-  In other words, the parse value of `p` is fed to `f` to obtain a new parser to run.
-  The parser created by `<bind>` fails when either `p` fails or when the parser returned
-  by `f` fails. If `f` fails in any way, the parse behavior is undefined.
-
-  `<bind>` is useful for implementing some forms of context-sensitive parsing
-  where the next parse action depends on the current parse value. In fact,
-  this is just the monadic bind operation `>>=` as can be found in, e.g., Haskell.
+  #|proc:<bind>
+  The `<bind>` procedure takes parser `p` and function `f`, and returns a parser.
+  The function `f` must accept one parse value and return a parser. When `p` succeeds,
+  the returned parser applies `f` to the parse value, then runs the parser from `f`.
   |#
   (define-who (<bind> p f)
-    (lambda (inp state lvl)
-      (let-values ([(stt val inp) (parser-call p inp state (fx1+ lvl))])
-        (if stt
-            ((f val) inp state (fx1+ lvl))
-            (values #f #f (format "failed ~a: ~a" who inp))))))
+    (pcheck ([parser? p] [procedure? f])
+            (lambda (inp state lvl)
+              (let-values ([(stt val inp) (parser-call p inp state (fx1+ lvl))])
+                (if stt
+                    (let ([p1 (f val)])
+                      (parser-call p1 inp state (fx1+ lvl)))
+                    (values #f #f (format "failed ~a: ~a" who inp)))))))
 
 
-  #|doc
-  `p` must be a parser; `f` must be a binary function that returns one value,
-  and the value must be a parser.
-
-  `<bind-st>` is to `<bind>` what `<map-st>` is to `<map>`, that is, the second
-  argument of `<bind-st>` is also a function that takes two arguments, the first being
-  the parse value of `p`, the second being the implicit state value.
-  The rest is the same as in `<bind>`.
+  #|proc:<bind-st>
+  The `<bind-st>` procedure takes parser `p` and function `f`, and returns a parser.
+  The function `f` must accept a parse value and the parser state, and return a parser.
+  When `p` succeeds, the returned parser applies `f`, then runs the parser from `f`.
   |#
   (define-who (<bind-st> p f)
-    (lambda (inp state lvl)
-      (let-values ([(stt val inp) (parser-call p inp state (fx1+ lvl))])
-        (if stt
-            ((f val state) inp state (fx1+ lvl))
-            (values #f #f (format "failed ~a: ~a" who inp))))))
+    (pcheck ([parser? p] [procedure? f])
+            (lambda (inp state lvl)
+              (let-values ([(stt val inp) (parser-call p inp state (fx1+ lvl))])
+                (if stt
+                    (let ([p1 (f val state)])
+                      (parser-call p1 inp state (fx1+ lvl)))
+                    (values #f #f (format "failed ~a: ~a" who inp)))))))
 
 
-  #|doc
-  `p0` and `p1` must be parsers.
-
-  `<followed-by>` takes two parsers `p0` and `p1` as input and returns a parser that
-  runs `p0` and `p1` in sequence and succeeds when both `p0` and `p1` succeeds.
-  If the returned parser succeeds, the value of `p0` is returned and the postion is set to where it
-  was before `p1` was run.
-
-  `<followed-by>` fails when either `p0` or `p1` fails.
+  #|proc:<followed-by>
+  The `<followed-by>` procedure takes parsers `p0` and `p1`, and returns a parser.
+  The returned parser runs `p0`, then checks that `p1` succeeds without consuming `p1`'s
+  input. It returns the value from `p0` and fails when either parser fails.
   |#
   (define-who (<followed-by> p0 p1)
-    (lambda (inp state lvl)
-      (let-values ([(stt1 val1 inp1) (parser-call p0 inp state (fx1+ lvl))])
-        (if stt1
-            (let ([old-input (save-input inp1)])
-              (let-values ([(stt2 val2 inp2) (parser-call p1 inp1 state (fx1+ lvl))])
-                (if stt2
-                    (values #t val1 old-input)
-                    (values #f #f (format "failed ~a: second parser fails" who)))))
-            (values #f #f inp1)))))
+    (pcheck ([parser? p0 p1])
+            (lambda (inp state lvl)
+              (let-values ([(stt1 val1 inp1) (parser-call p0 inp state (fx1+ lvl))])
+                (if stt1
+                    (let ([old-input (save-input inp1)])
+                      (let-values ([(stt2 val2 inp2)
+                                    (parser-call p1 inp1 state (fx1+ lvl))])
+                        (if stt2
+                            (values #t val1 old-input)
+                            (values #f #f (format "failed ~a: second parser fails" who)))))
+                    (values #f #f inp1))))))
 
 
-  #|doc
-  `p0` and `p1` must be parsers.
-
-  `<not-followed-by>`  takes two parsers `p0` and `p1` as input and returns a parser that
-  runs `p0` and `p1` in sequence and succeeds when `p0` succeeds and `p1` *fails*.
-  If the returned parser succeeds, the value of `p0` is returned and the postion is set to where it
-  was before `p1` was run.
-
-  `<not-followed-by>` fails when `p0` fails or when `p1` succeeds.
+  #|proc:<not-followed-by>
+  The `<not-followed-by>` procedure takes parsers `p0` and `p1`, and returns a parser.
+  The returned parser runs `p0`, then checks that `p1` fails without consuming `p1`'s
+  input. It returns the value from `p0` and fails when `p0` fails or `p1` succeeds.
   |#
   (define-who (<not-followed-by> p0 p1)
-    (lambda (inp state lvl)
-      (let-values ([(stt1 val1 inp1) (parser-call p0 inp state (fx1+ lvl))])
-        (if stt1
-            (let ([old-input (save-input inp1)])
-              (let-values ([(stt2 val2 inp2) (parser-call p1 inp1 state (fx1+ lvl))])
-                (if stt2
-                    (values #f #f (format "failed ~a: second parser succeeds" who))
-                    (values #t val1 old-input))))
-            (values #f #f inp1)))))
+    (pcheck ([parser? p0 p1])
+            (lambda (inp state lvl)
+              (let-values ([(stt1 val1 inp1) (parser-call p0 inp state (fx1+ lvl))])
+                (if stt1
+                    (let ([old-input (save-input inp1)])
+                      (let-values ([(stt2 val2 inp2)
+                                    (parser-call p1 inp1 state (fx1+ lvl))])
+                        (if stt2
+                            (values #f #f (format "failed ~a: second parser succeeds" who))
+                            (values #t val1 old-input))))
+                    (values #f #f inp1))))))
 
 
   #|doc
@@ -1344,30 +1307,24 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (<map> (lambda (val) const) p))
 
 
-  #|doc
-  `p` must be a parser.
-
-  `<as-string>` takes a parser `p`, and returns a parser that when invoked,
-  will invoke `p`. When `p` succeeds, its parse value, which must be a list of characters,
-  will be converted to a string and returned.
-  The returned parser fails either when `p` fails, or when `p` succeeds but its parse value
-  cannot be converted to a string.
+  #|proc:<as-string>
+  The `<as-string>` procedure takes parser `p` and returns a parser.
+  When `p` succeeds, the returned parser converts `p`'s list of characters to a string
+  and returns it.
   |#
   (define (<as-string> p)
-    (<map> (lambda (val) (apply string val)) p))
+    (pcheck ([parser? p])
+            (<map> (lambda (val) (apply string val)) p)))
 
 
-  #|doc
-  `p` must be a parser.
-
-  `<as-symbol>` takes a parser `p`, and returns a parser that when invoked,
-  will invoke `p`. When `p` succeeds, its parse value, which must be a list of characters,
-  will be converted to a symbol and returned.
-  The returned parser fails either when `p` fails, or when `p` succeeds but its parse value
-  cannot be converted to a symbol.
+  #|proc:<as-symbol>
+  The `<as-symbol>` procedure takes parser `p` and returns a parser.
+  When `p` succeeds, the returned parser converts `p`'s list of characters to a symbol
+  and returns it.
   |#
   (define (<as-symbol> p)
-    (<map> (lambda (val) (string->symbol (apply string val))) p))
+    (pcheck ([parser? p])
+            (<map> (lambda (val) (string->symbol (apply string val))) p)))
 
   (define (<as-integer> p)
     (<map> (lambda (val)
@@ -1386,46 +1343,45 @@ For simplicity, "PC" in the following documentation means "parser combinator".
              (fold-left (lambda (s n) (+ (* 10 s) (char->num n))) 0 val))
            (<some> <digit>)))
 
-  ;; TODO reshape the result
+  #|proc:<sep-by>
+  The `<sep-by>` procedure takes parsers `p0` and `p1`, and returns a parser.
+  The returned parser parses zero or more `p0` values separated by `p1` values.
+  It returns a list of values from `p0` and ignores values from `p1`.
+  |#
   (define (<sep-by> p0 p1)
-    (<map> (lambda (val) (if (null? val) val (cons (car val) (cadr val))))
-           (<optional> (<~> p0 (<many> (~> p1 p0))))))
+    (pcheck ([parser? p0 p1])
+            (<map> (lambda (val) (if (null? val) val (cons (car val) (cadr val))))
+                   (<optional> (<~> p0 (<many> (~> p1 p0)))))))
 
-  ;; succeed if text parsed by `p0` is separated by text parsed by `p1`,
-  ;; `p0` must succeed once
+  #|proc:<sep-by1>
+  The `<sep-by1>` procedure takes parsers `p0` and `p1`, and returns a parser.
+  The returned parser parses one or more `p0` values separated by `p1` values.
+  It returns a list of values from `p0` and ignores values from `p1`.
+  |#
   (define (<sep-by1> p0 p1)
-    (<map> (lambda (val) (cons (car val) (cadr val)))
-           (<~> p0 (<many> (~> p1 p0)))))
+    (pcheck ([parser? p0 p1])
+            (<map> (lambda (val) (cons (car val) (cadr val)))
+                   (<~> p0 (<many> (~> p1 p0))))))
 
 
-  #|doc
-  `p` must be a parser.
-
-  `<token>` takes a parser `p` and returns a parser that when invoked will
-  first invoke `p`, and if `p` succeeds, will also remove all whitespace
-  characters up to the next non-whitespace character.
-  Then the parser value of `p` is returned.
-  The returned parser fails if `p` fails.
-
-  This PC adds the tokenizer behavior to the given parser to automatically
-  ignore whitespaces between tokens.
+  #|proc:<token>
+  The `<token>` procedure takes parser `p` and returns a parser.
+  The returned parser runs `p`, consumes any following whitespace, and returns the value
+  from `p`. It fails when `p` fails.
   |#
   (define (<token> p)
-    (<~ p (<many> <whitespace>)))
+    (pcheck ([parser? p])
+            (<~ p (<many> <whitespace>))))
 
 
-  #|doc
-  `p` must be a parser.
-
-  `<fully>` takes a parser `p` and returns a parser that will parse the entire
-  input use `p`, that is, whitespaces on both ends of the input are removed,
-  and when `p` succeeds, it must have reached EOF.
-  The returned parser fails when either
-  1) `p` fails or,
-  2) `p` succeeds but EOF is not reached.
+  #|proc:<fully>
+  The `<fully>` procedure takes parser `p` and returns a parser.
+  The returned parser consumes leading whitespace, runs `p`, consumes trailing
+  whitespace, requires EOF, and returns the value from `p`.
   |#
   (define (<fully> p)
-    (<~n> 1 (<many> <whitespace>) p (<many> <whitespace>) <eof>))
+    (pcheck ([parser? p])
+            (<~n> 1 (<many> <whitespace>) p (<many> <whitespace>) <eof>)))
 
 
   ;; TODO These can be placed in the front at o=3, but not at o=2.
