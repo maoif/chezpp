@@ -1,5 +1,7 @@
 (import (chezpp chez)
+        (chezpp file)
         (chezpp list)
+        (chezpp string)
         (chezpp utils)
         (chezpp parser combinator))
 
@@ -14,6 +16,120 @@
     [(p in st) (run-binary-parser p in st)]))
 
 (define u8vec bytevector)
+
+(define capture-parser-error
+  (lambda (thunk)
+    (guard (err [(parser-error? err) err]
+                [else #f])
+      (thunk)
+      #f)))
+
+(mat parser-errors
+
+     ;; error: textual parser failure exposes string source and zero-based position fields.
+     (let ([err (capture-parser-error (lambda () (runT (<char> #\a) "xb")))])
+       (and (parser-error? err)
+            (eq? 'run-textual-parser (parser-error-who err))
+            (eq? 'expected (parser-error-kind err))
+            (equal? "<string>" (parser-error-source err))
+            (= 0 (parser-error-offset err))
+            (= 0 (parser-error-line err))
+            (= 0 (parser-error-column err))
+            (equal? '(#\a) (parser-error-expected err))
+            (char=? #\x (parser-error-found err))
+            (equal? "<string>:1:1: expected #\\a, got #\\x"
+                    (parser-error->string err))))
+
+     ;; error: newline tracking reports the failure line and column.
+     (let ([err (capture-parser-error
+                 (lambda () (runT (<~> (<string> "aa\nbb\n") (<char> #\c))
+                                  "aa\nbb\nx")))])
+       (and (parser-error? err)
+            (= 6 (parser-error-offset err))
+            (= 2 (parser-error-line err))
+            (= 0 (parser-error-column err))
+            (equal? "<string>:3:1: expected #\\c, got #\\x"
+                    (parser-error->string err))))
+
+     ;; error: source-aware textual runner uses the supplied source.
+     (let ([err (capture-parser-error
+                 (lambda () (run-textual-parser/source (<char> #\a) "z" "input.ss")))])
+       (and (parser-error? err)
+            (equal? "input.ss" (parser-error-source err))
+            (equal? "input.ss:1:1: expected #\\a, got #\\z"
+                    (parser-error->string err))))
+
+     ;; error: textual file parser reports the source path.
+     (let ([path (format "parser-error-text-~a" (random 9999))])
+       (call-with-output-file path (lambda (p) (put-string p "z")))
+       (let ([err (capture-parser-error
+                   (lambda () (parse-textual-file (<char> #\a) path)))])
+         (delete-file path)
+         (and (parser-error? err)
+              (equal? path (parser-error-source err))
+              (equal? (format "~a:1:1: expected #\\a, got #\\z" path)
+                      (parser-error->string err)))))
+
+     ;; error: binary parser failure reports byte offset and found byte.
+     (let ([err (capture-parser-error
+                 (lambda () (runB (<uimm8> #x0b) (u8vec #x20))))])
+       (and (parser-error? err)
+            (equal? "<bytevector>" (parser-error-source err))
+            (= 0 (parser-error-offset err))
+            (not (parser-error-line err))
+            (not (parser-error-column err))
+            (= #x0b (car (parser-error-expected err)))
+            (= #x20 (parser-error-found err))
+            (equal? "<bytevector>:byte 0: expected #x0b, got #x20"
+                    (parser-error->string err))))
+
+     ;; error: binary file parser reports the source path and byte offset.
+     (let ([path (format "parser-error-bin-~a" (random 9999))])
+       (write-u8vec! path (u8vec #x20))
+       (let ([err (capture-parser-error
+                   (lambda () (parse-binary-file (<uimm8> #x0b) path)))])
+         (delete-file path)
+         (and (parser-error? err)
+              (equal? path (parser-error-source err))
+              (equal? (format "~a:byte 0: expected #x0b, got #x20" path)
+                      (parser-error->string err)))))
+
+     ;; error: choice merges expected alternatives at the farthest offset.
+     (let ([err (capture-parser-error
+                 (lambda () (runT (</> (<string> "abx") (<string> "aby")) "abz")))])
+       (and (parser-error? err)
+            (= 2 (parser-error-offset err))
+            (equal? '("abx" "aby") (parser-error-expected err))
+            (= 2 (length (parser-error-causes err)))
+            (equal? "<string>:1:3: expected \"abx\" or \"aby\", got #\\z"
+                    (parser-error->string err))))
+
+     ;; error: sequence propagates the child failure without nested failed prefixes.
+     (let ([err (capture-parser-error
+                 (lambda () (runT (<~> (<char> #\a) (<char> #\b)) "ac")))])
+       (and (parser-error? err)
+            (not (string-contains? (parser-error->string err) "failed <~>"))
+            (equal? "<string>:1:2: expected #\\b, got #\\c"
+                    (parser-error->string err))))
+
+     ;; error: <pos-at> recomputes text line and column for random access.
+     (let ([err (capture-parser-error
+                 (lambda () (runT (<pos-at> 3 (<char> #\z)) "a\nbx")))])
+       (and (parser-error? err)
+            (= 3 (parser-error-offset err))
+            (= 1 (parser-error-line err))
+            (= 1 (parser-error-column err))
+            (equal? "<string>:2:2: expected #\\z, got #\\x"
+                    (parser-error->string err))))
+
+     ;; error: <u8vec> short input is a parser error, not a generic API error.
+     (let ([err (capture-parser-error (lambda () (runB (<u8vec> 3) (u8vec 1 2))))])
+       (and (parser-error? err)
+            (eq? 'unexpected-eof (parser-error-kind err))
+            (equal? "<bytevector>:byte 0: unexpected EOF while reading u8vec"
+                    (parser-error->string err))))
+
+     )
 
 
 (mat common-prims
