@@ -6,7 +6,8 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
              hashset.ss treemap.ss treeset.ss \
              bittree.ss bitvec.ss dset.ss \
              concurrency.ss \
-             cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss uuid.ss $(NET_TESTS)
+             cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss uuid.ss $(NET_TESTS) \
+             parser.ss
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      ?= $(SRCS_TEST)
 TEST_OBJS := $(addsuffix .so,$(basename $(TEST)))
@@ -25,15 +26,6 @@ mat.so: mat.sls
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
 $(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
-	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
-	rm -f "$$stdout" "$$stderr"; \
-	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
-	status=$$?; \
-	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
-	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
-	if [ $$status -ne 0 ]; then exit $$status; fi
-
-parser.so: parser.ss ../chezpp.lib ../chez++
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
