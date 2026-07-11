@@ -3,6 +3,7 @@
           parser-error-who parser-error-kind parser-error-message parser-error-source
           parser-error-offset parser-error-line parser-error-column parser-error-expected
           parser-error-found parser-error-context parser-error-causes parser-error->string
+          parser? define-parser
           run-textual-parser run-binary-parser
           run-textual-parser/source run-binary-parser/source
           parse-textual-file parse-binary-file
@@ -236,21 +237,23 @@ For simplicity, "PC" in the following documentation means "parser combinator".
 
   (define $run-textual-parser
     (lambda (who p in source state)
-      (pcheck ([procedure? p] [string? in])
+      (pcheck ([parser? p] [string? in])
               (let-values ([(stt val inp/err)
-                            (p (make-textual-input
-                                (string-length in) source 0 in 0 0)
-                               state 0)])
+                            (parser-call p
+                                         (make-textual-input
+                                          (string-length in) source 0 in 0 0)
+                                         state 0)])
                 (if stt val (raise-parser-error who inp/err))))))
 
 
   (define $run-binary-parser
     (lambda (who p in source state)
-      (pcheck ([procedure? p] [bytevector? in])
+      (pcheck ([parser? p] [bytevector? in])
               (let-values ([(stt val inp/err)
-                            (p (make-binary-input
-                                (bytevector-length in) source 0 in)
-                               state 0)])
+                            (parser-call p
+                                         (make-binary-input
+                                          (bytevector-length in) source 0 in)
+                                         state 0)])
                 (if stt val (raise-parser-error who inp/err))))))
 
   #|proc:run-textual-parser/source
@@ -262,7 +265,7 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (case-lambda
       [(p in source) (run-textual-parser/source p in source #f)]
       [(p in source state)
-       (pcheck ([procedure? p] [string? in])
+       (pcheck ([parser? p] [string? in])
                (unless (or (not source) (string? source))
                  (errorf who "source must be #f or a string"))
                ($run-textual-parser who p in (or source "<string>") state))]))
@@ -276,7 +279,7 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (case-lambda
       [(p in source) (run-binary-parser/source p in source #f)]
       [(p in source state)
-       (pcheck ([procedure? p] [bytevector? in])
+       (pcheck ([parser? p] [bytevector? in])
                (unless (or (not source) (string? source))
                  (errorf who "source must be #f or a string"))
                ($run-binary-parser who p in (or source "<bytevector>") state))]))
@@ -295,7 +298,7 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (case-lambda
       [(p in) (run-textual-parser p in #f)]
       [(p in state)
-       (pcheck ([procedure? p] [string? in])
+       (pcheck ([parser? p] [string? in])
                ($run-textual-parser who p in "<string>" state))]))
 
 
@@ -313,7 +316,7 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (case-lambda
       [(p in) (run-binary-parser p in #f)]
       [(p in state)
-       (pcheck ([procedure? p] [bytevector? in])
+       (pcheck ([parser? p] [bytevector? in])
                ($run-binary-parser who p in "<bytevector>" state))]))
 
 
@@ -331,7 +334,7 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (case-lambda
       [(p path) (parse-textual-file p path #f)]
       [(p path state)
-       (pcheck ([procedure? p] [file-regular? path])
+       (pcheck ([parser? p] [file-regular? path])
                (let ([in (read-string path)])
                  ($run-textual-parser who p in path state)))]))
 
@@ -350,7 +353,7 @@ For simplicity, "PC" in the following documentation means "parser combinator".
     (case-lambda
       [(p path) (parse-binary-file p path #f)]
       [(p path state)
-       (pcheck ([procedure? p] [file-regular? path])
+       (pcheck ([parser? p] [file-regular? path])
                (let ([in (read-u8vec path)])
                  ($run-binary-parser who p in path state)))]))
 
@@ -381,8 +384,68 @@ For simplicity, "PC" in the following documentation means "parser combinator".
 
 
 
-  (define-record-type lazy-parser
-    (fields (mutable proc)))
+  (define-record-type (parser make-parser $parser?)
+    (fields (immutable body parser-body)))
+
+  #|proc:parser?
+  The `parser?` procedure returns `#t` when `value` is a parser or legacy parser procedure.
+  It returns `#f` otherwise. Procedure support is temporary during parser record migration.
+  |#
+  (define parser?
+    (lambda (value)
+      (or ($parser? value) (procedure? value))))
+
+  (define-record-type (lazy-parser make-lazy-parser lazy-parser?)
+    (parent parser)
+    (fields))
+
+  #|macro:define-parser
+  The `define-parser` macro defines parser `name` with body expression `body`. Within
+  `body`, `inp`, `state`, and `lvl` are the current input, parser state, and nesting level.
+  When `body` is omitted, the macro declares a lazy parser that must be completed by a
+  later `define-parser` form using the same lexical identifier.
+  |#
+  (define-syntax define-parser
+    (let ([declared '()])
+      (define consume-declaration!
+        (lambda (name)
+          (let loop ([rest declared] [kept '()])
+            (cond [(null? rest) #f]
+                  [(free-identifier=? (car rest) name)
+                   (set! declared (append (reverse kept) (cdr rest)))
+                   #t]
+                  [else (loop (cdr rest) (cons (car rest) kept))]))))
+      (lambda (stx)
+        (syntax-case stx ()
+          [(_ name)
+           (identifier? #'name)
+           (begin
+             (set! declared (cons #'name declared))
+             #'(define name
+                 (make-lazy-parser
+                  (let ([body (lambda (inp state lvl)
+                                (errorf 'define-parser "parser body not defined"))])
+                    (case-lambda
+                      [(true-body) (set! body true-body)]
+                      [(inp state lvl) (body inp state lvl)])))))]
+          [(_ name body)
+           (identifier? #'name)
+           (with-syntax ([inp (datum->syntax #'name 'inp)]
+                         [state (datum->syntax #'name 'state)]
+                         [lvl (datum->syntax #'name 'lvl)])
+             (if (consume-declaration! #'name)
+                 (with-syntax ([initialized
+                                (car (generate-temporaries '(initialized)))])
+                   #'(define initialized
+                       (let ([parser name])
+                         (unless (lazy-parser? parser)
+                           (errorf 'define-parser
+                                   "not a declared lazy parser: ~a" parser))
+                         ((parser-body parser)
+                          (lambda (inp state lvl) body))
+                         #t)))
+                 #'(define name
+                     (make-parser (lambda (inp state lvl) body)))))]))))
 
   ;; used internally for defining parser implementations
 
@@ -391,8 +454,8 @@ For simplicity, "PC" in the following documentation means "parser combinator".
       (syntax-case stx ()
         [(k p args ...)
          #'(let ([pp p])
-             (if (lazy-parser? pp)
-                 ((lazy-parser-proc pp) args ...)
+             (if ($parser? pp)
+                 ((parser-body pp) args ...)
                  (pp args ...)))])))
 
 
@@ -401,7 +464,13 @@ For simplicity, "PC" in the following documentation means "parser combinator".
       (syntax-case stx ()
         [(k p)
          (identifier? #'p)
-         #'(define p (make-lazy-parser (lambda args (errorf 'p "parser code not defined"))))])))
+         #'(define p
+             (make-lazy-parser
+              (let ([body (lambda (inp state lvl)
+                            (errorf 'p "parser code not defined"))])
+                (case-lambda
+                  [(true-body) (set! body true-body)]
+                  [(inp state lvl) (body inp state lvl)]))))])))
 
 
   (define-syntax define-lazy-parser
@@ -412,8 +481,10 @@ For simplicity, "PC" in the following documentation means "parser combinator".
          #'(define dummy
              (let ([body e])
                (if (lazy-parser? p)
-                   (if (procedure? body)
-                       (lazy-parser-proc-set! p body)
+                   (if (parser? body)
+                       ((parser-body p)
+                        (lambda (inp state lvl)
+                          (parser-call body inp state lvl)))
                        (errorf 'k "not a parser procedure: ~a" body))
                    (errorf 'k "not a declared lazy parser: ~a" p))
                #t))])))
@@ -1164,7 +1235,6 @@ For simplicity, "PC" in the following documentation means "parser combinator".
   (define s64? (lambda (x) (int-in-range? x (- (expt 2 63)) (sub1 (expt 2 63)))))
   (define f32? (lambda (x) (and (flonum? x) (not (nan? x)))))
   (define f64? (lambda (x) (and (flonum? x) (not (nan? x)))))
-  (define parser? (lambda (x) (or (procedure? x) (lazy-parser? x))))
   (define sleb128-len? (lambda (x) (and (fixnum? x) (fx> x 0))))
   (define all-u8? (lambda (x*) (andmap u8? x*)))
   (define all-parsers? (lambda (x*) (andmap parser? x*)))

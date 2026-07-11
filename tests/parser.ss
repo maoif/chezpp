@@ -24,6 +24,34 @@
       (thunk)
       #f)))
 
+(define-parser <defined-item>
+  (parser-call <item> inp state lvl))
+
+(define-parser <recursive-as>)
+(define-parser <recursive-as>
+  (parser-call
+   (</> (<as> '() <eof>)
+        (<map> (lambda (val) (cons (car val) (cadr val)))
+               (<~> (<char> #\a) <recursive-as>)))
+   inp state lvl))
+
+(mat parser-definitions
+
+     (equal? #\a (runT <defined-item> "a"))
+
+     (equal? '(#\a #\a #\a) (runT <recursive-as> "aaa"))
+
+     (let ()
+       (define-parser <scoped>)
+       (define-parser <scoped> (values #t 'outer inp))
+       (and (eq? 'outer (runT <scoped> ""))
+            (let ()
+              (define-parser <scoped>)
+              (define-parser <scoped> (values #t 'inner inp))
+              (eq? 'inner (runT <scoped> "")))))
+
+     )
+
 (mat parser-errors
 
      ;; error: textual parser failure exposes string source and zero-based position fields.
