@@ -3,7 +3,8 @@
         (chezpp list)
         (chezpp string)
         (chezpp utils)
-        (chezpp parser combinator))
+        (chezpp parser combinator)
+        (chezpp parser wasm))
 
 (define runT
   (case-lambda
@@ -63,6 +64,63 @@
 
      ;; error: parser combinators reject a raw three-argument procedure.
      (error? (<many> (lambda (inp state lvl) (values #t 'raw inp))))
+
+     ;; error: parser-call type-checks its parser argument through pcheck.
+     (guard (err [(and (who-condition? err)
+                       (eq? 'pcheck (condition-who err))) #t]
+                 [else #f])
+       (parser-call 'not-a-parser #f #f #f)
+       #f)
+
+     )
+
+(mat parser-consumers
+
+     (let ([path (format "parser-wasm-minimal-~a.wasm" (random 9999))])
+       (dynamic-wind
+         (lambda ()
+           (write-u8vec path (u8vec #x00 #x61 #x73 #x6d 1 0 0 0)))
+         (lambda ()
+           (list? (parse-wasm-binary-module path)))
+         (lambda ()
+           (when (file-exists? path)
+             (delete-file path)))))
+
+     )
+
+(mat parser-contracts
+
+     ;; error: <satisfy> requires a parser as its first parameter.
+     (error? (<satisfy> 'not-a-parser char?))
+
+     ;; error: <satisfy> requires a predicate procedure.
+     (error? (<satisfy> <item> 'not-a-procedure))
+
+     ;; error: <satisfy-char> requires a predicate procedure.
+     (error? (<satisfy-char> 'not-a-procedure))
+
+     ;; error: <one-of> requires a string.
+     (error? (<one-of> 'not-a-string))
+
+     ;; error: <none-of> requires a string.
+     (error? (<none-of> 'not-a-string))
+
+     ;; error: <optional> requires a parser.
+     (error? (<optional> 'not-a-parser))
+
+     ;; error: sequence aliases require parser arguments.
+     (error? (~> <item> 'not-a-parser))
+
+     ;; error: <as-integer> requires a parser.
+     (error? (<as-integer> 'not-a-parser))
+
+     ;; error: <bind> callbacks must return parsers.
+     (error? (runT (<bind> <item> (lambda (value) 'not-a-parser)) "a"))
+
+     ;; error: <bind-st> callbacks must return parsers.
+     (error? (runT (<bind-st> <item>
+                             (lambda (value state) 'not-a-parser))
+                   "a"))
 
      )
 
