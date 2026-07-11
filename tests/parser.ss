@@ -52,6 +52,20 @@
 
      )
 
+(mat parser-types
+
+     (and (parser? <item>)
+          (parser? (<result> 'value))
+          (parser? (<many> <item>)))
+
+     ;; error: parser runners reject a raw three-argument procedure.
+     (error? (runT (lambda (inp state lvl) (values #t 'raw inp)) ""))
+
+     ;; error: parser combinators reject a raw three-argument procedure.
+     (error? (<many> (lambda (inp state lvl) (values #t 'raw inp))))
+
+     )
+
 (mat parser-errors
 
      ;; error: textual parser failure exposes string source and zero-based position fields.
