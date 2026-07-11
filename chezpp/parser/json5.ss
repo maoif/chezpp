@@ -21,7 +21,7 @@
         (lambda (d*)
           (integer->char (hexdigits->num d*))))
 
-      (declare-lazy-parser <j-value>)
+      (define-parser <j-value>)
 
       (define <line-comment> (<~> (<string> "//")
                                   (<many> (<satisfy-char> (lambda (c) (not (char=? c #\newline)))))))
@@ -136,12 +136,15 @@
                                (<~> <trailing-comma> <right-bracket>))))))
 
       (define <json5> (<fully> <j-value>))
-      (define-lazy-parser <j-value> (</> <j-object>
-                                         <j-array>
-                                         <j-null>
-                                         <j-bool>
-                                         <j-string>
-                                         <j-number>))
+      (define j-value-parser
+        (</> <j-object>
+             <j-array>
+             <j-null>
+             <j-bool>
+             <j-string>
+             <j-number>))
+      (define-parser <j-value>
+        (parser-call j-value-parser inp state lvl))
 
       <json5>))
 

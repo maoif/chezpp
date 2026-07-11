@@ -7,7 +7,6 @@
           run-textual-parser run-binary-parser
           run-textual-parser/source run-binary-parser/source
           parse-textual-file parse-binary-file
-          declare-lazy-parser define-lazy-parser
           ;; TODO remove these
           parser-call input-pos input-pos-set! input-len save-input binary-input-data
           bindigits->num octdigits->num digits->num hexdigits->num
@@ -454,39 +453,6 @@ For simplicity, "PC" in the following documentation means "parser combinator".
         [(k p args ...)
          #'(let ([pp p])
              ((parser-body pp) args ...))])))
-
-
-  (define-syntax declare-lazy-parser
-    (lambda (stx)
-      (syntax-case stx ()
-        [(k p)
-         (identifier? #'p)
-         #'(define p
-             (make-lazy-parser
-              (let ([body (lambda (inp state lvl)
-                            (errorf 'p "parser code not defined"))])
-                (case-lambda
-                  [(true-body) (set! body true-body)]
-                  [(inp state lvl) (body inp state lvl)]))))])))
-
-
-  (define-syntax define-lazy-parser
-    (lambda (stx)
-      (syntax-case stx ()
-        [(k p e)
-         (identifier? #'p)
-         #'(define dummy
-             (let ([body e])
-               (if (lazy-parser? p)
-                   (if (parser? body)
-                       ((parser-body p)
-                        (lambda (inp state lvl)
-                          (parser-call body inp state lvl)))
-                       (errorf 'k "not a parser procedure: ~a" body))
-                   (errorf 'k "not a declared lazy parser: ~a" p))
-               #t))])))
-
-
 ;;;; input logic
 
   (define-record-type input
