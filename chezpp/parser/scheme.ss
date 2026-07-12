@@ -33,7 +33,7 @@
               (fx- (char->integer c) 48)
               (errorf who "not a digit: ~a" c))))
 
-      (define-parser <s-datum>)
+      (declare-lazy-parser <s-datum>)
 
       (define (<token> p) (<~ p (<many> <whitespace>)))
       (define (<fully> p) (<~n> 1 (<many> <whitespace>) p (<many> <whitespace>) <eof>))
@@ -178,9 +178,7 @@
 
       (define <s-lexeme-datum> (</> <s-bool> <s-char> <s-string> <s-num> <s-symbol>))
       (define <s-compound-datum> (</> <s-abbrev> <s-list> <s-vector>))
-      (define s-datum-parser (</> <s-lexeme-datum> <s-compound-datum>))
-      (define-parser <s-datum>
-        (parser-call s-datum-parser inp state lvl))
+      (install-lazy-parser! <s-datum> (</> <s-lexeme-datum> <s-compound-datum>))
 
       (values (<fully> <s-datum>) (<fully> (<many> <s-datum>)))))
 

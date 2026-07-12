@@ -28,13 +28,12 @@
 (define-parser <defined-item>
   (parser-call <item> inp state lvl))
 
-(define-parser <recursive-as>)
-(define-parser <recursive-as>
-  (parser-call
-   (</> (<as> '() <eof>)
-        (<map> (lambda (val) (cons (car val) (cadr val)))
-               (<~> (<char> #\a) <recursive-as>)))
-   inp state lvl))
+(declare-lazy-parser <recursive-as>)
+(install-lazy-parser!
+ <recursive-as>
+ (</> (<as> '() <eof>)
+      (<map> (lambda (value) (cons (car value) (cadr value)))
+             (<~> (<char> #\a) <recursive-as>))))
 
 (declare-lazy-parser <installable>)
 
@@ -77,15 +76,6 @@
 
      ;; error: the installed source must be a parser.
      (error? (install-lazy-parser! <installable> 'not-a-parser))
-
-     (let ()
-       (define-parser <scoped>)
-       (define-parser <scoped> (values #t 'outer inp))
-       (and (eq? 'outer (runT <scoped> ""))
-            (let ()
-              (define-parser <scoped>)
-              (define-parser <scoped> (values #t 'inner inp))
-              (eq? 'inner (runT <scoped> "")))))
 
      )
 

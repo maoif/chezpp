@@ -57,98 +57,7 @@
       (define <end> (<uimm8> #x0B))
       (define <block-type> (</> (<uimm8> #x40) <valtype> <s33>))
       (define <memarg> (<~> <u32> <u32>))
-      (define-parser <instr>)
-      (define instr-parser
-        (</>
-         ;; control
-         ;; (<msg-f> "instr")
-         (<uimm8> #x00)
-         (<uimm8> #x01)
-         (<~> (<uimm8> #x02) <block-type> (<many> <instr>) <end>)
-         (<~> (<uimm8> #x03) <block-type> (<many> <instr>) <end>)
-         (<~> (<uimm8> #x04) <block-type> (<many> <instr>)
-              (</> <end>
-                   (<~> (<uimm8> #x05) (<many> <instr>) <end>)))
-         (<~> (<uimm8> #x0C) <u32>)
-         (<~> (<uimm8> #x0D) <u32>)
-         (<~> (<uimm8> #x0E) (<vec> <u32>) <u32>)
-         (<uimm8> #x0F)
-         (<~> (<uimm8> #x10) <u32>)
-         (<~> (<uimm8> #x11) <u32> <u32>)
-
-         ;; (<msg-f> "control")
-         ;; reference
-         (<~> (<uimm8> #xD0) <reftype>)
-         (<uimm8> #xD1)
-         (<~> (<uimm8> #xD2) <u32>)
-         ;; (<msg-f> "ref")
-         ;; parametric
-         (<uimm8> #x1A)
-         (<uimm8> #x1B)
-         (<~> (<uimm8> #x1C) (<vec> <valtype>))
-         ;; (<msg-f> "param")
-         ;; variable
-         (<~> (<uimm8> #x20) <u32>)
-         (<~> (<uimm8> #x21) <u32>)
-         (<~> (<uimm8> #x22) <u32>)
-         (<~> (<uimm8> #x23) <u32>)
-         (<~> (<uimm8> #x24) <u32>)
-         ;; (<msg-f> "var")
-         ;; table
-         (<~> (<uimm8> #x25) <u32>)
-         (<~> (<uimm8> #x26) <u32>)
-         (<~> (<uimm8> #xFC) (</> (<~> (<uimm32> 12) <u32> <u32>)
-                                  (<~> (<uimm32> 13) <u32>)
-                                  (<~> (<uimm32> 14) <u32> <u32>)
-                                  (<~> (<uimm32> 15) <u32>)
-                                  (<~> (<uimm32> 16) <u32>)
-                                  (<~> (<uimm32> 17) <u32>)))
-         ;; (<msg-f> "table")
-         ;; memory
-         (<~> (<satisfy> <u8> (lambda (x) (fx<= #x28 x #x3E))) <memarg>)
-         (<~> (<uimm8> #x3F) (<uimm8> #x00))
-         (<~> (<uimm8> #x40) (<uimm8> #x00))
-         (<~> (<uimm8> #xFC) (</> (<~> (<uimm32> 8) <u32> (<uimm8> #x00))
-                                  (<~> (<uimm32> 9) <u32>)
-                                  (<~> (<uimm32> 10) (<uimm8> #x00) (<uimm8> #x00))
-                                  (<~> (<uimm32> 11) (<uimm8> #x00))))
-         ;; (<msg-f> "mem")
-         ;; numeric
-         (<~> (<uimm8> #x41) (<sleb128> 32))
-         (<~> (<uimm8> #x42) (<sleb128> 64))
-         (<~> (<uimm8> #x43) <f32>)
-         (<~> (<uimm8> #x44) <f64>)
-         ;; TODO expand
-         (<satisfy> <u8> (lambda (x) (fx<= #x45 x #xC4)))
-         (<~> (<uimm8> #xFC) (</> (<~> (<uimm32> 0))
-                                  (<~> (<uimm32> 1))
-                                  (<~> (<uimm32> 2))
-                                  (<~> (<uimm32> 3))
-                                  (<~> (<uimm32> 4))
-                                  (<~> (<uimm32> 5))
-                                  (<~> (<uimm32> 6))
-                                  (<~> (<uimm32> 7))))
-         ;; (<msg-f> "vec")
-         ;; vector
-         ;; TODO redefine <satisfy>?
-         (<~> (<uimm8> #xFD)
-              (<bind> <uleb128>
-                      (lambda (x)
-                        (println x)
-                        (cond [(or (<= 0 x 11) (= x 92) (= x 93)) <memarg>]
-                              [(<= 84 x 91) <memarg> <u8>]
-                              [(= x 12) (<rep> <u8> 16)]
-                              [(= x 13) (<rep> <u8> 16)]
-                              [(<= 21 x 34) <u8>]
-                              [else x]))))
-         ;; (<msg-f> "instr end")
-         (<bind> <u8>
-                 (lambda (n)
-                   ;;(println n)
-                   (<fail-with> "fail to read instr")))
-         ))
-      (define-parser <instr>
-        (parser-call instr-parser inp state lvl))
+      (declare-lazy-parser <instr>)
       (define <expr> (<~> (<many> <instr>) (<uimm8> #x0B)))
 
       (define <import>
@@ -288,6 +197,96 @@
                             (<optional> <datasec>)
                             (<many>     <customsec>)
                             <eof>))
+
+      (install-lazy-parser! <instr>
+        (</>
+         ;; control
+         ;; (<msg-f> "instr")
+         (<uimm8> #x00)
+         (<uimm8> #x01)
+         (<~> (<uimm8> #x02) <block-type> (<many> <instr>) <end>)
+         (<~> (<uimm8> #x03) <block-type> (<many> <instr>) <end>)
+         (<~> (<uimm8> #x04) <block-type> (<many> <instr>)
+              (</> <end>
+                   (<~> (<uimm8> #x05) (<many> <instr>) <end>)))
+         (<~> (<uimm8> #x0C) <u32>)
+         (<~> (<uimm8> #x0D) <u32>)
+         (<~> (<uimm8> #x0E) (<vec> <u32>) <u32>)
+         (<uimm8> #x0F)
+         (<~> (<uimm8> #x10) <u32>)
+         (<~> (<uimm8> #x11) <u32> <u32>)
+
+         ;; (<msg-f> "control")
+         ;; reference
+         (<~> (<uimm8> #xD0) <reftype>)
+         (<uimm8> #xD1)
+         (<~> (<uimm8> #xD2) <u32>)
+         ;; (<msg-f> "ref")
+         ;; parametric
+         (<uimm8> #x1A)
+         (<uimm8> #x1B)
+         (<~> (<uimm8> #x1C) (<vec> <valtype>))
+         ;; (<msg-f> "param")
+         ;; variable
+         (<~> (<uimm8> #x20) <u32>)
+         (<~> (<uimm8> #x21) <u32>)
+         (<~> (<uimm8> #x22) <u32>)
+         (<~> (<uimm8> #x23) <u32>)
+         (<~> (<uimm8> #x24) <u32>)
+         ;; (<msg-f> "var")
+         ;; table
+         (<~> (<uimm8> #x25) <u32>)
+         (<~> (<uimm8> #x26) <u32>)
+         (<~> (<uimm8> #xFC) (</> (<~> (<uimm32> 12) <u32> <u32>)
+                                  (<~> (<uimm32> 13) <u32>)
+                                  (<~> (<uimm32> 14) <u32> <u32>)
+                                  (<~> (<uimm32> 15) <u32>)
+                                  (<~> (<uimm32> 16) <u32>)
+                                  (<~> (<uimm32> 17) <u32>)))
+         ;; (<msg-f> "table")
+         ;; memory
+         (<~> (<satisfy> <u8> (lambda (x) (fx<= #x28 x #x3E))) <memarg>)
+         (<~> (<uimm8> #x3F) (<uimm8> #x00))
+         (<~> (<uimm8> #x40) (<uimm8> #x00))
+         (<~> (<uimm8> #xFC) (</> (<~> (<uimm32> 8) <u32> (<uimm8> #x00))
+                                  (<~> (<uimm32> 9) <u32>)
+                                  (<~> (<uimm32> 10) (<uimm8> #x00) (<uimm8> #x00))
+                                  (<~> (<uimm32> 11) (<uimm8> #x00))))
+         ;; (<msg-f> "mem")
+         ;; numeric
+         (<~> (<uimm8> #x41) (<sleb128> 32))
+         (<~> (<uimm8> #x42) (<sleb128> 64))
+         (<~> (<uimm8> #x43) <f32>)
+         (<~> (<uimm8> #x44) <f64>)
+         ;; TODO expand
+         (<satisfy> <u8> (lambda (x) (fx<= #x45 x #xC4)))
+         (<~> (<uimm8> #xFC) (</> (<~> (<uimm32> 0))
+                                  (<~> (<uimm32> 1))
+                                  (<~> (<uimm32> 2))
+                                  (<~> (<uimm32> 3))
+                                  (<~> (<uimm32> 4))
+                                  (<~> (<uimm32> 5))
+                                  (<~> (<uimm32> 6))
+                                  (<~> (<uimm32> 7))))
+         ;; (<msg-f> "vec")
+         ;; vector
+         ;; TODO redefine <satisfy>?
+         (<~> (<uimm8> #xFD)
+              (<bind> <uleb128>
+                      (lambda (x)
+                        (println x)
+                        (cond [(or (<= 0 x 11) (= x 92) (= x 93)) <memarg>]
+                              [(<= 84 x 91) <memarg> <u8>]
+                              [(= x 12) (<rep> <u8> 16)]
+                              [(= x 13) (<rep> <u8> 16)]
+                              [(<= 21 x 34) <u8>]
+                              [else x]))))
+         ;; (<msg-f> "instr end")
+         (<bind> <u8>
+                 (lambda (n)
+                   ;;(println n)
+                   (<fail-with> "fail to read instr")))
+         ))
 
       <module>))
 

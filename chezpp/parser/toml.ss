@@ -178,8 +178,8 @@
       ;; token no newline
       (define (<token-nn> p) (<~ p <ws>))
 
-      (define-parser <val>)
-      (define-parser <keyval>)
+      (declare-lazy-parser <val>)
+      (declare-lazy-parser <keyval>)
 
       (define <basic-unescaped> (</> <wschar>
                                      (<satisfy-char> (lambda (c)
@@ -347,19 +347,6 @@
                              #;(if (= 1 (length val)) (car val) val)
                              )
                            <dotted-key>))
-      (define val-parser
-        (</> <t-string> <boolean> <array>
-             <inline-table>  (<msg-f> '<val> "val1")
-             <date-time>     (<msg-f> '<val> "val2")
-             <float>         (<msg-f> '<val> "val3")
-             <integer>       (<msg-f> '<val> "val4")))
-      (define keyval-parser
-        (<map> (lambda (val) (cons (car val) (caddr val)))
-               (<~> <key> <keyval-sep> (<token> <val>))))
-      (define-parser <val>
-        (parser-call val-parser inp state lvl))
-      (define-parser <keyval>
-        (parser-call keyval-parser inp state lvl))
       (define <kvs> (<many> <keyval>))
 
       (define <array-table> (<~1> (<token-nn> (<string> "[["))
@@ -372,6 +359,18 @@
 
       (define <toml> (<map> make-toml
                             (<fully> (<~> <kvs> (<many> (<~> <table> <kvs>))))))
+
+      (install-lazy-parser!
+       <val>
+       (</> <t-string> <boolean> <array>
+            <inline-table>  (<msg-f> '<val> "val1")
+            <date-time>     (<msg-f> '<val> "val2")
+            <float>         (<msg-f> '<val> "val3")
+            <integer>       (<msg-f> '<val> "val4")))
+      (install-lazy-parser!
+       <keyval>
+       (<map> (lambda (value) (cons (car value) (caddr value)))
+              (<~> <key> <keyval-sep> (<token> <val>))))
 
       <toml>))
 
