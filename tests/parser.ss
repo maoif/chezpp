@@ -77,6 +77,11 @@
      ;; error: the installed source must be a parser.
      (error? (install-lazy-parser! <installable> 'not-a-parser))
 
+     ;; error: define-parser requires an ordinary parser body.
+     (error?
+      (eval '(let () (define-parser invalid) #t)
+            (environment '(chezpp chez) '(chezpp parser combinator))))
+
      )
 
 (mat parser-types

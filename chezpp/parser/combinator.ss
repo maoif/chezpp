@@ -411,50 +411,17 @@ For simplicity, "PC" in the following documentation means "parser combinator".
   #|macro:define-parser
   The `define-parser` macro defines parser `name` with body expression `body`. Within
   `body`, `inp`, `state`, and `lvl` are the current input, parser state, and nesting level.
-  When `body` is omitted, the macro declares a lazy parser that must be completed by a
-  later `define-parser` form using the same lexical identifier.
   |#
   (define-syntax define-parser
-    (let ([declared '()])
-      (define consume-declaration!
-        (lambda (name)
-          (let loop ([rest declared] [kept '()])
-            (cond [(null? rest) #f]
-                  [(free-identifier=? (car rest) name)
-                   (set! declared (append (reverse kept) (cdr rest)))
-                   #t]
-                  [else (loop (cdr rest) (cons (car rest) kept))]))))
-      (lambda (stx)
-        (syntax-case stx ()
-          [(_ name)
-           (identifier? #'name)
-           (begin
-             (set! declared (cons #'name declared))
-             #'(define name
-                 (make-lazy-parser
-                  (let ([body (lambda (inp state lvl)
-                                (errorf 'define-parser "parser body not defined"))])
-                    (case-lambda
-                      [(true-body) (set! body true-body)]
-                      [(inp state lvl) (body inp state lvl)])))))]
-          [(_ name body)
-           (identifier? #'name)
-           (with-syntax ([inp (datum->syntax #'name 'inp)]
-                         [state (datum->syntax #'name 'state)]
-                         [lvl (datum->syntax #'name 'lvl)])
-             (if (consume-declaration! #'name)
-                 (with-syntax ([initialized
-                                (car (generate-temporaries '(initialized)))])
-                   #'(define initialized
-                       (let ([parser name])
-                         (unless (lazy-parser? parser)
-                           (errorf 'define-parser
-                                   "not a declared lazy parser: ~a" parser))
-                         ((parser-body parser)
-                          (lambda (inp state lvl) body))
-                         #t)))
-                 #'(define name
-                     (make-parser (lambda (inp state lvl) body)))))]))))
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ name body)
+         (identifier? #'name)
+         (with-syntax ([inp (datum->syntax #'name 'inp)]
+                       [state (datum->syntax #'name 'state)]
+                       [lvl (datum->syntax #'name 'lvl)])
+           #'(define name
+               (make-parser (lambda (inp state lvl) body))))])))
 
   #|macro:parser-call
   The `parser-call` macro invokes `parser` with `input`, `state`, and nesting `level`.
