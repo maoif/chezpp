@@ -3,7 +3,7 @@
           parser-error-who parser-error-kind parser-error-message parser-error-source
           parser-error-offset parser-error-line parser-error-column parser-error-expected
           parser-error-found parser-error-context parser-error-causes parser-error->string
-          parser? define-parser
+          parser? define-parser declare-lazy-parser install-lazy-parser!
           run-textual-parser run-binary-parser
           run-textual-parser/source run-binary-parser/source
           parse-textual-file parse-binary-file
@@ -381,6 +381,32 @@ For simplicity, "PC" in the following documentation means "parser combinator".
   (define-record-type (lazy-parser make-lazy-parser lazy-parser?)
     (parent parser)
     (fields))
+
+  #|macro:declare-lazy-parser
+  The `declare-lazy-parser` macro defines `name` as a lazy parser whose body can be
+  installed or replaced with `install-lazy-parser!`.
+  |#
+  (define-syntax declare-lazy-parser
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ name)
+         (identifier? #'name)
+         #'(define name
+             (make-lazy-parser
+              (let ([body (lambda (inp state lvl)
+                            (errorf 'declare-lazy-parser
+                                    "parser body not installed"))])
+                (case-lambda
+                  [(true-body) (set! body true-body)]
+                  [(inp state lvl) (body inp state lvl)]))))])))
+
+  #|proc:install-lazy-parser!
+  The `install-lazy-parser!` procedure installs the body of `parser` in lazy parser
+  `target`. A later call can replace the installed body.
+  |#
+  (define-who (install-lazy-parser! target parser)
+    (pcheck ([lazy-parser? target] [parser? parser])
+            ((parser-body target) (parser-body parser))))
 
   #|macro:define-parser
   The `define-parser` macro defines parser `name` with body expression `body`. Within

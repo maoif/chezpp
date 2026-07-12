@@ -36,11 +36,47 @@
                (<~> (<char> #\a) <recursive-as>)))
    inp state lvl))
 
+(declare-lazy-parser <installable>)
+
+(define-parser <installed-a>
+  (values #t 'a inp))
+
+(define-parser <installed-b>
+  (values #t 'b inp))
+
 (mat parser-definitions
 
      (equal? #\a (runT <defined-item> "a"))
 
      (equal? '(#\a #\a #\a) (runT <recursive-as> "aaa"))
+
+     (parser? <installable>)
+
+     ;; error: a declared lazy parser cannot run before its body is installed.
+     (error? (runT <installable> ""))
+
+     (begin
+       (install-lazy-parser! <installable> <installed-a>)
+       (eq? 'a (runT <installable> "")))
+
+     (begin
+       (install-lazy-parser! <installable> <installed-b>)
+       (eq? 'b (runT <installable> "")))
+
+     (let ()
+       (declare-lazy-parser <scoped>)
+       (install-lazy-parser! <scoped> (<result> 'outer))
+       (and (eq? 'outer (runT <scoped> ""))
+            (let ()
+              (declare-lazy-parser <scoped>)
+              (install-lazy-parser! <scoped> (<result> 'inner))
+              (eq? 'inner (runT <scoped> "")))))
+
+     ;; error: an ordinary parser cannot be an installation target.
+     (error? (install-lazy-parser! <item> <installed-a>))
+
+     ;; error: the installed source must be a parser.
+     (error? (install-lazy-parser! <installable> 'not-a-parser))
 
      (let ()
        (define-parser <scoped>)
