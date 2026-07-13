@@ -469,15 +469,19 @@ For simplicity, "PC" in the following documentation means "parser combinator".
          (binary-input-data inp))]
        [else (assert-unreachable)])))
 
-  (define recompute-text-position
-    (lambda (str target)
-      (let loop ([i 0] [line 0] [col 0])
+  (define scan-text-position
+    (lambda (str start target line col)
+      (let loop ([i start] [line line] [col col])
         (if (fx= i target)
             (values line col)
             (let ([c (string-ref str i)])
               (if (char=? c #\newline)
                   (loop (fx1+ i) (fx1+ line) 0)
                   (loop (fx1+ i) line (fx1+ col))))))))
+
+  (define recompute-text-position
+    (lambda (str target)
+      (scan-text-position str 0 target 0 0)))
 
   (define-who set-input-position!
     (lambda (inp pos)
@@ -486,11 +490,18 @@ For simplicity, "PC" in the following documentation means "parser combinator".
                 (errorf who "position ~a is past input length ~a" pos (input-len inp)))
               (cond
                [(textual-input? inp)
-                (let-values ([(line col)
-                              (recompute-text-position (textual-input-str inp) pos)])
-                  (input-pos-set! inp pos)
-                  (textual-input-line-set! inp line)
-                  (textual-input-col-set! inp col))]
+                (let* ([current-pos (input-pos inp)]
+                       [str (textual-input-str inp)])
+                  (let-values ([(line col)
+                                (if (fx<= current-pos pos)
+                                    (scan-text-position
+                                     str current-pos pos
+                                     (textual-input-line inp)
+                                     (textual-input-col inp))
+                                    (recompute-text-position str pos))])
+                    (input-pos-set! inp pos)
+                    (textual-input-line-set! inp line)
+                    (textual-input-col-set! inp col)))]
                [(binary-input? inp)
                 (input-pos-set! inp pos)]
                [else (assert-unreachable)]))))
