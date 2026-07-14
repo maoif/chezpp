@@ -12,7 +12,7 @@
           bindigits->num octdigits->num digits->num hexdigits->num
 
           <fail> <fail-with> <eof> <result> <satisfy>
-          <pos> <pos-at> <msg-t> <msg-f>
+          <pos> <pos-at> <bounded> <msg-t> <msg-f>
 
           <satisfy-char>
           <item> <char> <string> <whitespace>
@@ -932,6 +932,44 @@ For simplicity, "PC" in the following documentation means "parser combinator".
                       (values #t val inp)
                       (values #f #f (ensure-parser-failure inp1 new-inp)))))))
             pos-at-parser))
+
+
+  #|proc:<bounded>
+  The `<bounded>` procedure takes natural `count` and binary `parser`. It returns a parser that
+  runs `parser` over exactly the next `count` bytes. The returned parser fails if the range
+  exceeds the input, if `parser` fails, or if `parser` does not consume the complete range.
+  |#
+  (define-who (<bounded> count parser)
+    (pcheck ([natural? count] [parser? parser])
+            (define-parser bounded-parser
+              (if (not (binary-input? inp))
+                  (values #f #f
+                          (parser-failure-custom inp "<bounded> requires binary input"))
+                  (let* ([start (input-pos inp)]
+                         [end (+ start count)])
+                    (if (> end (input-len inp))
+                        (values #f #f
+                                (parser-failure-eof inp '(bounded-range)
+                                                    "bounded range exceeds input"))
+                        (let ([limited (make-binary-input
+                                        end
+                                        (input-source inp)
+                                        start
+                                        (binary-input-data inp))])
+                          (let-values ([(status value next-input)
+                                        (parser-call parser limited state (fx1+ lvl))])
+                            (cond
+                             [(not status) (values #f #f next-input)]
+                             [(not (= end (input-pos next-input)))
+                              (values #f #f
+                                      (parser-failure-custom
+                                       next-input
+                                       (format "bounded parser left ~a byte(s)"
+                                               (- end (input-pos next-input)))))]
+                             [else
+                              (input-pos-set! inp end)
+                              (values #t value inp)])))))))
+            bounded-parser))
 
 
   #|proc:<msg-t>

@@ -686,6 +686,33 @@
      )
 
 
+(mat parser-bounded-binary
+
+     (equal? '(1 2)
+             (runB (<~1> (<uimm8> 9)
+                          (<bounded> 2 (<~> <u8> <u8>))
+                          (<uimm8> 8)
+                          <eof>)
+                   (u8vec 9 1 2 8)))
+
+     ;; error: the bounded parser must consume every declared byte.
+     (error? (runB (<bounded> 2 <u8>) (u8vec 1 2)))
+
+     ;; error: the declared range cannot extend beyond the binary input.
+     (error? (runB (<bounded> 3 (<rep> <u8> 3)) (u8vec 1 2)))
+
+     ;; error: failures inside a bounded parser retain the absolute byte offset.
+     (let ([err (capture-parser-error
+                 (lambda ()
+                   (runB (<~> (<uimm8> 9)
+                              (<bounded> 2 (<~> (<uimm8> 1) (<uimm8> 2))))
+                         (u8vec 9 1 3))))])
+       (and (parser-error? err)
+            (= 2 (parser-error-offset err))))
+
+     )
+
+
 (mat parser-combinators
 
      (equal? '()
