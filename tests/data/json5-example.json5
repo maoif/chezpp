@@ -1,0 +1,10 @@
+{
+  // JSON5 permits identifier keys and comments.
+  title: 'parser suite',
+  color: 0xdecaf,
+  message: 'line \
+continuation',
+  nested: {
+    values: [1, true, null,],
+  },
+}
