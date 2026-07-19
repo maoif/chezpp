@@ -17,6 +17,14 @@
         (bytevector-copy! bytes offset result 0 size)
         result)))
 
+  (define strict-utf8->string
+    (lambda (bytes)
+      (bytevector->string
+       bytes
+       (make-transcoder (utf-8-codec)
+                        (eol-style none)
+                        (error-handling-mode raise)))))
+
   (define nul-string
     (lambda (bytes index)
       (and (< index (bytevector-length bytes))
@@ -24,7 +32,7 @@
              (cond [(= end (bytevector-length bytes)) #f]
                    [(zero? (bytevector-u8-ref bytes end))
                     (guard (condition [else #f])
-                      (utf8->string (copy-range bytes index (- end index))))]
+                      (strict-utf8->string (copy-range bytes index (- end index))))]
                    [else (loop (+ end 1))])))))
 
   (define rebuild-section-header
@@ -186,7 +194,7 @@
                   (unless (or (zero? name-size) terminated?)
                     (errorf 'note-parser "unterminated ELF note name"))
                   (make-elf-note
-                   (utf8->string (copy-range raw-name 0 name-length)) type
+                   (strict-utf8->string (copy-range raw-name 0 name-length)) type
                    (list-ref field* 2))))
               (<~> (<u8vec> name-size)
                    (<skip> (<uimm8> 0) name-padding)
@@ -408,7 +416,7 @@
         (<map>
          (lambda (fields)
            (make-elf-section-header
-            (list-ref fields 0) #f (list-ref fields 1) (list-ref fields 2)
+            (list-ref fields 0) "" (list-ref fields 1) (list-ref fields 2)
             (list-ref fields 3) (list-ref fields 4) (list-ref fields 5)
             (list-ref fields 6) (list-ref fields 7) (list-ref fields 8)
             (list-ref fields 9)))

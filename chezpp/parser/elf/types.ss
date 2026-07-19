@@ -392,7 +392,7 @@
     make-elf-section-header elf-section-header?
     $make-elf-section-header $elf-section-header?
     ([name-index elf-section-header-name-index $elf-section-header-name-index natural?]
-     [name elf-section-header-name $elf-section-header-name elf-value?]
+     [name elf-section-header-name $elf-section-header-name string?]
      [type elf-section-header-type $elf-section-header-type natural?]
      [flags elf-section-header-flags $elf-section-header-flags natural?]
      [address elf-section-header-address $elf-section-header-address natural?]

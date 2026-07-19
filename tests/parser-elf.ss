@@ -1,5 +1,6 @@
 (import (chezpp)
-        (chezpp parser elf))
+        (chezpp parser elf)
+        (chezpp parser elf types))
 
 (define minimal-elf64le
   (lambda ()
@@ -305,6 +306,13 @@
             (= 0 (vector-length (elf-file-sections file)))))
 
      )
+
+(mat elf-record-contracts
+
+     ;; error: an ELF section-header name must be a string.
+     (error? (make-elf-section-header 0 #f 0 0 0 0 0 0 0 0 0))
+
+     )
 (mat parse-elf-headers
 
      (for-all
@@ -385,6 +393,15 @@
         (bytevector-u8-set! bytes 285 0)
         (bytevector-u8-set! bytes 286 1)
         (parse-elf bytes)))
+
+     ;; error: malformed UTF-8 in a note name must retain the section byte offset.
+     (guard (condition
+             [(parser-error? condition) (= 272 (parser-error-offset condition))]
+             [else #f])
+       (let ([bytes (rich-elf64le)])
+         (bytevector-u8-set! bytes 284 #xff)
+         (parse-elf bytes)
+         #f))
 
      ;; error: the section-header table must fit in the input.
      (error? (parse-elf (rich-elf-with-u64 40 800)))
