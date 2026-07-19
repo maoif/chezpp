@@ -133,6 +133,164 @@
       (bytevector-u64-set! bytes offset value (endianness little))
       bytes)))
 
+(define rich-elf-without-section-names
+  (lambda ()
+    (let ([bytes (rich-elf64le)])
+      (bytevector-u16-set! bytes 62 0 (endianness little))
+      bytes)))
+
+(define elf-endianness
+  (lambda (endianness-name)
+    (if (eq? endianness-name 'little) (endianness little) (endianness big))))
+
+(define set-elf-word!
+  (lambda (bytes offset size value endianness)
+    (if (= size 4)
+        (bytevector-u32-set! bytes offset value endianness)
+        (bytevector-u64-set! bytes offset value endianness))))
+
+(define set-elf-sword!
+  (lambda (bytes offset size value endianness)
+    (if (= size 4)
+        (bytevector-s32-set! bytes offset value endianness)
+        (bytevector-s64-set! bytes offset value endianness))))
+
+(define set-elf-section!
+  (lambda (bytes class endianness table-offset index type offset size link entry-size)
+    (let ([at (+ table-offset (* index (if (eq? class 'elf32) 40 64)))])
+      (bytevector-u32-set! bytes (+ at 4) type endianness)
+      (if (eq? class 'elf32)
+          (begin
+            (bytevector-u32-set! bytes (+ at 16) offset endianness)
+            (bytevector-u32-set! bytes (+ at 20) size endianness)
+            (bytevector-u32-set! bytes (+ at 24) link endianness)
+            (bytevector-u32-set! bytes (+ at 32) 1 endianness)
+            (bytevector-u32-set! bytes (+ at 36) entry-size endianness))
+          (begin
+            (bytevector-u64-set! bytes (+ at 24) offset endianness)
+            (bytevector-u64-set! bytes (+ at 32) size endianness)
+            (bytevector-u32-set! bytes (+ at 40) link endianness)
+            (bytevector-u64-set! bytes (+ at 48) 1 endianness)
+            (bytevector-u64-set! bytes (+ at 56) entry-size endianness))))))
+
+(define typed-elf
+  (lambda (class endianness-name)
+    (let* ([elf64? (eq? class 'elf64)]
+           [word (if elf64? 8 4)]
+           [symbol-size (if elf64? 24 16)]
+           [table-offset 640]
+           [endianness (elf-endianness endianness-name)]
+           [bytes (make-bytevector 1400 0)]
+           [header (minimal-elf class endianness-name)])
+      (bytevector-copy! header 0 bytes 0 (bytevector-length header))
+      (if elf64?
+          (bytevector-u64-set! bytes 40 table-offset endianness)
+          (bytevector-u32-set! bytes 32 table-offset endianness))
+      (bytevector-u16-set! bytes (if elf64? 60 48) 11 endianness)
+      (bytevector-u16-set! bytes (if elf64? 62 50) 0 endianness)
+
+      (bytevector-copy! (string->utf8 "\x0;x\x0;") 0 bytes 128 3)
+      (let ([symbol-at (+ 144 symbol-size)])
+        (bytevector-u32-set! bytes symbol-at 1 endianness)
+        (if elf64?
+            (begin
+              (bytevector-u8-set! bytes (+ symbol-at 4) #x12)
+              (bytevector-u16-set! bytes (+ symbol-at 6) 1 endianness)
+              (bytevector-u64-set! bytes (+ symbol-at 8) #x11223344 endianness)
+              (bytevector-u64-set! bytes (+ symbol-at 16) 7 endianness))
+            (begin
+              (bytevector-u32-set! bytes (+ symbol-at 4) #x11223344 endianness)
+              (bytevector-u32-set! bytes (+ symbol-at 8) 7 endianness)
+              (bytevector-u8-set! bytes (+ symbol-at 12) #x12)
+              (bytevector-u16-set! bytes (+ symbol-at 14) 1 endianness))))
+
+      (set-elf-word! bytes 208 word #x1000 endianness)
+      (set-elf-word! bytes (+ 208 word) word 3 endianness)
+      (bytevector-u32-set! bytes 240 1 endianness)
+      (bytevector-u32-set! bytes 244 2 endianness)
+      (bytevector-u32-set! bytes 248 1 endianness)
+      (bytevector-u32-set! bytes 252 0 endianness)
+      (bytevector-u32-set! bytes 256 1 endianness)
+      (bytevector-u32-set! bytes 272 1 endianness)
+      (bytevector-u32-set! bytes 276 6 endianness)
+      (for-each
+       (lambda (offset)
+         (set-elf-word! bytes offset word #x11 endianness)
+         (set-elf-word! bytes (+ offset word) word #x22 endianness))
+       '(288 320 352))
+      (set-elf-sword! bytes 400 word 1 endianness)
+      (set-elf-word! bytes (+ 400 word) word #x33 endianness)
+      (set-elf-sword! bytes (+ 400 (* 2 word)) word 0 endianness)
+      (set-elf-word! bytes (+ 400 (* 3 word)) word 0 endianness)
+
+      (set-elf-section! bytes class endianness table-offset 1 3 128 3 0 0)
+      (set-elf-section! bytes class endianness table-offset 2 2 144 (* 2 symbol-size)
+                        1 symbol-size)
+      (set-elf-section! bytes class endianness table-offset 3 19 208 (* 2 word) 0 word)
+      (set-elf-section! bytes class endianness table-offset 4 5 240 20 2 4)
+      (set-elf-section! bytes class endianness table-offset 5 17 272 8 2 4)
+      (set-elf-section! bytes class endianness table-offset 6 14 288 (* 2 word) 0 word)
+      (set-elf-section! bytes class endianness table-offset 7 15 320 (* 2 word) 0 word)
+      (set-elf-section! bytes class endianness table-offset 8 16 352 (* 2 word) 0 word)
+      (set-elf-section! bytes class endianness table-offset 9 6 400 (* 4 word) 1
+                        (* 2 word))
+      (set-elf-section! bytes class endianness table-offset 10 18 480 8 2 4)
+      bytes)))
+
+(define typed-elf-with-section-size
+  (lambda (class endianness-name index size)
+    (let* ([bytes (typed-elf class endianness-name)]
+           [endianness (elf-endianness endianness-name)]
+           [at (+ 640 (* index (if (eq? class 'elf32) 40 64))
+                  (if (eq? class 'elf32) 20 32))])
+      (if (eq? class 'elf32)
+          (bytevector-u32-set! bytes at size endianness)
+          (bytevector-u64-set! bytes at size endianness))
+      bytes)))
+
+(define extended-count-elf32be
+  (lambda ()
+    (let* ([header-size 52]
+           [program-entry-size 32]
+           [program-count #xffff]
+           [section-entry-size 40]
+           [section-count #xff01]
+           [section-name-index #xff00]
+           [section-offset (+ header-size (* program-entry-size program-count))]
+           [name-offset (+ section-offset (* section-entry-size section-count))]
+           [bytes (make-bytevector (+ name-offset 1) 0)]
+           [big (endianness big)]
+           [name-header (+ section-offset (* section-name-index section-entry-size))])
+      (bytevector-copy! (minimal-elf 'elf32 'big) 0 bytes 0 header-size)
+      (bytevector-u32-set! bytes 28 header-size big)
+      (bytevector-u32-set! bytes 32 section-offset big)
+      (bytevector-u16-set! bytes 44 #xffff big)
+      (bytevector-u16-set! bytes 48 0 big)
+      (bytevector-u16-set! bytes 50 #xffff big)
+      (bytevector-u32-set! bytes (+ section-offset 20) section-count big)
+      (bytevector-u32-set! bytes (+ section-offset 24) section-name-index big)
+      (bytevector-u32-set! bytes (+ section-offset 28) program-count big)
+      (bytevector-u32-set! bytes (+ name-header 4) 3 big)
+      (bytevector-u32-set! bytes (+ name-header 16) name-offset big)
+      (bytevector-u32-set! bytes (+ name-header 20) 1 big)
+      (bytevector-u32-set! bytes (+ name-header 32) 1 big)
+      bytes)))
+
+(define elf32be-with-section-zero
+  (lambda (program-count section-count section-name-index size link info)
+    (let* ([section-offset 52]
+           [bytes (make-bytevector 92 0)]
+           [big (endianness big)])
+      (bytevector-copy! (minimal-elf 'elf32 'big) 0 bytes 0 52)
+      (bytevector-u32-set! bytes 32 section-offset big)
+      (bytevector-u16-set! bytes 44 program-count big)
+      (bytevector-u16-set! bytes 48 section-count big)
+      (bytevector-u16-set! bytes 50 section-name-index big)
+      (bytevector-u32-set! bytes (+ section-offset 20) size big)
+      (bytevector-u32-set! bytes (+ section-offset 24) link big)
+      (bytevector-u32-set! bytes (+ section-offset 28) info big)
+      bytes)))
+
 (mat parse-elf-records
 
      (let* ([file (parse-elf (minimal-elf64le))]
@@ -230,5 +388,110 @@
 
      ;; error: the section-header table must fit in the input.
      (error? (parse-elf (rich-elf-with-u64 40 800)))
+
+     )
+
+(mat parse-elf-without-section-names
+
+     (let* ([file (parse-elf (rich-elf-without-section-names))]
+            [header (elf-file-header file)]
+            [sections (elf-file-sections file)])
+       (and (= 0 (elf-header-section-name-index header))
+            (for-all
+             (lambda (section)
+               (string=? "" (elf-section-header-name (elf-section-header section))))
+             (vector->list sections))))
+
+     )
+
+(mat parse-elf-typed-sections
+
+     (for-all
+      (lambda (configuration)
+        (let* ([class (car configuration)]
+               [endianness-name (cadr configuration)]
+               [file (parse-elf (typed-elf class endianness-name))]
+               [sections (elf-file-sections file)]
+               [relr (elf-section-content (vector-ref sections 3))]
+               [hash (elf-section-content (vector-ref sections 4))]
+               [group (elf-section-content (vector-ref sections 5))]
+               [init (elf-section-content (vector-ref sections 6))]
+               [fini (elf-section-content (vector-ref sections 7))]
+               [preinit (elf-section-content (vector-ref sections 8))]
+               [dynamic (elf-section-content (vector-ref sections 9))]
+               [dynamic* (elf-dynamic-table-entries dynamic)]
+               [xindex (elf-section-content (vector-ref sections 10))])
+          (and (equal? '#(#x1000 3) (elf-relr-table-entries relr))
+               (equal? '#(1) (elf-hash-table-buckets hash))
+               (equal? '#(0 1) (elf-hash-table-chains hash))
+               (= 1 (elf-group-section-flags group))
+               (equal? '#(6) (elf-group-section-members group))
+               (equal? '#(#x11 #x22) (elf-word-table-entries init))
+               (equal? '#(#x11 #x22) (elf-word-table-entries fini))
+               (equal? '#(#x11 #x22) (elf-word-table-entries preinit))
+               (= 1 (elf-dynamic-entry-tag (vector-ref dynamic* 0)))
+               (= #x33 (elf-dynamic-entry-value (vector-ref dynamic* 0)))
+               (= 0 (elf-dynamic-entry-tag (vector-ref dynamic* 1)))
+               (equal? '#(0 0) (elf-word-table-entries xindex)))))
+      '((elf32 little) (elf32 big) (elf64 little) (elf64 big)))
+
+     ;; error: an SHT_RELR payload must contain complete class-sized words.
+     (error? (parse-elf (typed-elf-with-section-size 'elf32 'little 3 5)))
+
+     ;; error: an SHT_HASH payload must match its declared bucket and chain counts.
+     (error?
+      (let ([bytes (typed-elf 'elf64 'big)])
+        (bytevector-u32-set! bytes 240 2 (endianness big))
+        (parse-elf bytes)))
+
+     ;; error: an SHT_GROUP payload must contain a flags word and complete members.
+     (error? (parse-elf (typed-elf-with-section-size 'elf64 'little 5 6)))
+
+     ;; error: an address-array payload must contain complete class-sized words.
+     (error? (parse-elf (typed-elf-with-section-size 'elf32 'big 6 5)))
+
+     ;; error: an SHT_DYNAMIC payload must contain complete tag/value pairs.
+     (error? (parse-elf (typed-elf-with-section-size 'elf64 'big 9 17)))
+
+     ;; error: unused SHT_SYMTAB_SHNDX entries must be zero.
+     (error?
+      (let ([bytes (typed-elf 'elf32 'little)])
+        (bytevector-u32-set! bytes 480 1 (endianness little))
+        (parse-elf bytes)))
+
+     )
+
+(mat parse-elf-extended-counts
+
+     (let* ([file (parse-elf (extended-count-elf32be))]
+            [header (elf-file-header file)]
+            [programs (elf-file-program-headers file)]
+            [sections (elf-file-sections file)]
+            [zero (elf-section-content (vector-ref sections 0))])
+       (and (= #xffff (elf-header-program-header-count header))
+            (= #xff01 (elf-header-section-header-count header))
+            (= #xff00 (elf-header-section-name-index header))
+            (= #xffff (vector-length programs))
+            (= #xff01 (vector-length sections))
+            (elf-raw-section? zero)
+            (= 0 (bytevector-length (elf-raw-section-bytes zero)))))
+
+     ;; error: an extended section count must be in the reserved-index range.
+     (error? (parse-elf (elf32be-with-section-zero 0 0 0 2 0 0)))
+
+     ;; error: an extended program-header count must be at least PN_XNUM.
+     (error? (parse-elf (elf32be-with-section-zero #xffff 1 0 0 0 2)))
+
+     ;; error: an extended section-name index must be in the reserved-index range.
+     (error? (parse-elf (elf32be-with-section-zero 0 1 #xffff 0 2 0)))
+
+     ;; error: section zero must not carry an extended count when e_shnum is ordinary.
+     (error? (parse-elf (elf32be-with-section-zero 0 1 0 2 0 0)))
+
+     ;; error: section zero must not carry PN_XNUM data when e_phnum is ordinary.
+     (error? (parse-elf (elf32be-with-section-zero 0 1 0 0 0 2)))
+
+     ;; error: section zero must not carry SHN_XINDEX data when e_shstrndx is ordinary.
+     (error? (parse-elf (elf32be-with-section-zero 0 1 0 0 2 0)))
 
      )
