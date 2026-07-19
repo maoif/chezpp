@@ -37,7 +37,8 @@
            (let loop ([end index])
              (cond [(= end (bytevector-length bytes)) #f]
                    [(zero? (bytevector-u8-ref bytes end))
-                    (utf8->string (copy-range bytes index (- end index)))]
+                    (guard (condition [else #f])
+                      (utf8->string (copy-range bytes index (- end index))))]
                    [else (loop (+ end 1))])))))
 
   (define raw-section-header
@@ -83,34 +84,57 @@
           (vector-set! result i (unsigned-ref bytes (+ start (* i 4)) 4 endianness))))))
 
   (define decode-symbols
-    (lambda (bytes class endianness header string-bytes)
+    (lambda (bytes class endianness header string-bytes xindices section-count)
       (let* ([size (bytevector-length bytes)]
              [standard (if (eq? class 'elf32) 16 24)]
              [entry-size (elf-section-header-entry-size header)]
              [entry-size (if (zero? entry-size) standard entry-size)])
-        (and (= entry-size standard) (zero? (modulo size entry-size))
-             (let* ([count (/ size entry-size)] [result (make-vector count)])
-               (do ([i 0 (+ i 1)]) ((= i count) (make-elf-symbol-table result))
+        (and string-bytes (= entry-size standard) (zero? (modulo size entry-size))
+             (let* ([count (/ size entry-size)]
+                    [result (make-vector count)])
+               (and (or (not xindices) (= count (vector-length xindices)))
+                    (let loop ([i 0])
+                      (if (= i count)
+                          (make-elf-symbol-table result)
                  (let* ([at (* i entry-size)]
                         [name-index (unsigned-ref bytes at 4 endianness)]
-                        [name (and string-bytes (nul-string string-bytes name-index))])
-                   (if (eq? class 'elf32)
-                       (vector-set!
-                        result i
-                        (make-elf-symbol name-index name
-                                         (unsigned-ref bytes (+ at 12) 1 endianness)
-                                         (unsigned-ref bytes (+ at 13) 1 endianness)
-                                         (unsigned-ref bytes (+ at 14) 2 endianness)
-                                         (unsigned-ref bytes (+ at 4) 4 endianness)
-                                         (unsigned-ref bytes (+ at 8) 4 endianness)))
-                       (vector-set!
-                        result i
-                        (make-elf-symbol name-index name
-                                         (unsigned-ref bytes (+ at 4) 1 endianness)
-                                         (unsigned-ref bytes (+ at 5) 1 endianness)
-                                         (unsigned-ref bytes (+ at 6) 2 endianness)
-                                         (unsigned-ref bytes (+ at 8) 8 endianness)
-                                         (unsigned-ref bytes (+ at 16) 8 endianness)))))))))))
+                        [name (nul-string string-bytes name-index)]
+                        [raw-index (unsigned-ref bytes
+                                                 (+ at (if (eq? class 'elf32) 14 6))
+                                                 2 endianness)]
+                        [extended? (= raw-index #xffff)]
+                        [section-index (if extended?
+                                           (and xindices (vector-ref xindices i))
+                                           raw-index)]
+                        [unused-extension?
+                         (and xindices (not extended?)
+                              (not (zero? (vector-ref xindices i))))]
+                        [valid-index?
+                         (and section-index
+                              (or (< section-index section-count)
+                                  (<= #xff00 section-index #xfffe)))])
+                   (and name valid-index? (not unused-extension?)
+                        (begin
+                          (if (eq? class 'elf32)
+                              (vector-set!
+                               result i
+                               (make-elf-symbol
+                                name-index name
+                                (unsigned-ref bytes (+ at 12) 1 endianness)
+                                (unsigned-ref bytes (+ at 13) 1 endianness)
+                                section-index
+                                (unsigned-ref bytes (+ at 4) 4 endianness)
+                                (unsigned-ref bytes (+ at 8) 4 endianness)))
+                              (vector-set!
+                               result i
+                               (make-elf-symbol
+                                name-index name
+                                (unsigned-ref bytes (+ at 4) 1 endianness)
+                                (unsigned-ref bytes (+ at 5) 1 endianness)
+                                section-index
+                                (unsigned-ref bytes (+ at 8) 8 endianness)
+                                (unsigned-ref bytes (+ at 16) 8 endianness))))
+                          (loop (+ i 1)))))))))))))
 
   (define decode-relocations
     (lambda (bytes class endianness header addends?)
@@ -151,6 +175,17 @@
                      (and (elf-range-valid? name-at name-size length)
                           (elf-range-valid? desc-at desc-size length)
                           (<= next length)
+                          (or (zero? name-size)
+                              (zero? (bytevector-u8-ref bytes
+                                                       (+ name-at name-size -1))))
+                          (let padding-loop ([i (+ name-at name-size)])
+                            (or (= i desc-at)
+                                (and (zero? (bytevector-u8-ref bytes i))
+                                     (padding-loop (+ i 1)))))
+                          (let padding-loop ([i (+ desc-at desc-size)])
+                            (or (= i next)
+                                (and (zero? (bytevector-u8-ref bytes i))
+                                     (padding-loop (+ i 1)))))
                           (let* ([raw-name (copy-range bytes name-at name-size)]
                                  [name-length (if (and (> name-size 0)
                                                        (zero? (bytevector-u8-ref
@@ -162,8 +197,47 @@
                                          name type (copy-range bytes desc-at desc-size))
                                         notes)))))))))))
 
+  (define linked-section-type?
+    (lambda (headers index type*)
+      (and (< index (vector-length headers))
+           (memv (elf-section-header-type (vector-ref headers index)) type*))))
+
+  (define symbol-table-entry-count
+    (lambda (class header raw)
+      (let ([standard (if (eq? class 'elf32) 16 24)]
+            [entry-size (elf-section-header-entry-size header)])
+        (and (= entry-size standard)
+             (zero? (modulo (bytevector-length raw) entry-size))
+             (/ (bytevector-length raw) entry-size)))))
+
+  (define symbol-xindices
+    (lambda (symbol-index headers raw-sections endianness expected-count)
+      (let loop ([i 0] [found #f])
+        (if (= i (vector-length headers))
+            found
+            (let ([header (vector-ref headers i)])
+              (if (and (= 18 (elf-section-header-type header))
+                       (= symbol-index (elf-section-header-link header)))
+                  (and (not found)
+                       (= 4 (elf-section-header-entry-size header))
+                       (= (* expected-count 4)
+                          (bytevector-length (vector-ref raw-sections i)))
+                       (loop (+ i 1)
+                             (vector-u32 (vector-ref raw-sections i)
+                                         endianness 0 expected-count)))
+                  (loop (+ i 1) found)))))))
+
+  (define relocation-symbols-valid?
+    (lambda (relocations symbol-count)
+      (let ([relocation* (elf-relocation-table-relocations relocations)])
+        (let loop ([i 0])
+          (or (= i (vector-length relocation*))
+              (and (< (elf-relocation-symbol-index (vector-ref relocation* i))
+                      symbol-count)
+                   (loop (+ i 1))))))))
+
   (define decode-section-content
-    (lambda (raw class endianness header all-headers raw-sections)
+    (lambda (raw class endianness section-index header all-headers raw-sections)
       (let* ([type (elf-section-header-type header)]
              [size (bytevector-length raw)]
              [word (if (eq? class 'elf32) 4 8)]
@@ -172,19 +246,36 @@
                           (vector-ref raw-sections link))])
         (case type
           [(3) (make-elf-string-table raw)]
-          [(2 11) (or (decode-symbols raw class endianness header linked)
-                      (make-elf-raw-section raw))]
-          [(4) (or (decode-relocations raw class endianness header #t)
-                   (make-elf-raw-section raw))]
-          [(9) (or (decode-relocations raw class endianness header #f)
-                   (make-elf-raw-section raw))]
+          [(2 11)
+           (and (linked-section-type? all-headers link '(3))
+                (let ([count (symbol-table-entry-count class header raw)])
+                  (and count
+                       (decode-symbols
+                        raw class endianness header linked
+                        (symbol-xindices section-index all-headers raw-sections
+                                         endianness count)
+                        (vector-length all-headers)))))]
+          [(4 9)
+           (and (linked-section-type? all-headers link '(2 11))
+                (< (elf-section-header-info header) (vector-length all-headers))
+                (let* ([symbol-header (vector-ref all-headers link)]
+                       [symbol-raw (vector-ref raw-sections link)]
+                       [symbol-count (symbol-table-entry-count
+                                      class symbol-header symbol-raw)]
+                       [relocations (and symbol-count
+                                         (decode-relocations
+                                          raw class endianness header (= type 4)))])
+                  (and relocations
+                       (relocation-symbols-valid? relocations symbol-count)
+                       relocations)))]
           [(19) (and (zero? (modulo size word))
                      (make-elf-relr-table
                       (let ([values (make-vector (/ size word))])
                         (do ([i 0 (+ i 1)]) ((= i (vector-length values)) values)
                           (vector-set! values i
                                        (unsigned-ref raw (* i word) word endianness))))))]
-          [(5) (and (>= size 8)
+          [(5) (and (linked-section-type? all-headers link '(2 11))
+                    (>= size 8)
                     (let* ([bucket-count (unsigned-ref raw 0 4 endianness)]
                            [chain-count (unsigned-ref raw 4 4 endianness)]
                            [needed (* 4 (+ 2 bucket-count chain-count))])
@@ -193,11 +284,18 @@
                             (vector-u32 raw endianness 8 bucket-count)
                             (vector-u32 raw endianness (+ 8 (* bucket-count 4))
                                         chain-count)))))]
-          [(17) (and (>= size 4) (zero? (modulo size 4))
+          [(17) (and (linked-section-type? all-headers link '(2 11))
+                     (>= size 4) (zero? (modulo size 4))
                      (make-elf-group-section
                       (unsigned-ref raw 0 4 endianness)
                       (vector-u32 raw endianness 4 (- (/ size 4) 1))))]
-          [(18) (and (zero? (modulo size 4))
+          [(18) (and (linked-section-type? all-headers link '(2 11))
+                     (= 4 (elf-section-header-entry-size header))
+                     (let ([symbol-count
+                            (symbol-table-entry-count
+                             class (vector-ref all-headers link)
+                             (vector-ref raw-sections link))])
+                       (and symbol-count (= size (* symbol-count 4))))
                      (make-elf-word-table (vector-u32 raw endianness 0 (/ size 4))))]
           [(14 15 16) (and (zero? (modulo size word))
                            (make-elf-word-table
@@ -205,7 +303,8 @@
                               (do ([i 0 (+ i 1)]) ((= i (vector-length values)) values)
                                 (vector-set! values i
                                              (unsigned-ref raw (* i word) word endianness))))))]
-          [(6) (and (zero? (modulo size (* 2 word)))
+          [(6) (and (linked-section-type? all-headers link '(3))
+                    (zero? (modulo size (* 2 word)))
                     (make-elf-dynamic-table
                      (let ([values (make-vector (/ size (* 2 word)))])
                        (do ([i 0 (+ i 1)]) ((= i (vector-length values)) values)
@@ -214,7 +313,7 @@
                                         (make-elf-dynamic-entry
                                          (signed-ref raw at word endianness)
                                          (unsigned-ref raw (+ at word) word endianness))))))))]
-          [(7) (or (decode-notes raw endianness) (make-elf-raw-section raw))]
+          [(7) (decode-notes raw endianness)]
           [else (make-elf-raw-section raw)]))))
 
   (define unsigned-parser
@@ -465,6 +564,42 @@
                                             (decoded-elf-header-header-size header))))))]
                       ))))))))))
 
+  (define section-zero-problem
+    (lambda (header zero)
+      (let ([raw-phnum (decoded-elf-header-raw-phnum header)]
+            [raw-shnum (decoded-elf-header-raw-shnum header)]
+            [raw-shstrndx (decoded-elf-header-raw-shstrndx header)]
+            [shoff (decoded-elf-header-shoff header)])
+        (cond
+          [(and zero
+                (or (not (zero? (elf-section-header-name-index zero)))
+                    (not (zero? (elf-section-header-type zero)))
+                    (not (zero? (elf-section-header-flags zero)))
+                    (not (zero? (elf-section-header-address zero)))
+                    (not (zero? (elf-section-header-offset zero)))
+                    (not (zero? (elf-section-header-address-alignment zero)))
+                    (not (zero? (elf-section-header-entry-size zero)))))
+           (issue shoff "invalid extended-count section zero")]
+          [(and (= raw-phnum #xffff)
+                (< (elf-section-header-info zero) #xffff))
+           (issue shoff "invalid extended program-header count")]
+          [(and (not (= raw-phnum #xffff)) zero
+                (not (zero? (elf-section-header-info zero))))
+           (issue shoff "unexpected extended program-header count")]
+          [(and (= raw-shnum 0) (not (zero? shoff))
+                (< (elf-section-header-size zero) #xff00))
+           (issue shoff "invalid extended section count")]
+          [(and (not (= raw-shnum 0)) zero
+                (not (zero? (elf-section-header-size zero))))
+           (issue shoff "unexpected extended section count")]
+          [(and (= raw-shstrndx #xffff)
+                (< (elf-section-header-link zero) #xff00))
+           (issue shoff "invalid extended section-name index")]
+          [(and (not (= raw-shstrndx #xffff)) zero
+                (not (zero? (elf-section-header-link zero))))
+           (issue shoff "unexpected extended section-name index")]
+          [else #f]))))
+
   (define elf-body-parser
     (lambda (bytes length header)
       (let* ([problem (header-problem header)]
@@ -493,7 +628,11 @@
                                       class
                                       (decoded-elf-header-endianness-name header))))
                 (<result> #f))
-            (lambda (zero) (elf-layout-parser bytes length header zero)))]))))
+            (lambda (zero)
+              (let ([zero-problem (section-zero-problem header zero)])
+                (if zero-problem
+                    (problem-parser zero-problem length)
+                    (elf-layout-parser bytes length header zero)))))]))))
 
   (define finish-elf
     (lambda (bytes class endianness-name endianness type machine version entry phoff shoff flags
@@ -532,16 +671,20 @@
                                  (issue (elf-section-header-offset
                                          (vector-ref headers shstrndx))
                                         "invalid section name index or terminator"))
-                         (let ([header (rebuild-section-header old-header name)])
+                         (let* ([header (rebuild-section-header old-header name)]
+                                [content
+                                 (decode-section-content
+                                  (vector-ref raw-sections i) class endianness i header headers
+                                  raw-sections)])
                            (vector-set! headers i header)
-                           (vector-set!
-                            sections i
-                            (make-elf-section
-                             header
-                             (decode-section-content
-                              (vector-ref raw-sections i) class endianness header headers
-                              raw-sections)))
-                           (loop (+ i 1))))))))]))))
+                           (if content
+                               (begin
+                                 (vector-set! sections i (make-elf-section header content))
+                                 (loop (+ i 1)))
+                               (values
+                                #f
+                                (issue (elf-section-header-offset header)
+                                       "malformed typed section")))))))))]))))
 
   (define-parser parser-elf
     (let ([bytes (binary-input-data inp)]
