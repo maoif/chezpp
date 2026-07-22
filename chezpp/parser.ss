@@ -13,6 +13,5 @@
                   (chezpp parser scheme)
                   (chezpp parser toml)
                   (chezpp parser elf)
-                  (chezpp parser jclass)
                   (chezpp parser wasm)))
   )
