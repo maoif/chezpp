@@ -1,7 +1,57 @@
 (library (chezpp parser wasm)
-  (export parse-wasm-binary-module)
+  (export
+    parse-wasm-binary-module
+    make-wasm-module wasm-module? wasm-module-types wasm-module-imports
+    wasm-module-functions wasm-module-tables wasm-module-memories wasm-module-globals
+    wasm-module-tags wasm-module-exports wasm-module-start wasm-module-elements
+    wasm-module-data wasm-module-custom-sections
+    make-wasm-custom-section wasm-custom-section? wasm-custom-section-name
+    wasm-custom-section-bytes wasm-custom-section-after-section
+    make-wasm-recursive-type wasm-recursive-type? wasm-recursive-type-subtypes
+    make-wasm-subtype wasm-subtype? wasm-subtype-final? wasm-subtype-supertypes
+    wasm-subtype-composite-type
+    make-wasm-function-type wasm-function-type? wasm-function-type-parameters
+    wasm-function-type-results
+    make-wasm-struct-type wasm-struct-type? wasm-struct-type-fields
+    make-wasm-array-type wasm-array-type? wasm-array-type-field
+    make-wasm-field-type wasm-field-type? wasm-field-type-storage-type
+    wasm-field-type-mutable?
+    make-wasm-reference-type wasm-reference-type? wasm-reference-type-nullable?
+    wasm-reference-type-heap-type
+    make-wasm-limits wasm-limits? wasm-limits-address-type wasm-limits-minimum
+    wasm-limits-maximum
+    make-wasm-table-type wasm-table-type? wasm-table-type-reference-type
+    wasm-table-type-limits
+    make-wasm-memory-type wasm-memory-type? wasm-memory-type-limits
+    make-wasm-global-type wasm-global-type? wasm-global-type-value-type
+    wasm-global-type-mutable?
+    make-wasm-tag-type wasm-tag-type? wasm-tag-type-type-index
+    make-wasm-external-type wasm-external-type? wasm-external-type-kind
+    wasm-external-type-type
+    make-wasm-import wasm-import? wasm-import-module wasm-import-name
+    wasm-import-external-type
+    make-wasm-function wasm-function? wasm-function-type-index wasm-function-locals
+    wasm-function-body
+    make-wasm-table wasm-table? wasm-table-type wasm-table-initializer
+    make-wasm-memory wasm-memory? wasm-memory-type
+    make-wasm-global wasm-global? wasm-global-type wasm-global-initializer
+    make-wasm-tag wasm-tag? wasm-tag-type
+    make-wasm-export wasm-export? wasm-export-name wasm-export-kind wasm-export-index
+    make-wasm-element wasm-element? wasm-element-mode wasm-element-reference-type
+    wasm-element-table-index wasm-element-offset wasm-element-initializers
+    make-wasm-data wasm-data? wasm-data-mode wasm-data-memory-index wasm-data-offset
+    wasm-data-bytes
+    make-wasm-instruction wasm-instruction? wasm-instruction-mnemonic
+    wasm-instruction-immediates wasm-instruction-body wasm-instruction-alternate
+    make-wasm-memory-argument wasm-memory-argument? wasm-memory-argument-alignment
+    wasm-memory-argument-offset wasm-memory-argument-memory-index
+    make-wasm-block-type wasm-block-type? wasm-block-type-kind wasm-block-type-value
+    make-wasm-catch wasm-catch? wasm-catch-kind wasm-catch-tag-index
+    wasm-catch-label-index
+    make-wasm-float wasm-float? wasm-float-width wasm-float-bits)
   (import (chezpp chez)
           (chezpp parser combinator)
+          (chezpp parser wasm types)
           (chezpp internal)
           (chezpp list)
           (chezpp io)

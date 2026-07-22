@@ -1,7 +1,7 @@
 NET_TESTS := net-core.ss net-http.ss net-ftp.ss net-ssh.ss net-sftp.ss net-scp.ss net-websocket.ss net-grpc.ss
 NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss
 PARSER_TESTS := parser-csv.ss parser-json5.ss parser-xml.ss parser-toml.ss \
-                parser-elf.ss
+                parser-elf.ss parser-wasm.ss
 PARSER_OBJS := $(PARSER_TESTS:.ss=.so)
 
 SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss navigator.ss \
