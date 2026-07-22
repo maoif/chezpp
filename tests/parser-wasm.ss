@@ -1,5 +1,341 @@
 (import (chezpp)
-        (chezpp parser wasm))
+        (chezpp parser wasm)
+        (chezpp parser wasm binary values)
+        (chezpp parser wasm binary types))
+
+(define parse-binary
+  (lambda (parser bytes)
+    (run-binary-parser (<~0> parser <eof>) bytes)))
+
+(mat wasm-binary-values-and-types
+
+     (= #xffffffff
+        (run-binary-parser <wasm-u32>
+                           (bytevector #xff #xff #xff #xff #x0f)))
+
+     (= -2147483648
+        (run-binary-parser <wasm-s32>
+                           (bytevector #x80 #x80 #x80 #x80 #x78)))
+
+     ;; A non-minimal encoding is legal when it stays within ceil(N / 7) bytes.
+     (= 0 (run-binary-parser <wasm-u32> (bytevector #x80 #x00)))
+
+     ;; error: u32 has nonzero unused bits in its fifth byte.
+     (error? (run-binary-parser <wasm-u32>
+                                (bytevector #xff #xff #xff #xff #x10)))
+
+     ;; error: u32 cannot occupy six bytes.
+     (error? (run-binary-parser <wasm-u32>
+                                (bytevector #x80 #x80 #x80 #x80 #x80 #x00)))
+
+     (let ([type (run-binary-parser <wasm-reference-type> (bytevector #x64 #x70))])
+       (and (wasm-reference-type? type)
+            (not (wasm-reference-type-nullable? type))
+            (eq? 'func (wasm-reference-type-heap-type type))))
+
+     (let ([limits (run-binary-parser <wasm-limits>
+                                      (bytevector #x05 #x02 #x09))])
+       (and (eq? 'i64 (wasm-limits-address-type limits))
+            (= 2 (wasm-limits-minimum limits))
+            (= 9 (wasm-limits-maximum limits))))
+
+     )
+
+(mat wasm-binary-integer-boundaries
+
+     (= 0 (parse-binary <wasm-u32> #vu8(0)))
+
+     (= #xffffffffffffffff
+        (parse-binary <wasm-u64>
+                      (bytevector #xff #xff #xff #xff #xff #xff #xff #xff #xff #x01)))
+
+     (= 0 (parse-binary <wasm-u64> #vu8(128 0)))
+
+     (= 2147483647
+        (parse-binary <wasm-s32> #vu8(255 255 255 255 7)))
+
+     (= -2147483648
+        (parse-binary <wasm-s32> #vu8(128 128 128 128 120)))
+
+     (= 1 (parse-binary <wasm-s32> #vu8(129 0)))
+
+     (= -1 (parse-binary <wasm-s32> #vu8(255 127)))
+
+     (= #xffffffff
+        (parse-binary <wasm-s33> #vu8(255 255 255 255 15)))
+
+     (= -4294967296
+        (parse-binary <wasm-s33> #vu8(128 128 128 128 112)))
+
+     (= 1 (parse-binary <wasm-s33> #vu8(129 0)))
+
+     (= -1 (parse-binary <wasm-s33> #vu8(255 127)))
+
+     (= #x7fffffffffffffff
+        (parse-binary <wasm-s64>
+                      #vu8(255 255 255 255 255 255 255 255 255 0)))
+
+     (= -9223372036854775808
+        (parse-binary <wasm-s64>
+                      #vu8(128 128 128 128 128 128 128 128 128 127)))
+
+     (= 1 (parse-binary <wasm-s64> #vu8(129 0)))
+
+     (= -1 (parse-binary <wasm-s64> #vu8(255 127)))
+
+     ;; error: a u32 input cannot end while the continuation bit is set.
+     (error? (parse-binary <wasm-u32> #vu8(128)))
+
+     ;; error: a u64 tenth byte may only carry its one remaining value bit.
+     (error? (parse-binary <wasm-u64>
+                           #vu8(128 128 128 128 128 128 128 128 128 2)))
+
+     ;; error: a u64 encoding cannot continue beyond its tenth byte.
+     (error? (parse-binary <wasm-u64>
+                           #vu8(128 128 128 128 128 128 128 128 128 128 0)))
+
+     ;; error: an s32 positive final byte has nonzero unused high bits.
+     (error? (parse-binary <wasm-s32> #vu8(128 128 128 128 8)))
+
+     ;; error: an s32 negative final byte has inconsistent unused high bits.
+     (error? (parse-binary <wasm-s32> #vu8(255 255 255 255 119)))
+
+     ;; error: an s33 encoding cannot continue beyond its fifth byte.
+     (error? (parse-binary <wasm-s33> #vu8(128 128 128 128 128 0)))
+
+     ;; error: an s33 positive final byte has nonzero unused high bits.
+     (error? (parse-binary <wasm-s33> #vu8(128 128 128 128 16)))
+
+     ;; error: an s33 negative final byte has inconsistent unused high bits.
+     (error? (parse-binary <wasm-s33> #vu8(255 255 255 255 111)))
+
+     ;; error: an s64 input cannot end while the continuation bit is set.
+     (error? (parse-binary <wasm-s64> #vu8(128)))
+
+     ;; error: an s64 positive final byte has nonzero unused high bits.
+     (error? (parse-binary <wasm-s64>
+                           #vu8(128 128 128 128 128 128 128 128 128 2)))
+
+     ;; error: an s64 negative final byte has inconsistent unused high bits.
+     (error? (parse-binary <wasm-s64>
+                           #vu8(128 128 128 128 128 128 128 128 128 125)))
+
+     ;; error: an s64 encoding cannot continue beyond its tenth byte.
+     (error? (parse-binary <wasm-s64>
+                           #vu8(128 128 128 128 128 128 128 128 128 128 0)))
+
+     )
+
+(mat wasm-binary-scalars-and-vectors
+
+     (let ([value (parse-binary <wasm-f32> #vu8(1 0 192 127))])
+       (and (= 32 (wasm-float-width value))
+            (= #x7fc00001 (wasm-float-bits value))))
+
+     (let ([value (parse-binary <wasm-f64> #vu8(1 0 0 0 0 0 248 127))])
+       (and (= 64 (wasm-float-width value))
+            (= #x7ff8000000000001 (wasm-float-bits value))))
+
+     (equal? #vu8() (parse-binary <wasm-byte-vector> #vu8(0)))
+
+     (equal? #vu8(1 2 255)
+             (parse-binary <wasm-byte-vector> #vu8(3 1 2 255)))
+
+     (string=? "wasm" (parse-binary <wasm-name> #vu8(4 119 97 115 109)))
+
+     (string=? (string (integer->char #x4e2d))
+               (parse-binary <wasm-name> #vu8(3 228 184 173)))
+
+     (equal? '#() (parse-binary (<wasm-vector> <wasm-u32>) #vu8(0)))
+
+     (equal? '#(1 300)
+             (parse-binary (<wasm-vector> <wasm-u32>) #vu8(2 1 172 2)))
+
+     ;; error: the vector parser constructor requires an element parser.
+     (error? (<wasm-vector> 'not-a-parser))
+
+     ;; error: a byte vector must contain the declared number of bytes.
+     (error? (parse-binary <wasm-byte-vector> #vu8(2 1)))
+
+     ;; error: overlong UTF-8 is not a valid WebAssembly name.
+     (error? (parse-binary <wasm-name> #vu8(2 192 175)))
+
+     )
+
+(mat wasm-binary-basic-types
+
+     (equal? '(i32 i64 f32 f64)
+             (map (lambda (byte)
+                    (parse-binary <wasm-number-type> (bytevector byte)))
+                  '(#x7f #x7e #x7d #x7c)))
+
+     (eq? 'v128 (parse-binary <wasm-vector-type> #vu8(123)))
+
+     (equal? '(func extern any eq i31 struct array none nofunc noextern exn noexn)
+             (map (lambda (byte)
+                    (parse-binary <wasm-heap-type> (bytevector byte)))
+                  '(#x70 #x6f #x6e #x6d #x6c #x6b #x6a #x69 #x68 #x67 #x66 #x65)))
+
+     (= 3 (parse-binary <wasm-heap-type> #vu8(3)))
+
+     (let ([type (parse-binary <wasm-reference-type> #vu8(99 105))])
+       (and (wasm-reference-type-nullable? type)
+            (eq? 'none (wasm-reference-type-heap-type type))))
+
+     (let ([type (parse-binary <wasm-reference-type> #vu8(100 3))])
+       (and (not (wasm-reference-type-nullable? type))
+            (= 3 (wasm-reference-type-heap-type type))))
+
+     (equal? '(func extern any eq i31 struct array none nofunc noextern exn noexn)
+             (map (lambda (byte)
+                    (wasm-reference-type-heap-type
+                     (parse-binary <wasm-value-type> (bytevector byte))))
+                  '(#x70 #x6f #x6e #x6d #x6c #x6b #x6a #x69 #x68 #x67 #x66 #x65)))
+
+     (equal? '(i8 i16 i32 v128)
+             (map (lambda (byte)
+                    (parse-binary <wasm-storage-type> (bytevector byte)))
+                  '(#x78 #x77 #x7f #x7b)))
+
+     ;; error: an unassigned negative s33 value is not a heap type.
+     (error? (parse-binary <wasm-heap-type> #vu8(100)))
+
+     ;; error: an unknown leading byte is not a value type.
+     (error? (parse-binary <wasm-value-type> #vu8(97)))
+
+     )
+
+(mat wasm-binary-composite-types
+
+     (let ([type (parse-binary <wasm-function-type> #vu8(96 2 127 112 1 126))])
+       (and (equal? '#(i64) (wasm-function-type-results type))
+            (= 2 (vector-length (wasm-function-type-parameters type)))
+            (eq? 'i32 (vector-ref (wasm-function-type-parameters type) 0))
+            (wasm-reference-type?
+             (vector-ref (wasm-function-type-parameters type) 1))))
+
+     (let* ([type (parse-binary <wasm-struct-type> #vu8(95 2 120 1 126 0))]
+            [fields (wasm-struct-type-fields type)])
+       (and (= 2 (vector-length fields))
+            (eq? 'i8 (wasm-field-type-storage-type (vector-ref fields 0)))
+            (wasm-field-type-mutable? (vector-ref fields 0))
+            (eq? 'i64 (wasm-field-type-storage-type (vector-ref fields 1)))
+            (not (wasm-field-type-mutable? (vector-ref fields 1)))))
+
+     (let* ([type (parse-binary <wasm-array-type> #vu8(94 119 0))]
+            [field (wasm-array-type-field type)])
+       (and (eq? 'i16 (wasm-field-type-storage-type field))
+            (not (wasm-field-type-mutable? field))))
+
+     (let ([type (parse-binary <wasm-subtype> #vu8(79 1 3 96 0 0))])
+       (and (wasm-subtype-final? type)
+            (equal? '#(3) (wasm-subtype-supertypes type))
+            (wasm-function-type? (wasm-subtype-composite-type type))))
+
+     (let ([type (parse-binary <wasm-subtype> #vu8(80 0 94 127 1))])
+       (and (not (wasm-subtype-final? type))
+            (equal? '#() (wasm-subtype-supertypes type))
+            (wasm-array-type? (wasm-subtype-composite-type type))))
+
+     (let ([type (parse-binary <wasm-subtype> #vu8(96 0 0))])
+       (and (wasm-subtype-final? type)
+            (equal? '#() (wasm-subtype-supertypes type))))
+
+     (let* ([type (parse-binary <wasm-recursive-type>
+                                #vu8(78 2 96 0 0 94 120 1))]
+            [subtypes (wasm-recursive-type-subtypes type)])
+       (and (= 2 (vector-length subtypes))
+            (wasm-function-type?
+             (wasm-subtype-composite-type (vector-ref subtypes 0)))
+            (wasm-array-type?
+             (wasm-subtype-composite-type (vector-ref subtypes 1)))))
+
+     (= 1
+        (vector-length
+         (wasm-recursive-type-subtypes
+          (parse-binary <wasm-recursive-type> #vu8(96 0 0)))))
+
+     ;; error: mutability is encoded by exactly zero or one.
+     (error? (parse-binary <wasm-field-type> #vu8(127 2)))
+
+     ;; error: an explicit recursive group must contain every declared subtype.
+     (error? (parse-binary <wasm-recursive-type> #vu8(78 2 96 0 0)))
+
+     ;; error: a recursive group cannot end in a truncated composite type.
+     (error? (parse-binary <wasm-recursive-type> #vu8(78 1 96 0)))
+
+     )
+
+(mat wasm-binary-administrative-types
+
+     (eq? 'empty
+          (wasm-block-type-kind (parse-binary <wasm-block-type> #vu8(64))))
+
+     (eq? 'value-type
+          (wasm-block-type-kind (parse-binary <wasm-block-type> #vu8(127))))
+
+     (= 3 (wasm-block-type-value (parse-binary <wasm-block-type> #vu8(3))))
+
+     (let ([type (parse-binary <wasm-global-type> #vu8(126 1))])
+       (and (eq? 'i64 (wasm-global-type-value-type type))
+            (wasm-global-type-mutable? type)))
+
+     (let ([type (parse-binary <wasm-table-type> #vu8(112 1 2 9))])
+       (and (eq? 'func
+                 (wasm-reference-type-heap-type
+                  (wasm-table-type-reference-type type)))
+            (= 2 (wasm-limits-minimum (wasm-table-type-limits type)))
+            (= 9 (wasm-limits-maximum (wasm-table-type-limits type)))))
+
+     (let ([type (parse-binary <wasm-memory-type> #vu8(4 7))])
+       (and (eq? 'i64
+                 (wasm-limits-address-type (wasm-memory-type-limits type)))
+            (= 7 (wasm-limits-minimum (wasm-memory-type-limits type)))
+            (not (wasm-limits-maximum (wasm-memory-type-limits type)))))
+
+     (= 4 (wasm-tag-type-type-index
+           (parse-binary <wasm-tag-type> #vu8(0 4))))
+
+     (equal? '(function table memory global tag)
+             (map (lambda (bytes)
+                    (wasm-external-type-kind
+                     (parse-binary <wasm-external-type> bytes)))
+                  (list #vu8(0 2) #vu8(1 112 0 1) #vu8(2 0 1)
+                        #vu8(3 127 0) #vu8(4 0 2))))
+
+     (let ([function (parse-binary <wasm-external-type> #vu8(0 2))]
+           [table (parse-binary <wasm-external-type> #vu8(1 112 0 1))]
+           [memory (parse-binary <wasm-external-type> #vu8(2 0 1))]
+           [global (parse-binary <wasm-external-type> #vu8(3 127 0))]
+           [tag (parse-binary <wasm-external-type> #vu8(4 0 2))])
+       (and (= 2 (wasm-external-type-type function))
+            (wasm-table-type? (wasm-external-type-type table))
+            (wasm-memory-type? (wasm-external-type-type memory))
+            (wasm-global-type? (wasm-external-type-type global))
+            (wasm-tag-type? (wasm-external-type-type tag))
+            (= 2
+               (wasm-tag-type-type-index
+                (wasm-external-type-type tag)))))
+
+     ;; error: a negative s33 value cannot be a block type index.
+     (error? (parse-binary <wasm-block-type> #vu8(100)))
+
+     ;; error: global mutability is encoded by exactly zero or one.
+     (error? (parse-binary <wasm-global-type> #vu8(127 2)))
+
+     ;; error: the tag attribute must be zero in Core 3.0.
+     (error? (parse-binary <wasm-tag-type> #vu8(1 0)))
+
+     ;; error: limits flags outside 0, 1, 4, and 5 are invalid.
+     (error? (parse-binary <wasm-limits> #vu8(2 0)))
+
+     ;; error: a limits maximum cannot be lower than its minimum.
+     (error? (parse-binary <wasm-limits> #vu8(1 9 2)))
+
+     ;; error: external type kind five is undefined.
+     (error? (parse-binary <wasm-external-type> #vu8(5)))
+
+     )
 
 (mat wasm-records
 

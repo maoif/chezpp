@@ -1,7 +1,9 @@
 (library (chezpp)
   (export)
   (import (chezscheme)
-          (chezpp concurrency fiber))
+          (chezpp concurrency fiber)
+          (chezpp parser wasm binary values)
+          (chezpp parser wasm binary types))
 
   (export (import (chezpp chez)
                   (chezpp match)
