@@ -107,8 +107,63 @@
                (memq value '(header type import function table memory tag global export start
                                     element data-count code data))))))
 
+  (define external-type-fields?
+    (lambda (field*)
+      (let ([kind (vector-ref field* 0)] [type (vector-ref field* 1)])
+        (case kind
+          [(function) (natural? type)]
+          [(table) (wasm-table-type? type)]
+          [(memory) (wasm-memory-type? type)]
+          [(global) (wasm-global-type? type)]
+          [(tag) (wasm-tag-type? type)]
+          [else #f]))))
+
+  (define block-type-fields?
+    (lambda (field*)
+      (let ([kind (vector-ref field* 0)] [value (vector-ref field* 1)])
+        (case kind
+          [(empty) (not value)]
+          [(value-type) (value-type? value)]
+          [(type-index) (natural? value)]
+          [else #f]))))
+
+  (define catch-fields?
+    (lambda (field*)
+      (let ([kind (vector-ref field* 0)] [tag-index (vector-ref field* 1)])
+        (case kind
+          [(catch catch-ref) (natural? tag-index)]
+          [(catch-all catch-all-ref) (not tag-index)]
+          [else #f]))))
+
+  (define float-fields?
+    (lambda (field*)
+      (let ([width (vector-ref field* 0)] [bits (vector-ref field* 1)])
+        (and (natural? bits)
+             (if (= width 32)
+                 (<= bits #xffffffff)
+                 (<= bits #xffffffffffffffff))))))
+
   (define-syntax define-checked-record-type
     (syntax-rules ()
+      [(_ internal-name public-maker public-predicate internal-maker internal-predicate
+          relationship-predicate
+          ([field public-accessor internal-accessor field-predicate] ...))
+       (begin
+         (define-record-type (internal-name internal-maker internal-predicate)
+           (fields (immutable field internal-accessor) ...))
+         (define public-maker
+           (lambda (field ...)
+             (let ([relationship-fields (vector field ...)])
+               (pcheck ([field-predicate field] ...
+                        [relationship-predicate relationship-fields])
+                       (internal-maker field ...)))))
+         (define public-predicate
+           (lambda (object)
+             (pcheck () (internal-predicate object))))
+         (define public-accessor
+           (lambda (record)
+             (pcheck ([internal-predicate record])
+                     (internal-accessor record)))) ...)]
       [(_ internal-name public-maker public-predicate internal-maker internal-predicate
           ([field public-accessor internal-accessor field-predicate] ...))
        (begin
@@ -127,8 +182,10 @@
                      (internal-accessor record)))) ...)]))
 
   #|proc:make-wasm-module
-  Creates a module. Parameters supply `types`, `imports`, `functions`, `tables`, `memories`,
-  `globals`, `tags`, `exports`, `start`, `elements`, `data`, and `custom-sections` fields.
+  Creates a module. `types` contains recursive type groups and `imports` contains imports.
+  `functions`, `tables`, `memories`, `globals`, and `tags` contain defined entities.
+  `exports` contains exports, and `start` is the optional start function index.
+  `elements` and `data` contain segments; `custom-sections` preserves custom payloads.
   |#
   #|proc:wasm-module?
   Returns whether `object` is a module record. `object` is the value to test.
@@ -186,7 +243,8 @@
                       (vector-of? wasm-custom-section?)]))
 
   #|proc:make-wasm-custom-section
-  Creates a custom section. `name`, `bytes`, and `after-section` supply the corresponding fields.
+  Creates a custom section. `name` is its decoded name and `bytes` is its raw payload.
+  `after-section` identifies the preceding standard section, or is `#f` before all sections.
   |#
   #|proc:wasm-custom-section?
   Returns whether `object` is a custom section. `object` is the value to test.
@@ -224,7 +282,8 @@
                (vector-of? wasm-subtype?)]))
 
   #|proc:make-wasm-subtype
-  Creates a subtype. `final?`, `supertypes`, and `composite-type` supply its fields.
+  Creates a subtype. `final?` states whether extension is forbidden.
+  `supertypes` contains type indexes, and `composite-type` is the defined composite type.
   |#
   #|proc:wasm-subtype?
   Returns whether `object` is a subtype. `object` is the value to test.
@@ -245,7 +304,8 @@
      [composite-type wasm-subtype-composite-type $wasm-subtype-composite-type composite-type?]))
 
   #|proc:make-wasm-function-type
-  Creates a function type. `parameters` and `results` are vectors of value types.
+  Creates a function type. `parameters` lists accepted value types and `results` lists returned
+  value types.
   |#
   #|proc:wasm-function-type?
   Returns whether `object` is a function type. `object` is the value to test.
@@ -308,7 +368,8 @@
      [mutable? wasm-field-type-mutable? $wasm-field-type-mutable? boolean?]))
 
   #|proc:make-wasm-reference-type
-  Creates a reference type. `nullable?` is its nullability and `heap-type` is its heap type.
+  Creates a reference type. `nullable?` states whether null is included, and `heap-type` names the
+  referenced abstract heap type or gives its concrete type index.
   |#
   #|proc:wasm-reference-type?
   Returns whether `object` is a reference type. `object` is the value to test.
@@ -326,7 +387,8 @@
      [heap-type wasm-reference-type-heap-type $wasm-reference-type-heap-type heap-type?]))
 
   #|proc:make-wasm-limits
-  Creates limits. `address-type` is `i32` or `i64`; `minimum` and optional `maximum` are bounds.
+  Creates limits. `address-type` selects 32- or 64-bit addressing. `minimum` is the required lower
+  bound, and `maximum` is the optional upper bound.
   |#
   #|proc:wasm-limits?
   Returns whether `object` is limits. `object` is the value to test.
@@ -408,7 +470,8 @@
     ([type-index wasm-tag-type-type-index $wasm-tag-type-type-index natural?]))
 
   #|proc:make-wasm-external-type
-  Creates an external type. `kind` identifies the namespace and `type` is its entity type.
+  Creates an external type. `kind` selects the function, table, memory, global, or tag namespace.
+  `type` is the matching type index or table, memory, global, or tag type record.
   |#
   #|proc:wasm-external-type?
   Returns whether `object` is an external type. `object` is the value to test.
@@ -422,6 +485,7 @@
   (define-checked-record-type $wasm-external-type
     make-wasm-external-type wasm-external-type?
     $make-wasm-external-type $wasm-external-type?
+    external-type-fields?
     ([kind wasm-external-type-kind $wasm-external-type-kind external-kind?]
      [type wasm-external-type-type $wasm-external-type-type
            (lambda (value)
@@ -429,7 +493,8 @@
                  (wasm-global-type? value) (wasm-tag-type? value)))]))
 
   #|proc:make-wasm-import
-  Creates an import. `module`, `name`, and `external-type` supply its corresponding fields.
+  Creates an import. `module` is the source module name and `name` is the imported item name.
+  `external-type` describes the imported entity and its namespace.
   |#
   #|proc:wasm-import?
   Returns whether `object` is an import. `object` is the value to test.
@@ -450,7 +515,8 @@
      [external-type wasm-import-external-type $wasm-import-external-type wasm-external-type?]))
 
   #|proc:make-wasm-function
-  Creates a function. `type-index`, `locals`, and `body` supply its corresponding fields.
+  Creates a function. `type-index` selects its function type, `locals` lists its local value types,
+  and `body` contains its instructions.
   |#
   #|proc:wasm-function?
   Returns whether `object` is a function. `object` is the value to test.
@@ -471,7 +537,8 @@
      [body wasm-function-body $wasm-function-body (vector-of? wasm-instruction?)]))
 
   #|proc:make-wasm-table
-  Creates a table. `type` is its table type and `initializer` is its optional expression.
+  Creates a table. `type` defines its reference elements and limits. `initializer` is the optional
+  initialization expression used by an explicitly initialized table.
   |#
   #|proc:wasm-table?
   Returns whether `object` is a table. `object` is the value to test.
@@ -502,7 +569,8 @@
     ([type wasm-memory-type $wasm-memory-entity-type wasm-memory-type?]))
 
   #|proc:make-wasm-global
-  Creates a global. `type` is its global type and `initializer` is its instruction expression.
+  Creates a global. `type` defines its value type and mutability. `initializer` is its constant
+  instruction expression.
   |#
   #|proc:wasm-global?
   Returns whether `object` is a global. `object` is the value to test.
@@ -532,7 +600,8 @@
     ([type wasm-tag-type $wasm-tag-entity-type wasm-tag-type?]))
 
   #|proc:make-wasm-export
-  Creates an export. `name` is its name, `kind` its namespace, and `index` its entity index.
+  Creates an export. `name` is its external name, `kind` selects the exported namespace, and
+  `index` selects the entity in that namespace.
   |#
   #|proc:wasm-export?
   Returns whether `object` is an export. `object` is the value to test.
@@ -553,8 +622,9 @@
      [index wasm-export-index $wasm-export-index natural?]))
 
   #|proc:make-wasm-element
-  Creates an element segment. `mode`, `reference-type`, `table-index`, `offset`, and
-  `initializers` supply its fields.
+  Creates an element segment. `mode` states how the segment is applied, and `reference-type` is its
+  element type. `table-index` and `offset` locate an active segment; both are `#f` otherwise.
+  `initializers` contains the reference-producing instruction expressions.
   |#
   #|proc:wasm-element?
   Returns whether `object` is an element segment. `object` is the value to test.
@@ -585,7 +655,8 @@
                    (vector-of? instruction-vector?)]))
 
   #|proc:make-wasm-data
-  Creates a data segment. `mode`, `memory-index`, `offset`, and `bytes` supply its fields.
+  Creates a data segment. `mode` states whether it is active or passive. `memory-index` and `offset`
+  locate an active segment; both are `#f` for a passive segment. `bytes` is the segment payload.
   |#
   #|proc:wasm-data?
   Returns whether `object` is a data segment. `object` is the value to test.
@@ -610,7 +681,8 @@
      [bytes wasm-data-bytes $wasm-data-bytes bytevector?]))
 
   #|proc:make-wasm-instruction
-  Creates an instruction. `mnemonic`, `immediates`, `body`, and `alternate` supply its fields.
+  Creates an instruction. `mnemonic` is its canonical operation name and `immediates` contains its
+  operands. `body` contains nested instructions; `alternate` contains an alternate body or catches.
   |#
   #|proc:wasm-instruction?
   Returns whether `object` is an instruction. `object` is the value to test.
@@ -637,7 +709,8 @@
                 instruction-alternate?]))
 
   #|proc:make-wasm-memory-argument
-  Creates a memory argument. `alignment`, `offset`, and `memory-index` supply its fields.
+  Creates a memory argument. `alignment` is the encoded alignment exponent, `offset` is the static
+  address offset, and `memory-index` selects the addressed memory.
   |#
   #|proc:wasm-memory-argument?
   Returns whether `object` is a memory argument. `object` is the value to test.
@@ -659,7 +732,8 @@
      [memory-index wasm-memory-argument-memory-index $wasm-memory-argument-memory-index natural?]))
 
   #|proc:make-wasm-block-type
-  Creates a block type. `kind` identifies the form and `value` stores its optional payload.
+  Creates a block type. `kind` selects empty, value-type, or type-index form. `value` is `#f`, the
+  result value type, or the function type index required by that form.
   |#
   #|proc:wasm-block-type?
   Returns whether `object` is a block type. `object` is the value to test.
@@ -672,12 +746,14 @@
   |#
   (define-checked-record-type $wasm-block-type make-wasm-block-type wasm-block-type?
     $make-wasm-block-type $wasm-block-type?
+    block-type-fields?
     ([kind wasm-block-type-kind $wasm-block-type-kind block-kind?]
      [value wasm-block-type-value $wasm-block-type-value
             (lambda (value) (or (not value) (natural? value) (value-type? value)))]))
 
   #|proc:make-wasm-catch
-  Creates a catch clause. `kind`, optional `tag-index`, and `label-index` supply its fields.
+  Creates a catch clause. `kind` selects tagged, tagless, reference, or non-reference matching.
+  `tag-index` selects the tag for tagged forms or is `#f`; `label-index` selects the branch target.
   |#
   #|proc:wasm-catch?
   Returns whether `object` is a catch clause. `object` is the value to test.
@@ -693,12 +769,14 @@
   |#
   (define-checked-record-type $wasm-catch make-wasm-catch wasm-catch?
     $make-wasm-catch $wasm-catch?
+    catch-fields?
     ([kind wasm-catch-kind $wasm-catch-kind catch-kind?]
      [tag-index wasm-catch-tag-index $wasm-catch-tag-index optional-natural?]
      [label-index wasm-catch-label-index $wasm-catch-label-index natural?]))
 
   #|proc:make-wasm-float
-  Creates a floating constant. `width` is 32 or 64 and `bits` is its unsigned bit pattern.
+  Creates a floating constant. `width` selects the 32- or 64-bit format, and `bits` is an unsigned
+  bit pattern that fits that format.
   |#
   #|proc:wasm-float?
   Returns whether `object` is a floating constant. `object` is the value to test.
@@ -711,6 +789,7 @@
   |#
   (define-checked-record-type $wasm-float make-wasm-float wasm-float?
     $make-wasm-float $wasm-float?
+    float-fields?
     ([width wasm-float-width $wasm-float-width float-width?]
      [bits wasm-float-bits $wasm-float-bits natural?]))
 

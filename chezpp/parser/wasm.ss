@@ -340,6 +340,10 @@
 
       <module>))
 
+  #|proc:parse-wasm-binary-module
+  The `parse-wasm-binary-module` procedure parses and returns the contents of a binary WebAssembly
+  module. The `path` parameter is the path to a regular binary WebAssembly module file.
+  |#
   (define parse-wasm-binary-module
     (lambda (path)
       (pcheck ([file-regular? path])
