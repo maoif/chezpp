@@ -97,8 +97,9 @@
       (and (symbol? value) (memq value '(catch catch-ref catch-all catch-all-ref)))))
   (define instruction-alternate?
     (lambda (value)
-      ((vector-of? (lambda (item) (or (wasm-instruction? item) (wasm-catch? item))))
-       value)))
+      (and (vector? value)
+           (or ((vector-of? wasm-instruction?) value)
+               ((vector-of? wasm-catch?) value)))))
   (define float-width? (lambda (value) (or (eqv? value 32) (eqv? value 64))))
   (define section-position?
     (lambda (value)
@@ -142,6 +143,31 @@
              (if (= width 32)
                  (<= bits #xffffffff)
                  (<= bits #xffffffffffffffff))))))
+
+  (define limits-fields?
+    (lambda (field*)
+      (let ([minimum (vector-ref field* 1)] [maximum (vector-ref field* 2)])
+        (or (not maximum) (>= maximum minimum)))))
+
+  (define element-fields?
+    (lambda (field*)
+      (let ([mode (vector-ref field* 0)]
+            [table-index (vector-ref field* 2)]
+            [offset (vector-ref field* 3)])
+        (case mode
+          [(active) (and (natural? table-index) (instruction-vector? offset))]
+          [(passive declarative) (and (not table-index) (not offset))]
+          [else #f]))))
+
+  (define data-fields?
+    (lambda (field*)
+      (let ([mode (vector-ref field* 0)]
+            [memory-index (vector-ref field* 1)]
+            [offset (vector-ref field* 2)])
+        (case mode
+          [(active) (and (natural? memory-index) (instruction-vector? offset))]
+          [(passive) (and (not memory-index) (not offset))]
+          [else #f]))))
 
   (define-syntax define-checked-record-type
     (syntax-rules ()
@@ -404,6 +430,7 @@
   |#
   (define-checked-record-type $wasm-limits make-wasm-limits wasm-limits?
     $make-wasm-limits $wasm-limits?
+    limits-fields?
     ([address-type wasm-limits-address-type $wasm-limits-address-type address-type?]
      [minimum wasm-limits-minimum $wasm-limits-minimum natural?]
      [maximum wasm-limits-maximum $wasm-limits-maximum optional-natural?]))
@@ -646,6 +673,7 @@
   |#
   (define-checked-record-type $wasm-element make-wasm-element wasm-element?
     $make-wasm-element $wasm-element?
+    element-fields?
     ([mode wasm-element-mode $wasm-element-mode element-mode?]
      [reference-type wasm-element-reference-type $wasm-element-reference-type
                      wasm-reference-type?]
@@ -675,6 +703,7 @@
   |#
   (define-checked-record-type $wasm-data make-wasm-data wasm-data?
     $make-wasm-data $wasm-data?
+    data-fields?
     ([mode wasm-data-mode $wasm-data-mode data-mode?]
      [memory-index wasm-data-memory-index $wasm-data-memory-index optional-natural?]
      [offset wasm-data-offset $wasm-data-offset optional-instruction-vector?]
