@@ -4,7 +4,8 @@
           (chezpp concurrency fiber)
           (chezpp parser wasm opcodes)
           (chezpp parser wasm binary values)
-          (chezpp parser wasm binary types))
+          (chezpp parser wasm binary types)
+          (chezpp parser wasm binary instructions))
 
   (export (import (chezpp chez)
                   (chezpp match)

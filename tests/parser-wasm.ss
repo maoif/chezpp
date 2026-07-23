@@ -2,11 +2,25 @@
         (chezpp parser wasm)
         (chezpp parser wasm opcodes)
         (chezpp parser wasm binary values)
-        (chezpp parser wasm binary types))
+        (chezpp parser wasm binary types)
+        (chezpp parser wasm binary instructions))
 
 (define parse-binary
   (lambda (parser bytes)
     (run-binary-parser (<~0> parser <eof>) bytes)))
+
+(define capture-parser-error
+  (lambda (thunk)
+    (guard (err [(parser-error? err) err]
+                [else #f])
+      (thunk)
+      #f)))
+
+(define raises?
+  (lambda (thunk)
+    (guard (err [else #t])
+      (thunk)
+      #f)))
 
 (mat wasm-binary-values-and-types
 
@@ -39,6 +53,402 @@
        (and (eq? 'i64 (wasm-limits-address-type limits))
             (= 2 (wasm-limits-minimum limits))
             (= 9 (wasm-limits-maximum limits))))
+
+     )
+
+(define instruction-has-fields?
+  (lambda (instruction mnemonic immediates body alternate)
+    (and (wasm-instruction? instruction)
+         (eq? mnemonic (wasm-instruction-mnemonic instruction))
+         (equal? immediates (wasm-instruction-immediates instruction))
+         (equal? body (wasm-instruction-body instruction))
+         (equal? alternate (wasm-instruction-alternate instruction)))))
+
+(define integer-range
+  (lambda (start end)
+    (let loop ([value start] [values '()])
+      (if (= value end)
+          (reverse values)
+          (loop (+ value 1) (cons value values))))))
+
+(define reserved-one-byte-opcodes
+  ;; Final Core 3.0 unassigned bytes, excluding the 0xfb, 0xfc, and 0xfd prefixes.
+  (append '(#x06 #x07 #x09 #x16 #x17 #x18 #x19 #x1d #x1e #x27)
+          (integer-range #xc5 #xd0)
+          (integer-range #xd7 #xfb)
+          '(#xfe #xff)))
+
+(mat wasm-binary-scalar-and-control-instructions
+
+     (instruction-has-fields?
+      (parse-binary <wasm-instruction> #vu8(#x01))
+      'nop '#() '#() '#())
+
+     (instruction-has-fields?
+      (parse-binary <wasm-instruction> #vu8(#x1b))
+      'select '#() '#() '#())
+
+     (andmap
+      (lambda (test)
+        (let ([instruction (parse-binary <wasm-instruction> (car test))])
+          (instruction-has-fields? instruction (cadr test) (caddr test) '#() '#())))
+      (list (list #vu8(#x0c #x03) 'br '#(3))
+            (list #vu8(#x10 #x04) 'call '#(4))
+            (list #vu8(#x14 #x05) 'call-ref '#(5))
+            (list #vu8(#x25 #x06) 'table.get '#(6))
+            (list #vu8(#x3f #x07) 'memory.size '#(7))
+            (list #vu8(#x23 #x08) 'global.get '#(8))
+            (list #vu8(#x20 #x09) 'local.get '#(9))
+            (list #vu8(#x08 #x0a) 'throw '#(10))
+            (list #vu8(#xfc #x09 #x0b) 'data.drop '#(11))
+            (list #vu8(#xfc #x0d #x0c) 'elem.drop '#(12))))
+
+     (let* ([instruction (parse-binary <wasm-instruction>
+                                       #vu8(#x0e #x02 #x01 #x02 #x03))]
+            [immediates (wasm-instruction-immediates instruction)])
+       (and (eq? 'br-table (wasm-instruction-mnemonic instruction))
+            (= 2 (vector-length immediates))
+            (equal? '#(1 2) (vector-ref immediates 0))
+            (= 3 (vector-ref immediates 1))))
+
+     (and (instruction-has-fields?
+           (parse-binary <wasm-instruction> #vu8(#x11 #x02 #x07))
+           'call-indirect '#(2 7) '#() '#())
+          (instruction-has-fields?
+           (parse-binary <wasm-instruction> #vu8(#x13 #x03 #x09))
+           'return-call-indirect '#(3 9) '#() '#()))
+
+     (let* ([instruction (parse-binary <wasm-instruction> #vu8(#x28 #x02 #x10))]
+            [argument (vector-ref (wasm-instruction-immediates instruction) 0)])
+       (and (eq? 'i32.load (wasm-instruction-mnemonic instruction))
+            (wasm-memory-argument? argument)
+            (= 2 (wasm-memory-argument-alignment argument))
+            (= 0 (wasm-memory-argument-memory-index argument))
+            (= 16 (wasm-memory-argument-offset argument))))
+
+     (let* ([instruction
+             (parse-binary
+              <wasm-instruction>
+              #vu8(#x29 #x43 #x02 #x80 #x80 #x80 #x80 #x80 #x80 #x80 #x80 #x80 #x01))]
+            [argument (vector-ref (wasm-instruction-immediates instruction) 0)])
+       (and (= 3 (wasm-memory-argument-alignment argument))
+            (= 2 (wasm-memory-argument-memory-index argument))
+            (= #x8000000000000000 (wasm-memory-argument-offset argument))))
+
+     (and (instruction-has-fields?
+           (parse-binary <wasm-instruction> #vu8(#x41 #x7f))
+           'i32.const '#(-1) '#() '#())
+          (instruction-has-fields?
+           (parse-binary <wasm-instruction> #vu8(#x42 #x7e))
+           'i64.const '#(-2) '#() '#()))
+
+     (let* ([f32-instruction
+             (parse-binary <wasm-instruction> #vu8(#x43 #x01 #x23 #x45 #x67))]
+            [f64-instruction
+             (parse-binary
+              <wasm-instruction>
+              #vu8(#x44 #xef #xcd #xab #x89 #x67 #x45 #x23 #x01))]
+            [f32-value (vector-ref (wasm-instruction-immediates f32-instruction) 0)]
+            [f64-value (vector-ref (wasm-instruction-immediates f64-instruction) 0)])
+       (and (wasm-float? f32-value)
+            (= 32 (wasm-float-width f32-value))
+            (= #x67452301 (wasm-float-bits f32-value))
+            (wasm-float? f64-value)
+            (= 64 (wasm-float-width f64-value))
+            (= #x0123456789abcdef (wasm-float-bits f64-value))))
+
+     (let* ([instruction
+             (parse-binary <wasm-instruction> #vu8(#x1c #x02 #x7f #x63 #x70))]
+            [immediates (wasm-instruction-immediates instruction)]
+            [types (vector-ref immediates 0)]
+            [reference-type (vector-ref types 1)])
+       (and (eq? 'select (wasm-instruction-mnemonic instruction))
+            (= 1 (vector-length immediates))
+            (= 2 (vector-length types))
+            (eq? 'i32 (vector-ref types 0))
+            (wasm-reference-type? reference-type)
+            (wasm-reference-type-nullable? reference-type)
+            (eq? 'func (wasm-reference-type-heap-type reference-type))))
+
+     (and (instruction-has-fields?
+           (parse-binary <wasm-instruction> #vu8(#xd0 #x03))
+           'ref.null '#(3) '#() '#())
+          (instruction-has-fields?
+           (parse-binary <wasm-instruction> #vu8(#xd0 #x70))
+           'ref.null '#(func) '#() '#()))
+
+     (andmap
+      (lambda (test)
+        (let ([instruction (parse-binary <wasm-instruction> (car test))])
+          (instruction-has-fields? instruction (cadr test) (caddr test) '#() '#())))
+      (list (list #vu8(#xfc #x08 #x05 #x02) 'memory.init '#(2 5))
+            (list #vu8(#xfc #x0a #x03 #x04) 'memory.copy '#(3 4))
+            (list #vu8(#xfc #x0c #x06 #x07) 'table.init '#(7 6))
+            (list #vu8(#xfc #x0e #x08 #x09) 'table.copy '#(8 9))))
+
+     (let ([instruction (parse-binary <wasm-instruction> #vu8(#x02 #x40 #x01 #x0b))])
+       (and (eq? 'block (wasm-instruction-mnemonic instruction))
+            (= 1 (vector-length (wasm-instruction-immediates instruction)))
+            (eq? 'empty
+                 (wasm-block-type-kind
+                  (vector-ref (wasm-instruction-immediates instruction) 0)))
+            (= 1 (vector-length (wasm-instruction-body instruction)))
+            (eq? 'nop
+                 (wasm-instruction-mnemonic
+                  (vector-ref (wasm-instruction-body instruction) 0)))
+            (equal? '#() (wasm-instruction-alternate instruction))))
+
+     (let ([instruction
+            (parse-binary <wasm-instruction> #vu8(#x03 #x7f #x41 #x01 #x0b))])
+       (and (eq? 'loop (wasm-instruction-mnemonic instruction))
+            (eq? 'value-type
+                 (wasm-block-type-kind
+                  (vector-ref (wasm-instruction-immediates instruction) 0)))
+            (instruction-has-fields?
+             (vector-ref (wasm-instruction-body instruction) 0)
+             'i32.const '#(1) '#() '#())))
+
+     (let ([instruction (parse-binary <wasm-instruction> #vu8(#x04 #x40 #x01 #x0b))])
+       (and (eq? 'if (wasm-instruction-mnemonic instruction))
+            (= 1 (vector-length (wasm-instruction-body instruction)))
+            (equal? '#() (wasm-instruction-alternate instruction))))
+
+     (let ([instruction
+            (parse-binary
+             <wasm-instruction>
+             #vu8(#x04 #x40 #x41 #x01 #x05 #x41 #x02 #x0b))])
+       (and (eq? 'if (wasm-instruction-mnemonic instruction))
+            (= 1 (vector-length (wasm-instruction-body instruction)))
+            (= 1 (vector-length (wasm-instruction-alternate instruction)))
+            (= 1
+               (vector-ref
+                (wasm-instruction-immediates
+                 (vector-ref (wasm-instruction-body instruction) 0))
+                0))
+            (= 2
+               (vector-ref
+                (wasm-instruction-immediates
+                 (vector-ref (wasm-instruction-alternate instruction) 0))
+                0))))
+
+     (let ([instruction
+            (parse-binary
+             <wasm-instruction>
+             #vu8(#x02 #x40 #x04 #x40 #x03 #x40 #x01 #x0b #x05 #x00 #x0b #x0b))])
+       (and (eq? 'block (wasm-instruction-mnemonic instruction))
+            (eq? 'if
+                 (wasm-instruction-mnemonic
+                  (vector-ref (wasm-instruction-body instruction) 0)))
+            (eq? 'loop
+                 (wasm-instruction-mnemonic
+                  (vector-ref
+                   (wasm-instruction-body
+                    (vector-ref (wasm-instruction-body instruction) 0))
+                   0)))
+            (eq? 'unreachable
+                 (wasm-instruction-mnemonic
+                  (vector-ref
+                   (wasm-instruction-alternate
+                    (vector-ref (wasm-instruction-body instruction) 0))
+                   0)))))
+
+     (let* ([instruction
+             (parse-binary
+              <wasm-instruction>
+              #vu8(#x1f #x40 #x04
+                    #x00 #x01 #x02
+                    #x01 #x03 #x04
+                    #x02 #x05
+                    #x03 #x06
+                    #x01 #x0b))]
+            [catches (wasm-instruction-alternate instruction)])
+       (and (eq? 'try-table (wasm-instruction-mnemonic instruction))
+            (= 4 (vector-length catches))
+            (eq? 'catch (wasm-catch-kind (vector-ref catches 0)))
+            (= 1 (wasm-catch-tag-index (vector-ref catches 0)))
+            (= 2 (wasm-catch-label-index (vector-ref catches 0)))
+            (eq? 'catch-ref (wasm-catch-kind (vector-ref catches 1)))
+            (= 3 (wasm-catch-tag-index (vector-ref catches 1)))
+            (= 4 (wasm-catch-label-index (vector-ref catches 1)))
+            (eq? 'catch-all (wasm-catch-kind (vector-ref catches 2)))
+            (not (wasm-catch-tag-index (vector-ref catches 2)))
+            (= 5 (wasm-catch-label-index (vector-ref catches 2)))
+            (eq? 'catch-all-ref (wasm-catch-kind (vector-ref catches 3)))
+            (not (wasm-catch-tag-index (vector-ref catches 3)))
+            (= 6 (wasm-catch-label-index (vector-ref catches 3)))
+            (eq? 'nop
+                 (wasm-instruction-mnemonic
+                  (vector-ref (wasm-instruction-body instruction) 0)))))
+
+     (let ([expression (parse-binary <wasm-expression> #vu8(#x41 #x7f #x0b))])
+       (and (= 1 (vector-length expression))
+            (instruction-has-fields?
+             (vector-ref expression 0) 'i32.const '#(-1) '#() '#())))
+
+     ;; error: memory flags are truncated before the offset.
+     (let ([err (capture-parser-error
+                 (lambda () (parse-binary <wasm-instruction> #vu8(#x28 #x02))))])
+       (and (parser-error? err)
+            (eq? 'unexpected-eof (parser-error-kind err))
+            (= 2 (parser-error-offset err))
+            (string-contains? (parser-error->string err) "unexpected EOF")))
+
+     ;; error: a memory argument is truncated before its alignment flags.
+     (error? (parse-binary <wasm-instruction> #vu8(#x28)))
+
+     ;; error: a continued memory alignment encoding is truncated.
+     (let ([err (capture-parser-error
+                 (lambda () (parse-binary <wasm-instruction> #vu8(#x28 #x80))))])
+       (and (parser-error? err)
+            (eq? 'unexpected-eof (parser-error-kind err))
+            (= 2 (parser-error-offset err))
+            (string-contains? (parser-error->string err) "unexpected EOF")))
+
+     ;; error: explicit-memory flags are truncated before the memory index.
+     (error? (parse-binary <wasm-instruction> #vu8(#x28 #x40)))
+
+     ;; error: explicit-memory flags are truncated before the offset.
+     (error? (parse-binary <wasm-instruction> #vu8(#x28 #x40 #x01)))
+
+     ;; error: memory argument flags 128 and above are reserved.
+     (error? (parse-binary <wasm-instruction> #vu8(#x28 #x80 #x01)))
+
+     ;; error: every unassigned final Core 3.0 one-byte opcode is rejected.
+     (for-all
+      (lambda (opcode)
+        (raises? (lambda ()
+                   (parse-binary <wasm-instruction> (bytevector opcode)))))
+      reserved-one-byte-opcodes)
+
+     ;; error: an unknown one-byte opcode reports its consumed offset and category.
+     (let ([err (capture-parser-error
+                 (lambda () (parse-binary <wasm-instruction> #vu8(#x06))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 1 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "unknown WebAssembly opcode")))
+
+     ;; error: an unknown aggregate subopcode is rejected.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x7f)))
+
+     ;; error: an unknown miscellaneous subopcode is rejected.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfc #x7f)))
+
+     ;; error: an unknown multi-byte vector subopcode is rejected.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x80 #x04)))
+
+     ;; error: an aggregate prefix is truncated before its subopcode.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb)))
+
+     ;; error: a miscellaneous prefix has a truncated bounded u32 subopcode.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfc #x80)))
+
+     ;; error: else is a terminator, not a standalone instruction.
+     (error? (parse-binary <wasm-instruction> #vu8(#x05)))
+
+     ;; error: end is a terminator, not a standalone instruction.
+     (error? (parse-binary <wasm-instruction> #vu8(#x0b)))
+
+     ;; error: try-table accepts only catch kind bytes zero through three.
+     (error? (parse-binary <wasm-instruction>
+                           #vu8(#x1f #x40 #x01 #x04 #x00 #x0b)))
+
+     ;; error: a block must end with an end terminator.
+     (error? (parse-binary <wasm-instruction> #vu8(#x02 #x40 #x01)))
+
+     ;; error: an expression must end with an end terminator.
+     (let ([err (capture-parser-error
+                 (lambda () (parse-binary <wasm-expression> #vu8(#x01))))])
+       (and (parser-error? err)
+            (eq? 'unexpected-eof (parser-error-kind err))
+            (= 1 (parser-error-offset err))
+            (string-contains? (parser-error->string err) "unexpected EOF")))
+
+     ;; error: else is illegal in a block body.
+     (error? (parse-binary <wasm-instruction> #vu8(#x02 #x40 #x05 #x0b)))
+
+     ;; error: a second else is illegal in an if alternate.
+     (error? (parse-binary <wasm-instruction> #vu8(#x04 #x40 #x05 #x05 #x0b)))
+
+     ;; error: branch table omits its default label.
+     (error? (parse-binary <wasm-instruction> #vu8(#x0e #x01 #x00)))
+
+     ;; error: indirect call omits its table index.
+     (error? (parse-binary <wasm-instruction> #vu8(#x11 #x00)))
+
+     ;; error: typed select omits its declared value type.
+     (error? (parse-binary <wasm-instruction> #vu8(#x1c #x01)))
+
+     ;; error: Task 5 structure fields report the stable unsupported-shape failure.
+     (let ([err (capture-parser-error
+                 (lambda () (parse-binary <wasm-instruction> #vu8(#xfb #x02))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 2 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "unsupported immediate shape: struct-field")))
+
+     ;; error: Task 5 fixed-length array allocation is deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x08)))
+
+     ;; error: Task 5 array copying is deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x11)))
+
+     ;; error: Task 5 type-and-data indexes are deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x12)))
+
+     ;; error: Task 5 type-and-element indexes are deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x13)))
+
+     ;; error: Task 5 non-null heap type is deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x14)))
+
+     ;; error: Task 5 nullable heap type is deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x15)))
+
+     ;; error: Task 5 alternate non-null heap type is deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x16)))
+
+     ;; error: Task 5 alternate nullable heap type is deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x17)))
+
+     ;; error: Task 5 branch-on-cast immediates are deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x18)))
+
+     ;; error: Task 5 branch-on-cast-fail immediates are deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x19)))
+
+     ;; error: Task 5 vector constants are deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x0c)))
+
+     ;; error: Task 5 shuffle bytes are deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x0d)))
+
+     ;; error: Task 5 lane indexes are deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x15)))
+
+     ;; error: Task 5 memory lane arguments are deliberately unsupported.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x54)))
+
+     ;; error: a representative bounded LEB failure preserves its exact location and message.
+     (let ([err (capture-parser-error
+                 (lambda ()
+                   (parse-binary <wasm-u32> #vu8(#xff #xff #xff #xff #x10))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 5 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "integer has nonzero unused bits")))
+
+     ;; error: a representative malformed UTF-8 name preserves its location and message.
+     (let ([err (capture-parser-error
+                 (lambda () (parse-binary <wasm-name> #vu8(#x02 #xc3 #x28))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 3 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "invalid UTF-8 WebAssembly name")))
 
      )
 
