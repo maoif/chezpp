@@ -1,5 +1,6 @@
 (import (chezpp)
         (chezpp parser wasm)
+        (chezpp parser wasm opcodes)
         (chezpp parser wasm binary values)
         (chezpp parser wasm binary types))
 
@@ -40,6 +41,219 @@
             (= 9 (wasm-limits-maximum limits))))
 
      )
+
+(define expected-core-3-mnemonics
+  '#(
+   ;; parametric
+   unreachable nop drop select
+   ;; control
+   block loop if else end br br-if br-table return call call-indirect br-on-null br-on-non-null
+   br-on-cast br-on-cast-fail
+   ;; exception/tail-call; final Core 3.0 has no continuation instructions
+   throw throw-ref return-call return-call-indirect call-ref return-call-ref try-table
+   ;; variable
+   local.get local.set local.tee global.get global.set
+   ;; table
+   table.get table.set table.init elem.drop table.copy table.grow table.size table.fill
+   ;; memory
+   i32.load i64.load f32.load f64.load i32.load8-s i32.load8-u i32.load16-s i32.load16-u
+   i64.load8-s i64.load8-u i64.load16-s i64.load16-u i64.load32-s i64.load32-u i32.store
+   i64.store f32.store f64.store i32.store8 i32.store16 i64.store8 i64.store16 i64.store32
+   memory.size memory.grow memory.init data.drop memory.copy memory.fill v128.load
+   v128.load8x8-s v128.load8x8-u v128.load16x4-s v128.load16x4-u v128.load32x2-s
+   v128.load32x2-u v128.load8-splat v128.load16-splat v128.load32-splat v128.load64-splat
+   v128.store v128.load8-lane v128.load16-lane v128.load32-lane v128.load64-lane
+   v128.store8-lane v128.store16-lane v128.store32-lane v128.store64-lane v128.load32-zero
+   v128.load64-zero
+   ;; numeric
+   i32.const i64.const f32.const f64.const i32.eqz i32.eq i32.ne i32.lt-s i32.lt-u i32.gt-s
+   i32.gt-u i32.le-s i32.le-u i32.ge-s i32.ge-u i64.eqz i64.eq i64.ne i64.lt-s i64.lt-u
+   i64.gt-s i64.gt-u i64.le-s i64.le-u i64.ge-s i64.ge-u f32.eq f32.ne f32.lt f32.gt f32.le
+   f32.ge f64.eq f64.ne f64.lt f64.gt f64.le f64.ge i32.clz i32.ctz i32.popcnt i32.add i32.sub
+   i32.mul i32.div-s i32.div-u i32.rem-s i32.rem-u i32.and i32.or i32.xor i32.shl i32.shr-s
+   i32.shr-u i32.rotl i32.rotr i64.clz i64.ctz i64.popcnt i64.add i64.sub i64.mul i64.div-s
+   i64.div-u i64.rem-s i64.rem-u i64.and i64.or i64.xor i64.shl i64.shr-s i64.shr-u i64.rotl
+   i64.rotr f32.abs f32.neg f32.ceil f32.floor f32.trunc f32.nearest f32.sqrt f32.add f32.sub
+   f32.mul f32.div f32.min f32.max f32.copysign f64.abs f64.neg f64.ceil f64.floor f64.trunc
+   f64.nearest f64.sqrt f64.add f64.sub f64.mul f64.div f64.min f64.max f64.copysign
+   i32.wrap-i64 i32.trunc-f32-s i32.trunc-f32-u i32.trunc-f64-s i32.trunc-f64-u
+   i64.extend-i32-s i64.extend-i32-u i64.trunc-f32-s i64.trunc-f32-u i64.trunc-f64-s
+   i64.trunc-f64-u f32.convert-i32-s f32.convert-i32-u f32.convert-i64-s f32.convert-i64-u
+   f32.demote-f64 f64.convert-i32-s f64.convert-i32-u f64.convert-i64-s f64.convert-i64-u
+   f64.promote-f32 i32.reinterpret-f32 i64.reinterpret-f64 f32.reinterpret-i32
+   f64.reinterpret-i64 i32.extend8-s i32.extend16-s i64.extend8-s i64.extend16-s i64.extend32-s
+   i32.trunc-sat-f32-s i32.trunc-sat-f32-u i32.trunc-sat-f64-s i32.trunc-sat-f64-u
+   i64.trunc-sat-f32-s i64.trunc-sat-f32-u i64.trunc-sat-f64-s i64.trunc-sat-f64-u
+   ;; reference
+   ref.null ref.is-null ref.func ref.eq ref.as-non-null ref.test ref.cast any.convert-extern
+   extern.convert-any ref.i31
+   ;; aggregate/gc
+   struct.new struct.new-default struct.get struct.get-s struct.get-u struct.set array.new
+   array.new-default array.new-fixed array.new-data array.new-elem array.get array.get-s
+   array.get-u array.set array.len array.fill array.copy array.init-data array.init-elem
+   i31.get-s i31.get-u
+   ;; vector
+   v128.const i8x16.shuffle i8x16.swizzle i8x16.splat i16x8.splat i32x4.splat i64x2.splat
+   f32x4.splat f64x2.splat i8x16.extract-lane-s i8x16.extract-lane-u i8x16.replace-lane
+   i16x8.extract-lane-s i16x8.extract-lane-u i16x8.replace-lane i32x4.extract-lane
+   i32x4.replace-lane i64x2.extract-lane i64x2.replace-lane f32x4.extract-lane
+   f32x4.replace-lane f64x2.extract-lane f64x2.replace-lane i8x16.eq i8x16.ne i8x16.lt-s
+   i8x16.lt-u i8x16.gt-s i8x16.gt-u i8x16.le-s i8x16.le-u i8x16.ge-s i8x16.ge-u i16x8.eq
+   i16x8.ne i16x8.lt-s i16x8.lt-u i16x8.gt-s i16x8.gt-u i16x8.le-s i16x8.le-u i16x8.ge-s
+   i16x8.ge-u i32x4.eq i32x4.ne i32x4.lt-s i32x4.lt-u i32x4.gt-s i32x4.gt-u i32x4.le-s
+   i32x4.le-u i32x4.ge-s i32x4.ge-u f32x4.eq f32x4.ne f32x4.lt f32x4.gt f32x4.le f32x4.ge
+   f64x2.eq f64x2.ne f64x2.lt f64x2.gt f64x2.le f64x2.ge v128.not v128.and v128.andnot v128.or
+   v128.xor v128.bitselect v128.any-true f32x4.demote-f64x2-zero f64x2.promote-low-f32x4
+   i8x16.abs i8x16.neg i8x16.popcnt i8x16.all-true i8x16.bitmask i8x16.narrow-i16x8-s
+   i8x16.narrow-i16x8-u f32x4.ceil f32x4.floor f32x4.trunc f32x4.nearest i8x16.shl i8x16.shr-s
+   i8x16.shr-u i8x16.add i8x16.add-sat-s i8x16.add-sat-u i8x16.sub i8x16.sub-sat-s
+   i8x16.sub-sat-u f64x2.ceil f64x2.floor i8x16.min-s i8x16.min-u i8x16.max-s i8x16.max-u
+   f64x2.trunc i8x16.avgr-u i16x8.extadd-pairwise-i8x16-s i16x8.extadd-pairwise-i8x16-u
+   i32x4.extadd-pairwise-i16x8-s i32x4.extadd-pairwise-i16x8-u i16x8.abs i16x8.neg
+   i16x8.q15mulr-sat-s i16x8.all-true i16x8.bitmask i16x8.narrow-i32x4-s i16x8.narrow-i32x4-u
+   i16x8.extend-low-i8x16-s i16x8.extend-high-i8x16-s i16x8.extend-low-i8x16-u
+   i16x8.extend-high-i8x16-u i16x8.shl i16x8.shr-s i16x8.shr-u i16x8.add i16x8.add-sat-s
+   i16x8.add-sat-u i16x8.sub i16x8.sub-sat-s i16x8.sub-sat-u f64x2.nearest i16x8.mul
+   i16x8.min-s i16x8.min-u i16x8.max-s i16x8.max-u i16x8.avgr-u i16x8.extmul-low-i8x16-s
+   i16x8.extmul-high-i8x16-s i16x8.extmul-low-i8x16-u i16x8.extmul-high-i8x16-u i32x4.abs
+   i32x4.neg i32x4.all-true i32x4.bitmask i32x4.extend-low-i16x8-s i32x4.extend-high-i16x8-s
+   i32x4.extend-low-i16x8-u i32x4.extend-high-i16x8-u i32x4.shl i32x4.shr-s i32x4.shr-u
+   i32x4.add i32x4.sub i32x4.mul i32x4.min-s i32x4.min-u i32x4.max-s i32x4.max-u
+   i32x4.dot-i16x8-s i32x4.extmul-low-i16x8-s i32x4.extmul-high-i16x8-s
+   i32x4.extmul-low-i16x8-u i32x4.extmul-high-i16x8-u i64x2.abs i64x2.neg i64x2.all-true
+   i64x2.bitmask i64x2.extend-low-i32x4-s i64x2.extend-high-i32x4-s i64x2.extend-low-i32x4-u
+   i64x2.extend-high-i32x4-u i64x2.shl i64x2.shr-s i64x2.shr-u i64x2.add i64x2.sub i64x2.mul
+   i64x2.eq i64x2.ne i64x2.lt-s i64x2.gt-s i64x2.le-s i64x2.ge-s i64x2.extmul-low-i32x4-s
+   i64x2.extmul-high-i32x4-s i64x2.extmul-low-i32x4-u i64x2.extmul-high-i32x4-u f32x4.abs
+   f32x4.neg f32x4.sqrt f32x4.add f32x4.sub f32x4.mul f32x4.div f32x4.min f32x4.max f32x4.pmin
+   f32x4.pmax f64x2.abs f64x2.neg f64x2.sqrt f64x2.add f64x2.sub f64x2.mul f64x2.div f64x2.min
+   f64x2.max f64x2.pmin f64x2.pmax i32x4.trunc-sat-f32x4-s i32x4.trunc-sat-f32x4-u
+   f32x4.convert-i32x4-s f32x4.convert-i32x4-u i32x4.trunc-sat-f64x2-s-zero
+   i32x4.trunc-sat-f64x2-u-zero f64x2.convert-low-i32x4-s f64x2.convert-low-i32x4-u
+   ;; relaxed-simd
+   i8x16.relaxed-swizzle i32x4.relaxed-trunc-f32x4-s i32x4.relaxed-trunc-f32x4-u
+   i32x4.relaxed-trunc-f64x2-s-zero i32x4.relaxed-trunc-f64x2-u-zero f32x4.relaxed-madd
+   f32x4.relaxed-nmadd f64x2.relaxed-madd f64x2.relaxed-nmadd i8x16.relaxed-laneselect
+   i16x8.relaxed-laneselect i32x4.relaxed-laneselect i64x2.relaxed-laneselect f32x4.relaxed-min
+   f32x4.relaxed-max f64x2.relaxed-min f64x2.relaxed-max i16x8.relaxed-q15mulr-s
+   i16x8.relaxed-dot-i8x16-i7x16-s i32x4.relaxed-dot-i8x16-i7x16-add-s
+   ))
+
+(define wasm-opcode-immediate-shapes
+  '(none block-type label-index label-vector function-index type-index table-index
+    memory-index global-index local-index tag-index field-index data-index element-index
+    heap-type reference-type value-type-vector select-types call-indirect br-on-cast
+    memory-argument memory-argument-lane lane-index shuffle-bytes vector-bytes i32 i64
+    f32 f64 table-pair memory-pair array-new-fixed array-copy struct-field try-table
+    resume-table))
+
+(define wasm-opcode-structured-kinds '(#f block loop if try-table))
+
+(define expected-core-3-binary-variants
+  (vector (vector #f #x1b 'select 'none #f)
+          (vector #xfb 21 'ref.test 'reference-type #f)
+          (vector #xfb 23 'ref.cast 'reference-type #f)))
+
+(define unique-values?
+  (lambda (values)
+    (let ([seen (make-hashtable equal-hash equal?)])
+      (andmap (lambda (value)
+                (and (not (hashtable-ref seen value #f))
+                     (begin (hashtable-set! seen value #t) #t)))
+              values))))
+
+(define descriptor-fields=?
+  (lambda (descriptor prefix code mnemonic immediate-shape structured-kind)
+    (and (wasm-opcode-descriptor? descriptor)
+         (equal? prefix (wasm-opcode-prefix descriptor))
+         (= code (wasm-opcode-code descriptor))
+         (eq? mnemonic (wasm-opcode-mnemonic descriptor))
+         (eq? immediate-shape (wasm-opcode-immediate-shape descriptor))
+         (eq? structured-kind (wasm-opcode-structured-kind descriptor)))))
+
+(mat wasm-core-3-opcode-table
+
+     (andmap (lambda (mnemonic)
+               (wasm-opcode-descriptor? (wasm-opcode-by-mnemonic mnemonic)))
+             (vector->list expected-core-3-mnemonics))
+
+     (= (vector-length expected-core-3-mnemonics)
+        (vector-length wasm-core-3-opcodes))
+
+     (unique-values? (vector->list expected-core-3-mnemonics))
+
+     (unique-values?
+      (map wasm-opcode-mnemonic (vector->list wasm-core-3-opcodes)))
+
+     (andmap (lambda (descriptor)
+               (and (memq (wasm-opcode-mnemonic descriptor)
+                          (vector->list expected-core-3-mnemonics))
+                    #t))
+             (vector->list wasm-core-3-opcodes))
+
+     (unique-values?
+      (append
+       (map (lambda (descriptor)
+              (cons (wasm-opcode-prefix descriptor) (wasm-opcode-code descriptor)))
+            (vector->list wasm-core-3-opcodes))
+       (map (lambda (variant)
+              (cons (vector-ref variant 0) (vector-ref variant 1)))
+            (vector->list expected-core-3-binary-variants))))
+
+     (= 499 (+ (vector-length wasm-core-3-opcodes)
+               (vector-length expected-core-3-binary-variants)))
+
+     (andmap
+      (lambda (descriptor)
+        (eq? descriptor
+             (wasm-opcode-by-binary (wasm-opcode-prefix descriptor)
+                                    (wasm-opcode-code descriptor))))
+      (vector->list wasm-core-3-opcodes))
+
+     (andmap (lambda (descriptor)
+               (and (memq (wasm-opcode-immediate-shape descriptor)
+                          wasm-opcode-immediate-shapes)
+                    (memq (wasm-opcode-structured-kind descriptor)
+                          wasm-opcode-structured-kinds)
+                    #t))
+             (vector->list wasm-core-3-opcodes))
+
+     (andmap
+      (lambda (variant)
+        (let ([descriptor
+               (wasm-opcode-by-binary (vector-ref variant 0) (vector-ref variant 1))])
+          (descriptor-fields=? descriptor
+                               (vector-ref variant 0) (vector-ref variant 1)
+                               (vector-ref variant 2) (vector-ref variant 3)
+                               (vector-ref variant 4))))
+      (vector->list expected-core-3-binary-variants))
+
+     (descriptor-fields=? (wasm-opcode-by-mnemonic 'unreachable)
+                          #f #x00 'unreachable 'none #f)
+
+     (descriptor-fields=? (wasm-opcode-by-mnemonic 'block)
+                          #f #x02 'block 'block-type 'block)
+
+     (descriptor-fields=? (wasm-opcode-by-mnemonic 'call-indirect)
+                          #f #x11 'call-indirect 'call-indirect #f)
+
+     (descriptor-fields=? (wasm-opcode-by-mnemonic 'struct.get)
+                          #xfb 2 'struct.get 'struct-field #f)
+
+     (descriptor-fields=? (wasm-opcode-by-mnemonic 'memory.init)
+                          #xfc 8 'memory.init 'data-index #f)
+
+     (descriptor-fields=? (wasm-opcode-by-mnemonic 'v128.load)
+                          #xfd 0 'v128.load 'memory-argument #f)
+
+     ;; error case: an unassigned binary pair has no descriptor.
+     (not (wasm-opcode-by-binary #xfd #xffff))
+
+     ;; error case: an unknown textual mnemonic has no descriptor.
+     (not (wasm-opcode-by-mnemonic 'not-a-wasm-opcode))
+
+     )
+
 
 (mat wasm-binary-integer-boundaries
 
