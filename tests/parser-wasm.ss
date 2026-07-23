@@ -329,6 +329,50 @@
             (string-contains? (parser-error-message err)
                               "unknown WebAssembly opcode")))
 
+     ;; error: an unknown opcode in an expression preserves its instruction failure.
+     (let ([err (capture-parser-error
+                 (lambda () (parse-binary <wasm-expression> #vu8(#x06 #x0b))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 1 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "unknown WebAssembly opcode")))
+
+     ;; error: an unknown opcode in a block preserves its instruction failure.
+     (let ([err
+            (capture-parser-error
+             (lambda ()
+               (parse-binary <wasm-instruction> #vu8(#x02 #x40 #x06 #x0b))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 3 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "unknown WebAssembly opcode")))
+
+     ;; error: an unknown opcode in an if alternate preserves its instruction failure.
+     (let ([err
+            (capture-parser-error
+             (lambda ()
+               (parse-binary <wasm-instruction>
+                             #vu8(#x04 #x40 #x05 #x06 #x0b))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 4 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "unknown WebAssembly opcode")))
+
+     ;; error: a deferred shape in a block preserves its unsupported-shape failure.
+     (let ([err
+            (capture-parser-error
+             (lambda ()
+               (parse-binary <wasm-instruction>
+                             #vu8(#x02 #x40 #xfb #x02 #x0b))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 4 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "unsupported immediate shape: struct-field")))
+
      ;; error: an unknown aggregate subopcode is rejected.
      (error? (parse-binary <wasm-instruction> #vu8(#xfb #x7f)))
 
