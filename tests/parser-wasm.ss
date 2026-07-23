@@ -647,20 +647,158 @@
    (vector #xfd #x113 'i32x4.relaxed-dot-i8x16-i7x16-add-s)
    ))
 
+;; Shapes follow the final Core 3.0 binary grammar and the normalized order below.
+(define expected-core-3-special-opcodes
+  (vector
+   ;; one-byte special descriptors
+   (vector #f #x2 'block 'block-type 'block)
+   (vector #f #x3 'loop 'block-type 'loop)
+   (vector #f #x4 'if 'block-type 'if)
+   (vector #f #x8 'throw 'tag-index #f)
+   (vector #f #xc 'br 'label-index #f)
+   (vector #f #xd 'br-if 'label-index #f)
+   (vector #f #xe 'br-table 'label-vector #f)
+   (vector #f #x10 'call 'function-index #f)
+   (vector #f #x11 'call-indirect 'call-indirect #f)
+   (vector #f #x12 'return-call 'function-index #f)
+   (vector #f #x13 'return-call-indirect 'call-indirect #f)
+   (vector #f #x14 'call-ref 'type-index #f)
+   (vector #f #x15 'return-call-ref 'type-index #f)
+   (vector #f #x1c 'select 'select-types #f)
+   (vector #f #x1f 'try-table 'try-table 'try-table)
+   (vector #f #x20 'local.get 'local-index #f)
+   (vector #f #x21 'local.set 'local-index #f)
+   (vector #f #x22 'local.tee 'local-index #f)
+   (vector #f #x23 'global.get 'global-index #f)
+   (vector #f #x24 'global.set 'global-index #f)
+   (vector #f #x25 'table.get 'table-index #f)
+   (vector #f #x26 'table.set 'table-index #f)
+   (vector #f #x28 'i32.load 'memory-argument #f)
+   (vector #f #x29 'i64.load 'memory-argument #f)
+   (vector #f #x2a 'f32.load 'memory-argument #f)
+   (vector #f #x2b 'f64.load 'memory-argument #f)
+   (vector #f #x2c 'i32.load8-s 'memory-argument #f)
+   (vector #f #x2d 'i32.load8-u 'memory-argument #f)
+   (vector #f #x2e 'i32.load16-s 'memory-argument #f)
+   (vector #f #x2f 'i32.load16-u 'memory-argument #f)
+   (vector #f #x30 'i64.load8-s 'memory-argument #f)
+   (vector #f #x31 'i64.load8-u 'memory-argument #f)
+   (vector #f #x32 'i64.load16-s 'memory-argument #f)
+   (vector #f #x33 'i64.load16-u 'memory-argument #f)
+   (vector #f #x34 'i64.load32-s 'memory-argument #f)
+   (vector #f #x35 'i64.load32-u 'memory-argument #f)
+   (vector #f #x36 'i32.store 'memory-argument #f)
+   (vector #f #x37 'i64.store 'memory-argument #f)
+   (vector #f #x38 'f32.store 'memory-argument #f)
+   (vector #f #x39 'f64.store 'memory-argument #f)
+   (vector #f #x3a 'i32.store8 'memory-argument #f)
+   (vector #f #x3b 'i32.store16 'memory-argument #f)
+   (vector #f #x3c 'i64.store8 'memory-argument #f)
+   (vector #f #x3d 'i64.store16 'memory-argument #f)
+   (vector #f #x3e 'i64.store32 'memory-argument #f)
+   (vector #f #x3f 'memory.size 'memory-index #f)
+   (vector #f #x40 'memory.grow 'memory-index #f)
+   (vector #f #x41 'i32.const 'i32 #f)
+   (vector #f #x42 'i64.const 'i64 #f)
+   (vector #f #x43 'f32.const 'f32 #f)
+   (vector #f #x44 'f64.const 'f64 #f)
+   (vector #f #xd0 'ref.null 'heap-type #f)
+   (vector #f #xd2 'ref.func 'function-index #f)
+   (vector #f #xd5 'br-on-null 'label-index #f)
+   (vector #f #xd6 'br-on-non-null 'label-index #f)
+   ;; #xfb aggregate, cast, and branch descriptors
+   (vector #xfb #x0 'struct.new 'type-index #f)
+   (vector #xfb #x1 'struct.new-default 'type-index #f)
+   (vector #xfb #x2 'struct.get 'struct-field #f)
+   (vector #xfb #x3 'struct.get-s 'struct-field #f)
+   (vector #xfb #x4 'struct.get-u 'struct-field #f)
+   (vector #xfb #x5 'struct.set 'struct-field #f)
+   (vector #xfb #x6 'array.new 'type-index #f)
+   (vector #xfb #x7 'array.new-default 'type-index #f)
+   (vector #xfb #x8 'array.new-fixed 'array-new-fixed #f)
+   (vector #xfb #x9 'array.new-data 'type-data #f)
+   (vector #xfb #xa 'array.new-elem 'type-element #f)
+   (vector #xfb #xb 'array.get 'type-index #f)
+   (vector #xfb #xc 'array.get-s 'type-index #f)
+   (vector #xfb #xd 'array.get-u 'type-index #f)
+   (vector #xfb #xe 'array.set 'type-index #f)
+   (vector #xfb #x10 'array.fill 'type-index #f)
+   (vector #xfb #x11 'array.copy 'array-copy #f)
+   (vector #xfb #x12 'array.init-data 'type-data #f)
+   (vector #xfb #x13 'array.init-elem 'type-element #f)
+   (vector #xfb #x14 'ref.test 'heap-type-non-null #f)
+   (vector #xfb #x15 'ref.test 'heap-type-nullable #f)
+   (vector #xfb #x16 'ref.cast 'heap-type-non-null #f)
+   (vector #xfb #x17 'ref.cast 'heap-type-nullable #f)
+   (vector #xfb #x18 'br-on-cast 'br-on-cast #f)
+   (vector #xfb #x19 'br-on-cast-fail 'br-on-cast #f)
+   ;; #xfc bulk descriptors
+   (vector #xfc #x8 'memory.init 'memory-data #f)
+   (vector #xfc #x9 'data.drop 'data-index #f)
+   (vector #xfc #xa 'memory.copy 'memory-pair #f)
+   (vector #xfc #xb 'memory.fill 'memory-index #f)
+   (vector #xfc #xc 'table.init 'table-element #f)
+   (vector #xfc #xd 'elem.drop 'element-index #f)
+   (vector #xfc #xe 'table.copy 'table-pair #f)
+   (vector #xfc #xf 'table.grow 'table-index #f)
+   (vector #xfc #x10 'table.size 'table-index #f)
+   (vector #xfc #x11 'table.fill 'table-index #f)
+   ;; #xfd vector descriptors
+   (vector #xfd #x0 'v128.load 'memory-argument #f)
+   (vector #xfd #x1 'v128.load8x8-s 'memory-argument #f)
+   (vector #xfd #x2 'v128.load8x8-u 'memory-argument #f)
+   (vector #xfd #x3 'v128.load16x4-s 'memory-argument #f)
+   (vector #xfd #x4 'v128.load16x4-u 'memory-argument #f)
+   (vector #xfd #x5 'v128.load32x2-s 'memory-argument #f)
+   (vector #xfd #x6 'v128.load32x2-u 'memory-argument #f)
+   (vector #xfd #x7 'v128.load8-splat 'memory-argument #f)
+   (vector #xfd #x8 'v128.load16-splat 'memory-argument #f)
+   (vector #xfd #x9 'v128.load32-splat 'memory-argument #f)
+   (vector #xfd #xa 'v128.load64-splat 'memory-argument #f)
+   (vector #xfd #xb 'v128.store 'memory-argument #f)
+   (vector #xfd #xc 'v128.const 'vector-bytes #f)
+   (vector #xfd #xd 'i8x16.shuffle 'shuffle-bytes #f)
+   (vector #xfd #x15 'i8x16.extract-lane-s 'lane-index #f)
+   (vector #xfd #x16 'i8x16.extract-lane-u 'lane-index #f)
+   (vector #xfd #x17 'i8x16.replace-lane 'lane-index #f)
+   (vector #xfd #x18 'i16x8.extract-lane-s 'lane-index #f)
+   (vector #xfd #x19 'i16x8.extract-lane-u 'lane-index #f)
+   (vector #xfd #x1a 'i16x8.replace-lane 'lane-index #f)
+   (vector #xfd #x1b 'i32x4.extract-lane 'lane-index #f)
+   (vector #xfd #x1c 'i32x4.replace-lane 'lane-index #f)
+   (vector #xfd #x1d 'i64x2.extract-lane 'lane-index #f)
+   (vector #xfd #x1e 'i64x2.replace-lane 'lane-index #f)
+   (vector #xfd #x1f 'f32x4.extract-lane 'lane-index #f)
+   (vector #xfd #x20 'f32x4.replace-lane 'lane-index #f)
+   (vector #xfd #x21 'f64x2.extract-lane 'lane-index #f)
+   (vector #xfd #x22 'f64x2.replace-lane 'lane-index #f)
+   (vector #xfd #x54 'v128.load8-lane 'memory-argument-lane #f)
+   (vector #xfd #x55 'v128.load16-lane 'memory-argument-lane #f)
+   (vector #xfd #x56 'v128.load32-lane 'memory-argument-lane #f)
+   (vector #xfd #x57 'v128.load64-lane 'memory-argument-lane #f)
+   (vector #xfd #x58 'v128.store8-lane 'memory-argument-lane #f)
+   (vector #xfd #x59 'v128.store16-lane 'memory-argument-lane #f)
+   (vector #xfd #x5a 'v128.store32-lane 'memory-argument-lane #f)
+   (vector #xfd #x5b 'v128.store64-lane 'memory-argument-lane #f)
+   (vector #xfd #x5c 'v128.load32-zero 'memory-argument #f)
+   (vector #xfd #x5d 'v128.load64-zero 'memory-argument #f)
+   ))
+
 (define wasm-opcode-immediate-shapes
   '(none block-type label-index label-vector function-index type-index table-index
     memory-index global-index local-index tag-index field-index data-index element-index
     heap-type reference-type value-type-vector select-types call-indirect br-on-cast
     memory-argument memory-argument-lane lane-index shuffle-bytes vector-bytes i32 i64
     f32 f64 table-pair memory-pair array-new-fixed array-copy struct-field try-table
-    resume-table))
+    resume-table type-data type-element memory-data table-element heap-type-non-null
+    heap-type-nullable))
 
 (define wasm-opcode-structured-kinds '(#f block loop if try-table))
 
 (define expected-core-3-binary-variants
   (vector (vector #f #x1b 'select 'none #f)
-          (vector #xfb 21 'ref.test 'reference-type #f)
-          (vector #xfb 23 'ref.cast 'reference-type #f)))
+          (vector #xfb 21 'ref.test 'heap-type-nullable #f)
+          (vector #xfb 23 'ref.cast 'heap-type-nullable #f)))
 
 (define unique-values?
   (lambda (values)
@@ -691,6 +829,24 @@
          (eq? mnemonic (wasm-opcode-mnemonic descriptor))
          (eq? immediate-shape (wasm-opcode-immediate-shape descriptor))
          (eq? structured-kind (wasm-opcode-structured-kind descriptor)))))
+
+(define special-opcode-fields=?
+  (lambda (expected)
+    (descriptor-fields=?
+     (wasm-opcode-by-binary (vector-ref expected 0) (vector-ref expected 1))
+     (vector-ref expected 0) (vector-ref expected 1) (vector-ref expected 2)
+     (vector-ref expected 3) (vector-ref expected 4))))
+
+(define descriptor-special?
+  (lambda (descriptor)
+    (or (not (eq? 'none (wasm-opcode-immediate-shape descriptor)))
+        (wasm-opcode-structured-kind descriptor))))
+
+(define descriptor-special-fields
+  (lambda (descriptor)
+    (vector (wasm-opcode-prefix descriptor) (wasm-opcode-code descriptor)
+            (wasm-opcode-mnemonic descriptor) (wasm-opcode-immediate-shape descriptor)
+            (wasm-opcode-structured-kind descriptor))))
 
 (mat wasm-core-3-opcode-table
 
@@ -726,9 +882,311 @@
 
      (= 499 (vector-length expected-core-3-binary-assignments))
 
+     (= 128 (vector-length expected-core-3-special-opcodes))
+
      (unique-values?
       (map binary-assignment-pair
            (vector->list expected-core-3-binary-assignments)))
+
+     (unique-values?
+      (map binary-assignment-pair
+           (vector->list expected-core-3-special-opcodes)))
+
+     (let ([official-pairs
+            (map binary-assignment-pair
+                 (vector->list expected-core-3-binary-assignments))])
+       (andmap (lambda (special)
+                 (and (member (binary-assignment-pair special) official-pairs) #t))
+               (vector->list expected-core-3-special-opcodes)))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 0))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 1))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 2))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 3))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 4))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 5))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 6))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 7))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 8))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 9))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 10))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 11))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 12))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 13))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 14))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 15))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 16))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 17))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 18))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 19))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 20))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 21))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 22))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 23))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 24))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 25))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 26))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 27))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 28))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 29))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 30))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 31))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 32))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 33))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 34))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 35))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 36))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 37))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 38))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 39))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 40))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 41))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 42))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 43))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 44))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 45))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 46))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 47))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 48))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 49))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 50))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 51))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 52))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 53))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 54))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 55))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 56))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 57))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 58))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 59))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 60))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 61))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 62))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 63))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 64))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 65))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 66))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 67))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 68))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 69))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 70))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 71))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 72))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 73))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 74))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 75))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 76))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 77))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 78))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 79))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 80))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 81))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 82))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 83))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 84))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 85))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 86))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 87))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 88))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 89))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 90))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 91))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 92))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 93))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 94))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 95))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 96))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 97))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 98))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 99))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 100))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 101))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 102))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 103))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 104))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 105))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 106))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 107))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 108))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 109))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 110))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 111))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 112))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 113))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 114))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 115))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 116))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 117))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 118))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 119))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 120))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 121))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 122))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 123))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 124))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 125))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 126))
+
+     (special-opcode-fields=? (vector-ref expected-core-3-special-opcodes 127))
+
+     (let ([special-pairs
+            (map binary-assignment-pair
+                 (vector->list expected-core-3-special-opcodes))])
+       (andmap
+        (lambda (assignment)
+          (if (member (binary-assignment-pair assignment) special-pairs)
+              #t
+              (let ([descriptor
+                     (wasm-opcode-by-binary (vector-ref assignment 0)
+                                            (vector-ref assignment 1))])
+                (and (eq? 'none (wasm-opcode-immediate-shape descriptor))
+                     (not (wasm-opcode-structured-kind descriptor))))))
+        (vector->list expected-core-3-binary-assignments)))
+
+     (let ([expected-special (vector->list expected-core-3-special-opcodes)])
+       (andmap
+        (lambda (assignment)
+          (let ([descriptor
+                 (wasm-opcode-by-binary (vector-ref assignment 0)
+                                        (vector-ref assignment 1))])
+            (or (not (descriptor-special? descriptor))
+                (and (member (descriptor-special-fields descriptor) expected-special)
+                     #t))))
+        (vector->list expected-core-3-binary-assignments)))
+
+     (= 128
+        (length
+         (filter descriptor-special?
+                 (map (lambda (assignment)
+                        (wasm-opcode-by-binary (vector-ref assignment 0)
+                                               (vector-ref assignment 1)))
+                      (vector->list expected-core-3-binary-assignments)))))
 
      (andmap
       (lambda (assignment)
@@ -791,13 +1249,19 @@
                           #xfb 2 'struct.get 'struct-field #f)
 
      (descriptor-fields=? (wasm-opcode-by-mnemonic 'memory.init)
-                          #xfc 8 'memory.init 'data-index #f)
+                          #xfc 8 'memory.init 'memory-data #f)
 
      (descriptor-fields=? (wasm-opcode-by-mnemonic 'v128.load)
                           #xfd 0 'v128.load 'memory-argument #f)
 
      ;; error case: an unassigned binary pair has no descriptor.
      (not (wasm-opcode-by-binary #xfd #xffff))
+
+     ;; error case: the largest u32 subopcode is valid input but unassigned.
+     (not (wasm-opcode-by-binary #xfd #xffffffff))
+
+     ;; error case: a subopcode above the u32 range violates the public contract.
+     (error? (wasm-opcode-by-binary #xfd #x100000000))
 
      ;; error case: an unknown textual mnemonic has no descriptor.
      (not (wasm-opcode-by-mnemonic 'not-a-wasm-opcode))

@@ -18,6 +18,10 @@
       (or (not value)
           (and (fixnum? value) (fx<= 0 value) (fx<= value #xff)))))
 
+  (define wasm-opcode-code?
+    (lambda (value)
+      (and (fixnum? value) (fx<= 0 value) (fx<= value #xffffffff))))
+
   #|proc:wasm-opcode-descriptor?
   Returns whether `object` is a WebAssembly opcode descriptor. `object` is tested.
   |#
@@ -67,6 +71,10 @@
 
   ;; The final Core 3.0 instruction index has 496 distinct WAT mnemonics.
   ;; `select` uses its typed encoding here because it represents the general WAT syntax.
+  ;; `type-data` and `type-element` normalize to vectors in their binary operand order.
+  ;; `memory-data` normalizes `(dataidx memidx)` to `(memidx dataidx)`.
+  ;; `table-element` normalizes `(elemidx tableidx)` to `(tableidx elemidx)`.
+  ;; The two heap-type shapes construct non-nullable or nullable reference-type records.
   (define wasm-core-3-opcodes
     (vector->immutable-vector
      (vector
@@ -283,8 +291,8 @@
      (make-wasm-opcode-descriptor 'array.new 251 6 'type-index #f)
      (make-wasm-opcode-descriptor 'array.new-default 251 7 'type-index #f)
      (make-wasm-opcode-descriptor 'array.new-fixed 251 8 'array-new-fixed #f)
-     (make-wasm-opcode-descriptor 'array.new-data 251 9 'data-index #f)
-     (make-wasm-opcode-descriptor 'array.new-elem 251 10 'element-index #f)
+     (make-wasm-opcode-descriptor 'array.new-data 251 9 'type-data #f)
+     (make-wasm-opcode-descriptor 'array.new-elem 251 10 'type-element #f)
      (make-wasm-opcode-descriptor 'array.get 251 11 'type-index #f)
      (make-wasm-opcode-descriptor 'array.get-s 251 12 'type-index #f)
      (make-wasm-opcode-descriptor 'array.get-u 251 13 'type-index #f)
@@ -292,11 +300,11 @@
      (make-wasm-opcode-descriptor 'array.len 251 15 'none #f)
      (make-wasm-opcode-descriptor 'array.fill 251 16 'type-index #f)
      (make-wasm-opcode-descriptor 'array.copy 251 17 'array-copy #f)
-     (make-wasm-opcode-descriptor 'array.init-data 251 18 'data-index #f)
-     (make-wasm-opcode-descriptor 'array.init-elem 251 19 'element-index #f)
+     (make-wasm-opcode-descriptor 'array.init-data 251 18 'type-data #f)
+     (make-wasm-opcode-descriptor 'array.init-elem 251 19 'type-element #f)
      ;; reference
-     (make-wasm-opcode-descriptor 'ref.test 251 20 'reference-type #f)
-     (make-wasm-opcode-descriptor 'ref.cast 251 22 'reference-type #f)
+     (make-wasm-opcode-descriptor 'ref.test 251 20 'heap-type-non-null #f)
+     (make-wasm-opcode-descriptor 'ref.cast 251 22 'heap-type-non-null #f)
      ;; control/exceptions/tail-call
      (make-wasm-opcode-descriptor 'br-on-cast 251 24 'br-on-cast #f)
      (make-wasm-opcode-descriptor 'br-on-cast-fail 251 25 'br-on-cast #f)
@@ -317,12 +325,12 @@
      (make-wasm-opcode-descriptor 'i64.trunc-sat-f64-s 252 6 'none #f)
      (make-wasm-opcode-descriptor 'i64.trunc-sat-f64-u 252 7 'none #f)
      ;; memory
-     (make-wasm-opcode-descriptor 'memory.init 252 8 'data-index #f)
+     (make-wasm-opcode-descriptor 'memory.init 252 8 'memory-data #f)
      (make-wasm-opcode-descriptor 'data.drop 252 9 'data-index #f)
      (make-wasm-opcode-descriptor 'memory.copy 252 10 'memory-pair #f)
      (make-wasm-opcode-descriptor 'memory.fill 252 11 'memory-index #f)
      ;; table
-     (make-wasm-opcode-descriptor 'table.init 252 12 'element-index #f)
+     (make-wasm-opcode-descriptor 'table.init 252 12 'table-element #f)
      (make-wasm-opcode-descriptor 'elem.drop 252 13 'element-index #f)
      (make-wasm-opcode-descriptor 'table.copy 252 14 'table-pair #f)
      (make-wasm-opcode-descriptor 'table.grow 252 15 'table-index #f)
@@ -598,19 +606,21 @@
     (vector->immutable-vector
      (vector
       (make-wasm-opcode-descriptor 'select #f #x1b 'none #f)
-      (make-wasm-opcode-descriptor 'ref.test #xfb 21 'reference-type #f)
-      (make-wasm-opcode-descriptor 'ref.cast #xfb 23 'reference-type #f))))
+      (make-wasm-opcode-descriptor 'ref.test #xfb 21 'heap-type-nullable #f)
+      (make-wasm-opcode-descriptor 'ref.cast #xfb 23 'heap-type-nullable #f))))
 
   (define opcode-binary-key
     (lambda (prefix code)
-      (cons prefix code)))
+      (fx+ code (fxsll (if prefix (fx1+ prefix) 0) 32))))
 
   (define add-binary-descriptor!
     (lambda (table descriptor)
       (let ([key (opcode-binary-key ($wasm-opcode-prefix descriptor)
                                     ($wasm-opcode-code descriptor))])
         (when (hashtable-ref table key #f)
-          (assertion-violation 'wasm-core-3-opcodes "duplicate binary opcode" key))
+          (assertion-violation
+           'wasm-core-3-opcodes "duplicate binary opcode"
+           (vector ($wasm-opcode-prefix descriptor) ($wasm-opcode-code descriptor))))
         (hashtable-set! table key descriptor))))
 
   (define add-canonical-descriptor!
@@ -623,7 +633,7 @@
 
   (define build-opcode-tables
     (lambda ()
-      (let ([binary-table (make-hashtable equal-hash equal?)]
+      (let ([binary-table (make-eqv-hashtable)]
             [mnemonic-table (make-eq-hashtable)])
         (let loop ([index 0])
           (unless (fx= index (vector-length wasm-core-3-opcodes))
@@ -642,12 +652,13 @@
     (build-opcode-tables))
 
   #|proc:wasm-opcode-by-binary
-  Returns the descriptor for `prefix` and `code`, or `#f`. `prefix` is `#f` or a prefix byte.
-  `code` is the natural one-byte opcode or prefixed subopcode.
+  Returns the exact binary descriptor for `prefix` and `code`, or `#f`. `prefix` is `#f` or a
+  prefix byte, and `code` is a u32 one-byte opcode or prefixed subopcode. A binary variant result
+  may not be a member of `wasm-core-3-opcodes`; mnemonic lookup always returns its canonical row.
   |#
   (define wasm-opcode-by-binary
     (lambda (prefix code)
-      (pcheck ([wasm-opcode-prefix? prefix] [natural? code])
+      (pcheck ([wasm-opcode-prefix? prefix] [wasm-opcode-code? code])
               (hashtable-ref wasm-opcode-binary-table
                              (opcode-binary-key prefix code) #f))))
 
