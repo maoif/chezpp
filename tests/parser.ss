@@ -739,6 +739,12 @@
                           <eof>)
                    "aaa;"))
 
+     (equal? '()
+             (runB (<~0> (<many-until> <u8> (<uimm8> #xff))
+                          (<uimm8> #xff)
+                          <eof>)
+                   (u8vec #xff)))
+
      (equal? '(1 2)
              (runB (<~0> (<many-until> <u8> (<uimm8> #xff))
                           (<uimm8> #xff)
