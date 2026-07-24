@@ -142,19 +142,8 @@
 
   (define sequence-before
     (lambda (terminator-parser)
-      (let ()
-        (declare-lazy-parser sequence-parser)
-        (install-lazy-parser!
-         sequence-parser
-         (<bind>
-          (<optional> (<followed-by> (<result> #t) terminator-parser))
-          (lambda (terminator-found?)
-            (if (eq? #t terminator-found?)
-                (<result> '())
-                (<map> (lambda (values)
-                         (cons (car values) (cadr values)))
-                       (<~> <wasm-instruction> sequence-parser))))))
-        (<map> list->immutable-vector sequence-parser))))
+      (<map> list->immutable-vector
+             (<many-until> <wasm-instruction> terminator-parser))))
 
   (define sequence-ending-with-end
     (<~ (sequence-before (<uimm8> #x0b)) (<uimm8> #x0b)))

@@ -16,12 +16,6 @@
       (thunk)
       #f)))
 
-(define raises?
-  (lambda (thunk)
-    (guard (err [else #t])
-      (thunk)
-      #f)))
-
 (mat wasm-binary-values-and-types
 
      (= #xffffffff
@@ -77,6 +71,12 @@
           (integer-range #xc5 #xd0)
           (integer-range #xd7 #xfb)
           '(#xfe #xff)))
+
+(define make-nop-expression-bytes
+  (lambda (count)
+    (let ([bytes (make-bytevector (+ count 1) #x01)])
+      (bytevector-u8-set! bytes count #x0b)
+      bytes)))
 
 (mat wasm-binary-scalar-and-control-instructions
 
@@ -134,6 +134,23 @@
        (and (= 3 (wasm-memory-argument-alignment argument))
             (= 2 (wasm-memory-argument-memory-index argument))
             (= #x8000000000000000 (wasm-memory-argument-offset argument))))
+
+     (let* ([instruction
+             (parse-binary
+              <wasm-instruction>
+              #vu8(#x28 #x3f
+                    #xff #xff #xff #xff #xff #xff #xff #xff #xff #x01))]
+            [argument (vector-ref (wasm-instruction-immediates instruction) 0)])
+       (and (= 63 (wasm-memory-argument-alignment argument))
+            (= 0 (wasm-memory-argument-memory-index argument))
+            (= #xffffffffffffffff (wasm-memory-argument-offset argument))))
+
+     (let* ([instruction
+             (parse-binary <wasm-instruction> #vu8(#x28 #x40 #x03 #x00))]
+            [argument (vector-ref (wasm-instruction-immediates instruction) 0)])
+       (and (= 0 (wasm-memory-argument-alignment argument))
+            (= 3 (wasm-memory-argument-memory-index argument))
+            (= 0 (wasm-memory-argument-offset argument))))
 
      (and (instruction-has-fields?
            (parse-binary <wasm-instruction> #vu8(#x41 #x7f))
@@ -285,6 +302,16 @@
             (instruction-has-fields?
              (vector-ref expression 0) 'i32.const '#(-1) '#() '#())))
 
+     (let* ([count 10000]
+            [expression
+             (parse-binary <wasm-expression> (make-nop-expression-bytes count))])
+       (and (= count (vector-length expression))
+            (eq? 'nop
+                 (wasm-instruction-mnemonic (vector-ref expression 0)))
+            (eq? 'nop
+                 (wasm-instruction-mnemonic
+                  (vector-ref expression (fx1- count))))))
+
      ;; error: memory flags are truncated before the offset.
      (let ([err (capture-parser-error
                  (lambda () (parse-binary <wasm-instruction> #vu8(#x28 #x02))))])
@@ -316,8 +343,15 @@
      ;; error: every unassigned final Core 3.0 one-byte opcode is rejected.
      (for-all
       (lambda (opcode)
-        (raises? (lambda ()
-                   (parse-binary <wasm-instruction> (bytevector opcode)))))
+        (let ([err
+               (capture-parser-error
+                (lambda ()
+                  (parse-binary <wasm-instruction> (bytevector opcode))))])
+          (and (parser-error? err)
+               (eq? 'custom (parser-error-kind err))
+               (= 1 (parser-error-offset err))
+               (string=? "<fail-with>: unknown WebAssembly opcode"
+                         (parser-error-message err)))))
       reserved-one-byte-opcodes)
 
      ;; error: an unknown one-byte opcode reports its consumed offset and category.
