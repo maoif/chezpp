@@ -727,6 +727,59 @@
      (equal? '(#\a #\b #\c)
              (runT (<many> <item>) "abc"))
 
+     (equal? '()
+             (runT (<~0> (<many-until> (<char> #\a) (<char> #\x3b))
+                          (<char> #\x3b)
+                          <eof>)
+                   ";"))
+
+     (equal? '(#\a #\a #\a)
+             (runT (<~0> (<many-until> (<char> #\a) (<char> #\x3b))
+                          (<char> #\x3b)
+                          <eof>)
+                   "aaa;"))
+
+     (equal? '(1 2)
+             (runB (<~0> (<many-until> <u8> (<uimm8> #xff))
+                          (<uimm8> #xff)
+                          <eof>)
+                   (u8vec 1 2 #xff)))
+
+     ;; error: a partially consumed item reports its own exact failure.
+     (let ([err
+            (capture-parser-error
+             (lambda ()
+               (runT (<many-until> (<~> (<char> #\a) (<char> #\b))
+                                   (<char> #\x3b))
+                     "ax;")))])
+       (and (parser-error? err)
+            (eq? 'expected (parser-error-kind err))
+            (= 1 (parser-error-offset err))
+            (equal? '(#\b) (parser-error-expected err))
+            (string=? "expected #\\b, got #\\x" (parser-error-message err))
+            (char=? #\x (parser-error-found err))))
+
+     ;; error: EOF without a terminator propagates the item parser's EOF failure.
+     (let ([err
+            (capture-parser-error
+             (lambda ()
+               (runT (<many-until> (<char> #\a) (<char> #\x3b)) "aa")))])
+       (and (parser-error? err)
+            (eq? 'expected (parser-error-kind err))
+            (= 2 (parser-error-offset err))
+            (equal? '(#\a) (parser-error-expected err))
+            (string=? "unexpected EOF, expected #\\a" (parser-error-message err))
+            (eq? 'eof (parser-error-found err))))
+
+     ;; error: a successful item parser must consume input.
+     (error? (runT (<many-until> (<result> 'item) (<char> #\x3b)) "a"))
+
+     ;; error: the repeated item must be a parser.
+     (error? (<many-until> 'not-a-parser (<char> #\x3b)))
+
+     ;; error: the terminator lookahead must be a parser.
+     (error? (<many-until> (<char> #\a) 'not-a-parser))
+
      ;; error
      (error? (runT (<some> (<char> #\a)) ""))
 

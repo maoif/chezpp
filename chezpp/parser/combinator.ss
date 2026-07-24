@@ -49,7 +49,7 @@
           <u8*> <bytes> <u8vec>
           <uleb128> <sleb128>
 
-          <many> <some> <optional>
+          <many> <many-until> <some> <optional>
           <rep> <skip> <sep-by> <sep-by1>
           <~> <~n> <~ ~> <~0> <~1> <~2> <~3> <~4> <~5>
           </>
@@ -1459,6 +1459,40 @@ For simplicity, "PC" in the following documentation means "parser combinator".
                                  (loop inp1 (save-input inp1)))
                           (values #t (lb) old-inp))))))
               many-parser)))
+
+
+  #|proc:<many-until>
+  The `<many-until>` procedure returns a parser that repeatedly runs `item-parser`, whose
+  behavior is `(Input -> Any)`. At each position, `terminator-parser` is checked with lookahead
+  behavior `(Input -> Any)` and is not consumed. The result is the list of item values. When the
+  terminator does not match, an item failure is propagated. An item success that consumes no input
+  raises a progress error.
+  |#
+  (define-who (<many-until> item-parser terminator-parser)
+    (pcheck ([parser? item-parser terminator-parser])
+            (let ([item-body (parser-body item-parser)]
+                  [terminator-body (parser-body terminator-parser)])
+              (define-parser many-until-parser
+                (let ([lb (make-list-builder)])
+                  (let loop ([inp1 inp])
+                    (let ([current-input (save-input inp1)])
+                      (let-values ([(terminator-status terminator-value terminator-input)
+                                    (terminator-body (save-input current-input)
+                                                     state
+                                                     (fx1+ lvl))])
+                        (if terminator-status
+                            (values #t (lb) current-input)
+                            (let-values ([(item-status item-value item-input)
+                                          (item-body inp1 state (fx1+ lvl))])
+                              (if item-status
+                                  (begin
+                                    (ensure-progress who current-input item-input)
+                                    (lb item-value)
+                                    (loop item-input))
+                                  (values #f #f
+                                          (ensure-parser-failure
+                                           item-input current-input))))))))))
+              many-until-parser)))
 
 
   #|proc:<some>
