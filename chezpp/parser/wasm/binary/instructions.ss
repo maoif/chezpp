@@ -31,6 +31,16 @@
     (lambda (first-parser second-parser)
       (<map> list->immutable-vector (<~> first-parser second-parser))))
 
+  (define bytes->bytevector
+    (lambda (byte*)
+      (let* ([length (length byte*)]
+             [bytes (make-bytevector length)])
+        (let loop ([index 0] [byte* byte*])
+          (unless (null? byte*)
+            (bytevector-u8-set! bytes index (car byte*))
+            (loop (fx1+ index) (cdr byte*))))
+        bytes)))
+
   (define reversed-pair-immediates
     (lambda (first-parser second-parser)
       (<map> (lambda (values)
@@ -100,9 +110,105 @@
                  <wasm-u32>)]
          [else (<fail-with> "invalid WebAssembly catch kind")]))))
 
+  (define two-u32-immediates
+    (pair-immediates <wasm-u32> <wasm-u32>))
+
+  (define reference-type-immediates
+    (one-immediate <wasm-reference-type>))
+
+  (define value-type-vector-immediates
+    (<map> (lambda (types)
+             (make-immutable-vector (vector->immutable-vector types)))
+           (<wasm-vector> <wasm-value-type>)))
+
+  (define non-null-heap-type-immediates
+    (<map> (lambda (heap-type)
+             (make-immutable-vector (make-wasm-reference-type #f heap-type)))
+           <wasm-heap-type>))
+
+  (define nullable-heap-type-immediates
+    (<map> (lambda (heap-type)
+             (make-immutable-vector (make-wasm-reference-type #t heap-type)))
+           <wasm-heap-type>))
+
+  (define vector-bytes-immediates
+    (<map> (lambda (byte*)
+             (make-immutable-vector (bytes->bytevector byte*)))
+           (<rep> <u8> 16)))
+
+  (define shuffle-lane-parser
+    (<bind>
+     <u8>
+     (lambda (lane)
+       (if (fx< lane 32)
+           (<result> lane)
+           (<fail-with> "invalid WebAssembly shuffle lane")))))
+
+  (define shuffle-bytes-immediates
+    (<map> (lambda (lane*)
+             (make-immutable-vector (bytes->bytevector lane*)))
+           (<rep> shuffle-lane-parser 16)))
+
+  ;; Core 3.0 binary grammar, `Bcastop` and `Binstr/cast`, uses flags before all fields.
+  (define br-on-cast-flags-parser
+    (<bind>
+     <u8>
+     (lambda (flags)
+       (if (fx< flags 4)
+           (<result> flags)
+           (<fail-with> "invalid WebAssembly br-on-cast flags")))))
+
+  (define br-on-cast-immediates
+    (<bind>
+     br-on-cast-flags-parser
+     (lambda (flags)
+       (<map>
+        (lambda (values)
+          (make-immutable-vector
+           (car values)
+           (make-wasm-reference-type (not (fxzero? (fxand flags 1)))
+                                     (cadr values))
+           (make-wasm-reference-type (not (fxzero? (fxand flags 2)))
+                                     (caddr values))))
+        (<~> <wasm-u32> <wasm-heap-type> <wasm-heap-type>)))))
+
+  (define instruction-lane-count
+    (lambda (mnemonic)
+      (cond [(memq mnemonic
+                   '(i8x16.extract-lane-s i8x16.extract-lane-u i8x16.replace-lane
+                     v128.load8-lane v128.store8-lane))
+             16]
+            [(memq mnemonic
+                   '(i16x8.extract-lane-s i16x8.extract-lane-u i16x8.replace-lane
+                     v128.load16-lane v128.store16-lane))
+             8]
+            [(memq mnemonic
+                   '(i32x4.extract-lane i32x4.replace-lane
+                     f32x4.extract-lane f32x4.replace-lane
+                     v128.load32-lane v128.store32-lane))
+             4]
+            [(memq mnemonic
+                   '(i64x2.extract-lane i64x2.replace-lane
+                     f64x2.extract-lane f64x2.replace-lane
+                     v128.load64-lane v128.store64-lane))
+             2]
+            [else #f])))
+
+  (define lane-index-parser
+    (lambda (descriptor)
+      (let ([lane-count (instruction-lane-count (wasm-opcode-mnemonic descriptor))])
+        (if lane-count
+            (<bind>
+             <u8>
+             (lambda (lane)
+               (if (fx< lane lane-count)
+                   (<result> lane)
+                   (<fail-with> "invalid WebAssembly lane index"))))
+            (<fail-with> "unclassified WebAssembly lane instruction")))))
+
   (define immediate-parser
-    (lambda (shape)
-      (case shape
+    (lambda (descriptor)
+      (case (wasm-opcode-immediate-shape descriptor)
         [(none) (<result> empty-vector)]
         [(block-type) (one-immediate <wasm-block-type>)]
         [(label-index function-index type-index table-index memory-index global-index
@@ -114,26 +220,33 @@
                    (vector->immutable-vector (car values)) (cadr values)))
                 (<~> (<wasm-vector> <wasm-u32>) <wasm-u32>))]
         [(heap-type) (one-immediate <wasm-heap-type>)]
-        [(value-type-vector select-types)
-         (<map> (lambda (types)
-                  (make-immutable-vector (vector->immutable-vector types)))
-                (<wasm-vector> <wasm-value-type>))]
-        [(call-indirect) (pair-immediates <wasm-u32> <wasm-u32>)]
+        [(reference-type) reference-type-immediates]
+        [(value-type-vector select-types) value-type-vector-immediates]
+        [(call-indirect) two-u32-immediates]
         [(memory-argument) (one-immediate <wasm-memory-argument>)]
         [(i32) (one-immediate <wasm-s32>)]
         [(i64) (one-immediate <wasm-s64>)]
         [(f32) (one-immediate <wasm-f32>)]
         [(f64) (one-immediate <wasm-f64>)]
-        [(table-pair memory-pair) (pair-immediates <wasm-u32> <wasm-u32>)]
+        [(table-pair memory-pair) two-u32-immediates]
         [(memory-data table-element)
          (reversed-pair-immediates <wasm-u32> <wasm-u32>)]
-        [(struct-field array-new-fixed array-copy type-data type-element
-                       heap-type-non-null heap-type-nullable br-on-cast
-                       vector-bytes shuffle-bytes lane-index memory-argument-lane)
-         (<fail-with> (format "unsupported immediate shape: ~a" shape))]
+        [(struct-field array-new-fixed array-copy type-data type-element)
+         two-u32-immediates]
+        [(heap-type-non-null) non-null-heap-type-immediates]
+        [(heap-type-nullable) nullable-heap-type-immediates]
+        [(br-on-cast) br-on-cast-immediates]
+        [(vector-bytes) vector-bytes-immediates]
+        [(shuffle-bytes) shuffle-bytes-immediates]
+        [(lane-index) (one-immediate (lane-index-parser descriptor))]
+        [(memory-argument-lane)
+         (pair-immediates <wasm-memory-argument> (lane-index-parser descriptor))]
         [(try-table)
          (<fail-with> "try-table immediate must be parsed structurally")]
-        [else (<fail-with> (format "unsupported immediate shape: ~a" shape))])))
+        [else
+         (<fail-with>
+          (format "unsupported immediate shape: ~a"
+                  (wasm-opcode-immediate-shape descriptor)))])))
 
   #|proc:<wasm-instruction>
   The `<wasm-instruction>` parser reads one scalar or structured Core 3.0 instruction.
@@ -216,8 +329,7 @@
               [else
                (<map> (lambda (immediates)
                         (instruction-record descriptor immediates))
-                      (immediate-parser
-                       (wasm-opcode-immediate-shape descriptor)))]))))
+                      (immediate-parser descriptor))]))))
 
   #|proc:<wasm-expression>
   The `<wasm-expression>` parser reads an instruction vector terminated by one end byte.

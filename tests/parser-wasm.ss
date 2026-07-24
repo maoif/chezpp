@@ -16,6 +16,10 @@
       (thunk)
       #f)))
 
+(define parser-rejects?
+  (lambda (parser bytes)
+    (and (capture-parser-error (lambda () (parse-binary parser bytes))) #t)))
+
 (mat wasm-binary-values-and-types
 
      (= #xffffffff
@@ -76,6 +80,18 @@
   (lambda (count)
     (let ([bytes (make-bytevector (+ count 1) #x01)])
       (bytevector-u8-set! bytes count #x0b)
+      bytes)))
+
+(define make-shuffle-instruction-bytes
+  (lambda (invalid-position)
+    (let ([bytes (make-bytevector 18)])
+      (bytevector-u8-set! bytes 0 #xfd)
+      (bytevector-u8-set! bytes 1 #x0d)
+      (let loop ([position 0])
+        (when (fx< position 16)
+          (bytevector-u8-set! bytes (fx+ position 2)
+                              (if (fx= position invalid-position) 32 position))
+          (loop (fx1+ position))))
       bytes)))
 
 (mat wasm-binary-scalar-and-control-instructions
@@ -395,17 +411,11 @@
             (string-contains? (parser-error-message err)
                               "unknown WebAssembly opcode")))
 
-     ;; error: a deferred shape in a block preserves its unsupported-shape failure.
-     (let ([err
-            (capture-parser-error
-             (lambda ()
-               (parse-binary <wasm-instruction>
-                             #vu8(#x02 #x40 #xfb #x02 #x0b))))])
-       (and (parser-error? err)
-            (eq? 'custom (parser-error-kind err))
-            (= 4 (parser-error-offset err))
-            (string-contains? (parser-error-message err)
-                              "unsupported immediate shape: struct-field")))
+     (let* ([block
+             (parse-binary <wasm-instruction>
+                           #vu8(#x02 #x40 #xfb #x02 #x01 #x02 #x0b))]
+            [instruction (vector-ref (wasm-instruction-body block) 0)])
+       (instruction-has-fields? instruction 'struct.get '#(1 2) '#() '#()))
 
      ;; error: an unknown aggregate subopcode is rejected.
      (error? (parse-binary <wasm-instruction> #vu8(#xfb #x7f)))
@@ -458,56 +468,215 @@
      ;; error: typed select omits its declared value type.
      (error? (parse-binary <wasm-instruction> #vu8(#x1c #x01)))
 
-     ;; error: Task 5 structure fields report the stable unsupported-shape failure.
+     (andmap
+      (lambda (test)
+        (instruction-has-fields?
+         (parse-binary <wasm-instruction> (car test))
+         (cadr test) (caddr test) '#() '#()))
+      (list (list #vu8(#xfb #x02 #x07 #x09) 'struct.get '#(7 9))
+            (list #vu8(#xfb #x05 #x0a #x0b) 'struct.set '#(10 11))
+            (list #vu8(#xfb #x08 #x03 #x04) 'array.new-fixed '#(3 4))
+            (list #vu8(#xfb #x11 #x05 #x06) 'array.copy '#(5 6))
+            (list #vu8(#xfb #x09 #x07 #x08) 'array.new-data '#(7 8))
+            (list #vu8(#xfb #x12 #x09 #x0a) 'array.init-data '#(9 10))
+            (list #vu8(#xfb #x0a #x0b #x0c) 'array.new-elem '#(11 12))
+            (list #vu8(#xfb #x13 #x0d #x0e) 'array.init-elem '#(13 14))))
+
+     (andmap
+      (lambda (test)
+        (let* ([instruction (parse-binary <wasm-instruction> (car test))]
+               [reference-type (vector-ref (wasm-instruction-immediates instruction) 0)])
+          (and (eq? (cadr test) (wasm-instruction-mnemonic instruction))
+               (wasm-reference-type? reference-type)
+               (eq? (caddr test) (wasm-reference-type-nullable? reference-type))
+               (equal? (cadddr test) (wasm-reference-type-heap-type reference-type)))))
+      (list (list #vu8(#xfb #x14 #x03) 'ref.test #f 3)
+            (list #vu8(#xfb #x15 #x70) 'ref.test #t 'func)
+            (list #vu8(#xfb #x16 #x04) 'ref.cast #f 4)
+            (list #vu8(#xfb #x17 #x6d) 'ref.cast #t 'eq)))
+
+     (let* ([instruction
+             (parse-binary <wasm-instruction>
+                           #vu8(#xfb #x18 #x03 #x05 #x70 #x03))]
+            [immediates (wasm-instruction-immediates instruction)]
+            [source-type (vector-ref immediates 1)]
+            [target-type (vector-ref immediates 2)])
+       (and (eq? 'br-on-cast (wasm-instruction-mnemonic instruction))
+            (= 5 (vector-ref immediates 0))
+            (wasm-reference-type-nullable? source-type)
+            (eq? 'func (wasm-reference-type-heap-type source-type))
+            (wasm-reference-type-nullable? target-type)
+            (= 3 (wasm-reference-type-heap-type target-type))))
+
+     (let* ([instruction
+             (parse-binary <wasm-instruction>
+                           #vu8(#xfb #x19 #x00 #x06 #x6c #x04))]
+            [immediates (wasm-instruction-immediates instruction)])
+       (and (eq? 'br-on-cast-fail (wasm-instruction-mnemonic instruction))
+            (= 6 (vector-ref immediates 0))
+            (not (wasm-reference-type-nullable? (vector-ref immediates 1)))
+            (eq? 'i31
+                 (wasm-reference-type-heap-type (vector-ref immediates 1)))
+            (not (wasm-reference-type-nullable? (vector-ref immediates 2)))
+            (= 4 (wasm-reference-type-heap-type (vector-ref immediates 2)))))
+
+     (let ([instruction
+            (parse-binary <wasm-instruction>
+                          #vu8(#xfd #x0c 0 1 2 3 4 5 6 7
+                                8 9 10 11 12 13 14 15))])
+       (and (eq? 'v128.const (wasm-instruction-mnemonic instruction))
+            (equal? (bytevector 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                    (vector-ref (wasm-instruction-immediates instruction) 0))))
+
+     (let ([instruction
+            (parse-binary <wasm-instruction>
+                          #vu8(#xfd #x0d 31 30 29 28 27 26 25 24
+                                23 22 21 20 19 18 17 16))])
+       (and (eq? 'i8x16.shuffle (wasm-instruction-mnemonic instruction))
+            (equal? (bytevector 31 30 29 28 27 26 25 24
+                                23 22 21 20 19 18 17 16)
+                    (vector-ref (wasm-instruction-immediates instruction) 0))))
+
+     (andmap
+      (lambda (test)
+        (instruction-has-fields?
+         (parse-binary <wasm-instruction> (car test))
+         (cadr test) (vector (caddr test)) '#() '#()))
+      (list (list #vu8(#xfd #x15 #x0f) 'i8x16.extract-lane-s 15)
+            (list #vu8(#xfd #x18 #x07) 'i16x8.extract-lane-s 7)
+            (list #vu8(#xfd #x1b #x03) 'i32x4.extract-lane 3)
+            (list #vu8(#xfd #x1f #x03) 'f32x4.extract-lane 3)
+            (list #vu8(#xfd #x1d #x01) 'i64x2.extract-lane 1)
+            (list #vu8(#xfd #x21 #x01) 'f64x2.extract-lane 1)))
+
+     (andmap
+      (lambda (test)
+        (let* ([instruction (parse-binary <wasm-instruction> (car test))]
+               [immediates (wasm-instruction-immediates instruction)]
+               [argument (vector-ref immediates 0)])
+          (and (eq? (cadr test) (wasm-instruction-mnemonic instruction))
+               (wasm-memory-argument? argument)
+               (= (caddr test) (wasm-memory-argument-alignment argument))
+               (= (cadddr test) (wasm-memory-argument-offset argument))
+               (= (car (cddddr test)) (wasm-memory-argument-memory-index argument))
+               (= (cadr (cddddr test)) (vector-ref immediates 1)))))
+      (list (list #vu8(#xfd #x54 #x02 #x10 #x0f) 'v128.load8-lane 2 16 0 15)
+            (list #vu8(#xfd #x55 #x01 #x11 #x07) 'v128.load16-lane 1 17 0 7)
+            (list #vu8(#xfd #x56 #x40 #x03 #x12 #x03)
+                  'v128.load32-lane 0 18 3 3)
+            (list #vu8(#xfd #x5b #x03 #x13 #x01) 'v128.store64-lane 3 19 0 1)))
+
+     (and (instruction-has-fields?
+           (parse-binary <wasm-instruction> #vu8(#xfd #x80 #x02))
+           'i8x16.relaxed-swizzle '#() '#() '#())
+          (instruction-has-fields?
+           (parse-binary <wasm-instruction> #vu8(#xfd #x93 #x02))
+           'i32x4.relaxed-dot-i8x16-i7x16-add-s '#() '#() '#()))
+
+     ;; error: a vector constant is truncated before its sixteenth byte.
+     (error? (parse-binary <wasm-instruction>
+                           #vu8(#xfd #x0c 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14)))
+
+     ;; error: a shuffle constant is truncated before its sixteenth byte.
+     (error? (parse-binary <wasm-instruction>
+                           #vu8(#xfd #x0d 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14)))
+
+     ;; error: every shuffle position rejects the first invalid lane value 32.
+     (for-all
+      (lambda (position)
+        (parser-rejects? <wasm-instruction>
+                         (make-shuffle-instruction-bytes position)))
+      (integer-range 0 16))
+
+     ;; error: shuffle lane 32 reports its exact consumed offset and category.
      (let ([err (capture-parser-error
-                 (lambda () (parse-binary <wasm-instruction> #vu8(#xfb #x02))))])
+                 (lambda ()
+                   (parse-binary <wasm-instruction>
+                                 (make-shuffle-instruction-bytes 0))))])
        (and (parser-error? err)
             (eq? 'custom (parser-error-kind err))
-            (= 2 (parser-error-offset err))
+            (= 3 (parser-error-offset err))
             (string-contains? (parser-error-message err)
-                              "unsupported immediate shape: struct-field")))
+                              "invalid WebAssembly shuffle lane")))
 
-     ;; error: Task 5 fixed-length array allocation is deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x08)))
+     ;; error: each direct lane family rejects its first invalid lane.
+     (andmap
+      (lambda (bytes) (parser-rejects? <wasm-instruction> bytes))
+      (list #vu8(#xfd #x15 16) #vu8(#xfd #x18 8)
+            #vu8(#xfd #x1b 4) #vu8(#xfd #x1f 4)
+            #vu8(#xfd #x1d 2) #vu8(#xfd #x21 2)))
 
-     ;; error: Task 5 array copying is deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x11)))
+     ;; error: each memory lane family rejects its first invalid lane.
+     (andmap
+      (lambda (bytes) (parser-rejects? <wasm-instruction> bytes))
+      (list #vu8(#xfd #x54 0 0 16) #vu8(#xfd #x55 0 0 8)
+            #vu8(#xfd #x56 0 0 4) #vu8(#xfd #x57 0 0 2)))
 
-     ;; error: Task 5 type-and-data indexes are deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x12)))
+     ;; error: an invalid direct lane reports its exact consumed offset and category.
+     (let ([err (capture-parser-error
+                 (lambda ()
+                   (parse-binary <wasm-instruction> #vu8(#xfd #x18 8))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 3 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "invalid WebAssembly lane index")))
 
-     ;; error: Task 5 type-and-element indexes are deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x13)))
+     ;; error: structure fields are truncated before the field index.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x02 #x01)))
 
-     ;; error: Task 5 non-null heap type is deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x14)))
+     ;; error: a truncated aggregate reports the exact missing-field offset.
+     (let ([err (capture-parser-error
+                 (lambda ()
+                   (parse-binary <wasm-instruction> #vu8(#xfb #x02 #x01))))])
+       (and (parser-error? err)
+            (eq? 'unexpected-eof (parser-error-kind err))
+            (= 3 (parser-error-offset err))
+            (string-contains? (parser-error->string err) "unexpected EOF")))
 
-     ;; error: Task 5 nullable heap type is deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x15)))
+     ;; error: a malformed aggregate type index retains a stable custom failure.
+     (let ([err
+            (capture-parser-error
+             (lambda ()
+               (parse-binary <wasm-instruction>
+                             #vu8(#xfb #x02 #xff #xff #xff #xff #x10 #x00))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 7 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "integer has nonzero unused bits")))
 
-     ;; error: Task 5 alternate non-null heap type is deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x16)))
+     ;; error: fixed arrays are truncated before the fixed count.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x08 #x01)))
 
-     ;; error: Task 5 alternate nullable heap type is deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x17)))
+     ;; error: array copies are truncated before the source type index.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x11 #x01)))
 
-     ;; error: Task 5 branch-on-cast immediates are deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x18)))
+     ;; error: type/data operands are truncated before the data index.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x12 #x01)))
 
-     ;; error: Task 5 branch-on-cast-fail immediates are deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x19)))
+     ;; error: type/element operands are truncated before the element index.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x13 #x01)))
 
-     ;; error: Task 5 vector constants are deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x0c)))
+     ;; error: reserved br-on-cast flag bits are rejected before the label.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x18 #x04 #x00 #x70 #x70)))
 
-     ;; error: Task 5 shuffle bytes are deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x0d)))
+     ;; error: br-on-cast fields cannot omit the second heap type.
+     (error? (parse-binary <wasm-instruction> #vu8(#xfb #x18 #x00 #x01 #x70)))
 
-     ;; error: Task 5 lane indexes are deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x15)))
+     ;; error: malformed abstract source heap types retain a stable custom failure.
+     (let ([err (capture-parser-error
+                 (lambda ()
+                   (parse-binary <wasm-instruction> #vu8(#xfb #x18 #x00 #x00 #x64 #x70))))])
+       (and (parser-error? err)
+            (eq? 'custom (parser-error-kind err))
+            (= 5 (parser-error-offset err))
+            (string-contains? (parser-error-message err)
+                              "undefined WebAssembly heap type")))
 
-     ;; error: Task 5 memory lane arguments are deliberately unsupported.
-     (error? (parse-binary <wasm-instruction> #vu8(#xfd #x54)))
+     ;; error: a malformed concrete heap type exceeds the signed 33-bit encoding.
+     (error? (parse-binary <wasm-instruction>
+                           #vu8(#xfb #x14 #x80 #x80 #x80 #x80 #x10)))
 
      ;; error: a representative bounded LEB failure preserves its exact location and message.
      (let ([err (capture-parser-error
@@ -1272,6 +1441,132 @@
    (vector #xfd #x5d 'v128.load64-zero 'memory-argument #f)
    ))
 
+(define concatenate-bytevectors
+  (lambda bytevectors
+    (let* ([length (apply + (map bytevector-length bytevectors))]
+           [result (make-bytevector length)])
+      (let loop ([bytevectors bytevectors] [offset 0])
+        (if (null? bytevectors)
+            result
+            (let* ([bytes (car bytevectors)]
+                   [next-offset (fx+ offset (bytevector-length bytes))])
+              (bytevector-copy! bytes 0 result offset (bytevector-length bytes))
+              (loop (cdr bytevectors) next-offset)))))))
+
+(define byte-list->bytevector
+  (lambda (byte*)
+    (let* ([length (length byte*)] [bytes (make-bytevector length)])
+      (let loop ([index 0] [byte* byte*])
+        (unless (null? byte*)
+          (bytevector-u8-set! bytes index (car byte*))
+          (loop (fx1+ index) (cdr byte*))))
+      bytes)))
+
+(define encode-minimal-u32
+  (lambda (value)
+    (let loop ([value value] [byte* '()])
+      (let ([next (fxsra value 7)] [payload (fxand value #x7f)])
+        (if (fxzero? next)
+            (byte-list->bytevector (reverse (cons payload byte*)))
+            (loop next (cons (fxior payload #x80) byte*)))))))
+
+(define expected-special-row
+  (lambda (assignment)
+    (let ([prefix (vector-ref assignment 0)] [code (vector-ref assignment 1)])
+      (let loop ([row* (vector->list expected-core-3-special-opcodes)])
+        (and (not (null? row*))
+             (let ([row (car row*)])
+               (if (and (equal? prefix (vector-ref row 0))
+                        (= code (vector-ref row 1)))
+                   row
+                   (loop (cdr row*)))))))))
+
+(define minimal-binary-immediate
+  (lambda (shape structured-kind)
+    (case shape
+      [(none) #vu8()]
+      [(block-type)
+       (case structured-kind
+         [(block loop if) #vu8(#x40 #x0b)]
+         [else (error 'minimal-binary-immediate "unhandled structured block type")])]
+      [(try-table) #vu8(#x40 #x00 #x0b)]
+      [(label-index function-index type-index table-index memory-index global-index
+                    local-index tag-index field-index data-index element-index)
+       #vu8(0)]
+      [(label-vector) #vu8(0 0)]
+      [(heap-type heap-type-non-null heap-type-nullable) #vu8(#x70)]
+      [(reference-type) #vu8(#x70)]
+      [(value-type-vector select-types) #vu8(1 #x7f)]
+      [(call-indirect table-pair memory-pair array-new-fixed array-copy struct-field
+                      type-data type-element memory-data table-element)
+       #vu8(0 0)]
+      [(br-on-cast) #vu8(0 0 #x70 #x70)]
+      [(memory-argument) #vu8(0 0)]
+      [(memory-argument-lane) #vu8(0 0 0)]
+      [(lane-index) #vu8(0)]
+      [(shuffle-bytes vector-bytes)
+       #vu8(0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0)]
+      [(i32 i64) #vu8(0)]
+      [(f32) #vu8(0 0 0 0)]
+      [(f64) #vu8(0 0 0 0 0 0 0 0)]
+      [else (error 'minimal-binary-immediate "unhandled expected shape" shape)])))
+
+(define minimal-binary-instruction
+  (lambda (assignment)
+    (let* ([prefix (vector-ref assignment 0)]
+           [code (vector-ref assignment 1)]
+           [special (expected-special-row assignment)]
+           [shape (if special (vector-ref special 3) 'none)]
+           [structured-kind (and special (vector-ref special 4))]
+           [opcode (if prefix
+                       (concatenate-bytevectors (bytevector prefix)
+                                                (encode-minimal-u32 code))
+                       (bytevector code))])
+      (concatenate-bytevectors opcode
+                               (minimal-binary-immediate shape structured-kind)))))
+
+(define expected-lane-instructions
+  (vector
+   (vector #xfd #x15 'i8x16.extract-lane-s 'lane-index 16)
+   (vector #xfd #x16 'i8x16.extract-lane-u 'lane-index 16)
+   (vector #xfd #x17 'i8x16.replace-lane 'lane-index 16)
+   (vector #xfd #x18 'i16x8.extract-lane-s 'lane-index 8)
+   (vector #xfd #x19 'i16x8.extract-lane-u 'lane-index 8)
+   (vector #xfd #x1a 'i16x8.replace-lane 'lane-index 8)
+   (vector #xfd #x1b 'i32x4.extract-lane 'lane-index 4)
+   (vector #xfd #x1c 'i32x4.replace-lane 'lane-index 4)
+   (vector #xfd #x1d 'i64x2.extract-lane 'lane-index 2)
+   (vector #xfd #x1e 'i64x2.replace-lane 'lane-index 2)
+   (vector #xfd #x1f 'f32x4.extract-lane 'lane-index 4)
+   (vector #xfd #x20 'f32x4.replace-lane 'lane-index 4)
+   (vector #xfd #x21 'f64x2.extract-lane 'lane-index 2)
+   (vector #xfd #x22 'f64x2.replace-lane 'lane-index 2)
+   (vector #xfd #x54 'v128.load8-lane 'memory-argument-lane 16)
+   (vector #xfd #x55 'v128.load16-lane 'memory-argument-lane 8)
+   (vector #xfd #x56 'v128.load32-lane 'memory-argument-lane 4)
+   (vector #xfd #x57 'v128.load64-lane 'memory-argument-lane 2)
+   (vector #xfd #x58 'v128.store8-lane 'memory-argument-lane 16)
+   (vector #xfd #x59 'v128.store16-lane 'memory-argument-lane 8)
+   (vector #xfd #x5a 'v128.store32-lane 'memory-argument-lane 4)
+   (vector #xfd #x5b 'v128.store64-lane 'memory-argument-lane 2)))
+
+(define lane-instruction-test-bytes
+  (lambda (expected)
+    (let* ([opcode (concatenate-bytevectors
+                    (bytevector (vector-ref expected 0))
+                    (encode-minimal-u32 (vector-ref expected 1)))]
+           [lane (fx1- (vector-ref expected 4))]
+           [immediate (if (eq? 'lane-index (vector-ref expected 3))
+                          (bytevector lane)
+                          (bytevector 0 0 lane))])
+      (concatenate-bytevectors opcode immediate))))
+
+(define private-binary-variant?
+  (lambda (assignment)
+    (let ([prefix (vector-ref assignment 0)] [code (vector-ref assignment 1)])
+      (or (and (not prefix) (= code #x1b))
+          (and (eqv? prefix #xfb) (memv code '(21 23)))))))
+
 (define wasm-opcode-immediate-shapes
   '(none block-type label-index label-vector function-index type-index table-index
     memory-index global-index local-index tag-index field-index data-index element-index
@@ -1371,6 +1666,73 @@
      (= 499 (vector-length expected-core-3-binary-assignments))
 
      (= 128 (vector-length expected-core-3-special-opcodes))
+
+     (= 22 (vector-length expected-lane-instructions))
+
+     (unique-values?
+      (map binary-assignment-pair (vector->list expected-lane-instructions)))
+
+     (let ([lane-specials
+            (filter (lambda (special)
+                      (memq (vector-ref special 3)
+                            '(lane-index memory-argument-lane)))
+                    (vector->list expected-core-3-special-opcodes))])
+       (and (= 22 (length lane-specials))
+            (andmap
+             (lambda (special)
+               (= 1
+                  (length
+                   (filter
+                    (lambda (expected)
+                      (and (equal? (binary-assignment-pair special)
+                                   (binary-assignment-pair expected))
+                           (eq? (vector-ref special 2) (vector-ref expected 2))
+                           (eq? (vector-ref special 3) (vector-ref expected 3))))
+                    (vector->list expected-lane-instructions)))))
+             lane-specials)))
+
+     (andmap
+      (lambda (expected)
+        (let* ([instruction
+                (parse-binary <wasm-instruction>
+                              (lane-instruction-test-bytes expected))]
+               [immediates (wasm-instruction-immediates instruction)]
+               [lane-position
+                (if (eq? 'lane-index (vector-ref expected 3)) 0 1)])
+          (and (eq? (vector-ref expected 2)
+                    (wasm-instruction-mnemonic instruction))
+               (= (fx1- (vector-ref expected 4))
+                  (vector-ref immediates lane-position))
+               (or (fxzero? lane-position)
+                   (let ([argument (vector-ref immediates 0)])
+                     (and (wasm-memory-argument? argument)
+                          (zero? (wasm-memory-argument-alignment argument))
+                          (zero? (wasm-memory-argument-offset argument))
+                          (zero? (wasm-memory-argument-memory-index argument))))))))
+      (vector->list expected-lane-instructions))
+
+     (let loop ([assignment* (vector->list expected-core-3-binary-assignments)]
+                [successes 0]
+                [terminator-failures 0]
+                [private-successes 0])
+       (if (null? assignment*)
+           (and (= successes 497)
+                (= terminator-failures 2)
+                (= private-successes 3))
+           (let* ([assignment (car assignment*)]
+                  [mnemonic (vector-ref assignment 2)]
+                  [bytes (minimal-binary-instruction assignment)])
+             (if (memq mnemonic '(else end))
+                 (and (parser-rejects? <wasm-instruction> bytes)
+                      (loop (cdr assignment*) successes
+                            (fx1+ terminator-failures) private-successes))
+                 (let ([instruction (parse-binary <wasm-instruction> bytes)])
+                   (and (eq? mnemonic (wasm-instruction-mnemonic instruction))
+                        (loop (cdr assignment*) (fx1+ successes)
+                              terminator-failures
+                              (if (private-binary-variant? assignment)
+                                  (fx1+ private-successes)
+                                  private-successes))))))))
 
      (unique-values?
       (map binary-assignment-pair
