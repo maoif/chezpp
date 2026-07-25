@@ -31,16 +31,6 @@
     (lambda (first-parser second-parser)
       (<map> list->immutable-vector (<~> first-parser second-parser))))
 
-  (define bytes->bytevector
-    (lambda (byte*)
-      (let* ([length (length byte*)]
-             [bytes (make-bytevector length)])
-        (let loop ([index 0] [byte* byte*])
-          (unless (null? byte*)
-            (bytevector-u8-set! bytes index (car byte*))
-            (loop (fx1+ index) (cdr byte*))))
-        bytes)))
-
   (define reversed-pair-immediates
     (lambda (first-parser second-parser)
       (<map> (lambda (values)
@@ -132,9 +122,17 @@
            <wasm-heap-type>))
 
   (define vector-bytes-immediates
-    (<map> (lambda (byte*)
-             (make-immutable-vector (bytes->bytevector byte*)))
-           (<rep> <u8> 16)))
+    (one-immediate (<u8vec> 16)))
+
+  (define shuffle-lanes->bytevector
+    (lambda (lane*)
+      (let* ([length (length lane*)]
+             [bytes (make-bytevector length)])
+        (let loop ([index 0] [lane* lane*])
+          (unless (null? lane*)
+            (bytevector-u8-set! bytes index (car lane*))
+            (loop (fx1+ index) (cdr lane*))))
+        bytes)))
 
   (define shuffle-lane-parser
     (<bind>
@@ -146,7 +144,7 @@
 
   (define shuffle-bytes-immediates
     (<map> (lambda (lane*)
-             (make-immutable-vector (bytes->bytevector lane*)))
+             (make-immutable-vector (shuffle-lanes->bytevector lane*)))
            (<rep> shuffle-lane-parser 16)))
 
   ;; Core 3.0 binary grammar, `Bcastop` and `Binstr/cast`, uses flags before all fields.

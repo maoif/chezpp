@@ -520,6 +520,32 @@
             (not (wasm-reference-type-nullable? (vector-ref immediates 2)))
             (= 4 (wasm-reference-type-heap-type (vector-ref immediates 2)))))
 
+     (let* ([instruction
+             (parse-binary <wasm-instruction>
+                           #vu8(#xfb #x18 #x01 #x07 #x70 #x03))]
+            [immediates (wasm-instruction-immediates instruction)]
+            [source-type (vector-ref immediates 1)]
+            [target-type (vector-ref immediates 2)])
+       (and (eq? 'br-on-cast (wasm-instruction-mnemonic instruction))
+            (= 7 (vector-ref immediates 0))
+            (wasm-reference-type-nullable? source-type)
+            (eq? 'func (wasm-reference-type-heap-type source-type))
+            (not (wasm-reference-type-nullable? target-type))
+            (= 3 (wasm-reference-type-heap-type target-type))))
+
+     (let* ([instruction
+             (parse-binary <wasm-instruction>
+                           #vu8(#xfb #x19 #x02 #x08 #x04 #x6d))]
+            [immediates (wasm-instruction-immediates instruction)]
+            [source-type (vector-ref immediates 1)]
+            [target-type (vector-ref immediates 2)])
+       (and (eq? 'br-on-cast-fail (wasm-instruction-mnemonic instruction))
+            (= 8 (vector-ref immediates 0))
+            (not (wasm-reference-type-nullable? source-type))
+            (= 4 (wasm-reference-type-heap-type source-type))
+            (wasm-reference-type-nullable? target-type)
+            (eq? 'eq (wasm-reference-type-heap-type target-type))))
+
      (let ([instruction
             (parse-binary <wasm-instruction>
                           #vu8(#xfd #x0c 0 1 2 3 4 5 6 7
