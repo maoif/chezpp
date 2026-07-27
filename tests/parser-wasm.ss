@@ -3,7 +3,8 @@
         (chezpp parser wasm opcodes)
         (chezpp parser wasm binary values)
         (chezpp parser wasm binary types)
-        (chezpp parser wasm binary instructions))
+        (chezpp parser wasm binary instructions)
+        (chezpp parser wasm text lexical))
 
 (define parse-binary
   (lambda (parser bytes)
@@ -19,6 +20,195 @@
 (define parser-rejects?
   (lambda (parser bytes)
     (and (capture-parser-error (lambda () (parse-binary parser bytes))) #t)))
+
+(define parse-wat-lexeme
+  (lambda (parser text)
+    (run-textual-parser (<~0> parser <eof>) text)))
+
+(mat wasm-text-lexical
+
+     (equal? '()
+             (parse-wat-lexeme
+              <wat-trivia>
+              " \t;; line\r\n(; outer (; middle (; inner ;) ;) ;)"))
+
+     (equal? '()
+             (parse-wat-lexeme <wat-trivia>
+                               "(@metadata value (@nested \"text)\"))"))
+
+     ;; error: custom annotations remain available to the module-field grammar.
+     (error? (parse-wat-lexeme <wat-trivia> "(@custom \"name\" \"payload\")"))
+
+     (string=? "$type-0!" (parse-wat-lexeme <wat-identifier> "$type-0!"))
+
+     (string=? "$hello"
+               (parse-wat-lexeme <wat-identifier> "$\"hello\""))
+
+     (string=? "$lambda: \x03bb;"
+               (parse-wat-lexeme <wat-identifier> "$\"lambda: λ\""))
+
+     (string=? "module" (parse-wat-lexeme (<wat-keyword> "module") "module (; ok ;)"))
+
+     ;; error: keywords must end at a token boundary.
+     (error? (parse-wat-lexeme (<wat-keyword> "module") "modulex"))
+
+     (equal? #vu8(#x41 #x0a #xff)
+             (parse-wat-lexeme <wat-string> "\"A\\n\\ff\""))
+
+     (equal? #vu8(#x09 #x0a #x0d #x22 #x27 #x5c)
+             (parse-wat-lexeme <wat-string> "\"\\t\\n\\r\\\"\\'\\\\\""))
+
+     (equal? #vu8(#xf0 #x9f #x98 #x80)
+             (parse-wat-lexeme <wat-string> "\"\\u{1f600}\""))
+
+     (equal? #vu8(#xf0 #x9f #x98 #x80)
+             (parse-wat-lexeme <wat-string> "\"\\u{1_f600}\""))
+
+     (equal? #vu8(#x00)
+             (parse-wat-lexeme <wat-string> "\"\\u{0000000}\""))
+
+     (string=? "lambda: \x03bb;"
+               (parse-wat-lexeme <wat-name> "\"lambda: λ\""))
+
+     (equal? #vu8(#xc0 #xaf)
+             (parse-wat-lexeme <wat-string> "\"\\c0\\af\""))
+
+     (= 4294967295 (parse-wat-lexeme <wat-u32> "4_294_967_295"))
+
+     (= #xffffffffffffffff
+        (parse-wat-lexeme <wat-u64> "0xffff_ffff_ffff_ffff"))
+
+     (= #xffffffff (parse-wat-lexeme <wat-i32> "-1"))
+
+     (= #xffffffffffffffff (parse-wat-lexeme <wat-i64> "0xffff_ffff_ffff_ffff"))
+
+     (= #x80000000 (parse-wat-lexeme <wat-i32> "-2_147_483_648"))
+
+     (= #x3fc00000
+        (wasm-float-bits (parse-wat-lexeme <wat-f32> "1.5")))
+
+     (= #x4000000000000000
+        (wasm-float-bits (parse-wat-lexeme <wat-f64> "0x1p+1")))
+
+     (= #x40400000
+        (wasm-float-bits (parse-wat-lexeme <wat-f32> "0x1.8p+1")))
+
+     (= #x3ff0000000000000
+        (wasm-float-bits (parse-wat-lexeme <wat-f64> "1e0")))
+
+     (= #x00000001
+        (wasm-float-bits (parse-wat-lexeme <wat-f32> "0x1p-149")))
+
+     (= #x0000000000000001
+        (wasm-float-bits (parse-wat-lexeme <wat-f64> "0x1p-1074")))
+
+     (= #x4b800000
+        (wasm-float-bits (parse-wat-lexeme <wat-f32> "16_777_217")))
+
+     (= #xff800000
+        (wasm-float-bits (parse-wat-lexeme <wat-f32> "-inf")))
+
+     (= #x7fc00000
+        (wasm-float-bits (parse-wat-lexeme <wat-f32> "nan")))
+
+     (= #xfff0000000000001
+        (wasm-float-bits (parse-wat-lexeme <wat-f64> "-nan:0x1")))
+
+     ;; error: block comments must close at their original nesting depth.
+     (error? (parse-wat-lexeme <wat-trivia> "(; outer (; inner ;)"))
+
+     ;; error: byte strings reject unknown escapes.
+     (error? (parse-wat-lexeme <wat-string> "\"\\q\""))
+
+     ;; error: byte strings reject unescaped control characters.
+     (error? (parse-wat-lexeme <wat-string> "\"line\nfeed\""))
+
+     ;; error: Unicode escapes must denote scalar values.
+     (error? (parse-wat-lexeme <wat-string> "\"\\u{d800}\""))
+
+     ;; error: Unicode escapes cannot exceed the maximum scalar value.
+     (error? (parse-wat-lexeme <wat-string> "\"\\u{110000}\""))
+
+     ;; error: Unicode escapes require at least one hexadecimal digit.
+     (error? (parse-wat-lexeme <wat-string> "\"\\u{}\""))
+
+     ;; error: Unicode escapes require a closing brace.
+     (error? (parse-wat-lexeme <wat-string> "\"\\u{41\""))
+
+     ;; error: names must contain valid UTF-8 after byte escapes are decoded.
+     (error? (parse-wat-lexeme <wat-name> "\"\\c0\\af\""))
+
+     ;; error: numeric separators cannot occur alone or consecutively.
+     (error? (parse-wat-lexeme <wat-i32> "1__0"))
+
+     ;; error: an underscore alone is not an integer literal.
+     (error? (parse-wat-lexeme <wat-i32> "_"))
+
+     ;; error: identifiers require a character after the dollar sign.
+     (error? (parse-wat-lexeme <wat-identifier> "$"))
+
+     ;; error: commas are not legal identifier characters.
+     (error? (parse-wat-lexeme <wat-identifier> "$bad,"))
+
+     ;; error: hexadecimal floats require an exponent.
+     (error? (parse-wat-lexeme <wat-f64> "0x1.5"))
+
+     ;; error: decimal exponents require digits.
+     (error? (parse-wat-lexeme <wat-f64> "1e+"))
+
+     ;; error: numeric tokens reject trailing identifier characters.
+     (error? (parse-wat-lexeme <wat-f32> "1.0oops"))
+
+     ;; error: adjacent keyword and string tokens require a separator.
+     (error? (parse-wat-lexeme (<~> (<wat-keyword> "module") <wat-string>)
+                               "module\"x\""))
+
+     ;; error: adjacent identifier and string tokens require a separator.
+     (error? (parse-wat-lexeme (<~> <wat-identifier> <wat-string>)
+                               "$x\"y\""))
+
+     ;; error: adjacent string tokens require a separator.
+     (error? (parse-wat-lexeme (<~> <wat-string> <wat-string>)
+                               "\"x\"\"y\""))
+
+     ;; error: adjacent float and string tokens require a separator.
+     (error? (parse-wat-lexeme (<~> <wat-f32> <wat-string>)
+                               "1e0\"y\""))
+
+     ;; error: finite float literals cannot round to infinity.
+     (error? (parse-wat-lexeme <wat-f32> "1e1000"))
+
+     ;; error: unescaped DEL is not a legal string character.
+     (error? (parse-wat-lexeme <wat-string>
+                               (string (integer->char #x22)
+                                       (integer->char #x7f)
+                                       (integer->char #x22))))
+
+     ;; error: integer tokens reject trailing identifier characters.
+     (error? (parse-wat-lexeme <wat-u32> "10things"))
+
+     ;; error: unsigned 32-bit integer literals cannot overflow.
+     (error? (parse-wat-lexeme <wat-u32> "4294967296"))
+
+     ;; error: negative 32-bit integer spellings cannot exceed the signed range.
+     (error? (parse-wat-lexeme <wat-i32> "-2147483649"))
+
+     ;; error: NaN payloads must fit the target significand.
+     (error? (parse-wat-lexeme <wat-f32> "nan:0x800000"))
+
+     ;; error: NaN payloads must be nonzero.
+     (error? (parse-wat-lexeme <wat-f64> "nan:0x0"))
+
+     ;; error: the token wrapper requires a parser argument.
+     (error? (<wat-token> 'not-a-parser))
+
+     ;; error: the keyword parser requires a string argument.
+     (error? (<wat-keyword> 'module))
+
+     ;; error: an empty string is not a keyword.
+     (error? (<wat-keyword> ""))
+
+     )
 
 (mat wasm-binary-values-and-types
 

@@ -7,7 +7,8 @@
           (chezpp parser wasm binary)
           (chezpp parser wasm binary values)
           (chezpp parser wasm binary types)
-          (chezpp parser wasm binary instructions))
+          (chezpp parser wasm binary instructions)
+          (chezpp parser wasm text lexical))
 
   (export (import (chezpp chez)
                   (chezpp match)
