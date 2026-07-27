@@ -2702,3 +2702,296 @@
      (error? (make-wasm-limits 'i32 9 2))
 
      )
+
+(define append-bytevectors
+  (lambda bytevector*
+    (let ([result
+           (make-bytevector
+            (fold-left (lambda (length bytes)
+                         (+ length (bytevector-length bytes)))
+                       0 bytevector*))])
+      (let loop ([bytevector* bytevector*] [offset 0])
+        (if (null? bytevector*)
+            result
+            (let* ([bytes (car bytevector*)]
+                   [length (bytevector-length bytes)])
+              (bytevector-copy! bytes 0 result offset length)
+              (loop (cdr bytevector*) (+ offset length))))))))
+
+(define encode-wasm-u32
+  (lambda (value)
+    (let loop ([value value] [byte* '()])
+      (let ([byte (logand value #x7f)]
+            [remaining (ash value -7)])
+        (if (zero? remaining)
+            (apply bytevector (reverse (cons byte byte*)))
+            (loop remaining (cons (logor byte #x80) byte*)))))))
+
+(define make-wasm-section-bytes
+  (lambda (id payload)
+    (append-bytevectors (bytevector id)
+                        (encode-wasm-u32 (bytevector-length payload))
+                        payload)))
+
+(define make-wasm-module-bytes
+  (lambda section*
+    (apply append-bytevectors
+           (cons #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00) section*))))
+
+(define standard-section-order
+  '#(1 2 3 4 5 13 6 7 8 9 12 10 11))
+
+(define reversed-standard-section-pairs
+  (let ([pair* '()])
+    (let outer ([later 1])
+      (when (< later (vector-length standard-section-order))
+        (let inner ([earlier 0])
+          (if (= earlier later)
+              (outer (fx1+ later))
+              (begin
+                (set! pair*
+                      (cons (cons (vector-ref standard-section-order later)
+                                  (vector-ref standard-section-order earlier))
+                            pair*))
+                (inner (fx1+ earlier)))))))
+    pair*))
+
+(mat wasm-binary-modules
+
+     (let ([module
+            (parse-wasm-binary-module
+             #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00))])
+       (and (wasm-module? module)
+            (zero? (vector-length (wasm-module-types module)))
+            (zero? (vector-length (wasm-module-functions module)))
+            (zero? (vector-length (wasm-module-custom-sections module)))))
+
+     (let* ([module
+             (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x01 #x04 #x01 #x60 #x00 #x00
+                    #x03 #x02 #x01 #x00
+                    #x07 #x07 #x01 #x03 #x61 #x64 #x64 #x00 #x00
+                    #x0a #x04 #x01 #x02 #x00 #x0b))]
+            [function (vector-ref (wasm-module-functions module) 0)]
+            [export (vector-ref (wasm-module-exports module) 0)])
+       (and (= 1 (vector-length (wasm-module-types module)))
+            (= 0 (wasm-function-type-index function))
+            (zero? (vector-length (wasm-function-locals function)))
+            (zero? (vector-length (wasm-function-body function)))
+            (string=? "add" (wasm-export-name export))
+            (eq? 'function (wasm-export-kind export))
+            (= 0 (wasm-export-index export))))
+
+     (let* ([module
+             (parse-wasm-binary-module
+              (make-wasm-module-bytes
+               (make-wasm-section-bytes 1 #vu8(#x01 #x60 #x00 #x00))
+               (make-wasm-section-bytes
+                2 #vu8(#x01 #x03 #x65 #x6e #x76 #x01 #x66 #x00 #x00))
+               (make-wasm-section-bytes 3 #vu8(#x01 #x00))
+               (make-wasm-section-bytes 5 #vu8(#x01 #x00 #x01))
+               (make-wasm-section-bytes 13 #vu8(#x01 #x00 #x00))
+               (make-wasm-section-bytes
+                6 #vu8(#x01 #x7f #x00 #x41 #x00 #x0b))
+               (make-wasm-section-bytes
+                7 #vu8(#x01 #x03 #x72 #x75 #x6e #x00 #x01))
+               (make-wasm-section-bytes 8 #vu8(#x01))
+               (make-wasm-section-bytes 12 #vu8(#x01))
+               (make-wasm-section-bytes 10 #vu8(#x01 #x02 #x00 #x0b))
+               (make-wasm-section-bytes
+                11 #vu8(#x01 #x00 #x41 #x00 #x0b #x01 #xaa))))]
+            [import (vector-ref (wasm-module-imports module) 0)]
+            [memory (vector-ref (wasm-module-memories module) 0)]
+            [global (vector-ref (wasm-module-globals module) 0)]
+            [tag (vector-ref (wasm-module-tags module) 0)]
+            [data (vector-ref (wasm-module-data module) 0)])
+       (and (string=? "env" (wasm-import-module import))
+            (eq? 'function
+                 (wasm-external-type-kind (wasm-import-external-type import)))
+            (= 1 (vector-length (wasm-module-functions module)))
+            (= 1 (wasm-limits-minimum
+                  (wasm-memory-type-limits (wasm-memory-type memory))))
+            (= 1 (vector-length (wasm-global-initializer global)))
+            (= 0 (wasm-tag-type-type-index (wasm-tag-type tag)))
+            (= 1 (wasm-module-start module))
+            (equal? #vu8(#xaa) (wasm-data-bytes data))))
+
+     (let* ([module
+             (parse-wasm-binary-module
+              (make-wasm-module-bytes
+               (make-wasm-section-bytes
+                9
+                #vu8(#x08
+                      #x00 #x41 #x00 #x0b #x01 #x00
+                      #x01 #x00 #x01 #x01
+                      #x02 #x01 #x41 #x00 #x0b #x00 #x01 #x02
+                      #x03 #x00 #x01 #x03
+                      #x04 #x41 #x00 #x0b #x01 #xd2 #x04 #x0b
+                      #x05 #x70 #x01 #xd2 #x05 #x0b
+                      #x06 #x01 #x41 #x00 #x0b #x70 #x01 #xd2 #x06 #x0b
+                      #x07 #x70 #x01 #xd2 #x07 #x0b))))]
+            [elements (wasm-module-elements module)])
+       (and (= 8 (vector-length elements))
+            (equal? '#(active passive active declarative
+                       active passive active declarative)
+                    (vector-map wasm-element-mode elements))
+            (andmap (lambda (element)
+                      (= 1 (vector-length (wasm-element-initializers element))))
+                    (vector->list elements))))
+
+     (let* ([module
+             (parse-wasm-binary-module
+              (make-wasm-module-bytes
+               (make-wasm-section-bytes
+                11
+                #vu8(#x03
+                      #x00 #x41 #x00 #x0b #x01 #xaa
+                      #x01 #x01 #xbb
+                      #x02 #x02 #x41 #x01 #x0b #x01 #xcc))))]
+            [data (wasm-module-data module)])
+       (and (= 3 (vector-length data))
+            (eq? 'active (wasm-data-mode (vector-ref data 0)))
+            (= 0 (wasm-data-memory-index (vector-ref data 0)))
+            (eq? 'passive (wasm-data-mode (vector-ref data 1)))
+            (not (wasm-data-memory-index (vector-ref data 1)))
+            (= 2 (wasm-data-memory-index (vector-ref data 2)))
+            (equal? #vu8(#xcc) (wasm-data-bytes (vector-ref data 2)))))
+
+     (let* ([module
+             (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x04 #x09 #x01 #x40 #x00 #x70 #x00 #x01
+                    #xd0 #x70 #x0b))]
+            [table (vector-ref (wasm-module-tables module) 0)]
+            [initializer (wasm-table-initializer table)])
+       (and (= 1 (vector-length initializer))
+            (eq? 'ref.null
+                 (wasm-instruction-mnemonic (vector-ref initializer 0)))))
+
+     (let* ([module
+             (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x09 #x05 #x01 #x01 #x00 #x01 #x02))]
+            [element (vector-ref (wasm-module-elements module) 0)]
+            [initializer (vector-ref (wasm-element-initializers element) 0)])
+       (and (eq? 'passive (wasm-element-mode element))
+            (= 2
+               (vector-ref
+                (wasm-instruction-immediates (vector-ref initializer 0))
+                0))))
+
+     (let* ([module
+             (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x09 #x05 #x01 #x03 #x00 #x01 #x03))]
+            [element (vector-ref (wasm-module-elements module) 0)]
+            [initializer (vector-ref (wasm-element-initializers element) 0)])
+       (and (eq? 'declarative (wasm-element-mode element))
+            (= 3
+               (vector-ref
+                (wasm-instruction-immediates (vector-ref initializer 0))
+                0))))
+
+     (let* ([module
+             (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x01 #x01 #x00
+                    #x00 #x04 #x01 #x78 #xaa #xbb))]
+            [custom (vector-ref (wasm-module-custom-sections module) 0)])
+       (and (string=? "x" (wasm-custom-section-name custom))
+            (equal? #vu8(#xaa #xbb) (wasm-custom-section-bytes custom))
+            (eq? 'type (wasm-custom-section-after-section custom))))
+
+     ;; error: duplicate standard sections are invalid.
+     (let ([error
+            (capture-parser-error
+             (lambda ()
+               (parse-wasm-binary-module
+                #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                      #x01 #x01 #x00 #x01 #x01 #x00))))])
+       (and error (= 11 (parser-error-offset error))))
+
+     (andmap
+      (lambda (section-pair)
+        (let ([error
+               (capture-parser-error
+                (lambda ()
+                  (parse-wasm-binary-module
+                   (make-wasm-module-bytes
+                    (make-wasm-section-bytes (car section-pair) #vu8(#x00))
+                    (make-wasm-section-bytes (cdr section-pair) #vu8(#x00))))))])
+          (and error (= 11 (parser-error-offset error)))))
+      reversed-standard-section-pairs)
+
+     ;; error: a function section requires a code body for each function.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x03 #x02 #x01 #x00)))
+
+     ;; error: a section parser must consume the complete declared payload.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x01 #x02 #x00 #x00)))
+
+     ;; error: data-count must equal the number of data segments.
+     (let ([error
+            (capture-parser-error
+             (lambda ()
+               (parse-wasm-binary-module
+                #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                      #x0c #x01 #x01))))])
+       (and error (= 8 (parser-error-offset error))))
+
+     ;; error: standard sections must occur in Core 3.0 order.
+     (let ([error
+            (capture-parser-error
+             (lambda ()
+               (parse-wasm-binary-module
+                #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                      #x07 #x01 #x00 #x01 #x01 #x00))))])
+       (and error (= 11 (parser-error-offset error))))
+
+     ;; error: element segment flags are limited to zero through seven.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x09 #x02 #x01 #x08)))
+
+     ;; error: a tag type attribute must be zero.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x0d #x03 #x01 #x01 #x00)))
+
+     ;; error: the binary magic must be exactly zero, a, s, m.
+     (error? (parse-wasm-binary-module
+              #vu8(#x01 #x61 #x73 #x6d #x01 #x00 #x00 #x00)))
+
+     ;; error: only WebAssembly binary version one is accepted.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x02 #x00 #x00 #x00)))
+
+     ;; error: unknown standard section IDs are rejected.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00 #x0e #x00)))
+
+     ;; error: custom section names must contain valid UTF-8.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x00 #x03 #x02 #xc0 #xaf)))
+
+     ;; error: data segment flags are limited to zero through two.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
+                    #x0b #x02 #x01 #x03)))
+
+     ;; error: a code body must contain its complete terminating expression.
+     (error? (parse-wasm-binary-module
+              (make-wasm-module-bytes
+               (make-wasm-section-bytes 3 #vu8(#x01 #x00))
+               (make-wasm-section-bytes 10 #vu8(#x01 #x02 #x00)))))
+
+     ;; error: bytes after the last complete section are not permitted.
+     (error? (parse-wasm-binary-module
+              #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00 #xff)))
+
+     )

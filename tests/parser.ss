@@ -112,7 +112,7 @@
          (lambda ()
            (write-u8vec path (u8vec #x00 #x61 #x73 #x6d 1 0 0 0)))
          (lambda ()
-           (list? (parse-wasm-binary-module path)))
+           (wasm-module? (parse-wasm-binary-module path)))
          (lambda ()
            (when (file-exists? path)
              (delete-file path)))))
