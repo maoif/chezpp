@@ -4,7 +4,8 @@
           (chezpp parser combinator)
           (chezpp parser wasm types)
           (chezpp parser wasm text lexical)
-          (chezpp parser wasm text types))
+          (chezpp parser wasm text types)
+          (chezpp parser wasm text instructions))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Module grammar helpers and instruction placeholders
@@ -58,31 +59,29 @@
   (declare-lazy-parser <wat-generic-item>)
 
   (define <wat-generic-parenthesized>
-    (<bind> (<~> <pos> wat-open <wat-reserved>)
-            (lambda (head)
-              (let ([pos (car head)] [mnemonic (caddr head)])
-                (if (forbidden-placeholder-head? mnemonic)
-                    (<fail-with> "module clause is not an instruction")
-                    (<map>
-                     (lambda (operand*)
-                       (make-wat-instruction-syntax
-                        pos (string->symbol mnemonic) '#() '#() #f
-                        (list->immutable-vector operand*)))
-                     (<~0> (<many-until> <wat-generic-item> wat-close) wat-close)))))))
+    (<map> (lambda (instruction*) (car (reverse instruction*)))
+           <wat-folded-instruction>))
 
   (define <wat-positioned-identifier>
     (<map> (lambda (value) (make-wat-index-reference (car value) (cadr value)))
            (<~> <pos> <wat-identifier>)))
 
   (define <wat-generic-atom>
-    (</> <wat-string> <wat-positioned-identifier> <wat-reserved>))
+    <wat-instruction>)
 
   (define generic-body
     (begin
       (install-lazy-parser!
        <wat-generic-item>
        (</> <wat-generic-parenthesized> <wat-generic-atom>))
-      (<~0> (<many-until> <wat-generic-item> wat-close) wat-close)))
+      (<map>
+       (lambda (instruction**)
+         (apply append instruction**))
+       (<~0>
+        (<many-until>
+         (</> (<map> list <wat-instruction>) <wat-folded-instruction>)
+         wat-close)
+        wat-close))))
 
   (define inline-import
     (<map> list->immutable-vector

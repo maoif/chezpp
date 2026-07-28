@@ -10,6 +10,7 @@
           (chezpp parser wasm binary instructions)
           (chezpp parser wasm text lexical)
           (chezpp parser wasm text types)
+          (chezpp parser wasm text instructions)
           (chezpp parser wasm text))
 
   (export (import (chezpp chez)

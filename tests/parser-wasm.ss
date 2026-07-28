@@ -6,6 +6,7 @@
         (chezpp parser wasm binary instructions)
         (chezpp parser wasm text lexical)
         (chezpp parser wasm text types)
+        (chezpp parser wasm text instructions)
         (chezpp parser wasm text))
 
 (define parse-binary
@@ -33,6 +34,163 @@
     (guard (err [else #t])
       (vector-set! value 0 (vector-ref value 0))
       #f)))
+
+(define wasm-mnemonic->text
+  (lambda (mnemonic)
+    (list->string
+     (map (lambda (character)
+            (if (char=? character #\-) #\_ character))
+          (string->list (symbol->string mnemonic))))))
+
+(define repeated-text
+  (lambda (text count)
+    (apply string-append
+           (map (lambda (unused) (string-append " " text)) (iota count)))))
+
+(define descriptor-immediate-text
+  (lambda (descriptor)
+    (case (wasm-opcode-immediate-shape descriptor)
+      [(none block-type memory-argument try-table) ""]
+      [(label-index function-index type-index table-index memory-index global-index
+                    local-index tag-index data-index element-index)
+       " 0"]
+      [(label-vector) " 0"]
+      [(heap-type heap-type-non-null heap-type-nullable) " func"]
+      [(reference-type) " funcref"]
+      [(value-type-vector select-types) " (result i32)"]
+      [(call-indirect) " (type 0)"]
+      [(i32 i64 f32 f64 lane-index) " 0"]
+      [(table-pair memory-pair memory-data table-element struct-field array-new-fixed
+                   array-copy type-data type-element)
+       " 0 0"]
+      [(br-on-cast) " 0 funcref funcref"]
+      [(vector-bytes) (string-append " i8x16" (repeated-text "0" 16))]
+      [(shuffle-bytes) (repeated-text "0" 16)]
+      [(memory-argument-lane) " offset=0 0"]
+      [else (error 'descriptor-immediate-text "uncovered immediate shape")])))
+
+(define descriptor-flat-text
+  (lambda (descriptor)
+    (let ([mnemonic (wasm-opcode-mnemonic descriptor)])
+      (case (wasm-opcode-structured-kind descriptor)
+        [(block loop)
+         (format "~a nop end" (wasm-mnemonic->text mnemonic))]
+        [(if)
+         (format "~a nop else nop end" (wasm-mnemonic->text mnemonic))]
+        [(try-table)
+         "try_table (catch_all 0) nop end"]
+        [else
+         (string-append (wasm-mnemonic->text mnemonic)
+                        (descriptor-immediate-text descriptor))]))))
+
+(define descriptor-folded-text
+  (lambda (descriptor)
+    (let ([mnemonic (wasm-opcode-mnemonic descriptor)])
+      (case (wasm-opcode-structured-kind descriptor)
+        [(block loop)
+         (format "(~a (nop))" (wasm-mnemonic->text mnemonic))]
+        [(if)
+         "(if (then (nop)) (else (nop)))"]
+        [(try-table)
+         "(try_table (nop))"]
+        [else
+         (format "(~a~a)" (wasm-mnemonic->text mnemonic)
+                 (descriptor-immediate-text descriptor))]))))
+
+(mat wasm-text-instructions
+
+     (let ([flat (parse-wat-lexeme <wat-expression>
+                                   "i32.const 1 i32.const 2 i32.add")]
+           [folded (parse-wat-lexeme <wat-expression>
+                                     "(i32.add (i32.const 1) (i32.const 2))")])
+       (and (= 3 (vector-length flat))
+            (= 3 (vector-length folded))
+            (eq? 'i32.add
+                 (wat-instruction-syntax-mnemonic (vector-ref folded 2)))))
+
+     (andmap
+      (lambda (descriptor)
+        (let ([mnemonic (wasm-opcode-mnemonic descriptor)])
+          (if (memq mnemonic '(else end))
+              #t
+              (let* ([flat
+                        (guard (error
+                                [else
+                                 (errorf 'wasm-text-instructions
+                                         "flat descriptor ~a failed: ~a"
+                                         mnemonic error)])
+                          (parse-wat-lexeme
+                           <wat-expression> (descriptor-flat-text descriptor)))]
+                       [folded
+                        (guard (error
+                                [else
+                                 (errorf 'wasm-text-instructions
+                                         "folded descriptor ~a failed: ~a"
+                                         mnemonic (condition-message error))])
+                          (parse-wat-lexeme
+                           <wat-expression> (descriptor-folded-text descriptor)))])
+                  (and (positive? (vector-length flat))
+                       (positive? (vector-length folded))
+                       (eq? mnemonic
+                            (wat-instruction-syntax-mnemonic
+                             (vector-ref folded (fx1- (vector-length folded))))))))))
+      (vector->list wasm-core-3-opcodes))
+
+     (let* ([expression
+             (parse-wat-lexeme
+              <wat-expression>
+              "local.get $value i32.load $memory offset=4 align=2")]
+            [local (vector-ref expression 0)]
+            [load (vector-ref expression 1)]
+            [local-index (vector-ref (wat-instruction-syntax-immediates local) 0)]
+            [memory-argument
+             (vector-ref (wat-instruction-syntax-immediates load) 0)])
+       (and (= 10 (wat-index-reference-pos local-index))
+            (string=? "$value" (wat-index-reference-value local-index))
+            (= 2 (vector-ref memory-argument 0))
+            (= 4 (vector-ref memory-argument 1))
+            (string=? "$memory"
+                      (wat-index-reference-value (vector-ref memory-argument 2)))))
+
+     (let* ([expression
+             (parse-wat-lexeme
+              <wat-expression>
+              "block $outer i32.const 1 loop $inner nop end $inner end $outer")]
+            [block (vector-ref expression 0)]
+            [loop (vector-ref (wat-instruction-syntax-body block) 1)])
+       (and (eq? 'block (wat-instruction-syntax-mnemonic block))
+            (eq? 'loop (wat-instruction-syntax-mnemonic loop))))
+
+     ;; error: unknown instruction mnemonics are rejected.
+     (error? (parse-wat-lexeme <wat-expression> "not.an.opcode"))
+
+     ;; error: required instruction immediates cannot be omitted.
+     (error? (parse-wat-lexeme <wat-expression> "local.get"))
+
+     ;; error: opening and closing structured labels must match.
+     (error? (parse-wat-lexeme <wat-expression> "block $a nop end $b"))
+
+     ;; error: a SIMD lane must be in range for its lane shape.
+     (error? (parse-wat-lexeme <wat-expression> "i8x16.extract_lane_s 16"))
+
+     ;; error: shuffle lanes are limited to the two input vectors.
+     (error? (parse-wat-lexeme
+              <wat-expression>
+              (string-append "i8x16.shuffle" (repeated-text "32" 16))))
+
+     ;; error: each memory attribute may occur at most once.
+     (error? (parse-wat-lexeme <wat-expression> "i32.load offset=1 offset=2"))
+
+     ;; error: folded instructions must have a closing parenthesis.
+     (error? (parse-wat-lexeme <wat-expression> "(i32.const 0"))
+
+     ;; error: else and end are reserved structured terminators.
+     (error? (parse-wat-lexeme <wat-expression> "else"))
+
+     ;; error: end cannot appear outside a structured instruction.
+     (error? (parse-wat-lexeme <wat-expression> "end"))
+
+     )
 
 (define core-fields-wat
   "(module $m
