@@ -64,7 +64,9 @@
             (wat-module-field? first-field)
             (eq? 'custom (wat-module-field-kind first-field))
             (= 16 (wat-module-field-pos first-field))
-            (not (vector-ref (wat-module-field-data first-field) 2))
+            (not
+             (wat-custom-placement-after
+              (vector-ref (wat-module-field-data first-field) 2)))
             (eq? 'recursive-type (wat-module-field-kind recursive-field))
             (string=? "$node"
                       (wat-subtype-syntax-id
@@ -77,11 +79,36 @@
             (eq? 'table-element
                  (wat-inline-abbreviation-kind
                   (wat-module-field-abbreviation (vector-ref field* 6))))
+            (wat-element-segment-syntax?
+             (wat-inline-abbreviation-data
+              (wat-module-field-abbreviation (vector-ref field* 6))))
             (eq? 'memory-data
                  (wat-inline-abbreviation-kind
                   (wat-module-field-abbreviation (vector-ref field* 8))))
+            (eq? 'active
+                 (wat-element-segment-syntax-mode
+                  (wat-inline-abbreviation-data
+                   (wat-module-field-abbreviation (vector-ref field* 13)))))
+            (string=? "$tab"
+                      (wat-index-reference-value
+                       (wat-element-segment-syntax-table
+                        (wat-inline-abbreviation-data
+                         (wat-module-field-abbreviation
+                          (vector-ref field* 13))))))
+            (eq? 'active
+                 (wat-data-segment-syntax-mode
+                  (wat-inline-abbreviation-data
+                   (wat-module-field-abbreviation (vector-ref field* 15)))))
+            (string=? "$mem"
+                      (wat-index-reference-value
+                       (wat-data-segment-syntax-memory
+                        (wat-inline-abbreviation-data
+                         (wat-module-field-abbreviation
+                          (vector-ref field* 15))))))
             (eq? 'data
-                 (vector-ref (wat-module-field-data (vector-ref field* 17)) 2))))
+                 (wat-custom-placement-after
+                  (vector-ref
+                   (wat-module-field-data (vector-ref field* 17)) 2)))))
 
      (let ([type (parse-wat-lexeme <wat-value-type> "(ref null $node)")])
        (and (wat-reference-type-syntax? type)
@@ -135,6 +162,95 @@
                 (global $g (import \"m\" \"g\") i32)
                 (tag $e (import \"m\" \"e\") (type 0)))")])
        (= 5 (vector-length (wat-module-fields module))))
+
+     (let* ([module
+            (run-textual-parser
+             parser-wat-module-syntax
+             "(module
+                (memory i32 1)
+                (table i32 1 funcref)
+                (memory 1 2 shared)
+                (memory (data)))")]
+            [field* (wat-module-fields module)]
+            [shared-type (wat-module-field-data (vector-ref field* 2))]
+            [inline-data
+             (wat-inline-abbreviation-data
+              (wat-module-field-abbreviation (vector-ref field* 3)))])
+       (and (= 4 (vector-length field*))
+            (wasm-memory-type? (wat-module-field-data (vector-ref field* 0)))
+            (wasm-table-type? (wat-module-field-data (vector-ref field* 1)))
+            (wat-memory-type-syntax? shared-type)
+            (wat-limits-syntax-shared?
+             (wat-memory-type-syntax-limits shared-type))
+            (wat-data-segment-syntax? inline-data)
+            (zero? (vector-length (wat-data-segment-syntax-strings inline-data)))))
+
+     (let* ([module
+            (run-textual-parser
+             parser-wat-module-syntax
+             "(module
+                (func (param) (result) (local))
+                (@custom \"a\" (after type) \"x\")
+                (@custom \"b\" (before import) \"y\")
+                (@custom \"c\" (after type) (before import) \"z\"))")]
+            [field* (wat-module-fields module)]
+            [after
+             (vector-ref (wat-module-field-data (vector-ref field* 1)) 2)]
+            [before
+             (vector-ref (wat-module-field-data (vector-ref field* 2)) 2)]
+            [both
+             (vector-ref (wat-module-field-data (vector-ref field* 3)) 2)])
+       (and (= 4 (vector-length field*))
+            (eq? 'type (wat-custom-placement-after after))
+            (eq? 'import (wat-custom-placement-before before))
+            (eq? 'type (wat-custom-placement-after both))
+            (eq? 'import (wat-custom-placement-before both))))
+
+     (let ([module
+            (run-textual-parser parser-wat-module-syntax
+                                "(module (elem) (data))")])
+       (= 2 (vector-length (wat-module-fields module))))
+
+     ;; error: an element segment cannot contain an untyped reserved token.
+     (error? (run-textual-parser parser-wat-module-syntax
+                                 "(module (elem nonsense))"))
+
+     ;; error: a data segment contains byte strings, not numeric tokens.
+     (error? (run-textual-parser parser-wat-module-syntax
+                                 "(module (data 123))"))
+
+     ;; error: a table element abbreviation requires indexes or element expressions.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (table funcref (elem nonsense)))"))
+
+     ;; error: shared memory limits require an explicit maximum.
+     (error? (run-textual-parser parser-wat-module-syntax
+                                 "(module (memory 1 shared))"))
+
+     ;; error: tables cannot use shared limits.
+     (error? (run-textual-parser parser-wat-module-syntax
+                                 "(module (table 1 2 shared funcref))"))
+
+     ;; error: duplicate custom after anchors are not allowed.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (@custom \"x\" (after type) (after import) \"a\"))"))
+
+     ;; error: duplicate custom before anchors are not allowed.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (@custom \"x\" (before type) (before import) \"a\"))"))
+
+     ;; error: custom placement anchors must name a standard section.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (@custom \"x\" (before unknown) \"a\"))"))
+
+     ;; error: an inline-imported function cannot declare locals.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (func (import \"m\" \"f\") (local i32)))"))
 
      ;; error: the module keyword must end at a token boundary.
      (error? (run-textual-parser parser-wat-module-syntax "(modulex)"))

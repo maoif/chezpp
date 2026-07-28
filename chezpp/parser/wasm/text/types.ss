@@ -28,6 +28,22 @@
     wat-global-type-syntax-value-type wat-global-type-syntax-mutable?
     make-wat-table-type-syntax wat-table-type-syntax? wat-table-type-syntax-pos
     wat-table-type-syntax-limits wat-table-type-syntax-reference-type
+    make-wat-limits-syntax wat-limits-syntax? wat-limits-syntax-pos
+    wat-limits-syntax-address-type wat-limits-syntax-minimum
+    wat-limits-syntax-maximum wat-limits-syntax-shared?
+    make-wat-memory-type-syntax wat-memory-type-syntax? wat-memory-type-syntax-pos
+    wat-memory-type-syntax-limits
+    make-wat-element-segment-syntax wat-element-segment-syntax?
+    wat-element-segment-syntax-pos wat-element-segment-syntax-mode
+    wat-element-segment-syntax-table wat-element-segment-syntax-offset
+    wat-element-segment-syntax-reference-type wat-element-segment-syntax-item-kind
+    wat-element-segment-syntax-items
+    make-wat-data-segment-syntax wat-data-segment-syntax?
+    wat-data-segment-syntax-pos wat-data-segment-syntax-mode
+    wat-data-segment-syntax-memory wat-data-segment-syntax-offset
+    wat-data-segment-syntax-strings
+    make-wat-custom-placement wat-custom-placement? wat-custom-placement-pos
+    wat-custom-placement-before wat-custom-placement-after
     make-wat-module wat-module? wat-module-pos wat-module-id wat-module-fields
     make-wat-module-field wat-module-field? wat-module-field-pos wat-module-field-kind
     wat-module-field-id wat-module-field-data wat-module-field-import
@@ -127,6 +143,43 @@
     (fields (immutable pos wat-table-type-syntax-pos)
             (immutable limits wat-table-type-syntax-limits)
             (immutable reference-type wat-table-type-syntax-reference-type)))
+
+  (define-record-type ($wat-limits-syntax make-wat-limits-syntax wat-limits-syntax?)
+    (fields (immutable pos wat-limits-syntax-pos)
+            (immutable address-type wat-limits-syntax-address-type)
+            (immutable minimum wat-limits-syntax-minimum)
+            (immutable maximum wat-limits-syntax-maximum)
+            (immutable shared? wat-limits-syntax-shared?)))
+
+  (define-record-type ($wat-memory-type-syntax make-wat-memory-type-syntax
+                                               wat-memory-type-syntax?)
+    (fields (immutable pos wat-memory-type-syntax-pos)
+            (immutable limits wat-memory-type-syntax-limits)))
+
+  (define-record-type
+    ($wat-element-segment-syntax make-wat-element-segment-syntax
+                                 wat-element-segment-syntax?)
+    (fields (immutable pos wat-element-segment-syntax-pos)
+            (immutable mode wat-element-segment-syntax-mode)
+            (immutable table wat-element-segment-syntax-table)
+            (immutable offset wat-element-segment-syntax-offset)
+            (immutable reference-type wat-element-segment-syntax-reference-type)
+            (immutable item-kind wat-element-segment-syntax-item-kind)
+            (immutable items wat-element-segment-syntax-items)))
+
+  (define-record-type
+    ($wat-data-segment-syntax make-wat-data-segment-syntax wat-data-segment-syntax?)
+    (fields (immutable pos wat-data-segment-syntax-pos)
+            (immutable mode wat-data-segment-syntax-mode)
+            (immutable memory wat-data-segment-syntax-memory)
+            (immutable offset wat-data-segment-syntax-offset)
+            (immutable strings wat-data-segment-syntax-strings)))
+
+  (define-record-type ($wat-custom-placement make-wat-custom-placement
+                                             wat-custom-placement?)
+    (fields (immutable pos wat-custom-placement-pos)
+            (immutable before wat-custom-placement-before)
+            (immutable after wat-custom-placement-after)))
 
   (define-record-type ($wat-module make-wat-module wat-module?)
     (fields (immutable pos wat-module-pos)
@@ -314,7 +367,7 @@
     (<map> (lambda (value)
              (let ([pos (car value)])
                (map (lambda (type) (make-wat-binding pos #f type)) (cadr value))))
-           (<~0> (<~> (wat-head "param") (<some> <wat-value-type>))
+           (<~0> (<~> (wat-head "param") (<many> <wat-value-type>))
                  wat-close)))
 
   (define parameter-clause
@@ -322,7 +375,7 @@
 
   (define result-clause
     (<~1> wat-open
-           (<~1> (<wat-keyword> "result") (<some> <wat-value-type>))
+           (<~1> (<wat-keyword> "result") (<many> <wat-value-type>))
            wat-close))
 
   (define make-function-type
@@ -476,21 +529,40 @@
            <wat-type-use>))
 
   (define limits-parser
-    (lambda (address-type bound-parser)
-      (<bind> (<~> bound-parser (<optional> bound-parser))
+    (lambda (pos address-type bound-parser)
+      (<bind> (<~> bound-parser
+                   (<optional> bound-parser)
+                   (<optional> (<wat-keyword> "shared")))
               (lambda (bound*)
                 (let ([minimum (car bound*)]
-                      [maximum (optional-value (cadr bound*))])
-                  (if (or (not maximum) (<= minimum maximum))
-                      (<result> (make-wasm-limits address-type minimum maximum))
-                      (<fail-with> "WebAssembly limits maximum is below minimum")))))))
+                      [maximum (optional-value (cadr bound*))]
+                      [shared? (not (null? (caddr bound*)))])
+                  (cond [(and shared? (not maximum))
+                         (<fail-with> "shared memory limits require a maximum")]
+                        [(and maximum (> minimum maximum))
+                         (<fail-with> "WebAssembly limits maximum is below minimum")]
+                        [shared?
+                         (<result>
+                          (make-wat-limits-syntax
+                           pos address-type minimum maximum #t))]
+                        [else
+                         (<result>
+                          (make-wasm-limits address-type minimum maximum))]))))))
 
   #|proc:<wat-limits>
   The `<wat-limits>` parser reads i32 or i64 minimum and optional maximum bounds.
   |#
   (define <wat-limits>
-    (</> (~> (<wat-keyword> "i64") (limits-parser 'i64 <wat-u64>))
-         (limits-parser 'i32 <wat-u32>)))
+    (<bind> (<~> <pos>
+                 (</> (<as> 'i64 (<wat-keyword> "i64"))
+                      (<as> 'i32 (<wat-keyword> "i32"))
+                      (<result> 'i32)))
+            (lambda (value)
+              (let ([pos (car value)] [address-type (cadr value)])
+                (limits-parser pos address-type
+                               (if (eq? address-type 'i64)
+                                   <wat-u64>
+                                   <wat-u32>))))))
 
   #|proc:<wat-global-type>
   The `<wat-global-type>` parser reads a mutable or immutable global value type.
@@ -511,19 +583,29 @@
   The `<wat-table-type>` parser reads table limits followed by a reference type.
   |#
   (define <wat-table-type>
-    (<map> (lambda (value)
-             (let ([pos (car value)]
-                   [limits (cadr value)]
-                   [reference-type (caddr value)])
-               (if (wasm-reference-type? reference-type)
-                   (make-wasm-table-type reference-type limits)
-                   (make-wat-table-type-syntax pos limits reference-type))))
-           (<~> <pos> <wat-limits> <wat-reference-type>)))
+    (<bind>
+     (<~> <pos> <wat-limits> <wat-reference-type>)
+     (lambda (value)
+       (let ([pos (car value)]
+             [limits (cadr value)]
+             [reference-type (caddr value)])
+         (cond [(wat-limits-syntax? limits)
+                (<fail-with> "WebAssembly tables cannot be shared")]
+               [(wasm-reference-type? reference-type)
+                (<result> (make-wasm-table-type reference-type limits))]
+               [else
+                (<result>
+                 (make-wat-table-type-syntax pos limits reference-type))])))))
 
   #|proc:<wat-memory-type>
   The `<wat-memory-type>` parser reads memory limits.
   |#
-  (define <wat-memory-type> (<map> make-wasm-memory-type <wat-limits>))
+  (define <wat-memory-type>
+    (<map> (lambda (value)
+             (if (wasm-limits? value)
+                 (make-wasm-memory-type value)
+                 (make-wat-memory-type-syntax (wat-limits-syntax-pos value) value)))
+           <wat-limits>))
 
   #|proc:<wat-tag-type>
   The `<wat-tag-type>` parser reads a tag function type use.
