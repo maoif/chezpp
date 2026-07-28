@@ -484,7 +484,7 @@
      (lambda (value)
        (let ([id (optional-value (cadr value))] [subtype (caddr value)])
          (make-wat-subtype-syntax
-          (wat-subtype-syntax-pos subtype) id
+          (car value) id
           (wat-subtype-syntax-final? subtype)
           (wat-subtype-syntax-supertypes subtype)
           (wat-subtype-syntax-composite-type subtype))))

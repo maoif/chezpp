@@ -27,6 +27,13 @@
   (lambda (parser text)
     (run-textual-parser (<~0> parser <eof>) text)))
 
+(define immutable-vector?
+  (lambda (value)
+    ;; An immutable vector rejects even a no-op mutation.
+    (guard (err [else #t])
+      (vector-set! value 0 (vector-ref value 0))
+      #f)))
+
 (define core-fields-wat
   "(module $m
      (@custom \"before\" \"A\")
@@ -152,16 +159,70 @@
        (and (wat-table-type-syntax? type)
             (= 0 (wat-table-type-syntax-pos type))))
 
-     (let ([module
-            (run-textual-parser
-             parser-wat-module-syntax
-             "(module
-                (func $f (import \"m\" \"f\") (type 0))
-                (table $t (import \"m\" \"t\") 1 funcref)
-                (memory $m (import \"m\" \"m\") 1)
-                (global $g (import \"m\" \"g\") i32)
-                (tag $e (import \"m\" \"e\") (type 0)))")])
-       (= 5 (vector-length (wat-module-fields module))))
+     (let* ([recursive-type
+             (parse-wat-lexeme <wat-recursive-type>
+                               "(rec (type $item (sub (func))))")]
+            [subtype
+             (vector-ref (wat-recursive-type-syntax-subtypes recursive-type) 0)])
+       (= 5 (wat-subtype-syntax-pos subtype)))
+
+     (let* ([module
+             (run-textual-parser
+              parser-wat-module-syntax
+              "(module
+                 (func $f (export \"f\") (import \"m\" \"f\") (type 0))
+                 (table $t (export \"t\") (import \"m\" \"t\") 1 funcref)
+                 (memory $mem (export \"mem\") (import \"m\" \"mem\") 1)
+                 (global $g (export \"g\") (import \"m\" \"g\") i32)
+                 (tag $e (export \"e\") (import \"m\" \"e\") (type 0)))")]
+            [field* (wat-module-fields module)]
+            [function-field (vector-ref field* 0)]
+            [table-field (vector-ref field* 1)]
+            [memory-field (vector-ref field* 2)]
+            [global-field (vector-ref field* 3)]
+            [tag-field (vector-ref field* 4)])
+       (and (= 5 (vector-length field*))
+            (string=? "f" (vector-ref (wat-module-field-import function-field) 1))
+            (string=? "f" (vector-ref (wat-module-field-exports function-field) 0))
+            (string=? "t" (vector-ref (wat-module-field-import table-field) 1))
+            (string=? "mem" (vector-ref (wat-module-field-import memory-field) 1))
+            (string=? "g" (vector-ref (wat-module-field-import global-field) 1))
+            (string=? "e" (vector-ref (wat-module-field-import tag-field) 1))
+            (immutable-vector? (wat-module-field-import function-field))
+            (immutable-vector? (wat-module-field-exports function-field))))
+
+     (let* ([module
+             (run-textual-parser
+              parser-wat-module-syntax
+              "(module
+                 (func (export \"x\") (import \"m\" \"f\"))
+                 (@custom \"after-import\" \"payload\"))")]
+            [custom (vector-ref (wat-module-fields module) 1)]
+            [placement (vector-ref (wat-module-field-data custom) 2)])
+       (eq? 'import (wat-custom-placement-after placement)))
+
+     (let* ([module
+             (run-textual-parser
+              parser-wat-module-syntax
+              "(module
+                 (import \"m\" \"f\" (func))
+                 (func (export \"defined\"))
+                 (global i32 (i32.const 0))
+                 (export \"defined\" (func 1))
+                 (@custom \"metadata\" \"payload\"))")]
+            [field* (wat-module-fields module)]
+            [import-field (vector-ref field* 0)]
+            [function-field (vector-ref field* 1)]
+            [global-field (vector-ref field* 2)]
+            [export-field (vector-ref field* 3)]
+            [custom-field (vector-ref field* 4)])
+       (and (immutable-vector? field*)
+            (immutable-vector? (wat-module-field-data import-field))
+            (immutable-vector? (wat-module-field-data function-field))
+            (immutable-vector? (wat-module-field-exports function-field))
+            (immutable-vector? (wat-module-field-data global-field))
+            (immutable-vector? (wat-module-field-data export-field))
+            (immutable-vector? (wat-module-field-data custom-field))))
 
      (let* ([module
             (run-textual-parser
@@ -317,6 +378,21 @@
      (error? (run-textual-parser
               parser-wat-module-syntax
               "(module (func (import \"m\" \"f\") (local i32)))"))
+
+     ;; error: an inline import cannot precede an inline export.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (func (import \"m\" \"f\") (export \"x\")))"))
+
+     ;; error: a table inline import cannot precede an inline export.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (table (import \"m\" \"t\") (export \"t\") 1 funcref))"))
+
+     ;; error: a global inline import cannot precede an inline export.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (global (import \"m\" \"g\") (export \"g\") i32))"))
 
      ;; error: the module keyword must end at a token boundary.
      (error? (run-textual-parser parser-wat-module-syntax "(modulex)"))

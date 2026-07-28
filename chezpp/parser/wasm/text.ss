@@ -14,6 +14,10 @@
     (lambda (value*)
       (vector->immutable-vector (list->vector value*))))
 
+  (define make-immutable-vector
+    (lambda value*
+      (list->immutable-vector value*)))
+
   (define optional-value
     (lambda (value)
       (if (null? value) #f value)))
@@ -102,7 +106,7 @@
        (let* ([pos (car value)] [subtype (cadr value)]
               [recursive-type
                (make-wat-recursive-type-syntax
-                pos (vector->immutable-vector (vector subtype)))])
+                pos (make-immutable-vector subtype))])
          (field-result pos 'recursive-type #f recursive-type #f '() #f)))
      (<~> <pos> <wat-type-definition>)))
 
@@ -113,35 +117,40 @@
 
   (define function-import-description
     (<map> (lambda (value)
-             (vector 'function (optional-value (cadr value)) (caddr value)))
+             (make-immutable-vector
+              'function (optional-value (cadr value)) (caddr value)))
            (<~0> (<~> (wat-field-head "func")
                       (<optional> <wat-identifier>) <wat-type-use>)
                  wat-close)))
 
   (define table-import-description
     (<map> (lambda (value)
-             (vector 'table (optional-value (cadr value)) (caddr value)))
+             (make-immutable-vector
+              'table (optional-value (cadr value)) (caddr value)))
            (<~0> (<~> (wat-field-head "table")
                       (<optional> <wat-identifier>) <wat-table-type>)
                  wat-close)))
 
   (define memory-import-description
     (<map> (lambda (value)
-             (vector 'memory (optional-value (cadr value)) (caddr value)))
+             (make-immutable-vector
+              'memory (optional-value (cadr value)) (caddr value)))
            (<~0> (<~> (wat-field-head "memory")
                       (<optional> <wat-identifier>) <wat-memory-type>)
                  wat-close)))
 
   (define global-import-description
     (<map> (lambda (value)
-             (vector 'global (optional-value (cadr value)) (caddr value)))
+             (make-immutable-vector
+              'global (optional-value (cadr value)) (caddr value)))
            (<~0> (<~> (wat-field-head "global")
                       (<optional> <wat-identifier>) <wat-global-type>)
                  wat-close)))
 
   (define tag-import-description
     (<map> (lambda (value)
-             (vector 'tag (optional-value (cadr value)) (caddr value)))
+             (make-immutable-vector
+              'tag (optional-value (cadr value)) (caddr value)))
            (<~0> (<~> (wat-field-head "tag")
                       (<optional> <wat-identifier>) <wat-tag-type>)
                  wat-close)))
@@ -157,9 +166,9 @@
               [name (caddr value)] [description (cadddr value)]
               [id (vector-ref description 1)])
          (field-result pos 'import id
-                       (vector module-name name
-                               (vector-ref description 0)
-                               (vector-ref description 2))
+                       (make-immutable-vector
+                        module-name name (vector-ref description 0)
+                        (vector-ref description 2))
                        #f '() #f)))
      (<~0> (<~> (wat-field-head "import") <wat-name> <wat-name> import-description)
             wat-close)))
@@ -196,7 +205,7 @@
 
   (define direct-offset
     (<map> (lambda (instruction)
-             (vector->immutable-vector (vector instruction)))
+             (make-immutable-vector instruction))
            <wat-generic-parenthesized>))
 
   (define segment-offset (</> offset-clause direct-offset))
@@ -206,14 +215,15 @@
 
   (define typed-element-items
     (<map> (lambda (value)
-             (vector (car value) 'expressions
-                     (list->immutable-vector (cadr value))))
+             (make-immutable-vector
+              (car value) 'expressions (list->immutable-vector (cadr value))))
            (<~> <wat-reference-type> (<many> <wat-generic-parenthesized>))))
 
   (define indexed-element-items
     (<map> (lambda (value)
-             (vector default-function-reference-type 'indexes
-                     (list->immutable-vector (cadr value))))
+             (make-immutable-vector
+              default-function-reference-type 'indexes
+              (list->immutable-vector (cadr value))))
            (<~> (<optional> (<wat-keyword> "func"))
                 (<many> <wat-index-reference>))))
 
@@ -223,8 +233,8 @@
     (<bind>
      (<~> (wat-field-head "func")
           (<optional> <wat-identifier>)
-          (<optional> inline-import)
           (<many> inline-export)
+          (<optional> inline-import)
           <wat-type-use>
           (<many> local-clause))
      (lambda (value)
@@ -232,8 +242,8 @@
                (lambda (body)
                  (let ([pos (car value)]
                        [id (optional-value (cadr value))]
-                       [import (optional-value (caddr value))]
-                       [export* (cadddr value)]
+                       [export* (caddr value)]
+                       [import (optional-value (cadddr value))]
                        [type-use (car (cddddr value))]
                        [local** (cadr (cddddr value))])
                    (if (and import (or (pair? local**) (pair? body)))
@@ -241,9 +251,9 @@
                        (<result>
                         (field-result
                          pos 'function id
-                         (vector type-use
-                                 (list->immutable-vector (apply append local**))
-                                 (list->immutable-vector body))
+                         (make-immutable-vector
+                          type-use (list->immutable-vector (apply append local**))
+                          (list->immutable-vector body))
                          import export* #f)))))))))
 
   (define optional-address-type
@@ -252,17 +262,18 @@
 
   (define table-expression-items
     (<map> (lambda (item*)
-             (vector 'expressions (list->immutable-vector item*)))
+             (make-immutable-vector 'expressions
+                                    (list->immutable-vector item*)))
            (<some> <wat-generic-parenthesized>)))
 
   (define table-indexed-items
     (<map> (lambda (item*)
-             (vector 'indexes (list->immutable-vector item*)))
+             (make-immutable-vector 'indexes (list->immutable-vector item*)))
            (<some> <wat-index-reference>)))
 
   (define table-element-items
     (</> table-expression-items table-indexed-items
-         (<result> (vector 'indexes '#()))))
+         (<result> (make-immutable-vector 'indexes '#()))))
 
   (define table-abbreviation
     (<map> (lambda (value)
@@ -279,13 +290,13 @@
     (<bind>
      (<~> (wat-field-head "table")
           (<optional> <wat-identifier>)
-          (<optional> inline-import)
-          (<many> inline-export))
+          (<many> inline-export)
+          (<optional> inline-import))
      (lambda (value)
        (let ([pos (car value)]
              [id (optional-value (cadr value))]
-             [import (optional-value (caddr value))]
-             [export* (cadddr value)])
+             [export* (caddr value)]
+             [import (optional-value (cadddr value))])
          (<bind> (if import <wat-table-type> (</> table-abbreviation <wat-table-type>))
                  (lambda (type-or-abbreviation)
                    (<map>
@@ -311,13 +322,13 @@
     (<bind>
      (<~> (wat-field-head "memory")
           (<optional> <wat-identifier>)
-          (<optional> inline-import)
-          (<many> inline-export))
+          (<many> inline-export)
+          (<optional> inline-import))
      (lambda (value)
        (let ([pos (car value)]
              [id (optional-value (cadr value))]
-             [import (optional-value (caddr value))]
-             [export* (cadddr value)])
+             [export* (caddr value)]
+             [import (optional-value (cadddr value))])
          (<bind> (if import <wat-memory-type>
                      (</> memory-abbreviation <wat-memory-type>))
                  (lambda (type-or-abbreviation)
@@ -334,16 +345,16 @@
     (<bind>
      (<~> (wat-field-head "global")
           (<optional> <wat-identifier>)
-          (<optional> inline-import)
           (<many> inline-export)
+          (<optional> inline-import)
           <wat-global-type>)
      (lambda (value)
        (<bind> generic-body
                (lambda (body)
                  (let ([pos (car value)]
                        [id (optional-value (cadr value))]
-                       [import (optional-value (caddr value))]
-                       [export* (cadddr value)]
+                       [export* (caddr value)]
+                       [import (optional-value (cadddr value))]
                        [type (car (cddddr value))])
                    (cond [(and import (pair? body))
                           (<fail-with> "an imported global cannot have an initializer")]
@@ -353,19 +364,20 @@
                           (<result>
                            (field-result
                             pos 'global id
-                            (vector type (list->immutable-vector body))
+                            (make-immutable-vector
+                             type (list->immutable-vector body))
                             import export* #f))])))))))
 
   (define tag-field
     (<map>
      (lambda (value)
        (field-result (car value) 'tag (optional-value (cadr value))
-                     (car (cddddr value)) (optional-value (caddr value))
-                     (cadddr value) #f))
+                     (car (cddddr value)) (optional-value (cadddr value))
+                     (caddr value) #f))
      (<~0> (<~> (wat-field-head "tag")
                 (<optional> <wat-identifier>)
-                (<optional> inline-import)
                 (<many> inline-export)
+                (<optional> inline-import)
                 <wat-tag-type>)
             wat-close)))
 
@@ -383,7 +395,8 @@
   (define export-field
     (<map> (lambda (value)
              (field-result (car value) 'export #f
-                           (vector (cadr value) (caddr value)) #f '() #f))
+                           (make-immutable-vector (cadr value) (caddr value))
+                           #f '() #f))
            (<~0> (<~> (wat-field-head "export") <wat-name> export-description)
                  wat-close)))
 
@@ -394,15 +407,17 @@
                  wat-close)))
 
   (define declarative-element-prefix
-    (<as> (vector 'declarative #f #f) (<wat-keyword> "declare")))
+    (<as> (make-immutable-vector 'declarative #f #f)
+          (<wat-keyword> "declare")))
 
   (define active-element-prefix
     (<map> (lambda (value)
-             (vector 'active (optional-value (car value)) (cadr value)))
+             (make-immutable-vector
+              'active (optional-value (car value)) (cadr value)))
            (<~> (<optional> table-use) segment-offset)))
 
   (define passive-element-prefix
-    (<result> (vector 'passive #f #f)))
+    (<result> (make-immutable-vector 'passive #f #f)))
 
   (define element-prefix
     (</> declarative-element-prefix active-element-prefix passive-element-prefix))
@@ -428,11 +443,12 @@
 
   (define active-data-prefix
     (<map> (lambda (value)
-             (vector 'active (optional-value (car value)) (cadr value)))
+             (make-immutable-vector
+              'active (optional-value (car value)) (cadr value)))
            (<~> (<optional> memory-use) segment-offset)))
 
   (define passive-data-prefix
-    (<result> (vector 'passive #f #f)))
+    (<result> (make-immutable-vector 'passive #f #f)))
 
   (define data-prefix (</> active-data-prefix passive-data-prefix))
 
@@ -479,7 +495,7 @@
               [after (and anchor (eq? 'after (car anchor)) (cdr anchor))])
          (field-result
           pos 'custom #f
-          (vector
+          (make-immutable-vector
            (cadr value) (list->immutable-vector (cadddr value))
            (make-wat-custom-placement pos before after))
           #f '() #f)))
@@ -493,12 +509,15 @@
          element-field data-field))
 
   (define module-field-section
-    (lambda (kind)
-      (case kind
-        [(recursive-type) 'type]
-        [(element) 'element]
-        [(function import table memory tag global export start data) kind]
-        [else #f])))
+    (lambda (field)
+      (let ([kind (wat-module-field-kind field)])
+        (if (wat-module-field-import field)
+            'import
+            (case kind
+              [(recursive-type) 'type]
+              [(element) 'element]
+              [(function import table memory tag global export start data) kind]
+              [else #f])))))
 
   (define anchor-custom-fields
     (lambda (field*)
@@ -520,10 +539,11 @@
                      (cons
                       (make-wat-module-field
                        (wat-module-field-pos field) kind #f
-                       (vector (vector-ref data 0) (vector-ref data 1) placement)
+                       (make-immutable-vector
+                        (vector-ref data 0) (vector-ref data 1) placement)
                        #f '#() #f)
                       result)))
-                  (loop (cdr field*) (or (module-field-section kind) anchor)
+                  (loop (cdr field*) (or (module-field-section field) anchor)
                         (cons field result))))))))
 
   #|proc:parser-wat-module-syntax
