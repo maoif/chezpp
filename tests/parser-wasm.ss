@@ -4,7 +4,9 @@
         (chezpp parser wasm binary values)
         (chezpp parser wasm binary types)
         (chezpp parser wasm binary instructions)
-        (chezpp parser wasm text lexical))
+        (chezpp parser wasm text lexical)
+        (chezpp parser wasm text types)
+        (chezpp parser wasm text))
 
 (define parse-binary
   (lambda (parser bytes)
@@ -24,6 +26,156 @@
 (define parse-wat-lexeme
   (lambda (parser text)
     (run-textual-parser (<~0> parser <eof>) text)))
+
+(define core-fields-wat
+  "(module $m
+     (@custom \"before\" \"A\")
+     (rec
+       (type $node (sub (struct (field $next (mut (ref null $node))))))
+       (type $items (array (mut i16))))
+     (type $sig (func (param $value i32) (result i32)))
+     (import \"env\" \"f\" (func $imported (type $sig)))
+     (func $f (export \"f\") (type $sig) (param $value i32)
+       (result i32) local.get $value)
+     (table $tab (export \"tab\") 1 4 funcref)
+     (table $inline-table funcref (elem $f))
+     (memory $mem (export \"memory\") i64 1 4)
+     (memory $bytes (data \"abc\" \"def\"))
+     (global $g (mut i32) (i32.const 0))
+     (tag $tag (type $sig))
+     (export \"g\" (global $g))
+     (start $f)
+     (elem $active (table $tab) (offset (i32.const 0)) func $f)
+     (elem $passive funcref (ref.func $f))
+     (data $active-data (memory $mem) (offset (i64.const 0)) \"x\")
+     (data $passive-data \"y\")
+     (@custom \"after\" \"B\"))")
+
+(mat wasm-text-types-and-fields
+
+     (let* ([module (run-textual-parser parser-wat-module-syntax core-fields-wat)]
+            [field* (wat-module-fields module)]
+            [first-field (vector-ref field* 0)]
+            [recursive-field (vector-ref field* 1)])
+       (and (wat-module? module)
+            (= 0 (wat-module-pos module))
+            (string=? "$m" (wat-module-id module))
+            (= 18 (vector-length field*))
+            (wat-module-field? first-field)
+            (eq? 'custom (wat-module-field-kind first-field))
+            (= 16 (wat-module-field-pos first-field))
+            (not (vector-ref (wat-module-field-data first-field) 2))
+            (eq? 'recursive-type (wat-module-field-kind recursive-field))
+            (string=? "$node"
+                      (wat-subtype-syntax-id
+                       (vector-ref
+                        (wat-recursive-type-syntax-subtypes
+                         (wat-module-field-data recursive-field))
+                        0)))
+            (string=? "$imported" (wat-module-field-id (vector-ref field* 3)))
+            (string=? "$f" (wat-module-field-id (vector-ref field* 4)))
+            (eq? 'table-element
+                 (wat-inline-abbreviation-kind
+                  (wat-module-field-abbreviation (vector-ref field* 6))))
+            (eq? 'memory-data
+                 (wat-inline-abbreviation-kind
+                  (wat-module-field-abbreviation (vector-ref field* 8))))
+            (eq? 'data
+                 (vector-ref (wat-module-field-data (vector-ref field* 17)) 2))))
+
+     (let ([type (parse-wat-lexeme <wat-value-type> "(ref null $node)")])
+       (and (wat-reference-type-syntax? type)
+            (= 0 (wat-reference-type-syntax-pos type))
+            (string=? "$node"
+                      (wat-index-reference-value
+                       (wat-reference-type-syntax-heap-type type)))))
+
+     (let ([type (parse-wat-lexeme <wat-function-type>
+                                   "(func (param $x i32) (param i64 f32) (result i32))")])
+       (and (wat-function-type-syntax? type)
+            (= 3 (vector-length (wat-function-type-syntax-parameters type)))
+            (string=? "$x"
+                      (wat-binding-id
+                       (vector-ref (wat-function-type-syntax-parameters type) 0)))
+            (= 1 (vector-length (wat-function-type-syntax-results type)))))
+
+     (let ([limits (parse-wat-lexeme <wat-limits> "i64 1 4")])
+       (and (wasm-limits? limits)
+            (eq? 'i64 (wasm-limits-address-type limits))
+            (= 1 (wasm-limits-minimum limits))
+            (= 4 (wasm-limits-maximum limits))))
+
+     (let ([type (parse-wat-lexeme <wat-table-type> "1 2 funcref")])
+       (and (wasm-table-type? type)
+            (= 1 (wasm-limits-minimum (wasm-table-type-limits type)))
+            (eq? 'func
+                 (wasm-reference-type-heap-type
+                  (wasm-table-type-reference-type type)))))
+
+     (let ([type (parse-wat-lexeme <wat-memory-type> "i64 2")])
+       (and (wasm-memory-type? type)
+            (eq? 'i64
+                 (wasm-limits-address-type (wasm-memory-type-limits type)))))
+
+     (let ([type (parse-wat-lexeme <wat-global-type> "(mut externref)")])
+       (and (wasm-global-type? type)
+            (wasm-global-type-mutable? type)))
+
+     (let ([type (parse-wat-lexeme <wat-table-type> "1 (ref null $node)")])
+       (and (wat-table-type-syntax? type)
+            (= 0 (wat-table-type-syntax-pos type))))
+
+     (let ([module
+            (run-textual-parser
+             parser-wat-module-syntax
+             "(module
+                (func $f (import \"m\" \"f\") (type 0))
+                (table $t (import \"m\" \"t\") 1 funcref)
+                (memory $m (import \"m\" \"m\") 1)
+                (global $g (import \"m\" \"g\") i32)
+                (tag $e (import \"m\" \"e\") (type 0)))")])
+       (= 5 (vector-length (wat-module-fields module))))
+
+     ;; error: the module keyword must end at a token boundary.
+     (error? (run-textual-parser parser-wat-module-syntax "(modulex)"))
+
+     ;; error: a module must have a closing delimiter.
+     (error? (run-textual-parser parser-wat-module-syntax "(module (memory 1)"))
+
+     ;; error: a function may contain at most one inline import clause.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (func (import \"a\" \"b\") (import \"c\" \"d\")))"))
+
+     ;; error: a function may contain at most one explicit type clause.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (func (type 0) (type 1)))"))
+
+     ;; error: unknown module field keywords are rejected.
+     (error? (run-textual-parser parser-wat-module-syntax "(module (wrong 0))"))
+
+     ;; error: export descriptions require an index reference.
+     (error? (run-textual-parser parser-wat-module-syntax
+                                 "(module (export \"f\" (func)))"))
+
+     ;; error: limits reject a maximum below the minimum.
+     (error? (run-textual-parser parser-wat-module-syntax "(module (memory 4 1))"))
+
+     ;; error: an inline import must precede a function type use.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (func (param i32) (import \"a\" \"b\")))"))
+
+     ;; error: custom annotations must have a closing delimiter.
+     (error? (run-textual-parser parser-wat-module-syntax
+                                 "(module (@custom \"name\" \"value\")"))
+
+     ;; error: WAST commands after the single module are rejected.
+     (error? (run-textual-parser parser-wat-module-syntax
+                                 "(module) (invoke \"f\")"))
+
+     )
 
 (mat wasm-text-lexical
 
