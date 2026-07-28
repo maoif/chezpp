@@ -246,18 +246,34 @@
                                  (list->immutable-vector body))
                          import export* #f)))))))))
 
+  (define optional-address-type
+    (<optional> (</> (<as> 'i64 (<wat-keyword> "i64"))
+                    (<as> 'i32 (<wat-keyword> "i32")))))
+
+  (define table-expression-items
+    (<map> (lambda (item*)
+             (vector 'expressions (list->immutable-vector item*)))
+           (<some> <wat-generic-parenthesized>)))
+
+  (define table-indexed-items
+    (<map> (lambda (item*)
+             (vector 'indexes (list->immutable-vector item*)))
+           (<some> <wat-index-reference>)))
+
+  (define table-element-items
+    (</> table-expression-items table-indexed-items
+         (<result> (vector 'indexes '#()))))
+
   (define table-abbreviation
     (<map> (lambda (value)
              (make-wat-inline-abbreviation
               (car value) 'table-element
               (make-wat-element-segment-syntax
-               (car value) 'abbreviation #f #f (cadr value) 'mixed
-               (list->immutable-vector (caddr value)))))
-           (<~> <pos> <wat-reference-type>
-                (wat-parenthesized
-                 "elem"
-                 (<many> (</> <wat-generic-parenthesized>
-                              <wat-index-reference>))))))
+               (car value) 'abbreviation #f #f (optional-value (cadr value))
+               (caddr value) (vector-ref (cadddr value) 0)
+               (vector-ref (cadddr value) 1))))
+           (<~> <pos> optional-address-type <wat-reference-type>
+                (wat-parenthesized "elem" table-element-items))))
 
   (define table-field
     (<bind>
@@ -286,9 +302,10 @@
              (make-wat-inline-abbreviation
               (car value) 'memory-data
               (make-wat-data-segment-syntax
-               (car value) 'abbreviation #f #f
-               (list->immutable-vector (cadr value)))))
-           (<~> <pos> (wat-parenthesized "data" (<many> <wat-string>)))))
+               (car value) 'abbreviation #f #f (optional-value (cadr value))
+               (list->immutable-vector (caddr value)))))
+           (<~> <pos> optional-address-type
+                (wat-parenthesized "data" (<many> <wat-string>)))))
 
   (define memory-field
     (<bind>
@@ -403,7 +420,7 @@
            pos 'element
            (make-wat-element-segment-syntax
             pos (vector-ref prefix 0) (vector-ref prefix 1)
-            (vector-ref prefix 2) (vector-ref items 0)
+            (vector-ref prefix 2) #f (vector-ref items 0)
             (vector-ref items 1) (vector-ref items 2))))))
      (<~0> (<~> (wat-field-head "elem")
                 (<optional> <wat-identifier>) element-prefix element-items)
@@ -432,7 +449,8 @@
            pos 'data
            (make-wat-data-segment-syntax
             pos (vector-ref prefix 0) (vector-ref prefix 1)
-            (vector-ref prefix 2) (list->immutable-vector string*))))))
+            (vector-ref prefix 2) #f
+            (list->immutable-vector string*))))))
      (<~0> (<~> (wat-field-head "data")
                 (<optional> <wat-identifier>) data-prefix (<many> <wat-string>))
             wat-close)))
@@ -445,8 +463,7 @@
           '(("type" . type) ("import" . import) ("function" . function)
             ("table" . table) ("memory" . memory) ("tag" . tag)
             ("global" . global) ("export" . export) ("start" . start)
-            ("elem" . element) ("data-count" . data-count)
-            ("code" . code) ("data" . data)))))
+            ("elem" . element) ("code" . code) ("data" . data)))))
 
   (define custom-anchor
     (</> (<map> (lambda (section) (cons 'after section))
@@ -454,32 +471,21 @@
          (<map> (lambda (section) (cons 'before section))
                 (wat-parenthesized "before" custom-section-name))))
 
-  (define anchor-by-kind
-    (lambda (kind anchor*)
-      (filter (lambda (anchor) (eq? kind (car anchor))) anchor*)))
-
   (define custom-field
-    (<bind>
-     (<~0> (<~> (wat-field-head "@custom")
-                <wat-name> (<many> custom-anchor) (<many> <wat-string>))
-            wat-close)
+    (<map>
      (lambda (value)
-       (let* ([pos (car value)] [anchor* (caddr value)]
-              [before* (anchor-by-kind 'before anchor*)]
-              [after* (anchor-by-kind 'after anchor*)])
-         (if (or (and (pair? before*) (pair? (cdr before*)))
-                 (and (pair? after*) (pair? (cdr after*))))
-             (<fail-with> "duplicate custom section placement anchor")
-             (<result>
-              (field-result
-               pos 'custom #f
-               (vector
-                (cadr value) (list->immutable-vector (cadddr value))
-                (make-wat-custom-placement
-                 pos
-                 (and (pair? before*) (cdar before*))
-                 (and (pair? after*) (cdar after*))))
-               #f '() #f)))))))
+       (let* ([pos (car value)] [anchor (optional-value (caddr value))]
+              [before (and anchor (eq? 'before (car anchor)) (cdr anchor))]
+              [after (and anchor (eq? 'after (car anchor)) (cdr anchor))])
+         (field-result
+          pos 'custom #f
+          (vector
+           (cadr value) (list->immutable-vector (cadddr value))
+           (make-wat-custom-placement pos before after))
+          #f '() #f)))
+     (<~0> (<~> (wat-field-head "@custom")
+                <wat-name> (<optional> custom-anchor) (<many> <wat-string>))
+            wat-close)))
 
   (define module-field
     (</> custom-field recursive-type-field type-field import-field function-field

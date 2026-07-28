@@ -36,11 +36,13 @@
     make-wat-element-segment-syntax wat-element-segment-syntax?
     wat-element-segment-syntax-pos wat-element-segment-syntax-mode
     wat-element-segment-syntax-table wat-element-segment-syntax-offset
+    wat-element-segment-syntax-address-type
     wat-element-segment-syntax-reference-type wat-element-segment-syntax-item-kind
     wat-element-segment-syntax-items
     make-wat-data-segment-syntax wat-data-segment-syntax?
     wat-data-segment-syntax-pos wat-data-segment-syntax-mode
     wat-data-segment-syntax-memory wat-data-segment-syntax-offset
+    wat-data-segment-syntax-address-type
     wat-data-segment-syntax-strings
     make-wat-custom-placement wat-custom-placement? wat-custom-placement-pos
     wat-custom-placement-before wat-custom-placement-after
@@ -163,6 +165,7 @@
             (immutable mode wat-element-segment-syntax-mode)
             (immutable table wat-element-segment-syntax-table)
             (immutable offset wat-element-segment-syntax-offset)
+            (immutable address-type wat-element-segment-syntax-address-type)
             (immutable reference-type wat-element-segment-syntax-reference-type)
             (immutable item-kind wat-element-segment-syntax-item-kind)
             (immutable items wat-element-segment-syntax-items)))
@@ -173,6 +176,7 @@
             (immutable mode wat-data-segment-syntax-mode)
             (immutable memory wat-data-segment-syntax-memory)
             (immutable offset wat-data-segment-syntax-offset)
+            (immutable address-type wat-data-segment-syntax-address-type)
             (immutable strings wat-data-segment-syntax-strings)))
 
   (define-record-type ($wat-custom-placement make-wat-custom-placement

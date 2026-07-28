@@ -191,20 +191,66 @@
              "(module
                 (func (param) (result) (local))
                 (@custom \"a\" (after type) \"x\")
-                (@custom \"b\" (before import) \"y\")
-                (@custom \"c\" (after type) (before import) \"z\"))")]
+                (@custom \"b\" (before import) \"y\"))")]
             [field* (wat-module-fields module)]
             [after
              (vector-ref (wat-module-field-data (vector-ref field* 1)) 2)]
             [before
-             (vector-ref (wat-module-field-data (vector-ref field* 2)) 2)]
-            [both
-             (vector-ref (wat-module-field-data (vector-ref field* 3)) 2)])
-       (and (= 4 (vector-length field*))
+             (vector-ref (wat-module-field-data (vector-ref field* 2)) 2)])
+       (and (= 3 (vector-length field*))
             (eq? 'type (wat-custom-placement-after after))
-            (eq? 'import (wat-custom-placement-before before))
-            (eq? 'type (wat-custom-placement-after both))
-            (eq? 'import (wat-custom-placement-before both))))
+            (eq? 'import (wat-custom-placement-before before))))
+
+     (let* ([module
+             (run-textual-parser
+              parser-wat-module-syntax
+              "(module
+                 (table i64 funcref (elem))
+                 (table i32 funcref (elem))
+                 (memory i64 (data))
+                 (memory i32 (data)))")]
+            [field* (wat-module-fields module)])
+       (and (= 4 (vector-length field*))
+            (eq? 'i64
+                 (wat-element-segment-syntax-address-type
+                  (wat-inline-abbreviation-data
+                   (wat-module-field-abbreviation (vector-ref field* 0)))))
+            (eq? 'i32
+                 (wat-element-segment-syntax-address-type
+                  (wat-inline-abbreviation-data
+                   (wat-module-field-abbreviation (vector-ref field* 1)))))
+            (eq? 'i64
+                 (wat-data-segment-syntax-address-type
+                  (wat-inline-abbreviation-data
+                   (wat-module-field-abbreviation (vector-ref field* 2)))))
+            (eq? 'i32
+                 (wat-data-segment-syntax-address-type
+                  (wat-inline-abbreviation-data
+                   (wat-module-field-abbreviation (vector-ref field* 3)))))))
+
+     (let* ([module
+             (run-textual-parser
+              parser-wat-module-syntax
+              (string-append
+               "(module\n"
+               "  (table funcref (elem 0 1))\n"
+               "  (table funcref (elem (ref.func 0) (ref.func 1))))"))]
+            [field* (wat-module-fields module)]
+            [index-items
+             (wat-inline-abbreviation-data
+              (wat-module-field-abbreviation (vector-ref field* 0)))]
+            [expression-items
+             (wat-inline-abbreviation-data
+              (wat-module-field-abbreviation (vector-ref field* 1)))])
+       (and (eq? 'indexes (wat-element-segment-syntax-item-kind index-items))
+            (= 2 (vector-length (wat-element-segment-syntax-items index-items)))
+            (= 0 (wat-index-reference-value
+                  (vector-ref (wat-element-segment-syntax-items index-items) 0)))
+            (eq? 'expressions
+                 (wat-element-segment-syntax-item-kind expression-items))
+            (= 2 (vector-length (wat-element-segment-syntax-items expression-items)))
+            (wat-instruction-syntax?
+             (vector-ref (wat-element-segment-syntax-items expression-items) 0))))
 
      (let ([module
             (run-textual-parser parser-wat-module-syntax
@@ -224,6 +270,16 @@
               parser-wat-module-syntax
               "(module (table funcref (elem nonsense)))"))
 
+     ;; error: a table element abbreviation cannot mix indexes and expressions.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (table funcref (elem 0 (ref.func 0))))"))
+
+     ;; error: a table element abbreviation cannot mix expressions and indexes.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (table funcref (elem (ref.func 0) 0)))"))
+
      ;; error: shared memory limits require an explicit maximum.
      (error? (run-textual-parser parser-wat-module-syntax
                                  "(module (memory 1 shared))"))
@@ -241,6 +297,16 @@
      (error? (run-textual-parser
               parser-wat-module-syntax
               "(module (@custom \"x\" (before type) (before import) \"a\"))"))
+
+     ;; error: a custom annotation permits only one placement anchor in total.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (@custom \"x\" (after type) (before import) \"a\"))"))
+
+     ;; error: data-count is not a supported custom annotation placement anchor.
+     (error? (run-textual-parser
+              parser-wat-module-syntax
+              "(module (@custom \"x\" (after data-count) \"a\"))"))
 
      ;; error: custom placement anchors must name a standard section.
      (error? (run-textual-parser
