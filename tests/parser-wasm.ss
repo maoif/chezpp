@@ -55,7 +55,9 @@
                     local-index tag-index data-index element-index)
        " 0"]
       [(label-vector) " 0"]
-      [(heap-type heap-type-non-null heap-type-nullable) " func"]
+      [(heap-type) " func"]
+      [(heap-type-non-null) " (ref func)"]
+      [(heap-type-nullable) " (ref null func)"]
       [(reference-type) " funcref"]
       [(value-type-vector select-types) " (result i32)"]
       [(call-indirect) " (type 0)"]
@@ -147,7 +149,7 @@
              (vector-ref (wat-instruction-syntax-immediates load) 0)])
        (and (= 10 (wat-index-reference-pos local-index))
             (string=? "$value" (wat-index-reference-value local-index))
-            (= 2 (vector-ref memory-argument 0))
+            (= 1 (vector-ref memory-argument 0))
             (= 4 (vector-ref memory-argument 1))
             (string=? "$memory"
                       (wat-index-reference-value (vector-ref memory-argument 2)))))
@@ -160,6 +162,158 @@
             [loop (vector-ref (wat-instruction-syntax-body block) 1)])
        (and (eq? 'block (wat-instruction-syntax-mnemonic block))
             (eq? 'loop (wat-instruction-syntax-mnemonic loop))))
+
+     (let* ([flat
+             (vector-ref
+              (parse-wat-lexeme
+               <wat-expression>
+               "try_table (catch $tag $label) (catch_all 2) nop end")
+              0)]
+            [folded
+             (vector-ref
+              (parse-wat-lexeme
+               <wat-expression>
+               "(try_table (catch_ref 3 4) (catch_all_ref $label) (nop))")
+              0)]
+            [flat-catches (wat-instruction-syntax-alternate flat)]
+            [folded-catches (wat-instruction-syntax-alternate folded)])
+       (and (= 2 (vector-length flat-catches))
+            (= 2 (vector-length folded-catches))
+            (eq? 'catch (wat-catch-syntax-kind (vector-ref flat-catches 0)))
+            (eq? 'catch-all (wat-catch-syntax-kind (vector-ref flat-catches 1)))
+            (eq? 'catch-ref (wat-catch-syntax-kind (vector-ref folded-catches 0)))
+            (eq? 'catch-all-ref
+                 (wat-catch-syntax-kind (vector-ref folded-catches 1)))))
+
+     (let* ([expression
+             (parse-wat-lexeme
+              <wat-expression>
+              "table.get table.copy table.init 7 memory.size memory.copy memory.init 8")]
+            [table-get (vector-ref expression 0)]
+            [table-copy (vector-ref expression 1)]
+            [table-init (vector-ref expression 2)]
+            [memory-size (vector-ref expression 3)]
+            [memory-copy (vector-ref expression 4)]
+            [memory-init (vector-ref expression 5)])
+       (and (= 0 (wat-index-reference-value
+                  (vector-ref (wat-instruction-syntax-immediates table-get) 0)))
+            (equal? '(0 0)
+                    (map wat-index-reference-value
+                         (vector->list
+                          (wat-instruction-syntax-immediates table-copy))))
+            (equal? '(0 7)
+                    (map wat-index-reference-value
+                         (vector->list
+                          (wat-instruction-syntax-immediates table-init))))
+            (= 0 (wat-index-reference-value
+                  (vector-ref (wat-instruction-syntax-immediates memory-size) 0)))
+            (equal? '(0 0)
+                    (map wat-index-reference-value
+                         (vector->list
+                          (wat-instruction-syntax-immediates memory-copy))))
+            (equal? '(0 8)
+                    (map wat-index-reference-value
+                         (vector->list
+                          (wat-instruction-syntax-immediates memory-init))))))
+
+     (let* ([expression
+             (parse-wat-lexeme
+              <wat-expression>
+              "memory.init 3 4 table.init 5 6 array.new_fixed $array 2")]
+            [memory-init (vector-ref expression 0)]
+            [table-init (vector-ref expression 1)]
+            [array-new-fixed (vector-ref expression 2)])
+       (and (equal? '(3 4)
+                    (map wat-index-reference-value
+                         (vector->list
+                          (wat-instruction-syntax-immediates memory-init))))
+            (equal? '(5 6)
+                    (map wat-index-reference-value
+                         (vector->list
+                          (wat-instruction-syntax-immediates table-init))))
+            (= 2 (vector-ref (wat-instruction-syntax-immediates array-new-fixed) 1))))
+
+     (let* ([expression
+             (parse-wat-lexeme
+              <wat-expression>
+              "ref.test (ref null func) ref.cast (ref func)")]
+            [test-type
+             (vector-ref
+              (wat-instruction-syntax-immediates (vector-ref expression 0)) 0)]
+            [cast-type
+             (vector-ref
+              (wat-instruction-syntax-immediates (vector-ref expression 1)) 0)])
+       (and (wasm-reference-type? test-type)
+            (wasm-reference-type-nullable? test-type)
+            (wasm-reference-type? cast-type)
+            (not (wasm-reference-type-nullable? cast-type))))
+
+     (let* ([expression
+             (parse-wat-lexeme
+              <wat-expression>
+              "v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 255")]
+            [bytes
+             (vector-ref
+              (wat-instruction-syntax-immediates (vector-ref expression 0)) 0)])
+       (and (bytevector? bytes)
+            (= 16 (bytevector-length bytes))
+            (= 255 (bytevector-u8-ref bytes 15))))
+
+     (let* ([expression
+             (parse-wat-lexeme <wat-expression> "i32.load i64.load align=8")]
+            [default-argument
+             (vector-ref
+              (wat-instruction-syntax-immediates (vector-ref expression 0)) 0)]
+            [explicit-argument
+             (vector-ref
+              (wat-instruction-syntax-immediates (vector-ref expression 1)) 0)])
+       (and (= 2 (vector-ref default-argument 0))
+            (= 3 (vector-ref explicit-argument 0))))
+
+     (let* ([expression
+             (parse-wat-lexeme
+              <wat-expression>
+              "select select (result) select (result i32) (result funcref)")]
+            [untyped (wat-instruction-syntax-immediates (vector-ref expression 0))]
+            [empty-typed (wat-instruction-syntax-immediates (vector-ref expression 1))]
+            [typed (wat-instruction-syntax-immediates (vector-ref expression 2))]
+            [folded
+             (wat-instruction-syntax-immediates
+              (vector-ref
+               (parse-wat-lexeme
+                <wat-expression> "(select (result i32) (result i64))")
+               0))])
+       (and (zero? (vector-length untyped))
+            (zero? (vector-length (vector-ref empty-typed 0)))
+            (= 2 (vector-length (vector-ref typed 0)))
+            (= 2 (vector-length (vector-ref folded 0)))))
+
+     (let* ([flat
+             (vector-ref
+              (parse-wat-lexeme <wat-expression> "v128.load8_lane 3") 0)]
+            [folded
+             (vector-ref
+              (parse-wat-lexeme <wat-expression> "(v128.store16_lane 7)") 0)]
+            [flat-immediates (wat-instruction-syntax-immediates flat)]
+            [folded-immediates (wat-instruction-syntax-immediates folded)])
+       (and (= 3 (vector-ref flat-immediates 1))
+            (= 0
+               (wat-index-reference-value
+                (vector-ref (vector-ref flat-immediates 0) 2)))
+            (= 7 (vector-ref folded-immediates 1))
+            (= 0
+               (wat-index-reference-value
+                (vector-ref (vector-ref folded-immediates 0) 2)))))
+
+     (let* ([expression
+             (parse-wat-lexeme
+              <wat-expression>
+              "(block nop (nop)) (i32.add i32.const 1 (i32.const 2))")]
+            [block (vector-ref expression 0)])
+       (and (= 4 (vector-length expression))
+            (= 2 (vector-length (wat-instruction-syntax-body block)))
+            (eq? 'i32.add
+                 (wat-instruction-syntax-mnemonic (vector-ref expression 3)))))
 
      ;; error: unknown instruction mnemonics are rejected.
      (error? (parse-wat-lexeme <wat-expression> "not.an.opcode"))
@@ -180,6 +334,30 @@
 
      ;; error: each memory attribute may occur at most once.
      (error? (parse-wat-lexeme <wat-expression> "i32.load offset=1 offset=2"))
+
+     ;; error: explicit memory alignment must be a positive power of two.
+     (error? (parse-wat-lexeme <wat-expression> "i32.load align=3"))
+
+     ;; error: a memory offset must precede its alignment attribute.
+     (error? (parse-wat-lexeme <wat-expression> "i32.load align=2 offset=1"))
+
+     ;; error: array.new_fixed requires a numeric element count.
+     (error? (parse-wat-lexeme <wat-expression> "array.new_fixed 0 $count"))
+
+     ;; error: ref.test requires a reference type rather than a bare heap type.
+     (error? (parse-wat-lexeme <wat-expression> "ref.test func"))
+
+     ;; error: a v128 constant requires exactly the lane count selected by its shape.
+     (error? (parse-wat-lexeme <wat-expression> "v128.const i8x16 0 1"))
+
+     ;; error: integer vector lanes must fit their selected lane width.
+     (error? (parse-wat-lexeme
+              <wat-expression>
+              "v128.const i8x16 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 256"))
+
+     ;; error: catch syntax rejects kinds outside the Core 3.0 catch grammar.
+     (error? (make-wat-catch-syntax
+              0 'wrong #f (make-wat-index-reference 0 0)))
 
      ;; error: folded instructions must have a closing parenthesis.
      (error? (parse-wat-lexeme <wat-expression> "(i32.const 0"))

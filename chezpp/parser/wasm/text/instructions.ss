@@ -1,10 +1,15 @@
 (library (chezpp parser wasm text instructions)
-  (export <wat-instruction> <wat-folded-instruction> <wat-expression>)
+  (export make-wat-catch-syntax wat-catch-syntax? wat-catch-syntax-pos
+          wat-catch-syntax-kind wat-catch-syntax-tag wat-catch-syntax-label
+          <wat-instruction> <wat-folded-instruction> <wat-expression>)
   (import (chezpp chez)
+          (only (chezpp list) make-list-builder)
           (chezpp parser combinator)
           (chezpp parser wasm opcodes)
+          (chezpp parser wasm types)
           (chezpp parser wasm text lexical)
-          (chezpp parser wasm text types))
+          (chezpp parser wasm text types)
+          (chezpp utils))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Instruction tokens and immediate parsers
@@ -20,9 +25,73 @@
     (lambda value*
       (list->immutable-vector value*)))
 
+  (define flatten-lists
+    (lambda (value**)
+      (let ([builder (make-list-builder)])
+        (for-each (lambda (value*) (for-each builder value*)) value**)
+        (builder))))
+
   (define optional-value
     (lambda (value default)
       (if (null? value) default value)))
+
+  (define-record-type ($wat-catch-syntax $make-wat-catch-syntax $wat-catch-syntax?)
+    (fields (immutable pos $wat-catch-syntax-pos)
+            (immutable kind $wat-catch-syntax-kind)
+            (immutable tag $wat-catch-syntax-tag)
+            (immutable label $wat-catch-syntax-label)))
+
+  (define optional-index-reference?
+    (lambda (value)
+      (or (not value) (wat-index-reference? value))))
+
+  #|proc:make-wat-catch-syntax
+  Creates private catch syntax. `pos` is the source offset, `kind` is the catch kind, `tag` is
+  the optional tag reference, and `label` is the required label reference. Returns catch syntax.
+  |#
+  (define make-wat-catch-syntax
+    (lambda (pos kind tag label)
+      (pcheck ([natural? pos] [symbol? kind] [optional-index-reference? tag]
+               [wat-index-reference? label])
+              (unless (and (memq kind '(catch catch-ref catch-all catch-all-ref))
+                           (if (memq kind '(catch catch-ref)) tag (not tag)))
+                (errorf 'make-wat-catch-syntax "invalid catch syntax fields"))
+              ($make-wat-catch-syntax pos kind tag label))))
+
+  #|proc:wat-catch-syntax?
+  Returns whether `object` is private catch syntax. `object` is tested.
+  |#
+  (define wat-catch-syntax?
+    (lambda (object)
+      (pcheck () ($wat-catch-syntax? object))))
+
+  #|proc:wat-catch-syntax-pos
+  Returns the source offset of catch syntax `record`.
+  |#
+  (define wat-catch-syntax-pos
+    (lambda (record)
+      (pcheck ([$wat-catch-syntax? record]) ($wat-catch-syntax-pos record))))
+
+  #|proc:wat-catch-syntax-kind
+  Returns the catch kind of catch syntax `record`.
+  |#
+  (define wat-catch-syntax-kind
+    (lambda (record)
+      (pcheck ([$wat-catch-syntax? record]) ($wat-catch-syntax-kind record))))
+
+  #|proc:wat-catch-syntax-tag
+  Returns the optional tag reference of catch syntax `record`.
+  |#
+  (define wat-catch-syntax-tag
+    (lambda (record)
+      (pcheck ([$wat-catch-syntax? record]) ($wat-catch-syntax-tag record))))
+
+  #|proc:wat-catch-syntax-label
+  Returns the label reference of catch syntax `record`.
+  |#
+  (define wat-catch-syntax-label
+    (lambda (record)
+      (pcheck ([$wat-catch-syntax? record]) ($wat-catch-syntax-label record))))
 
   (define instruction-character?
     (lambda (character)
@@ -67,6 +136,27 @@
   (define indexed-pair-immediate
     (two-immediates <wat-index-reference> <wat-index-reference>))
 
+  (define default-index-reference
+    (lambda ()
+      (make-wat-index-reference 0 0)))
+
+  (define optional-index-immediate
+    (<map> (lambda (index*)
+             (make-immutable-vector
+              (optional-value index* (default-index-reference))))
+           (<optional> <wat-index-reference>)))
+
+  (define optional-pair-immediate
+    (</> indexed-pair-immediate
+         (<result> (make-immutable-vector
+                    (default-index-reference) (default-index-reference)))))
+
+  (define optional-leading-index-pair-immediate
+    (</> indexed-pair-immediate
+         (<map> (lambda (second)
+                  (make-immutable-vector (default-index-reference) second))
+                <wat-index-reference>)))
+
   (define wat-open (<~0> (<char> #\() <wat-trivia>))
   (define wat-close (<~0> (<char> #\)) <wat-trivia>))
 
@@ -75,9 +165,13 @@
       (<~1> (<~0> wat-open (<wat-keyword> keyword)) parser wat-close)))
 
   (define select-types-immediate
-    (<map> (lambda (type*)
-             (make-immutable-vector (list->immutable-vector type*)))
-           (parenthesized "result" (<some> <wat-value-type>))))
+    (<map>
+     (lambda (type**)
+       (if (null? type**)
+           empty-vector
+           (make-immutable-vector
+            (list->immutable-vector (flatten-lists type**)))))
+     (<many> (parenthesized "result" (<many> <wat-value-type>)))))
 
   (define call-indirect-immediate
     (<map>
@@ -91,34 +185,81 @@
     (lambda (name parser)
       (<~1> (<string> name) parser)))
 
-  (define memory-attribute
-    (</> (<map> (lambda (value) (cons 'offset value))
-                (named-attribute "offset=" <wat-u64>))
-         (<map> (lambda (value) (cons 'align value))
-                (named-attribute "align=" <wat-u32>))))
+  (define exact-log2
+    (lambda (value)
+      (and (positive? value)
+           (let loop ([value value] [exponent 0])
+             (cond [(= value 1) exponent]
+                   [(odd? value) #f]
+                   [else (loop (quotient value 2) (fx1+ exponent))])))))
 
-  (define attribute-value
-    (lambda (name attribute* default)
-      (let ([matching (filter (lambda (attribute) (eq? name (car attribute)))
-                              attribute*)])
-        (cond [(null? matching) default]
-              [(null? (cdr matching)) (cdar matching)]
-              [else #f]))))
+  (define memory-natural-alignment
+    (lambda (mnemonic)
+      (cond
+       [(memq mnemonic '(v128.load v128.store)) 4]
+       [(memq mnemonic
+              '(i64.load f64.load i64.store f64.store
+                v128.load8x8-s v128.load8x8-u v128.load16x4-s
+                v128.load16x4-u v128.load32x2-s v128.load32x2-u
+                v128.load64-splat v128.load64-zero
+                v128.load64-lane v128.store64-lane))
+        3]
+       [(memq mnemonic
+              '(i32.load f32.load i64.load32-s i64.load32-u
+                i32.store f32.store i64.store32
+                v128.load32-splat v128.load32-zero
+                v128.load32-lane v128.store32-lane))
+        2]
+       [(memq mnemonic
+              '(i32.load16-s i32.load16-u i64.load16-s i64.load16-u
+                i32.store16 i64.store16 v128.load16-splat
+                v128.load16-lane v128.store16-lane))
+        1]
+       [else 0])))
+
+  (define explicit-alignment
+    (<bind>
+     (named-attribute "align=" <wat-u64>)
+     (lambda (alignment)
+       (let ([exponent (exact-log2 alignment)])
+         (if exponent
+             (<result> exponent)
+             (<fail-with> "WebAssembly alignment is not a positive power of two"))))))
+
+  (define memory-argument-with-index
+    (lambda (descriptor index-parser)
+      (<map>
+       (lambda (value)
+         (make-immutable-vector
+          (make-immutable-vector
+           (optional-value (caddr value)
+                           (memory-natural-alignment
+                            (wasm-opcode-mnemonic descriptor)))
+           (optional-value (cadr value) 0)
+           (car value))))
+       (<~> index-parser
+            (<optional> (named-attribute "offset=" <wat-u64>))
+            (<optional> explicit-alignment)))))
 
   (define memory-argument-immediate
-    (<bind>
-     (<~> (<optional> <wat-index-reference>) (<many> memory-attribute))
-     (lambda (value)
-       (let* ([attribute* (cadr value)]
-              [offset (attribute-value 'offset attribute* 0)]
-              [alignment (attribute-value 'align attribute* 0)])
-         (if (and offset alignment)
-             (<result>
-              (make-immutable-vector
-               (make-immutable-vector
-                alignment offset
-                (optional-value (car value) (make-wat-index-reference 0 0)))))
-             (<fail-with> "duplicate WebAssembly memory attribute"))))))
+    (lambda (descriptor)
+      (memory-argument-with-index
+       descriptor
+       (<map> (lambda (index*)
+                (optional-value index* (default-index-reference)))
+              (<optional> <wat-index-reference>)))))
+
+  (define memory-argument-lane-immediate
+    (lambda (descriptor)
+      (let ([combine
+             (lambda (memory-argument-parser)
+               (<map> (lambda (value)
+                        (make-immutable-vector
+                         (vector-ref (car value) 0) (cadr value)))
+                      (<~> memory-argument-parser (lane-parser descriptor))))])
+        (</> (combine (memory-argument-with-index descriptor <wat-index-reference>))
+             (combine (memory-argument-with-index
+                       descriptor (<result> (default-index-reference))))))))
 
   (define instruction-lane-count
     (lambda (mnemonic)
@@ -160,18 +301,54 @@
            (<result> (make-immutable-vector (apply bytevector lane*)))
            (<fail-with> "invalid WebAssembly shuffle lane")))))
 
+  (define integer-lane-parser
+    (lambda (width parser-width parser)
+      (<bind>
+       parser
+       (lambda (value)
+         (let ([limit (expt 2 width)]
+               [negative-limit (- (expt 2 parser-width)
+                                  (expt 2 (fx1- width)))])
+           (if (or (< value limit) (>= value negative-limit))
+               (<result> (logand value (- limit 1)))
+               (<fail-with> "WebAssembly vector lane is out of range")))))))
+
+  (define vector-lanes-immediate
+    (lambda (lane-parser lane-count lane-width lane-bits)
+      (<map>
+       (lambda (lane*)
+         (let ([bytes (make-bytevector 16)])
+           (let loop ([index 0] [lane* lane*])
+             (unless (null? lane*)
+               (let ([offset (* index lane-width)] [lane (car lane*)])
+                 (case lane-width
+                   [(1) (bytevector-u8-set! bytes offset lane)]
+                   [(2) (bytevector-u16-set! bytes offset lane (endianness little))]
+                   [(4) (bytevector-u32-set! bytes offset (lane-bits lane)
+                                            (endianness little))]
+                   [(8) (bytevector-u64-set! bytes offset (lane-bits lane)
+                                            (endianness little))])
+                 (loop (fx1+ index) (cdr lane*)))))
+           (make-immutable-vector bytes)))
+       (<rep> lane-parser lane-count))))
+
   (define vector-immediate
-    (<map> (lambda (value)
-             (make-immutable-vector
-              (make-immutable-vector (car value)
-                                     (list->immutable-vector (cadr value)))))
-           (<~> (</> (<as> 'i8x16 (<wat-keyword> "i8x16"))
-                     (<as> 'i16x8 (<wat-keyword> "i16x8"))
-                     (<as> 'i32x4 (<wat-keyword> "i32x4"))
-                     (<as> 'i64x2 (<wat-keyword> "i64x2"))
-                     (<as> 'f32x4 (<wat-keyword> "f32x4"))
-                     (<as> 'f64x2 (<wat-keyword> "f64x2")))
-                (<some> (</> <wat-i64> <wat-f64>)))))
+    (</> (<~1> (<wat-keyword> "i8x16")
+                (vector-lanes-immediate
+                 (integer-lane-parser 8 32 <wat-i32>) 16 1 values))
+         (<~1> (<wat-keyword> "i16x8")
+                (vector-lanes-immediate
+                 (integer-lane-parser 16 32 <wat-i32>) 8 2 values))
+         (<~1> (<wat-keyword> "i32x4")
+                (vector-lanes-immediate <wat-i32> 4 4 values))
+         (<~1> (<wat-keyword> "i64x2")
+                (vector-lanes-immediate <wat-i64> 2 8 values))
+         (<~1> (<wat-keyword> "f32x4")
+                (vector-lanes-immediate
+                 <wat-f32> 4 4 wasm-float-bits))
+         (<~1> (<wat-keyword> "f64x2")
+                (vector-lanes-immediate
+                 <wat-f64> 2 8 wasm-float-bits))))
 
   (define br-on-cast-immediate
     (<map> list->immutable-vector
@@ -182,43 +359,38 @@
       (case (wasm-opcode-immediate-shape descriptor)
         [(none) (<result> empty-vector)]
         [(block-type) (one-immediate <wat-block-type>)]
-        [(label-index function-index type-index table-index memory-index global-index
-                      local-index tag-index data-index element-index)
+        [(label-index function-index type-index global-index local-index tag-index
+                      data-index element-index)
          index-immediate]
+        [(table-index memory-index) optional-index-immediate]
         [(label-vector)
          (<map> (lambda (index*)
                   (make-immutable-vector
                    (list->immutable-vector (reverse (cdr (reverse index*))))
                    (car (reverse index*))))
                 (<some> <wat-index-reference>))]
-        [(heap-type heap-type-non-null heap-type-nullable)
-         (one-immediate <wat-heap-type>)]
+        [(heap-type) (one-immediate <wat-heap-type>)]
+        [(heap-type-non-null heap-type-nullable)
+         (one-immediate <wat-reference-type>)]
         [(reference-type) (one-immediate <wat-reference-type>)]
         [(value-type-vector select-types) select-types-immediate]
         [(call-indirect) call-indirect-immediate]
-        [(memory-argument) memory-argument-immediate]
+        [(memory-argument) (memory-argument-immediate descriptor)]
         [(i32) (one-immediate <wat-i32>)]
         [(i64) (one-immediate <wat-i64>)]
         [(f32) (one-immediate <wat-f32>)]
         [(f64) (one-immediate <wat-f64>)]
-        [(table-pair memory-pair struct-field array-new-fixed array-copy
-                     type-data type-element)
+        [(table-pair memory-pair) optional-pair-immediate]
+        [(struct-field array-copy type-data type-element)
          indexed-pair-immediate]
-        [(memory-data)
-         (<map> (lambda (value) (make-immutable-vector (cadr value) (car value)))
-                (<~> <wat-index-reference> <wat-index-reference>))]
-        [(table-element)
-         (<map> (lambda (value) (make-immutable-vector (cadr value) (car value)))
-                (<~> <wat-index-reference> <wat-index-reference>))]
+        [(array-new-fixed)
+         (two-immediates <wat-index-reference> <wat-u32>)]
+        [(memory-data table-element) optional-leading-index-pair-immediate]
         [(br-on-cast) br-on-cast-immediate]
         [(vector-bytes) vector-immediate]
         [(shuffle-bytes) shuffle-immediate]
         [(lane-index) (one-immediate (lane-parser descriptor))]
-        [(memory-argument-lane)
-         (<map> (lambda (value)
-                  (let ([memory (vector-ref (car value) 0)])
-                    (make-immutable-vector memory (cadr value))))
-                (<~> memory-argument-immediate (lane-parser descriptor)))]
+        [(memory-argument-lane) (memory-argument-lane-immediate descriptor)]
         [(try-table) (<result> empty-vector)]
         [else
          (<fail-with>
@@ -315,16 +487,22 @@
          (<as> 'catch (<wat-keyword> "catch"))))
 
   (define try-catch-clause
-    (<~1>
+    (<~2>
      (<followed-by> (<result> #t) (<~0> wat-open try-catch-kind))
      wat-open
      (<bind>
-      try-catch-kind
-      (lambda (kind)
-        (<map> (lambda (value) (make-immutable-vector kind value))
-               (if (memq kind '(catch catch-ref))
-                   (two-immediates <wat-index-reference> <wat-index-reference>)
-                   (one-immediate <wat-index-reference>)))))
+      (<~> <pos> try-catch-kind)
+      (lambda (head)
+        (let ([pos (car head)] [kind (cadr head)])
+          (<map>
+           (lambda (value)
+             (if (memq kind '(catch catch-ref))
+                 (make-wat-catch-syntax pos kind (vector-ref value 0)
+                                        (vector-ref value 1))
+                 (make-wat-catch-syntax pos kind #f (vector-ref value 0))))
+           (if (memq kind '(catch catch-ref))
+               (two-immediates <wat-index-reference> <wat-index-reference>)
+               (one-immediate <wat-index-reference>))))))
      wat-close))
 
   (define flat-try-after
@@ -341,9 +519,9 @@
                (lambda (unused)
                  (make-instruction
                   pos descriptor
-                  (make-immutable-vector (cadr header)
-                                         (list->immutable-vector (caddr header)))
-                  (list->immutable-vector body) #f empty-vector))
+                  (make-immutable-vector (cadr header))
+                  (list->immutable-vector body)
+                  (list->immutable-vector (caddr header)) empty-vector))
                (<~0> (<wat-keyword> "end") (closing-label label))))))))))
 
   (define flat-after
@@ -364,7 +542,7 @@
        (lambda (immediates)
          (<map>
           (lambda (operand**)
-            (let* ([operand* (apply append operand**)]
+            (let* ([operand* (flatten-lists operand**)]
                    [node (make-instruction
                           pos descriptor immediates empty-vector #f
                           (list->immutable-vector operand*))])
@@ -381,7 +559,7 @@
             (list
              (make-instruction
               pos descriptor (make-immutable-vector (cadr header))
-              (list->immutable-vector (apply append body*)) #f empty-vector)))
+              (list->immutable-vector (flatten-lists body*)) #f empty-vector)))
           (<many-until> <wat-folded-list> wat-close))))))
 
   (define folded-try-after
@@ -395,9 +573,9 @@
             (list
              (make-instruction
               pos descriptor
-              (make-immutable-vector (cadr header)
-                                     (list->immutable-vector (caddr header)))
-              (list->immutable-vector (apply append body*)) #f empty-vector)))
+              (make-immutable-vector (cadr header))
+              (list->immutable-vector (flatten-lists body*))
+              (list->immutable-vector (caddr header)) empty-vector)))
           (<many-until> <wat-folded-list> wat-close))))))
 
   (define folded-branch
@@ -413,12 +591,12 @@
             (<optional> (folded-branch "else")))
        (lambda (value)
          (<result>
-          (let* ([operand* (apply append (caddr value))]
-                 [body (apply append (cadddr value))]
+          (let* ([operand* (flatten-lists (caddr value))]
+                 [body (flatten-lists (cadddr value))]
                  [alternate-source (car (cddddr value))]
                  [alternate (if (null? alternate-source)
                                 '()
-                                (apply append alternate-source))]
+                                (flatten-lists alternate-source))]
                  [node
                   (make-instruction
                    pos descriptor (make-immutable-vector (cadr value))
@@ -452,7 +630,9 @@
   (define <wat-instruction>
     (begin
       (install-lazy-parser! <wat-flat-instruction> flat-parser)
-      (install-lazy-parser! <wat-folded-list> folded-parser)
+      (install-lazy-parser!
+       <wat-folded-list>
+       (</> (<map> list <wat-flat-instruction>) folded-parser))
       flat-parser))
 
   #|proc:<wat-folded-instruction>
@@ -467,7 +647,7 @@
   |#
   (define <wat-expression>
     (<map> (lambda (instruction**)
-             (list->immutable-vector (apply append instruction**)))
+             (list->immutable-vector (flatten-lists instruction**)))
            (<many> (</> (<map> list <wat-instruction>)
                         <wat-folded-instruction>))))
 
