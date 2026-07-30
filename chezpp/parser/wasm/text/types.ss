@@ -53,7 +53,7 @@
     make-wat-instruction-syntax wat-instruction-syntax? wat-instruction-syntax-pos
     wat-instruction-syntax-mnemonic wat-instruction-syntax-immediates
     wat-instruction-syntax-body wat-instruction-syntax-alternate
-    wat-instruction-syntax-operands
+    wat-instruction-syntax-operands wat-instruction-syntax-label
     make-wat-inline-abbreviation wat-inline-abbreviation?
     wat-inline-abbreviation-pos wat-inline-abbreviation-kind
     wat-inline-abbreviation-data
@@ -206,7 +206,8 @@
             (immutable immediates wat-instruction-syntax-immediates)
             (immutable body wat-instruction-syntax-body)
             (immutable alternate wat-instruction-syntax-alternate)
-            (immutable operands wat-instruction-syntax-operands)))
+            (immutable operands wat-instruction-syntax-operands)
+            (immutable label wat-instruction-syntax-label)))
 
   (define-record-type
     ($wat-inline-abbreviation make-wat-inline-abbreviation wat-inline-abbreviation?)

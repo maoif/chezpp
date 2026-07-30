@@ -1,11 +1,13 @@
 (library (chezpp parser wasm text)
-  (export parser-wat-module-syntax)
+  (export parser-wat-module-syntax parser-wat-module)
   (import (chezpp chez)
           (chezpp parser combinator)
           (chezpp parser wasm types)
           (chezpp parser wasm text lexical)
           (chezpp parser wasm text types)
-          (chezpp parser wasm text instructions))
+          (chezpp parser wasm text instructions)
+          (chezpp parser wasm normalize)
+          (chezpp parser wasm validate))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Module grammar helpers and instruction placeholders
@@ -559,5 +561,19 @@
                        (<optional> <wat-identifier>)
                        (<many-until> module-field wat-close))
                   wat-close <eof>))))
+
+  #|proc:parser-wat-module
+  The `parser-wat-module` parser reads exactly one Core 3.0 text module and returns its canonical
+  module representation. Normalization failures retain their original source position.
+  |#
+  (define parser-wat-module
+    (<bind>
+     parser-wat-module-syntax
+     (lambda (syntax)
+       (let ([result (normalize-wat-module syntax)])
+         (if (wasm-issue? result)
+             (<pos-at> (wasm-issue-offset result)
+                       (<fail-with> (wasm-issue-message result)))
+             (<result> result))))))
 
   )

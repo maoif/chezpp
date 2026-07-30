@@ -423,14 +423,14 @@
       (<many-until> <wat-flat-instruction> terminator)))
 
   (define make-instruction
-    (lambda (pos descriptor immediates body alternate operands)
+    (lambda (pos descriptor immediates body alternate operands label)
       (make-wat-instruction-syntax
-       pos (wasm-opcode-mnemonic descriptor) immediates body alternate operands)))
+       pos (wasm-opcode-mnemonic descriptor) immediates body alternate operands label)))
 
   (define flat-simple-after
     (lambda (pos descriptor)
       (<map> (lambda (immediates)
-               (make-instruction pos descriptor immediates empty-vector #f empty-vector))
+               (make-instruction pos descriptor immediates empty-vector #f empty-vector #f))
              (immediate-parser descriptor))))
 
   (define flat-block-after
@@ -446,7 +446,7 @@
                (lambda (unused)
                  (make-instruction
                   pos descriptor (make-immutable-vector type)
-                  (list->immutable-vector body) #f empty-vector))
+                  (list->immutable-vector body) #f empty-vector label))
                (<~0> (<wat-keyword> "end") (closing-label label))))))))))
 
   (define flat-if-after
@@ -471,13 +471,13 @@
                         (make-instruction
                          pos descriptor (make-immutable-vector type)
                          (list->immutable-vector body)
-                         (list->immutable-vector alternate) empty-vector))
+                         (list->immutable-vector alternate) empty-vector label))
                       (<~0> (<wat-keyword> "end") (closing-label label)))))))
                (<map>
                 (lambda (unused)
                   (make-instruction
                    pos descriptor (make-immutable-vector type)
-                   (list->immutable-vector body) empty-vector empty-vector))
+                   (list->immutable-vector body) empty-vector empty-vector label))
                 (<~0> (<wat-keyword> "end") (closing-label label)))))))))))
 
   (define try-catch-kind
@@ -521,7 +521,7 @@
                   pos descriptor
                   (make-immutable-vector (cadr header))
                   (list->immutable-vector body)
-                  (list->immutable-vector (caddr header)) empty-vector))
+                  (list->immutable-vector (caddr header)) empty-vector label))
                (<~0> (<wat-keyword> "end") (closing-label label))))))))))
 
   (define flat-after
@@ -545,7 +545,7 @@
             (let* ([operand* (flatten-lists operand**)]
                    [node (make-instruction
                           pos descriptor immediates empty-vector #f
-                          (list->immutable-vector operand*))])
+                          (list->immutable-vector operand*) #f)])
               (append operand* (list node))))
           (<many-until> <wat-folded-list> wat-close))))))
 
@@ -559,7 +559,8 @@
             (list
              (make-instruction
               pos descriptor (make-immutable-vector (cadr header))
-              (list->immutable-vector (flatten-lists body*)) #f empty-vector)))
+              (list->immutable-vector (flatten-lists body*)) #f empty-vector
+              (optional-value (car header) #f))))
           (<many-until> <wat-folded-list> wat-close))))))
 
   (define folded-try-after
@@ -575,7 +576,8 @@
               pos descriptor
               (make-immutable-vector (cadr header))
               (list->immutable-vector (flatten-lists body*))
-              (list->immutable-vector (caddr header)) empty-vector)))
+              (list->immutable-vector (caddr header)) empty-vector
+              (optional-value (car header) #f))))
           (<many-until> <wat-folded-list> wat-close))))))
 
   (define folded-branch
@@ -601,7 +603,8 @@
                   (make-instruction
                    pos descriptor (make-immutable-vector (cadr value))
                    (list->immutable-vector body) (list->immutable-vector alternate)
-                   (list->immutable-vector operand*))])
+                   (list->immutable-vector operand*)
+                   (optional-value (car value) #f))])
             (append operand* (list node))))))))
 
   (define folded-after

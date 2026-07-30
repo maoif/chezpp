@@ -28,6 +28,24 @@
   (lambda (parser text)
     (run-textual-parser (<~0> parser <eof>) text)))
 
+(define with-temporary-wat
+  (lambda (text procedure)
+    (let ([path (format "parser-wasm-~a.wat" (random 999999))]
+          [port #f])
+      (dynamic-wind
+        (lambda ()
+          (set! port
+                (open-file-output-port path
+                                       (file-options no-fail replace)
+                                       (buffer-mode block)
+                                       #f))
+          (put-bytevector port (string->utf8 text))
+          (flush-output-port port))
+        (lambda () (procedure path))
+        (lambda ()
+          (when port (close-port port))
+          (when (file-exists? path) (delete-file path)))))))
+
 (define immutable-vector?
   (lambda (value)
     ;; An immutable vector rejects even a no-op mutation.
@@ -3929,5 +3947,215 @@
      ;; error: bytes after the last complete section are not permitted.
      (error? (parse-wasm-binary-module
               #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00 #xff)))
+
+     )
+
+(mat wasm-text-normalization
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (func $id (export \"id\") (param $x i32) (result i32)
+                   local.get $x)
+                 (start $id))")]
+            [function (vector-ref (wasm-module-functions module) 0)]
+            [export (vector-ref (wasm-module-exports module) 0)]
+            [instruction (vector-ref (wasm-function-body function) 0)])
+       (and (= 1 (vector-length (wasm-module-types module)))
+            (= 0 (wasm-function-type-index function))
+            (eq? 'local.get (wasm-instruction-mnemonic instruction))
+            (= 0 (vector-ref (wasm-instruction-immediates instruction) 0))
+            (eq? 'function (wasm-export-kind export))
+            (= 0 (wasm-export-index export))
+            (= 0 (wasm-module-start module))))
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (func $later (param i32) (result i32) local.get 0)
+                 (import \"env\" \"first\" (func $first (param i32) (result i32)))
+                 (func $again (param i32) (result i32)
+                   (i32.add (call $later (local.get 0)) (call $first (local.get 0))))
+                 (export \"later\" (func $later)))")]
+            [function* (wasm-module-functions module)]
+            [body (wasm-function-body (vector-ref function* 1))])
+       (and (= 1 (vector-length (wasm-module-types module)))
+            (= 0 (wasm-function-type-index (vector-ref function* 0)))
+            (= 0 (wasm-function-type-index (vector-ref function* 1)))
+            (equal? '(local.get call local.get call i32.add)
+                    (map wasm-instruction-mnemonic (vector->list body)))
+            (= 1 (vector-ref
+                  (wasm-instruction-immediates (vector-ref body 1)) 0))
+            (= 0 (vector-ref
+                  (wasm-instruction-immediates (vector-ref body 3)) 0))
+            (= 1 (wasm-export-index
+                  (vector-ref (wasm-module-exports module) 0)))))
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (type $sig (func (param i32 i64)))
+                 (func (type $sig) (local $temporary i32)
+                   local.get $temporary))")]
+            [instruction
+             (vector-ref
+              (wasm-function-body
+               (vector-ref (wasm-module-functions module) 0)) 0)])
+       (= 2 (vector-ref (wasm-instruction-immediates instruction) 0)))
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (func $f)
+                 (table funcref (elem $f))
+                 (elem $later declare func $f)
+                 (func elem.drop $later))")]
+            [body (wasm-function-body
+                   (vector-ref (wasm-module-functions module) 1))])
+       (and (= 2 (vector-length (wasm-module-elements module)))
+            (= 1 (vector-ref
+                  (wasm-instruction-immediates (vector-ref body 0)) 0))))
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (func (result i32) i32.const 0)
+                 (import \"env\" \"later\" (func (param i64))))")]
+            [type* (wasm-module-types module)]
+            [first
+             (wasm-subtype-composite-type
+              (vector-ref (wasm-recursive-type-subtypes (vector-ref type* 0)) 0))]
+            [second
+             (wasm-subtype-composite-type
+              (vector-ref (wasm-recursive-type-subtypes (vector-ref type* 1)) 0))])
+       (and (equal? '#(i32) (wasm-function-type-results first))
+            (equal? '#(i64) (wasm-function-type-parameters second))))
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (type $pair (struct (field $left i32)))
+                 (type $sig (func))
+                 (import \"env\" \"f\" (func $imported (type $sig)))
+                 (table $table 1 funcref)
+                 (memory $memory 1)
+                 (global $global i32 (i32.const 0))
+                 (tag $tag (type $sig))
+                 (elem $element declare func $imported)
+                 (data $data \"x\")
+                 (func
+                   block $exit br $exit end $exit
+                   global.get $global memory.size $memory table.size $table
+                   throw $tag elem.drop $element data.drop $data
+                   struct.get $pair $left))")]
+            [body (wasm-function-body
+                   (vector-ref (wasm-module-functions module) 0))]
+            [immediate
+             (lambda (index offset)
+               (vector-ref
+                (wasm-instruction-immediates (vector-ref body index)) offset))])
+       (and (= 0
+               (vector-ref
+                (wasm-instruction-immediates
+                 (vector-ref (wasm-instruction-body (vector-ref body 0)) 0)) 0))
+            (= 0 (immediate 1 0))
+            (= 0 (immediate 2 0))
+            (= 0 (immediate 3 0))
+            (= 0 (immediate 4 0))
+            (= 0 (immediate 5 0))
+            (= 0 (immediate 6 0))
+            (= 0 (immediate 7 0))
+            (= 0 (immediate 7 1))))
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (type $sig (func))
+                 (tag $tag (type $sig))
+                 (func
+                   try_table $outer (type $sig) (catch $tag $outer)
+                   end $outer))")]
+            [instruction
+             (vector-ref
+              (wasm-function-body
+               (vector-ref (wasm-module-functions module) 0)) 0)]
+            [catch (vector-ref (wasm-instruction-alternate instruction) 0)])
+       (and (= 0 (wasm-catch-tag-index catch))
+            (= 0 (wasm-catch-label-index catch))))
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (func $f)
+                 (elem declare funcref (ref.func $f)))")]
+            [initializer
+             (vector-ref
+              (wasm-element-initializers
+               (vector-ref (wasm-module-elements module) 0)) 0)])
+       (= 0
+          (vector-ref
+           (wasm-instruction-immediates (vector-ref initializer 0)) 0)))
+
+     (let* ([module
+             (parse-wasm-text-module
+              "(module
+                 (func $f (export \"f\") (import \"env\" \"f\"))
+                 (table $t (export \"t\") (import \"env\" \"t\") 1 funcref)
+                 (memory $m (export \"m\") (import \"env\" \"m\") 1)
+                 (global $g (export \"g\") (import \"env\" \"g\") i32)
+                 (tag $e (export \"e\") (import \"env\" \"e\")))")]
+            [import* (wasm-module-imports module)]
+            [export* (wasm-module-exports module)])
+       (and (= 5 (vector-length import*))
+            (= 5 (vector-length export*))
+            (equal? '(function table memory global tag)
+                    (map (lambda (import)
+                           (wasm-external-type-kind
+                            (wasm-import-external-type import)))
+                         (vector->list import*)))
+            (equal? '(function table memory global tag)
+                    (map wasm-export-kind (vector->list export*)))
+            (andmap zero? (map wasm-export-index (vector->list export*)))))
+
+     (let ([module (parse-wasm-text-module "(module (func (type 99)))")])
+       (= 99
+          (wasm-function-type-index
+           (vector-ref (wasm-module-functions module) 0))))
+
+     ;; error: symbolic references must name a declaration in the matching namespace.
+     (let ([error
+            (capture-parser-error
+             (lambda ()
+               (parse-wasm-text-module
+                "(module (func call $missing))")))])
+       (and error (> (parser-error-offset error) 0)))
+
+     ;; error: duplicate textual identifiers in one namespace are rejected.
+     (error? (parse-wasm-text-module
+              "(module (memory $m 1) (memory $m 1))"))
+
+     ;; error: an inline signature must agree with its explicit function type.
+     (error? (parse-wasm-text-module
+              "(module
+                 (type $sig (func (param i32)))
+                 (func (type $sig) (param i64)))"))
+
+     ;; error: named parameters and locals share one function-local namespace.
+     (error? (parse-wasm-text-module
+              "(module (func (param $x i32) (local $x i64)))"))
+
+     ;; error: a symbolic branch label must name an enclosing structured instruction.
+     (error? (parse-wasm-text-module
+              "(module (func block br $missing end))"))
+
+     ;; error: the source-string API requires a string.
+     (error? (parse-wasm-text-module #vu8()))
+
+     (with-temporary-wat
+      "(module)"
+      (lambda (path) (wasm-module? (parse-wasm-text-module-file path))))
+
+     ;; error: the file API requires a regular-file path.
+     (error? (parse-wasm-text-module-file "data/not-a-wasm-module.wat"))
 
      )

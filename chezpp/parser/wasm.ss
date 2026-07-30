@@ -1,6 +1,7 @@
 (library (chezpp parser wasm)
   (export
     parse-wasm-binary-module parse-wasm-binary-module-file
+    parse-wasm-text-module parse-wasm-text-module-file
     make-wasm-module wasm-module? wasm-module-types wasm-module-imports
     wasm-module-functions wasm-module-tables wasm-module-memories wasm-module-globals
     wasm-module-tags wasm-module-exports wasm-module-start wasm-module-elements
@@ -53,6 +54,7 @@
           (chezpp parser combinator)
           (chezpp parser wasm types)
           (chezpp parser wasm binary)
+          (chezpp parser wasm text)
           (chezpp file)
           (chezpp utils))
 
@@ -78,4 +80,22 @@
     (lambda (path)
       (pcheck ([file-regular? path])
               (parse-binary-file <wasm-binary-module> path))))
+
+  #|proc:parse-wasm-text-module
+  Parses a WebAssembly Core 3.0 text module from source string `text`. The return value is a
+  canonical `wasm-module` record.
+  |#
+  (define-who parse-wasm-text-module
+    (lambda (text)
+      (pcheck ([string? text])
+              (run-textual-parser parser-wat-module text))))
+
+  #|proc:parse-wasm-text-module-file
+  Parses a WebAssembly Core 3.0 text module from regular-file path `path`. The return value is a
+  canonical `wasm-module` record.
+  |#
+  (define-who parse-wasm-text-module-file
+    (lambda (path)
+      (pcheck ([file-regular? path])
+              (parse-textual-file parser-wat-module path))))
   )
