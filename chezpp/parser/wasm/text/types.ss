@@ -233,8 +233,9 @@
   (define wat-close
     (<~0> (<char> #\)) <wat-trivia>))
 
-  (define (wat-parenthesized keyword parser)
-    (<~1> (<~0> wat-open (<wat-keyword> keyword)) parser wat-close))
+  (define wat-parenthesized
+    (lambda (keyword parser)
+      (<~1> (<~0> wat-open (<wat-keyword> keyword)) parser wat-close)))
 
   (define wat-head
     (lambda (keyword)

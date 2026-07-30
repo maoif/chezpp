@@ -3657,6 +3657,212 @@
 
      )
 
+(mat wasm-public-contracts
+
+     ;; error: a module requires a vector of recursive type groups.
+     (error? (make-wasm-module #f '#() '#() '#() '#() '#() '#() '#() #f '#() '#() '#()))
+
+     ;; error: a custom section name must be a string.
+     (error? (make-wasm-custom-section #f #vu8() #f))
+
+     ;; error: a recursive type requires a vector of subtypes.
+     (error? (make-wasm-recursive-type #f))
+
+     ;; error: a subtype finality flag must be a boolean.
+     (error? (make-wasm-subtype 'not-a-boolean '#()
+                                (make-wasm-function-type '#() '#())))
+
+     ;; error: function parameters must be a vector of value types.
+     (error? (make-wasm-function-type #f '#()))
+
+     ;; error: struct fields must be a vector of field types.
+     (error? (make-wasm-struct-type #f))
+
+     ;; error: an array element must be a field type.
+     (error? (make-wasm-array-type #f))
+
+     ;; error: a field storage type must be a WebAssembly storage type.
+     (error? (make-wasm-field-type #f #f))
+
+     ;; error: reference nullability must be a boolean.
+     (error? (make-wasm-reference-type 'not-a-boolean 'func))
+
+     ;; error: a limits address type must be i32 or i64.
+     (error? (make-wasm-limits #f 0 #f))
+
+     ;; error: a table requires a reference element type.
+     (error? (make-wasm-table-type #f (make-wasm-limits 'i32 0 #f)))
+
+     ;; error: a memory requires a limits record.
+     (error? (make-wasm-memory-type #f))
+
+     ;; error: a global requires a WebAssembly value type.
+     (error? (make-wasm-global-type #f #f))
+
+     ;; error: a tag type index must be natural.
+     (error? (make-wasm-tag-type #f))
+
+     ;; error: an external type kind must name a Core external namespace.
+     (error? (make-wasm-external-type #f 0))
+
+     ;; error: an import module name must be a string.
+     (error? (make-wasm-import #f "name" (make-wasm-external-type 'function 0)))
+
+     ;; error: a function type index must be natural.
+     (error? (make-wasm-function #f '#() '#()))
+
+     ;; error: a table entity requires a table type.
+     (error? (make-wasm-table #f #f))
+
+     ;; error: a memory entity requires a memory type.
+     (error? (make-wasm-memory #f))
+
+     ;; error: a global entity requires a global type.
+     (error? (make-wasm-global #f '#()))
+
+     ;; error: a tag entity requires a tag type.
+     (error? (make-wasm-tag #f))
+
+     ;; error: an export name must be a string.
+     (error? (make-wasm-export #f 'function 0))
+
+     ;; error: an element mode must name a Core element mode.
+     (error? (make-wasm-element #f (make-wasm-reference-type #t 'func) #f #f '#()))
+
+     ;; error: a data mode must name a Core data mode.
+     (error? (make-wasm-data #f #f #f #vu8()))
+
+     ;; error: an instruction mnemonic must be a symbol.
+     (error? (make-wasm-instruction #f '#() '#() '#()))
+
+     ;; error: a memory alignment exponent must be natural.
+     (error? (make-wasm-memory-argument #f 0 0))
+
+     ;; error: a block type kind must name a Core block type form.
+     (error? (make-wasm-block-type #f #f))
+
+     ;; error: a catch kind must name a Core catch form.
+     (error? (make-wasm-catch #f #f 0))
+
+     ;; error: a float width must be 32 or 64.
+     (error? (make-wasm-float #f 0))
+
+     ;; error: binary module input must be a bytevector or string path.
+     (error? (parse-wasm-binary-module 'not-input))
+
+     ;; error: a binary file path must be a string naming a regular file.
+     (error? (parse-wasm-binary-module-file #vu8()))
+
+     ;; error: a missing binary file path is rejected by the explicit file API.
+     (error? (parse-wasm-binary-module-file "data/not-a-wasm-module.wasm"))
+
+     ;; error: a directory is not accepted as a binary module file.
+     (error? (parse-wasm-binary-module-file "."))
+
+     ;; error: textual module input must be a source string.
+     (error? (parse-wasm-text-module #vu8()))
+
+     ;; error: the source-string API parses a path spelling as source text.
+     (let ([error
+            (capture-parser-error
+             (lambda () (parse-wasm-text-module "data/wasm-core3.wat")))])
+       (and error (string=? "<string>" (parser-error-source error))))
+
+     ;; error: a text file path must be a string naming a regular file.
+     (error? (parse-wasm-text-module-file #vu8()))
+
+     ;; error: a missing text file path is rejected by the explicit file API.
+     (error? (parse-wasm-text-module-file "data/not-a-wasm-module.wat"))
+
+     ;; error: a directory is not accepted as a text module file.
+     (error? (parse-wasm-text-module-file "."))
+
+     )
+
+(mat wasm-positioned-errors
+
+     ;; error: a type truncated inside a bounded section reports its exact byte position.
+     (let ([error
+            (capture-parser-error
+             (lambda ()
+               (parse-wasm-binary-module
+                #vu8(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00 #x01 #x01 #x60))))])
+       (and error
+            (eq? 'expected (parser-error-kind error))
+            (string=? "<bytevector>" (parser-error-source error))
+            (= 11 (parser-error-offset error))
+            (not (parser-error-line error))
+            (not (parser-error-column error))
+            (equal? '(#x4e #x4f #x50 #x60 #x5f #x5e)
+                    (parser-error-expected error))
+            (eq? 'eof (parser-error-found error))
+            (string=?
+             (string-append
+              "<bytevector>:byte 11: unexpected EOF, expected #x4e, #x4f, #x50, "
+              "#x60, #x5f, or #x5e")
+             (parser-error->string error))))
+
+     ;; error: an unknown nested folded instruction retains its source position.
+     (let ([error
+            (capture-parser-error
+             (lambda ()
+               (parse-wasm-text-module
+                "(module (func (i32.add (i32.const 1) (bad))))")))])
+       (and error
+            (eq? 'custom (parser-error-kind error))
+            (string=? "<string>" (parser-error-source error))
+            (= 41 (parser-error-offset error))
+            (= 0 (parser-error-line error))
+            (= 41 (parser-error-column error))
+            (null? (parser-error-expected error))
+            (not (parser-error-found error))
+            (string=?
+             "<string>:1:42: <fail-with>: unknown WebAssembly instruction: bad"
+             (parser-error->string error))))
+
+     ;; error: an unterminated nested comment retains exact expected field alternatives.
+     (let ([error
+            (capture-parser-error
+             (lambda ()
+               (parse-wasm-text-module "(module (; outer (; inner ;)")))])
+       (and error
+            (eq? 'expected (parser-error-kind error))
+            (string=? "<string>" (parser-error-source error))
+            (= 9 (parser-error-offset error))
+            (= 0 (parser-error-line error))
+            (= 9 (parser-error-column error))
+            (equal? '("@custom" "rec" "type" "import" "func" "table" "memory"
+                      "global" "tag" "export" "start" "elem" "data")
+                    (parser-error-expected error))
+            (char=? (integer->char #x3b) (parser-error-found error))
+            (string=?
+             (string-append
+              "<string>:1:10: expected \"@custom\", \"rec\", \"type\", \"import\", "
+              "\"func\", \"table\", \"memory\", \"global\", \"tag\", \"export\", "
+              "\"start\", \"elem\", or \"data\", got #\\;")
+             (parser-error->string error))))
+
+     ;; error: post-parse identifier resolution reports the original symbolic reference.
+     (let ([error
+            (capture-parser-error
+             (lambda ()
+               (parse-wasm-text-module "(module\n  (func call $missing))")))])
+       (and error
+            (eq? 'custom (parser-error-kind error))
+            (string=? "<string>" (parser-error-source error))
+            (= 21 (parser-error-offset error))
+            (= 1 (parser-error-line error))
+            (= 13 (parser-error-column error))
+            (null? (parser-error-expected error))
+            (not (parser-error-found error))
+            (string=?
+             (string-append
+              "<string>:2:14: <fail-with>: unknown WebAssembly function identifier: "
+              "$missing")
+             (parser-error->string error))))
+
+     )
+
 (define append-bytevectors
   (lambda bytevector*
     (let ([result

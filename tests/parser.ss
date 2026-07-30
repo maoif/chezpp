@@ -727,6 +727,14 @@
      (equal? '(#\a #\b #\c)
              (runT (<many> <item>) "abc"))
 
+     (equal? '(#\a #\x)
+             (runT (<~0> (<many-until> <item>
+                                       (<~> (<char> #\a) (<char> #\b)))
+                          (<char> #\a)
+                          (<char> #\b)
+                          <eof>)
+                   "axab"))
+
      (equal? '()
              (runT (<~0> (<many-until> (<char> #\a) (<char> #\x3b))
                           (<char> #\x3b)

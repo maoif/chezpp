@@ -1,13 +1,18 @@
 (library (chezpp parser wasm)
   (export
+    ;; Parser API
     parse-wasm-binary-module parse-wasm-binary-module-file
     parse-wasm-text-module parse-wasm-text-module-file
+
+    ;; Module and custom sections
     make-wasm-module wasm-module? wasm-module-types wasm-module-imports
     wasm-module-functions wasm-module-tables wasm-module-memories wasm-module-globals
     wasm-module-tags wasm-module-exports wasm-module-start wasm-module-elements
     wasm-module-data wasm-module-custom-sections
     make-wasm-custom-section wasm-custom-section? wasm-custom-section-name
     wasm-custom-section-bytes wasm-custom-section-after-section
+
+    ;; Types
     make-wasm-recursive-type wasm-recursive-type? wasm-recursive-type-subtypes
     make-wasm-subtype wasm-subtype? wasm-subtype-final? wasm-subtype-supertypes
     wasm-subtype-composite-type
@@ -29,6 +34,8 @@
     make-wasm-tag-type wasm-tag-type? wasm-tag-type-type-index
     make-wasm-external-type wasm-external-type? wasm-external-type-kind
     wasm-external-type-type
+
+    ;; Entities and segments
     make-wasm-import wasm-import? wasm-import-module wasm-import-name
     wasm-import-external-type
     make-wasm-function wasm-function? wasm-function-type-index wasm-function-locals
@@ -42,6 +49,8 @@
     wasm-element-table-index wasm-element-offset wasm-element-initializers
     make-wasm-data wasm-data? wasm-data-mode wasm-data-memory-index wasm-data-offset
     wasm-data-bytes
+
+    ;; Instructions and immediates
     make-wasm-instruction wasm-instruction? wasm-instruction-mnemonic
     wasm-instruction-immediates wasm-instruction-body wasm-instruction-alternate
     make-wasm-memory-argument wasm-memory-argument? wasm-memory-argument-alignment

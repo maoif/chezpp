@@ -90,11 +90,12 @@
   The `<wat-token>` procedure takes `parser`, whose signature is `(TextInput -> Any)`, and returns
   a parser that reads its value and consumes following WebAssembly text trivia.
   |#
-  (define (<wat-token> parser)
-    (pcheck ([parser? parser])
-            (<~0> parser
-                  (<followed-by> (<result> '()) <wat-token-boundary>)
-                  <wat-trivia>)))
+  (define <wat-token>
+    (lambda (parser)
+      (pcheck ([parser? parser])
+              (<~0> parser
+                    (<followed-by> (<result> '()) <wat-token-boundary>)
+                    <wat-trivia>))))
 
   #|proc:<wat-keyword>
   The `<wat-keyword>` procedure takes nonempty string `keyword` and returns a parser that reads it

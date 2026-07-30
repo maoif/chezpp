@@ -20,7 +20,7 @@
 
   (define wasm-opcode-code?
     (lambda (value)
-      (and (fixnum? value) (fx<= 0 value) (fx<= value #xffffffff))))
+      (and (natural? value) (<= value #xffffffff))))
 
   #|proc:wasm-opcode-descriptor?
   Returns whether `object` is a WebAssembly opcode descriptor. `object` is tested.
@@ -611,7 +611,7 @@
 
   (define opcode-binary-key
     (lambda (prefix code)
-      (fx+ code (fxsll (if prefix (fx1+ prefix) 0) 32))))
+      (+ code (ash (if prefix (+ prefix 1) 0) 32))))
 
   (define add-binary-descriptor!
     (lambda (table descriptor)
