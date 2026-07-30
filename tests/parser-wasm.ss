@@ -4159,3 +4159,335 @@
      (error? (parse-wasm-text-module-file "data/not-a-wasm-module.wat"))
 
      )
+
+(define wasm-vector=?
+  (lambda (left right value=?)
+    (and (vector? right)
+         (= (vector-length left) (vector-length right))
+         (let loop ([index 0])
+           (or (= index (vector-length left))
+               (and (value=? (vector-ref left index) (vector-ref right index))
+                    (loop (+ index 1))))))))
+
+(define wasm-vector-any?
+  (lambda (predicate vector)
+    (let loop ([index 0])
+      (and (< index (vector-length vector))
+           (or (predicate (vector-ref vector index)) (loop (+ index 1)))))))
+
+(define wasm-value=?
+  (lambda (left right)
+    (cond
+      [(wasm-recursive-type? left) (wasm-recursive-type=? left right)]
+      [(wasm-subtype? left) (wasm-subtype=? left right)]
+      [(wasm-function-type? left) (wasm-function-type=? left right)]
+      [(wasm-struct-type? left) (wasm-struct-type=? left right)]
+      [(wasm-array-type? left) (wasm-array-type=? left right)]
+      [(wasm-field-type? left) (wasm-field-type=? left right)]
+      [(wasm-reference-type? left) (wasm-reference-type=? left right)]
+      [(wasm-limits? left) (wasm-limits=? left right)]
+      [(wasm-table-type? left) (wasm-table-type=? left right)]
+      [(wasm-memory-type? left) (wasm-memory-type=? left right)]
+      [(wasm-global-type? left) (wasm-global-type=? left right)]
+      [(wasm-tag-type? left) (wasm-tag-type=? left right)]
+      [(wasm-external-type? left) (wasm-external-type=? left right)]
+      [(wasm-import? left) (wasm-import=? left right)]
+      [(wasm-function? left) (wasm-function=? left right)]
+      [(wasm-table? left) (wasm-table=? left right)]
+      [(wasm-memory? left) (wasm-memory=? left right)]
+      [(wasm-global? left) (wasm-global=? left right)]
+      [(wasm-tag? left) (wasm-tag=? left right)]
+      [(wasm-export? left) (wasm-export=? left right)]
+      [(wasm-element? left) (wasm-element=? left right)]
+      [(wasm-data? left) (wasm-data=? left right)]
+      [(wasm-custom-section? left) (wasm-custom-section=? left right)]
+      [(wasm-instruction? left) (wasm-instruction=? left right)]
+      [(wasm-memory-argument? left) (wasm-memory-argument=? left right)]
+      [(wasm-block-type? left) (wasm-block-type=? left right)]
+      [(wasm-catch? left) (wasm-catch=? left right)]
+      [(wasm-float? left) (wasm-float=? left right)]
+      [(vector? left) (wasm-vector=? left right wasm-value=?)]
+      [else (equal? left right)])))
+
+(define wasm-recursive-type=?
+  (lambda (left right)
+    (and (wasm-recursive-type? right)
+         (wasm-vector=? (wasm-recursive-type-subtypes left)
+                        (wasm-recursive-type-subtypes right)
+                        wasm-value=?))))
+
+(define wasm-subtype=?
+  (lambda (left right)
+    (and (wasm-subtype? right)
+         (eq? (wasm-subtype-final? left) (wasm-subtype-final? right))
+         (wasm-vector=? (wasm-subtype-supertypes left)
+                        (wasm-subtype-supertypes right)
+                        wasm-value=?)
+         (wasm-value=? (wasm-subtype-composite-type left)
+                       (wasm-subtype-composite-type right)))))
+
+(define wasm-function-type=?
+  (lambda (left right)
+    (and (wasm-function-type? right)
+         (wasm-vector=? (wasm-function-type-parameters left)
+                        (wasm-function-type-parameters right)
+                        wasm-value=?)
+         (wasm-vector=? (wasm-function-type-results left)
+                        (wasm-function-type-results right)
+                        wasm-value=?))))
+
+(define wasm-struct-type=?
+  (lambda (left right)
+    (and (wasm-struct-type? right)
+         (wasm-vector=? (wasm-struct-type-fields left)
+                        (wasm-struct-type-fields right)
+                        wasm-value=?))))
+
+(define wasm-array-type=?
+  (lambda (left right)
+    (and (wasm-array-type? right)
+         (wasm-value=? (wasm-array-type-field left) (wasm-array-type-field right)))))
+
+(define wasm-field-type=?
+  (lambda (left right)
+    (and (wasm-field-type? right)
+         (wasm-value=? (wasm-field-type-storage-type left)
+                       (wasm-field-type-storage-type right))
+         (eq? (wasm-field-type-mutable? left) (wasm-field-type-mutable? right)))))
+
+(define wasm-reference-type=?
+  (lambda (left right)
+    (and (wasm-reference-type? right)
+         (eq? (wasm-reference-type-nullable? left)
+              (wasm-reference-type-nullable? right))
+         (wasm-value=? (wasm-reference-type-heap-type left)
+                       (wasm-reference-type-heap-type right)))))
+
+(define wasm-limits=?
+  (lambda (left right)
+    (and (wasm-limits? right)
+         (eq? (wasm-limits-address-type left) (wasm-limits-address-type right))
+         (= (wasm-limits-minimum left) (wasm-limits-minimum right))
+         (equal? (wasm-limits-maximum left) (wasm-limits-maximum right)))))
+
+(define wasm-table-type=?
+  (lambda (left right)
+    (and (wasm-table-type? right)
+         (wasm-value=? (wasm-table-type-reference-type left)
+                       (wasm-table-type-reference-type right))
+         (wasm-limits=? (wasm-table-type-limits left) (wasm-table-type-limits right)))))
+
+(define wasm-memory-type=?
+  (lambda (left right)
+    (and (wasm-memory-type? right)
+         (wasm-limits=? (wasm-memory-type-limits left)
+                        (wasm-memory-type-limits right)))))
+
+(define wasm-global-type=?
+  (lambda (left right)
+    (and (wasm-global-type? right)
+         (wasm-value=? (wasm-global-type-value-type left)
+                       (wasm-global-type-value-type right))
+         (eq? (wasm-global-type-mutable? left) (wasm-global-type-mutable? right)))))
+
+(define wasm-tag-type=?
+  (lambda (left right)
+    (and (wasm-tag-type? right)
+         (= (wasm-tag-type-type-index left) (wasm-tag-type-type-index right)))))
+
+(define wasm-external-type=?
+  (lambda (left right)
+    (and (wasm-external-type? right)
+         (eq? (wasm-external-type-kind left) (wasm-external-type-kind right))
+         (wasm-value=? (wasm-external-type-type left)
+                       (wasm-external-type-type right)))))
+
+(define wasm-import=?
+  (lambda (left right)
+    (and (wasm-import? right)
+         (string=? (wasm-import-module left) (wasm-import-module right))
+         (string=? (wasm-import-name left) (wasm-import-name right))
+         (wasm-external-type=? (wasm-import-external-type left)
+                               (wasm-import-external-type right)))))
+
+(define wasm-function=?
+  (lambda (left right)
+    (and (wasm-function? right)
+         (= (wasm-function-type-index left) (wasm-function-type-index right))
+         (wasm-vector=? (wasm-function-locals left) (wasm-function-locals right) wasm-value=?)
+         (wasm-vector=? (wasm-function-body left) (wasm-function-body right) wasm-value=?))))
+
+(define wasm-table=?
+  (lambda (left right)
+    (and (wasm-table? right)
+         (wasm-table-type=? (wasm-table-type left) (wasm-table-type right))
+         (wasm-value=? (wasm-table-initializer left) (wasm-table-initializer right)))))
+
+(define wasm-memory=?
+  (lambda (left right)
+    (and (wasm-memory? right)
+         (wasm-memory-type=? (wasm-memory-type left) (wasm-memory-type right)))))
+
+(define wasm-global=?
+  (lambda (left right)
+    (and (wasm-global? right)
+         (wasm-global-type=? (wasm-global-type left) (wasm-global-type right))
+         (wasm-value=? (wasm-global-initializer left) (wasm-global-initializer right)))))
+
+(define wasm-tag=?
+  (lambda (left right)
+    (and (wasm-tag? right) (wasm-tag-type=? (wasm-tag-type left) (wasm-tag-type right)))))
+
+(define wasm-export=?
+  (lambda (left right)
+    (and (wasm-export? right)
+         (string=? (wasm-export-name left) (wasm-export-name right))
+         (eq? (wasm-export-kind left) (wasm-export-kind right))
+         (= (wasm-export-index left) (wasm-export-index right)))))
+
+(define wasm-element=?
+  (lambda (left right)
+    (and (wasm-element? right)
+         (eq? (wasm-element-mode left) (wasm-element-mode right))
+         (wasm-value=? (wasm-element-reference-type left)
+                       (wasm-element-reference-type right))
+         (wasm-value=? (wasm-element-table-index left) (wasm-element-table-index right))
+         (wasm-value=? (wasm-element-offset left) (wasm-element-offset right))
+         (wasm-vector=? (wasm-element-initializers left)
+                        (wasm-element-initializers right)
+                        wasm-value=?))))
+
+(define wasm-data=?
+  (lambda (left right)
+    (and (wasm-data? right)
+         (eq? (wasm-data-mode left) (wasm-data-mode right))
+         (wasm-value=? (wasm-data-memory-index left) (wasm-data-memory-index right))
+         (wasm-value=? (wasm-data-offset left) (wasm-data-offset right))
+         (equal? (wasm-data-bytes left) (wasm-data-bytes right)))))
+
+(define wasm-custom-section=?
+  (lambda (left right)
+    (and (wasm-custom-section? right)
+         (string=? (wasm-custom-section-name left) (wasm-custom-section-name right))
+         (equal? (wasm-custom-section-bytes left) (wasm-custom-section-bytes right))
+         (or (not (wasm-custom-section-after-section left))
+             (not (wasm-custom-section-after-section right))
+             (eq? (wasm-custom-section-after-section left)
+                  (wasm-custom-section-after-section right))))))
+
+(define wasm-instruction=?
+  (lambda (left right)
+    (and (wasm-instruction? right)
+         (eq? (wasm-instruction-mnemonic left) (wasm-instruction-mnemonic right))
+         (wasm-vector=? (wasm-instruction-immediates left)
+                        (wasm-instruction-immediates right)
+                        wasm-value=?)
+         (wasm-vector=? (wasm-instruction-body left) (wasm-instruction-body right) wasm-value=?)
+         (wasm-vector=? (wasm-instruction-alternate left)
+                        (wasm-instruction-alternate right)
+                        wasm-value=?))))
+
+(define wasm-memory-argument=?
+  (lambda (left right)
+    (and (wasm-memory-argument? right)
+         (= (wasm-memory-argument-alignment left) (wasm-memory-argument-alignment right))
+         (= (wasm-memory-argument-offset left) (wasm-memory-argument-offset right))
+         (= (wasm-memory-argument-memory-index left)
+            (wasm-memory-argument-memory-index right)))))
+
+(define wasm-block-type=?
+  (lambda (left right)
+    (and (wasm-block-type? right)
+         (eq? (wasm-block-type-kind left) (wasm-block-type-kind right))
+         (wasm-value=? (wasm-block-type-value left) (wasm-block-type-value right)))))
+
+(define wasm-catch=?
+  (lambda (left right)
+    (and (wasm-catch? right)
+         (eq? (wasm-catch-kind left) (wasm-catch-kind right))
+         (wasm-value=? (wasm-catch-tag-index left) (wasm-catch-tag-index right))
+         (= (wasm-catch-label-index left) (wasm-catch-label-index right)))))
+
+(define wasm-float=?
+  (lambda (left right)
+    (and (wasm-float? right)
+         (= (wasm-float-width left) (wasm-float-width right))
+         (= (wasm-float-bits left) (wasm-float-bits right)))))
+
+(define wasm-module=?
+  (lambda (left right)
+    (and (wasm-module? right)
+         (wasm-vector=? (wasm-module-types left) (wasm-module-types right) wasm-value=?)
+         (wasm-vector=? (wasm-module-imports left) (wasm-module-imports right) wasm-value=?)
+         (wasm-vector=? (wasm-module-functions left) (wasm-module-functions right) wasm-value=?)
+         (wasm-vector=? (wasm-module-tables left) (wasm-module-tables right) wasm-value=?)
+         (wasm-vector=? (wasm-module-memories left) (wasm-module-memories right) wasm-value=?)
+         (wasm-vector=? (wasm-module-globals left) (wasm-module-globals right) wasm-value=?)
+         (wasm-vector=? (wasm-module-tags left) (wasm-module-tags right) wasm-value=?)
+         (wasm-vector=? (wasm-module-exports left) (wasm-module-exports right) wasm-value=?)
+         (wasm-value=? (wasm-module-start left) (wasm-module-start right))
+         (wasm-vector=? (wasm-module-elements left) (wasm-module-elements right) wasm-value=?)
+         (wasm-vector=? (wasm-module-data left) (wasm-module-data right) wasm-value=?)
+         (wasm-vector=? (wasm-module-custom-sections left)
+                        (wasm-module-custom-sections right)
+                        wasm-value=?))))
+
+(mat wasm-fixtures
+
+     (let* ([module (parse-wasm-binary-module-file "data/example.wasm")]
+            [function (vector-ref (wasm-module-functions module) 0)]
+            [export (vector-ref (wasm-module-exports module) 0)])
+       (and (= 1 (vector-length (wasm-module-types module)))
+            (= 1 (vector-length (wasm-module-functions module)))
+            (= 1 (vector-length (wasm-module-exports module)))
+            (equal? '#(i32 i32)
+                    (wasm-function-type-parameters
+                     (wasm-subtype-composite-type
+                      (vector-ref
+                       (wasm-recursive-type-subtypes (vector-ref (wasm-module-types module) 0))
+                       0))))
+            (equal? '#(i32)
+                    (wasm-function-type-results
+                     (wasm-subtype-composite-type
+                      (vector-ref
+                       (wasm-recursive-type-subtypes (vector-ref (wasm-module-types module) 0))
+                       0))))
+            (= 0 (wasm-function-type-index function))
+            (string=? "add" (wasm-export-name export))
+            (eq? 'function (wasm-export-kind export))
+            (= 0 (wasm-export-index export))
+            (equal? '(local.get local.get i32.add)
+                    (map wasm-instruction-mnemonic
+                         (vector->list (wasm-function-body function))))))
+
+     (let* ([module (parse-wasm-binary-module-file "data/fibonacci.wasm")]
+            [table (vector-ref (wasm-module-tables module) 0)]
+            [memory (vector-ref (wasm-module-memories module) 0)]
+            [element (vector-ref (wasm-module-elements module) 0)]
+            [data (vector-ref (wasm-module-data module) 0)]
+            [export-name* (vector-map wasm-export-name (wasm-module-exports module))]
+            [custom-name* (vector-map wasm-custom-section-name
+                                      (wasm-module-custom-sections module))])
+       (and (= 11 (vector-length (wasm-module-types module)))
+            (= 57 (vector-length (wasm-module-functions module)))
+            (= 1 (vector-length (wasm-module-tables module)))
+            (= 18 (wasm-limits-minimum (wasm-table-type-limits (wasm-table-type table))))
+            (= 18 (wasm-limits-maximum (wasm-table-type-limits (wasm-table-type table))))
+            (= 1 (vector-length (wasm-module-memories module)))
+            (= 17 (wasm-limits-minimum (wasm-memory-type-limits (wasm-memory-type memory))))
+            (= 3 (vector-length (wasm-module-globals module)))
+            (= 4 (vector-length (wasm-module-exports module)))
+            (equal? '#("memory" "fibonacci" "__data_end" "__heap_base") export-name*)
+            (= 1 (vector-length (wasm-module-elements module)))
+            (eq? 'active (wasm-element-mode element))
+            (= 17 (vector-length (wasm-element-initializers element)))
+            (= 1 (vector-length (wasm-module-data module)))
+            (eq? 'active (wasm-data-mode data))
+            (= 916 (bytevector-length (wasm-data-bytes data)))
+            (wasm-vector-any? (lambda (name) (string=? "name" name)) custom-name*)))
+
+     (let ([text-module (parse-wasm-text-module-file "data/wasm-core3.wat")]
+           [binary-module (parse-wasm-binary-module-file "data/wasm-core3.wasm")])
+       (wasm-module=? text-module binary-module))
+
+     )
