@@ -1,7 +1,6 @@
 #include "common.h"
 
 #include <arpa/inet.h>
-#include <blake3.h>
 #include <openssl/core_names.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>

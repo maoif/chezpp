@@ -77,6 +77,10 @@ test-some: mat.so $(TEST_OBJS)
 test-cov: $(SRCS_TESTS)
 	echo todo
 
+.PHONY: test-optional-hash-linkage
+test-optional-hash-linkage:
+	@./optional-hash-linkage.sh
+
 .PHONY: clean
 clean:
 	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr

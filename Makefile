@@ -9,7 +9,8 @@ SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
 SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c')
 
 CC := gcc
-CFLAGS := -fPIC -Wall -Wextra -O2 -shared -luuid -lssl -lcrypto -lxxhash -lblake3
+CFLAGS := -fPIC -Wall -Wextra -O2 -shared
+LDLIBS := -luuid -lssl -lcrypto -ldl
 
 chezpplibs = chezpp.lib \
              chezpp/concurrency/fiber.lib
@@ -36,7 +37,7 @@ run: chez++
 	@./chez++
 
 libchezpp.so:
-	$(CC) $(CFLAGS) -o $@ $(SRCS_C)
+	$(CC) $(CFLAGS) -o $@ $(SRCS_C) $(LDLIBS)
 
 ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
 	@echo '(optimize-level 1)' \

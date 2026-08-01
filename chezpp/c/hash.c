@@ -1,6 +1,5 @@
 #include "common.h"
-
-#include <xxhash.h>
+#include "xxhash-0.8-abi.h"
 
 //=======================================================================
 // xxhash

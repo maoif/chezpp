@@ -79,6 +79,15 @@
       (unless (memq which *hashers*)
         (errorf who "valid hash algorithm is one of ~a" *hashers*))))
 
+  (define ffi-xxhash-load-error
+    (foreign-procedure "chezpp_xxhash_load_error" () ptr))
+
+  (define ensure-xxhash
+    (lambda (who)
+      (let ([message (ffi-xxhash-load-error)])
+        (when message
+          (error who message)))))
+
 
 ;;;;===----------------------------------------------------------------------===
 ;;;;  specialized interface
@@ -125,6 +134,7 @@
            [(x) (name x 0)]
            [(x salt)
             (pcheck ([x? x] [fixnum? salt])
+                    (ensure-xxhash who)
                     ;; salt + tag safe?
                     (ffi (cvt x) (fx+ salt tag)))]))]))
 
@@ -153,6 +163,7 @@
            [(x) (name x 0)]
            [(x salt)
             (pcheck ([x? x] [fixnum? salt])
+                    (ensure-xxhash who)
                     (let ([p1 (get-p1 x)] [p2 (get-p2 x)])
                       (ffi p1 p2 (fx+ salt tag))))]))]))
 
@@ -178,6 +189,7 @@
             (pcheck ([x? x]) (name x salt start (x-length x)))]
            [(x salt start stop)
             (pcheck ([x? x] [natural? start stop] [fixnum? salt])
+                    (ensure-xxhash who)
                     (let ([len (x-length x)])
                       (when (fx> start stop)
                         (errorf who "start index ~a is greater than stop index ~a" start stop))
@@ -220,9 +232,9 @@
                         (errorf who "start index ~a is greater than stop index ~a" start stop))
                       (when (fx> stop len)
                         (errorf who "stop index ~a is greater than file length ~a" stop len))
-                      (let ([port (open-file-input-port path)]
-                            [bv (make-bytevector 4096 0)]
-                            [hashsher (make-hasher 'which salt)])
+                      (let* ([hashsher (make-hasher 'which salt)]
+                             [port (open-file-input-port path)]
+                             [bv (make-bytevector 4096 0)])
                         (set-port-position! port start)
                         (let loop ([remaining (fx- stop start)])
                           (if (fx= 0 remaining)
@@ -319,6 +331,7 @@
       [(which salt)
        (pcheck ([fixnum? salt])
                (check-hasher who which)
+               (ensure-xxhash who)
                (case which
                  [xxhash32 (mk-hasher (ffi-xxh32-create salt)
                                       ffi-xxh32-get
