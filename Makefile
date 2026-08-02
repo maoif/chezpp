@@ -1,8 +1,8 @@
 SCHEME := scheme
 SCHEME_SCRIPT := $(or $(shell command -v $(SCHEME) 2>/dev/null),$(SCHEME))
+SCHEME_EXE := $(realpath $(SCHEME_SCRIPT))
+SCHEME_INCLUDE_DIR := $(dir $(SCHEME_EXE))
 PREFIX := /usr
-
-# TODO include Chez header file
 
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
 SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
@@ -10,6 +10,7 @@ SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c')
 
 CC := gcc
 CFLAGS := -fPIC -Wall -Wextra -O2 -shared
+CFLAGS += -I$(SCHEME_INCLUDE_DIR)
 LDLIBS := -luuid -lssl -lcrypto -ldl
 
 chezpplibs = chezpp.lib \
@@ -36,7 +37,25 @@ all: chez++
 run: chez++
 	@./chez++
 
-libchezpp.so:
+.PHONY: check-scheme-header
+check-scheme-header:
+	@header='$(SCHEME_INCLUDE_DIR)/scheme.h'; \
+	if [ ! -r "$$header" ]; then \
+	  echo "error: ChezScheme header not found or unreadable: $$header" >&2; \
+	  exit 1; \
+	fi; \
+	header_version=$$(sed -n 's/^#define VERSION "\([^"]*\)"/\1/p' "$$header" | head -n 1); \
+	if [ -z "$$header_version" ]; then \
+	  echo "error: ChezScheme header version not found in $$header" >&2; \
+	  exit 1; \
+	fi; \
+	scheme_version=$$($(SCHEME) --version 2>&1); \
+	if [ "$$header_version" != "$$scheme_version" ]; then \
+	  echo "error: ChezScheme header version mismatch: $$header reports $$header_version; $(SCHEME) reports $$scheme_version" >&2; \
+	  exit 1; \
+	fi
+
+libchezpp.so: check-scheme-header
 	$(CC) $(CFLAGS) -o $@ $(SRCS_C) $(LDLIBS)
 
 ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so

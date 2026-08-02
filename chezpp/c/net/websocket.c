@@ -83,6 +83,7 @@ typedef struct lws_vhost *(*lws_get_vhost_by_name_fn)(struct lws_context *, cons
 typedef int (*lws_get_vhost_listen_port_fn)(struct lws_vhost *);
 
 static void *websocket_handle = NULL;
+static struct lws_context *websocket_lifetime_context = NULL;
 static lws_create_context_fn p_lws_create_context = NULL;
 static lws_context_destroy_fn p_lws_context_destroy = NULL;
 static lws_client_connect_via_info_fn p_lws_client_connect_via_info = NULL;
@@ -244,6 +245,27 @@ static int ensure_websocket_loaded(void) {
       p_lws_set_log_level(0, NULL);
   }
   return 1;
+}
+
+static int ensure_websocket_lifetime_context(void) {
+  struct lws_context_creation_info info;
+
+  if (websocket_lifetime_context != NULL) return 1;
+
+  memset(&info, 0, sizeof(info));
+  info.port = CONTEXT_PORT_NO_LISTEN;
+  info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+  info.gid = (gid_t)-1;
+  info.uid = (uid_t)-1;
+  websocket_lifetime_context = p_lws_create_context(&info);
+  return websocket_lifetime_context != NULL;
+}
+
+__attribute__((destructor)) static void release_websocket_lifetime_context(void) {
+  if (websocket_lifetime_context != NULL && p_lws_context_destroy != NULL) {
+    p_lws_context_destroy(websocket_lifetime_context);
+    websocket_lifetime_context = NULL;
+  }
 }
 
 static void register_context(struct lws_context *context) {
@@ -630,6 +652,8 @@ ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol
 
   if (!ensure_websocket_loaded())
     return make_error_status_message("failed to load libwebsockets");
+  if (!ensure_websocket_lifetime_context())
+    return make_error_status_message("failed to initialize libwebsockets");
 
   server = (chezpp_ws_server *)calloc(1, sizeof(chezpp_ws_server));
   if (server == NULL) return make_status("error", errno_str());
@@ -733,6 +757,8 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
 
   if (!ensure_websocket_loaded())
     return make_error_status_message("failed to load libwebsockets");
+  if (!ensure_websocket_lifetime_context())
+    return make_error_status_message("failed to initialize libwebsockets");
 
   conn = (chezpp_ws_connection *)calloc(1, sizeof(chezpp_ws_connection));
   if (conn == NULL) return make_status("error", errno_str());
