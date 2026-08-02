@@ -1,5 +1,3 @@
-(define rpc-echo-example-host "127.0.0.1")
-(define rpc-echo-example-port 41116)
 (define grpc-echo-example-host "127.0.0.1")
 (define grpc-echo-example-port 41117)
 

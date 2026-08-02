@@ -7,7 +7,6 @@
 (define ftp-file-transfer-port 41003)
 (define sftp-file-transfer-port 41004)
 (define websocket-file-transfer-port 41005)
-(define rpc-file-transfer-port 41006)
 (define grpc-file-transfer-port 41007)
 
 (define file-transfer-done-marker-name ".chezpp-upload.done")

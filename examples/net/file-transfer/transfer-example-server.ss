@@ -8,7 +8,6 @@
       [(ftp) ftp-file-server]
       [(sftp) sftp-file-server]
       [(websocket) websocket-file-server]
-      [(rpc) rpc-file-server]
       [(grpc) grpc-file-server]
       [else
        (errorf 'transfer-example-server
