@@ -81,6 +81,10 @@ test-cov: $(SRCS_TESTS)
 test-optional-hash-linkage:
 	@./optional-hash-linkage.sh
 
+.PHONY: test-optional-library-loader
+test-optional-library-loader:
+	@./optional-library-loader.sh
+
 .PHONY: clean
 clean:
 	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr
