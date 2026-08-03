@@ -104,6 +104,7 @@
           ffi-net-sftp-flag-truncate
           ffi-net-sftp-flag-exclusive
           ffi-net-sftp-flag-text
+          ffi-net-tls-load-error
           ffi-net-tls-context-create
           ffi-net-tls-context-free
           ffi-net-tls-context-load-ca-file
@@ -349,6 +350,8 @@
     (foreign-procedure "chezpp_net_sftp_flag_exclusive" () int))
   (define ffi-net-sftp-flag-text
     (foreign-procedure "chezpp_net_sftp_flag_text" () int))
+  (define ffi-net-tls-load-error
+    (foreign-procedure "chezpp_net_tls_load_error" () ptr))
   (define ffi-net-tls-context-create
     (foreign-procedure "chezpp_net_tls_context_create" (int) uptr))
   (define ffi-net-tls-context-free

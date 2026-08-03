@@ -11,7 +11,7 @@ SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c')
 CC := gcc
 CFLAGS := -fPIC -Wall -Wextra -O2 -shared -pthread
 CFLAGS += -I$(SCHEME_INCLUDE_DIR)
-LDLIBS := -luuid -lssl -lcrypto -ldl
+LDLIBS := -luuid -ldl
 
 chezpplibs = chezpp.lib \
              chezpp/concurrency/fiber.lib

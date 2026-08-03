@@ -14,6 +14,7 @@ The `random-status` procedure returns `#t` when the OpenSSL random source is rea
 |#
   (define random-status
     (lambda ()
+      (ensure-openssl 'random-status)
       (not (fx= 0 (ffi-random-status)))))
 
   #|proc:random-bytes
@@ -22,6 +23,7 @@ The `random-bytes` procedure returns a fresh random bytevector of length `len`.
   (define-who random-bytes
     (lambda (len)
       (pcheck ([natural? len])
+              (ensure-openssl who)
               (let ([bv (ffi-random-bytevector len)])
                 (when (eq? bv #f)
                   (errorf who "failed to obtain random bytes"))
@@ -53,6 +55,7 @@ The `random-bytes!` procedure fills a bytevector slice with random bytes.
       [(bv start stop)
        (pcheck ([bytevector? bv])
                (check-slice who (bytevector-length bv) start stop)
+               (ensure-openssl who)
                (when (fx= 0 (ffi-random-fill! bv start stop))
                  (errorf who "failed to fill bytevector with random bytes"))
                bv)]))

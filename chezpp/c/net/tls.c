@@ -1,4 +1,5 @@
 #include "../common.h"
+#include "../openssl_loader.h"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -30,26 +31,31 @@ static ptr make_error_status_message(const char *msg) { return make_status("erro
 
 static ptr make_errno_status(const char *tag) { return make_status(tag, errno_str()); }
 
-static void ensure_tls_init() {
-  static int initialized = 0;
-  if (!initialized) {
-    OPENSSL_init_ssl(0, NULL);
-    initialized = 1;
-  }
+static int ensure_tls_init(void) {
+  return chezpp_openssl_require();
+}
+
+ptr chezpp_net_tls_load_error(void) {
+  const char *error;
+
+  if (ensure_tls_init()) return Sfalse;
+  error = chezpp_optional_library_error(
+      (chezpp_optional_library *)chezpp_openssl_library());
+  return error == NULL || error[0] == '\0' ? Sfalse : Sstring(error);
 }
 
 static ptr openssl_error_status(const char *fallback) {
   char buffer[256];
-  unsigned long err = ERR_get_error();
+  unsigned long err = chezpp_openssl_ERR_get_error();
   if (err != 0) {
-    ERR_error_string_n(err, buffer, sizeof(buffer));
+    chezpp_openssl_ERR_error_string_n(err, buffer, sizeof(buffer));
     return make_status("error", Sstring(buffer));
   }
   return make_error_status_message(fallback);
 }
 
 static ptr ssl_result_status(SSL *ssl, int rc, const char *fallback) {
-  int err = SSL_get_error(ssl, rc);
+  int err = chezpp_openssl_SSL_get_error(ssl, rc);
   switch (err) {
   case SSL_ERROR_WANT_READ:
     return make_status("would-block-read", Sfalse);
@@ -131,12 +137,12 @@ static ptr x509_to_der_bytevector(X509 *cert) {
   ptr out;
 
   if (cert == NULL) return Sfalse;
-  len = i2d_X509(cert, NULL);
+  len = chezpp_openssl_i2d_X509(cert, NULL);
   if (len <= 0) return Sfalse;
   buf = (unsigned char *)malloc((size_t)len);
   if (buf == NULL) return make_errno_status("error");
   p = buf;
-  if (i2d_X509(cert, &p) != len) {
+  if (chezpp_openssl_i2d_X509(cert, &p) != len) {
     free(buf);
     return Sfalse;
   }
@@ -153,7 +159,7 @@ static int server_alpn_select_cb(SSL *ssl, const unsigned char **out, unsigned c
   (void)ssl;
 
   if (ctx == NULL || ctx->alpn == NULL || ctx->alpn_len == 0) return SSL_TLSEXT_ERR_NOACK;
-  if (SSL_select_next_proto(&selected, outlen, ctx->alpn, ctx->alpn_len, in, inlen) !=
+  if (chezpp_openssl_SSL_select_next_proto(&selected, outlen, ctx->alpn, ctx->alpn_len, in, inlen) !=
       OPENSSL_NPN_NEGOTIATED)
     return SSL_TLSEXT_ERR_NOACK;
   *out = selected;
@@ -161,26 +167,26 @@ static int server_alpn_select_cb(SSL *ssl, const unsigned char **out, unsigned c
 }
 
 static X509 *load_x509_from_memory(unsigned char *data, int len, int format) {
-  BIO *bio = BIO_new_mem_buf(data, len);
+  BIO *bio = chezpp_openssl_BIO_new_mem_buf(data, len);
   X509 *cert = NULL;
   if (bio == NULL) return NULL;
   if (format == 0)
-    cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+    cert = chezpp_openssl_PEM_read_bio_X509(bio, NULL, NULL, NULL);
   else
-    cert = d2i_X509_bio(bio, NULL);
-  BIO_free(bio);
+    cert = chezpp_openssl_d2i_X509_bio(bio, NULL);
+  chezpp_openssl_BIO_free(bio);
   return cert;
 }
 
 static EVP_PKEY *load_pkey_from_memory(unsigned char *data, int len, int format) {
-  BIO *bio = BIO_new_mem_buf(data, len);
+  BIO *bio = chezpp_openssl_BIO_new_mem_buf(data, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
   if (format == 0)
-    pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+    pkey = chezpp_openssl_PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
   else
-    pkey = d2i_PrivateKey_bio(bio, NULL);
-  BIO_free(bio);
+    pkey = chezpp_openssl_d2i_PrivateKey_bio(bio, NULL);
+  chezpp_openssl_BIO_free(bio);
   return pkey;
 }
 
@@ -197,21 +203,22 @@ uptr chezpp_net_tls_context_create(int mode) {
   SSL_CTX *ctx;
   chezpp_tls_context *wrapper;
 
-  ensure_tls_init();
-  method = mode == 1 ? TLS_server_method() : TLS_client_method();
-  ctx = SSL_CTX_new(method);
+  if (!ensure_tls_init()) return 0;
+  method = mode == 1 ? chezpp_openssl_TLS_server_method() : chezpp_openssl_TLS_client_method();
+  ctx = chezpp_openssl_SSL_CTX_new(method);
   if (ctx == NULL) return 0;
-  SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+  chezpp_openssl_SSL_CTX_ctrl(ctx, SSL_CTRL_SET_MIN_PROTO_VERSION,
+                              TLS1_2_VERSION, NULL);
   if (mode == 0) {
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-    (void)SSL_CTX_set_default_verify_paths(ctx);
+    chezpp_openssl_SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    (void)chezpp_openssl_SSL_CTX_set_default_verify_paths(ctx);
   } else {
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+    chezpp_openssl_SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
   }
 
   wrapper = (chezpp_tls_context *)calloc(1, sizeof(chezpp_tls_context));
   if (wrapper == NULL) {
-    SSL_CTX_free(ctx);
+    chezpp_openssl_SSL_CTX_free(ctx);
     return 0;
   }
   wrapper->ctx = ctx;
@@ -222,7 +229,7 @@ uptr chezpp_net_tls_context_create(int mode) {
 void chezpp_net_tls_context_free(uptr handle) {
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   if (ctx == NULL) return;
-  if (ctx->ctx != NULL) SSL_CTX_free(ctx->ctx);
+  if (ctx->ctx != NULL) chezpp_openssl_SSL_CTX_free(ctx->ctx);
   if (ctx->alpn != NULL) free(ctx->alpn);
   free(ctx);
 }
@@ -230,7 +237,7 @@ void chezpp_net_tls_context_free(uptr handle) {
 ptr chezpp_net_tls_context_load_ca_file(uptr handle, const char *path) {
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
-  if (SSL_CTX_load_verify_locations(ctx->ctx, path, NULL) != 1)
+  if (chezpp_openssl_SSL_CTX_load_verify_locations(ctx->ctx, path, NULL) != 1)
     return openssl_error_status("failed to load CA file");
   return Strue;
 }
@@ -238,7 +245,7 @@ ptr chezpp_net_tls_context_load_ca_file(uptr handle, const char *path) {
 ptr chezpp_net_tls_context_load_ca_path(uptr handle, const char *path) {
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
-  if (SSL_CTX_load_verify_locations(ctx->ctx, NULL, path) != 1)
+  if (chezpp_openssl_SSL_CTX_load_verify_locations(ctx->ctx, NULL, path) != 1)
     return openssl_error_status("failed to load CA path");
   return Strue;
 }
@@ -246,7 +253,7 @@ ptr chezpp_net_tls_context_load_ca_path(uptr handle, const char *path) {
 ptr chezpp_net_tls_context_load_default_ca(uptr handle) {
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
-  if (SSL_CTX_set_default_verify_paths(ctx->ctx) != 1)
+  if (chezpp_openssl_SSL_CTX_set_default_verify_paths(ctx->ctx) != 1)
     return openssl_error_status("failed to load default TLS verify paths");
   return Strue;
 }
@@ -256,9 +263,9 @@ ptr chezpp_net_tls_context_load_cert_file(uptr handle, const char *path, int for
   int rc;
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
   if (format == 0)
-    rc = SSL_CTX_use_certificate_chain_file(ctx->ctx, path);
+    rc = chezpp_openssl_SSL_CTX_use_certificate_chain_file(ctx->ctx, path);
   else
-    rc = SSL_CTX_use_certificate_file(ctx->ctx, path, SSL_FILETYPE_ASN1);
+    rc = chezpp_openssl_SSL_CTX_use_certificate_file(ctx->ctx, path, SSL_FILETYPE_ASN1);
   if (rc != 1) return openssl_error_status("failed to load TLS certificate");
   return Strue;
 }
@@ -269,11 +276,11 @@ ptr chezpp_net_tls_context_load_cert_bytes(uptr handle, ptr bv, int start, int s
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
   cert = load_x509_from_memory(Sbytevector_data(bv) + start, stop - start, format);
   if (cert == NULL) return openssl_error_status("failed to parse TLS certificate");
-  if (SSL_CTX_use_certificate(ctx->ctx, cert) != 1) {
-    X509_free(cert);
+  if (chezpp_openssl_SSL_CTX_use_certificate(ctx->ctx, cert) != 1) {
+    chezpp_openssl_X509_free(cert);
     return openssl_error_status("failed to install TLS certificate");
   }
-  X509_free(cert);
+  chezpp_openssl_X509_free(cert);
   return Strue;
 }
 
@@ -281,7 +288,7 @@ ptr chezpp_net_tls_context_load_key_file(uptr handle, const char *path, int form
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   int filetype = format == 0 ? SSL_FILETYPE_PEM : SSL_FILETYPE_ASN1;
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
-  if (SSL_CTX_use_PrivateKey_file(ctx->ctx, path, filetype) != 1)
+  if (chezpp_openssl_SSL_CTX_use_PrivateKey_file(ctx->ctx, path, filetype) != 1)
     return openssl_error_status("failed to load TLS private key");
   return Strue;
 }
@@ -292,18 +299,18 @@ ptr chezpp_net_tls_context_load_key_bytes(uptr handle, ptr bv, int start, int st
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
   pkey = load_pkey_from_memory(Sbytevector_data(bv) + start, stop - start, format);
   if (pkey == NULL) return openssl_error_status("failed to parse TLS private key");
-  if (SSL_CTX_use_PrivateKey(ctx->ctx, pkey) != 1) {
-    EVP_PKEY_free(pkey);
+  if (chezpp_openssl_SSL_CTX_use_PrivateKey(ctx->ctx, pkey) != 1) {
+    chezpp_openssl_EVP_PKEY_free(pkey);
     return openssl_error_status("failed to install TLS private key");
   }
-  EVP_PKEY_free(pkey);
+  chezpp_openssl_EVP_PKEY_free(pkey);
   return Strue;
 }
 
 ptr chezpp_net_tls_context_check_key(uptr handle) {
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
-  if (SSL_CTX_check_private_key(ctx->ctx) != 1)
+  if (chezpp_openssl_SSL_CTX_check_private_key(ctx->ctx) != 1)
     return openssl_error_status("TLS certificate/private-key mismatch");
   return Strue;
 }
@@ -311,7 +318,7 @@ ptr chezpp_net_tls_context_check_key(uptr handle) {
 ptr chezpp_net_tls_context_set_verify(uptr handle, int verify_mode) {
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
-  SSL_CTX_set_verify(ctx->ctx, verify_mode ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, NULL);
+  chezpp_openssl_SSL_CTX_set_verify(ctx->ctx, verify_mode ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, NULL);
   return Sboolean(verify_mode);
 }
 
@@ -336,10 +343,10 @@ ptr chezpp_net_tls_context_set_alpn(uptr handle, ptr bv, int start, int stop) {
   ctx->alpn_len = (unsigned int)len;
 
   if (ctx->mode == 0) {
-    if (SSL_CTX_set_alpn_protos(ctx->ctx, ctx->alpn, ctx->alpn_len) != 0)
+    if (chezpp_openssl_SSL_CTX_set_alpn_protos(ctx->ctx, ctx->alpn, ctx->alpn_len) != 0)
       return openssl_error_status("failed to configure TLS ALPN");
   } else {
-    SSL_CTX_set_alpn_select_cb(ctx->ctx, server_alpn_select_cb, ctx);
+    chezpp_openssl_SSL_CTX_set_alpn_select_cb(ctx->ctx, server_alpn_select_cb, ctx);
   }
   return Strue;
 }
@@ -356,35 +363,37 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
   if (timeout_ms >= 0 && !current_time_ms(&start_ms)) return make_errno_status("error");
   if (!set_socket_nonblocking_temporarily(fd, &saved_flags, &changed)) return make_errno_status("error");
-  ssl = SSL_new(ctx->ctx);
+  ssl = chezpp_openssl_SSL_new(ctx->ctx);
   if (ssl == NULL) {
     restore_socket_flags(fd, saved_flags, changed);
     return openssl_error_status("failed to create TLS session");
   }
   if (server_name != NULL && server_name[0] != '\0') {
-    if (SSL_set_tlsext_host_name(ssl, server_name) != 1) {
+    if (chezpp_openssl_SSL_ctrl(ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME,
+                                TLSEXT_NAMETYPE_host_name,
+                                (void *)server_name) != 1) {
       restore_socket_flags(fd, saved_flags, changed);
-      SSL_free(ssl);
+      chezpp_openssl_SSL_free(ssl);
       return openssl_error_status("failed to configure TLS SNI");
     }
-    if (X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), server_name) != 1 &&
-        SSL_set1_host(ssl, server_name) != 1) {
+    if (chezpp_openssl_X509_VERIFY_PARAM_set1_ip_asc(chezpp_openssl_SSL_get0_param(ssl), server_name) != 1 &&
+        chezpp_openssl_SSL_set1_host(ssl, server_name) != 1) {
       restore_socket_flags(fd, saved_flags, changed);
-      SSL_free(ssl);
+      chezpp_openssl_SSL_free(ssl);
       return openssl_error_status("failed to configure TLS hostname verification");
     }
   }
-  if (SSL_set_fd(ssl, fd) != 1) {
+  if (chezpp_openssl_SSL_set_fd(ssl, fd) != 1) {
     restore_socket_flags(fd, saved_flags, changed);
-    SSL_free(ssl);
+    chezpp_openssl_SSL_free(ssl);
     return openssl_error_status("failed to attach TLS session to socket");
   }
 
   for (;;) {
-    rc = SSL_connect(ssl);
+    rc = chezpp_openssl_SSL_connect(ssl);
     if (rc == 1) break;
     {
-      int err = SSL_get_error(ssl, rc);
+      int err = chezpp_openssl_SSL_get_error(ssl, rc);
       int wait_rc;
       int remaining;
       switch (err) {
@@ -394,12 +403,12 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
           remaining = remaining_timeout_ms(timeout_ms, start_ms);
           if (remaining < 0) {
             restore_socket_flags(fd, saved_flags, changed);
-            SSL_free(ssl);
+            chezpp_openssl_SSL_free(ssl);
             return make_errno_status("error");
           }
           if (remaining == 0) {
             restore_socket_flags(fd, saved_flags, changed);
-            SSL_free(ssl);
+            chezpp_openssl_SSL_free(ssl);
             return make_timeout_status("TLS client handshake timed out");
           }
         } else {
@@ -408,16 +417,16 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
         wait_rc = wait_for_fd_event(fd, err == SSL_ERROR_WANT_WRITE, remaining);
         if (wait_rc > 0) continue;
         restore_socket_flags(fd, saved_flags, changed);
-        SSL_free(ssl);
+        chezpp_openssl_SSL_free(ssl);
         if (wait_rc == 0) return make_timeout_status("TLS client handshake timed out");
         return make_errno_status("error");
       default: {
-        long verify_result = SSL_get_verify_result(ssl);
+        long verify_result = chezpp_openssl_SSL_get_verify_result(ssl);
         ptr status = verify_result == X509_V_OK
                          ? ssl_result_status(ssl, rc, "TLS client handshake failed")
-                         : make_error_status_message(X509_verify_cert_error_string(verify_result));
+                         : make_error_status_message(chezpp_openssl_X509_verify_cert_error_string(verify_result));
         restore_socket_flags(fd, saved_flags, changed);
-        SSL_free(ssl);
+        chezpp_openssl_SSL_free(ssl);
         return status;
       }
       }
@@ -427,7 +436,7 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
   session = (chezpp_tls_session *)calloc(1, sizeof(chezpp_tls_session));
   if (session == NULL) {
     restore_socket_flags(fd, saved_flags, changed);
-    SSL_free(ssl);
+    chezpp_openssl_SSL_free(ssl);
     return make_errno_status("error");
   }
   session->ssl = ssl;
@@ -449,22 +458,22 @@ ptr chezpp_net_tls_accept(uptr handle, int fd, int timeout_ms) {
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
   if (timeout_ms >= 0 && !current_time_ms(&start_ms)) return make_errno_status("error");
   if (!set_socket_nonblocking_temporarily(fd, &saved_flags, &changed)) return make_errno_status("error");
-  ssl = SSL_new(ctx->ctx);
+  ssl = chezpp_openssl_SSL_new(ctx->ctx);
   if (ssl == NULL) {
     restore_socket_flags(fd, saved_flags, changed);
     return openssl_error_status("failed to create TLS session");
   }
-  if (SSL_set_fd(ssl, fd) != 1) {
+  if (chezpp_openssl_SSL_set_fd(ssl, fd) != 1) {
     restore_socket_flags(fd, saved_flags, changed);
-    SSL_free(ssl);
+    chezpp_openssl_SSL_free(ssl);
     return openssl_error_status("failed to attach TLS session to socket");
   }
 
   for (;;) {
-    rc = SSL_accept(ssl);
+    rc = chezpp_openssl_SSL_accept(ssl);
     if (rc == 1) break;
     {
-      int err = SSL_get_error(ssl, rc);
+      int err = chezpp_openssl_SSL_get_error(ssl, rc);
       int wait_rc;
       int remaining;
       switch (err) {
@@ -474,12 +483,12 @@ ptr chezpp_net_tls_accept(uptr handle, int fd, int timeout_ms) {
           remaining = remaining_timeout_ms(timeout_ms, start_ms);
           if (remaining < 0) {
             restore_socket_flags(fd, saved_flags, changed);
-            SSL_free(ssl);
+            chezpp_openssl_SSL_free(ssl);
             return make_errno_status("error");
           }
           if (remaining == 0) {
             restore_socket_flags(fd, saved_flags, changed);
-            SSL_free(ssl);
+            chezpp_openssl_SSL_free(ssl);
             return make_timeout_status("TLS server handshake timed out");
           }
         } else {
@@ -488,13 +497,13 @@ ptr chezpp_net_tls_accept(uptr handle, int fd, int timeout_ms) {
         wait_rc = wait_for_fd_event(fd, err == SSL_ERROR_WANT_WRITE, remaining);
         if (wait_rc > 0) continue;
         restore_socket_flags(fd, saved_flags, changed);
-        SSL_free(ssl);
+        chezpp_openssl_SSL_free(ssl);
         if (wait_rc == 0) return make_timeout_status("TLS server handshake timed out");
         return make_errno_status("error");
       default: {
         ptr status = ssl_result_status(ssl, rc, "TLS server handshake failed");
         restore_socket_flags(fd, saved_flags, changed);
-        SSL_free(ssl);
+        chezpp_openssl_SSL_free(ssl);
         return status;
       }
       }
@@ -504,7 +513,7 @@ ptr chezpp_net_tls_accept(uptr handle, int fd, int timeout_ms) {
   session = (chezpp_tls_session *)calloc(1, sizeof(chezpp_tls_session));
   if (session == NULL) {
     restore_socket_flags(fd, saved_flags, changed);
-    SSL_free(ssl);
+    chezpp_openssl_SSL_free(ssl);
     return make_errno_status("error");
   }
   session->ssl = ssl;
@@ -517,7 +526,7 @@ ptr chezpp_net_tls_accept(uptr handle, int fd, int timeout_ms) {
 ptr chezpp_net_tls_close(uptr handle) {
   chezpp_tls_session *session = session_from_handle(handle);
   if (session == NULL) return Strue;
-  if (session->ssl != NULL) SSL_free(session->ssl);
+  if (session->ssl != NULL) chezpp_openssl_SSL_free(session->ssl);
   free(session);
   return Strue;
 }
@@ -541,7 +550,7 @@ ptr chezpp_net_tls_read(uptr handle, int size, int timeout_ms, int nonblocking) 
 
   bv = Smake_bytevector((iptr)size, 0);
   for (;;) {
-    rc = SSL_read_ex(session->ssl, Sbytevector_data(bv), (size_t)size, &nread);
+    rc = chezpp_openssl_SSL_read_ex(session->ssl, Sbytevector_data(bv), (size_t)size, &nread);
     if (rc == 1) break;
     {
       ptr status = ssl_result_status(session->ssl, rc, "TLS read failed");
@@ -606,7 +615,7 @@ ptr chezpp_net_tls_read_into(uptr handle, ptr bv, int start, int stop, int timeo
       return make_errno_status("error");
   }
   for (;;) {
-    rc = SSL_read_ex(session->ssl, Sbytevector_data(bv) + start, (size_t)(stop - start), &nread);
+    rc = chezpp_openssl_SSL_read_ex(session->ssl, Sbytevector_data(bv) + start, (size_t)(stop - start), &nread);
     if (rc == 1) break;
     {
       ptr status = ssl_result_status(session->ssl, rc, "TLS read failed");
@@ -665,7 +674,7 @@ ptr chezpp_net_tls_write(uptr handle, ptr bv, int start, int stop, int timeout_m
       return make_errno_status("error");
   }
   for (;;) {
-    rc = SSL_write_ex(session->ssl, Sbytevector_data(bv) + start, (size_t)(stop - start),
+    rc = chezpp_openssl_SSL_write_ex(session->ssl, Sbytevector_data(bv) + start, (size_t)(stop - start),
                       &nwritten);
     if (rc == 1) break;
     {
@@ -707,10 +716,10 @@ ptr chezpp_net_tls_shutdown(uptr handle) {
   chezpp_tls_session *session = session_from_handle(handle);
   int rc;
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
-  rc = SSL_shutdown(session->ssl);
+  rc = chezpp_openssl_SSL_shutdown(session->ssl);
   if (rc == 1) return Strue;
   if (rc == 0) {
-    rc = SSL_shutdown(session->ssl);
+    rc = chezpp_openssl_SSL_shutdown(session->ssl);
     if (rc == 1 || rc == 0) return Strue;
   }
   return ssl_result_status(session->ssl, rc, "TLS shutdown failed");
@@ -719,14 +728,15 @@ ptr chezpp_net_tls_shutdown(uptr handle) {
 ptr chezpp_net_tls_protocol_version(uptr handle) {
   chezpp_tls_session *session = session_from_handle(handle);
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
-  return Sstring(SSL_get_version(session->ssl));
+  return Sstring(chezpp_openssl_SSL_get_version(session->ssl));
 }
 
 ptr chezpp_net_tls_cipher_name(uptr handle) {
   chezpp_tls_session *session = session_from_handle(handle);
   const char *name;
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
-  name = SSL_get_cipher_name(session->ssl);
+  name = chezpp_openssl_SSL_CIPHER_get_name(
+      chezpp_openssl_SSL_get_current_cipher(session->ssl));
   return name == NULL ? Sfalse : Sstring(name);
 }
 
@@ -734,7 +744,7 @@ ptr chezpp_net_tls_verified(uptr handle) {
   chezpp_tls_session *session = session_from_handle(handle);
   long result;
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
-  result = SSL_get_verify_result(session->ssl);
+  result = chezpp_openssl_SSL_get_verify_result(session->ssl);
   return Sboolean(result == X509_V_OK);
 }
 
@@ -743,10 +753,10 @@ ptr chezpp_net_tls_peer_certificate_der(uptr handle) {
   X509 *cert;
   ptr out;
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
-  cert = SSL_get1_peer_certificate(session->ssl);
+  cert = chezpp_openssl_SSL_get1_peer_certificate(session->ssl);
   if (cert == NULL) return Sfalse;
   out = x509_to_der_bytevector(cert);
-  X509_free(cert);
+  chezpp_openssl_X509_free(cert);
   return out;
 }
 
@@ -758,11 +768,14 @@ ptr chezpp_net_tls_peer_certificate_chain_der(uptr handle) {
   int i;
 
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
-  chain = SSL_get_peer_cert_chain(session->ssl);
+  chain = chezpp_openssl_SSL_get_peer_cert_chain(session->ssl);
   if (chain == NULL) return Snil;
 
-  for (i = 0; i < sk_X509_num(chain); i += 1) {
-    X509 *cert = sk_X509_value(chain, i);
+  for (i = 0;
+       i < chezpp_openssl_OPENSSL_sk_num((const OPENSSL_STACK *)chain);
+       i += 1) {
+    X509 *cert = (X509 *)chezpp_openssl_OPENSSL_sk_value(
+        (const OPENSSL_STACK *)chain, i);
     ptr der = x509_to_der_bytevector(cert);
     ptr cell = Scons(der, Snil);
     if (Snullp(head)) {

@@ -249,6 +249,9 @@ The `make-tls-context` procedure constructs a client or server TLS context.
 |#
   (define-who make-tls-context
     (lambda (mode)
+      (let ([message (ffi-net-tls-load-error)])
+        (when message
+          (raise-net-error who 'tls message)))
       (let ([handle (ffi-net-tls-context-create (mode->int who mode))])
         (when (= handle 0)
           (raise-net-error who 'tls "failed to create TLS context"))
