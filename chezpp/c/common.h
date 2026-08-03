@@ -18,7 +18,7 @@
 #include <pwd.h>
 
 
-#include "scheme.h"
+#include <scheme.h>
 
 ptr errno_str();
 ptr errno_str_vector();

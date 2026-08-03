@@ -2,7 +2,9 @@
 
 #include <dlfcn.h>
 #include <libwebsockets.h>
+#include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 
 typedef struct chezpp_ws_message chezpp_ws_message;
 typedef struct chezpp_ws_send chezpp_ws_send;
@@ -84,6 +86,11 @@ typedef int (*lws_get_vhost_listen_port_fn)(struct lws_vhost *);
 
 static void *websocket_handle = NULL;
 static struct lws_context *websocket_lifetime_context = NULL;
+static int websocket_load_state;
+static int websocket_lifetime_state;
+static pthread_mutex_t websocket_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t websocket_runtime_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t context_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 static lws_create_context_fn p_lws_create_context = NULL;
 static lws_context_destroy_fn p_lws_context_destroy = NULL;
 static lws_client_connect_via_info_fn p_lws_client_connect_via_info = NULL;
@@ -103,14 +110,17 @@ static lws_set_timeout_fn p_lws_set_timeout = NULL;
 static lws_get_vhost_by_name_fn p_lws_get_vhost_by_name = NULL;
 static lws_get_vhost_listen_port_fn p_lws_get_vhost_listen_port = NULL;
 static chezpp_ws_context_node *context_list = NULL;
-static int ws_trace_flag = -1;
+static atomic_int ws_trace_flag = -1;
 
 static int ws_trace_enabled(void) {
-  if (ws_trace_flag < 0) {
+  int enabled = atomic_load(&ws_trace_flag);
+  if (enabled < 0) {
     const char *value = getenv("CHEZPP_WS_TRACE");
-    ws_trace_flag = (value != NULL && *value != 0) ? 1 : 0;
+    int expected = -1;
+    enabled = (value != NULL && *value != 0) ? 1 : 0;
+    atomic_compare_exchange_strong(&ws_trace_flag, &expected, enabled);
   }
-  return ws_trace_flag;
+  return atomic_load(&ws_trace_flag);
 }
 
 static void ws_tracef(const char *fmt, ...) {
@@ -202,11 +212,9 @@ static int load_symbol(void **out, const char *name) {
   return *out != NULL;
 }
 
-static int ensure_websocket_loaded(void) {
+static int initialize_websocket_library(void) {
   const char *names[] = {"libwebsockets.so.20", "libwebsockets.so", NULL};
   int i;
-
-  if (websocket_handle != NULL) return 1;
 
   for (i = 0; names[i] != NULL; ++i) {
     websocket_handle = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
@@ -247,10 +255,31 @@ static int ensure_websocket_loaded(void) {
   return 1;
 }
 
-static int ensure_websocket_lifetime_context(void) {
-  struct lws_context_creation_info info;
+static int ensure_websocket_loaded(void) {
+  int loaded;
 
-  if (websocket_lifetime_context != NULL) return 1;
+  pthread_mutex_lock(&websocket_runtime_mutex);
+  while (websocket_load_state == 1)
+    pthread_cond_wait(&websocket_runtime_cond, &websocket_runtime_mutex);
+  if (websocket_load_state != 0) {
+    loaded = websocket_load_state == 2;
+    pthread_mutex_unlock(&websocket_runtime_mutex);
+    return loaded;
+  }
+  websocket_load_state = 1;
+  pthread_mutex_unlock(&websocket_runtime_mutex);
+
+  loaded = initialize_websocket_library();
+
+  pthread_mutex_lock(&websocket_runtime_mutex);
+  websocket_load_state = loaded ? 2 : 3;
+  pthread_cond_broadcast(&websocket_runtime_cond);
+  pthread_mutex_unlock(&websocket_runtime_mutex);
+  return loaded;
+}
+
+static int initialize_websocket_lifetime_context(void) {
+  struct lws_context_creation_info info;
 
   memset(&info, 0, sizeof(info));
   info.port = CONTEXT_PORT_NO_LISTEN;
@@ -261,39 +290,42 @@ static int ensure_websocket_lifetime_context(void) {
   return websocket_lifetime_context != NULL;
 }
 
-__attribute__((destructor)) static void release_websocket_lifetime_context(void) {
-  if (websocket_lifetime_context != NULL && p_lws_context_destroy != NULL) {
+static int ensure_websocket_lifetime_context(void) {
+  int initialized;
+
+  pthread_mutex_lock(&websocket_runtime_mutex);
+  while (websocket_lifetime_state == 1)
+    pthread_cond_wait(&websocket_runtime_cond, &websocket_runtime_mutex);
+  if (websocket_lifetime_state != 0) {
+    initialized = websocket_lifetime_state == 2;
+    pthread_mutex_unlock(&websocket_runtime_mutex);
+    return initialized;
+  }
+  websocket_lifetime_state = 1;
+  pthread_mutex_unlock(&websocket_runtime_mutex);
+
+  initialized = initialize_websocket_lifetime_context();
+
+  pthread_mutex_lock(&websocket_runtime_mutex);
+  websocket_lifetime_state = initialized ? 2 : 3;
+  pthread_cond_broadcast(&websocket_runtime_cond);
+  pthread_mutex_unlock(&websocket_runtime_mutex);
+  return initialized;
+}
+
+__attribute__((destructor)) static void release_websocket_runtime(void) {
+  pthread_mutex_lock(&websocket_runtime_mutex);
+  pthread_mutex_lock(&context_list_mutex);
+  if (context_list == NULL && websocket_lifetime_context != NULL &&
+      p_lws_context_destroy != NULL) {
     p_lws_context_destroy(websocket_lifetime_context);
     websocket_lifetime_context = NULL;
   }
+  pthread_mutex_unlock(&context_list_mutex);
+  pthread_mutex_unlock(&websocket_runtime_mutex);
 }
 
-static void register_context(struct lws_context *context) {
-  chezpp_ws_context_node *node = (chezpp_ws_context_node *)calloc(1, sizeof(chezpp_ws_context_node));
-  if (node == NULL) return;
-  node->context = context;
-  node->next = context_list;
-  context_list = node;
-}
-
-static void unregister_context(struct lws_context *context) {
-  chezpp_ws_context_node **pp = &context_list;
-  while (*pp != NULL) {
-    if ((*pp)->context == context) {
-      chezpp_ws_context_node *node = *pp;
-      *pp = node->next;
-      free(node);
-      return;
-    }
-    pp = &(*pp)->next;
-  }
-}
-
-static void service_context(struct lws_context *primary, int timeout_ms) {
-  if (primary != NULL) p_lws_service(primary, timeout_ms);
-}
-
-static int context_registered(struct lws_context *context) {
+static int context_registered_unlocked(struct lws_context *context) {
   chezpp_ws_context_node *node = context_list;
   while (node != NULL) {
     if (node->context == context) return 1;
@@ -302,44 +334,115 @@ static int context_registered(struct lws_context *context) {
   return 0;
 }
 
-static void service_registered(struct lws_context *primary, int timeout_ms) {
-  chezpp_ws_context_node *node = context_list;
-  struct lws_context **snapshot = NULL;
-  size_t count = 0;
-  size_t i = 0;
-  int used_primary = 0;
+static struct lws_context *create_registered_context(
+    const struct lws_context_creation_info *info) {
+  chezpp_ws_context_node *node = (chezpp_ws_context_node *)calloc(1, sizeof(chezpp_ws_context_node));
+  struct lws_context *context;
 
-  while (node != NULL) {
-    count += 1;
-    node = node->next;
+  if (node == NULL) return NULL;
+  pthread_mutex_lock(&context_list_mutex);
+  context = p_lws_create_context(info);
+  if (context == NULL) {
+    pthread_mutex_unlock(&context_list_mutex);
+    free(node);
+    return NULL;
   }
+  node->context = context;
+  node->next = context_list;
+  context_list = node;
+  pthread_mutex_unlock(&context_list_mutex);
+  return context;
+}
 
-  if (count > 0) {
-    snapshot = (struct lws_context **)malloc(sizeof(struct lws_context *) * count);
-    if (snapshot == NULL) {
-      if (primary != NULL) p_lws_service(primary, timeout_ms);
+static void destroy_registered_context(struct lws_context *context) {
+  chezpp_ws_context_node **pp;
+  pthread_mutex_lock(&context_list_mutex);
+  pp = &context_list;
+  while (*pp != NULL) {
+    if ((*pp)->context == context) {
+      chezpp_ws_context_node *node = *pp;
+      *pp = node->next;
+      free(node);
+      p_lws_context_destroy(context);
+      pthread_mutex_unlock(&context_list_mutex);
       return;
     }
+    pp = &(*pp)->next;
   }
+  pthread_mutex_unlock(&context_list_mutex);
+}
 
+static void service_context(struct lws_context *primary, int timeout_ms) {
+  pthread_mutex_lock(&context_list_mutex);
+  if (primary != NULL && context_registered_unlocked(primary))
+    p_lws_service(primary, timeout_ms);
+  pthread_mutex_unlock(&context_list_mutex);
+}
+
+static void service_registered(struct lws_context *primary, int timeout_ms) {
+  chezpp_ws_context_node *node;
+  int used_primary = 0;
+
+  pthread_mutex_lock(&context_list_mutex);
   node = context_list;
-  while (node != NULL && i < count) {
-    snapshot[i++] = node->context;
-    node = node->next;
-  }
-  count = i;
-
-  for (i = 0; i < count; ++i) {
-    struct lws_context *context = snapshot[i];
+  while (node != NULL) {
+    struct lws_context *context = node->context;
     int step = (context == primary && !used_primary) ? timeout_ms : 0;
-    if (!context_registered(context)) continue;
     p_lws_service(context, step);
     if (context == primary) used_primary = 1;
+    node = node->next;
   }
+  pthread_mutex_unlock(&context_list_mutex);
+}
 
-  if (snapshot != NULL) free(snapshot);
-  if (primary != NULL && !used_primary && context_registered(primary))
-    p_lws_service(primary, timeout_ms);
+static int context_listen_port(struct lws_context *context, const char *vhost_name,
+                               int fallback) {
+  struct lws_vhost *vhost = NULL;
+  int port = fallback;
+
+  pthread_mutex_lock(&context_list_mutex);
+  if (context_registered_unlocked(context)) {
+    vhost = p_lws_get_vhost_by_name(context, vhost_name);
+    if (vhost == NULL) vhost = p_lws_get_vhost_by_name(context, "default");
+    if (vhost != NULL) port = p_lws_get_vhost_listen_port(vhost);
+  }
+  pthread_mutex_unlock(&context_list_mutex);
+  return port;
+}
+
+static struct lws *connect_context(struct lws_context *context,
+                                   const struct lws_client_connect_info *info) {
+  struct lws *wsi = NULL;
+
+  pthread_mutex_lock(&context_list_mutex);
+  if (context_registered_unlocked(context))
+    wsi = p_lws_client_connect_via_info(info);
+  pthread_mutex_unlock(&context_list_mutex);
+  return wsi;
+}
+
+static void clear_opaque_user_data(struct lws_context *context, struct lws *wsi) {
+  pthread_mutex_lock(&context_list_mutex);
+  if (context_registered_unlocked(context) && wsi != NULL &&
+      p_lws_set_opaque_user_data != NULL)
+    p_lws_set_opaque_user_data(wsi, NULL);
+  pthread_mutex_unlock(&context_list_mutex);
+}
+
+static void close_wsi(struct lws_context *context, struct lws *wsi) {
+  pthread_mutex_lock(&context_list_mutex);
+  if (context_registered_unlocked(context) && wsi != NULL) {
+    p_lws_close_reason(wsi, LWS_CLOSE_STATUS_NORMAL, NULL, 0);
+    p_lws_set_timeout(wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
+  }
+  pthread_mutex_unlock(&context_list_mutex);
+}
+
+static void request_writable(struct lws_context *context, struct lws *wsi) {
+  pthread_mutex_lock(&context_list_mutex);
+  if (context_registered_unlocked(context) && wsi != NULL)
+    p_lws_callback_on_writable(wsi);
+  pthread_mutex_unlock(&context_list_mutex);
 }
 
 static void clear_messages(chezpp_ws_connection *conn) {
@@ -377,8 +480,7 @@ static void set_error(char **slot, const char *msg) {
 
 static void destroy_server_resources(chezpp_ws_server *server) {
   if (server->context != NULL) {
-    unregister_context(server->context);
-    p_lws_context_destroy(server->context);
+    destroy_registered_context(server->context);
     server->context = NULL;
   }
   if (server->protocol_name != NULL) free(server->protocol_name);
@@ -648,7 +750,6 @@ static ptr connection_error_status(chezpp_ws_connection *conn, const char *fallb
 ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol_name) {
   chezpp_ws_server *server;
   struct lws_context_creation_info info;
-  struct lws_vhost *vhost;
 
   if (!ensure_websocket_loaded())
     return make_error_status_message("failed to load libwebsockets");
@@ -685,20 +786,16 @@ ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol
   info.gid = (gid_t)-1;
   info.uid = (uid_t)-1;
 
-  server->context = p_lws_create_context(&info);
+  server->context = create_registered_context(&info);
   if (server->context == NULL) {
     free(server->protocol_name);
     free(server);
     return make_error_status_message("failed to create websocket server context");
   }
 
-  register_context(server->context);
   ws_tracef("listen host=%s port=%d protocol=%s context=%p",
             host == NULL ? "(null)" : host, port, server->protocol_name, (void *)server->context);
-  vhost = p_lws_get_vhost_by_name(server->context, info.vhost_name);
-  if (vhost == NULL) vhost = p_lws_get_vhost_by_name(server->context, "default");
-  if (vhost != NULL) server->port = p_lws_get_vhost_listen_port(vhost);
-  else server->port = port;
+  server->port = context_listen_port(server->context, info.vhost_name, port);
   return make_websocket_handle((uptr)server);
 }
 
@@ -712,8 +809,7 @@ ptr chezpp_net_websocket_server_close(uptr handle) {
   server->accept_tail = NULL;
   while (queued != NULL) {
     chezpp_ws_connection *next = queued->next_accept;
-    if (queued->wsi != NULL && p_lws_set_opaque_user_data != NULL)
-      p_lws_set_opaque_user_data(queued->wsi, NULL);
+    clear_opaque_user_data(queued->context, queued->wsi);
     clear_messages(queued);
     clear_pending_send(queued);
     clear_rx(queued);
@@ -783,13 +879,12 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   info.gid = (gid_t)-1;
   info.uid = (uid_t)-1;
 
-  conn->context = p_lws_create_context(&info);
+  conn->context = create_registered_context(&info);
   if (conn->context == NULL) {
     free(conn->protocol_name);
     free(conn);
     return make_error_status_message("failed to create websocket client context");
   }
-  register_context(conn->context);
   ws_tracef("connect-start host=%s port=%d path=%s protocol=%s context=%p",
             host, port, (path != NULL && *path != 0) ? path : "/", protocol, (void *)conn->context);
 
@@ -806,10 +901,9 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   ccinfo.ietf_version_or_minus_one = -1;
   ccinfo.opaque_user_data = conn;
   ccinfo.ssl_connection = secure ? LCCSCF_USE_SSL : 0;
-  conn->wsi = p_lws_client_connect_via_info(&ccinfo);
+  conn->wsi = connect_context(conn->context, &ccinfo);
   if (conn->wsi == NULL) {
-    unregister_context(conn->context);
-    p_lws_context_destroy(conn->context);
+    destroy_registered_context(conn->context);
     free(conn->protocol_name);
     free(conn);
     return make_error_status_message("failed to start websocket client connection");
@@ -818,8 +912,7 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   if (!wait_for_condition(conn->context, pred_connected, conn, timeout_ms, 1)) {
     ws_tracef("connect-timeout host=%s port=%d path=%s protocol=%s", host, port,
               (path != NULL && *path != 0) ? path : "/", protocol);
-    unregister_context(conn->context);
-    p_lws_context_destroy(conn->context);
+    destroy_registered_context(conn->context);
     if (conn->error != NULL) free(conn->error);
     free(conn->protocol_name);
     free(conn);
@@ -827,8 +920,7 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   }
   if (conn->failed) {
     ptr err = connection_error_status(conn, "websocket connection failed");
-    unregister_context(conn->context);
-    p_lws_context_destroy(conn->context);
+    destroy_registered_context(conn->context);
     if (conn->error != NULL) free(conn->error);
     free(conn->protocol_name);
     free(conn);
@@ -843,11 +935,9 @@ ptr chezpp_net_websocket_close(uptr handle) {
   chezpp_ws_server *server = NULL;
   if (conn == NULL) return Strue;
   server = conn->server;
-  if (conn->wsi != NULL && p_lws_set_opaque_user_data != NULL)
-    p_lws_set_opaque_user_data(conn->wsi, NULL);
+  clear_opaque_user_data(conn->context, conn->wsi);
   if (!conn->closed && conn->wsi != NULL) {
-    p_lws_close_reason(conn->wsi, LWS_CLOSE_STATUS_NORMAL, NULL, 0);
-    p_lws_set_timeout(conn->wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
+    close_wsi(conn->context, conn->wsi);
     service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
   }
   conn->wsi = NULL;
@@ -856,8 +946,7 @@ ptr chezpp_net_websocket_close(uptr handle) {
   clear_pending_send(conn);
   clear_rx(conn);
   if (conn->owns_context && conn->context != NULL) {
-    unregister_context(conn->context);
-    p_lws_context_destroy(conn->context);
+    destroy_registered_context(conn->context);
     conn->context = NULL;
   } else if (server != NULL) {
     if (server->live_count > 0) server->live_count -= 1;
@@ -903,7 +992,7 @@ ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop
   len = (size_t)(stop - start);
   if (!queue_send(conn, type, Sbytevector_data(bv) + start, len))
     return make_status("error", errno_str());
-  p_lws_callback_on_writable(conn->wsi);
+  request_writable(conn->context, conn->wsi);
 
   if (nonblocking) {
     service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);

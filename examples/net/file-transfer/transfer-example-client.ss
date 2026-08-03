@@ -1,4 +1,4 @@
-(load "examples/file-transfer-script-common.ss")
+(load "examples/net/file-transfer/file-transfer-script-common.ss")
 
 (define lookup-client
   (lambda (name)

@@ -1,6 +1,6 @@
 (import (chezpp))
 
-(load "examples/net-example-common.ss")
+(load "examples/net/net-example-common.ss")
 
 (define parse-ssh-run-cmd-arguments
   (lambda (arg*)

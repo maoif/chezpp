@@ -166,9 +166,7 @@
                        (format "229 Entering Extended Passive Mode (|||~a|)" port))))
                (loop)]
                [(string=? cmd "STOR")
-                (let* ([target (server-path-join cwd arg)]
-                       [path (ftp-data-physical-path root target)])
-                  (mkdirs (path-dirname path))
+                (let ([path (validated-upload-path 'ftp-file-server root arg)])
                   (send-crlf-line op "150 opening data connection")
                   (let ([data (data-accept)])
                     (dynamic-wind

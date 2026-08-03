@@ -1,6 +1,6 @@
 (import (except (chezpp) http-download))
 
-(load "examples/net-example-common.ss")
+(load "examples/net/net-example-common.ss")
 
 #|proc:http-download
 The `http-download` procedure fetches the body at `uri` via HTTP or HTTPS and

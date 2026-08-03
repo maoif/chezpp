@@ -1,7 +1,7 @@
 (import (chezpp)
         (chezpp net))
 
-(load "examples/net-example-common.ss")
+(load "examples/net/net-example-common.ss")
 
 (define grpc-echo-method "/chezpp.examples.Echo/Unary")
 

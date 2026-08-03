@@ -119,7 +119,8 @@
             (immutable port http-server-port)
             (immutable tls-context http-server-tls-context)
             (mutable handlers http-server-handlers http-server-handlers-set!)
-            (mutable closed? http-server-closed? http-server-closed?-set!)))
+            (mutable closed? http-server-closed? http-server-closed?-set!)
+            (immutable close-mutex http-server-close-mutex)))
 
   (define-record-type (http-connection %make-http-connection http-connection?)
     (sealed #t)
@@ -1539,7 +1540,8 @@ The `http-listen` procedure opens a listening HTTP server on `host` and `port`, 
                                        (socket-local-address server-socket))
                                       tls-context
                                       '()
-                                      #f))))]))
+                                      #f
+                                      (make-mutex 'http-server-close)))))]))
 
   #|proc:http-server-close
 The `http-server-close` procedure closes the listening socket owned by an HTTP server.
@@ -1547,9 +1549,10 @@ The `http-server-close` procedure closes the listening socket owned by an HTTP s
   (define-who http-server-close
     (lambda (server)
       (pcheck ([http-server? server])
-              (unless (http-server-closed? server)
-                (close-socket (http-server-socket server))
-                (http-server-closed?-set! server #t))
+              (with-mutex (http-server-close-mutex server)
+                (unless (http-server-closed? server)
+                  (close-socket (http-server-socket server))
+                  (http-server-closed?-set! server #t)))
               server)))
 
   #|proc:http-register-handler!

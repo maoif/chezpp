@@ -9,7 +9,7 @@ SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
 SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c')
 
 CC := gcc
-CFLAGS := -fPIC -Wall -Wextra -O2 -shared
+CFLAGS := -fPIC -Wall -Wextra -O2 -shared -pthread
 CFLAGS += -I$(SCHEME_INCLUDE_DIR)
 LDLIBS := -luuid -lssl -lcrypto -ldl
 

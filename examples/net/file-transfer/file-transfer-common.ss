@@ -10,8 +10,6 @@
 (define grpc-file-transfer-port 41007)
 
 (define file-transfer-done-marker-name ".chezpp-upload.done")
-(define sftp-file-transfer-state-root "/tmp/chezpp-example-sftp")
-
 (define write-bytevector-file
   (lambda (path bv)
     (call-with-port
@@ -87,6 +85,24 @@
             (char=? (string-ref dir (- (string-length dir) 1)) #\/))
         (string-append dir leaf)
         (string-append dir "/" leaf))))
+
+(define validated-upload-path
+  (lambda (who dir name)
+    (unless (string? name)
+      (errorf who "expected upload name string, given ~s" name))
+    (when (or (string=? name "")
+              (string=? name ".")
+              (string=? name "..")
+              (char=? (string-ref name 0) #\/)
+              (string-contains? name "/")
+              (string-contains? name "\\")
+              (string-contains? name (string (integer->char 0))))
+      (errorf who "invalid upload file name ~s" name))
+    (let ([path (path-join dir name)])
+      (unless (and (string=? name (path-basename path))
+                   (string=? path (path-join dir (path-basename path))))
+        (errorf who "upload file name escapes destination: ~s" name))
+      path)))
 
 (define done-marker-path
   (lambda (dir)
@@ -172,7 +188,7 @@
 
 (define store-upload!
   (lambda (dir name payload)
-    (write-bytevector-file (path-join dir name) payload)
+    (write-bytevector-file (validated-upload-path 'store-upload! dir name) payload)
     name))
 
 (define with-env
@@ -287,7 +303,7 @@
               (errorf who "begin frame requires a file name"))
             (set! current-name name)
             (set! current-op
-                  (open-file-output-port (path-join dir name)
+                  (open-file-output-port (validated-upload-path who dir name)
                                          (file-options no-fail replace)
                                          (buffer-mode block)
                                          #f))

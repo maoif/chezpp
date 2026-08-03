@@ -62,6 +62,29 @@
               (milisleep 10)
               (loop (+ i 1))))))))
 
+(mat net-websocket-concurrent-first-use
+     (let* ([count 8]
+            [server* (make-vector count #f)]
+            [thread*
+             (vector-map
+              (lambda (index)
+                (fork-thread
+                 (lambda ()
+                   (let ([server (websocket-listen "127.0.0.1" 0)])
+                     (vector-set! server* index server)))))
+              '#(0 1 2 3 4 5 6 7))])
+       (dynamic-wind
+         (lambda ()
+           (vector-for-each thread-join thread*))
+         (lambda ()
+           (andmap websocket-server? (vector->list server*)))
+         (lambda ()
+           (vector-for-each
+            (lambda (server)
+              (when (websocket-server? server)
+                (websocket-server-close server)))
+            server*)))))
+
 (mat net-websocket
      (let* ([port (reserve-loopback-port)]
             [server (websocket-listen "127.0.0.1" port)]
