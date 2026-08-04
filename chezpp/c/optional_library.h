@@ -21,6 +21,8 @@ typedef struct {
 int chezpp_optional_library_open(chezpp_optional_library *library);
 int chezpp_optional_library_symbol(chezpp_optional_library *library,
                                    const char *name, void **target);
+int chezpp_optional_library_probe_symbol(chezpp_optional_library *library,
+                                         const char *name, void **target);
 void chezpp_optional_library_fail(chezpp_optional_library *library,
                                   const char *format, ...);
 void chezpp_optional_library_set_version(chezpp_optional_library *library,

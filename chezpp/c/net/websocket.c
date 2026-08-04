@@ -1,6 +1,6 @@
 #include "../common.h"
+#include "../optional_library.h"
 
-#include <dlfcn.h>
 #include <libwebsockets.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -83,10 +83,16 @@ typedef void (*lws_close_reason_fn)(struct lws *, enum lws_close_status, unsigne
 typedef void (*lws_set_timeout_fn)(struct lws *, enum pending_timeout, int);
 typedef struct lws_vhost *(*lws_get_vhost_by_name_fn)(struct lws_context *, const char *);
 typedef int (*lws_get_vhost_listen_port_fn)(struct lws_vhost *);
+typedef const char *(*lws_get_library_version_fn)(void);
 
-static void *websocket_handle = NULL;
+static const char *const websocket_names[] = {
+    "libwebsockets.so.21", NULL};
+static chezpp_optional_library websocket_library =
+    CHEZPP_OPTIONAL_LIBRARY_INIT("websockets", websocket_names);
+static pthread_once_t websocket_once = PTHREAD_ONCE_INIT;
+static int websocket_available;
+static unsigned websocket_capabilities;
 static struct lws_context *websocket_lifetime_context = NULL;
-static int websocket_load_state;
 static int websocket_lifetime_state;
 static pthread_mutex_t websocket_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t websocket_runtime_cond = PTHREAD_COND_INITIALIZER;
@@ -208,19 +214,35 @@ static char *ws_strdup(const char *s) {
 }
 
 static int load_symbol(void **out, const char *name) {
-  *out = dlsym(websocket_handle, name);
-  return *out != NULL;
+  return chezpp_optional_library_symbol(&websocket_library, name, out);
 }
 
-static int initialize_websocket_library(void) {
-  const char *names[] = {"libwebsockets.so.20", "libwebsockets.so", NULL};
-  int i;
+static void initialize_websocket_library(void) {
+  lws_get_library_version_fn version_fn = NULL;
+  const char *version;
+  unsigned major;
+  unsigned minor;
+  unsigned patch;
 
-  for (i = 0; names[i] != NULL; ++i) {
-    websocket_handle = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
-    if (websocket_handle != NULL) break;
+  if (!chezpp_optional_library_open(&websocket_library)) return;
+  if (!load_symbol((void **)&version_fn, "lws_get_library_version")) return;
+  version = version_fn();
+  if (version == NULL ||
+      sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3) {
+    chezpp_optional_library_fail(
+        &websocket_library,
+        "websockets: unable to parse runtime version %s",
+        version == NULL ? "(null)" : version);
+    return;
   }
-  if (websocket_handle == NULL) return 0;
+  chezpp_optional_library_set_version(&websocket_library, version);
+  if (major < 4 || (major == 4 && minor < 3)) {
+    chezpp_optional_library_fail(
+        &websocket_library,
+        "websockets: runtime ABI version %u.%u.%u requires >= 4.3.0",
+        major, minor, patch);
+    return;
+  }
 
   if (!load_symbol((void **)&p_lws_create_context, "lws_create_context") ||
       !load_symbol((void **)&p_lws_context_destroy, "lws_context_destroy") ||
@@ -239,43 +261,39 @@ static int initialize_websocket_library(void) {
       !load_symbol((void **)&p_lws_close_reason, "lws_close_reason") ||
       !load_symbol((void **)&p_lws_set_timeout, "lws_set_timeout") ||
       !load_symbol((void **)&p_lws_get_vhost_by_name, "lws_get_vhost_by_name") ||
-      !load_symbol((void **)&p_lws_get_vhost_listen_port, "lws_get_vhost_listen_port")) {
-    dlclose(websocket_handle);
-    websocket_handle = NULL;
-    return 0;
-  }
+      !load_symbol((void **)&p_lws_get_vhost_listen_port, "lws_get_vhost_listen_port")) return;
 
   {
+    void *symbol = NULL;
     const char *level = getenv("CHEZPP_WS_LOGLEVEL");
+    if (chezpp_optional_library_probe_symbol(
+            &websocket_library, "lws_init_vhost_client_ssl",
+            &symbol))
+      websocket_capabilities |= 1U;
+    if (chezpp_optional_library_probe_symbol(
+            &websocket_library, "lws_extension_callback_pm_deflate", &symbol))
+      websocket_capabilities |= 2U;
     if (level != NULL && *level != 0)
       p_lws_set_log_level((int)strtol(level, NULL, 0), NULL);
     else
       p_lws_set_log_level(0, NULL);
   }
-  return 1;
+  websocket_available = 1;
 }
 
 static int ensure_websocket_loaded(void) {
-  int loaded;
+  pthread_once(&websocket_once, initialize_websocket_library);
+  return websocket_available;
+}
 
-  pthread_mutex_lock(&websocket_runtime_mutex);
-  while (websocket_load_state == 1)
-    pthread_cond_wait(&websocket_runtime_cond, &websocket_runtime_mutex);
-  if (websocket_load_state != 0) {
-    loaded = websocket_load_state == 2;
-    pthread_mutex_unlock(&websocket_runtime_mutex);
-    return loaded;
-  }
-  websocket_load_state = 1;
-  pthread_mutex_unlock(&websocket_runtime_mutex);
+const chezpp_optional_library *chezpp_net_websocket_library(void) {
+  (void)ensure_websocket_loaded();
+  return &websocket_library;
+}
 
-  loaded = initialize_websocket_library();
-
-  pthread_mutex_lock(&websocket_runtime_mutex);
-  websocket_load_state = loaded ? 2 : 3;
-  pthread_cond_broadcast(&websocket_runtime_cond);
-  pthread_mutex_unlock(&websocket_runtime_mutex);
-  return loaded;
+unsigned chezpp_net_websocket_capabilities(void) {
+  (void)ensure_websocket_loaded();
+  return websocket_capabilities;
 }
 
 static int initialize_websocket_lifetime_context(void) {
@@ -752,7 +770,8 @@ ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol
   struct lws_context_creation_info info;
 
   if (!ensure_websocket_loaded())
-    return make_error_status_message("failed to load libwebsockets");
+    return make_error_status_message(
+        chezpp_optional_library_error(&websocket_library));
   if (!ensure_websocket_lifetime_context())
     return make_error_status_message("failed to initialize libwebsockets");
 
@@ -852,7 +871,8 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   char origin[512];
 
   if (!ensure_websocket_loaded())
-    return make_error_status_message("failed to load libwebsockets");
+    return make_error_status_message(
+        chezpp_optional_library_error(&websocket_library));
   if (!ensure_websocket_lifetime_context())
     return make_error_status_message("failed to initialize libwebsockets");
 

@@ -126,3 +126,13 @@ ptr chezpp_blake3_load_error(void) {
   error = chezpp_optional_library_error(&blake3_library);
   return error == NULL || error[0] == '\0' ? Sfalse : Sstring(error);
 }
+
+const chezpp_optional_library *chezpp_xxhash_library(void) {
+  pthread_once(&xxhash_once, initialize_xxhash);
+  return &xxhash_library;
+}
+
+const chezpp_optional_library *chezpp_blake3_library(void) {
+  pthread_once(&blake3_once, initialize_blake3);
+  return &blake3_library;
+}

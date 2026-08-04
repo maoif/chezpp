@@ -1,5 +1,6 @@
 (library (chezpp net ffi)
   (export net-af-inet
+          ffi-optional-library-info
           net-af-inet6
           net-af-unix
           net-pollin
@@ -131,6 +132,9 @@
           ffi-net-tls-peer-certificate-chain-der)
   (import (chezpp chez)
           (chezpp internal))
+
+  (define ffi-optional-library-info
+    (foreign-procedure "chezpp_optional_library_info" (string) scheme-object))
 
   (define net-af-inet (foreign-procedure "chezpp_net_af_inet" () int))
   (define net-af-inet6 (foreign-procedure "chezpp_net_af_inet6" () int))

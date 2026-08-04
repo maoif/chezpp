@@ -36,6 +36,7 @@
                   (chezpp uuid)
                   (chezpp hash)
                   (chezpp digest)
+                  (chezpp optional-library)
                   (chezpp crypto)
                   (chezpp net)
                   (chezpp concurrency)

@@ -1,7 +1,8 @@
 #include "../common.h"
+#include "../optional_library.h"
 
 #include <curl/curl.h>
-#include <dlfcn.h>
+#include <pthread.h>
 
 typedef CURLcode (*curl_global_init_fn)(long);
 typedef void (*curl_global_cleanup_fn)(void);
@@ -12,6 +13,7 @@ typedef CURLcode (*curl_easy_perform_fn)(CURL *);
 typedef const char *(*curl_easy_strerror_fn)(CURLcode);
 typedef struct curl_slist *(*curl_slist_append_fn)(struct curl_slist *, const char *);
 typedef void (*curl_slist_free_all_fn)(struct curl_slist *);
+typedef curl_version_info_data *(*curl_version_info_fn)(CURLversion);
 
 typedef struct {
   unsigned char *data;
@@ -19,8 +21,11 @@ typedef struct {
   size_t cap;
 } memory_buffer;
 
-static void *curl_handle = NULL;
-static int curl_initialized = 0;
+static const char *const curl_names[] = {"libcurl.so.4", NULL};
+static chezpp_optional_library curl_library =
+    CHEZPP_OPTIONAL_LIBRARY_INIT("curl", curl_names);
+static pthread_once_t curl_once = PTHREAD_ONCE_INIT;
+static int curl_available;
 static curl_global_init_fn p_curl_global_init = NULL;
 static curl_global_cleanup_fn p_curl_global_cleanup = NULL;
 static curl_easy_init_fn p_curl_easy_init = NULL;
@@ -82,51 +87,62 @@ static size_t write_memory_cb(char *ptr, size_t size, size_t nmemb, void *userda
   return n;
 }
 
-static int load_symbol(void **out, const char *name) {
-  *out = dlsym(curl_handle, name);
-  return *out != NULL;
+#define CURL_LOAD(pointer, name)                                              \
+  chezpp_optional_library_symbol(&curl_library, name, (void **)&pointer)
+
+static void initialize_curl(void) {
+  curl_version_info_fn version_info = NULL;
+  curl_version_info_data *data;
+  unsigned major;
+  unsigned minor;
+  unsigned patch;
+
+  if (!chezpp_optional_library_open(&curl_library)) return;
+  if (!CURL_LOAD(version_info, "curl_version_info")) return;
+  data = version_info(CURLVERSION_NOW);
+  if (data == NULL || data->version == NULL) {
+    chezpp_optional_library_fail(&curl_library,
+                                 "curl: curl_version_info returned no version");
+    return;
+  }
+  chezpp_optional_library_set_version(&curl_library, data->version);
+  major = (unsigned)((data->version_num >> 16) & 0xffU);
+  minor = (unsigned)((data->version_num >> 8) & 0xffU);
+  patch = (unsigned)(data->version_num & 0xffU);
+  if (major < 8) {
+    chezpp_optional_library_fail(
+        &curl_library, "curl: runtime version %u.%u.%u requires >= 8.0.0",
+        major, minor, patch);
+    return;
+  }
+  if (!CURL_LOAD(p_curl_global_init, "curl_global_init") ||
+      !CURL_LOAD(p_curl_global_cleanup, "curl_global_cleanup") ||
+      !CURL_LOAD(p_curl_easy_init, "curl_easy_init") ||
+      !CURL_LOAD(p_curl_easy_cleanup, "curl_easy_cleanup") ||
+      !CURL_LOAD(p_curl_easy_setopt, "curl_easy_setopt") ||
+      !CURL_LOAD(p_curl_easy_perform, "curl_easy_perform") ||
+      !CURL_LOAD(p_curl_easy_strerror, "curl_easy_strerror") ||
+      !CURL_LOAD(p_curl_slist_append, "curl_slist_append") ||
+      !CURL_LOAD(p_curl_slist_free_all, "curl_slist_free_all")) return;
+  if (p_curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
+    chezpp_optional_library_fail(&curl_library,
+                                 "curl: runtime initialization failed");
+    return;
+  }
+  curl_available = 1;
 }
 
 static int ensure_curl_loaded(void) {
-  const char *names[] = {"libcurl.so.4", "libcurl.so", NULL};
-  int i;
-
-  if (curl_handle != NULL)
-    return 1;
-
-  for (i = 0; names[i] != NULL; ++i) {
-    curl_handle = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
-    if (curl_handle != NULL)
-      break;
-  }
-  if (curl_handle == NULL)
-    return 0;
-
-  if (!load_symbol((void **)&p_curl_global_init, "curl_global_init") ||
-      !load_symbol((void **)&p_curl_global_cleanup, "curl_global_cleanup") ||
-      !load_symbol((void **)&p_curl_easy_init, "curl_easy_init") ||
-      !load_symbol((void **)&p_curl_easy_cleanup, "curl_easy_cleanup") ||
-      !load_symbol((void **)&p_curl_easy_setopt, "curl_easy_setopt") ||
-      !load_symbol((void **)&p_curl_easy_perform, "curl_easy_perform") ||
-      !load_symbol((void **)&p_curl_easy_strerror, "curl_easy_strerror") ||
-      !load_symbol((void **)&p_curl_slist_append, "curl_slist_append") ||
-      !load_symbol((void **)&p_curl_slist_free_all, "curl_slist_free_all")) {
-    dlclose(curl_handle);
-    curl_handle = NULL;
-    return 0;
-  }
-
-  if (!curl_initialized) {
-    if (p_curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-      dlclose(curl_handle);
-      curl_handle = NULL;
-      return 0;
-    }
-    curl_initialized = 1;
-  }
-
-  return 1;
+  pthread_once(&curl_once, initialize_curl);
+  return curl_available;
 }
+
+const chezpp_optional_library *chezpp_net_curl_library(void) {
+  (void)ensure_curl_loaded();
+  return &curl_library;
+}
+
+unsigned chezpp_net_curl_capabilities(void) { return 0; }
 
 static ptr curl_error_status(CURLcode code) {
   const char *msg;
@@ -187,7 +203,7 @@ static ptr perform_fetch(const char *url, const char *user, const char *pass, in
   memory_buffer buf;
 
   if (!ensure_curl_loaded())
-    return make_error_status_message("failed to load libcurl");
+    return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = p_curl_easy_init();
   if (curl == NULL)
@@ -246,7 +262,7 @@ ptr chezpp_net_ftp_download(const char *url, const char *dest, const char *user,
   ptr result;
 
   if (!ensure_curl_loaded())
-    return make_error_status_message("failed to load libcurl");
+    return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = p_curl_easy_init();
   if (curl == NULL)
@@ -293,7 +309,7 @@ ptr chezpp_net_ftp_upload(const char *url, const char *src, const char *user, co
   ptr result;
 
   if (!ensure_curl_loaded())
-    return make_error_status_message("failed to load libcurl");
+    return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = p_curl_easy_init();
   if (curl == NULL)
@@ -362,7 +378,7 @@ ptr chezpp_net_ftp_command(const char *url, const char *user, const char *pass, 
   struct curl_slist *quote = NULL;
 
   if (!ensure_curl_loaded())
-    return make_error_status_message("failed to load libcurl");
+    return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = p_curl_easy_init();
   if (curl == NULL)
@@ -417,7 +433,7 @@ ptr chezpp_net_ftp_rename(const char *url, const char *user, const char *pass, i
   size_t rnto_len;
 
   if (!ensure_curl_loaded())
-    return make_error_status_message("failed to load libcurl");
+    return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = p_curl_easy_init();
   if (curl == NULL)

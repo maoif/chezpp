@@ -1,8 +1,9 @@
 #include "../common.h"
+#include "../optional_library.h"
 
 #include <dirent.h>
-#include <dlfcn.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <libssh/libssh.h>
 #include <libssh/sftp.h>
@@ -99,8 +100,14 @@ typedef ssize_t (*sftp_aio_begin_read_fn)(sftp_file, size_t, sftp_aio *);
 typedef ssize_t (*sftp_aio_wait_read_fn)(sftp_aio *, void *, size_t);
 typedef ssize_t (*sftp_aio_begin_write_fn)(sftp_file, const void *, size_t, sftp_aio *);
 typedef ssize_t (*sftp_aio_wait_write_fn)(sftp_aio *);
+typedef const char *(*ssh_version_fn)(int);
 
-static void *ssh_handle = NULL;
+static const char *const ssh_names[] = {"libssh.so.4", NULL};
+static chezpp_optional_library ssh_library =
+    CHEZPP_OPTIONAL_LIBRARY_INIT("ssh", ssh_names);
+static pthread_once_t ssh_once = PTHREAD_ONCE_INIT;
+static int ssh_available;
+static int ssh_aio_available;
 static ssh_new_fn p_ssh_new = NULL;
 static ssh_free_fn p_ssh_free = NULL;
 static ssh_options_set_fn p_ssh_options_set = NULL;
@@ -219,21 +226,32 @@ static int add_default_identities(ssh_session session) {
 }
 
 static int load_symbol(void **out, const char *name) {
-  *out = dlsym(ssh_handle, name);
-  return *out != NULL;
+  return chezpp_optional_library_symbol(&ssh_library, name, out);
 }
 
-static int ensure_ssh_loaded(void) {
-  const char *names[] = {"libssh.so.4", "libssh.so", NULL};
-  int i;
+static void initialize_ssh(void) {
+  ssh_version_fn version_fn = NULL;
+  const char *version;
+  unsigned major;
+  unsigned minor;
+  unsigned patch;
 
-  if (ssh_handle != NULL) return 1;
-
-  for (i = 0; names[i] != NULL; ++i) {
-    ssh_handle = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
-    if (ssh_handle != NULL) break;
+  if (!chezpp_optional_library_open(&ssh_library)) return;
+  if (!load_symbol((void **)&version_fn, "ssh_version")) return;
+  version = version_fn(SSH_VERSION_INT(0, 10, 0));
+  if (version == NULL || sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3) {
+    chezpp_optional_library_fail(
+        &ssh_library, "ssh: unable to parse runtime version %s",
+        version == NULL ? "(null)" : version);
+    return;
   }
-  if (ssh_handle == NULL) return 0;
+  chezpp_optional_library_set_version(&ssh_library, version);
+  if (major == 0 && minor < 10) {
+    chezpp_optional_library_fail(
+        &ssh_library, "ssh: runtime version %s requires libssh >= 0.10.0",
+        version);
+    return;
+  }
 
   if (!load_symbol((void **)&p_ssh_new, "ssh_new") ||
       !load_symbol((void **)&p_ssh_free, "ssh_free") ||
@@ -297,18 +315,36 @@ static int ensure_ssh_loaded(void) {
       !load_symbol((void **)&p_sftp_rmdir, "sftp_rmdir") ||
       !load_symbol((void **)&p_sftp_rename, "sftp_rename") ||
       !load_symbol((void **)&p_sftp_file_set_nonblocking, "sftp_file_set_nonblocking") ||
-      !load_symbol((void **)&p_sftp_file_set_blocking, "sftp_file_set_blocking") ||
-      !load_symbol((void **)&p_sftp_aio_free, "sftp_aio_free") ||
-      !load_symbol((void **)&p_sftp_aio_begin_read, "sftp_aio_begin_read") ||
-      !load_symbol((void **)&p_sftp_aio_wait_read, "sftp_aio_wait_read") ||
-      !load_symbol((void **)&p_sftp_aio_begin_write, "sftp_aio_begin_write") ||
-      !load_symbol((void **)&p_sftp_aio_wait_write, "sftp_aio_wait_write")) {
-    dlclose(ssh_handle);
-    ssh_handle = NULL;
-    return 0;
-  }
+      !load_symbol((void **)&p_sftp_file_set_blocking, "sftp_file_set_blocking")) return;
 
-  return 1;
+  ssh_aio_available =
+      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_free",
+                                           (void **)&p_sftp_aio_free) &&
+      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_begin_read",
+                                           (void **)&p_sftp_aio_begin_read) &&
+      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_wait_read",
+                                           (void **)&p_sftp_aio_wait_read) &&
+      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_begin_write",
+                                           (void **)&p_sftp_aio_begin_write) &&
+      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_wait_write",
+                                           (void **)&p_sftp_aio_wait_write);
+
+  ssh_available = 1;
+}
+
+static int ensure_ssh_loaded(void) {
+  pthread_once(&ssh_once, initialize_ssh);
+  return ssh_available;
+}
+
+const chezpp_optional_library *chezpp_net_ssh_library(void) {
+  (void)ensure_ssh_loaded();
+  return &ssh_library;
+}
+
+unsigned chezpp_net_ssh_capabilities(void) {
+  (void)ensure_ssh_loaded();
+  return ssh_aio_available ? 1U : 0U;
 }
 
 static ptr ssh_error_status(ssh_session session, const char *fallback) {
@@ -1001,7 +1037,8 @@ ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeou
   long timeout_sec;
   long timeout_usec;
 
-  if (!ensure_ssh_loaded()) return make_error_status_message("failed to load libssh");
+  if (!ensure_ssh_loaded())
+    return make_error_status_message(chezpp_optional_library_error(&ssh_library));
 
   session = p_ssh_new();
   if (session == NULL) return make_error_status_message("failed to allocate ssh session");
@@ -1526,8 +1563,10 @@ ptr chezpp_net_sftp_open_file(uptr handle, const char *path, int flags, int mode
 ptr chezpp_net_sftp_close_file(uptr handle) {
   chezpp_sftp_file *wrapper = (chezpp_sftp_file *)TO_VOIDP(handle);
   if (wrapper == NULL) return Strue;
-  if (wrapper->pending_read != NULL) p_sftp_aio_free(wrapper->pending_read);
-  if (wrapper->pending_write != NULL) p_sftp_aio_free(wrapper->pending_write);
+  if (p_sftp_aio_free != NULL && wrapper->pending_read != NULL)
+    p_sftp_aio_free(wrapper->pending_read);
+  if (p_sftp_aio_free != NULL && wrapper->pending_write != NULL)
+    p_sftp_aio_free(wrapper->pending_write);
   if (wrapper->file != NULL) p_sftp_close(wrapper->file);
   free(wrapper);
   return Strue;
@@ -1548,6 +1587,9 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking, int timeout_ms)
     deadline += timeout_ms;
   }
   use_nonblocking = nonblocking || timeout_ms >= 0;
+
+  if (use_nonblocking && !ssh_aio_available)
+    return make_error_status_message("libssh: sftp AIO capability unavailable");
 
   if (!use_nonblocking) {
     out = Smake_bytevector((iptr)size, 0);
@@ -1622,6 +1664,9 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
   }
   use_nonblocking = nonblocking || timeout_ms >= 0;
 
+  if (use_nonblocking && !ssh_aio_available)
+    return make_error_status_message("libssh: sftp AIO capability unavailable");
+
   if (!use_nonblocking) {
     rc = p_sftp_read(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
 
@@ -1682,6 +1727,9 @@ ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblock
     deadline += timeout_ms;
   }
   use_nonblocking = nonblocking || timeout_ms >= 0;
+
+  if (use_nonblocking && !ssh_aio_available)
+    return make_error_status_message("libssh: sftp AIO capability unavailable");
 
   if (!use_nonblocking) {
     rc = p_sftp_write(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));

@@ -1,6 +1,7 @@
 #include "../common.h"
+#include "../optional_library.h"
 
-#include <dlfcn.h>
+#include <pthread.h>
 
 #include <grpc/grpc.h>
 #include <grpc/byte_buffer.h>
@@ -130,7 +131,17 @@ typedef gpr_timespec (*gpr_time_from_millis_fn)(int64_t, gpr_clock_type);
 typedef gpr_timespec (*gpr_now_fn)(gpr_clock_type);
 typedef gpr_timespec (*gpr_time_add_fn)(gpr_timespec, gpr_timespec);
 typedef void (*gpr_free_fn)(void *);
+typedef const char *(*grpc_version_string_fn)(void);
 
+static const char *const grpc_names[] = {"libgrpc.so.54", NULL};
+static chezpp_optional_library grpc_library =
+    CHEZPP_OPTIONAL_LIBRARY_INIT("grpc", grpc_names);
+static const char *const gpr_names[] = {"libgpr.so.54", NULL};
+static chezpp_optional_library gpr_library =
+    CHEZPP_OPTIONAL_LIBRARY_INIT("gpr", gpr_names);
+static pthread_once_t grpc_once = PTHREAD_ONCE_INIT;
+static int grpc_available;
+static unsigned grpc_capabilities;
 static void *grpc_handle = NULL;
 static void *gpr_handle = NULL;
 
@@ -196,32 +207,46 @@ static ptr make_error_status_message(const char *msg) {
 static ptr make_handle(uptr handle) { return Sunsigned(handle); }
 
 static int load_symbol(void **out, void *handle, const char *name) {
-  *out = dlsym(handle, name);
-  return *out != NULL;
+  chezpp_optional_library *library =
+      handle == grpc_handle ? &grpc_library : &gpr_library;
+  return chezpp_optional_library_symbol(library, name, out);
 }
 
-static int ensure_grpc_loaded(void) {
-  const char *grpc_names[] = {"libgrpc.so.52", "libgrpc.so", NULL};
-  const char *gpr_names[] = {"libgpr.so.52", "libgpr.so", NULL};
-  int i;
+static void initialize_grpc(void) {
+  grpc_version_string_fn version_fn = NULL;
+  const char *version;
+  unsigned major;
+  unsigned minor;
+  unsigned patch;
 
-  if (grpc_handle != NULL && gpr_handle != NULL) return 1;
-
-  for (i = 0; grpc_names[i] != NULL; i += 1) {
-    grpc_handle = dlopen(grpc_names[i], RTLD_NOW | RTLD_LOCAL);
-    if (grpc_handle != NULL) break;
+  if (!chezpp_optional_library_open(&grpc_library)) return;
+  grpc_handle = grpc_library.handle;
+  if (!load_symbol((void **)&version_fn, grpc_handle, "grpc_version_string")) return;
+  version = version_fn();
+  if (version == NULL ||
+      sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3) {
+    chezpp_optional_library_fail(
+        &grpc_library, "grpc: unable to parse runtime version %s",
+        version == NULL ? "(null)" : version);
+    return;
   }
-  if (grpc_handle == NULL) return 0;
-
-  for (i = 0; gpr_names[i] != NULL; i += 1) {
-    gpr_handle = dlopen(gpr_names[i], RTLD_NOW | RTLD_LOCAL);
-    if (gpr_handle != NULL) break;
+  chezpp_optional_library_set_version(&grpc_library, version);
+  if (major != 54) {
+    chezpp_optional_library_fail(
+        &grpc_library,
+        "grpc: runtime ABI major %u (version %u.%u.%u) requires major 54",
+        major, major, minor, patch);
+    return;
   }
-  if (gpr_handle == NULL) {
-    dlclose(grpc_handle);
-    grpc_handle = NULL;
-    return 0;
+  if (!chezpp_optional_library_open(&gpr_library)) {
+    char diagnostic[sizeof(grpc_library.error)];
+    snprintf(diagnostic, sizeof(diagnostic), "%s", gpr_library.error);
+    chezpp_optional_library_fail(
+        &grpc_library, "grpc: companion gpr unavailable: %s", diagnostic);
+    return;
   }
+  gpr_handle = gpr_library.handle;
+  chezpp_optional_library_set_version(&gpr_library, version);
 
   if (!load_symbol((void **)&p_grpc_init, grpc_handle, "grpc_init") ||
       !load_symbol((void **)&p_grpc_shutdown, grpc_handle, "grpc_shutdown") ||
@@ -289,11 +314,15 @@ static int ensure_grpc_loaded(void) {
       !load_symbol((void **)&p_gpr_now, gpr_handle, "gpr_now") ||
       !load_symbol((void **)&p_gpr_time_add, gpr_handle, "gpr_time_add") ||
       !load_symbol((void **)&p_gpr_free, gpr_handle, "gpr_free")) {
-    dlclose(gpr_handle);
-    dlclose(grpc_handle);
-    gpr_handle = NULL;
-    grpc_handle = NULL;
-    return 0;
+    char diagnostic[sizeof(grpc_library.error)];
+    snprintf(diagnostic, sizeof(diagnostic), "%s",
+             grpc_library.error[0] != '\0' ? grpc_library.error : gpr_library.error);
+    if (gpr_library.state == 1)
+      chezpp_optional_library_fail(&gpr_library,
+                                   "grpc initialization aborted: %s", diagnostic);
+    if (grpc_library.state == 1)
+      chezpp_optional_library_fail(&grpc_library, "%s", diagnostic);
+    return;
   }
 
   if (!grpc_initialized) {
@@ -301,7 +330,36 @@ static int ensure_grpc_loaded(void) {
     grpc_initialized = 1;
   }
 
-  return 1;
+  {
+    void *symbol = NULL;
+    if (chezpp_optional_library_probe_symbol(
+            &grpc_library, "grpc_ssl_credentials_create", &symbol) &&
+        chezpp_optional_library_probe_symbol(
+            &grpc_library, "grpc_ssl_server_credentials_create", &symbol))
+      grpc_capabilities |= 1U;
+    if (chezpp_optional_library_probe_symbol(
+            &grpc_library, "grpc_compression_algorithm_name", &symbol))
+      grpc_capabilities |= 2U;
+  }
+
+  grpc_available = 1;
+}
+
+static int ensure_grpc_loaded(void) {
+  pthread_once(&grpc_once, initialize_grpc);
+  return grpc_available;
+}
+
+const chezpp_optional_library *chezpp_net_grpc_library(void) {
+  (void)ensure_grpc_loaded();
+  if (grpc_library.error[0] != '\0') return &grpc_library;
+  if (gpr_library.error[0] != '\0') return &gpr_library;
+  return &grpc_library;
+}
+
+unsigned chezpp_net_grpc_capabilities(void) {
+  (void)ensure_grpc_loaded();
+  return grpc_capabilities;
 }
 
 static gpr_timespec make_deadline(int timeout_ms) {
@@ -761,7 +819,9 @@ static ptr start_unary_call(grpc_channel *channel, const char *method, ptr paylo
   const char *metadata_error = NULL;
   size_t nops = 0;
 
-  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (!ensure_grpc_loaded())
+    return make_error_status_message(chezpp_optional_library_error(
+        (chezpp_optional_library *)chezpp_net_grpc_library()));
   if (channel == NULL) return make_error_status_message("invalid gRPC channel");
 
   cq = p_grpc_completion_queue_create_for_pluck(NULL);
@@ -865,7 +925,9 @@ ptr chezpp_net_grpc_channel_open(const char *target) {
   grpc_channel_credentials *creds;
   grpc_channel *channel;
 
-  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (!ensure_grpc_loaded())
+    return make_error_status_message(chezpp_optional_library_error(
+        (chezpp_optional_library *)chezpp_net_grpc_library()));
   creds = p_grpc_insecure_credentials_create();
   if (creds == NULL) return make_error_status_message("failed to create insecure gRPC credentials");
   channel = p_grpc_channel_create(target, creds, NULL);
@@ -888,7 +950,9 @@ ptr chezpp_net_grpc_server_open(const char *host, int port) {
   int bound_port;
   ptr out;
 
-  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (!ensure_grpc_loaded())
+    return make_error_status_message(chezpp_optional_library_error(
+        (chezpp_optional_library *)chezpp_net_grpc_library()));
   server = (chezpp_grpc_server *)calloc(1, sizeof(chezpp_grpc_server));
   if (server == NULL) return make_error_status_message("out of memory");
 
@@ -1103,7 +1167,9 @@ ptr chezpp_net_grpc_stream_open(uptr handle, const char *method, int shape, ptr 
   const char *metadata_error = NULL;
   size_t nops = 0;
 
-  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (!ensure_grpc_loaded())
+    return make_error_status_message(chezpp_optional_library_error(
+        (chezpp_optional_library *)chezpp_net_grpc_library()));
   if (channel == NULL) return make_error_status_message("invalid gRPC channel");
   if (shape != CHEZPP_GRPC_STREAM_SHAPE_SERVER && shape != CHEZPP_GRPC_STREAM_SHAPE_CLIENT &&
       shape != CHEZPP_GRPC_STREAM_SHAPE_BIDI)

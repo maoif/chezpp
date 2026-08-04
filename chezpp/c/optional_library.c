@@ -14,8 +14,8 @@ static void close_handle(chezpp_optional_library *library) {
 
 static void fail_locked(chezpp_optional_library *library, const char *format,
                         va_list arguments) {
-  close_handle(library);
   vsnprintf(library->error, sizeof(library->error), format, arguments);
+  close_handle(library);
   library->state = -1;
 }
 
@@ -95,6 +95,25 @@ int chezpp_optional_library_symbol(chezpp_optional_library *library,
   *target = NULL;
   pthread_mutex_unlock(&library->mutex);
   return 0;
+}
+
+int chezpp_optional_library_probe_symbol(chezpp_optional_library *library,
+                                         const char *name, void **target) {
+  const char *loader_error;
+
+  if (library == NULL || name == NULL || target == NULL) return 0;
+  pthread_mutex_lock(&library->mutex);
+  if (library->state != 1 || library->handle == NULL) {
+    *target = NULL;
+    pthread_mutex_unlock(&library->mutex);
+    return 0;
+  }
+  dlerror();
+  *target = dlsym(library->handle, name);
+  loader_error = dlerror();
+  if (loader_error != NULL) *target = NULL;
+  pthread_mutex_unlock(&library->mutex);
+  return loader_error == NULL;
 }
 
 void chezpp_optional_library_fail(chezpp_optional_library *library,
