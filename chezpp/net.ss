@@ -5,6 +5,7 @@
           (chezpp internal))
 
   (export (import (chezpp net errors)
+                  (chezpp net operation)
                   (chezpp net ip)
                   (chezpp net uri)
                   (chezpp net ftp)

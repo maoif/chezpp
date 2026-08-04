@@ -1,7 +1,8 @@
 (library (chezpp)
   (export)
   (import (chezscheme)
-          (chezpp concurrency fiber))
+          (chezpp concurrency fiber)
+          (chezpp net operation))
 
   (export (import (chezpp chez)
                   (chezpp match)
