@@ -174,6 +174,25 @@
             (error? (capture-condition (lambda () (net-operation-result operation))))
             (fx= cleanup-count 1)))
 
+     ;; Cleanup failure does not replace an explicit failed update's primary condition.
+     (let* ([advance-failure
+             (condition (make-error) (make-message-condition "advance failed"))]
+            [cleanup-failure
+             (condition (make-error) (make-message-condition "cleanup also failed"))]
+            [cleanup-count 0]
+            [operation
+             (make-net-operation
+              'failed-cleanup
+              (lambda () (net-operation-failed advance-failure))
+              void
+              (lambda ()
+                (set! cleanup-count (fx+ cleanup-count 1))
+                (raise cleanup-failure)))])
+       (and (eq? operation (net-operation-step! operation))
+            (eq? 'failed (net-operation-state operation))
+            (eq? advance-failure (net-operation-condition operation))
+            (fx= cleanup-count 1)))
+
      ;; Conditions raised by advancement become failed operation results.
      (let ([operation
             (make-net-operation
@@ -183,6 +202,42 @@
        (net-operation-step! operation)
        (and (eq? 'failed (net-operation-state operation))
             (condition? (net-operation-condition operation))))
+
+     ;; Cleanup failure does not replace a condition raised by advancement.
+     (let* ([advance-failure
+             (condition (make-error) (make-message-condition "advance raised"))]
+            [cleanup-failure
+             (condition (make-error) (make-message-condition "cleanup raised"))]
+            [cleanup-count 0]
+            [operation
+             (make-net-operation
+              'raised-cleanup
+              (lambda () (raise advance-failure))
+              void
+              (lambda ()
+                (set! cleanup-count (fx+ cleanup-count 1))
+                (raise cleanup-failure)))])
+       (and (eq? operation (net-operation-step! operation))
+            (eq? 'failed (net-operation-state operation))
+            (eq? advance-failure (net-operation-condition operation))
+            (fx= cleanup-count 1)))
+
+     ;; Cleanup failure after successful advancement becomes the terminal condition.
+     (let* ([cleanup-failure
+             (condition (make-error) (make-message-condition "completion cleanup failed"))]
+            [cleanup-count 0]
+            [operation
+             (make-net-operation
+              'completed-cleanup
+              (lambda () (net-operation-completed 'done))
+              void
+              (lambda ()
+                (set! cleanup-count (fx+ cleanup-count 1))
+                (raise cleanup-failure)))])
+       (and (eq? operation (net-operation-step! operation))
+            (eq? 'failed (net-operation-state operation))
+            (eq? cleanup-failure (net-operation-condition operation))
+            (fx= cleanup-count 1)))
 
      ;; Pending and completed operations do not expose a failure condition.
      (let ([operation

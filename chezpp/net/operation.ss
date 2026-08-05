@@ -178,11 +178,19 @@ The return value is `-1` without a deadline, or a nonnegative fixnum of millisec
        (net-operation-update-deadline-ms update))
       (%net-operation-value-set! operation (net-operation-update-value update))))
 
+  (define cleanup-terminal-operation!
+    (lambda (operation)
+      (let ([failure
+             (capture-callback-failure
+              (lambda () (cleanup-operation! operation)))])
+        (when (and failure (not (eq? 'failed (%net-operation-state operation))))
+          (apply-update! operation (net-operation-failed failure))))
+      operation))
+
   (define fail-operation!
     (lambda (operation failure)
       (apply-update! operation (net-operation-failed (conditionize failure)))
-      (capture-callback-failure (lambda () (cleanup-operation! operation)))
-      operation))
+      (cleanup-terminal-operation! operation)))
 
   #|proc:net-operation-step!
 The `net-operation-step!` procedure advances pending `operation` once without waiting.
@@ -198,12 +206,7 @@ Conditions from advancement or cleanup are stored as a failed result.
                         (%net-operation-state operation)))
               (apply-update! operation (advance-operation who operation))
               (when (operation-terminal? operation)
-                (guard (failure
-                        [else
-                         (apply-update!
-                          operation
-                          (net-operation-failed (conditionize failure)))])
-                  (cleanup-operation! operation)))
+                (cleanup-terminal-operation! operation))
               operation)))
 
   #|proc:net-operation-cancel!
@@ -220,14 +223,11 @@ If cancellation or cleanup fails, the first callback condition becomes a failed 
                 (%net-operation-poll-targets-set! operation '())
                 (%net-operation-deadline-ms-set! operation #f)
                 (%net-operation-value-set! operation (make-cancel-condition operation))
-                (let* ([cancel-failure
-                        (capture-callback-failure (%net-operation-cancel operation))]
-                       [cleanup-failure
-                        (capture-callback-failure
-                         (lambda () (cleanup-operation! operation)))]
-                       [failure (or cancel-failure cleanup-failure)])
-                  (when failure
-                    (apply-update! operation (net-operation-failed failure)))))
+                (let ([cancel-failure
+                       (capture-callback-failure (%net-operation-cancel operation))])
+                  (when cancel-failure
+                    (apply-update! operation (net-operation-failed cancel-failure)))
+                  (cleanup-terminal-operation! operation)))
               operation)))
 
   #|proc:net-operation-result
