@@ -7,6 +7,12 @@
       (thunk)
       #f)))
 
+(define current-monotonic-ms
+  (lambda ()
+    (let ([time (current-time 'time-monotonic)])
+      (+ (* (time-second time) 1000)
+         (quotient (time-nanosecond time) 1000000)))))
+
 
 (mat net-operation-lifecycle
 
@@ -36,19 +42,42 @@
             (eq? 'completed (net-operation-state operation))
             (eq? 'done (net-operation-result operation))))
 
+     ;; The wait path blocks in poll until the operation's absolute deadline.
      (let* ([steps 0]
+            [started-ms (current-monotonic-ms)]
+            [deadline-ms (+ started-ms 30)]
             [operation
              (make-net-operation
               'timeout
               (lambda ()
                 (set! steps (fx+ steps 1))
                 (if (fx= steps 1)
-                    (net-operation-pending '() 0)
+                    (net-operation-pending '() deadline-ms)
                     (net-operation-completed 'timeout-wakeup)))
               void)])
-       (net-operation-step! operation)
-       (and (fx= 0 (net-operation-remaining-timeout-ms operation))
-            (eq? 'timeout-wakeup (net-operation-wait operation))))
+       (and (eq? 'timeout-wakeup (net-operation-wait operation))
+            (fx= steps 2)
+            (let ([elapsed-ms (- (current-monotonic-ms) started-ms)])
+              (and (>= elapsed-ms 20) (< elapsed-ms 2000)))))
+
+     ;; A poll condition fails the operation and runs cleanup exactly once.
+     (let* ([events (list 'read)]
+            [target (make-poll-target 0 events)]
+            [cleanup-count 0]
+            [operation
+             (make-net-operation
+              'poll-failure
+              (lambda () (net-operation-pending (list target) #f))
+              void
+              (lambda () (set! cleanup-count (fx+ cleanup-count 1))))])
+       (set-car! events 'unknown)
+       (let ([failure (capture-condition (lambda () (net-operation-wait operation)))])
+         (and (condition? failure)
+              (eq? 'failed (net-operation-state operation))
+              (eq? failure (net-operation-condition operation))
+              (fx= cleanup-count 1)
+              (begin (net-operation-cancel! operation) #t)
+              (fx= cleanup-count 1))))
 
      ;; A cancelled operation cannot be stepped or read as a successful result.
      (let ([operation
@@ -79,6 +108,56 @@
               (eq? operation (net-operation-cancel! operation))
               (fx= cancel-count 1)
               (fx= cleanup-count 1))))
+
+     ;; A cancel callback failure is stored after cleanup and cancellation still returns normally.
+     (let* ([failure (condition (make-error) (make-message-condition "cancel failed"))]
+            [cleanup-count 0]
+            [operation
+             (make-net-operation
+              'cancel-failure
+              (lambda () (net-operation-pending '() #f))
+              (lambda () (raise failure))
+              (lambda () (set! cleanup-count (fx+ cleanup-count 1))))])
+       (and (eq? operation (guard (condition [else #f])
+                             (net-operation-cancel! operation)))
+            (eq? 'failed (net-operation-state operation))
+            (eq? failure (net-operation-condition operation))
+            (fx= cleanup-count 1)))
+
+     ;; A cleanup callback failure is stored and cancellation still returns the same operation.
+     (let* ([failure (condition (make-error) (make-message-condition "cleanup failed"))]
+            [cancel-count 0]
+            [operation
+             (make-net-operation
+              'cleanup-failure
+              (lambda () (net-operation-pending '() #f))
+              (lambda () (set! cancel-count (fx+ cancel-count 1)))
+              (lambda () (raise failure)))])
+       (and (eq? operation (guard (condition [else #f])
+                             (net-operation-cancel! operation)))
+            (eq? 'failed (net-operation-state operation))
+            (eq? failure (net-operation-condition operation))
+            (fx= cancel-count 1)))
+
+     ;; When both callbacks fail, cleanup runs and the earlier cancellation condition wins.
+     (let* ([cancel-failure
+             (condition (make-error) (make-message-condition "cancel failed first"))]
+            [cleanup-failure
+             (condition (make-error) (make-message-condition "cleanup failed second"))]
+            [cleanup-count 0]
+            [operation
+             (make-net-operation
+              'both-failures
+              (lambda () (net-operation-pending '() #f))
+              (lambda () (raise cancel-failure))
+              (lambda ()
+                (set! cleanup-count (fx+ cleanup-count 1))
+                (raise cleanup-failure)))])
+       (and (eq? operation (guard (condition [else #f])
+                             (net-operation-cancel! operation)))
+            (eq? 'failed (net-operation-state operation))
+            (eq? cancel-failure (net-operation-condition operation))
+            (fx= cleanup-count 1)))
 
      ;; Failed operations expose their condition but not a successful result.
      (let* ([failure (condition (make-error) (make-message-condition "failed"))]

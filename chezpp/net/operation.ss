@@ -23,21 +23,6 @@
           (chezpp net poll)
           (chezpp net operation private))
 
-  (define-record-type (net-operation %make-net-operation %net-operation?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable kind %net-operation-kind)
-            (immutable advance %net-operation-advance)
-            (immutable cancel %net-operation-cancel)
-            (immutable cleanup %net-operation-cleanup)
-            (mutable state %net-operation-state %net-operation-state-set!)
-            (mutable poll-targets %net-operation-poll-targets
-                     %net-operation-poll-targets-set!)
-            (mutable deadline-ms %net-operation-deadline-ms
-                     %net-operation-deadline-ms-set!)
-            (mutable value %net-operation-value %net-operation-value-set!)
-            (mutable cleaned? %net-operation-cleaned? %net-operation-cleaned?-set!)))
-
   #|proc:net-operation?
 The `net-operation?` procedure reports whether `value` is a network operation.
 The `value` parameter may be any Scheme object.
@@ -142,6 +127,12 @@ The return value is `-1` without a deadline, or a nonnegative fixnum of millisec
         (%net-operation-cleaned?-set! operation #t)
         ((%net-operation-cleanup operation)))))
 
+  (define capture-callback-failure
+    (lambda (callback)
+      (guard (failure [else (conditionize failure)])
+        (callback)
+        #f)))
+
   (define make-cancel-condition
     (lambda (operation)
       (condition (make-error)
@@ -187,6 +178,12 @@ The return value is `-1` without a deadline, or a nonnegative fixnum of millisec
        (net-operation-update-deadline-ms update))
       (%net-operation-value-set! operation (net-operation-update-value update))))
 
+  (define fail-operation!
+    (lambda (operation failure)
+      (apply-update! operation (net-operation-failed (conditionize failure)))
+      (capture-callback-failure (lambda () (cleanup-operation! operation)))
+      operation))
+
   #|proc:net-operation-step!
 The `net-operation-step!` procedure advances pending `operation` once without waiting.
 The `operation` parameter is a pending network operation.
@@ -213,6 +210,7 @@ Conditions from advancement or cleanup are stored as a failed result.
 The `net-operation-cancel!` procedure cancels pending `operation` and cleans it up once.
 The `operation` parameter is a network operation in any lifecycle state.
 The return value is the same operation. Repeated cancellation of a terminal operation is inert.
+If cancellation or cleanup fails, the first callback condition becomes a failed result.
 |#
   (define net-operation-cancel!
     (lambda (operation)
@@ -222,10 +220,14 @@ The return value is the same operation. Repeated cancellation of a terminal oper
                 (%net-operation-poll-targets-set! operation '())
                 (%net-operation-deadline-ms-set! operation #f)
                 (%net-operation-value-set! operation (make-cancel-condition operation))
-                (dynamic-wind
-                  void
-                  (lambda () ((%net-operation-cancel operation)))
-                  (lambda () (cleanup-operation! operation))))
+                (let* ([cancel-failure
+                        (capture-callback-failure (%net-operation-cancel operation))]
+                       [cleanup-failure
+                        (capture-callback-failure
+                         (lambda () (cleanup-operation! operation)))]
+                       [failure (or cancel-failure cleanup-failure)])
+                  (when failure
+                    (apply-update! operation (net-operation-failed failure)))))
               operation)))
 
   #|proc:net-operation-result
@@ -258,6 +260,7 @@ It is an error to read a condition from a pending or completed operation.
 The `net-operation-wait` procedure drives `operation` to a terminal state using blocking poll.
 The `operation` parameter is a network operation to advance and wait for.
 The return value is the successful operation result; failure conditions are raised.
+Poll conditions fail the operation and run cleanup once before the same condition is raised.
 It is an error to wait on a cancelled operation.
 |#
   (define-who net-operation-wait
@@ -268,8 +271,10 @@ It is an error to wait on a cancelled operation.
                   [(pending)
                    (net-operation-step! operation)
                    (when (eq? 'pending (%net-operation-state operation))
-                     (poll (%net-operation-poll-targets operation)
-                           (net-operation-remaining-timeout-ms operation)))
+                     (guard (failure
+                             [else (fail-operation! operation failure)])
+                       (poll (%net-operation-poll-targets operation)
+                             (net-operation-remaining-timeout-ms operation))))
                    (loop)]
                   [(completed) (net-operation-result operation)]
                   [(failed) (raise (net-operation-condition operation))]

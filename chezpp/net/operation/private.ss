@@ -1,5 +1,21 @@
 (library (chezpp net operation private)
-  (export net-operation-update?
+  (export %make-net-operation
+          %net-operation?
+          %net-operation-kind
+          %net-operation-advance
+          %net-operation-cancel
+          %net-operation-cleanup
+          %net-operation-state
+          %net-operation-state-set!
+          %net-operation-poll-targets
+          %net-operation-poll-targets-set!
+          %net-operation-deadline-ms
+          %net-operation-deadline-ms-set!
+          %net-operation-value
+          %net-operation-value-set!
+          %net-operation-cleaned?
+          %net-operation-cleaned?-set!
+          net-operation-update?
           net-operation-update-state
           net-operation-update-poll-targets
           net-operation-update-deadline-ms
@@ -9,6 +25,29 @@
           net-operation-failed)
   (import (chezpp chez)
           (chezpp utils))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Dependency-neutral operation storage
+  ;;;;===----------------------------------------------------------------------===
+
+  (define-record-type (net-operation %make-net-operation %net-operation?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable kind %net-operation-kind)
+            (immutable advance %net-operation-advance)
+            (immutable cancel %net-operation-cancel)
+            (immutable cleanup %net-operation-cleanup)
+            (mutable state %net-operation-state %net-operation-state-set!)
+            (mutable poll-targets %net-operation-poll-targets
+                     %net-operation-poll-targets-set!)
+            (mutable deadline-ms %net-operation-deadline-ms
+                     %net-operation-deadline-ms-set!)
+            (mutable value %net-operation-value %net-operation-value-set!)
+            (mutable cleaned? %net-operation-cleaned? %net-operation-cleaned?-set!)))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Operation updates
+  ;;;;===----------------------------------------------------------------------===
 
   (define-record-type (net-operation-update %make-net-operation-update
                                             net-operation-update?)
