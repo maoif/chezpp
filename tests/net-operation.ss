@@ -270,3 +270,19 @@
              (lambda () (make-net-would-block 'socket '(unknown))))])
        (error? failure))
      )
+
+
+(mat net-operation-poll-resource
+
+     (let* ([descriptor-target (make-poll-target 0 '(read))]
+            [operation
+             (make-net-operation
+              'poll-resource
+              (lambda () (net-operation-pending (list descriptor-target) #f))
+              void)])
+       (net-operation-step! operation)
+       (let ([operation-target (make-poll-target operation '(read))])
+         (and (eq? operation (poll-target-resource operation-target))
+              (fx= 0 (poll-target-fd operation-target))
+              (equal? '(read) (poll-target-events operation-target)))))
+     )

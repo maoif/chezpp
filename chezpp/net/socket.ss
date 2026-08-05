@@ -7,6 +7,7 @@
           socket-listen!
           socket-accept
           socket-connect!
+          socket-connect/nonblocking
           socket-shutdown!
           socket-send
           socket-send-all
@@ -39,7 +40,9 @@
           (chezpp net errors)
           (chezpp net ffi)
           (chezpp net private)
-          (chezpp net address))
+          (chezpp net address)
+          (chezpp net poll)
+          (chezpp net operation))
 
   (define-record-type (socket %make-socket socket?)
     (sealed #t)
@@ -79,9 +82,15 @@
         (raise-net-error who kind (ffi-error-message x) x))
       x))
 
-  (define maybe-would-block
-    (lambda (x)
-      (and (ffi-would-block? x) #f)))
+  (define ffi-would-block-event
+    (lambda (answer)
+      (vector-ref answer 1)))
+
+  (define ffi-result->would-block
+    (lambda (resource answer)
+      (and (ffi-would-block? answer)
+           (make-net-would-block resource
+                                 (list (ffi-would-block-event answer))))))
 
   (define dup-socket-fd
     (lambda (who sock)
@@ -97,25 +106,38 @@
       (or (socket-address-path address) "")))
 
   (define send-result
-    (lambda (who x nonblocking?)
+    (lambda (who sock answer)
       (cond
-       [(fixnum? x) x]
-       [(ffi-would-block? x) #f]
-       [else (ensure-ffi-success who x 'socket)])))
+       [(fixnum? answer) answer]
+       [(ffi-would-block? answer) (ffi-result->would-block sock answer)]
+       [else (ensure-ffi-success who answer 'socket)])))
 
   (define recv-result
-    (lambda (who x)
+    (lambda (who sock answer)
       (cond
-       [(or (bytevector? x) (eof-object? x)) x]
-       [(ffi-would-block? x) #f]
-       [else (ensure-ffi-success who x 'socket)])))
+       [(or (bytevector? answer) (eof-object? answer)) answer]
+       [(ffi-would-block? answer) (ffi-result->would-block sock answer)]
+       [else (ensure-ffi-success who answer 'socket)])))
 
   (define recv-into-result
-    (lambda (who x)
+    (lambda (who sock answer)
       (cond
-       [(or (fixnum? x) (eof-object? x)) x]
-       [(ffi-would-block? x) #f]
-       [else (ensure-ffi-success who x 'socket)])))
+       [(or (fixnum? answer) (eof-object? answer)) answer]
+       [(ffi-would-block? answer) (ffi-result->would-block sock answer)]
+       [else (ensure-ffi-success who answer 'socket)])))
+
+  (define check-connect-timeout
+    (lambda (who timeout-ms)
+      (unless (or (not timeout-ms)
+                  (and (fixnum? timeout-ms) (fx>= timeout-ms 0)))
+        (errorf who "timeout must be #f or a nonnegative fixnum, given ~s" timeout-ms))
+      timeout-ms))
+
+  (define current-monotonic-ms
+    (lambda ()
+      (let ([time (current-time 'time-monotonic)])
+        (+ (* (time-second time) 1000)
+           (quotient (time-nanosecond time) 1000000)))))
 
   #|proc:open-socket
 The `open-socket` procedure opens a new socket and returns a socket object.
@@ -181,7 +203,10 @@ The `socket-listen!` procedure marks a bound stream socket as listening.
                     #f)))
 
   #|proc:socket-accept
-The `socket-accept` procedure accepts an incoming connection and returns the child socket and peer address.
+The `socket-accept` procedure accepts an incoming connection from `sock`.
+The `sock` parameter is an open listening socket.
+The return values are the accepted socket and its peer address.
+A nonblocking listening socket may instead return a would-block value requesting `read`.
 |#
   (define-who socket-accept
     (lambda (sock)
@@ -189,6 +214,7 @@ The `socket-accept` procedure accepts an incoming connection and returns the chi
               (ensure-open who sock)
               (let ([ans (ffi-net-socket-accept (socket-fd sock) 0)])
                 (cond
+                 [(ffi-would-block? ans) (ffi-result->would-block sock ans)]
                  [(vector? ans)
                   (let ([address (%socket-address-from-ffi (vector-ref ans 1))])
                     (values (make-accepted-socket sock (vector-ref ans 0) address)
@@ -196,7 +222,10 @@ The `socket-accept` procedure accepts an incoming connection and returns the chi
                  [else (ensure-ffi-success who ans 'socket)])))))
 
   #|proc:socket-accept/nonblocking
-The `socket-accept/nonblocking` procedure accepts an incoming connection if one is ready, and returns `#f` otherwise.
+The `socket-accept/nonblocking` procedure attempts one accept from `sock` without waiting.
+The `sock` parameter is an open listening socket.
+The return values are the accepted socket and peer address when a connection is ready.
+The return value is otherwise a would-block value naming `sock` and requesting `read`.
 |#
   (define-who socket-accept/nonblocking
     (lambda (sock)
@@ -204,7 +233,7 @@ The `socket-accept/nonblocking` procedure accepts an incoming connection if one 
               (ensure-open who sock)
               (let ([ans (ffi-net-socket-accept (socket-fd sock) 1)])
                 (cond
-                 [(ffi-would-block? ans) #f]
+                 [(ffi-would-block? ans) (ffi-result->would-block sock ans)]
                  [(vector? ans)
                   (let ([address (%socket-address-from-ffi (vector-ref ans 1))])
                     (values (make-accepted-socket sock (vector-ref ans 0) address)
@@ -212,20 +241,74 @@ The `socket-accept/nonblocking` procedure accepts an incoming connection if one 
                  [else (ensure-ffi-success who ans 'socket)])))))
 
   #|proc:socket-connect!
-The `socket-connect!` procedure connects a socket to a remote socket address.
+The `socket-connect!` procedure connects `sock` to `address`, waiting for readiness as needed.
+The `sock` parameter is an open socket.
+The `address` parameter is the remote socket address.
+The return value is `#t` after the connection succeeds. Connection failures are raised.
 |#
   (define-who socket-connect!
     (lambda (sock address)
       (pcheck ([socket? sock] [socket-address? address])
-              (ensure-open who sock)
-              (let ([ans (ffi-net-socket-connect (socket-fd sock)
-                                                 (family-symbol->int who (socket-address-family address))
-                                                 (address->ffi-host address)
-                                                 (or (socket-address-port address) -1)
-                                                 (address->ffi-path address))])
-                (if (ffi-would-block? ans)
-                    #f
-                    (ensure-ffi-success who ans 'socket))))))
+              (net-operation-wait (socket-connect/nonblocking sock address #f)))))
+
+  #|proc:socket-connect/nonblocking
+The `socket-connect/nonblocking` procedure creates a nonblocking connect operation.
+The `sock` parameter is an open socket that the operation connects and owns on cancellation.
+The `address` parameter is the remote socket address.
+The optional `timeout-ms` parameter is `#f` or a nonnegative relative timeout in milliseconds.
+The return value is a pending network operation with a write target and absolute deadline as
+needed. Stepping never waits; completion returns `#t`, failure stores a condition, and cancellation
+closes `sock`. Terminal cleanup restores the socket's original blocking mode when it remains open.
+|#
+  (define-who socket-connect/nonblocking
+    (case-lambda
+      [(sock address) (socket-connect/nonblocking sock address #f)]
+      [(sock address timeout-ms)
+       (pcheck ([socket? sock] [socket-address? address])
+               (ensure-open who sock)
+               (check-connect-timeout who timeout-ms)
+               (let ([original-blocking? (socket-blocking? sock)]
+                     [attempted? #f]
+                     [deadline-ms
+                      (and timeout-ms (+ (current-monotonic-ms) timeout-ms))])
+                 (socket-set-blocking! sock #f)
+                 (make-net-operation
+                  'socket-connect
+                  (lambda ()
+                    (ensure-open who sock)
+                    (if attempted?
+                        (begin
+                          (when (and deadline-ms
+                                     (>= (current-monotonic-ms) deadline-ms))
+                            (raise-net-error who 'timeout "socket connection timed out" sock))
+                          (ensure-ffi-success
+                           who
+                           (ffi-net-socket-connect-status (socket-fd sock))
+                           'socket)
+                          (net-operation-completed #t))
+                        (let ([answer
+                               (ffi-net-socket-connect
+                                (socket-fd sock)
+                                (family-symbol->int
+                                 who (socket-address-family address))
+                                (address->ffi-host address)
+                                (or (socket-address-port address) -1)
+                                (address->ffi-path address))])
+                          (if (ffi-would-block? answer)
+                              (begin
+                                (set! attempted? #t)
+                                (net-operation-pending
+                                 (list (make-poll-target sock '(write)))
+                                 deadline-ms))
+                              (begin
+                                (ensure-ffi-success who answer 'socket)
+                                (net-operation-completed #t))))))
+                  (lambda ()
+                    (unless (socket-closed? sock)
+                      (close-socket sock)))
+                  (lambda ()
+                    (unless (socket-closed? sock)
+                      (socket-set-blocking! sock original-blocking?))))))]))
 
   #|proc:socket-shutdown!
 The `socket-shutdown!` procedure shuts down reading, writing, or both directions of a socket.
@@ -240,30 +323,43 @@ The `socket-shutdown!` procedure shuts down reading, writing, or both directions
                'socket))))
 
   #|proc:socket-send
-The `socket-send` procedure writes a bytevector slice to a socket and returns the number of bytes written.
+The `socket-send` procedure writes a slice of `bytevector` to `sock`.
+The `sock` parameter is an open socket. The `bytevector` parameter supplies the bytes.
+The optional `start` and `stop` parameters delimit the half-open slice to write.
+The return value is the number of bytes written, or a write would-block value when applicable.
 |#
   (define-who socket-send
     (case-lambda
-      [(sock bv) (socket-send sock bv 0 (bytevector-length bv))]
-      [(sock bv start) (socket-send sock bv start (bytevector-length bv))]
-      [(sock bv start stop)
-       (pcheck ([socket? sock] [bytevector? bv])
+      [(sock bytevector) (socket-send sock bytevector 0 (bytevector-length bytevector))]
+      [(sock bytevector start)
+       (socket-send sock bytevector start (bytevector-length bytevector))]
+      [(sock bytevector start stop)
+       (pcheck ([socket? sock] [bytevector? bytevector])
                (ensure-open who sock)
-               (check-slice who (bytevector-length bv) start stop)
-               (send-result who (ffi-net-socket-send (socket-fd sock) bv start stop 0) #f))]))
+               (check-slice who (bytevector-length bytevector) start stop)
+               (send-result who sock
+                            (ffi-net-socket-send
+                             (socket-fd sock) bytevector start stop 0)))]))
 
   #|proc:socket-send/nonblocking
-The `socket-send/nonblocking` procedure attempts to write a bytevector slice without blocking and returns `#f` if the socket would block.
+The `socket-send/nonblocking` procedure attempts one write to `sock` without waiting.
+The `sock` parameter is an open socket. The `bytevector` parameter supplies the bytes.
+The optional `start` and `stop` parameters delimit the half-open slice to write.
+The return value is the number of bytes written or a would-block value requesting `write`.
 |#
   (define-who socket-send/nonblocking
     (case-lambda
-      [(sock bv) (socket-send/nonblocking sock bv 0 (bytevector-length bv))]
-      [(sock bv start) (socket-send/nonblocking sock bv start (bytevector-length bv))]
-      [(sock bv start stop)
-       (pcheck ([socket? sock] [bytevector? bv])
+      [(sock bytevector)
+       (socket-send/nonblocking sock bytevector 0 (bytevector-length bytevector))]
+      [(sock bytevector start)
+       (socket-send/nonblocking sock bytevector start (bytevector-length bytevector))]
+      [(sock bytevector start stop)
+       (pcheck ([socket? sock] [bytevector? bytevector])
                (ensure-open who sock)
-               (check-slice who (bytevector-length bv) start stop)
-               (send-result who (ffi-net-socket-send (socket-fd sock) bv start stop 1) #t))]))
+               (check-slice who (bytevector-length bytevector) start stop)
+               (send-result who sock
+                            (ffi-net-socket-send
+                             (socket-fd sock) bytevector start stop 1)))]))
 
   #|proc:socket-send-all
 The `socket-send-all` procedure writes an entire bytevector slice to a socket before returning.
@@ -282,70 +378,96 @@ The `socket-send-all` procedure writes an entire bytevector slice to a socket be
                      (loop (fx+ i (socket-send sock bv i stop))))))]))
 
   #|proc:socket-send-all/nonblocking
-The `socket-send-all/nonblocking` procedure writes as much of a bytevector slice as possible without blocking.
+The `socket-send-all/nonblocking` procedure writes a slice to `sock` without waiting.
+The `sock` parameter is an open socket. The `bytevector` parameter supplies the bytes.
+The optional `start` and `stop` parameters delimit the half-open slice to write.
+The return value is the bytes written after progress, the full slice length after completion, or
+a would-block value requesting `write` when no bytes could be written.
 |#
   (define-who socket-send-all/nonblocking
     (case-lambda
-      [(sock bv) (socket-send-all/nonblocking sock bv 0 (bytevector-length bv))]
-      [(sock bv start) (socket-send-all/nonblocking sock bv start (bytevector-length bv))]
-      [(sock bv start stop)
-       (pcheck ([socket? sock] [bytevector? bv])
+      [(sock bytevector)
+       (socket-send-all/nonblocking sock bytevector 0 (bytevector-length bytevector))]
+      [(sock bytevector start)
+       (socket-send-all/nonblocking sock bytevector start (bytevector-length bytevector))]
+      [(sock bytevector start stop)
+       (pcheck ([socket? sock] [bytevector? bytevector])
                (ensure-open who sock)
-               (check-slice who (bytevector-length bv) start stop)
+               (check-slice who (bytevector-length bytevector) start stop)
                (let loop ([i start])
                  (if (fx= i stop)
                      (fx- stop start)
-                     (let ([n (socket-send/nonblocking sock bv i stop)])
+                     (let ([n (socket-send/nonblocking sock bytevector i stop)])
                        (cond
-                        [(eq? n #f) (and (fx> i start) (fx- i start))]
+                        [(net-would-block? n)
+                         (if (fx> i start) (fx- i start) n)]
                         [(fx= n 0) (fx- i start)]
                         [else (loop (fx+ i n))])))))]))
 
   #|proc:socket-recv
-The `socket-recv` procedure reads up to `size` bytes from a socket and returns a bytevector, an EOF object, or `#f` if a nonblocking socket would block.
+The `socket-recv` procedure reads up to `size` bytes from `sock`.
+The `sock` parameter is an open socket. The `size` parameter is the maximum byte count.
+The return value is a bytevector, an EOF object, or a read would-block value when applicable.
 |#
   (define-who socket-recv
     (lambda (sock size)
       (pcheck ([socket? sock] [fixnum? size])
               (check-size who size)
               (ensure-open who sock)
-              (recv-result who (ffi-net-socket-recv (socket-fd sock) size 0)))))
+              (recv-result who sock (ffi-net-socket-recv (socket-fd sock) size 0)))))
 
   #|proc:socket-recv/nonblocking
-The `socket-recv/nonblocking` procedure attempts to read up to `size` bytes without blocking and returns `#f` if the socket would block.
+The `socket-recv/nonblocking` procedure attempts one read from `sock` without waiting.
+The `sock` parameter is an open socket. The `size` parameter is the maximum byte count.
+The return value is a bytevector, an EOF object, or a would-block value requesting `read`.
 |#
   (define-who socket-recv/nonblocking
     (lambda (sock size)
       (pcheck ([socket? sock] [fixnum? size])
               (check-size who size)
               (ensure-open who sock)
-              (recv-result who (ffi-net-socket-recv (socket-fd sock) size 1)))))
+              (recv-result who sock (ffi-net-socket-recv (socket-fd sock) size 1)))))
 
   #|proc:socket-recv!
-The `socket-recv!` procedure reads into a bytevector slice and returns the number of bytes read or an EOF object.
+The `socket-recv!` procedure reads from `sock` into `bytevector`.
+The `sock` parameter is an open socket. The `bytevector` parameter receives bytes.
+The optional `start` and `stop` parameters delimit the half-open destination slice.
+The return value is the number of bytes read, an EOF object, or a read would-block value.
 |#
   (define-who socket-recv!
     (case-lambda
-      [(sock bv) (socket-recv! sock bv 0 (bytevector-length bv))]
-      [(sock bv start) (socket-recv! sock bv start (bytevector-length bv))]
-      [(sock bv start stop)
-       (pcheck ([socket? sock] [bytevector? bv])
+      [(sock bytevector) (socket-recv! sock bytevector 0 (bytevector-length bytevector))]
+      [(sock bytevector start)
+       (socket-recv! sock bytevector start (bytevector-length bytevector))]
+      [(sock bytevector start stop)
+       (pcheck ([socket? sock] [bytevector? bytevector])
                (ensure-open who sock)
-               (check-slice who (bytevector-length bv) start stop)
-               (recv-into-result who (ffi-net-socket-recv-into (socket-fd sock) bv start stop 0)))]))
+               (check-slice who (bytevector-length bytevector) start stop)
+               (recv-into-result
+                who sock
+                (ffi-net-socket-recv-into
+                 (socket-fd sock) bytevector start stop 0)))]))
 
   #|proc:socket-recv!/nonblocking
-The `socket-recv!/nonblocking` procedure attempts to read into a bytevector slice without blocking and returns `#f` if the socket would block.
+The `socket-recv!/nonblocking` procedure attempts one read into `bytevector` without waiting.
+The `sock` parameter is an open socket. The `bytevector` parameter receives bytes.
+The optional `start` and `stop` parameters delimit the half-open destination slice.
+The return value is a byte count, an EOF object, or a would-block value requesting `read`.
 |#
   (define-who socket-recv!/nonblocking
     (case-lambda
-      [(sock bv) (socket-recv!/nonblocking sock bv 0 (bytevector-length bv))]
-      [(sock bv start) (socket-recv!/nonblocking sock bv start (bytevector-length bv))]
-      [(sock bv start stop)
-       (pcheck ([socket? sock] [bytevector? bv])
+      [(sock bytevector)
+       (socket-recv!/nonblocking sock bytevector 0 (bytevector-length bytevector))]
+      [(sock bytevector start)
+       (socket-recv!/nonblocking sock bytevector start (bytevector-length bytevector))]
+      [(sock bytevector start stop)
+       (pcheck ([socket? sock] [bytevector? bytevector])
                (ensure-open who sock)
-               (check-slice who (bytevector-length bv) start stop)
-               (recv-into-result who (ffi-net-socket-recv-into (socket-fd sock) bv start stop 1)))]))
+               (check-slice who (bytevector-length bytevector) start stop)
+               (recv-into-result
+                who sock
+                (ffi-net-socket-recv-into
+                 (socket-fd sock) bytevector start stop 1)))]))
 
   #|proc:socket-set-option!
 The `socket-set-option!` procedure updates a supported socket option.
@@ -407,7 +529,8 @@ The `socket-set-blocking!` procedure toggles blocking mode on a socket.
               blocking?)))
 
   #|proc:call-with-socket
-The `call-with-socket` procedure opens a socket, passes it to a thunk, and always closes it afterwards.
+The `call-with-socket` procedure opens a socket, passes it to a thunk, and always closes it
+afterwards.
 |#
   (define-who call-with-socket
     (lambda (family type proto proc)
@@ -419,7 +542,8 @@ The `call-with-socket` procedure opens a socket, passes it to a thunk, and alway
                   (lambda () (close-socket sock)))))))
 
   #|proc:call-with-connected-socket
-The `call-with-connected-socket` procedure opens, connects, passes, and closes a socket around a thunk.
+The `call-with-connected-socket` procedure opens, connects, passes, and closes a socket around a
+thunk.
 |#
   (define-who call-with-connected-socket
     (lambda (family type proto address proc)
@@ -438,7 +562,8 @@ The `call-with-connected-socket` procedure opens, connects, passes, and closes a
       (open-fd-output-port (dup-socket-fd who sock) 'block transcoder)))
 
   #|proc:open-socket-port
-The `open-socket-port` procedure opens a bidirectional binary port for a socket using a duplicated file descriptor.
+The `open-socket-port` procedure opens a bidirectional binary port for a socket using a duplicated
+file descriptor.
 |#
   (define-who open-socket-port
     (lambda (sock)
@@ -447,7 +572,8 @@ The `open-socket-port` procedure opens a bidirectional binary port for a socket 
               (open-fd-input/output-port (dup-socket-fd who sock) 'block #f))))
 
   #|proc:open-socket-input-port
-The `open-socket-input-port` procedure opens a binary input port for a socket using a duplicated file descriptor.
+The `open-socket-input-port` procedure opens a binary input port for a socket using a duplicated
+file descriptor.
 |#
   (define-who open-socket-input-port
     (lambda (sock)
@@ -456,7 +582,8 @@ The `open-socket-input-port` procedure opens a binary input port for a socket us
               (open-dup-input-port who sock #f))))
 
   #|proc:open-socket-output-port
-The `open-socket-output-port` procedure opens a binary output port for a socket using a duplicated file descriptor.
+The `open-socket-output-port` procedure opens a binary output port for a socket using a duplicated
+file descriptor.
 |#
   (define-who open-socket-output-port
     (lambda (sock)
@@ -479,7 +606,8 @@ The `open-socket-binary-output-port` procedure is an alias for `open-socket-outp
       (open-socket-output-port sock)))
 
   #|proc:open-socket-text-input-port
-The `open-socket-text-input-port` procedure opens a text input port for a socket using the native transcoder.
+The `open-socket-text-input-port` procedure opens a text input port for a socket using the native
+transcoder.
 |#
   (define-who open-socket-text-input-port
     (lambda (sock)
@@ -488,7 +616,8 @@ The `open-socket-text-input-port` procedure opens a text input port for a socket
               (open-dup-input-port who sock (native-transcoder)))))
 
   #|proc:open-socket-text-output-port
-The `open-socket-text-output-port` procedure opens a text output port for a socket using the native transcoder.
+The `open-socket-text-output-port` procedure opens a text output port for a socket using the native
+transcoder.
 |#
   (define-who open-socket-text-output-port
     (lambda (sock)
@@ -497,7 +626,8 @@ The `open-socket-text-output-port` procedure opens a text output port for a sock
               (open-dup-output-port who sock (native-transcoder)))))
 
   #|proc:call-with-socket-ports
-The `call-with-socket-ports` procedure opens binary input and output ports for a socket, passes them to a thunk, and closes them afterwards.
+The `call-with-socket-ports` procedure opens binary input and output ports for a socket, passes them
+to a thunk, and closes them afterwards.
 |#
   (define-who call-with-socket-ports
     (lambda (sock proc)

@@ -21,6 +21,7 @@
           ffi-net-socket-bind
           ffi-net-socket-listen
           ffi-net-socket-connect
+          ffi-net-socket-connect-status
           ffi-net-socket-accept
           ffi-net-socket-shutdown
           ffi-net-socket-send
@@ -166,6 +167,8 @@
     (foreign-procedure "chezpp_net_socket_listen" (int int) scheme-object))
   (define ffi-net-socket-connect
     (foreign-procedure "chezpp_net_socket_connect" (int int string int string) scheme-object))
+  (define ffi-net-socket-connect-status
+    (foreign-procedure "chezpp_net_socket_connect_status" (int) scheme-object))
   (define ffi-net-socket-accept
     (foreign-procedure "chezpp_net_socket_accept" (int int) scheme-object))
   (define ffi-net-socket-shutdown

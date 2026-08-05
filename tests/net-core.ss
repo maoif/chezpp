@@ -33,6 +33,12 @@
       (thunk)
       #f)))
 
+(define current-monotonic-ms
+  (lambda ()
+    (let ([time (current-time 'time-monotonic)])
+      (+ (* (time-second time) 1000)
+         (quotient (time-nanosecond time) 1000000)))))
+
 (define start-stalled-tls-handshake-server
   (lambda (delay-ms)
     (let ([listener (open-socket 'inet 'stream)])
@@ -221,8 +227,137 @@
        (let ([no-client (socket-accept/nonblocking server)]
              [reuse? (socket-get-option server 'reuse-address)])
          (close-socket server)
-         (and (not no-client)
+         (and (net-would-block? no-client)
+              (equal? '(read) (net-would-block-events no-client))
               reuse?))))
+
+(mat net-socket-readiness
+     (let ([listener (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+           (socket-listen! listener 1)
+           (let ([answer (socket-accept/nonblocking listener)])
+             (and (net-would-block? answer)
+                  (eq? listener (net-would-block-resource answer))
+                  (equal? '(read) (net-would-block-events answer)))))
+         (lambda () (close-socket listener))))
+
+     (let-values ([(server port th)
+                   (start-echo-server
+                    (lambda (client peer)
+                      (milisleep 100)))])
+       (let ([client (open-socket 'inet 'stream)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([answer (socket-recv/nonblocking client 1)]
+                   [buffer (make-bytevector 1)])
+               (and (net-would-block? answer)
+                    (eq? client (net-would-block-resource answer))
+                    (equal? '(read) (net-would-block-events answer))
+                    (let ([into-answer (socket-recv!/nonblocking client buffer)])
+                      (and (net-would-block? into-answer)
+                           (eq? client (net-would-block-resource into-answer))
+                           (equal? '(read) (net-would-block-events into-answer)))))))
+           (lambda ()
+             (close-socket client)
+             (thread-join th)))))
+
+     (let-values ([(server port th)
+                   (start-echo-server
+                    (lambda (client peer)
+                      (milisleep 500)))])
+       (let ([client (open-socket 'inet 'stream)]
+             [payload (make-bytevector 65536 0)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (socket-set-option! client 'send-buffer 4096)
+             (let loop ([attempts 10000])
+               (if (fx= attempts 0)
+                   #f
+                   (let ([answer (socket-send/nonblocking client payload)])
+                     (if (net-would-block? answer)
+                         (and (eq? client (net-would-block-resource answer))
+                              (equal? '(write) (net-would-block-events answer)))
+                         (loop (fx1- attempts)))))))
+           (lambda ()
+             (close-socket client)
+             (thread-join th)))))
+
+     (let ([listener (open-socket 'inet 'stream)]
+           [client (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+           (socket-listen! listener 1)
+           (let* ([port (socket-address-port (socket-local-address listener))]
+                  [operation
+                   (socket-connect/nonblocking
+                    client (make-socket-address 'inet "127.0.0.1" port) 1000)])
+             (net-operation-step! operation)
+             (and (net-operation? operation)
+                  (case (net-operation-state operation)
+                    [(completed) #t]
+                    [(pending)
+                     (let ([target (car (net-operation-poll-targets operation))])
+                       (and (equal? '(write) (poll-target-events target))
+                            (memq 'write
+                                  (poll-target-ready-events
+                                   (car (poll (list target) 1000))))
+                            (begin (net-operation-step! operation) #t)))]
+                    [else #f])
+                  (eq? 'completed (net-operation-state operation))
+                  (eq? #t (net-operation-result operation))
+                  (socket-address? (socket-peer-address client)))))
+         (lambda ()
+           (close-socket client)
+           (close-socket listener))))
+
+     (let ([client (open-socket 'inet 'stream)])
+       (let ([operation
+              (socket-connect/nonblocking
+               client (make-socket-address 'inet "127.0.0.1" 9) 100)])
+         (and (net-operation? operation)
+              (eq? 'pending (net-operation-state operation))
+              (begin (net-operation-cancel! operation) #t)
+              (eq? 'cancelled (net-operation-state operation))
+              (socket-closed? client))))
+
+     ;; Error case: SO_ERROR reports a refused nonblocking connection as a failed operation.
+     (let ([listener (open-socket 'inet 'stream)])
+       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+       (let ([port (socket-address-port (socket-local-address listener))])
+         (close-socket listener)
+         (let ([client (open-socket 'inet 'stream)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (let ([operation
+                      (socket-connect/nonblocking
+                       client (make-socket-address 'inet "127.0.0.1" port) 1000)])
+                 (net-operation-step! operation)
+                 (case (net-operation-state operation)
+                   [(pending)
+                    (let* ([target (car (net-operation-poll-targets operation))]
+                           [ready-events
+                            (poll-target-ready-events
+                             (car (poll (list target) 1000)))])
+                      (net-operation-step! operation)
+                      (and (memq 'write ready-events)
+                           (or (memq 'error ready-events) (memq 'hup ready-events))
+                           (eq? 'failed (net-operation-state operation))
+                           (net-error? (net-operation-condition operation))))]
+                   [(failed) (net-error? (net-operation-condition operation))]
+                   [else #f])))
+             (lambda ()
+               (unless (socket-closed? client)
+                 (close-socket client))))))))
 
 (mat net-socket-listen-validation
      (let ([sock (open-socket 'inet 'stream)])
@@ -251,6 +386,36 @@
            (close-socket server)
            (and (null? (poll-target-ready-events (car before)))
                 (not (not (memq 'read (poll-target-ready-events (car after))))))))))
+
+(mat net-poll-resources
+     (let ([listener (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([descriptor-target (make-poll-target (socket-fd listener) '(read))]
+                 [port (open-socket-input-port listener)])
+             (dynamic-wind
+               void
+               (lambda ()
+                 (let ([port-target (make-poll-target port '(read))])
+                   (and (fx= (socket-fd listener) (poll-target-fd descriptor-target))
+                        (eq? port (poll-target-resource port-target))
+                        (fx= (port-file-descriptor port) (poll-target-fd port-target)))))
+               (lambda () (close-port port)))))
+         (lambda () (close-socket listener))))
+
+     (let* ([started-ms (current-monotonic-ms)]
+            [deadline-ms (+ started-ms 30)])
+       (and (null? (poll-until '() deadline-ms))
+            (let ([elapsed-ms (- (current-monotonic-ms) started-ms)])
+              (and (>= elapsed-ms 20) (< elapsed-ms 2000)))))
+
+     (let ([socket (open-socket 'inet 'stream)])
+       (let ([descriptor (socket-fd socket)])
+         (close-socket socket)
+         (let ([answer (poll/nonblocking
+                        (list (make-poll-target descriptor '(read write))))])
+           (not (not (memq 'invalid (poll-target-ready-events (car answer)))))))))
 
 (mat net-poll-validation
      (and

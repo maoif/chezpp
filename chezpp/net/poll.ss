@@ -6,13 +6,14 @@
           poll-target-events
           poll-target-ready-events
           poll
+          poll-until
           poll/nonblocking)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp net errors)
           (chezpp net ffi)
           (chezpp net private)
-          (chezpp net socket))
+          (chezpp net operation private))
 
   (define-record-type (poll-target %make-poll-target poll-target?)
     (sealed #t)
@@ -68,9 +69,30 @@
   (define resource->fd
     (lambda (who resource)
       (cond
-       [(socket? resource) (socket-fd resource)]
+       [(and (record? resource)
+             (let ([type (record-rtd resource)])
+               (and (eq? 'socket (record-type-name type))
+                    (let ([field* (record-type-field-names type)])
+                      (and (fx> (vector-length field*) 0)
+                           (eq? 'fd (vector-ref field* 0)))))))
+        ((record-accessor (record-rtd resource) 0) resource)]
        [(fixnum? resource) resource]
-       [else (errorf who "expected socket or file descriptor, given ~s" resource)])))
+       [(and (port? resource) (binary-port? resource))
+        (let ([descriptor
+               (guard (failure [else #f])
+                 (port-file-descriptor resource))])
+          (if (fixnum? descriptor)
+              descriptor
+              (errorf who "binary port has no file descriptor: ~s" resource)))]
+       [(%net-operation? resource)
+        (let ([target* (%net-operation-poll-targets resource)])
+          (if (and (pair? target*) (null? (cdr target*)))
+              (poll-target-fd (car target*))
+              (errorf who "operation must have exactly one poll target, given ~s" resource)))]
+       [else
+        (errorf who
+                "expected socket, descriptor, binary port, or net operation, given ~s"
+                resource)])))
 
   (define target->spec
     (lambda (who target)
@@ -80,25 +102,34 @@
         v)))
 
   #|proc:make-poll-target
-The `make-poll-target` procedure constructs a poll target from a socket or file descriptor and a list of event symbols.
+The `make-poll-target` procedure constructs a readiness target for `resource`.
+The `resource` parameter is a socket, integer descriptor, descriptor-backed binary port, or
+network operation with exactly one current poll target.
+The `event*` parameter is a list containing `read`, `write`, `priority`, `error`, `hup`, or
+`invalid` symbols.
+The return value is a poll target retaining `resource` and its extracted descriptor.
 |#
   (define-who make-poll-target
     (lambda (resource event*)
-      (let ([fd (resource->fd who resource)])
-        (event-list->mask who event*)
-        (%make-poll-target resource fd event* '()))))
+      (unless (list? event*)
+        (errorf who "poll events must be a list, given ~s" event*))
+      (pcheck ([list? event*])
+              (let ([fd (resource->fd who resource)])
+                (event-list->mask who event*)
+                (%make-poll-target resource fd event* '())))))
 
   #|proc:poll
-The `poll` procedure waits for readiness across poll targets and returns updated targets with ready-event lists.
+The `poll` procedure waits for readiness across `target*`.
+The `target*` parameter is a list of poll targets.
+The optional `timeout-ms` parameter is `-1` to wait indefinitely or a nonnegative timeout.
+The return value is a corresponding list of targets whose ready events include all native flags.
 |#
   (define-who poll
     (case-lambda
       [(target*) (poll target* -1)]
       [(target* timeout-ms)
-       (pcheck ([fixnum? timeout-ms])
+       (pcheck ([list? target*] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
-               (unless (list? target*)
-                 (errorf who "poll targets must be a list, given ~s" target*))
                (for-each (lambda (target)
                            (unless (poll-target? target)
                              (errorf who "poll target expected, given ~s" target)))
@@ -115,10 +146,33 @@ The `poll` procedure waits for readiness across poll targets and returns updated
                       target*
                       ans)))]))
 
+  (define current-monotonic-ms
+    (lambda ()
+      (let ([time (current-time 'time-monotonic)])
+        (+ (* (time-second time) 1000)
+           (quotient (time-nanosecond time) 1000000)))))
+
+  #|proc:poll-until
+The `poll-until` procedure waits for `target*` until the absolute `deadline-ms`.
+The `target*` parameter is a list of poll targets.
+The `deadline-ms` parameter is an absolute monotonic deadline in milliseconds.
+The return value is a corresponding list of targets populated with their ready events.
+An elapsed deadline performs a nonblocking poll.
+|#
+  (define poll-until
+    (lambda (target* deadline-ms)
+      (pcheck ([list? target*] [natural? deadline-ms])
+              (poll target*
+                    (min (most-positive-fixnum)
+                         (max 0 (- deadline-ms (current-monotonic-ms))))))))
+
   #|proc:poll/nonblocking
-The `poll/nonblocking` procedure performs a zero-timeout poll and returns updated targets immediately.
+The `poll/nonblocking` procedure polls `target*` without waiting.
+The `target*` parameter is a list of poll targets.
+The return value is a corresponding list of targets populated with current ready events.
 |#
   (define-who poll/nonblocking
     (lambda (target*)
-      (poll target* 0)))
+      (pcheck ([list? target*])
+              (poll target* 0))))
   )

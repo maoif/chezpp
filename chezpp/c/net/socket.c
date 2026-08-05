@@ -26,6 +26,13 @@ static ptr make_status(const char *tag, ptr value) {
 
 static ptr make_errno_status(const char *tag) { return make_status(tag, errno_str()); }
 
+static ptr would_block_status(const char *event) {
+  ptr value = Smake_vector(2, Sfalse);
+  Svector_set(value, 0, Sstring_to_symbol("would-block"));
+  Svector_set(value, 1, Sstring_to_symbol(event));
+  return value;
+}
+
 static ptr make_addr(int family, const char *host, int port, const char *path) {
   ptr v = Smake_vector(4, Sfalse);
   switch (family) {
@@ -197,7 +204,19 @@ ptr chezpp_net_socket_connect(int fd, int family, const char *host, int port, co
   if (fill_sockaddr(family, host, port, path, 0, &storage, &len) != 0)
     return make_errno_status("error");
   if (connect(fd, (struct sockaddr *)&storage, len) < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("write");
+    return make_errno_status("error");
+  }
+  return Strue;
+}
+
+ptr chezpp_net_socket_connect_status(int fd) {
+  int socket_error = 0;
+  socklen_t length = sizeof(socket_error);
+  if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error, &length) < 0)
+    return make_errno_status("error");
+  if (socket_error != 0) {
+    errno = socket_error;
     return make_errno_status("error");
   }
   return Strue;
@@ -216,12 +235,12 @@ ptr chezpp_net_socket_accept(int fd, int nonblocking) {
     pfd.events = POLLIN;
     client_fd = poll(&pfd, 1, 0);
     if (client_fd < 0) return make_errno_status("error");
-    if (client_fd == 0) return make_status("would-block", Sfalse);
+    if (client_fd == 0) return would_block_status("read");
   }
 
   client_fd = accept(fd, (struct sockaddr *)&storage, &len);
   if (client_fd < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("read");
     return make_errno_status("error");
   }
 
@@ -245,7 +264,7 @@ ptr chezpp_net_socket_send(int fd, ptr bv, int start, int stop, int nonblocking)
   int flags = MSG_NOSIGNAL | (nonblocking ? MSG_DONTWAIT : 0);
   ssize_t n = send(fd, Sbytevector_data(bv) + start, (size_t)(stop - start), flags);
   if (n < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("write");
     return make_errno_status("error");
   }
   return Sfixnum((iptr)n);
@@ -261,7 +280,7 @@ ptr chezpp_net_socket_recv(int fd, int size, int nonblocking) {
   bv = Smake_bytevector(size, 0);
   n = recv(fd, Sbytevector_data(bv), (size_t)size, nonblocking ? MSG_DONTWAIT : 0);
   if (n < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("read");
     return make_errno_status("error");
   }
   if (n == 0) return Seof_object;
@@ -278,7 +297,7 @@ ptr chezpp_net_socket_recv_into(int fd, ptr bv, int start, int stop, int nonbloc
   ssize_t n = recv(fd, Sbytevector_data(bv) + start, (size_t)(stop - start),
                    nonblocking ? MSG_DONTWAIT : 0);
   if (n < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("read");
     return make_errno_status("error");
   }
   if (n == 0) return Seof_object;
