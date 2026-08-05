@@ -1,5 +1,16 @@
 (library (chezpp net private)
   (export socket-address?
+          socket?
+          socket-fd
+          socket-fd-set!
+          socket-family
+          socket-type
+          socket-proto
+          socket-blocking?
+          socket-blocking-set!
+          socket-closed?
+          socket-closed-set!
+          %make-socket
           socket-address-family
           socket-address-host
           socket-address-port
@@ -23,6 +34,16 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp net ffi))
+
+  (define-record-type (socket %make-socket socket?)
+    (sealed #t)
+    (opaque #f)
+    (fields (mutable fd socket-fd socket-fd-set!)
+            (immutable family socket-family)
+            (immutable type socket-type)
+            (immutable proto socket-proto)
+            (mutable blocking socket-blocking? socket-blocking-set!)
+            (mutable closed socket-closed? socket-closed-set!)))
 
   (define-record-type (socket-address %make-socket-address socket-address?)
     (sealed #t)

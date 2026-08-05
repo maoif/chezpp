@@ -415,7 +415,20 @@
          (close-socket socket)
          (let ([answer (poll/nonblocking
                         (list (make-poll-target descriptor '(read write))))])
-           (not (not (memq 'invalid (poll-target-ready-events (car answer)))))))))
+           (not (not (memq 'invalid (poll-target-ready-events (car answer))))))))
+
+     ;; Error case: a transparent record with socket-shaped fields is not a socket resource.
+     (let* ([record-type
+             (make-record-type-descriptor
+              'socket #f #f #f #f '#((immutable fd)))]
+            [constructor
+             (record-constructor
+              (make-record-constructor-descriptor record-type #f #f))]
+            [lookalike (constructor 0)])
+       (guard (failure [else #t])
+         (make-poll-target lookalike '(read))
+         #f))
+     )
 
 (mat net-poll-validation
      (and

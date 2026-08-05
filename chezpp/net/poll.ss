@@ -69,13 +69,7 @@
   (define resource->fd
     (lambda (who resource)
       (cond
-       [(and (record? resource)
-             (let ([type (record-rtd resource)])
-               (and (eq? 'socket (record-type-name type))
-                    (let ([field* (record-type-field-names type)])
-                      (and (fx> (vector-length field*) 0)
-                           (eq? 'fd (vector-ref field* 0)))))))
-        ((record-accessor (record-rtd resource) 0) resource)]
+       [(socket? resource) (socket-fd resource)]
        [(fixnum? resource) resource]
        [(and (port? resource) (binary-port? resource))
         (let ([descriptor

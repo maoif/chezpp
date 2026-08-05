@@ -44,16 +44,6 @@
           (chezpp net poll)
           (chezpp net operation))
 
-  (define-record-type (socket %make-socket socket?)
-    (sealed #t)
-    (opaque #f)
-    (fields (mutable fd socket-fd socket-fd-set!)
-            (immutable family socket-family)
-            (immutable type socket-type)
-            (immutable proto socket-proto)
-            (mutable blocking socket-blocking? socket-blocking-set!)
-            (mutable closed socket-closed? socket-closed-set!)))
-
   (define ensure-open
     (lambda (who sock)
       (when (socket-closed? sock)
