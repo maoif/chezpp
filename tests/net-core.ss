@@ -55,6 +55,40 @@
                      (close-socket client)
                      (close-socket listener)))))))))
 
+(define start-stalled-tls-reader
+  (lambda (delay-ms)
+    (let ([release? #f]
+          [listener (open-socket 'inet 'stream)]
+          [ctx (make-tls-context 'server)]
+          [cert-path "/tmp/chezpp-net-test-cert.pem"]
+          [key-path "/tmp/chezpp-net-test-key.pem"])
+      (write-bytevector-file cert-path tls-test-certificate)
+      (write-bytevector-file key-path tls-test-private-key)
+      (tls-context-load-cert! ctx cert-path)
+      (tls-context-load-private-key! ctx key-path)
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values listener
+                ctx
+                port
+                (fork-thread
+                 (lambda ()
+                   (let-values ([(client peer) (socket-accept listener)])
+                     (socket-set-option! client 'recv-buffer 1024)
+                     (guard (c [else #f])
+                       (let ([session (tls-accept ctx client)])
+                         (let loop ()
+                           (unless release?
+                             (milisleep delay-ms)
+                             (loop)))
+                         (close-tls-session session)))
+                     (close-socket client)
+                     (close-socket listener)
+                     (close-tls-context ctx))))
+                (lambda () (set! release? #t)))))))
+
 (mat net-errors
      (let ([err (make-net-error 'net-test 'parse "bad address" '(1 2 3))])
        (and (net-error? err)
@@ -520,7 +554,7 @@
                    [read-target (make-poll-target client '(read))])
                (let loop ([attempt 8])
                  (let ([n (tls-read!/nonblocking session buf 0 2)])
-                   (if (eq? n #f)
+                   (if (net-would-block? n)
                        (if (fx= attempt 0)
                            (begin
                              (close-tls-session session)
@@ -536,11 +570,83 @@
                          (close-tls-context ctx)
                          (close-socket client)
                          (thread-join th)
-                         (and (not idle)
+                         (and (net-would-block? idle)
+                              (equal? '(read) (net-would-block-events idle))
+                              (eq? client (net-would-block-resource idle))
                               (memq 'write (poll-target-ready-events (car write-ready)))
                               sent
                               (= n 2)
                               (equal? (slice-bytevector buf 0 2) (string->utf8 "nb")))))))))))))
+
+(mat net-tls-handshake-readiness
+     (let-values ([(listener port th)
+                   (start-stalled-tls-handshake-server 200)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)]
+             [operation #f])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (set! operation (tls-connect/nonblocking ctx client #f 100))
+             (net-operation-step! operation)
+             (and (eq? 'pending (net-operation-state operation))
+                  (let ([target* (net-operation-poll-targets operation)])
+                    (and (= (length target*) 1)
+                         (eq? client (poll-target-resource (car target*)))
+                         (not (not
+                               (memq 'read
+                                     (poll-target-events (car target*)))))))
+                  (begin (net-operation-cancel! operation) #t)
+                  (eq? 'cancelled (net-operation-state operation))))
+           (lambda ()
+             (when (and operation
+                        (eq? 'pending (net-operation-state operation)))
+               (net-operation-cancel! operation))
+             (close-tls-context ctx)
+             (guard (c [else #f])
+               (close-socket client))
+             (thread-join th)
+             (guard (c [else #f])
+               (close-socket listener)))))))
+
+(mat net-tls-write-all-readiness
+     (let-values ([(listener server-ctx port th release-server)
+                   (start-stalled-tls-reader 10)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)]
+             [session #f]
+             [payload (make-bytevector 65536 65)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-set-option! client 'send-buffer 1024)
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (set! session (tls-connect ctx client "localhost"))
+             (let loop ([attempt 500])
+               (when (fx= attempt 0)
+                 (error 'net-tls-write-all-readiness
+                        "TLS writes did not reach backpressure"))
+               (let ([answer (tls-write/nonblocking session payload)])
+                 (if (net-would-block? answer)
+                     (let ([all-answer
+                            (tls-write-all/nonblocking session payload)])
+                       (and (net-would-block? all-answer)
+                            (eq? client
+                                 (net-would-block-resource all-answer))
+                            (not (not
+                                  (memq
+                                   'write
+                                   (net-would-block-events all-answer))))))
+                     (loop (fx1- attempt))))))
+           (lambda ()
+             (release-server)
+             (when session (close-tls-session session))
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
 
 (mat net-tls-timeout
      (let-values ([(listener port th)

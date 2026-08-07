@@ -28,12 +28,23 @@
   (lambda (thunk)
     (let loop ([attempt 40])
       (let ([x (thunk)])
-        (if (eq? x #f)
-            (and (fx> attempt 0)
-                 (begin
-                   (milisleep 50)
-                   (loop (fx1- attempt))))
-            x)))))
+        (cond
+         [(net-would-block? x)
+          (and (fx> attempt 0)
+               (begin
+                 (poll
+                  (list
+                   (make-poll-target
+                    (net-would-block-resource x)
+                    (net-would-block-events x)))
+                  50)
+                 (loop (fx1- attempt))))]
+         [(eq? x #f)
+          (and (fx> attempt 0)
+               (begin
+                 (milisleep 50)
+                 (loop (fx1- attempt))))]
+         [else x])))))
 
 (define complete-sftp-write-all-nonblocking
   (lambda (file bv start stop)
@@ -46,8 +57,13 @@
        [else
         (let ([n (sftp-write-all/nonblocking file bv i stop)])
           (cond
-           [(eq? n #f)
-            (milisleep 25)
+           [(net-would-block? n)
+            (poll
+             (list
+              (make-poll-target
+               (net-would-block-resource n)
+               (net-would-block-events n)))
+             25)
             (loop i (fx1- attempt))]
            [(fx= n 0)
             (milisleep 25)
@@ -158,6 +174,29 @@
                 (when (file-exists? root)
                   (file-removetree root #f)))))))
 
+(define with-test-ssh-channel
+  (lambda (command proc)
+    (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (with-env
+           "HOME"
+           home
+           (lambda ()
+             (let ([session (ssh-open "127.0.0.1" port user)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (ssh-auth-publickey! session user)
+                   (let ([channel (ssh-exec session command)])
+                     (dynamic-wind
+                       void
+                       (lambda () (proc channel))
+                       (lambda () (ssh-close-channel channel)))))
+                 (lambda () (ssh-close session)))))))
+        stop-server))))
+
 (define ssh-test-pty
   (lambda (session)
     (call-with-ssh-channel
@@ -211,7 +250,7 @@
         void
         (lambda ()
           (let ([n1 #f] [n2 #f] [n3 #f])
-            (and (not (ssh-read/nonblocking channel 8))
+            (and (net-would-block? (ssh-read/nonblocking channel 8))
                  (begin
                    (set! n1 (wait-for-result
                              (lambda ()
@@ -587,6 +626,19 @@
           [read-path-2 (string-append remote-root "/nested/base.txt")]
           [write-path (string-append remote-root "/timeout-write.txt")])
       (and
+       (let ([file (sftp-open-file sftp read-path-1 'read)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (with-suspended-ssh-session-child
+              'sftp-test-timeouts
+              remote-root
+              (lambda ()
+                (let ([answer (sftp-read/nonblocking file 16)])
+                  (and (net-would-block? answer)
+                       (fixnum? (net-would-block-resource answer))
+                       (pair? (net-would-block-events answer)))))))
+           (lambda () (sftp-close-file file))))
        (let ([file (sftp-open-file sftp read-path-1 'read)])
          (dynamic-wind
            void

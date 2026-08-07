@@ -18,6 +18,10 @@
           ssh-write-all
           ssh-read/nonblocking
           ssh-read!/nonblocking
+          ssh-read-stderr
+          ssh-read-stderr!
+          ssh-read-stderr/nonblocking
+          ssh-read-stderr!/nonblocking
           ssh-write/nonblocking
           ssh-write-all/nonblocking
           ssh-request-pty!
@@ -31,7 +35,8 @@
           (chezpp utils)
           (chezpp net errors)
           (chezpp net ffi)
-          (chezpp net private))
+          (chezpp net private)
+          (chezpp net operation))
 
   (define-record-type (ssh-session %make-ssh-session ssh-session?)
     (sealed #t)
@@ -69,26 +74,40 @@
         (raise-net-error who 'ssh "SSH channel is closed" channel))
       (ensure-session-open who (ssh-channel-session channel))))
 
+  (define channel-resource
+    (lambda (who channel)
+      (ensure-success
+       who
+       'ssh
+       (ffi-net-ssh-session-fd
+        (ssh-session-handle (ssh-channel-session channel))))))
+
   (define read-result
-    (lambda (who x)
+    (lambda (who channel answer)
       (cond
-       [(or (bytevector? x) (eof-object? x)) x]
-       [(ffi-would-block? x) #f]
-       [else (ensure-success who 'ssh x)])))
+       [(or (bytevector? answer) (eof-object? answer)) answer]
+       [(ffi-would-block? answer)
+        (make-net-would-block (channel-resource who channel)
+                              (ffi-would-block-events answer))]
+       [else (ensure-success who 'ssh answer)])))
 
   (define read-into-result
-    (lambda (who x)
+    (lambda (who channel answer)
       (cond
-       [(or (fixnum? x) (eof-object? x)) x]
-       [(ffi-would-block? x) #f]
-       [else (ensure-success who 'ssh x)])))
+       [(or (fixnum? answer) (eof-object? answer)) answer]
+       [(ffi-would-block? answer)
+        (make-net-would-block (channel-resource who channel)
+                              (ffi-would-block-events answer))]
+       [else (ensure-success who 'ssh answer)])))
 
   (define write-result
-    (lambda (who x)
+    (lambda (who channel answer)
       (cond
-       [(fixnum? x) x]
-       [(ffi-would-block? x) #f]
-       [else (ensure-success who 'ssh x)])))
+       [(fixnum? answer) answer]
+       [(ffi-would-block? answer)
+        (make-net-would-block (channel-resource who channel)
+                              (ffi-would-block-events answer))]
+       [else (ensure-success who 'ssh answer)])))
 
   (define check-slice
     (lambda (who len start stop)
@@ -136,15 +155,8 @@
        (lambda (bv start count)
          (ensure-channel-open who-name channel)
          (let ([stop (fx+ start count)])
-           (let ([n (read-into-result
-                     who-name
-                     (ffi-net-ssh-channel-read-into (ssh-channel-handle channel)
-                                                    bv
-                                                    start
-                                                    stop
-                                                    (if stderr? 1 0)
-                                                    0
-                                                    -1))])
+           (let ([n ((if stderr? ssh-read-stderr! ssh-read!)
+                     channel bv start stop)])
              (cond
               [(fixnum? n) n]
               [(eof-object? n) 0]
@@ -440,7 +452,7 @@ The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout s
        (pcheck ([ssh-channel? channel] [fixnum? size])
                (check-size who size)
                (ensure-channel-open who channel)
-               (read-result who
+               (read-result who channel
                             (ffi-net-ssh-channel-read (ssh-channel-handle channel)
                                                       size
                                                       0
@@ -451,7 +463,7 @@ The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout s
                (check-size who size)
                (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
-               (read-result who
+               (read-result who channel
                             (ffi-net-ssh-channel-read (ssh-channel-handle channel)
                                                       size
                                                       0
@@ -459,14 +471,16 @@ The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout s
                                                       timeout-ms)))]))
 
   #|proc:ssh-read/nonblocking
-The `ssh-read/nonblocking` procedure attempts to read from an SSH channel without blocking.
+The `ssh-read/nonblocking` procedure attempts one stdout read from `channel`.
+The `channel` parameter is an open SSH channel. The `size` parameter is the maximum byte count.
+The return value is a bytevector, EOF, or a would-block value naming the SSH descriptor.
 |#
   (define-who ssh-read/nonblocking
     (lambda (channel size)
       (pcheck ([ssh-channel? channel] [fixnum? size])
               (check-size who size)
               (ensure-channel-open who channel)
-              (read-result who
+              (read-result who channel
                            (ffi-net-ssh-channel-read (ssh-channel-handle channel) size 0 1 -1)))))
 
   #|proc:ssh-read!
@@ -482,6 +496,7 @@ The `ssh-read!` procedure reads into a bytevector slice from an SSH channel's st
                (check-slice who (bytevector-length bv) start stop)
                (read-into-result
                 who
+                channel
                 (ffi-net-ssh-channel-read-into (ssh-channel-handle channel)
                                                bv
                                                start
@@ -496,6 +511,7 @@ The `ssh-read!` procedure reads into a bytevector slice from an SSH channel's st
                (check-slice who (bytevector-length bv) start stop)
                (read-into-result
                 who
+                channel
                 (ffi-net-ssh-channel-read-into (ssh-channel-handle channel)
                                                bv
                                                start
@@ -505,7 +521,10 @@ The `ssh-read!` procedure reads into a bytevector slice from an SSH channel's st
                                                timeout-ms)))]))
 
   #|proc:ssh-read!/nonblocking
-The `ssh-read!/nonblocking` procedure attempts to read into a bytevector slice without blocking.
+The `ssh-read!/nonblocking` procedure attempts one stdout read into `bv`.
+The `channel` parameter is an open SSH channel. The `bv` parameter receives the bytes.
+The optional `start` and `stop` parameters delimit the half-open destination slice.
+The return value is a byte count, EOF, or a would-block value naming the SSH descriptor.
 |#
   (define-who ssh-read!/nonblocking
     (case-lambda
@@ -517,6 +536,7 @@ The `ssh-read!/nonblocking` procedure attempts to read into a bytevector slice w
                (check-slice who (bytevector-length bv) start stop)
                (read-into-result
                 who
+                channel
                 (ffi-net-ssh-channel-read-into (ssh-channel-handle channel)
                                                bv
                                                start
@@ -524,6 +544,104 @@ The `ssh-read!/nonblocking` procedure attempts to read into a bytevector slice w
                                                0
                                                1
                                                -1)))]))
+
+  #|proc:ssh-read-stderr
+The `ssh-read-stderr` procedure reads up to `size` bytes from `channel`'s stderr stream.
+The `channel` parameter is an open SSH channel. The `size` parameter is the maximum byte count.
+The optional `timeout-ms` parameter is a nonnegative timeout in milliseconds.
+The return value is a bytevector or EOF. A timeout or transport failure is raised.
+|#
+  (define-who ssh-read-stderr
+    (case-lambda
+      [(channel size)
+       (pcheck ([ssh-channel? channel] [fixnum? size])
+               (check-size who size)
+               (ensure-channel-open who channel)
+               (read-result
+                who channel
+                (ffi-net-ssh-channel-read
+                 (ssh-channel-handle channel) size 1 0 -1)))]
+      [(channel size timeout-ms)
+       (pcheck ([ssh-channel? channel] [fixnum? size] [fixnum? timeout-ms])
+               (check-size who size)
+               (check-timeout-ms who timeout-ms)
+               (ensure-channel-open who channel)
+               (read-result
+                who channel
+                (ffi-net-ssh-channel-read
+                 (ssh-channel-handle channel) size 1 0 timeout-ms)))]))
+
+  #|proc:ssh-read-stderr/nonblocking
+The `ssh-read-stderr/nonblocking` procedure attempts one stderr read from `channel`.
+The `channel` parameter is an open SSH channel. The `size` parameter is the maximum byte count.
+The return value is a bytevector, EOF, or a would-block value naming the SSH descriptor and
+its requested transport events.
+|#
+  (define-who ssh-read-stderr/nonblocking
+    (lambda (channel size)
+      (pcheck ([ssh-channel? channel] [fixnum? size])
+              (check-size who size)
+              (ensure-channel-open who channel)
+              (read-result
+               who channel
+               (ffi-net-ssh-channel-read
+                (ssh-channel-handle channel) size 1 1 -1)))))
+
+  #|proc:ssh-read-stderr!
+The `ssh-read-stderr!` procedure reads `channel`'s stderr into `bytevector`.
+The `channel` parameter is an open SSH channel. The `bytevector` parameter receives bytes.
+The optional `start` and `stop` parameters delimit the half-open destination slice.
+The optional `timeout-ms` parameter is a nonnegative timeout in milliseconds.
+The return value is a byte count or EOF. A timeout or transport failure is raised.
+|#
+  (define-who ssh-read-stderr!
+    (case-lambda
+      [(channel bytevector)
+       (ssh-read-stderr! channel bytevector 0 (bytevector-length bytevector))]
+      [(channel bytevector start)
+       (ssh-read-stderr! channel bytevector start (bytevector-length bytevector))]
+      [(channel bytevector start stop)
+       (pcheck ([ssh-channel? channel] [bytevector? bytevector])
+               (ensure-channel-open who channel)
+               (check-slice who (bytevector-length bytevector) start stop)
+               (read-into-result
+                who channel
+                (ffi-net-ssh-channel-read-into
+                 (ssh-channel-handle channel) bytevector start stop 1 0 -1)))]
+      [(channel bytevector start stop timeout-ms)
+       (pcheck ([ssh-channel? channel] [bytevector? bytevector] [fixnum? timeout-ms])
+               (check-timeout-ms who timeout-ms)
+               (ensure-channel-open who channel)
+               (check-slice who (bytevector-length bytevector) start stop)
+               (read-into-result
+                who channel
+                (ffi-net-ssh-channel-read-into
+                 (ssh-channel-handle channel)
+                 bytevector start stop 1 0 timeout-ms)))]))
+
+  #|proc:ssh-read-stderr!/nonblocking
+The `ssh-read-stderr!/nonblocking` procedure attempts one stderr read into `bytevector`.
+The `channel` parameter is an open SSH channel. The `bytevector` parameter receives bytes.
+The optional `start` and `stop` parameters delimit the half-open destination slice.
+The return value is a byte count, EOF, or a would-block value naming the SSH descriptor and
+its requested transport events.
+|#
+  (define-who ssh-read-stderr!/nonblocking
+    (case-lambda
+      [(channel bytevector)
+       (ssh-read-stderr!/nonblocking
+        channel bytevector 0 (bytevector-length bytevector))]
+      [(channel bytevector start)
+       (ssh-read-stderr!/nonblocking
+        channel bytevector start (bytevector-length bytevector))]
+      [(channel bytevector start stop)
+       (pcheck ([ssh-channel? channel] [bytevector? bytevector])
+               (ensure-channel-open who channel)
+               (check-slice who (bytevector-length bytevector) start stop)
+               (read-into-result
+                who channel
+                (ffi-net-ssh-channel-read-into
+                 (ssh-channel-handle channel) bytevector start stop 1 1 -1)))]))
 
   #|proc:ssh-write
 The `ssh-write` procedure writes a bytevector slice to an SSH channel's stdin stream.
@@ -538,6 +656,7 @@ The `ssh-write` procedure writes a bytevector slice to an SSH channel's stdin st
                (check-slice who (bytevector-length bv) start stop)
                (write-result
                 who
+                channel
                 (ffi-net-ssh-channel-write (ssh-channel-handle channel)
                                            bv
                                            start
@@ -551,6 +670,7 @@ The `ssh-write` procedure writes a bytevector slice to an SSH channel's stdin st
                (check-slice who (bytevector-length bv) start stop)
                (write-result
                 who
+                channel
                 (ffi-net-ssh-channel-write (ssh-channel-handle channel)
                                            bv
                                            start
@@ -559,7 +679,10 @@ The `ssh-write` procedure writes a bytevector slice to an SSH channel's stdin st
                                            timeout-ms)))]))
 
   #|proc:ssh-write/nonblocking
-The `ssh-write/nonblocking` procedure attempts to write a bytevector slice without blocking.
+The `ssh-write/nonblocking` procedure attempts one write from a bytevector slice.
+The `channel` parameter is an open SSH channel. The `bv` parameter contains the bytes to write.
+The optional `start` and `stop` parameters delimit the half-open source slice.
+The return value is a byte count or a would-block value naming the SSH descriptor.
 |#
   (define-who ssh-write/nonblocking
     (case-lambda
@@ -571,6 +694,7 @@ The `ssh-write/nonblocking` procedure attempts to write a bytevector slice witho
                (check-slice who (bytevector-length bv) start stop)
                (write-result
                 who
+                channel
                 (ffi-net-ssh-channel-write (ssh-channel-handle channel)
                                            bv
                                            start
@@ -609,7 +733,10 @@ The `ssh-write-all` procedure writes an entire bytevector slice to an SSH channe
                          (loop (fx+ i (ssh-write channel bv i stop step-timeout))))))))]))
 
   #|proc:ssh-write-all/nonblocking
-The `ssh-write-all/nonblocking` procedure writes as much of a bytevector slice as possible without blocking.
+The `ssh-write-all/nonblocking` procedure writes as much of a bytevector slice as possible.
+The `channel` parameter is an open SSH channel. The `bv` parameter contains the bytes to write.
+The optional `start` and `stop` parameters delimit the half-open source slice.
+The return value is a byte count or a would-block value when no bytes were written.
 |#
   (define-who ssh-write-all/nonblocking
     (case-lambda
@@ -624,7 +751,8 @@ The `ssh-write-all/nonblocking` procedure writes as much of a bytevector slice a
                      (fx- stop start)
                      (let ([n (ssh-write/nonblocking channel bv i stop)])
                        (cond
-                        [(eq? n #f) (and (fx> i start) (fx- i start))]
+                        [(net-would-block? n)
+                         (if (fx> i start) (fx- i start) n)]
                         [(fx= n 0) (fx- i start)]
                         [else (loop (fx+ i n))])))))]))
 

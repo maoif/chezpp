@@ -30,6 +30,8 @@
           ffi-would-block?
           ffi-would-block-read?
           ffi-would-block-write?
+          ffi-would-block-event
+          ffi-would-block-events
           ffi-error-message)
   (import (chezpp chez)
           (chezpp utils)
@@ -82,6 +84,20 @@
       (and (vector? x)
            (= (vector-length x) 2)
            (eq? (vector-ref x 0) 'would-block-write))))
+
+  (define ffi-would-block-event
+    (lambda (answer)
+      (car (ffi-would-block-events answer))))
+
+  (define ffi-would-block-events
+    (lambda (answer)
+      (case (vector-ref answer 0)
+        [(would-block-read) '(read)]
+        [(would-block-write) '(write)]
+        [(would-block)
+         (let ([event* (vector-ref answer 1)])
+           (if (pair? event*) event* (list event*)))]
+        [else (assert-unreachable)])))
 
   (define ffi-error-message
     (lambda (x)

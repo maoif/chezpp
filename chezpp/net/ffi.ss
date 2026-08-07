@@ -44,6 +44,7 @@
           ffi-net-ftp-rename
           ffi-net-ssh-open
           ffi-net-ssh-close
+          ffi-net-ssh-session-fd
           ffi-net-ssh-auth-password
           ffi-net-ssh-auth-publickey-auto
           ffi-net-ssh-auth-agent
@@ -77,6 +78,7 @@
           ffi-net-websocket-server-close
           ffi-net-websocket-accept
           ffi-net-websocket-connect
+          ffi-net-websocket-connect-step
           ffi-net-websocket-close
           ffi-net-websocket-cancel-send
           ffi-net-websocket-send
@@ -121,6 +123,7 @@
           ffi-net-tls-context-set-alpn
           ffi-net-tls-connect
           ffi-net-tls-accept
+          ffi-net-tls-handshake-step
           ffi-net-tls-close
           ffi-net-tls-read
           ffi-net-tls-read-into
@@ -223,6 +226,8 @@
     (foreign-procedure "chezpp_net_ssh_open" (string int string int int) scheme-object))
   (define ffi-net-ssh-close
     (foreign-procedure "chezpp_net_ssh_close" (uptr) scheme-object))
+  (define ffi-net-ssh-session-fd
+    (foreign-procedure "chezpp_net_ssh_session_fd" (uptr) scheme-object))
   (define ffi-net-ssh-auth-password
     (foreign-procedure "chezpp_net_ssh_auth_password" (uptr string string) scheme-object))
   (define ffi-net-ssh-auth-publickey-auto
@@ -289,6 +294,8 @@
     (foreign-procedure "chezpp_net_websocket_accept" (uptr int int) scheme-object))
   (define ffi-net-websocket-connect
     (foreign-procedure "chezpp_net_websocket_connect" (string int string string int int) scheme-object))
+  (define ffi-net-websocket-connect-step
+    (foreign-procedure "chezpp_net_websocket_connect_step" (uptr) scheme-object))
   (define ffi-net-websocket-close
     (foreign-procedure "chezpp_net_websocket_close" (uptr) scheme-object))
   (define ffi-net-websocket-cancel-send
@@ -387,6 +394,8 @@
     (foreign-procedure "chezpp_net_tls_connect" (uptr int string int) scheme-object))
   (define ffi-net-tls-accept
     (foreign-procedure "chezpp_net_tls_accept" (uptr int int) scheme-object))
+  (define ffi-net-tls-handshake-step
+    (foreign-procedure "chezpp_net_tls_handshake_step" (uptr) scheme-object))
   (define ffi-net-tls-close
     (foreign-procedure "chezpp_net_tls_close" (uptr) scheme-object))
   (define ffi-net-tls-read

@@ -11,6 +11,19 @@ typedef struct chezpp_ws_send chezpp_ws_send;
 typedef struct chezpp_ws_server chezpp_ws_server;
 typedef struct chezpp_ws_connection chezpp_ws_connection;
 typedef struct chezpp_ws_context_node chezpp_ws_context_node;
+typedef struct chezpp_ws_poll_fd chezpp_ws_poll_fd;
+
+struct chezpp_ws_poll_fd {
+  chezpp_ws_poll_fd *next;
+  struct lws *wsi;
+  chezpp_ws_connection *connection;
+  int fd;
+  int events;
+};
+
+typedef struct {
+  chezpp_ws_poll_fd *head;
+} chezpp_ws_poll_state;
 
 struct chezpp_ws_message {
   chezpp_ws_message *next;
@@ -26,6 +39,8 @@ struct chezpp_ws_send {
 };
 
 struct chezpp_ws_server {
+  /* Must stay first: poll callbacks cast the context user to this field. */
+  chezpp_ws_poll_state poll_state;
   struct lws_context *context;
   struct lws_protocols protocols[3];
   char *protocol_name;
@@ -38,6 +53,8 @@ struct chezpp_ws_server {
 };
 
 struct chezpp_ws_connection {
+  /* Must stay first: poll callbacks cast the context user to this field. */
+  chezpp_ws_poll_state poll_state;
   struct lws_context *context;
   struct lws *wsi;
   chezpp_ws_server *server;
@@ -161,6 +178,88 @@ static ptr make_status(const char *tag, ptr value) {
 
 static ptr make_error_status_message(const char *msg) {
   return make_status("error", Sstring(msg == NULL ? "websocket error" : msg));
+}
+
+static ptr make_would_block_status(chezpp_ws_poll_state *state, int requested_events,
+                                   struct lws *wsi, int unowned_only) {
+  chezpp_ws_poll_fd *entry = state == NULL ? NULL : state->head;
+  ptr detail;
+  ptr events = Snil;
+
+  while (entry != NULL &&
+         ((entry->events & requested_events) == 0 ||
+          (wsi != NULL && entry->wsi != wsi) ||
+          (unowned_only && entry->connection != NULL)))
+    entry = entry->next;
+  if (entry == NULL)
+    return make_error_status_message("websocket has no service descriptor");
+  if ((entry->events & POLLOUT) != 0)
+    events = Scons(Sstring_to_symbol("write"), events);
+  if ((entry->events & POLLIN) != 0)
+    events = Scons(Sstring_to_symbol("read"), events);
+  if (Snullp(events)) {
+    if ((requested_events & POLLOUT) != 0)
+      events = Scons(Sstring_to_symbol("write"), events);
+    if ((requested_events & POLLIN) != 0)
+      events = Scons(Sstring_to_symbol("read"), events);
+  }
+  detail = Smake_vector(2, Sfalse);
+  Svector_set(detail, 0, Sfixnum((iptr)entry->fd));
+  Svector_set(detail, 1, events);
+  return make_status("would-block", detail);
+}
+
+static void update_poll_fd(chezpp_ws_poll_state *state, struct lws *wsi,
+                           int fd, int events) {
+  chezpp_ws_poll_fd *entry;
+  if (state == NULL) return;
+  entry = state->head;
+  while (entry != NULL && entry->fd != fd) entry = entry->next;
+  if (entry == NULL) {
+    entry = (chezpp_ws_poll_fd *)calloc(1, sizeof(chezpp_ws_poll_fd));
+    if (entry == NULL) return;
+    entry->fd = fd;
+    entry->next = state->head;
+    state->head = entry;
+  }
+  entry->wsi = wsi;
+  entry->events = events;
+}
+
+static void assign_poll_connection(chezpp_ws_poll_state *state, struct lws *wsi,
+                                   chezpp_ws_connection *connection) {
+  chezpp_ws_poll_fd *entry = state == NULL ? NULL : state->head;
+  while (entry != NULL) {
+    if (entry->wsi == wsi) {
+      entry->connection = connection;
+      return;
+    }
+    entry = entry->next;
+  }
+}
+
+static void remove_poll_fd(chezpp_ws_poll_state *state, int fd) {
+  chezpp_ws_poll_fd **entry;
+  if (state == NULL) return;
+  entry = &state->head;
+  while (*entry != NULL) {
+    if ((*entry)->fd == fd) {
+      chezpp_ws_poll_fd *removed = *entry;
+      *entry = removed->next;
+      free(removed);
+      return;
+    }
+    entry = &(*entry)->next;
+  }
+}
+
+static void clear_poll_fds(chezpp_ws_poll_state *state) {
+  if (state == NULL) return;
+  while (state->head != NULL) {
+    chezpp_ws_poll_fd *removed = state->head;
+    state->head = removed->next;
+    free(removed);
+  }
 }
 
 static ptr make_websocket_handle(uptr handle) { return Sunsigned(handle); }
@@ -503,6 +602,7 @@ static void destroy_server_resources(chezpp_ws_server *server) {
   }
   if (server->protocol_name != NULL) free(server->protocol_name);
   if (server->error != NULL) free(server->error);
+  clear_poll_fds(&server->poll_state);
   free(server);
 }
 
@@ -610,15 +710,32 @@ static enum lws_write_protocol write_protocol_for_type(int type) {
 static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user,
                               void *in, size_t len) {
   chezpp_ws_connection *conn = NULL;
+  void *context_user = NULL;
 
   (void)user;
 
   if (wsi != NULL && p_lws_get_opaque_user_data != NULL)
     conn = (chezpp_ws_connection *)p_lws_get_opaque_user_data(wsi);
+  if (wsi != NULL)
+    context_user = p_lws_context_user(p_lws_get_context(wsi));
 
   ws_tracef("callback reason=%d wsi=%p conn=%p", (int)reason, (void *)wsi, (void *)conn);
 
   switch (reason) {
+  case LWS_CALLBACK_ADD_POLL_FD:
+  case LWS_CALLBACK_CHANGE_MODE_POLL_FD: {
+    const struct lws_pollargs *args = (const struct lws_pollargs *)in;
+    if (args != NULL)
+      update_poll_fd((chezpp_ws_poll_state *)context_user, wsi,
+                     args->fd, args->events);
+    return 0;
+  }
+  case LWS_CALLBACK_DEL_POLL_FD: {
+    const struct lws_pollargs *args = (const struct lws_pollargs *)in;
+    if (args != NULL)
+      remove_poll_fd((chezpp_ws_poll_state *)context_user, args->fd);
+    return 0;
+  }
   case LWS_CALLBACK_ESTABLISHED: {
     chezpp_ws_server *server =
         (chezpp_ws_server *)p_lws_context_user(p_lws_get_context(wsi));
@@ -633,6 +750,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     accepted->client_side = 0;
     server->live_count += 1;
     p_lws_set_opaque_user_data(wsi, accepted);
+    assign_poll_connection(&server->poll_state, wsi, accepted);
     if (server->accept_tail == NULL) {
       server->accept_head = accepted;
       server->accept_tail = accepted;
@@ -646,6 +764,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     if (conn != NULL) {
       conn->wsi = wsi;
       conn->established = 1;
+      assign_poll_connection(&conn->poll_state, wsi, conn);
       ws_tracef("client established conn=%p", (void *)conn);
     }
     return 0;
@@ -846,14 +965,14 @@ ptr chezpp_net_websocket_accept(uptr handle, int nonblocking, int timeout_ms) {
   chezpp_ws_connection *conn;
   if (server == NULL || server->closed) return make_error_status_message("invalid websocket server");
   if (server->accept_head == NULL && nonblocking) {
-    service_registered(server->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
+    service_registered(server->context, 0);
   }
   if (server->accept_head == NULL && !nonblocking &&
       !wait_for_condition(server->context, pred_accept_ready, server, timeout_ms, 1))
     return make_error_status_message("websocket accept timed out");
   if (server->accept_head == NULL) {
     if (server->closed) return Seof_object;
-    return make_status("would-block", Sfalse);
+    return make_would_block_status(&server->poll_state, POLLIN, NULL, 1);
   }
   conn = pop_accept(server);
   ws_tracef("accept conn=%p server=%p", (void *)conn, (void *)server);
@@ -924,15 +1043,19 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   conn->wsi = connect_context(conn->context, &ccinfo);
   if (conn->wsi == NULL) {
     destroy_registered_context(conn->context);
+    clear_poll_fds(&conn->poll_state);
     free(conn->protocol_name);
     free(conn);
     return make_error_status_message("failed to start websocket client connection");
   }
 
+  if (timeout_ms < 0) return make_websocket_handle((uptr)conn);
+
   if (!wait_for_condition(conn->context, pred_connected, conn, timeout_ms, 1)) {
     ws_tracef("connect-timeout host=%s port=%d path=%s protocol=%s", host, port,
               (path != NULL && *path != 0) ? path : "/", protocol);
     destroy_registered_context(conn->context);
+    clear_poll_fds(&conn->poll_state);
     if (conn->error != NULL) free(conn->error);
     free(conn->protocol_name);
     free(conn);
@@ -941,6 +1064,7 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   if (conn->failed) {
     ptr err = connection_error_status(conn, "websocket connection failed");
     destroy_registered_context(conn->context);
+    clear_poll_fds(&conn->poll_state);
     if (conn->error != NULL) free(conn->error);
     free(conn->protocol_name);
     free(conn);
@@ -950,13 +1074,27 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   return make_websocket_handle((uptr)conn);
 }
 
+ptr chezpp_net_websocket_connect_step(uptr handle) {
+  chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
+
+  if (conn == NULL || conn->closed)
+    return make_error_status_message("invalid websocket connection");
+  if (!conn->established && !conn->failed)
+    service_registered(conn->context, 0);
+  if (conn->failed)
+    return connection_error_status(conn, "websocket connection failed");
+  if (conn->established) return Strue;
+  return make_would_block_status(&conn->poll_state, POLLIN | POLLOUT,
+                                 conn->wsi, 0);
+}
+
 ptr chezpp_net_websocket_close(uptr handle) {
   chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
   chezpp_ws_server *server = NULL;
   if (conn == NULL) return Strue;
   server = conn->server;
   clear_opaque_user_data(conn->context, conn->wsi);
-  if (!conn->closed && conn->wsi != NULL) {
+  if (!conn->closed && conn->established && conn->wsi != NULL) {
     close_wsi(conn->context, conn->wsi);
     service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
   }
@@ -968,6 +1106,7 @@ ptr chezpp_net_websocket_close(uptr handle) {
   if (conn->owns_context && conn->context != NULL) {
     destroy_registered_context(conn->context);
     conn->context = NULL;
+    clear_poll_fds(&conn->poll_state);
   } else if (server != NULL) {
     if (server->live_count > 0) server->live_count -= 1;
     maybe_release_server(server);
@@ -994,14 +1133,20 @@ ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop
                               int timeout_ms) {
   chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
   size_t len;
+  chezpp_ws_poll_state *poll_state;
 
   if (conn == NULL || conn->closed || conn->wsi == NULL)
     return make_error_status_message("invalid websocket connection");
+  poll_state = conn->server == NULL ? &conn->poll_state : &conn->server->poll_state;
 
   if (conn->pending_send != NULL) {
     if (nonblocking) {
-      service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
-      if (conn->pending_send != NULL) return make_status("would-block", Sfalse);
+      size_t pending_len = conn->pending_send->len;
+      service_context(conn->context, 0);
+      if (conn->pending_send != NULL)
+        return make_would_block_status(poll_state, POLLOUT, conn->wsi, 0);
+      if (conn->failed) return connection_error_status(conn, "websocket send failed");
+      return Sfixnum((iptr)pending_len);
     } else if (!wait_for_condition(conn->context, pred_send_done, conn, timeout_ms, 0)) {
       return make_error_status_message("websocket send timed out");
     }
@@ -1015,8 +1160,9 @@ ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop
   request_writable(conn->context, conn->wsi);
 
   if (nonblocking) {
-    service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
-    if (conn->pending_send != NULL) return make_status("would-block", Sfalse);
+    service_context(conn->context, 0);
+    if (conn->pending_send != NULL)
+      return make_would_block_status(poll_state, POLLOUT, conn->wsi, 0);
   } else if (!wait_for_condition(conn->context, pred_send_done, conn, timeout_ms, 0)) {
     clear_pending_send(conn);
     return make_error_status_message("websocket send timed out");
@@ -1028,13 +1174,15 @@ ptr chezpp_net_websocket_send(uptr handle, int type, ptr bv, int start, int stop
 
 ptr chezpp_net_websocket_recv(uptr handle, int nonblocking, int timeout_ms) {
   chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
+  chezpp_ws_poll_state *poll_state;
 
   if (conn == NULL || (conn->closed && conn->msg_head == NULL))
     return make_error_status_message("invalid websocket connection");
+  poll_state = conn->server == NULL ? &conn->poll_state : &conn->server->poll_state;
 
   if (conn->msg_head == NULL) {
     if (nonblocking) {
-      service_context(conn->context, CHEZPP_WS_NONBLOCK_SERVICE_MS);
+      service_context(conn->context, 0);
     } else if (!wait_for_condition(conn->context, pred_recv_ready, conn, timeout_ms, 0)) {
       return make_error_status_message("websocket receive timed out");
     }
@@ -1043,5 +1191,5 @@ ptr chezpp_net_websocket_recv(uptr handle, int nonblocking, int timeout_ms) {
   if (conn->msg_head != NULL) return pop_message_scheme(conn);
   if (conn->failed) return connection_error_status(conn, "websocket receive failed");
   if (conn->closed) return Seof_object;
-  return make_status("would-block", Sfalse);
+  return make_would_block_status(poll_state, POLLIN, conn->wsi, 0);
 }

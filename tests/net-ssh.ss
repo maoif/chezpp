@@ -90,6 +90,34 @@
            (guard (c [else #f])
              (close-socket listener)))))
 
+(mat net-ssh-stderr-readiness
+     (with-test-ssh-channel
+      "sh -c 'sleep 1; printf err >&2'"
+      (lambda (channel)
+        (let ([answer (ssh-read-stderr/nonblocking channel 16)]
+              [into-answer
+               (ssh-read-stderr!/nonblocking channel (make-bytevector 16 0))])
+          (and (net-would-block? answer)
+               (fixnum? (net-would-block-resource answer))
+               (not (not (memq 'read (net-would-block-events answer))))
+               (net-would-block? into-answer)
+               (eq? (net-would-block-resource answer)
+                    (net-would-block-resource into-answer))
+               (not (not (memq 'read (net-would-block-events into-answer))))))))
+
+     (with-test-ssh-channel
+      "sh -c 'printf err >&2'"
+      (lambda (channel)
+        (equal? (ssh-read-stderr channel 3) (string->utf8 "err"))))
+
+     (with-test-ssh-channel
+      "sh -c 'printf err >&2'"
+      (lambda (channel)
+        (let ([buffer (make-bytevector 3 0)])
+          (and (fx= 3 (ssh-read-stderr! channel buffer 0 3))
+               (equal? buffer (string->utf8 "err"))))))
+     )
+
 (mat net-ssh-known-hosts
      ;; Negative test: strict host-key verification rejects a server when HOME
      ;; has no known_hosts entry.

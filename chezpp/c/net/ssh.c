@@ -74,6 +74,7 @@ typedef int (*ssh_channel_close_fn)(ssh_channel);
 typedef int (*ssh_channel_get_exit_status_fn)(ssh_channel);
 typedef int (*ssh_channel_is_eof_fn)(ssh_channel);
 typedef socket_t (*ssh_get_fd_fn)(ssh_session);
+typedef int (*ssh_get_poll_flags_fn)(ssh_session);
 typedef void (*ssh_set_blocking_fn)(ssh_session, int);
 typedef sftp_session (*sftp_new_fn)(ssh_session);
 typedef int (*sftp_init_fn)(sftp_session);
@@ -134,6 +135,7 @@ static ssh_channel_close_fn p_ssh_channel_close = NULL;
 static ssh_channel_get_exit_status_fn p_ssh_channel_get_exit_status = NULL;
 static ssh_channel_is_eof_fn p_ssh_channel_is_eof = NULL;
 static ssh_get_fd_fn p_ssh_get_fd = NULL;
+static ssh_get_poll_flags_fn p_ssh_get_poll_flags = NULL;
 static ssh_set_blocking_fn p_ssh_set_blocking = NULL;
 static sftp_new_fn p_sftp_new = NULL;
 static sftp_init_fn p_sftp_init = NULL;
@@ -182,6 +184,22 @@ static ptr make_status(const char *tag, ptr value) {
   Svector_set(v, 0, Sstring_to_symbol(tag));
   Svector_set(v, 1, value);
   return v;
+}
+
+static ptr ssh_would_block_status(ssh_session session, int fallback_flags) {
+  int flags = p_ssh_get_poll_flags == NULL ? 0 : p_ssh_get_poll_flags(session);
+  ptr events = Snil;
+  if ((flags & SSH_WRITE_PENDING) != 0)
+    events = Scons(Sstring_to_symbol("write"), events);
+  if ((flags & SSH_READ_PENDING) != 0)
+    events = Scons(Sstring_to_symbol("read"), events);
+  if (Snullp(events)) {
+    if ((fallback_flags & POLLOUT) != 0)
+      events = Scons(Sstring_to_symbol("write"), events);
+    if ((fallback_flags & POLLIN) != 0)
+      events = Scons(Sstring_to_symbol("read"), events);
+  }
+  return make_status("would-block", events);
 }
 
 static ptr make_error_status_message(const char *msg) {
@@ -279,6 +297,7 @@ static void initialize_ssh(void) {
       !load_symbol((void **)&p_ssh_channel_get_exit_status, "ssh_channel_get_exit_status") ||
       !load_symbol((void **)&p_ssh_channel_is_eof, "ssh_channel_is_eof") ||
       !load_symbol((void **)&p_ssh_get_fd, "ssh_get_fd") ||
+      !load_symbol((void **)&p_ssh_get_poll_flags, "ssh_get_poll_flags") ||
       !load_symbol((void **)&p_ssh_set_blocking, "ssh_set_blocking") ||
       !load_symbol((void **)&p_ssh_scp_new, "ssh_scp_new") ||
       !load_symbol((void **)&p_ssh_scp_init, "ssh_scp_init") ||
@@ -1131,6 +1150,16 @@ ptr chezpp_net_ssh_close(uptr handle) {
   return Strue;
 }
 
+ptr chezpp_net_ssh_session_fd(uptr handle) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  socket_t fd;
+  if (wrapper == NULL || wrapper->session == NULL || p_ssh_get_fd == NULL)
+    return make_error_status_message("invalid ssh session");
+  fd = p_ssh_get_fd(wrapper->session);
+  if (fd < 0) return make_error_status_message("failed to query ssh session socket");
+  return Sfixnum((iptr)fd);
+}
+
 ptr chezpp_net_ssh_auth_password(uptr handle, const char *user, const char *password) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   int rc;
@@ -1347,7 +1376,8 @@ ptr chezpp_net_ssh_channel_read(uptr handle, int size, int is_stderr, int nonblo
   }
   if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
 
-  if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+  if (rc == SSH_AGAIN)
+    return ssh_would_block_status(wrapper->owner->session, POLLIN);
   if (rc == SSH_ERROR) return ssh_channel_error_status(wrapper, "ssh read failed");
   if (rc == 0 && p_ssh_channel_is_eof(wrapper->channel)) return Seof_object;
   if (rc < 0) return ssh_channel_error_status(wrapper, "ssh read failed");
@@ -1392,7 +1422,8 @@ ptr chezpp_net_ssh_channel_read_into(uptr handle, ptr bv, int start, int stop, i
   }
   if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
 
-  if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+  if (rc == SSH_AGAIN)
+    return ssh_would_block_status(wrapper->owner->session, POLLIN);
   if (rc == SSH_ERROR) return ssh_channel_error_status(wrapper, "ssh read failed");
   if (rc == 0 && p_ssh_channel_is_eof(wrapper->channel)) return Seof_object;
   if (rc < 0) return ssh_channel_error_status(wrapper, "ssh read failed");
@@ -1431,7 +1462,8 @@ ptr chezpp_net_ssh_channel_write(uptr handle, ptr bv, int start, int stop, int n
   }
   if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
 
-  if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+  if (rc == SSH_AGAIN)
+    return ssh_would_block_status(wrapper->owner->session, POLLOUT);
   if (rc == SSH_ERROR || rc < 0) return ssh_channel_error_status(wrapper, "ssh write failed");
   return Sfixnum((iptr)rc);
 }
@@ -1595,7 +1627,8 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking, int timeout_ms)
     out = Smake_bytevector((iptr)size, 0);
     rc = p_sftp_read(wrapper->file, Sbytevector_data(out), (size_t)size);
 
-    if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+    if (rc == SSH_AGAIN)
+      return ssh_would_block_status(wrapper->owner->owner->session, POLLIN);
     if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp read failed");
     if (rc == 0) return Seof_object;
     if (rc == size) return out;
@@ -1635,7 +1668,8 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking, int timeout_ms)
   p_sftp_file_set_blocking(wrapper->file);
   p_ssh_set_blocking(wrapper->owner->owner->session, 1);
 
-  if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+  if (rc == SSH_AGAIN)
+    return ssh_would_block_status(wrapper->owner->owner->session, POLLIN);
   wrapper->pending_read_len = 0;
   if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp read failed");
   if (rc == 0) return Seof_object;
@@ -1670,7 +1704,8 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
   if (!use_nonblocking) {
     rc = p_sftp_read(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
 
-    if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+    if (rc == SSH_AGAIN)
+      return ssh_would_block_status(wrapper->owner->owner->session, POLLIN);
     if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp read failed");
     if (rc == 0) return Seof_object;
     return Sfixnum((iptr)rc);
@@ -1705,7 +1740,8 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
   p_sftp_file_set_blocking(wrapper->file);
   p_ssh_set_blocking(wrapper->owner->owner->session, 1);
 
-  if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+  if (rc == SSH_AGAIN)
+    return ssh_would_block_status(wrapper->owner->owner->session, POLLIN);
   wrapper->pending_read_len = 0;
   if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp read failed");
   if (rc == 0) return Seof_object;
@@ -1734,7 +1770,8 @@ ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblock
   if (!use_nonblocking) {
     rc = p_sftp_write(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
 
-    if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+    if (rc == SSH_AGAIN)
+      return ssh_would_block_status(wrapper->owner->owner->session, POLLOUT);
     if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp write failed");
     return Sfixnum((iptr)rc);
   }
@@ -1769,7 +1806,8 @@ ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblock
   p_sftp_file_set_blocking(wrapper->file);
   p_ssh_set_blocking(wrapper->owner->owner->session, 1);
 
-  if (rc == SSH_AGAIN) return make_status("would-block", Sfalse);
+  if (rc == SSH_AGAIN)
+    return ssh_would_block_status(wrapper->owner->owner->session, POLLOUT);
   wrapper->pending_write_len = 0;
   if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp write failed");
   return Sfixnum((iptr)rc);

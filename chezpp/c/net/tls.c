@@ -18,6 +18,9 @@ typedef struct {
   SSL *ssl;
   int fd;
   int mode;
+  int saved_flags;
+  int flags_changed;
+  int handshake_complete;
 } chezpp_tls_session;
 
 static ptr make_status(const char *tag, ptr value) {
@@ -355,13 +358,12 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   SSL *ssl;
   chezpp_tls_session *session;
-  int rc;
   int saved_flags = 0;
   int changed = 0;
-  long long start_ms = 0;
+
+  (void)timeout_ms;
 
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
-  if (timeout_ms >= 0 && !current_time_ms(&start_ms)) return make_errno_status("error");
   if (!set_socket_nonblocking_temporarily(fd, &saved_flags, &changed)) return make_errno_status("error");
   ssl = chezpp_openssl_SSL_new(ctx->ctx);
   if (ssl == NULL) {
@@ -389,50 +391,6 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
     return openssl_error_status("failed to attach TLS session to socket");
   }
 
-  for (;;) {
-    rc = chezpp_openssl_SSL_connect(ssl);
-    if (rc == 1) break;
-    {
-      int err = chezpp_openssl_SSL_get_error(ssl, rc);
-      int wait_rc;
-      int remaining;
-      switch (err) {
-      case SSL_ERROR_WANT_READ:
-      case SSL_ERROR_WANT_WRITE:
-        if (timeout_ms >= 0) {
-          remaining = remaining_timeout_ms(timeout_ms, start_ms);
-          if (remaining < 0) {
-            restore_socket_flags(fd, saved_flags, changed);
-            chezpp_openssl_SSL_free(ssl);
-            return make_errno_status("error");
-          }
-          if (remaining == 0) {
-            restore_socket_flags(fd, saved_flags, changed);
-            chezpp_openssl_SSL_free(ssl);
-            return make_timeout_status("TLS client handshake timed out");
-          }
-        } else {
-          remaining = -1;
-        }
-        wait_rc = wait_for_fd_event(fd, err == SSL_ERROR_WANT_WRITE, remaining);
-        if (wait_rc > 0) continue;
-        restore_socket_flags(fd, saved_flags, changed);
-        chezpp_openssl_SSL_free(ssl);
-        if (wait_rc == 0) return make_timeout_status("TLS client handshake timed out");
-        return make_errno_status("error");
-      default: {
-        long verify_result = chezpp_openssl_SSL_get_verify_result(ssl);
-        ptr status = verify_result == X509_V_OK
-                         ? ssl_result_status(ssl, rc, "TLS client handshake failed")
-                         : make_error_status_message(chezpp_openssl_X509_verify_cert_error_string(verify_result));
-        restore_socket_flags(fd, saved_flags, changed);
-        chezpp_openssl_SSL_free(ssl);
-        return status;
-      }
-      }
-    }
-  }
-
   session = (chezpp_tls_session *)calloc(1, sizeof(chezpp_tls_session));
   if (session == NULL) {
     restore_socket_flags(fd, saved_flags, changed);
@@ -442,7 +400,8 @@ ptr chezpp_net_tls_connect(uptr handle, int fd, const char *server_name, int tim
   session->ssl = ssl;
   session->fd = fd;
   session->mode = 0;
-  restore_socket_flags(fd, saved_flags, changed);
+  session->saved_flags = saved_flags;
+  session->flags_changed = changed;
   return Sunsigned((uptr)session);
 }
 
@@ -450,13 +409,12 @@ ptr chezpp_net_tls_accept(uptr handle, int fd, int timeout_ms) {
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   SSL *ssl;
   chezpp_tls_session *session;
-  int rc;
   int saved_flags = 0;
   int changed = 0;
-  long long start_ms = 0;
+
+  (void)timeout_ms;
 
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
-  if (timeout_ms >= 0 && !current_time_ms(&start_ms)) return make_errno_status("error");
   if (!set_socket_nonblocking_temporarily(fd, &saved_flags, &changed)) return make_errno_status("error");
   ssl = chezpp_openssl_SSL_new(ctx->ctx);
   if (ssl == NULL) {
@@ -469,47 +427,6 @@ ptr chezpp_net_tls_accept(uptr handle, int fd, int timeout_ms) {
     return openssl_error_status("failed to attach TLS session to socket");
   }
 
-  for (;;) {
-    rc = chezpp_openssl_SSL_accept(ssl);
-    if (rc == 1) break;
-    {
-      int err = chezpp_openssl_SSL_get_error(ssl, rc);
-      int wait_rc;
-      int remaining;
-      switch (err) {
-      case SSL_ERROR_WANT_READ:
-      case SSL_ERROR_WANT_WRITE:
-        if (timeout_ms >= 0) {
-          remaining = remaining_timeout_ms(timeout_ms, start_ms);
-          if (remaining < 0) {
-            restore_socket_flags(fd, saved_flags, changed);
-            chezpp_openssl_SSL_free(ssl);
-            return make_errno_status("error");
-          }
-          if (remaining == 0) {
-            restore_socket_flags(fd, saved_flags, changed);
-            chezpp_openssl_SSL_free(ssl);
-            return make_timeout_status("TLS server handshake timed out");
-          }
-        } else {
-          remaining = -1;
-        }
-        wait_rc = wait_for_fd_event(fd, err == SSL_ERROR_WANT_WRITE, remaining);
-        if (wait_rc > 0) continue;
-        restore_socket_flags(fd, saved_flags, changed);
-        chezpp_openssl_SSL_free(ssl);
-        if (wait_rc == 0) return make_timeout_status("TLS server handshake timed out");
-        return make_errno_status("error");
-      default: {
-        ptr status = ssl_result_status(ssl, rc, "TLS server handshake failed");
-        restore_socket_flags(fd, saved_flags, changed);
-        chezpp_openssl_SSL_free(ssl);
-        return status;
-      }
-      }
-    }
-  }
-
   session = (chezpp_tls_session *)calloc(1, sizeof(chezpp_tls_session));
   if (session == NULL) {
     restore_socket_flags(fd, saved_flags, changed);
@@ -519,13 +436,53 @@ ptr chezpp_net_tls_accept(uptr handle, int fd, int timeout_ms) {
   session->ssl = ssl;
   session->fd = fd;
   session->mode = 1;
-  restore_socket_flags(fd, saved_flags, changed);
+  session->saved_flags = saved_flags;
+  session->flags_changed = changed;
   return Sunsigned((uptr)session);
+}
+
+ptr chezpp_net_tls_handshake_step(uptr handle) {
+  chezpp_tls_session *session = session_from_handle(handle);
+  int rc;
+  ptr status;
+
+  if (session == NULL || session->ssl == NULL)
+    return make_error_status_message("invalid TLS session");
+  if (session->handshake_complete) return Strue;
+
+  rc = session->mode == 1 ? chezpp_openssl_SSL_accept(session->ssl)
+                          : chezpp_openssl_SSL_connect(session->ssl);
+  if (rc == 1) {
+    session->handshake_complete = 1;
+    restore_socket_flags(session->fd, session->saved_flags, session->flags_changed);
+    session->flags_changed = 0;
+    return Strue;
+  }
+
+  if (session->mode == 0) {
+    long verify_result = chezpp_openssl_SSL_get_verify_result(session->ssl);
+    if (verify_result != X509_V_OK) {
+      restore_socket_flags(session->fd, session->saved_flags, session->flags_changed);
+      session->flags_changed = 0;
+      return make_error_status_message(
+          chezpp_openssl_X509_verify_cert_error_string(verify_result));
+    }
+  }
+
+  status = ssl_result_status(session->ssl, rc, session->mode == 1
+                                                   ? "TLS server handshake failed"
+                                                   : "TLS client handshake failed");
+  if (!is_would_block_status(status)) {
+    restore_socket_flags(session->fd, session->saved_flags, session->flags_changed);
+    session->flags_changed = 0;
+  }
+  return status;
 }
 
 ptr chezpp_net_tls_close(uptr handle) {
   chezpp_tls_session *session = session_from_handle(handle);
   if (session == NULL) return Strue;
+  restore_socket_flags(session->fd, session->saved_flags, session->flags_changed);
   if (session->ssl != NULL) chezpp_openssl_SSL_free(session->ssl);
   free(session);
   return Strue;
@@ -542,11 +499,10 @@ ptr chezpp_net_tls_read(uptr handle, int size, int timeout_ms, int nonblocking) 
 
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
   if (size < 0) return make_error_status_message("invalid TLS read size");
-  if (!nonblocking) {
-    if (timeout_ms >= 0 && !current_time_ms(&start_ms)) return make_errno_status("error");
-    if (!set_socket_nonblocking_temporarily(session->fd, &saved_flags, &changed))
-      return make_errno_status("error");
-  }
+  if (!nonblocking && timeout_ms >= 0 && !current_time_ms(&start_ms))
+    return make_errno_status("error");
+  if (!set_socket_nonblocking_temporarily(session->fd, &saved_flags, &changed))
+    return make_errno_status("error");
 
   bv = Smake_bytevector((iptr)size, 0);
   for (;;) {
@@ -556,11 +512,11 @@ ptr chezpp_net_tls_read(uptr handle, int size, int timeout_ms, int nonblocking) 
       ptr status = ssl_result_status(session->ssl, rc, "TLS read failed");
       if (Svectorp(status) && Svector_length(status) == 2 &&
           Svector_ref(status, 0) == Sstring_to_symbol("closed")) {
-        if (!nonblocking) restore_socket_flags(session->fd, saved_flags, changed);
+        restore_socket_flags(session->fd, saved_flags, changed);
         return Seof_object;
       }
       if (nonblocking || !is_would_block_status(status)) {
-        if (!nonblocking) restore_socket_flags(session->fd, saved_flags, changed);
+        restore_socket_flags(session->fd, saved_flags, changed);
         return status;
       }
       {
@@ -588,7 +544,7 @@ ptr chezpp_net_tls_read(uptr handle, int size, int timeout_ms, int nonblocking) 
       }
     }
   }
-  if (!nonblocking) restore_socket_flags(session->fd, saved_flags, changed);
+  restore_socket_flags(session->fd, saved_flags, changed);
   if (nread == 0) return Seof_object;
   if ((int)nread == size) return bv;
 
@@ -609,11 +565,10 @@ ptr chezpp_net_tls_read_into(uptr handle, ptr bv, int start, int stop, int timeo
   long long start_ms = 0;
 
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
-  if (!nonblocking) {
-    if (timeout_ms >= 0 && !current_time_ms(&start_ms)) return make_errno_status("error");
-    if (!set_socket_nonblocking_temporarily(session->fd, &saved_flags, &changed))
-      return make_errno_status("error");
-  }
+  if (!nonblocking && timeout_ms >= 0 && !current_time_ms(&start_ms))
+    return make_errno_status("error");
+  if (!set_socket_nonblocking_temporarily(session->fd, &saved_flags, &changed))
+    return make_errno_status("error");
   for (;;) {
     rc = chezpp_openssl_SSL_read_ex(session->ssl, Sbytevector_data(bv) + start, (size_t)(stop - start), &nread);
     if (rc == 1) break;
@@ -621,11 +576,11 @@ ptr chezpp_net_tls_read_into(uptr handle, ptr bv, int start, int stop, int timeo
       ptr status = ssl_result_status(session->ssl, rc, "TLS read failed");
       if (Svectorp(status) && Svector_length(status) == 2 &&
           Svector_ref(status, 0) == Sstring_to_symbol("closed")) {
-        if (!nonblocking) restore_socket_flags(session->fd, saved_flags, changed);
+        restore_socket_flags(session->fd, saved_flags, changed);
         return Seof_object;
       }
       if (nonblocking || !is_would_block_status(status)) {
-        if (!nonblocking) restore_socket_flags(session->fd, saved_flags, changed);
+        restore_socket_flags(session->fd, saved_flags, changed);
         return status;
       }
       {
@@ -653,7 +608,7 @@ ptr chezpp_net_tls_read_into(uptr handle, ptr bv, int start, int stop, int timeo
       }
     }
   }
-  if (!nonblocking) restore_socket_flags(session->fd, saved_flags, changed);
+  restore_socket_flags(session->fd, saved_flags, changed);
   if (nread == 0) return Seof_object;
   return Sfixnum((iptr)nread);
 }
@@ -668,11 +623,10 @@ ptr chezpp_net_tls_write(uptr handle, ptr bv, int start, int stop, int timeout_m
   long long start_ms = 0;
 
   if (session == NULL || session->ssl == NULL) return make_error_status_message("invalid TLS session");
-  if (!nonblocking) {
-    if (timeout_ms >= 0 && !current_time_ms(&start_ms)) return make_errno_status("error");
-    if (!set_socket_nonblocking_temporarily(session->fd, &saved_flags, &changed))
-      return make_errno_status("error");
-  }
+  if (!nonblocking && timeout_ms >= 0 && !current_time_ms(&start_ms))
+    return make_errno_status("error");
+  if (!set_socket_nonblocking_temporarily(session->fd, &saved_flags, &changed))
+    return make_errno_status("error");
   for (;;) {
     rc = chezpp_openssl_SSL_write_ex(session->ssl, Sbytevector_data(bv) + start, (size_t)(stop - start),
                       &nwritten);
@@ -680,7 +634,7 @@ ptr chezpp_net_tls_write(uptr handle, ptr bv, int start, int stop, int timeout_m
     {
       ptr status = ssl_result_status(session->ssl, rc, "TLS write failed");
       if (nonblocking || !is_would_block_status(status)) {
-        if (!nonblocking) restore_socket_flags(session->fd, saved_flags, changed);
+        restore_socket_flags(session->fd, saved_flags, changed);
         return status;
       }
       {
@@ -708,7 +662,7 @@ ptr chezpp_net_tls_write(uptr handle, ptr bv, int start, int stop, int timeout_m
       }
     }
   }
-  if (!nonblocking) restore_socket_flags(session->fd, saved_flags, changed);
+  restore_socket_flags(session->fd, saved_flags, changed);
   return Sfixnum((iptr)nwritten);
 }
 

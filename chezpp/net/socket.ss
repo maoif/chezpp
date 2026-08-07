@@ -72,10 +72,6 @@
         (raise-net-error who kind (ffi-error-message x) x))
       x))
 
-  (define ffi-would-block-event
-    (lambda (answer)
-      (vector-ref answer 1)))
-
   (define ffi-result->would-block
     (lambda (resource answer)
       (and (ffi-would-block? answer)
