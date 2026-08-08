@@ -10,16 +10,52 @@ typedef CURL *(*curl_easy_init_fn)(void);
 typedef void (*curl_easy_cleanup_fn)(CURL *);
 typedef CURLcode (*curl_easy_setopt_fn)(CURL *, CURLoption, ...);
 typedef CURLcode (*curl_easy_perform_fn)(CURL *);
+typedef CURLcode (*curl_easy_pause_fn)(CURL *, int);
 typedef const char *(*curl_easy_strerror_fn)(CURLcode);
 typedef struct curl_slist *(*curl_slist_append_fn)(struct curl_slist *, const char *);
 typedef void (*curl_slist_free_all_fn)(struct curl_slist *);
 typedef curl_version_info_data *(*curl_version_info_fn)(CURLversion);
+typedef CURLM *(*curl_multi_init_fn)(void);
+typedef CURLMcode (*curl_multi_cleanup_fn)(CURLM *);
+typedef CURLMcode (*curl_multi_add_handle_fn)(CURLM *, CURL *);
+typedef CURLMcode (*curl_multi_remove_handle_fn)(CURLM *, CURL *);
+typedef CURLMcode (*curl_multi_socket_action_fn)(CURLM *, curl_socket_t, int, int *);
+typedef CURLMsg *(*curl_multi_info_read_fn)(CURLM *, int *);
+typedef CURLMcode (*curl_multi_setopt_fn)(CURLM *, CURLMoption, ...);
+typedef const char *(*curl_multi_strerror_fn)(CURLMcode);
 
 typedef struct {
   unsigned char *data;
   size_t len;
   size_t cap;
 } memory_buffer;
+
+typedef struct ftp_socket_entry {
+  curl_socket_t fd;
+  int action;
+  struct ftp_socket_entry *next;
+} ftp_socket_entry;
+
+typedef enum {
+  FTP_TRANSFER_LIST = 0,
+  FTP_TRANSFER_DOWNLOAD = 1,
+  FTP_TRANSFER_UPLOAD = 2
+} ftp_transfer_kind;
+
+typedef struct {
+  CURLM *multi;
+  CURL *easy;
+  ftp_socket_entry *sockets;
+  memory_buffer buffer;
+  FILE *file;
+  char *value;
+  long timeout_ms;
+  CURLcode result;
+  ftp_transfer_kind kind;
+  int added;
+  int completed;
+  int cancelled;
+} ftp_transfer;
 
 static const char *const curl_names[] = {"libcurl.so.4", NULL};
 static chezpp_optional_library curl_library =
@@ -32,9 +68,18 @@ static curl_easy_init_fn p_curl_easy_init = NULL;
 static curl_easy_cleanup_fn p_curl_easy_cleanup = NULL;
 static curl_easy_setopt_fn p_curl_easy_setopt = NULL;
 static curl_easy_perform_fn p_curl_easy_perform = NULL;
+static curl_easy_pause_fn p_curl_easy_pause = NULL;
 static curl_easy_strerror_fn p_curl_easy_strerror = NULL;
 static curl_slist_append_fn p_curl_slist_append = NULL;
 static curl_slist_free_all_fn p_curl_slist_free_all = NULL;
+static curl_multi_init_fn p_curl_multi_init = NULL;
+static curl_multi_cleanup_fn p_curl_multi_cleanup = NULL;
+static curl_multi_add_handle_fn p_curl_multi_add_handle = NULL;
+static curl_multi_remove_handle_fn p_curl_multi_remove_handle = NULL;
+static curl_multi_socket_action_fn p_curl_multi_socket_action = NULL;
+static curl_multi_info_read_fn p_curl_multi_info_read = NULL;
+static curl_multi_setopt_fn p_curl_multi_setopt = NULL;
+static curl_multi_strerror_fn p_curl_multi_strerror = NULL;
 
 static ptr make_status(const char *tag, ptr value) {
   ptr v = Smake_vector(2, Sfalse);
@@ -121,9 +166,18 @@ static void initialize_curl(void) {
       !CURL_LOAD(p_curl_easy_cleanup, "curl_easy_cleanup") ||
       !CURL_LOAD(p_curl_easy_setopt, "curl_easy_setopt") ||
       !CURL_LOAD(p_curl_easy_perform, "curl_easy_perform") ||
+      !CURL_LOAD(p_curl_easy_pause, "curl_easy_pause") ||
       !CURL_LOAD(p_curl_easy_strerror, "curl_easy_strerror") ||
       !CURL_LOAD(p_curl_slist_append, "curl_slist_append") ||
-      !CURL_LOAD(p_curl_slist_free_all, "curl_slist_free_all")) return;
+      !CURL_LOAD(p_curl_slist_free_all, "curl_slist_free_all") ||
+      !CURL_LOAD(p_curl_multi_init, "curl_multi_init") ||
+      !CURL_LOAD(p_curl_multi_cleanup, "curl_multi_cleanup") ||
+      !CURL_LOAD(p_curl_multi_add_handle, "curl_multi_add_handle") ||
+      !CURL_LOAD(p_curl_multi_remove_handle, "curl_multi_remove_handle") ||
+      !CURL_LOAD(p_curl_multi_socket_action, "curl_multi_socket_action") ||
+      !CURL_LOAD(p_curl_multi_info_read, "curl_multi_info_read") ||
+      !CURL_LOAD(p_curl_multi_setopt, "curl_multi_setopt") ||
+      !CURL_LOAD(p_curl_multi_strerror, "curl_multi_strerror")) return;
   if (p_curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
     chezpp_optional_library_fail(&curl_library,
                                  "curl: runtime initialization failed");

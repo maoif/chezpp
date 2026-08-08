@@ -243,7 +243,7 @@
                                 [(v) v]
                                 [(client peer)
                                  (cons client peer)])))])
-                     (if accepted
+                     (if (and accepted (not (net-would-block? accepted)))
                          (let ([client (car accepted)]
                                [peer (cdr accepted)])
                            (spawn-client-handler client)

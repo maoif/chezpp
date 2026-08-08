@@ -6,14 +6,12 @@
 
 (define wait-ftp-nonblocking
   (lambda (proc)
-    (let loop ([i 0])
-      (let ([ans (proc)])
-        (cond
-         [ans ans]
-         [(>= i 200) #f]
-         [else
-          (milisleep 10)
-          (loop (+ i 1))])))))
+    (let ([answer (net-operation-wait (proc))])
+      (if (bytevector? answer)
+          (filter (lambda (entry) (not (string=? entry "")))
+                  (map (lambda (entry) (string-trim-right entry #\return))
+                       (string-split (utf8->string answer) #\newline)))
+          answer))))
 
 (define retry-ftp-test-op
   (lambda (proc)
@@ -435,6 +433,22 @@
            (lambda ()
              (stop-server))))))
 
+(mat net-ftp-readiness-operation
+     (with-test-ftp-session
+      (lambda (session)
+        (let ([operation (ftp-list/nonblocking session ".")])
+          (and (net-operation? operation)
+               (let loop ()
+                 (net-operation-step! operation)
+                 (case (net-operation-state operation)
+                   [(completed)
+                    (bytevector? (net-operation-result operation))]
+                   [(pending)
+                    (poll (net-operation-poll-targets operation)
+                          (net-operation-remaining-timeout-ms operation))
+                    (loop)]
+                   [else #f])))))))
+
 (mat net-ftp-cancel-pending
      (let-values ([(root port stop-server) (start-ftp-test-server)])
        (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
@@ -443,8 +457,10 @@
            (lambda ()
              (and (ftp-login! session "user" "pass")
                   (eq? (ftp-cancel-pending! session) session)
-                  (not (ftp-list/nonblocking session "/slow"))
-                  (eq? (ftp-cancel-pending! session) session)
+                  (let ([operation (ftp-list/nonblocking session "/slow")])
+                    (and (net-operation? operation)
+                         (eq? (ftp-cancel-pending! session) session)
+                         (eq? (net-operation-state operation) 'cancelled)))
                   (let ([entries (ftp-list session)])
                     (and (list? entries)
                          (not (not (member "docs" entries)))

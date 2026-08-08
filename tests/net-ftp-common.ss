@@ -54,3 +54,16 @@
                                 stderr-stuff)))
                     (when (file-exists? root)
                       (file-removetree root #f)))))))))
+
+(define with-test-ftp-session
+  (lambda (proc)
+    (let-values ([(root port stop-server) (start-ftp-test-server)])
+      (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
+        (dynamic-wind
+          void
+          (lambda ()
+            (ftp-login! session "user" "pass")
+            (proc session))
+          (lambda ()
+            (ftp-close session)
+            (stop-server)))))))
