@@ -112,15 +112,7 @@
 
 (define await-http-nonblocking
   (lambda (thunk)
-    (let loop ([i 0])
-      (let ([ans (thunk)])
-        (if ans
-            ans
-            (begin
-              (when (> i 100)
-                (error 'await-http-nonblocking "HTTP nonblocking operation did not complete"))
-              (milisleep 10)
-              (loop (+ i 1))))))))
+    (net-operation-wait (thunk))))
 
 (mat net-http-runtime
      (let-values ([(server port th)
@@ -669,7 +661,7 @@
                (let ([resp (await-http-nonblocking
                             (lambda ()
                               (http-send/nonblocking client request)))])
-                 (and (not first)
+                 (and (net-operation? first)
                       (= (http-response-status resp) 200)
                       (equal? (utf8->string (http-response-body resp)) "nb-ok")))))
            (lambda ()
@@ -706,7 +698,7 @@
                                                         (format "http://127.0.0.1:~a/echo" port)
                                                         '(("Content-Type" . "text/plain"))
                                                         "payload")))])
-                 (and (not first)
+                 (and (net-operation? first)
                       (= (http-response-status resp) 200)
                       (equal? (utf8->string (http-response-body resp)) "payload")))))
            (lambda ()
@@ -744,7 +736,7 @@
                                  client
                                  (format "http://127.0.0.1:~a/download-nb" port)
                                  download-path)))])
-                   (and (not first)
+                   (and (net-operation? first)
                         (= (http-response-status resp) 200)
                         (equal? (http-response-body resp) payload)
                         (equal? (read-u8vec download-path) payload)))))
@@ -780,7 +772,7 @@
                                  client
                                  (format "http://127.0.0.1:~a/upload-nb" port)
                                  upload-path)))])
-                   (and (not first)
+                   (and (net-operation? first)
                         (= (http-response-status resp) 200)
                         (equal? (http-response-body resp) payload)))))
              (lambda ()
@@ -791,7 +783,7 @@
 (mat net-http-cancel
      (let-values ([(server port th stop)
                    (start-http-dispatch-loop-server
-                    2
+                    1
                     (lambda (server)
                       (http-register-handler!
                        server
@@ -815,7 +807,7 @@
                                                      '()
                                                      #f)]
                     [first (http-send/nonblocking client slow-request)])
-               (and (not first)
+               (and (net-operation? first)
                     (begin
                       (http-cancel-pending! client)
                       #t)
@@ -840,7 +832,7 @@
                                                      '()
                                                      #f)]
                     [first (http-send/nonblocking client slow-request)])
-               (and (not first)
+               (and (net-operation? first)
                     (begin
                       (http-cancel-pending! client)
                       #t)
@@ -851,8 +843,8 @@
                                            (format "http://127.0.0.1:~a/after-cancel" port))])
                       (and
                        (= (http-response-status after) 200)
-                       (equal? (utf8->string (http-response-body after)) "after-conn-2")
-                       (= (accepted-count) 2))))))
+                       (equal? (utf8->string (http-response-body after)) "after-conn-1")
+                       (= (accepted-count) 1))))))
            (lambda ()
              (http-close client)
              (stop)
@@ -869,7 +861,7 @@
         (lambda (req)
           (set! count (+ count 1))
           (make-http-response 200 "OK" '() "ok")))
-       (let ([th (fork-thread (lambda () (http-serve-loop server #t)))])
+       (let ([th (fork-thread (lambda () (http-serve-loop server)))])
          (dynamic-wind
            void
            (lambda ()
@@ -881,3 +873,17 @@
            (lambda ()
              (http-server-close server)
              (thread-join th))))))
+
+(mat net-http-handler-table
+     (let ([server (http-listen "127.0.0.1" 0)]
+           [first (lambda (request) (make-http-response 200 "OK" '() "first"))]
+           [second (lambda (request) (make-http-response 200 "OK" '() "second"))])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (not (http-register-handler! server 'get "/item" first))
+                (eq? first (http-register-handler! server 'get "/item" second))
+                (eq? second (http-handler-ref server 'get "/item" #f))
+                (eq? second (http-unregister-handler! server 'get "/item"))
+                (eq? #f (http-handler-ref server 'get "/item" #f))))
+         (lambda () (http-server-close server)))))

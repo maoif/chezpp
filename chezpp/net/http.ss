@@ -42,6 +42,8 @@
           http-serve
           http-serve-loop
           http-register-handler!
+          http-handler-ref
+          http-unregister-handler!
           http-connection?
           http-connection-close
           http-read-request
@@ -57,6 +59,7 @@
           (chezpp net address)
           (chezpp net socket)
           (chezpp net poll)
+          (chezpp net operation)
           (chezpp net private)
           (chezpp net tls))
 
@@ -97,19 +100,6 @@
             (mutable cached-connection http-client-cached-connection http-client-cached-connection-set!)
             (mutable pending http-client-pending http-client-pending-set!)
             (mutable closed? http-client-closed? http-client-closed?-set!)))
-
-  (define-record-type (http-pending-op %make-http-pending-op http-pending-op?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable kind http-pending-kind)
-            (immutable args http-pending-args)
-            (immutable reader http-pending-reader)
-            (immutable writer http-pending-writer)
-            (immutable thread http-pending-thread)
-            (mutable done? http-pending-done? http-pending-done?-set!)
-            (mutable result http-pending-result http-pending-result-set!)
-            (mutable cancelled? http-pending-cancelled? http-pending-cancelled?-set!)
-            (mutable connection http-pending-connection http-pending-connection-set!)))
 
   (define-record-type (http-server %make-http-server http-server?)
     (sealed #t)
@@ -198,8 +188,8 @@
     (lambda (who client kind args)
       (let ([pending (http-client-pending client)])
         (when (and pending
-                   (or (not (eq? (http-pending-kind pending) kind))
-                       (not (equal? (http-pending-args pending) args))))
+                   (eq? 'pending (net-operation-state pending))
+                   (not (eq? (net-operation-kind pending) kind)))
           (raise-net-error who 'http "another nonblocking HTTP operation is pending" pending)))))
 
   (define ensure-server-open
@@ -262,111 +252,29 @@
     (lambda (conn deadline-ms)
       (vector-set! (http-connection-deadline-cell conn) 0 deadline-ms)))
 
-  (define close-pending-notifier!
-    (lambda (pending)
-      (guard (c [else #f])
-        (close-socket (http-pending-reader pending)))
-      (guard (c [else #f])
-        (close-socket (http-pending-writer pending)))))
-
-  (define open-pending-notifier
-    (lambda ()
-      (let ([listener (open-socket 'inet 'stream)]
-            [client #f]
-            [server #f])
-        (guard (c [else
-                   (when server
-                     (guard (x [else #f])
-                       (close-socket server)))
-                   (when client
-                     (guard (x [else #f])
-                       (close-socket client)))
-                   (guard (x [else #f])
-                     (close-socket listener))
-                   (raise c)])
-          (dynamic-wind
-            void
-            (lambda ()
-              (socket-set-option! listener 'reuse-address #t)
-              (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
-              (socket-listen! listener 1)
-              (let ([addr (socket-local-address listener)])
-                (set! client (open-socket 'inet 'stream))
-                (socket-connect! client addr)
-                (let-values ([(accepted peer) (socket-accept listener)])
-                  (set! server accepted)
-                  (values server client))))
-            (lambda ()
-              (guard (c [else #f])
-                (close-socket listener))))))))
-
-  (define start-pending!
-    (lambda (client kind args thunk)
-      (let-values ([(reader writer) (open-pending-notifier)])
-        (letrec ([pending
-                  (%make-http-pending-op
-                   kind
-                   args
-                   reader
-                   writer
-                   (fork-thread
-                    (lambda ()
-                      (let ([result
-                             (guard (c [else c])
-                               (thunk pending))])
-                        (when (http-pending-cancelled? pending)
-                          (set! result #f))
-                        (http-pending-result-set! pending result))
-                      (http-pending-done?-set! pending #t)
-                      (guard (c [else #f])
-                        (socket-send-all writer #vu8(1)))))
-                   #f
-                   #f
-                   #f
-                   #f)])
-          (http-client-pending-set! client pending)
-          pending))))
-
-  (define pending-ready?
-    (lambda (pending)
-      (or (http-pending-done? pending)
-          (let* ([target (make-poll-target (http-pending-reader pending)
-                                           '(read error hup invalid))]
-                 [ready (car (poll/nonblocking (list target)))])
-            (memq 'read (poll-target-ready-events ready))))))
-
-  (define finish-pending!
-    (lambda (who client pending)
-      (http-client-pending-set! client #f)
-      (thread-join (http-pending-thread pending))
-      (close-pending-notifier! pending)
-      (let ([result (http-pending-result pending)])
-        (if (condition? result)
-            (raise result)
-            result))))
-
   (define cancel-pending!
     (lambda (client pending)
-      (http-pending-cancelled?-set! pending #t)
-      (let ([conn (http-pending-connection pending)])
-        (when conn
-          (http-pending-connection-set! pending #f)
-          (uncache-http-connection! client conn)
-          (close-http-connection conn)))
-      (close-pending-notifier! pending)
+      (net-operation-cancel! pending)
       (http-client-pending-set! client #f)
-      (thread-join (http-pending-thread pending))
       client))
 
   (define http-transfer/nonblocking
     (lambda (who client kind args thunk)
       (ensure-client-open who client)
       (ensure-no-pending-mismatch who client kind args)
-      (let ([pending (or (http-client-pending client)
-                         (start-pending! client kind args thunk))])
-        (if (pending-ready? pending)
-            (finish-pending! who client pending)
-            #f))))
+      (let ([pending (http-client-pending client)])
+        (if (and pending (eq? 'pending (net-operation-state pending)))
+            pending
+            (let ([operation
+                   (make-net-operation
+                    kind
+                    (lambda ()
+                      (guard (failure [else (net-operation-failed failure)])
+                        (net-operation-completed (thunk #f))))
+                    void
+                    (lambda () (http-client-pending-set! client #f)))])
+              (http-client-pending-set! client operation)
+              operation)))))
 
   (define request-key
     (lambda (request)
@@ -1018,10 +926,7 @@
 
   (define cache-connection-allowed?
     (lambda (client pending)
-      (or (not pending)
-          (and (not (http-client-closed? client))
-               (eq? (http-client-pending client) pending)
-               (not (http-pending-cancelled? pending))))))
+      (not (http-client-closed? client))))
 
   (define http-send*
     (case-lambda
@@ -1034,8 +939,6 @@
         (dynamic-wind
           void
           (lambda ()
-            (when pending
-              (http-pending-connection-set! pending conn))
             (http-connection-deadline-ms-set! conn deadline-ms)
             (uncache-http-connection! client conn)
             (let ([request-headers (merge-request-headers request client)])
@@ -1061,27 +964,23 @@
                           response))
                     response))))
           (lambda ()
-            (when (and pending
-                       (eq? (http-pending-connection pending) conn))
-              (http-pending-connection-set! pending #f))
             (unless keep-open?
               (close-http-connection conn)))))]))
 
   (define make-handler-key
     (case-lambda
-      [(path) path]
+      [(path) (if (string=? path "") "/" path)]
       [(method path)
-       (cons (normalize-http-method 'make-handler-key method) path)]))
+       (cons (normalize-http-method 'make-handler-key method)
+             (if (string=? path "") "/" path))]))
 
   (define lookup-handler
     (lambda (server request)
       (let* ([path (or (uri-path (http-request-uri request)) "/")]
              [path (if (string=? path "") "/" path)]
              [method-key (make-handler-key (http-request-method request) path)])
-        (cond
-         [(assoc method-key (http-server-handlers server)) => cdr]
-         [(assoc path (http-server-handlers server)) => cdr]
-         [else #f]))))
+        (or (hashtable-ref (http-server-handlers server) method-key #f)
+            (hashtable-ref (http-server-handlers server) path #f)))))
 
   (define default-handler
     (lambda (request)
@@ -1308,15 +1207,22 @@ The `http-send` procedure sends an HTTP request with a configured client and ret
     (lambda (client request)
       (pcheck ([http-client? client] [http-request? request])
               (ensure-client-open who client)
-              (http-send* who
-                          client
-                          request
-                          5
-                          (timeout->deadline-ms
-                           (http-client-timeout-ms client))))))
+              (net-operation-wait
+               (http-transfer/nonblocking
+                who client 'http-send (request-key request)
+                (lambda (pending)
+                  (http-send* who
+                              client
+                              request
+                              5
+                              (timeout->deadline-ms
+                               (http-client-timeout-ms client)))))))))
 
   #|proc:http-send/nonblocking
-The `http-send/nonblocking` procedure progresses an HTTP request and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
+The `http-send/nonblocking` procedure constructs an HTTP request operation.
+The `client` parameter is an open HTTP client.
+The `request` parameter is the HTTP request to send.
+The return value is a `net-operation` whose successful result is an HTTP response.
 |#
   (define-who http-send/nonblocking
     (lambda (client request)
@@ -1324,7 +1230,7 @@ The `http-send/nonblocking` procedure progresses an HTTP request and returns `#f
               (http-transfer/nonblocking
                who
                client
-               'send
+               'http-send
                (request-key request)
                (lambda (pending)
                  (http-send* who
@@ -1354,7 +1260,9 @@ The `http-request` procedure sends a one-shot HTTP request without manually mana
              (http-close client))))]))
 
   #|proc:http-request/nonblocking
-The `http-request/nonblocking` procedure progresses a one-client HTTP request and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
+The `http-request/nonblocking` procedure constructs a request operation for `client`.
+The `method`, `uri`, `headers`, and `body` parameters describe the HTTP request.
+The return value is a `net-operation` whose successful result is an HTTP response.
 |#
   (define-who http-request/nonblocking
     (case-lambda
@@ -1368,7 +1276,7 @@ The `http-request/nonblocking` procedure progresses a one-client HTTP request an
                  (http-transfer/nonblocking
                  who
                   client
-                  'request
+                  'http-request
                   (request-key request)
                   (lambda (pending)
                     (http-send* who
@@ -1440,7 +1348,9 @@ The `http-download` procedure downloads a response body to `path` and returns th
                  response))]))
 
   #|proc:http-download/nonblocking
-The `http-download/nonblocking` procedure progresses a download and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
+The `http-download/nonblocking` procedure constructs a download operation for `client`.
+The `uri` parameter identifies the resource and `path` is the destination pathname.
+The return value is a `net-operation` whose successful result is an HTTP response.
 |#
   (define-who http-download/nonblocking
     (lambda (client uri path)
@@ -1448,7 +1358,7 @@ The `http-download/nonblocking` procedure progresses a download and returns `#f`
               (http-transfer/nonblocking
                who
                client
-               'download
+               'http-download
                (list (if (uri? uri) (uri->string uri) uri) path)
                (lambda (pending)
                  (let ([response
@@ -1484,7 +1394,9 @@ The `http-upload` procedure uploads a file as a PUT request body and returns the
                          (read-u8vec path)))]))
 
   #|proc:http-upload/nonblocking
-The `http-upload/nonblocking` procedure progresses an upload and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
+The `http-upload/nonblocking` procedure constructs an upload operation for `client`.
+The `uri` parameter identifies the resource and `path` is the source pathname.
+The return value is a `net-operation` whose successful result is an HTTP response.
 |#
   (define-who http-upload/nonblocking
     (lambda (client uri path)
@@ -1492,7 +1404,7 @@ The `http-upload/nonblocking` procedure progresses an upload and returns `#f` wh
               (http-transfer/nonblocking
                who
                client
-               'upload
+               'http-upload
                (list (if (uri? uri) (uri->string uri) uri) path)
                (lambda (pending)
                  (http-send* who
@@ -1539,7 +1451,7 @@ The `http-listen` procedure opens a listening HTTP server on `host` and `port`, 
                                       (socket-address-port
                                        (socket-local-address server-socket))
                                       tls-context
-                                      '()
+                                      (make-hashtable equal-hash equal?)
                                       #f
                                       (make-mutex 'http-server-close)))))]))
 
@@ -1556,26 +1468,59 @@ The `http-server-close` procedure closes the listening socket owned by an HTTP s
               server)))
 
   #|proc:http-register-handler!
-The `http-register-handler!` procedure registers a path-specific or method/path-specific request handler on an HTTP server.
+The `http-register-handler!` procedure registers `proc` on `server` for `path` and optional
+`method`. The `proc` parameter has signature `(http-request) -> http-response`.
+The return value is the replaced handler or `#f` when no handler was replaced.
 |#
   (define-who http-register-handler!
     (case-lambda
       [(server path proc)
        (pcheck ([http-server? server] [string? path] [procedure? proc])
                (ensure-server-open who server)
-               (http-server-handlers-set!
-                server
-                (cons (cons (make-handler-key path) proc)
-                      (http-server-handlers server)))
-               server)]
+               (let* ([key (make-handler-key path)]
+                      [old (hashtable-ref (http-server-handlers server) key #f)])
+                 (hashtable-set! (http-server-handlers server) key proc)
+                 old))]
       [(server method path proc)
        (pcheck ([http-server? server] [string? path] [procedure? proc])
                (ensure-server-open who server)
-               (http-server-handlers-set!
-                server
-                (cons (cons (make-handler-key method path) proc)
-                      (http-server-handlers server)))
-               server)]))
+               (let* ([key (make-handler-key method path)]
+                      [old (hashtable-ref (http-server-handlers server) key #f)])
+                 (hashtable-set! (http-server-handlers server) key proc)
+                 old))]))
+
+  #|proc:http-handler-ref
+The `http-handler-ref` procedure returns the handler registered for `method` and `path`.
+The `server` parameter is an open HTTP server and `default` is the missing-handler value.
+The return value is the method-specific handler, path handler, or `default`.
+|#
+  (define-who http-handler-ref
+    (lambda (server method path default)
+      (pcheck ([http-server? server] [string? path])
+              (ensure-server-open who server)
+              (or (hashtable-ref (http-server-handlers server)
+                                 (make-handler-key method path) #f)
+                  (hashtable-ref (http-server-handlers server) path default)))))
+
+  #|proc:http-unregister-handler!
+The `http-unregister-handler!` procedure removes a handler from `server` for `path` and optional
+`method`. The return value is the removed handler or `#f` when no handler was registered.
+|#
+  (define-who http-unregister-handler!
+    (case-lambda
+      [(server path)
+       (pcheck ([http-server? server] [string? path])
+               (ensure-server-open who server)
+               (let ([old (hashtable-ref (http-server-handlers server) path #f)])
+                 (hashtable-delete! (http-server-handlers server) path)
+                 old))]
+      [(server method path)
+       (pcheck ([http-server? server] [string? path])
+               (ensure-server-open who server)
+               (let* ([key (make-handler-key method path)]
+                      [old (hashtable-ref (http-server-handlers server) key #f)])
+                 (hashtable-delete! (http-server-handlers server) key)
+                 old))]))
 
   #|proc:http-accept
 The `http-accept` procedure accepts a client connection from an HTTP server and returns an HTTP connection object.
@@ -1687,30 +1632,25 @@ The `http-serve` procedure accepts one connection, dispatches requests through t
                 (serve-http-connection who server conn)))))
 
   #|proc:http-serve-loop
-The `http-serve-loop` procedure repeatedly accepts and serves HTTP connections until the server is closed. If `threaded?` is true, each accepted connection is served in a new Scheme thread; otherwise connections are served serially.
+The `http-serve-loop` procedure repeatedly accepts and serves HTTP connections until `server`
+is closed. The `server` parameter is an HTTP server. The return value is `server`.
 |#
   (define-who http-serve-loop
-    (case-lambda
-      [(server) (http-serve-loop server #t)]
-      [(server threaded?)
-       (pcheck ([http-server? server] [boolean? threaded?])
-               (let loop ()
-                 (unless (http-server-closed? server)
-                   (let* ([ready (poll (list (make-poll-target
-                                               (http-server-socket server)
-                                               '(read error hup invalid)))
-                                       100)]
-                          [events (poll-target-ready-events (car ready))])
-                     (when (and (not (http-server-closed? server))
-                                (memq 'read events))
-                       (guard (c [else
-                                  (unless (http-server-closed? server)
-                                    (raise c))])
-                         (if threaded?
-                             (let ([conn (http-accept server)])
-                               (fork-thread
-                                (lambda ()
-                                  (serve-http-connection who server conn))))
-                             (http-serve server)))))
-                   (loop)))
-               server)])))
+    (lambda (server)
+      (pcheck ([http-server? server])
+              (let loop ()
+                (unless (http-server-closed? server)
+                  (let* ([ready (poll (list (make-poll-target
+                                              (http-server-socket server)
+                                              '(read error hup invalid)))
+                                      100)]
+                         [events (poll-target-ready-events (car ready))])
+                    (when (and (not (http-server-closed? server))
+                               (memq 'read events))
+                      (guard (c [else
+                                 (unless (http-server-closed? server)
+                                   (raise c))])
+                        (http-serve server))))
+                  (loop)))
+              server)))
+  )
