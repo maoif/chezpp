@@ -15,6 +15,12 @@
       (thunk)
       #f)))
 
+(define wait-for-scp-operation
+  (lambda (thunk)
+    (let ([operation (thunk)])
+      (and (net-operation? operation)
+           (net-operation-wait operation)))))
+
 (define run-net-scp-basic-test
   (lambda (remote-root home port user)
     (let ([local-root (format "/tmp/chezpp-net-scp-basic-~a" port)])
@@ -114,14 +120,14 @@
                             (write-u8vec! (path-build (path-build tree-path "nested") "b.txt")
                                           (string->utf8 "B"))
                             (and
-                             (equal? (wait-for-result
+                             (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-upload/nonblocking
                                          scp
                                          upload-path
                                          (string-append remote-root "/uploaded-nb.txt"))))
                                      (string-append remote-root "/uploaded-nb.txt"))
-                             (equal? (wait-for-result
+                             (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-download/nonblocking
                                          scp
@@ -130,7 +136,7 @@
                                      download-path)
                              (equal? (read-u8vec download-path)
                                      (string->utf8 "scp-upload-nb"))
-                             (equal? (wait-for-result
+                             (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-copy-directory/nonblocking
                                          scp
@@ -138,7 +144,7 @@
                                          tree-path
                                          (string-append remote-root "/tree-nb-remote"))))
                                      (string-append remote-root "/tree-nb-remote"))
-                             (equal? (wait-for-result
+                             (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-copy-directory/nonblocking
                                          scp

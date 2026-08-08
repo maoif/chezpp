@@ -16,22 +16,11 @@
           (chezpp net errors)
           (chezpp net ffi)
           (chezpp net poll)
+          (chezpp net operation)
           (chezpp net address)
           (chezpp net socket)
           (chezpp net private)
           (chezpp net ssh))
-
-  (define-record-type (scp-pending-op %make-scp-pending-op scp-pending-op?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable kind scp-pending-kind)
-            (immutable args scp-pending-args)
-            (immutable reader scp-pending-reader)
-            (immutable writer scp-pending-writer)
-            (immutable thread scp-pending-thread)
-            (mutable done? scp-pending-done? scp-pending-done?-set!)
-            (mutable result scp-pending-result scp-pending-result-set!)
-            (mutable cancelled? scp-pending-cancelled? scp-pending-cancelled?-set!)))
 
   (define-record-type (scp-session %make-scp-session scp-session?)
     (sealed #t)
@@ -103,109 +92,33 @@
     (lambda (who session kind args)
       (let ([pending (scp-session-pending session)])
         (when (and pending
-                   (or (not (eq? (scp-pending-kind pending) kind))
-                       (not (equal? (scp-pending-args pending) args))))
+                   (eq? 'pending (net-operation-state pending))
+                   (not (eq? (net-operation-kind pending) kind)))
           (raise-net-error who 'scp "another nonblocking SCP operation is pending" pending)))))
-
-  (define open-pending-notifier
-    (lambda ()
-      (let ([listener (open-socket 'inet 'stream)]
-            [client #f]
-            [server #f])
-        (guard (c [else
-                   (when server
-                     (guard (x [else #f])
-                       (close-socket server)))
-                   (when client
-                     (guard (x [else #f])
-                       (close-socket client)))
-                   (guard (x [else #f])
-                     (close-socket listener))
-                   (raise c)])
-          (dynamic-wind
-            void
-            (lambda ()
-              (socket-set-option! listener 'reuse-address #t)
-              (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
-              (socket-listen! listener 1)
-              (let ([addr (socket-local-address listener)])
-                (set! client (open-socket 'inet 'stream))
-                (socket-connect! client addr)
-                (let-values ([(accepted peer) (socket-accept listener)])
-                  (set! server accepted)
-                  (values server client))))
-            (lambda ()
-              (guard (c [else #f])
-                (close-socket listener))))))))
-
-  (define close-pending-notifier!
-    (lambda (pending)
-      (guard (c [else #f])
-        (close-socket (scp-pending-reader pending)))
-      (guard (c [else #f])
-        (close-socket (scp-pending-writer pending)))))
-
-  (define start-pending!
-    (lambda (session kind args thunk)
-      (let-values ([(reader writer) (open-pending-notifier)])
-        (letrec ([pending
-                  (%make-scp-pending-op
-                   kind
-                   args
-                   reader
-                   writer
-                   (fork-thread
-                    (lambda ()
-                      (let ([result
-                             (guard (c [else c])
-                               (thunk))])
-                        (when (scp-pending-cancelled? pending)
-                          (set! result #f))
-                        (scp-pending-result-set! pending result))
-                      (scp-pending-done?-set! pending #t)
-                      (guard (c [else #f])
-                        (socket-send-all writer #vu8(1)))))
-                   #f
-                   #f
-                   #f)])
-          (scp-session-pending-set! session pending)
-          pending))))
-
-  (define pending-ready?
-    (lambda (pending)
-      (or (scp-pending-done? pending)
-          (let* ([target (make-poll-target (scp-pending-reader pending)
-                                           '(read error hup invalid))]
-                 [ready (car (poll/nonblocking (list target)))])
-            (memq 'read (poll-target-ready-events ready))))))
-
-  (define finish-pending!
-    (lambda (who session pending)
-      (scp-session-pending-set! session #f)
-      (thread-join (scp-pending-thread pending))
-      (close-pending-notifier! pending)
-      (let ([result (scp-pending-result pending)])
-        (if (condition? result)
-            (raise result)
-            result))))
 
   (define cancel-pending!
     (lambda (session pending)
-      (scp-pending-cancelled?-set! pending #t)
-      (close-pending-notifier! pending)
+      (net-operation-cancel! pending)
       (scp-session-pending-set! session #f)
-      (thread-join (scp-pending-thread pending))
       session))
 
   (define scp-transfer/nonblocking
     (lambda (who session kind args thunk)
       (ensure-session-open who session)
       (ensure-no-pending-mismatch who session kind args)
-      (let ([pending (or (scp-session-pending session)
-                         (start-pending! session kind args thunk))])
-        (if (pending-ready? pending)
-            (finish-pending! who session pending)
-            #f))))
+      (let ([pending (scp-session-pending session)])
+        (if (and pending (eq? 'pending (net-operation-state pending)))
+            pending
+            (let ([operation
+                   (make-net-operation
+                    kind
+                    (lambda ()
+                      (guard (failure [else (net-operation-failed failure)])
+                        (net-operation-completed (thunk))))
+                    void
+                    (lambda () (scp-session-pending-set! session #f)))])
+              (scp-session-pending-set! session operation)
+              operation)))))
 
   (define scp-download*
     (lambda (who session remote-path local-path timeout-ms)
@@ -326,7 +239,8 @@ The `scp-download` procedure downloads a single remote file to the exact local t
       [(session remote-path local-path timeout-ms)
        (pcheck ([scp-session? session] [string? remote-path local-path] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
-               (scp-download* who session remote-path local-path timeout-ms))]))
+               (net-operation-wait
+                (scp-download/nonblocking session remote-path local-path timeout-ms)))]))
 
   #|proc:scp-upload
 The `scp-upload` procedure uploads a single local file to the exact remote target path.
@@ -338,10 +252,13 @@ The `scp-upload` procedure uploads a single local file to the exact remote targe
       [(session local-path remote-path timeout-ms)
        (pcheck ([scp-session? session] [string? local-path remote-path] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
-               (scp-upload* who session local-path remote-path timeout-ms))]))
+               (net-operation-wait
+                (scp-upload/nonblocking session local-path remote-path timeout-ms)))]))
 
   #|proc:scp-download/nonblocking
-The `scp-download/nonblocking` procedure progresses a file download without blocking and returns `#f` while the transfer is still pending.
+The `scp-download/nonblocking` procedure constructs a file download operation.
+The `session`, `remote-path`, `local-path`, and optional `timeout-ms` describe the transfer.
+The return value is a `net-operation` whose successful result is `local-path`.
 |#
   (define-who scp-download/nonblocking
     (case-lambda
@@ -353,13 +270,15 @@ The `scp-download/nonblocking` procedure progresses a file download without bloc
                (scp-transfer/nonblocking
                 who
                 session
-                'download
+                'scp-download
                 (list remote-path local-path timeout-ms)
                 (lambda ()
                   (scp-download* who session remote-path local-path timeout-ms))))]))
 
   #|proc:scp-upload/nonblocking
-The `scp-upload/nonblocking` procedure progresses a file upload without blocking and returns `#f` while the transfer is still pending.
+The `scp-upload/nonblocking` procedure constructs a file upload operation.
+The `session`, `local-path`, `remote-path`, and optional `timeout-ms` describe the transfer.
+The return value is a `net-operation` whose successful result is `remote-path`.
 |#
   (define-who scp-upload/nonblocking
     (case-lambda
@@ -371,7 +290,7 @@ The `scp-upload/nonblocking` procedure progresses a file upload without blocking
                (scp-transfer/nonblocking
                 who
                 session
-                'upload
+                'scp-upload
                 (list local-path remote-path timeout-ms)
                 (lambda ()
                   (scp-upload* who session local-path remote-path timeout-ms))))]))
@@ -390,10 +309,14 @@ The `scp-copy-directory` procedure recursively copies a directory tree in the sp
       [(session direction source-path target-path timeout-ms)
        (pcheck ([scp-session? session] [string? source-path target-path] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
-               (scp-copy-directory* who session direction source-path target-path timeout-ms))]))
+               (net-operation-wait
+                (scp-copy-directory/nonblocking
+                 session direction source-path target-path timeout-ms)))]))
 
   #|proc:scp-copy-directory/nonblocking
-The `scp-copy-directory/nonblocking` procedure progresses a recursive directory copy without blocking and returns `#f` while the transfer is still pending.
+The `scp-copy-directory/nonblocking` procedure constructs a recursive copy operation.
+The `direction`, source, target, and optional timeout parameters describe the transfer.
+The return value is a `net-operation` whose successful result is the target path.
 |#
   (define-who scp-copy-directory/nonblocking
     (case-lambda
@@ -409,7 +332,7 @@ The `scp-copy-directory/nonblocking` procedure progresses a recursive directory 
                (scp-transfer/nonblocking
                 who
                 session
-                'copy-directory
+                'scp-copy-directory
                 (list direction source-path target-path timeout-ms)
                 (lambda ()
                   (scp-copy-directory* who
