@@ -68,23 +68,12 @@
 
 (define wait-grpc-call/nonblocking
   (lambda (client method payload metadata timeout-ms)
-    (let loop ()
-      (let ([resp (grpc-call/nonblocking client method payload metadata timeout-ms)])
-        (if resp
-            resp
-            (begin
-              (milisleep 10)
-              (loop)))))))
+    (net-operation-wait
+     (grpc-call/nonblocking client method payload metadata timeout-ms))))
 
 (define wait-grpc-stream/nonblocking
   (lambda (proc)
-    (let loop ()
-      (let ([stream (proc)])
-        (if stream
-            stream
-            (begin
-              (milisleep 10)
-              (loop)))))))
+    (net-operation-wait (proc))))
 
 (define grpc-net-error-message?
   (lambda (message thunk)
@@ -275,7 +264,7 @@
                  ""))))
            (lambda (server client)
              (and
-              (grpc-channel? server)
+             (grpc-channel? server)
               (grpc-channel? client)
               (let ([resp (grpc-call client
                                      "/chezpp.test.Echo/Unary"
@@ -405,7 +394,7 @@
             (grpc-channel? server)
             (grpc-channel? client)
             (eq? (grpc-cancel-pending! client) client)
-            (not (grpc-call/nonblocking
+            (net-operation? (grpc-call/nonblocking
                   client
                   "/chezpp.test.Echo/UnarySlow"
                   "slow"
@@ -420,7 +409,7 @@
                          500)])
               (and (grpc-response? resp)
                    (equal? (utf8->string (grpc-response-payload resp)) "fast")))
-            (not (grpc-call/nonblocking
+            (net-operation? (grpc-call/nonblocking
                   client
                   "/chezpp.test.Echo/UnarySlow"
                   "slow"
@@ -491,14 +480,14 @@
               void
               (lambda ()
                 (and
-                 (not (grpc-call/server-stream/nonblocking
+                 (net-operation? (grpc-call/server-stream/nonblocking
                        client
                        "/chezpp.test.Echo/ServerStream"
                        "x"
                        '()
                        100))
                  (eq? (grpc-cancel-pending! client) client)
-                 (not (grpc-call/server-stream/nonblocking
+                 (net-operation? (grpc-call/server-stream/nonblocking
                        client
                        "/chezpp.test.Echo/ServerStream"
                        "x"
@@ -520,7 +509,7 @@
               void
               (lambda ()
                 (and
-                 (not (grpc-call/server-stream/nonblocking
+                 (net-operation? (grpc-call/server-stream/nonblocking
                        client
                        "/chezpp.test.Echo/ServerStream"
                        "x"
