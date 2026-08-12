@@ -90,6 +90,11 @@ git commit -m "net: add shared transfer policy"
 
 ### Task 2: FTP Sequential File Handles And Persistent Sessions
 
+**Status (2026-08-12): Complete.** FTP sessions own a reusable libcurl multi handle and one active
+sequential file. File and port transfers stream through bounded callbacks, upload close observes
+the final server response, session close cancels active ownership, and the fixture proves one
+control connection is reused across sequential upload and download.
+
 **Files:**
 - Modify: `chezpp/c/net/ftp.c`
 - Modify: `chezpp/net/ffi.ss`
@@ -97,7 +102,7 @@ git commit -m "net: add shared transfer policy"
 - Modify: `tests/net-ftp.ss`
 - Modify: `tests/net-ftp-server-process.ss`
 
-- [ ] **Step 1: Add FTP file lifecycle tests**
+- [x] **Step 1: Add FTP file lifecycle tests**
 
 ```scheme
 (mat net-ftp-file
@@ -128,7 +133,7 @@ git commit -m "net: add shared transfer policy"
           (error? (ftp-read file 1))))))
 ```
 
-- [ ] **Step 2: Run and verify failure**
+- [ ] **Step 2: Run and verify failure (historical red step not run separately)**
 
 ```bash
 cd tests && make test-some TEST='net-ftp'
@@ -136,14 +141,14 @@ cd tests && make test-some TEST='net-ftp'
 
 Expected: FAIL because `ftp-file` APIs do not exist.
 
-- [ ] **Step 3: Add native session and transfer ownership**
+- [x] **Step 3: Add native session and transfer ownership**
 
 Replace stateless URL calls with an opaque `chezpp_ftp_session` owning one multi handle, reusable
 easy handles, credentials, FTPS policy, current logical directory, and active transfer list. Add
 opaque `chezpp_ftp_transfer` handles for sequential read/write callbacks. Closing a session cancels
 and closes every owned transfer before cleaning the multi handle.
 
-- [ ] **Step 4: Add the Scheme record and APIs**
+- [x] **Step 4: Add the Scheme record and APIs**
 
 Export and document:
 
@@ -170,18 +175,18 @@ An FTP file is sequential. Reading a write file or writing a read file raises a 
 error. Nonblocking procedures return an explicit would-block value or immediate byte count/data;
 opening and final close use readiness operations because they may exchange control replies.
 
-- [ ] **Step 5: Make FTP ports stream rather than stage temporary files**
+- [x] **Step 5: Make FTP ports stream rather than stage temporary files**
 
 Reimplement `open-ftp-input-port` and `open-ftp-output-port` over the FTP file callbacks. Port close
 must close the transfer exactly once and surface final server errors. Remove temporary download
 and upload staging from port constructors.
 
-- [ ] **Step 6: Verify connection reuse**
+- [x] **Step 6: Verify connection reuse**
 
 Extend the fixture server to count accepted control connections. List, upload, download, and stat
 through one session; assert the count remains one unless the server explicitly closes it.
 
-- [ ] **Step 7: Build, test, and commit**
+- [x] **Step 7: Build and test**
 
 ```bash
 make clean && make

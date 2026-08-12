@@ -36,6 +36,11 @@ typedef struct ftp_socket_entry {
   struct ftp_socket_entry *next;
 } ftp_socket_entry;
 
+typedef struct {
+  ftp_socket_entry *sockets;
+  long timeout_ms;
+} ftp_driver;
+
 typedef enum {
   FTP_TRANSFER_LIST = 0,
   FTP_TRANSFER_DOWNLOAD = 1,
@@ -43,13 +48,12 @@ typedef enum {
 } ftp_transfer_kind;
 
 typedef struct {
+  ftp_driver driver;
   CURLM *multi;
   CURL *easy;
-  ftp_socket_entry *sockets;
   memory_buffer buffer;
   FILE *file;
   char *local_path;
-  long timeout_ms;
   CURLcode result;
   ftp_transfer_kind kind;
   int added;
@@ -57,6 +61,29 @@ typedef struct {
   int cancelled;
   int download_succeeded;
 } ftp_transfer;
+
+typedef struct ftp_file ftp_file;
+
+typedef struct {
+  CURLM *multi;
+  ftp_file *active;
+  int closed;
+} ftp_session;
+
+struct ftp_file {
+  ftp_driver driver;
+  ftp_session *session;
+  CURL *easy;
+  memory_buffer buffer;
+  size_t buffer_offset;
+  CURLcode result;
+  int direction;
+  int added;
+  int completed;
+  int cancelled;
+  int eof;
+  int paused;
+};
 
 static int ftp_socket_cb(CURL *easy, curl_socket_t s, int what, void *userp,
                          void *socketp);
@@ -103,11 +130,11 @@ static ptr make_handle_status(const char *tag, uptr handle) {
   return make_status(tag, Sunsigned(handle));
 }
 
-static void ftp_socket_set(ftp_transfer *t, curl_socket_t fd, int action) {
-  ftp_socket_entry *p = t->sockets;
+static void ftp_socket_set(ftp_driver *driver, curl_socket_t fd, int action) {
+  ftp_socket_entry *p = driver->sockets;
   while (p != NULL && p->fd != fd) p = p->next;
   if (action == CURL_POLL_REMOVE) {
-    ftp_socket_entry **q = &t->sockets;
+    ftp_socket_entry **q = &driver->sockets;
     while (*q != NULL) {
       if ((*q)->fd == fd) {
         ftp_socket_entry *dead = *q;
@@ -123,8 +150,8 @@ static void ftp_socket_set(ftp_transfer *t, curl_socket_t fd, int action) {
     p = (ftp_socket_entry *)calloc(1, sizeof(*p));
     if (p == NULL) return;
     p->fd = fd;
-    p->next = t->sockets;
-    t->sockets = p;
+    p->next = driver->sockets;
+    driver->sockets = p;
   }
   p->action = action;
 }
@@ -137,14 +164,14 @@ static size_t ftp_read_file_cb(char *ptr, size_t size, size_t nmemb, void *userd
 static int ftp_socket_cb(CURL *easy, curl_socket_t s, int what, void *userp,
                          void *socketp) {
   (void)easy; (void)socketp;
-  ftp_socket_set((ftp_transfer *)userp, s, what);
+  ftp_socket_set((ftp_driver *)userp, s, what);
   return 0;
 }
 
 static int ftp_timer_cb(CURLM *multi, long timeout_ms, void *userp) {
-  ftp_transfer *t = (ftp_transfer *)userp;
+  ftp_driver *driver = (ftp_driver *)userp;
   (void)multi;
-  t->timeout_ms = timeout_ms;
+  driver->timeout_ms = timeout_ms;
   return 0;
 }
 
@@ -160,6 +187,35 @@ static void memory_buffer_free(memory_buffer *buf) {
   buf->data = NULL;
   buf->len = 0;
   buf->cap = 0;
+}
+
+static void memory_buffer_consume(memory_buffer *buf, size_t count) {
+  if (count >= buf->len) {
+    buf->len = 0;
+    return;
+  }
+  memmove(buf->data, buf->data + count, buf->len - count);
+  buf->len -= count;
+}
+
+static int memory_buffer_append(memory_buffer *buf, const unsigned char *data,
+                                size_t count) {
+  size_t need;
+  size_t cap;
+  unsigned char *next;
+  if (count == 0) return 1;
+  need = buf->len + count;
+  if (need > buf->cap) {
+    cap = buf->cap == 0 ? 65536 : buf->cap;
+    while (cap < need) cap *= 2;
+    next = (unsigned char *)realloc(buf->data, cap);
+    if (next == NULL) return 0;
+    buf->data = next;
+    buf->cap = cap;
+  }
+  memcpy(buf->data + buf->len, data, count);
+  buf->len += count;
+  return 1;
 }
 
 static size_t write_memory_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
@@ -184,6 +240,35 @@ static size_t write_memory_cb(char *ptr, size_t size, size_t nmemb, void *userda
   memcpy(buf->data + buf->len, ptr, n);
   buf->len += n;
   return n;
+}
+
+static size_t ftp_file_write_cb(char *ptr, size_t size, size_t nmemb,
+                                void *userdata) {
+  ftp_file *file = (ftp_file *)userdata;
+  size_t count = size * nmemb;
+  if (file->buffer.len != 0) {
+    file->paused = 1;
+    return CURL_WRITEFUNC_PAUSE;
+  }
+  if (!memory_buffer_append(&file->buffer, (const unsigned char *)ptr, count))
+    return 0;
+  return count;
+}
+
+static size_t ftp_file_read_cb(char *ptr, size_t size, size_t nmemb,
+                               void *userdata) {
+  ftp_file *file = (ftp_file *)userdata;
+  size_t capacity = size * nmemb;
+  size_t count;
+  if (file->buffer.len == 0) {
+    if (file->eof) return 0;
+    file->paused = 1;
+    return CURL_READFUNC_PAUSE;
+  }
+  count = file->buffer.len < capacity ? file->buffer.len : capacity;
+  memcpy(ptr, file->buffer.data, count);
+  memory_buffer_consume(&file->buffer, count);
+  return count;
 }
 
 #define CURL_LOAD(pointer, name)                                              \
@@ -612,9 +697,9 @@ static void ftp_transfer_release(ftp_transfer *t) {
     (void)unlink(t->local_path);
   memory_buffer_free(&t->buffer);
   if (t->local_path != NULL) free(t->local_path);
-  while (t->sockets != NULL) {
-    p = t->sockets;
-    t->sockets = p->next;
+  while (t->driver.sockets != NULL) {
+    p = t->driver.sockets;
+    t->driver.sockets = p->next;
     free(p);
   }
   free(t);
@@ -675,7 +760,7 @@ ptr chezpp_net_ftp_transfer_start(int kind, const char *url, const char *path,
   t = (ftp_transfer *)calloc(1, sizeof(*t));
   if (t == NULL) return make_errno_status();
   t->kind = (ftp_transfer_kind)kind;
-  t->timeout_ms = -1;
+  t->driver.timeout_ms = -1;
   memory_buffer_init(&t->buffer);
   t->easy = p_curl_easy_init();
   t->multi = p_curl_multi_init();
@@ -713,9 +798,9 @@ static ptr ftp_pending_status(ftp_transfer *t) {
   iptr i = 0;
   ptr targets;
   ptr out = Smake_vector(3, Sfalse);
-  for (p = t->sockets; p != NULL; p = p->next) count++;
+  for (p = t->driver.sockets; p != NULL; p = p->next) count++;
   targets = Smake_vector(count, Sfalse);
-  for (p = t->sockets; p != NULL; p = p->next) {
+  for (p = t->driver.sockets; p != NULL; p = p->next) {
     ptr target = Smake_vector(2, Sfalse);
     int events = 0;
     if (p->action == CURL_POLL_IN || p->action == CURL_POLL_INOUT) events |= POLLIN;
@@ -726,7 +811,7 @@ static ptr ftp_pending_status(ftp_transfer *t) {
   }
   Svector_set(out, 0, Sstring_to_symbol("pending"));
   Svector_set(out, 1, targets);
-  Svector_set(out, 2, t->timeout_ms < 0 ? Sfalse : Sinteger(t->timeout_ms));
+  Svector_set(out, 2, t->driver.timeout_ms < 0 ? Sfalse : Sinteger(t->driver.timeout_ms));
   return out;
 }
 
@@ -796,4 +881,287 @@ ptr chezpp_net_ftp_transfer_cancel(uptr handle) {
 
 void chezpp_net_ftp_transfer_close(uptr handle) {
   ftp_transfer_release((ftp_transfer *)handle);
+}
+
+static void ftp_driver_clear(ftp_driver *driver) {
+  ftp_socket_entry *entry;
+  while (driver->sockets != NULL) {
+    entry = driver->sockets;
+    driver->sockets = entry->next;
+    free(entry);
+  }
+  driver->timeout_ms = -1;
+}
+
+static void ftp_file_release(ftp_file *file) {
+  if (file == NULL) return;
+  if (file->added && file->session != NULL && file->session->multi != NULL)
+    (void)p_curl_multi_remove_handle(file->session->multi, file->easy);
+  if (file->easy != NULL) p_curl_easy_cleanup(file->easy);
+  if (file->session != NULL && file->session->active == file)
+    file->session->active = NULL;
+  memory_buffer_free(&file->buffer);
+  ftp_driver_clear(&file->driver);
+  free(file);
+}
+
+static ptr ftp_file_pending_status(ftp_file *file) {
+  ftp_socket_entry *entry;
+  iptr count = 0;
+  iptr index = 0;
+  ptr targets;
+  ptr out = Smake_vector(3, Sfalse);
+  for (entry = file->driver.sockets; entry != NULL; entry = entry->next) count++;
+  targets = Smake_vector(count, Sfalse);
+  for (entry = file->driver.sockets; entry != NULL; entry = entry->next) {
+    ptr target = Smake_vector(2, Sfalse);
+    int events = 0;
+    if (entry->action == CURL_POLL_IN || entry->action == CURL_POLL_INOUT)
+      events |= POLLIN;
+    if (entry->action == CURL_POLL_OUT || entry->action == CURL_POLL_INOUT)
+      events |= POLLOUT;
+    Svector_set(target, 0, Sinteger((iptr)entry->fd));
+    Svector_set(target, 1, Sinteger(events));
+    Svector_set(targets, index++, target);
+  }
+  Svector_set(out, 0, Sstring_to_symbol("pending"));
+  Svector_set(out, 1, targets);
+  Svector_set(out, 2, file->driver.timeout_ms < 0
+                              ? Sfalse
+                              : Sinteger(file->driver.timeout_ms));
+  return out;
+}
+
+static ptr ftp_file_drive(ftp_file *file, ptr ready, int timer_expired) {
+  CURLMcode mrc = CURLM_OK;
+  CURLMsg *msg;
+  int running = 0;
+  int queued = 0;
+  if (file == NULL || file->cancelled || file->session == NULL ||
+      file->session->closed)
+    return make_error_status_message("FTP file is closed or cancelled");
+  if (!Svectorp(ready))
+    return make_error_status_message("FTP ready events must be a vector");
+  if (timer_expired)
+    mrc = p_curl_multi_socket_action(file->session->multi, CURL_SOCKET_TIMEOUT,
+                                     0, &running);
+  for (iptr i = 0; i < Svector_length(ready) && mrc == CURLM_OK; i++) {
+    ptr event = Svector_ref(ready, i);
+    int action = 0;
+    int events;
+    if (!Svectorp(event) || Svector_length(event) != 2 ||
+        !Sfixnump(Svector_ref(event, 0)) ||
+        !Sfixnump(Svector_ref(event, 1)))
+      return make_error_status_message("invalid FTP ready descriptor/event pair");
+    events = (int)Sfixnum_value(Svector_ref(event, 1));
+    if (events & POLLIN) action |= CURL_CSELECT_IN;
+    if (events & POLLOUT) action |= CURL_CSELECT_OUT;
+    if (events & (POLLERR | POLLHUP | POLLNVAL)) action |= CURL_CSELECT_ERR;
+    mrc = p_curl_multi_socket_action(file->session->multi,
+                                     (curl_socket_t)Sfixnum_value(Svector_ref(event, 0)),
+                                     action, &running);
+  }
+  if (mrc != CURLM_OK)
+    return make_error_status_message(p_curl_multi_strerror(mrc));
+  while ((msg = p_curl_multi_info_read(file->session->multi, &queued)) != NULL) {
+    if (msg->msg == CURLMSG_DONE && msg->easy_handle == file->easy) {
+      file->completed = 1;
+      file->result = msg->data.result;
+      break;
+    }
+  }
+  if (file->completed && file->result != CURLE_OK)
+    return curl_error_status(file->result);
+  return file->completed ? make_status("completed", Strue)
+                         : ftp_file_pending_status(file);
+}
+
+ptr chezpp_net_ftp_session_open(void) {
+  ftp_session *session;
+  if (!ensure_curl_loaded())
+    return make_error_status_message(chezpp_optional_library_error(&curl_library));
+  session = (ftp_session *)calloc(1, sizeof(*session));
+  if (session == NULL) return make_errno_status();
+  session->multi = p_curl_multi_init();
+  if (session->multi == NULL) {
+    free(session);
+    return make_error_status_message("failed to initialize FTP session");
+  }
+  return make_handle_status("ok", (uptr)session);
+}
+
+ptr chezpp_net_ftp_session_close(uptr handle) {
+  ftp_session *session = (ftp_session *)handle;
+  if (session == NULL) return Strue;
+  session->closed = 1;
+  if (session->active != NULL) {
+    session->active->cancelled = 1;
+    ftp_file_release(session->active);
+  }
+  if (session->multi != NULL) (void)p_curl_multi_cleanup(session->multi);
+  free(session);
+  return Strue;
+}
+
+ptr chezpp_net_ftp_file_open(uptr session_handle, int direction,
+                             const char *url, const char *user, const char *pass,
+                             int passive, int timeout_ms, int use_tls,
+                             int verify_peer, int verify_host) {
+  ftp_session *session = (ftp_session *)session_handle;
+  ftp_file *file;
+  ptr out;
+  CURLcode rc;
+  CURLMcode mrc;
+  if (session == NULL || session->closed)
+    return make_error_status_message("FTP session is closed");
+  if (session->active != NULL)
+    return make_error_status_message("FTP session already has an active file");
+  if (direction != 0 && direction != 1)
+    return make_error_status_message("invalid FTP file direction");
+  file = (ftp_file *)calloc(1, sizeof(*file));
+  if (file == NULL) return make_errno_status();
+  file->session = session;
+  file->direction = direction;
+  file->driver.timeout_ms = -1;
+  memory_buffer_init(&file->buffer);
+  file->easy = p_curl_easy_init();
+  if (file->easy == NULL) {
+    ftp_file_release(file);
+    return make_error_status_message("failed to initialize FTP file");
+  }
+  out = apply_common_options(file->easy, url, user, pass, passive, timeout_ms,
+                             use_tls, verify_peer, verify_host);
+  if (out != Strue) {
+    ftp_file_release(file);
+    return out;
+  }
+  if (direction == 0) {
+    rc = p_curl_easy_setopt(file->easy, CURLOPT_WRITEFUNCTION, ftp_file_write_cb);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(file->easy, CURLOPT_WRITEDATA, file);
+  } else {
+    rc = p_curl_easy_setopt(file->easy, CURLOPT_UPLOAD, 1L);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(file->easy, CURLOPT_READFUNCTION, ftp_file_read_cb);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(file->easy, CURLOPT_READDATA, file);
+  }
+  if (rc != CURLE_OK) {
+    out = curl_error_status(rc);
+    ftp_file_release(file);
+    return out;
+  }
+  mrc = p_curl_multi_setopt(session->multi, CURLMOPT_SOCKETFUNCTION, ftp_socket_cb);
+  if (mrc == CURLM_OK)
+    mrc = p_curl_multi_setopt(session->multi, CURLMOPT_SOCKETDATA, &file->driver);
+  if (mrc == CURLM_OK)
+    mrc = p_curl_multi_setopt(session->multi, CURLMOPT_TIMERFUNCTION, ftp_timer_cb);
+  if (mrc == CURLM_OK)
+    mrc = p_curl_multi_setopt(session->multi, CURLMOPT_TIMERDATA, &file->driver);
+  if (mrc == CURLM_OK) mrc = p_curl_multi_add_handle(session->multi, file->easy);
+  if (mrc != CURLM_OK) {
+    out = make_error_status_message(p_curl_multi_strerror(mrc));
+    ftp_file_release(file);
+    return out;
+  }
+  file->added = 1;
+  session->active = file;
+  return make_handle_status("ok", (uptr)file);
+}
+
+ptr chezpp_net_ftp_file_step(uptr handle, ptr ready, int timer_expired) {
+  return ftp_file_drive((ftp_file *)handle, ready, timer_expired);
+}
+
+ptr chezpp_net_ftp_file_read(uptr handle, int count) {
+  ftp_file *file = (ftp_file *)handle;
+  ptr out;
+  size_t amount;
+  if (file == NULL || file->direction != 0 || count < 0)
+    return make_error_status_message("invalid FTP file read");
+  if (count == 0) return Smake_bytevector(0, 0);
+  if (file->buffer.len == 0) {
+    if (file->completed) return Seof_object;
+    return make_status("would-block", Sfalse);
+  }
+  amount = file->buffer.len < (size_t)count ? file->buffer.len : (size_t)count;
+  out = Smake_bytevector((iptr)amount, 0);
+  if (amount > 0) memcpy(Sbytevector_data(out), file->buffer.data, amount);
+  memory_buffer_consume(&file->buffer, amount);
+  if (file->paused) {
+    file->paused = 0;
+    (void)p_curl_easy_pause(file->easy, CURLPAUSE_CONT);
+  }
+  return out;
+}
+
+ptr chezpp_net_ftp_file_read_into(uptr handle, ptr bytevector, int length,
+                                  int start, int count) {
+  ftp_file *file = (ftp_file *)handle;
+  size_t amount;
+  if (file == NULL || file->direction != 0 || !Sbytevectorp(bytevector) || start < 0 ||
+      count < 0 || start > length || count > length - start)
+    return make_error_status_message("invalid FTP file read buffer");
+  if (count == 0) return Sinteger(0);
+  if (file->buffer.len == 0) {
+    if (file->completed) return Seof_object;
+    return make_status("would-block", Sfalse);
+  }
+  amount = file->buffer.len < (size_t)count ? file->buffer.len : (size_t)count;
+  memcpy(Sbytevector_data(bytevector) + start, file->buffer.data, amount);
+  memory_buffer_consume(&file->buffer, amount);
+  if (file->paused) {
+    file->paused = 0;
+    (void)p_curl_easy_pause(file->easy, CURLPAUSE_CONT);
+  }
+  return Sinteger((iptr)amount);
+}
+
+ptr chezpp_net_ftp_file_write(uptr handle, ptr bytevector, int length,
+                              int start, int count) {
+  ftp_file *file = (ftp_file *)handle;
+  if (file == NULL || file->direction != 1 || !Sbytevectorp(bytevector) || start < 0 ||
+      count < 0 || start > length || count > length - start)
+    return make_error_status_message("invalid FTP file write buffer");
+  if (count == 0) return Sinteger(0);
+  if (file->completed)
+    return make_error_status_message("FTP upload is already complete");
+  if (file->buffer.len != 0) return make_status("would-block", Sfalse);
+  if (!memory_buffer_append(&file->buffer, Sbytevector_data(bytevector) + start,
+                            (size_t)count))
+    return make_errno_status();
+  if (file->paused) {
+    file->paused = 0;
+    (void)p_curl_easy_pause(file->easy, CURLPAUSE_CONT);
+  }
+  return Sinteger(count);
+}
+
+ptr chezpp_net_ftp_file_finish(uptr handle) {
+  ftp_file *file = (ftp_file *)handle;
+  if (file == NULL) return make_error_status_message("FTP file is closed");
+  if (file->direction == 1) {
+    file->eof = 1;
+    if (file->paused) {
+      file->paused = 0;
+      (void)p_curl_easy_pause(file->easy, CURLPAUSE_CONT);
+    }
+  }
+  return Strue;
+}
+
+ptr chezpp_net_ftp_file_cancel(uptr handle) {
+  ftp_file *file = (ftp_file *)handle;
+  if (file == NULL) return Strue;
+  file->cancelled = 1;
+  if (file->added) {
+    (void)p_curl_easy_pause(file->easy, CURLPAUSE_ALL);
+    (void)p_curl_multi_remove_handle(file->session->multi, file->easy);
+    file->added = 0;
+  }
+  return Strue;
+}
+
+void chezpp_net_ftp_file_close(uptr handle) {
+  ftp_file_release((ftp_file *)handle);
 }

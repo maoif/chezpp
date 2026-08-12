@@ -333,6 +333,7 @@
                      (equal? (read-port->bytevector ip)
                              (string->utf8 "hello ftp"))))))
            (lambda ()
+             (ftp-close session)
              (stop-server))))))
 
 (mat net-ftp-output-port
@@ -351,6 +352,7 @@
                   (equal? (read-u8vec ported-path)
                           (string->utf8 "through port"))))
            (lambda ()
+             (ftp-close session)
              (stop-server))))))
 
 (mat net-ftp-input-port-closed-session
@@ -406,10 +408,8 @@
                        (ftp-close session)
                        #t)
                      (ftp-error-message-contains?
-                      "FTP session is closed"
-                      (lambda ()
-                        (close-port op)))
-                     (not (file-exists? ported-path))))
+                      "FTP file is closed"
+                      (lambda () (close-port op)))))
                   (lambda ()
                     (unless (port-closed? op)
                       (guard (c [else #f])
@@ -543,4 +543,73 @@
              (ftp-close session)
              (when (file-exists? download-path)
                (delete-file download-path #f))
+             (stop-server))))))
+
+(mat net-ftp-file
+     (with-test-ftp-session
+      (lambda (session)
+        (let ([file (ftp-open-file session "/data.bin" 'write
+                                   default-transfer-policy)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (and (ftp-file? file)
+                   (= 4 (ftp-write file #vu8(1 2 3 4)))
+                   (eq? 'write (ftp-file-direction file))
+                   (string=? "/data.bin" (ftp-file-path file))))
+            (lambda () (ftp-close-file file))))))
+
+     (with-test-ftp-session
+      (lambda (session)
+        (call-with-ftp-file
+         session "/reuse.bin" 'write
+         (lambda (file) (ftp-write-all file #vu8(9 8 7))))
+        (call-with-ftp-file
+         session "/reuse.bin" 'read
+         (lambda (file) (equal? #vu8(9 8 7) (ftp-read-all file))))))
+
+     (with-test-ftp-session
+      (lambda (session)
+        (call-with-ftp-file
+         session "/hello.txt" 'read default-transfer-policy
+         (lambda (file)
+           (equal? (string->utf8 "hello ftp") (ftp-read-all file))))))
+
+     ;; A closed transfer cannot be read.
+     (with-test-ftp-session
+      (lambda (session)
+        (let ([file (ftp-open-file session "/hello.txt" 'read)])
+          (ftp-close-file file)
+          (error? (guard (failure [else failure]) (ftp-read file 1) #f)))))
+
+     ;; A readable transfer cannot be written.
+     (with-test-ftp-session
+      (lambda (session)
+        (let ([file (ftp-open-file session "/hello.txt" 'read)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (error? (guard (failure [else failure])
+                        (ftp-write file #vu8(1))
+                        #f)))
+            (lambda () (ftp-close-file file)))))))
+
+(mat net-ftp-file-connection-reuse
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
+             [connection-count-path (string-append root ".control-connections")])
+         (dynamic-wind
+           void
+           (lambda ()
+             (ftp-login! session "user" "pass")
+             (call-with-ftp-file
+              session "/reuse-count.bin" 'write
+              (lambda (file) (ftp-write-all file #vu8(4 5 6))))
+             (and (call-with-ftp-file
+                   session "/reuse-count.bin" 'read
+                   (lambda (file) (equal? #vu8(4 5 6) (ftp-read-all file))))
+                  (= 1 (string->number
+                        (utf8->string (read-u8vec connection-count-path))))))
+           (lambda ()
+             (ftp-close session)
              (stop-server))))))

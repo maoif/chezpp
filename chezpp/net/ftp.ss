@@ -1,5 +1,21 @@
 (library (chezpp net ftp)
   (export ftp-session?
+          ftp-file?
+          ftp-file-direction
+          ftp-file-path
+          ftp-file-closed?
+          ftp-open-file
+          ftp-close-file
+          ftp-read
+          ftp-read!
+          ftp-read-all
+          ftp-write
+          ftp-write-all
+          ftp-read/nonblocking
+          ftp-read!/nonblocking
+          ftp-write/nonblocking
+          ftp-write-all/nonblocking
+          call-with-ftp-file
           ftp-open
           ftp-close
           ftp-cancel-pending!
@@ -34,13 +50,15 @@
           (chezpp net socket)
           (chezpp net poll)
           (chezpp net operation)
+          (chezpp net transfer)
           (chezpp net ffi)
           (chezpp net private))
 
   (define-record-type (ftp-session %make-ftp-session ftp-session?)
     (sealed #t)
     (opaque #f)
-    (fields (immutable uri ftp-session-uri)
+    (fields (mutable handle ftp-session-handle ftp-session-handle-set!)
+            (immutable uri ftp-session-uri)
             (mutable username ftp-session-username ftp-session-username-set!)
             (mutable password ftp-session-password ftp-session-password-set!)
             (mutable cwd ftp-session-cwd ftp-session-cwd-set!)
@@ -49,10 +67,29 @@
             (mutable verify-peer? ftp-session-verify-peer? ftp-session-verify-peer?-set!)
             (mutable verify-host? ftp-session-verify-host? ftp-session-verify-host?-set!)
             (mutable pending ftp-session-pending ftp-session-pending-set!)
+            (mutable active-file ftp-session-active-file ftp-session-active-file-set!)
             (mutable closed? ftp-session-closed? ftp-session-closed?-set!)))
 
+  #|record:ftp-file
+The `ftp-file` record represents one sequential remote FTP file transfer.
+The record stores its owning session, native handle, direction, remote path, transfer policy,
+completed byte count, current poll targets and timer deadline, EOF state, and closed state.
+|#
+  (define-record-type (ftp-file %make-ftp-file ftp-file?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable session ftp-file-session)
+            (mutable handle ftp-file-handle ftp-file-handle-set!)
+            (immutable direction ftp-file-direction)
+            (immutable path ftp-file-path)
+            (immutable policy ftp-file-policy)
+            (mutable completed-bytes ftp-file-completed-bytes ftp-file-completed-bytes-set!)
+            (mutable targets ftp-file-targets ftp-file-targets-set!)
+            (mutable deadline-ms ftp-file-deadline-ms ftp-file-deadline-ms-set!)
+            (mutable terminal? ftp-file-terminal? ftp-file-terminal?-set!)
+            (mutable closed? ftp-file-closed? ftp-file-closed?-set!)))
+
   (define ftp-default-timeout-ms 30000)
-  (define ftp-temp-counter 0)
 
   (define ftp-current-monotonic-ms
     (lambda ()
@@ -64,6 +101,120 @@
     (lambda (who session)
       (when (ftp-session-closed? session)
         (raise-net-error who 'ftp "FTP session is closed" session))))
+
+  (define ensure-file-open
+    (lambda (who file direction)
+      (when (ftp-file-closed? file)
+        (raise-net-error who 'ftp "FTP file is closed" file))
+      (unless (eq? direction (ftp-file-direction file))
+        (raise-net-error who 'ftp "FTP file direction does not support this operation" file))
+      (ensure-session-open who (ftp-file-session file))))
+
+  (define status-error?
+    (lambda (status)
+      (and (vector? status)
+           (> (vector-length status) 0)
+           (eq? 'error (vector-ref status 0)))))
+
+  (define ftp-target-vector->list
+    (lambda (target-vector)
+      (map (lambda (target)
+             (let ([events (vector-ref target 1)])
+               (make-poll-target
+                (vector-ref target 0)
+                (append (if (zero? (fxlogand events (net-pollin))) '() '(read))
+                        (if (zero? (fxlogand events (net-pollout))) '() '(write))))))
+           (vector->list target-vector))))
+
+  (define ftp-ready-targets->vector
+    (lambda (target*)
+      (list->vector
+       (map (lambda (target)
+              (vector (poll-target-fd target)
+                      (fold-left
+                       (lambda (mask event)
+                         (fxlogor mask
+                                  (case event
+                                    [(read) (net-pollin)] [(write) (net-pollout)]
+                                    [(error) (net-pollerr)] [(hup) (net-pollhup)]
+                                    [(invalid) (net-pollnval)] [else 0])))
+                       0
+                       (poll-target-ready-events target))))
+            target*))))
+
+  (define ftp-file-drive!
+    (lambda (who file ready-target* timer-expired?)
+      (let ([status (ffi-net-ftp-file-step
+                     (ftp-file-handle file)
+                     (ftp-ready-targets->vector ready-target*)
+                     (if timer-expired? 1 0))])
+        (when (or (status-error? status) (not (vector? status)))
+          (raise-net-error who 'ftp "FTP file transfer failed" status))
+        (case (vector-ref status 0)
+          [(pending)
+           (ftp-file-targets-set! file
+                                  (ftp-target-vector->list (vector-ref status 1)))
+           (ftp-file-deadline-ms-set!
+            file
+            (and (vector-ref status 2)
+                 (+ (ftp-current-monotonic-ms) (vector-ref status 2))))]
+          [(completed)
+           (ftp-file-targets-set! file '())
+           (ftp-file-deadline-ms-set! file #f)
+           (ftp-file-terminal?-set! file #t)]
+          [else (raise-net-error who 'ftp "invalid FTP file transfer state" status)])
+        status)))
+
+  (define check-ftp-slice
+    (lambda (who length start stop)
+      (unless (and (fixnum? start) (fixnum? stop)
+                   (fx<= 0 start) (fx<= start stop) (fx<= stop length))
+        (errorf who "invalid bytevector slice [~s, ~s) for length ~s"
+                start stop length))))
+
+  (define native-would-block?
+    (lambda (value)
+      (and (vector? value)
+           (> (vector-length value) 0)
+           (eq? 'would-block (vector-ref value 0)))))
+
+  (define ftp-file-pump/nonblocking!
+    (lambda (who file)
+      (let* ([target* (ftp-file-targets file)]
+             [ready* (if (null? target*)
+                         '()
+                         (filter (lambda (target)
+                                   (pair? (poll-target-ready-events target)))
+                                 (poll/nonblocking target*)))]
+             [deadline (ftp-file-deadline-ms file)]
+             [timer-expired? (or (and (null? target*) (not deadline))
+                                 (and deadline
+                                      (>= (ftp-current-monotonic-ms) deadline)))])
+        (ftp-file-drive! who file ready* timer-expired?))))
+
+  (define ftp-file-would-block
+    (lambda (file fallback-event)
+      (let ([target* (ftp-file-targets file)])
+        (if (pair? target*)
+            (make-net-would-block (poll-target-fd (car target*))
+                                  (poll-target-events (car target*)))
+            (make-net-would-block -1 (list fallback-event))))))
+
+  (define wait-for-ftp-file!
+    (lambda (who file)
+      (let ([target* (ftp-file-targets file)]
+            [deadline (ftp-file-deadline-ms file)])
+        (poll target*
+              (if deadline
+                  (max 0 (- deadline (ftp-current-monotonic-ms)))
+                  -1))
+        (ftp-file-drive!
+         who file
+         (if (null? target*)
+             '()
+             (filter (lambda (target) (pair? (poll-target-ready-events target)))
+                     (poll/nonblocking target*)))
+         (and deadline (>= (ftp-current-monotonic-ms) deadline))))))
 
   (define ensure-no-pending-mismatch
     (lambda (who session kind args)
@@ -216,28 +367,6 @@
                             (if (ftp-session-verify-host? session) 1 0)
                             cmd))))
 
-  (define next-temp-path
-    (lambda (suffix)
-      (set! ftp-temp-counter (+ ftp-temp-counter 1))
-      (let loop ()
-        (let* ([t (current-time)]
-               [path (format "/tmp/chezpp-net-ftp-~a-~a-~a~a"
-                             (time-second t)
-                             (time-nanosecond t)
-                             ftp-temp-counter
-                             suffix)])
-          (if (file-exists? path)
-              (begin
-                (set! ftp-temp-counter (+ ftp-temp-counter 1))
-                (loop))
-              path)))))
-
-  (define cleanup-temp-file!
-    (lambda (path)
-      (when (and path (file-exists? path))
-        (guard (c [else #f])
-          (delete-file path)))))
-
   (define cancel-pending!
     (lambda (session pending)
       (net-operation-cancel! pending)
@@ -347,71 +476,53 @@
 
   (define make-ftp-input-port
     (lambda (session remote-path)
-      (let ([local-path (next-temp-path ".download")]
-            [ip #f]
+      (let ([file (ftp-open-file session remote-path 'read)]
             [closed? #f])
         (define close!
           (lambda ()
             (unless closed?
               (set! closed? #t)
-              (when ip
-                (close-port ip)
-                (set! ip #f))
-              (cleanup-temp-file! local-path))))
-        (dynamic-wind
-          void
-          (lambda ()
-            (ftp-download session remote-path local-path)
-            (set! ip (open-file-input-port local-path
-                                           (file-options)
-                                           (buffer-mode block)
-                                           #f))
-            (make-custom-binary-input-port
-             "chezpp-ftp-input"
-             (lambda (bv start count)
-               (let ([n (get-bytevector-n! ip bv start count)])
-                 (if (eof-object? n) 0 n)))
-             (lambda () (port-position ip))
-             (lambda (pos) (set-port-position! ip pos))
-             (lambda () (close!) #t)))
-          (lambda ()
-            (when (and (not ip) (file-exists? local-path))
-              (cleanup-temp-file! local-path)))))))
+              (ensure-session-open 'open-ftp-input-port session)
+              (ftp-close-file file))))
+        (make-custom-binary-input-port
+         "chezpp-ftp-input"
+         (lambda (bytevector start count)
+           (let ([answer (ftp-read! file bytevector start (fx+ start count))])
+             (if (eof-object? answer) 0 answer)))
+         (lambda () #f)
+         (lambda (position)
+           (errorf 'open-ftp-input-port
+                   "FTP input ports do not support positioning: ~s" position))
+         (lambda () (close!) #t)))))
 
   (define make-ftp-output-port
     (lambda (session remote-path)
-      (let* ([local-path (next-temp-path ".upload")]
-             [op (open-file-output-port local-path
-                                        (file-options no-fail replace)
-                                        (buffer-mode block)
-                                        #f)]
-             [closed? #f])
+      (let ([file (ftp-open-file session remote-path 'write)]
+            [closed? #f])
         (define close!
           (lambda ()
             (unless closed?
               (set! closed? #t)
-              (when op
-                (close-port op)
-                (set! op #f))
-              (dynamic-wind
-                void
-                (lambda ()
-                  (ftp-upload session local-path remote-path))
-                (lambda ()
-                  (cleanup-temp-file! local-path))))))
+              (ensure-session-open 'open-ftp-output-port session)
+              (ftp-close-file file))))
         (make-custom-binary-output-port
          "chezpp-ftp-output"
-         (lambda (bv start count)
-           (put-bytevector op bv start count)
-           count)
-         (lambda ()
-           (flush-output-port op)
-           #t)
-         (lambda (pos)
-           (set-port-position! op pos))
+         (lambda (bytevector start count)
+           (ftp-write file bytevector start (fx+ start count)))
+         (lambda () #t)
+         (lambda (position)
+           (errorf 'open-ftp-output-port
+                   "FTP output ports do not support positioning: ~s" position))
          (lambda ()
            (close!)
            #t)))))
+
+  (define native-ftp-session-open
+    (lambda (who)
+      (let ([status (ffi-net-ftp-session-open)])
+        (if (and (vector? status) (eq? 'ok (vector-ref status 0)))
+            (vector-ref status 1)
+            (raise-net-error who 'ftp "failed to initialize FTP session" status)))))
 
   #|proc:ftp-open
 The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoint URI or host/port tuple.
@@ -427,7 +538,8 @@ The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoi
          (let ([u (normalize-ftp-uri who endpoint)])
            (let-values ([(user pass) (split-userinfo (uri-userinfo u))])
              (let ([secure? (string=? (uri-scheme u) "ftps")])
-               (%make-ftp-session u
+               (%make-ftp-session (native-ftp-session-open who)
+                                  u
                                   user
                                   pass
                                   (normalize-absolute-path
@@ -438,6 +550,7 @@ The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoi
                                   timeout-ms
                                   secure?
                                   secure?
+                                  #f
                                   #f
                                   #f)))))]
       [(host port)
@@ -467,7 +580,15 @@ The `ftp-close` procedure marks an FTP session as closed.
               (let ([pending (ftp-session-pending session)])
                 (when pending
                   (cancel-pending! session pending)))
-              (ftp-session-closed?-set! session #t)
+              (unless (ftp-session-closed? session)
+                (ensure-success who (ffi-net-ftp-session-close (ftp-session-handle session)))
+                (let ([file (ftp-session-active-file session)])
+                  (when file
+                    (ftp-file-handle-set! file 0)
+                    (ftp-file-closed?-set! file #t)
+                    (ftp-session-active-file-set! session #f)))
+                (ftp-session-handle-set! session 0)
+                (ftp-session-closed?-set! session #t))
               session)))
 
   #|proc:ftp-verify-peer?
@@ -669,6 +790,250 @@ The `ftp-upload/nonblocking` procedure incrementally uploads `local-path` throug
                                             (if (ftp-session-verify-peer? session) 1 0)
                                             (if (ftp-session-verify-host? session) 1 0)))
                                           remote-path)))))
+
+  #|proc:ftp-open-file
+The `ftp-open-file` procedure opens `path` for sequential `read` or `write` access on `session`.
+The optional `policy` parameter is a transfer policy and defaults to `default-transfer-policy`.
+The return value is a new open FTP file. Only one FTP file may be active on a session at a time.
+|#
+  (define-who ftp-open-file
+    (case-lambda
+      [(session path direction)
+       (ftp-open-file session path direction default-transfer-policy)]
+      [(session path direction policy)
+       (pcheck ([ftp-session? session] [string? path] [symbol? direction]
+                [transfer-policy? policy])
+               (ensure-session-open who session)
+               (unless (memq direction '(read write))
+                 (errorf who "direction must be `read` or `write`, given ~s" direction))
+               (let ([status
+                      (ffi-net-ftp-file-open
+                       (ftp-session-handle session)
+                       (if (eq? direction 'read) 0 1)
+                       (session-path-url session path)
+                       (ftp-session-username session)
+                       (ftp-session-password session)
+                       (if (ftp-session-passive? session) 1 0)
+                       (ftp-session-timeout-ms session)
+                       (if (session-use-tls? session) 1 0)
+                       (if (ftp-session-verify-peer? session) 1 0)
+                       (if (ftp-session-verify-host? session) 1 0))])
+                 (unless (and (vector? status) (eq? 'ok (vector-ref status 0)))
+                   (raise-net-error who 'ftp "failed to open FTP file" status))
+                 (let ([file (%make-ftp-file session (vector-ref status 1) direction
+                                             (resolve-session-path session path) policy 0
+                                             '() #f #f #f)])
+                   (ftp-session-active-file-set! session file)
+                   (ftp-file-drive! who file '() #t)
+                   file)))]))
+
+  #|proc:ftp-read/nonblocking
+The `ftp-read/nonblocking` procedure reads at most `size` bytes from readable FTP `file`.
+The return value is a bytevector, EOF, or a `net-would-block` readiness value.
+|#
+  (define-who ftp-read/nonblocking
+    (lambda (file size)
+      (pcheck ([ftp-file? file] [fixnum? size])
+              (ensure-file-open who file 'read)
+              (when (fx< size 0) (errorf who "size must be nonnegative, given ~s" size))
+              (ftp-file-pump/nonblocking! who file)
+              (let ([answer (ffi-net-ftp-file-read (ftp-file-handle file) size)])
+                (if (native-would-block? answer)
+                    (ftp-file-would-block file 'read)
+                    (ensure-success who answer))))))
+
+  #|proc:ftp-read
+The `ftp-read` procedure reads at most `size` bytes from readable FTP `file`.
+The return value is a bytevector or EOF. It waits for network readiness when necessary.
+|#
+  (define-who ftp-read
+    (lambda (file size)
+      (pcheck ([ftp-file? file] [fixnum? size])
+              (let loop ()
+                (let ([answer (ftp-read/nonblocking file size)])
+                  (if (net-would-block? answer)
+                      (begin (wait-for-ftp-file! who file) (loop))
+                      (begin
+                        (when (bytevector? answer)
+                          (let ([completed (+ (ftp-file-completed-bytes file)
+                                              (bytevector-length answer))])
+                            (ftp-file-completed-bytes-set! file completed)
+                            (transfer-report-progress! (ftp-file-policy file) 'ftp 'download
+                                                       (ftp-file-path file) completed #f)))
+                        answer)))))))
+
+  #|proc:ftp-read!/nonblocking
+The `ftp-read!/nonblocking` procedure reads into `bytevector` between `start` and `stop`.
+The return value is a byte count, EOF, or a `net-would-block` readiness value.
+|#
+  (define-who ftp-read!/nonblocking
+    (case-lambda
+      [(file bytevector)
+       (ftp-read!/nonblocking file bytevector 0 (bytevector-length bytevector))]
+      [(file bytevector start)
+       (ftp-read!/nonblocking file bytevector start (bytevector-length bytevector))]
+      [(file bytevector start stop)
+       (pcheck ([ftp-file? file] [bytevector? bytevector]
+                [fixnum? start stop])
+               (ensure-file-open who file 'read)
+               (check-ftp-slice who (bytevector-length bytevector) start stop)
+               (let ([chunk (ftp-read/nonblocking file (fx- stop start))])
+                 (if (bytevector? chunk)
+                     (let ([count (bytevector-length chunk)])
+                       (bytevector-copy! chunk 0 bytevector start count)
+                       count)
+                     chunk)))]))
+
+  #|proc:ftp-read!
+The `ftp-read!` procedure reads into `bytevector` between optional `start` and `stop` indices.
+The return value is a byte count or EOF. It waits for network readiness when necessary.
+|#
+  (define-who ftp-read!
+    (case-lambda
+      [(file bytevector) (ftp-read! file bytevector 0 (bytevector-length bytevector))]
+      [(file bytevector start) (ftp-read! file bytevector start (bytevector-length bytevector))]
+      [(file bytevector start stop)
+       (pcheck ([ftp-file? file] [bytevector? bytevector] [fixnum? start stop])
+               (let loop ()
+                 (let ([answer (ftp-read!/nonblocking file bytevector start stop)])
+                   (if (net-would-block? answer)
+                       (begin (wait-for-ftp-file! who file) (loop))
+                       answer))))]))
+
+  #|proc:ftp-read-all
+The `ftp-read-all` procedure reads all remaining bytes from readable FTP `file`.
+The return value is a bytevector containing the remaining remote file content.
+|#
+  (define-who ftp-read-all
+    (lambda (file)
+      (pcheck ([ftp-file? file])
+              (let-values ([(op get) (open-bytevector-output-port)])
+                (let loop ()
+                  (let ([chunk (ftp-read file (transfer-policy-chunk-size
+                                               (ftp-file-policy file)))])
+                    (if (eof-object? chunk)
+                        (get)
+                        (begin (put-bytevector op chunk) (loop)))))))))
+
+  #|proc:ftp-write/nonblocking
+The `ftp-write/nonblocking` procedure queues a bytevector slice for writable FTP `file`.
+The return value is the queued byte count or a `net-would-block` readiness value.
+|#
+  (define-who ftp-write/nonblocking
+    (case-lambda
+      [(file bytevector)
+       (ftp-write/nonblocking file bytevector 0 (bytevector-length bytevector))]
+      [(file bytevector start)
+       (ftp-write/nonblocking file bytevector start (bytevector-length bytevector))]
+      [(file bytevector start stop)
+       (pcheck ([ftp-file? file] [bytevector? bytevector] [fixnum? start stop])
+               (ensure-file-open who file 'write)
+               (check-ftp-slice who (bytevector-length bytevector) start stop)
+               (ftp-file-pump/nonblocking! who file)
+               (let ([answer (ffi-net-ftp-file-write
+                              (ftp-file-handle file) bytevector
+                              (bytevector-length bytevector) start (fx- stop start))])
+                 (if (native-would-block? answer)
+                     (ftp-file-would-block file 'write)
+                     (ensure-success who answer))))]))
+
+  #|proc:ftp-write
+The `ftp-write` procedure writes a bytevector slice to writable FTP `file`.
+The return value is the written byte count. It waits for network readiness when necessary.
+|#
+  (define-who ftp-write
+    (case-lambda
+      [(file bytevector) (ftp-write file bytevector 0 (bytevector-length bytevector))]
+      [(file bytevector start) (ftp-write file bytevector start (bytevector-length bytevector))]
+      [(file bytevector start stop)
+       (pcheck ([ftp-file? file] [bytevector? bytevector] [fixnum? start stop])
+               (let loop ()
+                 (let ([answer (ftp-write/nonblocking file bytevector start stop)])
+                   (if (net-would-block? answer)
+                       (begin (wait-for-ftp-file! who file) (loop))
+                       (begin
+                         (let ([completed (+ (ftp-file-completed-bytes file) answer)])
+                           (ftp-file-completed-bytes-set! file completed)
+                           (transfer-report-progress! (ftp-file-policy file) 'ftp 'upload
+                                                      (ftp-file-path file) completed #f))
+                         answer)))))]))
+
+  #|proc:ftp-write-all/nonblocking
+The `ftp-write-all/nonblocking` procedure writes as much of a bytevector slice as possible.
+The return value is a byte count or a `net-would-block` readiness value.
+|#
+  (define-who ftp-write-all/nonblocking
+    (case-lambda
+      [(file bytevector)
+       (ftp-write-all/nonblocking file bytevector 0 (bytevector-length bytevector))]
+      [(file bytevector start)
+       (ftp-write-all/nonblocking file bytevector start (bytevector-length bytevector))]
+      [(file bytevector start stop)
+       (ftp-write/nonblocking file bytevector start stop)]))
+
+  #|proc:ftp-write-all
+The `ftp-write-all` procedure writes an entire bytevector slice to writable FTP `file`.
+The return value is the number of bytes written.
+|#
+  (define-who ftp-write-all
+    (case-lambda
+      [(file bytevector) (ftp-write-all file bytevector 0 (bytevector-length bytevector))]
+      [(file bytevector start) (ftp-write-all file bytevector start (bytevector-length bytevector))]
+      [(file bytevector start stop)
+       (pcheck ([ftp-file? file] [bytevector? bytevector] [fixnum? start stop])
+               (let loop ([index start])
+                 (if (fx= index stop)
+                     (fx- stop start)
+                     (let ([count (ftp-write file bytevector index stop)])
+                       (loop (fx+ index count))))))]))
+
+  #|proc:ftp-close-file
+The `ftp-close-file` procedure finishes or cancels `file` and releases its native resources.
+The `file` parameter is an FTP file. Upload close waits for the final server response.
+The return value is `file`; repeated close calls are inert.
+|#
+  (define-who ftp-close-file
+    (lambda (file)
+      (pcheck ([ftp-file? file])
+              (unless (ftp-file-closed? file)
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (if (eq? 'write (ftp-file-direction file))
+                        (begin
+                          (ensure-success who (ffi-net-ftp-file-finish
+                                               (ftp-file-handle file)))
+                          (let loop ()
+                            (unless (ftp-file-terminal? file)
+                              (wait-for-ftp-file! who file)
+                              (loop))))
+                        (unless (ftp-file-terminal? file)
+                          (ensure-success who (ffi-net-ftp-file-cancel
+                                               (ftp-file-handle file))))))
+                  (lambda ()
+                    (ffi-net-ftp-file-close (ftp-file-handle file))
+                    (ftp-file-handle-set! file 0)
+                    (ftp-session-active-file-set! (ftp-file-session file) #f)
+                    (ftp-file-closed?-set! file #t))))
+              file)))
+
+  #|proc:call-with-ftp-file
+The `call-with-ftp-file` procedure opens a remote file, calls `procedure`, and closes the file.
+The `procedure` parameter has signature `(ftp-file) -> value`; its value is returned.
+The optional `policy` parameter defaults to `default-transfer-policy`.
+|#
+  (define-who call-with-ftp-file
+    (case-lambda
+      [(session path direction procedure)
+       (call-with-ftp-file session path direction default-transfer-policy procedure)]
+      [(session path direction policy procedure)
+       (pcheck ([ftp-session? session] [string? path] [symbol? direction]
+                [transfer-policy? policy] [procedure? procedure])
+               (let ([file (ftp-open-file session path direction policy)])
+                 (dynamic-wind
+                   void
+                   (lambda () (procedure file))
+                   (lambda () (ftp-close-file file)))))]))
 
   #|proc:ftp-delete!
 The `ftp-delete!` procedure deletes a remote file.

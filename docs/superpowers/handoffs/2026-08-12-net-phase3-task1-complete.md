@@ -2,9 +2,8 @@
 
 ## Current State
 
-Phase 3 Task 1 in `docs/superpowers/plans/2026-08-01-net-transfer-parity.md` is complete.
-The next work is Task 2, persistent FTP file transfers. Do not skip ahead to FTP metadata because
-Task 3 depends on the session and transfer ownership introduced by Task 2.
+Phase 3 Tasks 1 and 2 in `docs/superpowers/plans/2026-08-01-net-transfer-parity.md` are complete.
+The next work is Task 3, FTP metadata, FTPS modes, resume policy, and recursion.
 
 ## Completed Contract
 
@@ -29,11 +28,31 @@ git diff --check
 
 All generated stdout and stderr captures were empty.
 
+## Task 2 Completion
+
+FTP sessions now own a reusable native libcurl multi handle. `ftp-file` exposes sequential read,
+write, nonblocking, all-bytes, close, and dynamic-extent APIs. Callback buffers are bounded by the
+caller-driven chunk flow, ports stream directly without temporary files, and upload close waits for
+the final FTP response. Closing a session cancels and invalidates its active file before releasing
+the multi handle.
+
+The fixture records accepted control connections. Sequential upload and download through one
+session use exactly one connection.
+
+Task 2 verification added the following successful commands:
+
+```bash
+make clean && make
+cd tests && timeout 240s make test-some \
+  TEST='net-transfer net-ftp net-operation net-core net-http net-ssh net-sftp net-scp \
+net-websocket net-grpc'
+```
+
 ## Next Work
 
-Implement Task 2 from the transfer-parity plan. Its native ABI must make the session own one
-libcurl multi handle and every active transfer. Preserve the Phase 2 readiness contract and add
-the FTP file API and true streaming ports before starting Task 3.
+Implement Task 3 from the transfer-parity plan. Build MLSD/MLST parsing and structured entries on
+the persistent session/file ownership established by Task 2. Preserve legacy listing compatibility
+only through the explicit raw-list API required by the plan.
 
 ## Preserved User-Owned Paths
 

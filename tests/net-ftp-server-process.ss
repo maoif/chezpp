@@ -6,6 +6,8 @@
 (define main
   (lambda ()
     (let ([root (car (command-line-arguments))])
+      (define connection-count-path (string-append root ".control-connections"))
+      (define accepted-connections 0)
       (let ([listener (open-socket 'inet 'stream)])
         (socket-set-option! listener 'reuse-address #t)
         (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
@@ -246,6 +248,10 @@
                      (if (and accepted (not (net-would-block? accepted)))
                          (let ([client (car accepted)]
                                [peer (cdr accepted)])
+                           (set! accepted-connections (+ accepted-connections 1))
+                           (write-bytevector-file
+                            connection-count-path
+                            (string->utf8 (number->string accepted-connections)))
                            (spawn-client-handler client)
                            (loop))
                          (begin

@@ -50,6 +50,16 @@
           ffi-net-ftp-transfer-step
           ffi-net-ftp-transfer-cancel
           ffi-net-ftp-transfer-close
+          ffi-net-ftp-session-open
+          ffi-net-ftp-session-close
+          ffi-net-ftp-file-open
+          ffi-net-ftp-file-step
+          ffi-net-ftp-file-read
+          ffi-net-ftp-file-read-into
+          ffi-net-ftp-file-write
+          ffi-net-ftp-file-finish
+          ffi-net-ftp-file-cancel
+          ffi-net-ftp-file-close
           ffi-net-ssh-open
           ffi-net-ssh-close
           ffi-net-ssh-session-fd
@@ -256,6 +266,32 @@
     (foreign-procedure "chezpp_net_ftp_transfer_cancel" (uptr) scheme-object))
   (define ffi-net-ftp-transfer-close
     (foreign-procedure "chezpp_net_ftp_transfer_close" (uptr) void))
+  (define ffi-net-ftp-session-open
+    (foreign-procedure "chezpp_net_ftp_session_open" () scheme-object))
+  (define ffi-net-ftp-session-close
+    (foreign-procedure "chezpp_net_ftp_session_close" (uptr) scheme-object))
+  (define ffi-net-ftp-file-open
+    (foreign-procedure "chezpp_net_ftp_file_open"
+                       (uptr int string string string int int int int int)
+                       scheme-object))
+  (define ffi-net-ftp-file-step
+    (foreign-procedure "chezpp_net_ftp_file_step" (uptr scheme-object int) scheme-object))
+  (define ffi-net-ftp-file-read
+    (foreign-procedure "chezpp_net_ftp_file_read" (uptr int) scheme-object))
+  (define ffi-net-ftp-file-read-into
+    (foreign-procedure "chezpp_net_ftp_file_read_into"
+                       (uptr scheme-object int int int)
+                       scheme-object))
+  (define ffi-net-ftp-file-write
+    (foreign-procedure "chezpp_net_ftp_file_write"
+                       (uptr scheme-object int int int)
+                       scheme-object))
+  (define ffi-net-ftp-file-finish
+    (foreign-procedure "chezpp_net_ftp_file_finish" (uptr) scheme-object))
+  (define ffi-net-ftp-file-cancel
+    (foreign-procedure "chezpp_net_ftp_file_cancel" (uptr) scheme-object))
+  (define ffi-net-ftp-file-close
+    (foreign-procedure "chezpp_net_ftp_file_close" (uptr) void))
   (define ffi-net-ssh-open
     (foreign-procedure "chezpp_net_ssh_open" (string int string int int) scheme-object))
   (define ffi-net-ssh-close

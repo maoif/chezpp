@@ -11,6 +11,9 @@
 (define start-ftp-test-server
   (lambda ()
     (let ([root "/tmp/chezpp-net-ftp-root"])
+      (let ([connection-count-path (string-append root ".control-connections")])
+        (when (file-exists? connection-count-path)
+          (delete-file connection-count-path)))
       (when (file-exists? root)
         (file-removetree root #f))
       (mkdirs (string-append root "/docs"))
@@ -53,7 +56,11 @@
                                 stdout-stuff
                                 stderr-stuff)))
                     (when (file-exists? root)
-                      (file-removetree root #f)))))))))
+                      (file-removetree root #f))
+                    (let ([connection-count-path
+                           (string-append root ".control-connections")])
+                      (when (file-exists? connection-count-path)
+                        (delete-file connection-count-path))))))))))
 
 (define with-test-ftp-session
   (lambda (proc)
