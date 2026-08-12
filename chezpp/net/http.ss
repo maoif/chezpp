@@ -60,6 +60,7 @@
           (chezpp net socket)
           (chezpp net poll)
           (chezpp net operation)
+          (chezpp net ffi)
           (chezpp net private)
           (chezpp net tls))
 
@@ -365,6 +366,8 @@
                   [deadline-ms
                    (timeout->deadline-ms (http-client-timeout-ms client))]
                   [phase 'resolve]
+                  [resolver-handle #f]
+                  [resolver-fd #f]
                   [sock #f]
                   [tls-session #f]
                   [connection #f]
@@ -383,6 +386,10 @@
                   [operation #f])
               (define release-transport!
                 (lambda ()
+                  (when resolver-handle
+                    (ffi-net-resolver-close resolver-handle)
+                    (set! resolver-handle #f)
+                    (set! resolver-fd #f))
                   (when owned?
                     (cond
                      [connection (close-http-connection connection)]
@@ -424,6 +431,8 @@
                   (set! owned? #t)
                   (set! current-request next-request)
                   (set! phase 'resolve)
+                  (set! resolver-handle #f)
+                  (set! resolver-fd #f)
                   (set! connect-operation #f)
                   (set! tls-operation #f)
                   (set! request-headers '())
@@ -491,22 +500,41 @@
                              (set! body (body->bytevector (http-request-body current-request)))
                              (set! phase 'write-head)
                              (yield-update))
-                           (let* ([u (http-request-uri current-request)]
-                                  [host (or (uri-host u) "localhost")]
-                                  [port (default-port-for-uri who u)]
-                                  [address
-                                   (or (resolve-address host port #f 'stream)
-                                       (raise-net-error
-                                        who 'http "failed to resolve HTTP endpoint" u))])
-                             (set! sock
-                                   (open-socket (socket-address-family address) 'stream))
-                             (socket-set-blocking! sock #f)
-                             (set! connect-operation
-                                   (socket-connect/nonblocking
-                                    sock address
-                                    (remaining-timeout-ms deadline-ms)))
-                             (set! phase 'connect)
-                             (yield-update))))]
+                           (if (not resolver-handle)
+                               (let* ([u (http-request-uri current-request)]
+                                      [host (or (uri-host u) "localhost")]
+                                      [port (default-port-for-uri who u)]
+                                      [started
+                                       (ffi-net-resolver-start
+                                        host port 0 (net-sock-stream))])
+                                 (when (ffi-error? started)
+                                   (raise-net-error who 'http
+                                                    "failed to start HTTP resolver" started))
+                                 (set! resolver-handle (vector-ref started 0))
+                                 (set! resolver-fd (vector-ref started 1))
+                                 (pending-update resolver-fd '(read error hup invalid)))
+                               (let ([resolved (ffi-net-resolver-poll resolver-handle)])
+                                 (cond
+                                  [(not resolved)
+                                   (pending-update resolver-fd '(read error hup invalid))]
+                                  [(ffi-error? resolved)
+                                   (raise-net-error who 'http
+                                                    "failed to resolve HTTP endpoint" resolved)]
+                                  [else
+                                   (let ([address (%socket-address-from-ffi resolved)])
+                                     (ffi-net-resolver-close resolver-handle)
+                                     (set! resolver-handle #f)
+                                     (set! resolver-fd #f)
+                                     (set! sock
+                                           (open-socket
+                                            (socket-address-family address) 'stream))
+                                     (socket-set-blocking! sock #f)
+                                     (set! connect-operation
+                                           (socket-connect/nonblocking
+                                            sock address
+                                            (remaining-timeout-ms deadline-ms)))
+                                     (set! phase 'connect)
+                                     (yield-update))])))))]
                     [(connect)
                      (net-operation-step! connect-operation)
                      (case (net-operation-state connect-operation)

@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -16,6 +17,21 @@
 #ifndef MSG_DONTWAIT
 #define MSG_DONTWAIT 0
 #endif
+
+typedef struct {
+  pthread_mutex_t mutex;
+  char *host;
+  int port;
+  int family;
+  int type;
+  int read_fd;
+  int write_fd;
+  int result_code;
+  int finished;
+  int cancelled;
+  int references;
+  struct addrinfo *result;
+} chezpp_resolver_operation;
 
 static ptr make_status(const char *tag, ptr value) {
   ptr v = Smake_vector(2, Sfalse);
@@ -84,6 +100,41 @@ static ptr make_addr_from_sockaddr(const struct sockaddr *addr, socklen_t addrle
   }
 
   return Sfalse;
+}
+
+static void resolver_operation_release(chezpp_resolver_operation *operation) {
+  if (__sync_sub_and_fetch(&operation->references, 1) != 0) return;
+  if (operation->read_fd >= 0) close(operation->read_fd);
+  if (operation->write_fd >= 0) close(operation->write_fd);
+  if (operation->result != NULL) freeaddrinfo(operation->result);
+  pthread_mutex_destroy(&operation->mutex);
+  free(operation->host);
+  free(operation);
+}
+
+static void *resolver_operation_main(void *data) {
+  chezpp_resolver_operation *operation = (chezpp_resolver_operation *)data;
+  struct addrinfo hints;
+  struct addrinfo *result = NULL;
+  char service[32];
+  int rc;
+  unsigned char ready = 1;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = operation->family;
+  hints.ai_socktype = operation->type;
+  hints.ai_flags = AI_CANONNAME;
+  snprintf(service, sizeof(service), "%d", operation->port);
+  rc = getaddrinfo(operation->host, service, &hints, &result);
+  pthread_mutex_lock(&operation->mutex);
+  operation->result_code = rc;
+  operation->result = result;
+  operation->finished = 1;
+  if (!operation->cancelled) {
+    while (write(operation->write_fd, &ready, 1) < 0 && errno == EINTR) {}
+  }
+  pthread_mutex_unlock(&operation->mutex);
+  resolver_operation_release(operation);
+  return NULL;
 }
 
 static int fill_sockaddr(int family, const char *host, int port, const char *path,
@@ -449,6 +500,101 @@ ptr chezpp_net_resolve_addresses(const char *host, int port, int family, int typ
   Svector_set(out, 1, head);
   freeaddrinfo(result);
   return out;
+}
+
+ptr chezpp_net_resolver_start(const char *host, int port, int family, int type) {
+  chezpp_resolver_operation *operation;
+  pthread_t thread;
+  int pipe_fd[2] = {-1, -1};
+  int rc;
+  if (pipe(pipe_fd) != 0) return make_errno_status("error");
+  if (fcntl(pipe_fd[0], F_SETFL, fcntl(pipe_fd[0], F_GETFL) | O_NONBLOCK) < 0 ||
+      fcntl(pipe_fd[1], F_SETFL, fcntl(pipe_fd[1], F_GETFL) | O_NONBLOCK) < 0 ||
+      fcntl(pipe_fd[0], F_SETFD, FD_CLOEXEC) < 0 ||
+      fcntl(pipe_fd[1], F_SETFD, FD_CLOEXEC) < 0) {
+    close(pipe_fd[0]);
+    close(pipe_fd[1]);
+    return make_errno_status("error");
+  }
+  operation = (chezpp_resolver_operation *)calloc(1, sizeof(*operation));
+  if (operation == NULL) {
+    close(pipe_fd[0]);
+    close(pipe_fd[1]);
+    return make_errno_status("error");
+  }
+  operation->host = strdup(host);
+  operation->port = port;
+  operation->family = family;
+  operation->type = type;
+  operation->read_fd = pipe_fd[0];
+  operation->write_fd = pipe_fd[1];
+  operation->references = 2;
+  rc = pthread_mutex_init(&operation->mutex, NULL);
+  if (operation->host == NULL || rc != 0) {
+    if (rc == 0) pthread_mutex_destroy(&operation->mutex);
+    errno = operation->host == NULL ? ENOMEM : rc;
+    if (operation->host != NULL) free(operation->host);
+    close(pipe_fd[0]);
+    close(pipe_fd[1]);
+    free(operation);
+    return make_errno_status("error");
+  }
+  rc = pthread_create(&thread, NULL, resolver_operation_main, operation);
+  if (rc != 0) {
+    errno = rc;
+    operation->references = 1;
+    resolver_operation_release(operation);
+    return make_errno_status("error");
+  }
+  (void)pthread_detach(thread);
+  {
+    ptr out = Smake_vector(2, Sfalse);
+    Svector_set(out, 0, Sunsigned((uptr)operation));
+    Svector_set(out, 1, Sfixnum(operation->read_fd));
+    return out;
+  }
+}
+
+ptr chezpp_net_resolver_poll(uptr handle) {
+  chezpp_resolver_operation *operation =
+      (chezpp_resolver_operation *)TO_VOIDP(handle);
+  ptr answer = Sfalse;
+  if (operation == NULL) return make_status("error", Sstring("invalid resolver operation"));
+  pthread_mutex_lock(&operation->mutex);
+  if (operation->finished) {
+    if (operation->result_code != 0) {
+      answer = make_status("error", Sstring(gai_strerror(operation->result_code)));
+    } else if (operation->result == NULL) {
+      answer = make_status("error", Sstring("resolver returned no addresses"));
+    } else {
+      answer = make_addr_from_sockaddr(operation->result->ai_addr,
+                                       (socklen_t)operation->result->ai_addrlen);
+    }
+  }
+  pthread_mutex_unlock(&operation->mutex);
+  return answer;
+}
+
+ptr chezpp_net_resolver_cancel(uptr handle) {
+  chezpp_resolver_operation *operation =
+      (chezpp_resolver_operation *)TO_VOIDP(handle);
+  if (operation == NULL) return Strue;
+  pthread_mutex_lock(&operation->mutex);
+  operation->cancelled = 1;
+  if (operation->read_fd >= 0) {
+    close(operation->read_fd);
+    operation->read_fd = -1;
+  }
+  pthread_mutex_unlock(&operation->mutex);
+  return Strue;
+}
+
+void chezpp_net_resolver_close(uptr handle) {
+  chezpp_resolver_operation *operation =
+      (chezpp_resolver_operation *)TO_VOIDP(handle);
+  if (operation == NULL) return;
+  (void)chezpp_net_resolver_cancel(handle);
+  resolver_operation_release(operation);
 }
 
 ptr chezpp_net_address_to_name(int family, const char *host, int port, const char *path) {

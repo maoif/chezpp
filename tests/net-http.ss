@@ -817,7 +817,13 @@
          (dynamic-wind
            void
            (lambda ()
-             (let loop ([pending-cycles 0])
+             (net-operation-step! operation)
+             (and
+              (eq? (net-operation-state operation) 'pending)
+              (= (length (net-operation-poll-targets operation)) 1)
+              (let loop ([pending-cycles 1])
+                (poll (net-operation-poll-targets operation)
+                      (net-operation-remaining-timeout-ms operation))
                (net-operation-step! operation)
                (case (net-operation-state operation)
                  [(pending)
@@ -830,7 +836,7 @@
                          (= (http-response-status response) 200)
                          (equal? (utf8->string (http-response-body response))
                                  "segmented")))]
-                 [else #f])))
+                 [else #f]))))
            (lambda ()
              (http-close client)
              (thread-join th))))))
@@ -887,8 +893,12 @@
                     [first (http-send/nonblocking client slow-request)])
                (and (net-operation? first)
                     (begin
+                      (net-operation-step! first)
+                      (and (eq? (net-operation-state first) 'pending)
+                           (= (length (net-operation-poll-targets first)) 1)))
+                    (begin
                       (http-cancel-pending! client)
-                      #t)
+                      (eq? (net-operation-state first) 'cancelled))
                     (let ([resp (http-get client
                                           (format "http://127.0.0.1:~a/after-cancel" port))])
                       (and (= (http-response-status resp) 200)
