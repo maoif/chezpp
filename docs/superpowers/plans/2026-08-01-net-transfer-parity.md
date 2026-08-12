@@ -19,13 +19,17 @@ FTP/FTPS fixtures, SHA-256 digest APIs, and command-line examples.
 
 ### Task 1: Transfer Policy And Progress Contracts
 
+**Status (2026-08-12): Complete.** The shared immutable policy, validation, aggregate export,
+focused tests, clean build, and existing FTP/SSH/SFTP/SCP regression suites pass. The historical
+red-step command was not run separately. Task 2 is next.
+
 **Files:**
 - Create: `chezpp/net/transfer.ss`
 - Modify: `chezpp/net.ss`
 - Create: `tests/net-transfer.ss`
 - Modify: `tests/Makefile`
 
-- [ ] **Step 1: Write transfer-policy tests**
+- [x] **Step 1: Write transfer-policy tests**
 
 ```scheme
 (mat net-transfer-policy
@@ -47,7 +51,7 @@ FTP/FTPS fixtures, SHA-256 digest APIs, and command-line examples.
        (equal? seen '(ftp upload "/remote/a" 4 10))))
 ```
 
-- [ ] **Step 2: Run and verify failure**
+- [ ] **Step 2: Run and verify failure (historical red step not run separately)**
 
 ```bash
 cd tests && make test-some TEST='net-transfer'
@@ -55,7 +59,7 @@ cd tests && make test-some TEST='net-transfer'
 
 Expected: FAIL because `(chezpp net transfer)` does not exist.
 
-- [ ] **Step 3: Implement and document the record**
+- [x] **Step 3: Implement and document the record**
 
 Export:
 
@@ -74,7 +78,7 @@ are `error`, `replace`, and `skip`. The progress procedure signature is
 `(protocol direction path completed-bytes total-bytes-or-#f) -> unspecified`. Apply `pcheck` and
 document the record's immutable fields above its definition.
 
-- [ ] **Step 4: Build, test, and commit**
+- [x] **Step 4: Build and test**
 
 ```bash
 make clean && make

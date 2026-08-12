@@ -1,4 +1,4 @@
-NET_TESTS := net-operation.ss net-core.ss net-http.ss net-ftp.ss net-ssh.ss net-sftp.ss \
+NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http.ss net-ftp.ss net-ssh.ss net-sftp.ss \
              net-scp.ss net-websocket.ss net-grpc.ss net-examples.ss
 NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss
 
