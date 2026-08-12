@@ -111,9 +111,11 @@
                         (lambda ()
                           (let ([upload-path (path-build local-root "upload-nb.txt")]
                                 [download-path (path-build local-root "download-nb.txt")]
+                                [cancel-path (path-build local-root "cancel-nb.txt")]
                                 [tree-path (path-build local-root "tree-nb")]
-                                [tree-out-path (path-build local-root "tree-nb-out")])
-                            (write-u8vec! upload-path (string->utf8 "scp-upload-nb"))
+                                [tree-out-path (path-build local-root "tree-nb-out")]
+                                [large-payload (make-bytevector 200000 77)])
+                            (write-u8vec! upload-path large-payload)
                             (mkdirs (path-build tree-path "nested"))
                             (write-u8vec! (path-build tree-path "a.txt")
                                           (string->utf8 "A"))
@@ -127,6 +129,15 @@
                                          upload-path
                                          (string-append remote-root "/uploaded-nb.txt"))))
                                      (string-append remote-root "/uploaded-nb.txt"))
+                             (let ([operation
+                                    (scp-download/nonblocking
+                                     scp
+                                     (string-append remote-root "/uploaded-nb.txt")
+                                     cancel-path)])
+                               (and (file-exists? cancel-path)
+                                    (eq? (scp-cancel-pending! scp) scp)
+                                    (eq? (net-operation-state operation) 'cancelled)
+                                    (not (file-exists? cancel-path))))
                              (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-download/nonblocking
@@ -134,8 +145,9 @@
                                          (string-append remote-root "/uploaded-nb.txt")
                                          download-path)))
                                      download-path)
-                             (equal? (read-u8vec download-path)
-                                     (string->utf8 "scp-upload-nb"))
+                             (equal? (read-u8vec download-path) large-payload)
+                             (equal? (sha256-file upload-path)
+                                     (sha256-file download-path))
                              (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-copy-directory/nonblocking

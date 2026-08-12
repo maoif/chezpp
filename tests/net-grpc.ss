@@ -94,6 +94,10 @@
       (thunk)
       #f)))
 
+(define grpc-thread-count
+  (lambda ()
+    (length (directory-list "/proc/self/task"))))
+
 (define grpc-server-stream-ok?
   (lambda (client)
     (let ([stream (grpc-call/server-stream
@@ -409,29 +413,18 @@
                          500)])
               (and (grpc-response? resp)
                    (equal? (utf8->string (grpc-response-payload resp)) "fast")))
-            (net-operation? (grpc-call/nonblocking
-                  client
-                  "/chezpp.test.Echo/UnarySlow"
-                  "slow"
-                  '()
-                  500))
-            (grpc-net-error-message?
-             "another nonblocking gRPC operation is pending"
-             (lambda ()
-               (grpc-call/nonblocking
-                client
-                "/chezpp.test.Echo/UnarySlow"
-                "fast"
-                '()
-                500)))
-            (let ([resp (wait-grpc-call/nonblocking
-                         client
-                         "/chezpp.test.Echo/UnarySlow"
-                         "slow"
-                         '()
-                         500)])
-              (and (grpc-response? resp)
-                   (equal? (utf8->string (grpc-response-payload resp)) "slow")))
+            (let ([slow (grpc-call/nonblocking
+                         client "/chezpp.test.Echo/UnarySlow" "slow" '() 500)]
+                  [fast (grpc-call/nonblocking
+                         client "/chezpp.test.Echo/UnarySlow" "fast" '() 500)])
+              (and (net-operation? slow)
+                   (net-operation? fast)
+                   (let ([slow-response (net-operation-wait slow)]
+                         [fast-response (net-operation-wait fast)])
+                     (and (equal? (utf8->string
+                                   (grpc-response-payload slow-response)) "slow")
+                          (equal? (utf8->string
+                                   (grpc-response-payload fast-response)) "fast")))))
             (let ([stream (grpc-call/client-stream
                            client
                            "/chezpp.test.Echo/ClientStream"
@@ -488,19 +481,12 @@
                        100))
                  (eq? (grpc-cancel-pending! client) client)
                  (net-operation? (grpc-call/server-stream/nonblocking
-                       client
-                       "/chezpp.test.Echo/ServerStream"
-                       "x"
-                       '()
-                       100))
-                 (grpc-net-error-message?
-                  "another nonblocking gRPC operation is pending"
-                  (lambda ()
-                    (grpc-call/bidi-stream/nonblocking
-                     client
-                     "/chezpp.test.Echo/Bidi"
-                     '()
-                     100)))))
+                                  client
+                                  "/chezpp.test.Echo/ServerStream"
+                                  "x" '() 100))
+                 (net-operation? (grpc-call/bidi-stream/nonblocking
+                                  client "/chezpp.test.Echo/Bidi" '() 100))
+                 (eq? (grpc-cancel-pending! client) client)))
               (lambda ()
                 (guard (c [else #f])
                   (grpc-close-channel client)))))
@@ -527,6 +513,49 @@
               (lambda ()
                 (guard (c [else #f])
                   (grpc-close-channel client)))))))))
+
+(mat net-grpc-shared-completion-driver
+     (with-grpc-env
+      (lambda ()
+        (call-with-grpc-peer
+           100
+           (lambda (server)
+             (grpc-register-service!
+              server
+              "/chezpp.test.Echo/UnaryMany"
+              (lambda (request)
+                (grpc-response (grpc-request-payload request)))))
+           (lambda (server client)
+             (let ([before (grpc-thread-count)]
+                   [operation*
+                    (let loop ([i 0] [out '()])
+                      (if (= i 100)
+                          (reverse out)
+                          (loop
+                           (+ i 1)
+                           (cons
+                            (grpc-call/nonblocking
+                             client
+                             "/chezpp.test.Echo/UnaryMany"
+                             (number->string i)
+                             '()
+                             5000)
+                            out))))])
+               (for-each net-operation-step! operation*)
+               (let* ([fd*
+                       (map
+                        (lambda (operation)
+                          (poll-target-fd
+                           (car (net-operation-poll-targets operation))))
+                        (filter
+                         (lambda (operation)
+                           (eq? 'pending (net-operation-state operation)))
+                         operation*))]
+                      [response* (map net-operation-wait operation*)])
+                 (and (pair? fd*)
+                      (andmap (lambda (fd) (= fd (car fd*))) (cdr fd*))
+                      (= (length response*) 100)
+                      (<= (- (grpc-thread-count) before) 1)))))))))
 
 (mat net-grpc-timeout-validation
      (with-grpc-env

@@ -31,6 +31,30 @@ typedef struct {
   size_t pending_write_len;
 } chezpp_sftp_file;
 
+typedef struct {
+  chezpp_ssh_session *owner;
+  ssh_channel channel;
+  int fd;
+  int direction;
+  int phase;
+  int initialized;
+  int cancelled;
+  int local_fd;
+  int completed;
+  int blocking_changed;
+  size_t buffer_len;
+  size_t buffer_pos;
+  size_t header_len;
+  size_t header_pos;
+  uint64_t remaining;
+  uint64_t offset;
+  char *local_path;
+  char *remote_name;
+  char *command;
+  unsigned char header[1024];
+  unsigned char buffer[65536];
+} chezpp_scp_transfer;
+
 typedef ssh_scp (*ssh_scp_new_fn)(ssh_session, int, const char *);
 typedef int (*ssh_scp_init_fn)(ssh_scp);
 typedef int (*ssh_scp_close_fn)(ssh_scp);
@@ -1983,6 +2007,356 @@ ptr chezpp_net_scp_download_directory(uptr handle, const char *remote_path, cons
   if (initialized) p_ssh_scp_close(scp);
   p_ssh_scp_free(scp);
   return status;
+}
+
+static ptr scp_transfer_pending(chezpp_scp_transfer *t, int events);
+static ptr scp_transfer_retry_pending(chezpp_scp_transfer *t, int events);
+
+static char *scp_quote_command(const char *mode, const char *path) {
+  size_t path_len = strlen(path);
+  size_t quote_count = 0;
+  size_t i;
+  size_t pos;
+  char *command;
+  for (i = 0; i < path_len; i++) {
+    if (path[i] == '\'') quote_count++;
+  }
+  command = (char *)malloc(strlen(mode) + path_len + quote_count * 3 + 12);
+  if (command == NULL) return NULL;
+  pos = (size_t)sprintf(command, "scp %s -- '", mode);
+  for (i = 0; i < path_len; i++) {
+    if (path[i] == '\'') {
+      memcpy(command + pos, "'\\''", 4);
+      pos += 4;
+    } else {
+      command[pos++] = path[i];
+    }
+  }
+  command[pos++] = '\'';
+  command[pos] = '\0';
+  return command;
+}
+
+static ptr scp_channel_error(chezpp_scp_transfer *t, const char *fallback) {
+  const char *message = p_ssh_get_error(t->owner->session);
+  return make_error_status_message(message == NULL || *message == '\0' ? fallback : message);
+}
+
+static ptr scp_write_pending_buffer(chezpp_scp_transfer *t, const unsigned char *buffer,
+                                    size_t length, size_t *position) {
+  int rc = p_ssh_channel_write(t->channel, buffer + *position,
+                               (uint32_t)(length - *position));
+  if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLOUT);
+  if (rc <= 0) return scp_channel_error(t, "scp channel write failed");
+  *position += (size_t)rc;
+  if (*position < length) return scp_transfer_pending(t, POLLOUT);
+  return Strue;
+}
+
+static ptr scp_read_ack(chezpp_scp_transfer *t) {
+  unsigned char ack;
+  int rc = p_ssh_channel_read(t->channel, &ack, 1, 0);
+  if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
+  if (rc < 0) return scp_channel_error(t, "scp acknowledgment read failed");
+  if (ack != 0) return make_error_status_message("remote scp rejected the transfer");
+  return Strue;
+}
+
+/* Incremental SCP file transfers.  One step performs at most one SSH channel operation. */
+ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source,
+                                  const char *target) {
+  chezpp_ssh_session *owner = (chezpp_ssh_session *)TO_VOIDP(handle);
+  chezpp_scp_transfer *t;
+  char *parent = NULL;
+  char *name = NULL;
+  struct stat st;
+  if (owner == NULL || owner->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (direction != 0 && direction != 1)
+    return make_error_status_message("invalid scp transfer direction");
+  t = (chezpp_scp_transfer *)calloc(1, sizeof(*t));
+  if (t == NULL) return make_errno_status();
+  t->local_fd = -1;
+  t->owner = owner;
+  t->direction = direction;
+  t->local_path = dup_cstring(direction == 0 ? target : source);
+  t->remote_name = dup_cstring(direction == 0 ? source : target);
+  if (t->local_path == NULL || t->remote_name == NULL) goto oom;
+  if (p_ssh_set_blocking != NULL) {
+    p_ssh_set_blocking(owner->session, 0);
+    t->blocking_changed = 1;
+  }
+  if (direction == 1) {
+    if (stat(source, &st) != 0) goto errno_fail;
+    if (!S_ISREG(st.st_mode)) {
+      if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+      free(t->local_path); free(t->remote_name); free(t);
+      return make_path_error_status("local file expected", source);
+    }
+    t->remaining = (uint64_t)st.st_size;
+    t->local_fd = open(source, O_RDONLY);
+    if (t->local_fd < 0) goto errno_fail;
+    if (split_remote_path(target, &parent, &name) != Strue) goto fail;
+    free(t->remote_name); t->remote_name = name; name = NULL;
+    if (strchr(t->remote_name, '\n') != NULL || strchr(t->remote_name, '\r') != NULL) {
+      if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+      close(t->local_fd);
+      free(parent); free(t->local_path); free(t->remote_name); free(t);
+      return make_path_error_status("invalid remote file name", target);
+    }
+    t->command = scp_quote_command("-t", parent);
+  } else {
+    t->local_fd = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (t->local_fd < 0) goto errno_fail;
+    t->command = scp_quote_command("-f", source);
+  }
+  free(parent);
+  if (t->command == NULL) goto oom;
+  t->channel = p_ssh_channel_new(owner->session);
+  if (t->channel == NULL) goto fail;
+  t->fd = p_ssh_get_fd(owner->session);
+  t->phase = 0;
+  return make_status("ok", Sunsigned((uptr)t));
+oom:
+  if (t->local_fd >= 0) close(t->local_fd);
+  if (t->channel != NULL) p_ssh_channel_free(t->channel);
+  if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+  free(t->command); free(t->local_path); free(t->remote_name); free(t);
+  return make_errno_status();
+errno_fail:
+  if (t->local_fd >= 0) close(t->local_fd);
+  if (t->channel != NULL) p_ssh_channel_free(t->channel);
+  if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+  free(parent); free(name); free(t->command); free(t->local_path); free(t->remote_name); free(t);
+  return make_errno_status();
+fail:
+  if (t->local_fd >= 0) close(t->local_fd);
+  if (t->channel != NULL) p_ssh_channel_free(t->channel);
+  if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+  free(parent); free(name); free(t->command); free(t->local_path); free(t->remote_name); free(t);
+  return ssh_error_status_from_wrapper(owner, "failed to allocate scp transfer");
+}
+
+static ptr scp_transfer_pending(chezpp_scp_transfer *t, int events) {
+  ptr out = Smake_vector(3, Sfalse);
+  ptr target = Smake_vector(2, Sfalse);
+  ptr event_ls = Snil;
+  if ((events & POLLOUT) != 0)
+    event_ls = Scons(Sstring_to_symbol("write"), event_ls);
+  if ((events & POLLIN) != 0)
+    event_ls = Scons(Sstring_to_symbol("read"), event_ls);
+  Svector_set(target, 0, Sinteger((iptr)t->fd));
+  Svector_set(target, 1, event_ls);
+  Svector_set(out, 0, Sstring_to_symbol("pending"));
+  Svector_set(out, 1, target);
+  Svector_set(out, 2, Sfalse);
+  return out;
+}
+
+static ptr scp_transfer_retry_pending(chezpp_scp_transfer *t, int events) {
+  int flags = p_ssh_get_poll_flags == NULL ? 0 : p_ssh_get_poll_flags(t->owner->session);
+  int requested = 0;
+  if ((flags & SSH_WRITE_PENDING) != 0) requested |= POLLOUT;
+  if ((flags & SSH_READ_PENDING) != 0) requested |= POLLIN;
+  return scp_transfer_pending(t, requested == 0 ? events : requested);
+}
+
+ptr chezpp_net_scp_transfer_step(uptr handle) {
+  chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
+  int rc;
+  if (t == NULL || t->cancelled || t->channel == NULL)
+    return make_error_status_message("invalid or cancelled scp transfer");
+  if (t->phase == 0) {
+    rc = p_ssh_channel_open_session(t->channel);
+    if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLIN | POLLOUT);
+    if (rc != SSH_OK) return scp_channel_error(t, "scp channel open failed");
+    t->initialized = 1;
+    t->phase = 1;
+    return scp_transfer_pending(t, POLLIN | POLLOUT);
+  }
+  if (t->phase == 1) {
+    rc = p_ssh_channel_request_exec(t->channel, t->command);
+    if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLIN | POLLOUT);
+    if (rc != SSH_OK) return scp_channel_error(t, "scp exec request failed");
+    t->phase = 2;
+    return scp_transfer_pending(t, t->direction == 1 ? POLLIN : POLLOUT);
+  }
+  if (t->phase == 2) {
+    if (t->direction == 1) {
+      ptr ans = scp_read_ack(t);
+      if (ans != Strue) return ans;
+      {
+        struct stat st;
+        if (stat(t->local_path, &st) != 0) return make_errno_status();
+        rc = snprintf((char *)t->header, sizeof(t->header), "C%04o %llu %s\n",
+                      (unsigned)(st.st_mode & 07777),
+                      (unsigned long long)st.st_size, t->remote_name);
+        if (rc < 0 || (size_t)rc >= sizeof(t->header))
+          return make_error_status_message("scp file header is too long");
+        t->header_len = (size_t)rc;
+      }
+    } else {
+      t->header[0] = 0;
+      t->header_len = 1;
+    }
+    t->phase = 3;
+    return scp_transfer_pending(t, POLLOUT);
+  }
+  if (t->phase == 3) {
+    if (t->direction == 1) {
+      ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
+      if (ans != Strue) return ans;
+      t->phase = 4;
+      return scp_transfer_pending(t, POLLIN);
+    }
+    {
+      ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
+      if (ans != Strue) return ans;
+      t->header_len = 0;
+      t->header_pos = 0;
+      t->phase = 4;
+      return scp_transfer_pending(t, POLLIN);
+    }
+  }
+  if (t->phase == 4) {
+    if (t->direction == 1) {
+      ptr ans = scp_read_ack(t);
+      if (ans != Strue) return ans;
+      t->phase = 5;
+      return scp_transfer_pending(t, POLLOUT);
+    }
+    rc = p_ssh_channel_read(t->channel, t->header + t->header_len, 1, 0);
+    if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
+    if (rc < 0) return scp_channel_error(t, "scp header read failed");
+    t->header_len++;
+    if (t->header_len >= sizeof(t->header))
+      return make_error_status_message("scp file header is too long");
+    if (t->header[t->header_len - 1] != '\n') return scp_transfer_pending(t, POLLIN);
+    t->header[t->header_len - 1] = '\0';
+    {
+      unsigned mode;
+      unsigned long long size;
+      if (sscanf((char *)t->header, "C%o %llu", &mode, &size) != 2)
+        return make_error_status_message("remote path is not a regular file");
+      t->remaining = (uint64_t)size;
+      (void)fchmod(t->local_fd, (mode_t)mode);
+      t->header[0] = 0;
+      t->header_len = 1;
+      t->header_pos = 0;
+      t->phase = 5;
+      return scp_transfer_pending(t, POLLOUT);
+    }
+  }
+  if (t->phase == 5) {
+    if (t->direction == 0 && t->header_pos < t->header_len) {
+      ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
+      if (ans != Strue) return ans;
+      return scp_transfer_pending(t, POLLIN);
+    }
+    if (t->direction == 1) {
+      ssize_t n;
+      if (t->remaining == 0) {
+        t->header[0] = 0;
+        t->header_len = 1;
+        t->header_pos = 0;
+        t->phase = 6;
+        return scp_transfer_pending(t, POLLOUT);
+      }
+      if (t->buffer_pos == t->buffer_len) {
+        size_t want = t->remaining > sizeof(t->buffer) ?
+                      sizeof(t->buffer) : (size_t)t->remaining;
+        n = read(t->local_fd, t->buffer, want);
+        if (n < 0) {
+          if (errno == EINTR) return scp_transfer_pending(t, POLLOUT);
+          return make_errno_status();
+        }
+        if (n == 0) return make_error_status_message("local file became shorter during upload");
+        t->buffer_len = (size_t)n;
+        t->buffer_pos = 0;
+      }
+      {
+        ptr ans = scp_write_pending_buffer(t, t->buffer, t->buffer_len, &t->buffer_pos);
+        if (ans != Strue) return ans;
+        t->offset += (uint64_t)t->buffer_len;
+        t->remaining -= (uint64_t)t->buffer_len;
+        return scp_transfer_pending(t, POLLOUT);
+      }
+    }
+    if (t->remaining == 0) {
+      unsigned char end_marker;
+      rc = p_ssh_channel_read(t->channel, &end_marker, 1, 0);
+      if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
+      if (rc < 0) return scp_channel_error(t, "scp end marker read failed");
+      if (end_marker != 0) return make_error_status_message("invalid scp end marker");
+      t->header[0] = 0;
+      t->header_len = 1;
+      t->header_pos = 0;
+      t->phase = 6;
+      return scp_transfer_pending(t, POLLOUT);
+    }
+    {
+      size_t want = t->remaining > sizeof(t->buffer) ? sizeof(t->buffer) : (size_t)t->remaining;
+      rc = p_ssh_channel_read(t->channel, t->buffer, (uint32_t)want, 0);
+      if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
+      if (rc < 0) return scp_channel_error(t, "scp data read failed");
+      {
+        size_t written = 0;
+        while (written < (size_t)rc) {
+          ssize_t n = write(t->local_fd, t->buffer + written, (size_t)rc - written);
+          if (n < 0) {
+            if (errno == EINTR) continue;
+            return make_errno_status();
+          }
+          if (n == 0) { errno = EIO; return make_errno_status(); }
+          written += (size_t)n;
+        }
+      }
+      t->offset += (uint64_t)rc;
+      t->remaining -= (uint64_t)rc;
+      return scp_transfer_pending(t, POLLIN);
+    }
+  }
+  if (t->phase == 6) {
+    ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
+    if (ans != Strue) return ans;
+    if (t->direction == 1) {
+      t->phase = 7;
+      return scp_transfer_pending(t, POLLIN);
+    }
+    t->completed = 1;
+    t->phase = 8;
+    return make_status("completed", Strue);
+  }
+  if (t->phase == 7) {
+    ptr ans = scp_read_ack(t);
+    if (ans != Strue) return ans;
+    t->completed = 1;
+    t->phase = 8;
+    return make_status("completed", Strue);
+  }
+  return make_error_status_message("scp transfer is already complete");
+}
+
+ptr chezpp_net_scp_transfer_cancel(uptr handle) {
+  chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
+  if (t != NULL) t->cancelled = 1;
+  return Strue;
+}
+
+void chezpp_net_scp_transfer_close(uptr handle) {
+  chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
+  if (t == NULL) return;
+  if (t->local_fd >= 0) close(t->local_fd);
+  if (t->channel != NULL) {
+    (void)p_ssh_channel_send_eof(t->channel);
+    (void)p_ssh_channel_close(t->channel);
+    p_ssh_channel_free(t->channel);
+  }
+  if (t->blocking_changed && t->owner != NULL && t->owner->session != NULL)
+    p_ssh_set_blocking(t->owner->session, 1);
+  if (t->direction == 0 && !t->completed && t->local_path != NULL)
+    (void)unlink(t->local_path);
+  free(t->command); free(t->local_path); free(t->remote_name); free(t);
 }
 
 int chezpp_net_sftp_flag_read(void) { return O_RDONLY; }

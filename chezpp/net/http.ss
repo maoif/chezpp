@@ -109,6 +109,7 @@
             (immutable port http-server-port)
             (immutable tls-context http-server-tls-context)
             (mutable handlers http-server-handlers http-server-handlers-set!)
+            (mutable operations http-server-operations http-server-operations-set!)
             (mutable closed? http-server-closed? http-server-closed?-set!)
             (immutable close-mutex http-server-close-mutex)))
 
@@ -214,7 +215,7 @@
 
   (define current-time-ms
     (lambda ()
-      (let ([t (current-time)])
+      (let ([t (current-time 'time-monotonic)])
         (+ (* (time-second t) 1000)
            (quotient (time-nanosecond t) 1000000)))))
 
@@ -258,21 +259,401 @@
       (http-client-pending-set! client #f)
       client))
 
+  (define bytevector-slice
+    (lambda (bv start stop)
+      (let ([out (make-bytevector (fx- stop start) 0)])
+        (bytevector-copy! bv start out 0 (fx- stop start))
+        out)))
+
+  (define append-http-bytevectors
+    (lambda (left right)
+      (let* ([left-length (bytevector-length left)]
+             [right-length (bytevector-length right)]
+             [out (make-bytevector (fx+ left-length right-length) 0)])
+        (bytevector-copy! left 0 out 0 left-length)
+        (bytevector-copy! right 0 out left-length right-length)
+        out)))
+
+  (define bytevector-find-crlf
+    (lambda (bv start)
+      (let ([len (bytevector-length bv)])
+        (let loop ([i start])
+          (cond
+           [(fx>= (fx1+ i) len) #f]
+           [(and (fx= (bytevector-u8-ref bv i) 13)
+                 (fx= (bytevector-u8-ref bv (fx1+ i)) 10))
+            i]
+           [else (loop (fx1+ i))])))))
+
+  (define bytevector-find-header-end
+    (lambda (bv start)
+      (let ([len (bytevector-length bv)])
+        (let loop ([i start])
+          (cond
+           [(fx> (fx+ i 3) (fx1- len)) #f]
+           [(and (fx= (bytevector-u8-ref bv i) 13)
+                 (fx= (bytevector-u8-ref bv (fx1+ i)) 10)
+                 (fx= (bytevector-u8-ref bv (fx+ i 2)) 13)
+                 (fx= (bytevector-u8-ref bv (fx+ i 3)) 10))
+            i]
+           [else (loop (fx1+ i))])))))
+
+  (define serialize-http-request-head
+    (lambda (request headers)
+      (let-values ([(port get) (open-bytevector-output-port)])
+        (put-bytevector
+         port
+         (string->utf8
+          (format "~a ~a HTTP/1.1\r\n"
+                  (http-request-method request)
+                  (http-uri-target (http-request-uri request)))))
+        (write-header-lines port headers)
+        (put-bytevector port (string->utf8 "\r\n"))
+        (get))))
+
+  (define parse-buffered-headers
+    (lambda (who bv start stop)
+      (let ([port (open-bytevector-input-port (bytevector-slice bv start stop))])
+        (dynamic-wind
+          void
+          (lambda () (read-http-headers who port))
+          (lambda () (close-port port))))))
+
+  (define parse-buffered-chunked-body
+    (lambda (who bv start)
+      (let loop ([i start] [part* '()] [total 0])
+        (let ([line-end (bytevector-find-crlf bv i)])
+          (if (not line-end)
+              (values #f #f #f)
+              (let* ([line (utf8->string (bytevector-slice bv i line-end))]
+                     [size (parse-chunk-size who line)]
+                     [data-start (fx+ line-end 2)]
+                     [data-stop (fx+ data-start size)])
+                (cond
+                 [(fx= size 0)
+                  (let ([trailer-end (bytevector-find-header-end bv line-end)])
+                    (if (not trailer-end)
+                        (values #f #f #f)
+                        (let ([out (make-bytevector total 0)])
+                          (let fill ([rest (reverse part*)] [offset 0])
+                            (unless (null? rest)
+                              (let ([part (car rest)])
+                                (bytevector-copy! part 0 out offset
+                                                  (bytevector-length part))
+                                (fill (cdr rest)
+                                      (fx+ offset (bytevector-length part))))))
+                          (values #t out (fx+ trailer-end 4)))))]
+                 [(fx> (fx+ data-stop 2) (bytevector-length bv))
+                  (values #f #f #f)]
+                 [(or (not (fx= (bytevector-u8-ref bv data-stop) 13))
+                      (not (fx= (bytevector-u8-ref bv (fx1+ data-stop)) 10)))
+                  (raise-net-error who 'http "invalid HTTP chunk terminator")]
+                 [else
+                  (loop (fx+ data-stop 2)
+                        (cons (bytevector-slice bv data-start data-stop) part*)
+                        (fx+ total size))])))))))
+
   (define http-transfer/nonblocking
-    (lambda (who client kind args thunk)
+    (lambda (who client kind request finish)
       (ensure-client-open who client)
-      (ensure-no-pending-mismatch who client kind args)
+      (ensure-no-pending-mismatch who client kind (request-key request))
       (let ([pending (http-client-pending client)])
         (if (and pending (eq? 'pending (net-operation-state pending)))
             pending
-            (let ([operation
-                   (make-net-operation
-                    kind
-                    (lambda ()
-                      (guard (failure [else (net-operation-failed failure)])
-                        (net-operation-completed (thunk #f))))
-                    void
-                    (lambda () (http-client-pending-set! client #f)))])
+            (let ([current-request request]
+                  [redirects-left 5]
+                  [deadline-ms
+                   (timeout->deadline-ms (http-client-timeout-ms client))]
+                  [phase 'resolve]
+                  [sock #f]
+                  [tls-session #f]
+                  [connection #f]
+                  [connect-operation #f]
+                  [tls-operation #f]
+                  [request-headers '()]
+                  [head (make-bytevector 0 0)]
+                  [body (make-bytevector 0 0)]
+                  [write-offset 0]
+                  [input (make-bytevector 0 0)]
+                  [status #f]
+                  [reason ""]
+                  [response-headers '()]
+                  [body-start 0]
+                  [owned? #t]
+                  [operation #f])
+              (define release-transport!
+                (lambda ()
+                  (when owned?
+                    (cond
+                     [connection (close-http-connection connection)]
+                     [else
+                      (when tls-session
+                        (guard (failure [else #f])
+                          (close-tls-session tls-session)))
+                      (when sock
+                        (guard (failure [else #f])
+                          (close-socket sock)))])
+                    (set! connection #f)
+                    (set! tls-session #f)
+                    (set! sock #f))))
+              (define pending-update
+                (lambda (resource event*)
+                  (net-operation-pending
+                   (if resource (list (make-poll-target resource event*)) '())
+                   deadline-ms)))
+              (define yield-update
+                (lambda ()
+                  (net-operation-pending '() (current-time-ms))))
+              (define check-deadline!
+                (lambda ()
+                  (when (and deadline-ms (fx>= (current-time-ms) deadline-ms))
+                    (raise-http-timeout who "HTTP request timed out" current-request))))
+              (define transport-write
+                (lambda (bv start)
+                  (if tls-session
+                      (tls-write/nonblocking tls-session bv start (bytevector-length bv))
+                      (socket-send/nonblocking sock bv start (bytevector-length bv)))))
+              (define transport-read
+                (lambda ()
+                  (if tls-session
+                      (tls-read/nonblocking tls-session 65536)
+                      (socket-recv/nonblocking sock 65536))))
+              (define reset-request!
+                (lambda (next-request)
+                  (release-transport!)
+                  (set! owned? #t)
+                  (set! current-request next-request)
+                  (set! phase 'resolve)
+                  (set! connect-operation #f)
+                  (set! tls-operation #f)
+                  (set! request-headers '())
+                  (set! head (make-bytevector 0 0))
+                  (set! body (make-bytevector 0 0))
+                  (set! write-offset 0)
+                  (set! input (make-bytevector 0 0))
+                  (set! status #f)
+                  (set! reason "")
+                  (set! response-headers '())
+                  (set! body-start 0)))
+              (define complete-response
+                (lambda (response)
+                  (let ([next-request
+                         (and (http-client-follow-redirects? client)
+                              (fx> redirects-left 0)
+                              (redirect-status? (http-response-status response))
+                              (redirect-request current-request response))])
+                    (if next-request
+                        (begin
+                          (set! redirects-left (fx1- redirects-left))
+                          (reset-request! next-request)
+                          (yield-update))
+                        (begin
+                          (when (reusable-response? request-headers response
+                                                    (http-request-method current-request))
+                            (unless connection
+                              (set! connection
+                                    (make-http-connection*
+                                     who sock tls-session
+                                     (and tls-session #t) deadline-ms)))
+                            (cache-http-connection!
+                             client (request-origin-key current-request) connection)
+                            (set! owned? #f))
+                          (net-operation-completed (finish response)))))))
+              (define read-pending
+                (lambda (allow-io?)
+                  (if (not allow-io?)
+                      (pending-update sock '(read error hup invalid))
+                      (let ([answer (transport-read)])
+                        (cond
+                         [(net-would-block? answer)
+                          (pending-update (net-would-block-resource answer)
+                                          (net-would-block-events answer))]
+                         [(eof-object? answer)
+                          (advance #f)]
+                         [else
+                          (set! input (append-http-bytevectors input answer))
+                          (advance #f)])))))
+              (define advance
+                (lambda (allow-io?)
+                  (check-deadline!)
+                  (case phase
+                    [(resolve)
+                     (let ([cached (take-http-connection client current-request deadline-ms)])
+                       (if cached
+                           (begin
+                             (set! connection cached)
+                             (set! sock (http-connection-socket cached))
+                             (set! tls-session (http-connection-tls-session cached))
+                             (set! request-headers
+                                   (merge-request-headers current-request client))
+                             (set! head
+                                   (serialize-http-request-head current-request request-headers))
+                             (set! body (body->bytevector (http-request-body current-request)))
+                             (set! phase 'write-head)
+                             (yield-update))
+                           (let* ([u (http-request-uri current-request)]
+                                  [host (or (uri-host u) "localhost")]
+                                  [port (default-port-for-uri who u)]
+                                  [address
+                                   (or (resolve-address host port #f 'stream)
+                                       (raise-net-error
+                                        who 'http "failed to resolve HTTP endpoint" u))])
+                             (set! sock
+                                   (open-socket (socket-address-family address) 'stream))
+                             (socket-set-blocking! sock #f)
+                             (set! connect-operation
+                                   (socket-connect/nonblocking
+                                    sock address
+                                    (remaining-timeout-ms deadline-ms)))
+                             (set! phase 'connect)
+                             (yield-update))))]
+                    [(connect)
+                     (net-operation-step! connect-operation)
+                     (case (net-operation-state connect-operation)
+                       [(pending)
+                        (net-operation-pending
+                         (net-operation-poll-targets connect-operation)
+                         deadline-ms)]
+                       [(failed) (raise (net-operation-condition connect-operation))]
+                       [(completed)
+                        (if (string=? (uri-scheme (http-request-uri current-request)) "https")
+                            (begin
+                              (set! tls-operation
+                                    (tls-connect/nonblocking
+                                     (or (http-client-tls-context client)
+                                         (make-tls-context 'client))
+                                     sock
+                                     (uri-host (http-request-uri current-request))
+                                     (remaining-timeout-ms deadline-ms)))
+                              (set! phase 'tls-handshake)
+                              (yield-update))
+                            (begin
+                              (set! request-headers
+                                    (merge-request-headers current-request client))
+                              (set! head
+                                    (serialize-http-request-head
+                                     current-request request-headers))
+                              (set! body
+                                    (body->bytevector (http-request-body current-request)))
+                              (set! phase 'write-head)
+                              (yield-update)))])]
+                    [(tls-handshake)
+                     (net-operation-step! tls-operation)
+                     (case (net-operation-state tls-operation)
+                       [(pending)
+                        (net-operation-pending
+                         (net-operation-poll-targets tls-operation) deadline-ms)]
+                       [(failed) (raise (net-operation-condition tls-operation))]
+                       [(completed)
+                        (set! tls-session (net-operation-result tls-operation))
+                        (set! request-headers
+                              (merge-request-headers current-request client))
+                        (set! head
+                              (serialize-http-request-head current-request request-headers))
+                        (set! body (body->bytevector (http-request-body current-request)))
+                        (set! phase 'write-head)
+                        (yield-update)])]
+                    [(write-head write-body)
+                     (let ([bytes (if (eq? phase 'write-head) head body)])
+                       (cond
+                        [(fx= write-offset (bytevector-length bytes))
+                         (set! write-offset 0)
+                         (if (eq? phase 'write-head)
+                             (begin
+                               (set! phase 'write-body)
+                               (pending-update sock '(write error hup invalid)))
+                             (begin
+                               (set! phase 'read-status)
+                               (pending-update sock '(read error hup invalid))))]
+                        [(not allow-io?)
+                         (pending-update sock '(write error hup invalid))]
+                        [else
+                         (let ([answer (transport-write bytes write-offset)])
+                           (if (net-would-block? answer)
+                               (pending-update (net-would-block-resource answer)
+                                               (net-would-block-events answer))
+                               (begin
+                                 (set! write-offset (fx+ write-offset answer))
+                                 (advance #f))))]))]
+                    [(read-status)
+                     (let ([line-end (bytevector-find-crlf input 0)])
+                       (if line-end
+                           (begin
+                             (let-values ([(parsed-status parsed-reason)
+                                           (parse-response-line
+                                            who
+                                            (utf8->string
+                                             (bytevector-slice input 0 line-end)))])
+                               (set! status parsed-status)
+                               (set! reason parsed-reason))
+                             (set! body-start (fx+ line-end 2))
+                             (set! phase 'read-headers)
+                             (advance allow-io?))
+                           (read-pending allow-io?)))]
+                    [(read-headers)
+                     (let ([header-end (bytevector-find-header-end input body-start)])
+                       (if header-end
+                           (begin
+                             (set! response-headers
+                                   (parse-buffered-headers
+                                    who input body-start (fx+ header-end 2)))
+                             (set! body-start (fx+ header-end 4))
+                             (set! phase 'read-body)
+                             (advance allow-io?))
+                           (read-pending allow-io?)))]
+                    [(read-body)
+                     (let ([method (http-request-method current-request)]
+                           [content-length (response-body-length response-headers)])
+                       (cond
+                        [(or (string=? method "HEAD") (= status 204) (= status 304))
+                         (complete-response
+                          (make-http-response status reason response-headers #f))]
+                        [(chunked-transfer? response-headers)
+                         (let-values ([(done? parsed-body consumed)
+                                       (parse-buffered-chunked-body who input body-start)])
+                           (if done?
+                               (complete-response
+                                (make-http-response
+                                 status reason response-headers parsed-body))
+                               (read-pending allow-io?)))]
+                        [content-length
+                         (if (fx>= (fx- (bytevector-length input) body-start)
+                                  content-length)
+                             (complete-response
+                              (make-http-response
+                               status reason response-headers
+                               (bytevector-slice
+                                input body-start (fx+ body-start content-length))))
+                             (read-pending allow-io?))]
+                        [else
+                         (if allow-io?
+                             (let ([answer (transport-read)])
+                               (cond
+                                [(net-would-block? answer)
+                                 (pending-update
+                                  (net-would-block-resource answer)
+                                  (net-would-block-events answer))]
+                                [(eof-object? answer)
+                                 (complete-response
+                                  (make-http-response
+                                   status reason response-headers
+                                   (bytevector-slice
+                                    input body-start (bytevector-length input))))]
+                                [else
+                                 (set! input (append-http-bytevectors input answer))
+                                 (pending-update sock '(read error hup invalid))]))
+                             (pending-update sock '(read error hup invalid)))]))]
+                    [else (assert-unreachable)])))
+              (set! operation
+                    (make-net-operation
+                     kind
+                     (lambda ()
+                       (guard (failure [else (net-operation-failed failure)])
+                         (advance #t)))
+                     release-transport!
+                     (lambda ()
+                       (release-transport!)
+                       (http-client-pending-set! client #f))))
               (http-client-pending-set! client operation)
               operation)))))
 
@@ -1043,6 +1424,224 @@
         (lambda ()
           (http-connection-close conn)))))
 
+  (define serialize-http-response
+    (lambda (response)
+      (let-values ([(port get) (open-bytevector-output-port)])
+        (write-response-port port response)
+        (get))))
+
+  (define make-incremental-server-operation
+    (lambda (who server sock)
+      (socket-set-blocking! sock #f)
+      (let ([tls-session #f]
+            [tls-operation #f]
+            [phase (if (http-server-tls-context server) 'tls-handshake 'read-request)]
+            [deadline-ms (+ (current-time-ms) http-default-timeout-ms)]
+            [input (make-bytevector 0 0)]
+            [method #f]
+            [target #f]
+            [request-headers '()]
+            [body-start 0]
+            [request-stop 0]
+            [response-bytes (make-bytevector 0 0)]
+            [write-offset 0]
+            [close-after-write? #f])
+        (define release!
+          (lambda ()
+            (when (and tls-operation
+                       (eq? 'pending (net-operation-state tls-operation)))
+              (net-operation-cancel! tls-operation))
+            (when tls-session
+              (guard (failure [else #f])
+                (close-tls-session tls-session))
+              (set! tls-session #f))
+            (guard (failure [else #f])
+              (close-socket sock))))
+        (define pending-update
+          (lambda (event*)
+            (net-operation-pending
+             (list (make-poll-target sock event*)) deadline-ms)))
+        (define yield-update
+          (lambda ()
+            (net-operation-pending '() (current-time-ms))))
+        (define transport-read
+          (lambda ()
+            (if tls-session
+                (tls-read/nonblocking tls-session 65536)
+                (socket-recv/nonblocking sock 65536))))
+        (define transport-write
+          (lambda ()
+            (if tls-session
+                (tls-write/nonblocking
+                 tls-session response-bytes write-offset
+                 (bytevector-length response-bytes))
+                (socket-send/nonblocking
+                 sock response-bytes write-offset
+                 (bytevector-length response-bytes)))))
+        (define read-more
+          (lambda (allow-io? eof-allowed?)
+            (if (not allow-io?)
+                (pending-update '(read error hup invalid))
+                (let ([answer (transport-read)])
+                  (cond
+                   [(net-would-block? answer)
+                    (net-operation-pending
+                     (list
+                      (make-poll-target
+                       (net-would-block-resource answer)
+                       (net-would-block-events answer)))
+                     deadline-ms)]
+                   [(eof-object? answer)
+                    (if eof-allowed?
+                        (net-operation-completed #t)
+                        (raise-net-error
+                         who 'http "unexpected EOF while reading HTTP request"))]
+                   [else
+                    (set! input (append-http-bytevectors input answer))
+                    (advance #f)])))))
+        (define request-uri
+          (lambda ()
+            (if (string-contains? target "://")
+                (normalize-http-uri who target)
+                (normalize-http-uri
+                 who
+                 (string-append
+                  (if tls-session "https://" "http://")
+                  (or (http-header-ref request-headers "Host" #f) "localhost")
+                  target)))))
+        (define prepare-response!
+          (lambda (request)
+            (let* ([handler (or (lookup-handler server request) default-handler)]
+                   [response (handler request)])
+              (unless (http-response? response)
+                (errorf who "HTTP handler must return an HTTP response, given ~s"
+                        response))
+              (let-values ([(close? prepared)
+                            (server-prepare-response request response)])
+                (set! close-after-write? close?)
+                (set! response-bytes (serialize-http-response prepared))
+                (set! write-offset 0)
+                (set! phase 'write-response)
+                (pending-update '(write error hup invalid))))))
+        (define finish-request!
+          (lambda (body)
+            (let ([request (make-http-request method (request-uri) request-headers body)])
+              (set! input
+                    (bytevector-slice input request-stop (bytevector-length input)))
+              (prepare-response! request))))
+        (define reset-for-next-request!
+          (lambda ()
+            (set! deadline-ms (+ (current-time-ms) http-default-timeout-ms))
+            (set! method #f)
+            (set! target #f)
+            (set! request-headers '())
+            (set! body-start 0)
+            (set! request-stop 0)
+            (set! response-bytes (make-bytevector 0 0))
+            (set! write-offset 0)
+            (set! close-after-write? #f)
+            (set! phase 'read-request)))
+        (define advance
+          (lambda (allow-io?)
+            (when (fx>= (current-time-ms) deadline-ms)
+              (raise-http-timeout who "HTTP connection timed out" sock))
+            (case phase
+              [(tls-handshake)
+               (unless tls-operation
+                 (set! tls-operation
+                       (tls-accept/nonblocking
+                        (http-server-tls-context server)
+                        sock
+                        http-default-timeout-ms)))
+               (net-operation-step! tls-operation)
+               (case (net-operation-state tls-operation)
+                 [(pending)
+                  (net-operation-pending
+                   (net-operation-poll-targets tls-operation) deadline-ms)]
+                 [(failed) (raise (net-operation-condition tls-operation))]
+                 [(completed)
+                  (set! tls-session (net-operation-result tls-operation))
+                  (set! phase 'read-request)
+                  (yield-update)])]
+              [(read-request)
+               (let ([line-end (bytevector-find-crlf input 0)])
+                 (if line-end
+                     (begin
+                       (let-values ([(parsed-method parsed-target version)
+                                     (parse-request-line
+                                      who
+                                      (utf8->string
+                                       (bytevector-slice input 0 line-end)))])
+                         (set! method parsed-method)
+                         (set! target parsed-target))
+                       (set! body-start (fx+ line-end 2))
+                       (set! phase 'read-headers)
+                       (advance allow-io?))
+                     (read-more allow-io? #t)))]
+              [(read-headers)
+               (let ([header-end (bytevector-find-header-end input body-start)])
+                 (if header-end
+                     (begin
+                       (set! request-headers
+                             (parse-buffered-headers
+                              who input body-start (fx+ header-end 2)))
+                       (set! body-start (fx+ header-end 4))
+                       (set! phase 'read-body)
+                       (advance allow-io?))
+                     (read-more allow-io? #f)))]
+              [(read-body)
+               (let ([content-length (response-body-length request-headers)])
+                 (cond
+                  [(chunked-transfer? request-headers)
+                   (let-values ([(done? body consumed)
+                                 (parse-buffered-chunked-body who input body-start)])
+                     (if done?
+                         (begin
+                           (set! request-stop consumed)
+                           (finish-request! body))
+                         (read-more allow-io? #f)))]
+                  [content-length
+                   (if (fx>= (fx- (bytevector-length input) body-start) content-length)
+                       (begin
+                         (set! request-stop (fx+ body-start content-length))
+                         (finish-request!
+                          (if (fx= content-length 0)
+                              #f
+                              (bytevector-slice input body-start request-stop))))
+                       (read-more allow-io? #f))]
+                  [else
+                   (set! request-stop body-start)
+                   (finish-request! #f)]))]
+              [(write-response)
+               (cond
+                [(fx= write-offset (bytevector-length response-bytes))
+                 (if close-after-write?
+                     (net-operation-completed #t)
+                     (begin
+                       (reset-for-next-request!)
+                       (advance #f)))]
+                [(not allow-io?) (pending-update '(write error hup invalid))]
+                [else
+                 (let ([answer (transport-write)])
+                   (if (net-would-block? answer)
+                       (net-operation-pending
+                        (list
+                         (make-poll-target
+                          (net-would-block-resource answer)
+                          (net-would-block-events answer)))
+                        deadline-ms)
+                       (begin
+                         (set! write-offset (fx+ write-offset answer))
+                         (advance #f))))])]
+              [else (assert-unreachable)])))
+        (make-net-operation
+         'http-server-connection
+         (lambda ()
+           (guard (failure [else (net-operation-failed failure)])
+             (advance #t)))
+         release!
+         release!))))
+
   ;;===----------------------------------------------------------------------===
   ;; Data Model API
   ;;===----------------------------------------------------------------------===
@@ -1189,7 +1788,9 @@ The `http-set-timeout!` procedure records a client timeout value in milliseconds
               timeout-ms)))
 
   #|proc:http-cancel-pending!
-The `http-cancel-pending!` procedure cancels and discards the currently pending non-blocking HTTP operation on a client, if any.
+The `http-cancel-pending!` procedure cancels the pending request on `client`, if any.
+The `client` parameter is an open HTTP client.
+The return value is `client`.
 |#
   (define-who http-cancel-pending!
     (lambda (client)
@@ -1209,14 +1810,7 @@ The `http-send` procedure sends an HTTP request with a configured client and ret
               (ensure-client-open who client)
               (net-operation-wait
                (http-transfer/nonblocking
-                who client 'http-send (request-key request)
-                (lambda (pending)
-                  (http-send* who
-                              client
-                              request
-                              5
-                              (timeout->deadline-ms
-                               (http-client-timeout-ms client)))))))))
+                who client 'http-send request (lambda (response) response))))))
 
   #|proc:http-send/nonblocking
 The `http-send/nonblocking` procedure constructs an HTTP request operation.
@@ -1231,15 +1825,8 @@ The return value is a `net-operation` whose successful result is an HTTP respons
                who
                client
                'http-send
-               (request-key request)
-               (lambda (pending)
-                 (http-send* who
-                             client
-                             request
-                             5
-                             (timeout->deadline-ms
-                              (http-client-timeout-ms client))
-                             pending))))))
+               request
+               (lambda (response) response)))))
 
   #|proc:http-request
 The `http-request` procedure sends a one-shot HTTP request without manually managing a client object.
@@ -1277,15 +1864,8 @@ The return value is a `net-operation` whose successful result is an HTTP respons
                  who
                   client
                   'http-request
-                  (request-key request)
-                  (lambda (pending)
-                    (http-send* who
-                                client
-                                request
-                                5
-                                (timeout->deadline-ms
-                                 (http-client-timeout-ms client))
-                                pending)))))]))
+                  request
+                  (lambda (response) response))))]))
 
   (define make-http-verb
     (lambda (method)
@@ -1359,19 +1939,11 @@ The return value is a `net-operation` whose successful result is an HTTP respons
                who
                client
                'http-download
-               (list (if (uri? uri) (uri->string uri) uri) path)
-               (lambda (pending)
-                 (let ([response
-                        (http-send* who
-                                    client
-                                    (make-http-request 'get uri '() #f)
-                                    5
-                                    (timeout->deadline-ms
-                                     (http-client-timeout-ms client))
-                                    pending)])
+               (make-http-request 'get uri '() #f)
+               (lambda (response)
                    (when (bytevector? (http-response-body response))
                      (write-u8vec! path (http-response-body response)))
-                   response))))))
+                   response)))))
 
   #|proc:http-upload
 The `http-upload` procedure uploads a file as a PUT request body and returns the HTTP response.
@@ -1405,19 +1977,12 @@ The return value is a `net-operation` whose successful result is an HTTP respons
                who
                client
                'http-upload
-               (list (if (uri? uri) (uri->string uri) uri) path)
-               (lambda (pending)
-                 (http-send* who
-                             client
-                             (make-http-request
-                              'put
-                              uri
-                              '(("Content-Type" . "application/octet-stream"))
-                              (read-u8vec path))
-                             5
-                             (timeout->deadline-ms
-                              (http-client-timeout-ms client))
-                             pending))))))
+               (make-http-request
+                'put
+                uri
+                '(("Content-Type" . "application/octet-stream"))
+                (read-u8vec path))
+               (lambda (response) response)))))
 
   ;;===----------------------------------------------------------------------===
   ;; Server API
@@ -1452,6 +2017,7 @@ The `http-listen` procedure opens a listening HTTP server on `host` and `port`, 
                                        (socket-local-address server-socket))
                                       tls-context
                                       (make-hashtable equal-hash equal?)
+                                      '()
                                       #f
                                       (make-mutex 'http-server-close)))))]))
 
@@ -1463,6 +2029,9 @@ The `http-server-close` procedure closes the listening socket owned by an HTTP s
       (pcheck ([http-server? server])
               (with-mutex (http-server-close-mutex server)
                 (unless (http-server-closed? server)
+                  (for-each net-operation-cancel!
+                            (http-server-operations server))
+                  (http-server-operations-set! server '())
                   (close-socket (http-server-socket server))
                   (http-server-closed?-set! server #t)))
               server)))
@@ -1640,17 +2209,59 @@ is closed. The `server` parameter is an HTTP server. The return value is `server
       (pcheck ([http-server? server])
               (let loop ()
                 (unless (http-server-closed? server)
-                  (let* ([ready (poll (list (make-poll-target
-                                              (http-server-socket server)
-                                              '(read error hup invalid)))
-                                      100)]
-                         [events (poll-target-ready-events (car ready))])
+                  (let* ([operation*
+                          (filter
+                           (lambda (operation)
+                             (eq? 'pending (net-operation-state operation)))
+                           (http-server-operations server))]
+                         [listener-target
+                          (make-poll-target
+                           (http-server-socket server)
+                           '(read error hup invalid))]
+                         [target*
+                          (cons listener-target
+                                (apply append
+                                       (map net-operation-poll-targets operation*)))]
+                         [ready (poll target* 100)]
+                         [listener-events
+                          (poll-target-ready-events (car ready))])
                     (when (and (not (http-server-closed? server))
-                               (memq 'read events))
-                      (guard (c [else
-                                 (unless (http-server-closed? server)
-                                   (raise c))])
-                        (http-serve server))))
+                               (memq 'read listener-events))
+                      (call-with-values
+                       (lambda ()
+                         (socket-accept/nonblocking (http-server-socket server)))
+                       (case-lambda
+                         [(sock peer)
+                          (let ([operation
+                                 (make-incremental-server-operation who server sock)])
+                            (net-operation-step! operation)
+                            (set! operation* (cons operation operation*)))]
+                         [(value) (void)])))
+                    (for-each
+                     (lambda (operation)
+                       (when (and
+                              (eq? 'pending (net-operation-state operation))
+                              (or
+                               (fx= (net-operation-remaining-timeout-ms operation) 0)
+                               (exists
+                                (lambda (target)
+                                  (let ([fd (poll-target-fd target)])
+                                    (exists
+                                     (lambda (ready-target)
+                                       (and
+                                        (= fd (poll-target-fd ready-target))
+                                        (pair?
+                                         (poll-target-ready-events ready-target))))
+                                     ready)))
+                                (net-operation-poll-targets operation))))
+                         (net-operation-step! operation)))
+                     operation*)
+                    (http-server-operations-set!
+                     server
+                     (filter
+                      (lambda (operation)
+                        (eq? 'pending (net-operation-state operation)))
+                      operation*)))
                   (loop)))
               server)))
   )

@@ -54,6 +54,12 @@
   (define ftp-default-timeout-ms 30000)
   (define ftp-temp-counter 0)
 
+  (define ftp-current-monotonic-ms
+    (lambda ()
+      (let ([time (current-time 'time-monotonic)])
+        (+ (* (time-second time) 1000)
+           (div (time-nanosecond time) 1000000)))))
+
   (define ensure-session-open
     (lambda (who session)
       (when (ftp-session-closed? session)
@@ -245,17 +251,99 @@
       (let ([pending (ftp-session-pending session)])
         (if (and pending (eq? 'pending (net-operation-state pending)))
             pending
-            (let ([operation
-                   (make-net-operation
-                    kind
-                    (lambda ()
-                      (guard (failure [else (net-operation-failed failure)])
-                        (net-operation-completed (thunk))))
-                    void
-                    (lambda ()
-                      (ftp-session-pending-set! session #f)))])
-              (ftp-session-pending-set! session operation)
-              operation)))))
+            (let* ([native-kind (case kind [(ftp-list) 0] [(ftp-download) 1] [(ftp-upload) 2])]
+                   [url (case kind
+                          [(ftp-list) (session-directory-url session (car args))]
+                          [(ftp-download) (session-path-url session (car args))]
+                          [(ftp-upload) (session-path-url session (cadr args))])]
+                   [path (case kind [(ftp-list) ""] [(ftp-download) (cadr args)]
+                               [(ftp-upload) (car args)])]
+                   [started (ffi-net-ftp-transfer-start
+                             native-kind url path
+                             (ftp-session-username session) (ftp-session-password session)
+                             (if (ftp-session-passive? session) 1 0)
+                             (ftp-session-timeout-ms session)
+                             (if (session-use-tls? session) 1 0)
+                             (if (ftp-session-verify-peer? session) 1 0)
+                             (if (ftp-session-verify-host? session) 1 0))]
+                   [handle (and (vector? started) (eq? (vector-ref started 0) 'ok)
+                                (vector-ref started 1))])
+              (when (or (not handle) (ffi-error? started))
+                (raise-net-error who 'ftp "failed to start FTP transfer" started))
+              (let ([target* '()]
+                    [timer-deadline-ms #f]
+                    [first-step? #t]
+                    [operation #f])
+                (set! operation
+                     (make-net-operation
+                      kind
+                      (lambda ()
+                        (guard (failure [else (net-operation-failed failure)])
+                          (let* ([now-ms (ftp-current-monotonic-ms)]
+                                 [ready-target*
+                                  (if (null? target*)
+                                      '()
+                                      (filter (lambda (target)
+                                                (pair? (poll-target-ready-events target)))
+                                              (poll/nonblocking target*)))]
+                                 [ready
+                                  (list->vector
+                                   (map (lambda (target)
+                                          (vector
+                                           (poll-target-fd target)
+                                           (fold-left
+                                            (lambda (mask event)
+                                              (fxlogor
+                                               mask
+                                               (case event
+                                                 [(read) (net-pollin)]
+                                                 [(write) (net-pollout)]
+                                                 [(error) (net-pollerr)]
+                                                 [(hup) (net-pollhup)]
+                                                 [(invalid) (net-pollnval)]
+                                                 [else 0])))
+                                            0
+                                            (poll-target-ready-events target))))
+                                        ready-target*))]
+                                 [timer-expired?
+                                  (or first-step?
+                                      (and timer-deadline-ms
+                                           (>= now-ms timer-deadline-ms)))]
+                                 [status
+                                  (ffi-net-ftp-transfer-step
+                                   handle ready (if timer-expired? 1 0))])
+                            (set! first-step? #f)
+                            (case (and (vector? status) (vector-ref status 0))
+                              [(pending)
+                               (set! target*
+                                     (map (lambda (target)
+                                            (let ([events (vector-ref target 1)])
+                                              (make-poll-target
+                                               (vector-ref target 0)
+                                               (append
+                                                (if (zero? (fxlogand events (net-pollin)))
+                                                    '() '(read))
+                                                (if (zero? (fxlogand events (net-pollout)))
+                                                    '() '(write))))))
+                                          (vector->list (vector-ref status 1))))
+                               (set! timer-deadline-ms
+                                     (and (vector-ref status 2)
+                                          (+ now-ms (vector-ref status 2))))
+                               (net-operation-pending
+                                target* timer-deadline-ms)]
+                              [(completed)
+                               (net-operation-completed
+                                (if (= native-kind 0)
+                                    (vector-ref status 1)
+                                    (if (= native-kind 1) (cadr args) (cadr args))))]
+                              [else (net-operation-failed
+                                     (make-net-error who 'ftp "FTP transfer failed" status))]))))
+                      (lambda () (ffi-net-ftp-transfer-cancel handle))
+                      (lambda ()
+                        (ffi-net-ftp-transfer-close handle)
+                        (ftp-session-pending-set! session #f))))
+                (ftp-session-pending-set! session operation)
+                operation))))))
 
   (define make-ftp-input-port
     (lambda (session remote-path)
@@ -410,7 +498,9 @@ The `ftp-set-tls-verification!` procedure sets FTPS certificate-chain and hostna
               session)))
 
   #|proc:ftp-cancel-pending!
-The `ftp-cancel-pending!` procedure marks the currently pending non-blocking FTP operation cancelled, if any. FTP nonblocking operations run libcurl work in a Scheme worker thread, so libcurl cleanup happens when that worker returns.
+The `ftp-cancel-pending!` procedure cancels the pending native transfer on `session`, if any.
+The `session` parameter is an open FTP session.
+The return value is `session`; partial downloads are removed during cancellation cleanup.
 |#
   (define-who ftp-cancel-pending!
     (lambda (session)
@@ -493,7 +583,8 @@ The `ftp-list` procedure returns the names of entries in a remote directory.
                                            (lambda () (ftp-list* who session path))))))]))
 
   #|proc:ftp-list/nonblocking
-The `ftp-list/nonblocking` procedure progresses a directory listing and returns `#f` while the listing is still pending. The libcurl operation runs in a Scheme worker thread; cancellation marks the pending operation cancelled and cleanup happens when the worker returns.
+The `ftp-list/nonblocking` procedure starts an incremental directory listing on `session` for
+`path`. It returns a network operation whose completed value is the raw listing bytevector.
 |#
   (define-who ftp-list/nonblocking
     (case-lambda
@@ -518,7 +609,8 @@ The `ftp-download` procedure downloads a remote file to a local pathname.
                (ftp-download/nonblocking session remote-path local-path)))))
 
   #|proc:ftp-download/nonblocking
-The `ftp-download/nonblocking` procedure progresses a file download and returns `#f` while the download is still pending. The libcurl operation runs in a Scheme worker thread; cancellation marks the pending operation cancelled and cleanup happens when the worker returns.
+The `ftp-download/nonblocking` procedure incrementally downloads `remote-path` from `session` to
+`local-path`. It returns a network operation whose completed value is `local-path`.
 |#
   (define-who ftp-download/nonblocking
     (lambda (session remote-path local-path)
@@ -553,7 +645,8 @@ The `ftp-upload` procedure uploads a local file to a remote pathname.
                (ftp-upload/nonblocking session local-path remote-path)))))
 
   #|proc:ftp-upload/nonblocking
-The `ftp-upload/nonblocking` procedure progresses a file upload and returns `#f` while the upload is still pending. The libcurl operation runs in a Scheme worker thread; cancellation marks the pending operation cancelled and cleanup happens when the worker returns.
+The `ftp-upload/nonblocking` procedure incrementally uploads `local-path` through `session` to
+`remote-path`. It returns a network operation whose completed value is `remote-path`.
 |#
   (define-who ftp-upload/nonblocking
     (lambda (session local-path remote-path)

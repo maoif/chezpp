@@ -42,6 +42,10 @@
           ffi-net-ftp-upload
           ffi-net-ftp-command
           ffi-net-ftp-rename
+          ffi-net-ftp-transfer-start
+          ffi-net-ftp-transfer-step
+          ffi-net-ftp-transfer-cancel
+          ffi-net-ftp-transfer-close
           ffi-net-ssh-open
           ffi-net-ssh-close
           ffi-net-ssh-session-fd
@@ -63,6 +67,10 @@
           ffi-net-scp-upload-file
           ffi-net-scp-download-directory
           ffi-net-scp-upload-directory
+          ffi-net-scp-transfer-start
+          ffi-net-scp-transfer-step
+          ffi-net-scp-transfer-cancel
+          ffi-net-scp-transfer-close
           ffi-net-sftp-list
           ffi-net-sftp-stat
           ffi-net-sftp-delete
@@ -92,6 +100,8 @@
           ffi-net-grpc-unary-poll
           ffi-net-grpc-unary-close
           ffi-net-grpc-stream-open
+          ffi-net-grpc-stream-open-start
+          ffi-net-grpc-stream-open-poll
           ffi-net-grpc-stream-send
           ffi-net-grpc-stream-recv
           ffi-net-grpc-stream-close-send
@@ -100,6 +110,8 @@
           ffi-net-grpc-server-request
           ffi-net-grpc-server-request-stream
           ffi-net-grpc-server-respond
+          ffi-net-grpc-driver-fd
+          ffi-net-grpc-driver-drain
           ffi-net-sftp-flag-read
           ffi-net-sftp-flag-write
           ffi-net-sftp-flag-read/write
@@ -222,6 +234,16 @@
     (foreign-procedure "chezpp_net_ftp_rename"
                        (string string string int int int int int string string)
                        scheme-object))
+  (define ffi-net-ftp-transfer-start
+    (foreign-procedure "chezpp_net_ftp_transfer_start"
+                       (int string string string string int int int int int)
+                       scheme-object))
+  (define ffi-net-ftp-transfer-step
+    (foreign-procedure "chezpp_net_ftp_transfer_step" (uptr scheme-object int) scheme-object))
+  (define ffi-net-ftp-transfer-cancel
+    (foreign-procedure "chezpp_net_ftp_transfer_cancel" (uptr) scheme-object))
+  (define ffi-net-ftp-transfer-close
+    (foreign-procedure "chezpp_net_ftp_transfer_close" (uptr) void))
   (define ffi-net-ssh-open
     (foreign-procedure "chezpp_net_ssh_open" (string int string int int) scheme-object))
   (define ffi-net-ssh-close
@@ -264,6 +286,14 @@
     (foreign-procedure "chezpp_net_scp_download_directory" (uptr string string int) scheme-object))
   (define ffi-net-scp-upload-directory
     (foreign-procedure "chezpp_net_scp_upload_directory" (uptr string string int) scheme-object))
+  (define ffi-net-scp-transfer-start
+    (foreign-procedure "chezpp_net_scp_transfer_start" (uptr int string string) scheme-object))
+  (define ffi-net-scp-transfer-step
+    (foreign-procedure "chezpp_net_scp_transfer_step" (uptr) scheme-object))
+  (define ffi-net-scp-transfer-cancel
+    (foreign-procedure "chezpp_net_scp_transfer_cancel" (uptr) scheme-object))
+  (define ffi-net-scp-transfer-close
+    (foreign-procedure "chezpp_net_scp_transfer_close" (uptr) void))
   (define ffi-net-sftp-list
     (foreign-procedure "chezpp_net_sftp_list" (uptr string) scheme-object))
   (define ffi-net-sftp-stat
@@ -328,6 +358,12 @@
     (foreign-procedure "chezpp_net_grpc_stream_open"
                        (uptr string int ptr int int scheme-object int)
                        scheme-object))
+  (define ffi-net-grpc-stream-open-start
+    (foreign-procedure "chezpp_net_grpc_stream_open_start"
+                       (uptr string int ptr int int scheme-object int)
+                       scheme-object))
+  (define ffi-net-grpc-stream-open-poll
+    (foreign-procedure "chezpp_net_grpc_stream_open_poll" (uptr) scheme-object))
   (define ffi-net-grpc-stream-send
     (foreign-procedure "chezpp_net_grpc_stream_send" (uptr ptr int int) scheme-object))
   (define ffi-net-grpc-stream-recv
@@ -348,6 +384,10 @@
     (foreign-procedure "chezpp_net_grpc_server_respond"
                        (uptr ptr int int int string scheme-object)
                        scheme-object))
+  (define ffi-net-grpc-driver-fd
+    (foreign-procedure "chezpp_net_grpc_driver_fd" () int))
+  (define ffi-net-grpc-driver-drain
+    (foreign-procedure "chezpp_net_grpc_driver_drain" () scheme-object))
   (define ffi-net-sftp-flag-read
     (foreign-procedure "chezpp_net_sftp_flag_read" () int))
   (define ffi-net-sftp-flag-write

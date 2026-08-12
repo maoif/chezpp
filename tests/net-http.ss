@@ -110,6 +110,32 @@
                      (close-socket client)
                      (close-socket listener)))))))))
 
+(define start-segmented-http-response-server
+  (lambda ()
+    (let ([listener (open-socket 'inet 'stream)])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values
+         port
+         (fork-thread
+          (lambda ()
+            (let-values ([(client peer) (socket-accept listener)])
+              (dynamic-wind
+                void
+                (lambda ()
+                  (for-each
+                   (lambda (part)
+                     (socket-send-all client (string->utf8 part))
+                     (milisleep 40))
+                   '("HTTP/1.1 200 OK\r\n"
+                     "Content-Length: 9\r\nConnection: close\r\n\r\n"
+                     "segmented")))
+                (lambda ()
+                  (close-socket client)
+                  (close-socket listener)))))))))))
+
 (define await-http-nonblocking
   (lambda (thunk)
     (net-operation-wait (thunk))))
@@ -778,7 +804,59 @@
              (lambda ()
                (http-close client)
                (stop)
-               (thread-join th)))))))
+             (thread-join th)))))))
+
+(mat net-http-segmented-readiness
+     (let-values ([(port th) (start-segmented-http-response-server)])
+       (let* ([client (http-open)]
+              [operation
+               (http-send/nonblocking
+                client
+                (make-http-request
+                 'get (format "http://127.0.0.1:~a/segments" port) '() #f))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let loop ([pending-cycles 0])
+               (net-operation-step! operation)
+               (case (net-operation-state operation)
+                 [(pending)
+                  (poll (net-operation-poll-targets operation)
+                        (net-operation-remaining-timeout-ms operation))
+                  (loop (+ pending-cycles 1))]
+                 [(completed)
+                  (let ([response (net-operation-result operation)])
+                    (and (>= pending-cycles 3)
+                         (= (http-response-status response) 200)
+                         (equal? (utf8->string (http-response-body response))
+                                 "segmented")))]
+                 [else #f])))
+           (lambda ()
+             (http-close client)
+             (thread-join th))))))
+
+(mat net-http-serve-loop-partial-client
+     (let* ([port (reserve-loopback-port)]
+            [server (http-listen "127.0.0.1" port)]
+            [slow (open-socket 'inet 'stream)])
+       (http-register-handler!
+        server 'get "/fast"
+        (lambda (request) (make-http-response 200 "OK" '() "fast")))
+       (let ([thread (fork-thread (lambda () (http-serve-loop server)))])
+         (dynamic-wind
+           (lambda ()
+             (socket-connect! slow
+                              (make-socket-address 'inet "127.0.0.1" port)))
+           (lambda ()
+             (socket-send-all slow (string->utf8 "GET /slow HTTP/1.1\r\nHost: local"))
+             (let ([response
+                    (http-get (format "http://127.0.0.1:~a/fast" port))])
+               (and (= (http-response-status response) 200)
+                    (equal? (utf8->string (http-response-body response)) "fast"))))
+           (lambda ()
+             (close-socket slow)
+             (http-server-close server)
+             (thread-join thread))))))
 
 (mat net-http-cancel
      (let-values ([(server port th stop)

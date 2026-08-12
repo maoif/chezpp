@@ -438,15 +438,16 @@
       (lambda (session)
         (let ([operation (ftp-list/nonblocking session ".")])
           (and (net-operation? operation)
-               (let loop ()
+               (let loop ([pending-cycles 0])
                  (net-operation-step! operation)
                  (case (net-operation-state operation)
                    [(completed)
-                    (bytevector? (net-operation-result operation))]
+                    (and (fx>= pending-cycles 2)
+                         (bytevector? (net-operation-result operation)))]
                    [(pending)
                     (poll (net-operation-poll-targets operation)
                           (net-operation-remaining-timeout-ms operation))
-                    (loop)]
+                    (loop (fx1+ pending-cycles))]
                    [else #f])))))))
 
 (mat net-ftp-cancel-pending
@@ -517,4 +518,29 @@
            (lambda ()
              (when (file-exists? upload-path)
                (delete-file upload-path #f))
+             (stop-server))))))
+
+(mat net-ftp-download-cancellation-policy
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
+             [download-path "/tmp/chezpp-net-ftp-cancelled-download.bin"])
+         (dynamic-wind
+           (lambda ()
+             (when (file-exists? download-path)
+               (delete-file download-path #f)))
+           (lambda ()
+             (and (ftp-login! session "user" "pass")
+                  (let ([operation
+                         (ftp-download/nonblocking
+                          session "/hello.txt" download-path)])
+                    (and (file-exists? download-path)
+                         (eq? (ftp-cancel-pending! session) session)
+                         (eq? (net-operation-state operation) 'cancelled)
+                         (not (file-exists? download-path))))
+                  (let ([entries (ftp-list session)])
+                    (and (member "hello.txt" entries) #t))))
+           (lambda ()
+             (ftp-close session)
+             (when (file-exists? download-path)
+               (delete-file download-path #f))
              (stop-server))))))

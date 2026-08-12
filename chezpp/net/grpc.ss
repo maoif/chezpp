@@ -81,7 +81,6 @@
             (mutable handle grpc-channel-handle grpc-channel-handle-set!)
             (immutable handlers grpc-channel-handlers)
             (mutable pending grpc-channel-pending grpc-channel-pending-set!)
-            (mutable pending-args grpc-channel-pending-args grpc-channel-pending-args-set!)
             (mutable closed? grpc-channel-closed? grpc-channel-closed?-set!)))
 
   (define ensure-success
@@ -341,6 +340,30 @@
        [(or (bytevector? x) (eof-object? x)) x]
        [else (ensure-success who x)])))
 
+  (define grpc-would-block?
+    (lambda (value)
+      (and (vector? value)
+           (fx>= (vector-length value) 1)
+           (eq? (vector-ref value 0) 'would-block))))
+
+  (define await-stream-attempt
+    (lambda (who kind thunk)
+      (net-operation-wait
+       (make-net-operation
+        kind
+        (lambda ()
+          (guard (failure [else (net-operation-failed failure)])
+            (let ([answer (thunk)])
+              (if (grpc-would-block? answer)
+                  (let ([fd (ffi-net-grpc-driver-fd)])
+                    (net-operation-pending
+                     (if (fx>= fd 0)
+                         (list (make-poll-target fd '(read)))
+                         '())
+                     #f))
+                  (net-operation-completed answer)))))
+        void))))
+
   (define accept-stream-request
     (lambda (who channel)
       (let ([ans (ensure-success who
@@ -353,20 +376,15 @@
                 (vector-ref ans 2)))))
 
   (define cancel-pending!
-    (lambda (who channel pending)
-      (net-operation-cancel! pending)
-      (grpc-channel-pending-set! channel #f)
-      (grpc-channel-pending-args-set! channel #f)
+    (lambda (who channel)
+      (for-each net-operation-cancel! (grpc-channel-pending channel))
+      (grpc-channel-pending-set! channel '())
       channel))
 
-  (define ensure-pending-matches
-    (lambda (who channel kind args)
-      (let ([pending (grpc-channel-pending channel)])
-        (unless (and (eq? (net-operation-kind pending) kind)
-                     (equal? (grpc-channel-pending-args channel) args))
-          (raise-net-error who 'grpc
-                           "another nonblocking gRPC operation is pending"
-                           pending)))))
+  (define remove-pending-operation!
+    (lambda (channel operation)
+      (grpc-channel-pending-set! channel
+                                 (remq operation (grpc-channel-pending channel)))))
 
   #|proc:grpc-request
 The `grpc-request` procedure constructs a gRPC request record.
@@ -428,8 +446,7 @@ Use `(grpc-open-channel endpoint)`, `(grpc-open-channel host port)`, or `(grpc-o
           ep
           (ensure-success who (ffi-net-grpc-channel-open ep))
           (make-handler-table)
-          #f
-          #f
+          '()
           #f))]
       [(host port)
        (let ([ep (endpoint-string who host port)])
@@ -438,8 +455,7 @@ Use `(grpc-open-channel endpoint)`, `(grpc-open-channel host port)`, or `(grpc-o
           ep
           (ensure-success who (ffi-net-grpc-channel-open ep))
           (make-handler-table)
-          #f
-          #f
+          '()
           #f))]
       [(role host port)
        (pcheck ([symbol? role] [string? host] [fixnum? port])
@@ -454,8 +470,7 @@ Use `(grpc-open-channel endpoint)`, `(grpc-open-channel host port)`, or `(grpc-o
                      (format "~a:~a" host (vector-ref ans 1))
                      (vector-ref ans 0)
                      (make-handler-table)
-                     #f
-                     #f
+                     '()
                      #f))]
                  [else
                   (errorf who "invalid gRPC role ~s" role)]))]))
@@ -467,9 +482,7 @@ The `grpc-close-channel` procedure closes a gRPC client channel or server listen
     (lambda (channel)
       (pcheck ([grpc-channel? channel])
               (unless (grpc-channel-closed? channel)
-                (let ([pending (grpc-channel-pending channel)])
-                  (when pending
-                    (cancel-pending! who channel pending)))
+                (cancel-pending! who channel)
                 (let ([handle (grpc-channel-handle channel)])
                   (when handle
                     (ensure-success who
@@ -481,14 +494,14 @@ The `grpc-close-channel` procedure closes a gRPC client channel or server listen
               channel)))
 
   #|proc:grpc-cancel-pending!
-The `grpc-cancel-pending!` procedure cancels and discards the currently pending non-blocking gRPC operation on a channel, if any.
+The `grpc-cancel-pending!` procedure cancels all pending operations owned by `channel`.
+The `channel` parameter is a gRPC client channel.
+The return value is `channel`.
 |#
   (define-who grpc-cancel-pending!
     (lambda (channel)
       (pcheck ([grpc-channel? channel])
-              (let ([pending (grpc-channel-pending channel)])
-                (when pending
-                  (cancel-pending! who channel pending)))
+              (cancel-pending! who channel)
               channel)))
 
   #|proc:grpc-register-service!
@@ -546,23 +559,51 @@ The `grpc-call` procedure performs a blocking unary gRPC call and returns a gRPC
              [payload* (normalize-payload who payload)]
              [metadata* (normalize-metadata who metadata)]
              [args (list method* payload* metadata* timeout-ms)]
-             [operation
+             [deadline-ms (+ (current-time-ms) timeout-ms)]
+             [handle #f]
+             [operation #f])
+        (set! operation
               (make-net-operation
                'grpc-unary
                (lambda ()
                  (guard (failure [else (net-operation-failed failure)])
-                   (net-operation-completed
-                    (call-unary who channel method* payload* metadata* timeout-ms))))
-               void
+                   (unless handle
+                     (let ([started (ffi-net-grpc-unary-start
+                                     (grpc-channel-handle channel) method* payload* 0
+                                     (if payload* (bytevector-length payload*) 0)
+                                     metadata* timeout-ms)])
+                       (if (ffi-error? started)
+                           (raise-net-error who 'grpc (ffi-error-message started) started)
+                           (set! handle started))))
+                   (let ([answer (ffi-net-grpc-unary-poll handle)])
+                     (if (not answer)
+                         (net-operation-pending
+                          (let ([fd (ffi-net-grpc-driver-fd)])
+                            (if (fx>= fd 0)
+                                (list (make-poll-target fd '(read)))
+                                '()))
+                          deadline-ms)
+                         (begin
+                           (set! handle #f)
+                           (net-operation-completed (maybe-response-from-ffi who answer)))))))
                (lambda ()
-                 (grpc-channel-pending-set! channel #f)
-                 (grpc-channel-pending-args-set! channel #f)))])
-        (grpc-channel-pending-set! channel operation)
-        (grpc-channel-pending-args-set! channel args)
+                 (when handle
+                   (ffi-net-grpc-unary-close handle)
+                   (set! handle #f)))
+               (lambda ()
+                 (when handle
+                   (ffi-net-grpc-unary-close handle)
+                   (set! handle #f))
+                 (remove-pending-operation! channel operation))))
+        (grpc-channel-pending-set! channel
+                                   (cons operation (grpc-channel-pending channel)))
         operation)))
 
   #|proc:grpc-call/nonblocking
-The `grpc-call/nonblocking` procedure progresses a unary gRPC call without blocking and returns `#f` while the response is pending.
+The `grpc-call/nonblocking` procedure starts a unary call on `channel` for `method`.
+The `payload` parameter is a bytevector, string, or `#f` request body.
+The optional `metadata` parameter is an alist, and `timeout-ms` is the call timeout.
+The return value is a network operation whose result is a gRPC response.
 |#
   (define-who grpc-call/nonblocking
     (case-lambda
@@ -575,14 +616,7 @@ The `grpc-call/nonblocking` procedure progresses a unary gRPC call without block
                (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
-               (let* ([method* (method-name who method)]
-                      [payload* (normalize-payload who payload)]
-                      [metadata* (normalize-metadata who metadata)]
-                      [args (list method* payload* metadata* timeout-ms)])
-                 (if (grpc-channel-pending channel)
-                     (ensure-pending-matches who channel 'grpc-unary args)
-                     (start-pending-unary! who channel method payload metadata timeout-ms)))
-               (grpc-channel-pending channel))]))
+               (start-pending-unary! who channel method payload metadata timeout-ms))]))
 
   (define open-stream/nonblocking
     (lambda (who channel kind method shape payload metadata timeout-ms)
@@ -592,25 +626,52 @@ The `grpc-call/nonblocking` procedure progresses a unary gRPC call without block
              [payload* (normalize-payload who payload)]
              [metadata* (normalize-metadata who metadata)]
              [args (list kind method* payload* metadata* timeout-ms)]
-             [pending (grpc-channel-pending channel)])
-        (if pending
-            (begin
-              (ensure-pending-matches who channel kind args)
-              pending)
-            (let ([operation
+             [deadline-ms (+ (current-time-ms) timeout-ms)])
+        (let ([handle #f]
+              [operation #f])
+              (set! operation
                    (make-net-operation
                     kind
                     (lambda ()
                       (guard (failure [else (net-operation-failed failure)])
-                        (net-operation-completed
-                         (open-stream who channel method* shape payload* metadata* timeout-ms))))
-                    void
+                        (unless handle
+                          (let ([started
+                                 (ffi-net-grpc-stream-open-start
+                                  (grpc-channel-handle channel) method*
+                                  (stream-shape->int who shape) payload* 0
+                                  (if payload* (bytevector-length payload*) 0)
+                                  metadata* timeout-ms)])
+                            (if (ffi-error? started)
+                                (raise-net-error who 'grpc (ffi-error-message started) started)
+                                (set! handle started))))
+                        (let ([answer (ffi-net-grpc-stream-open-poll handle)])
+                          (cond
+                           [(not answer)
+                            (let ([fd (ffi-net-grpc-driver-fd)])
+                              (net-operation-pending
+                               (if (fx>= fd 0)
+                                   (list (make-poll-target fd '(read)))
+                                   '())
+                               deadline-ms))]
+                           [(ffi-error? answer)
+                            (net-operation-failed
+                             (make-net-error who 'grpc (ffi-error-message answer) answer))]
+                           [else
+                            (let ([stream (make-client-stream handle shape)])
+                              (set! handle #f)
+                              (net-operation-completed stream))]))))
                     (lambda ()
-                      (grpc-channel-pending-set! channel #f)
-                      (grpc-channel-pending-args-set! channel #f)))])
-              (grpc-channel-pending-set! channel operation)
-              (grpc-channel-pending-args-set! channel args)
-              operation)))))
+                      (when handle
+                        (ffi-net-grpc-stream-close handle)
+                        (set! handle #f)))
+                    (lambda ()
+                      (when handle
+                        (ffi-net-grpc-stream-close handle)
+                        (set! handle #f))
+                      (remove-pending-operation! channel operation))))
+          (grpc-channel-pending-set! channel
+                                     (cons operation (grpc-channel-pending channel)))
+          operation))))
 
   (define respond-to-request
     (lambda (who request response)
@@ -707,14 +768,17 @@ The `grpc-stream-send` procedure sends one message on a gRPC streaming call.
               (when (grpc-stream-send-closed? stream)
                 (raise-net-error who 'grpc "gRPC stream send side is closed" stream))
               (let ([payload* (normalize-payload who payload)])
-                (ensure-success who
-                                (ffi-net-grpc-stream-send
-                                 (grpc-stream-handle stream)
-                                 payload*
-                                 0
-                                 (if payload*
-                                     (bytevector-length payload*)
-                                     0)))
+                (ensure-success
+                 who
+                 (await-stream-attempt
+                  who
+                  'grpc-stream-send
+                  (lambda ()
+                    (ffi-net-grpc-stream-send
+                     (grpc-stream-handle stream)
+                     payload*
+                     0
+                     (if payload* (bytevector-length payload*) 0)))))
                 stream))))
 
   #|proc:grpc-stream-recv
@@ -726,9 +790,15 @@ The `grpc-stream-recv` procedure receives one message from a gRPC streaming call
               (ensure-stream-open who stream)
               (unless (stream-recv-allowed? stream)
                 (raise-net-error who 'grpc "gRPC stream does not support receiving" stream))
-              (let ([ans (stream-recv-result who
-                                            (ffi-net-grpc-stream-recv
-                                             (grpc-stream-handle stream)))])
+              (let ([ans
+                     (stream-recv-result
+                      who
+                      (await-stream-attempt
+                       who
+                       'grpc-stream-recv
+                       (lambda ()
+                         (ffi-net-grpc-stream-recv
+                          (grpc-stream-handle stream)))))])
                 (when (eof-object? ans)
                   (grpc-stream-recv-closed?-set! stream #t))
                 ans))))
@@ -743,9 +813,14 @@ The `grpc-stream-close-send` procedure closes the local send side of a gRPC stre
               (unless (stream-send-allowed? stream)
                 (raise-net-error who 'grpc "gRPC stream does not support sending" stream))
               (unless (grpc-stream-send-closed? stream)
-                (ensure-success who
-                                (ffi-net-grpc-stream-close-send
-                                 (grpc-stream-handle stream)))
+                (ensure-success
+                 who
+                 (await-stream-attempt
+                  who
+                  'grpc-stream-close-send
+                  (lambda ()
+                    (ffi-net-grpc-stream-close-send
+                     (grpc-stream-handle stream)))))
                 (grpc-stream-send-closed?-set! stream #t))
               stream)))
 
@@ -818,7 +893,9 @@ The `grpc-call/bidi-stream` procedure opens a blocking bidirectional gRPC stream
                 (grpc-call/bidi-stream/nonblocking channel method metadata timeout-ms)))]))
 
   #|proc:grpc-call/server-stream/nonblocking
-The `grpc-call/server-stream/nonblocking` procedure progresses opening a server-streaming gRPC call without blocking and returns `#f` until the stream is ready.
+The `grpc-call/server-stream/nonblocking` procedure starts a server-streaming call on `channel`.
+The `method`, `payload`, optional `metadata`, and `timeout-ms` parameters describe the call.
+The return value is a network operation whose result is a gRPC stream.
 |#
   (define-who grpc-call/server-stream/nonblocking
     (case-lambda
@@ -842,7 +919,9 @@ The `grpc-call/server-stream/nonblocking` procedure progresses opening a server-
                 timeout-ms))]))
 
   #|proc:grpc-call/client-stream/nonblocking
-The `grpc-call/client-stream/nonblocking` procedure progresses opening a client-streaming gRPC call without blocking and returns `#f` until the stream is ready.
+The `grpc-call/client-stream/nonblocking` procedure starts a client-streaming call on `channel`.
+The `method`, optional `metadata`, and `timeout-ms` parameters describe the call.
+The return value is a network operation whose result is a gRPC stream.
 |#
   (define-who grpc-call/client-stream/nonblocking
     (case-lambda
@@ -866,7 +945,9 @@ The `grpc-call/client-stream/nonblocking` procedure progresses opening a client-
                 timeout-ms))]))
 
   #|proc:grpc-call/bidi-stream/nonblocking
-The `grpc-call/bidi-stream/nonblocking` procedure progresses opening a bidirectional gRPC stream without blocking and returns `#f` until the stream is ready.
+The `grpc-call/bidi-stream/nonblocking` procedure starts a bidirectional call on `channel`.
+The `method`, optional `metadata`, and `timeout-ms` parameters describe the call.
+The return value is a network operation whose result is a gRPC stream.
 |#
   (define-who grpc-call/bidi-stream/nonblocking
     (case-lambda

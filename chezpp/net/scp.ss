@@ -33,6 +33,12 @@
 
   (define scp-default-timeout-ms 30000)
 
+  (define scp-current-monotonic-ms
+    (lambda ()
+      (let ([time (current-time 'time-monotonic)])
+        (+ (* (time-second time) 1000)
+           (quotient (time-nanosecond time) 1000000)))))
+
   (define ensure-success
     (lambda (who x)
       (cond
@@ -109,14 +115,44 @@
       (let ([pending (scp-session-pending session)])
         (if (and pending (eq? 'pending (net-operation-state pending)))
             pending
-            (let ([operation
-                   (make-net-operation
-                    kind
-                    (lambda ()
-                      (guard (failure [else (net-operation-failed failure)])
-                        (net-operation-completed (thunk))))
-                    void
-                    (lambda () (scp-session-pending-set! session #f)))])
+            (let* ([native? (memq kind '(scp-download scp-upload))]
+                   [deadline-ms
+                    (and native?
+                         (+ (scp-current-monotonic-ms) (caddr args)))]
+                   [handle (and native?
+                                (let ([started
+                                       (ffi-net-scp-transfer-start
+                                        (%ssh-session-handle (scp-session-ssh-session session))
+                                        (if (eq? kind 'scp-download) 0 1)
+                                        (if (eq? kind 'scp-download) (car args) (car args))
+                                        (if (eq? kind 'scp-download) (cadr args) (cadr args)))])
+                                  (if (ffi-error? started)
+                                      (raise-net-error who 'scp (ffi-error-message started) started)
+                                      (vector-ref started 1))))]
+                   [operation
+                    (make-net-operation
+                     kind
+                     (lambda ()
+                       (guard (failure [else (net-operation-failed failure)])
+                         (if native?
+                             (let ([status (ffi-net-scp-transfer-step handle)])
+                               (case (and (vector? status) (vector-ref status 0))
+                                 [(pending)
+                                  (let ([target (vector-ref status 1)])
+                                    (net-operation-pending
+                                     (list (make-poll-target
+                                            (vector-ref target 0)
+                                            (vector-ref target 1)))
+                                     deadline-ms))]
+                                 [(completed) (net-operation-completed
+                                               (if (eq? kind 'scp-download) (cadr args) (cadr args)))]
+                                 [else (net-operation-failed
+                                        (make-net-error who 'scp "SCP transfer failed" status))]))
+                             (net-operation-completed (thunk)))))
+                     (if native? (lambda () (ffi-net-scp-transfer-cancel handle)) void)
+                     (lambda ()
+                       (when native? (ffi-net-scp-transfer-close handle))
+                       (scp-session-pending-set! session #f)))])
               (scp-session-pending-set! session operation)
               operation)))))
 
@@ -219,7 +255,9 @@ The `scp-close` procedure closes an SCP session and, if it owns the wrapped SSH 
               session)))
 
   #|proc:scp-cancel-pending!
-The `scp-cancel-pending!` procedure cancels and discards the currently pending non-blocking SCP operation on a session, if any.
+The `scp-cancel-pending!` procedure cancels the pending transfer on `session`, if any.
+The `session` parameter is an open SCP session.
+The return value is `session`; partial downloads are removed during cleanup.
 |#
   (define-who scp-cancel-pending!
     (lambda (session)

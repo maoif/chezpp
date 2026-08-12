@@ -48,14 +48,19 @@ typedef struct {
   ftp_socket_entry *sockets;
   memory_buffer buffer;
   FILE *file;
-  char *value;
+  char *local_path;
   long timeout_ms;
   CURLcode result;
   ftp_transfer_kind kind;
   int added;
   int completed;
   int cancelled;
+  int download_succeeded;
 } ftp_transfer;
+
+static int ftp_socket_cb(CURL *easy, curl_socket_t s, int what, void *userp,
+                         void *socketp);
+static int ftp_timer_cb(CURLM *multi, long timeout_ms, void *userp);
 
 static const char *const curl_names[] = {"libcurl.so.4", NULL};
 static chezpp_optional_library curl_library =
@@ -93,6 +98,55 @@ static ptr make_error_status_message(const char *msg) {
 }
 
 static ptr make_errno_status(void) { return make_status("error", errno_str()); }
+
+static ptr make_handle_status(const char *tag, uptr handle) {
+  return make_status(tag, Sunsigned(handle));
+}
+
+static void ftp_socket_set(ftp_transfer *t, curl_socket_t fd, int action) {
+  ftp_socket_entry *p = t->sockets;
+  while (p != NULL && p->fd != fd) p = p->next;
+  if (action == CURL_POLL_REMOVE) {
+    ftp_socket_entry **q = &t->sockets;
+    while (*q != NULL) {
+      if ((*q)->fd == fd) {
+        ftp_socket_entry *dead = *q;
+        *q = dead->next;
+        free(dead);
+        return;
+      }
+      q = &(*q)->next;
+    }
+    return;
+  }
+  if (p == NULL) {
+    p = (ftp_socket_entry *)calloc(1, sizeof(*p));
+    if (p == NULL) return;
+    p->fd = fd;
+    p->next = t->sockets;
+    t->sockets = p;
+  }
+  p->action = action;
+}
+
+static size_t ftp_read_file_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
+  ftp_transfer *t = (ftp_transfer *)userdata;
+  return fread(ptr, size, nmemb, t->file);
+}
+
+static int ftp_socket_cb(CURL *easy, curl_socket_t s, int what, void *userp,
+                         void *socketp) {
+  (void)easy; (void)socketp;
+  ftp_socket_set((ftp_transfer *)userp, s, what);
+  return 0;
+}
+
+static int ftp_timer_cb(CURLM *multi, long timeout_ms, void *userp) {
+  ftp_transfer *t = (ftp_transfer *)userp;
+  (void)multi;
+  t->timeout_ms = timeout_ms;
+  return 0;
+}
 
 static void memory_buffer_init(memory_buffer *buf) {
   buf->data = NULL;
@@ -543,4 +597,203 @@ cleanup:
     free(rnto);
   p_curl_easy_cleanup(curl);
   return result;
+}
+
+static void ftp_transfer_release(ftp_transfer *t) {
+  ftp_socket_entry *p;
+  if (t == NULL) return;
+  if (t->added && t->multi != NULL && t->easy != NULL)
+    (void)p_curl_multi_remove_handle(t->multi, t->easy);
+  if (t->easy != NULL) p_curl_easy_cleanup(t->easy);
+  if (t->multi != NULL) (void)p_curl_multi_cleanup(t->multi);
+  if (t->file != NULL) fclose(t->file);
+  if (t->kind == FTP_TRANSFER_DOWNLOAD && !t->download_succeeded &&
+      t->local_path != NULL)
+    (void)unlink(t->local_path);
+  memory_buffer_free(&t->buffer);
+  if (t->local_path != NULL) free(t->local_path);
+  while (t->sockets != NULL) {
+    p = t->sockets;
+    t->sockets = p->next;
+    free(p);
+  }
+  free(t);
+}
+
+static ptr ftp_transfer_configure(ftp_transfer *t, const char *url, const char *path,
+                                  const char *user, const char *pass, int passive,
+                                  int timeout_ms, int use_tls, int verify_peer,
+                                  int verify_host) {
+  ptr out;
+  CURLcode rc;
+  long size;
+
+  out = apply_common_options(t->easy, url, user, pass, passive, timeout_ms, use_tls,
+                             verify_peer, verify_host);
+  if (out != Strue) return out;
+  if (t->kind == FTP_TRANSFER_LIST) {
+    rc = p_curl_easy_setopt(t->easy, CURLOPT_WRITEFUNCTION, write_memory_cb);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(t->easy, CURLOPT_WRITEDATA, &t->buffer);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(t->easy, CURLOPT_DIRLISTONLY, 1L);
+  } else if (t->kind == FTP_TRANSFER_DOWNLOAD) {
+    t->local_path = strdup(path);
+    if (t->local_path == NULL) return make_errno_status();
+    t->file = fopen(path, "wb");
+    if (t->file == NULL) return make_errno_status();
+    rc = p_curl_easy_setopt(t->easy, CURLOPT_WRITEDATA, t->file);
+  } else {
+    t->file = fopen(path, "rb");
+    if (t->file == NULL) return make_errno_status();
+    if (fseek(t->file, 0, SEEK_END) != 0 || (size = ftell(t->file)) < 0 ||
+        fseek(t->file, 0, SEEK_SET) != 0)
+      return make_errno_status();
+    rc = p_curl_easy_setopt(t->easy, CURLOPT_UPLOAD, 1L);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(t->easy, CURLOPT_READFUNCTION, ftp_read_file_cb);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(t->easy, CURLOPT_READDATA, t);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(t->easy, CURLOPT_INFILESIZE_LARGE, (curl_off_t)size);
+  }
+  return rc == CURLE_OK ? Strue : curl_error_status(rc);
+}
+
+ptr chezpp_net_ftp_transfer_start(int kind, const char *url, const char *path,
+                                  const char *user, const char *pass, int passive,
+                                  int timeout_ms, int use_tls, int verify_peer,
+                                  int verify_host) {
+  ftp_transfer *t;
+  ptr out;
+  CURLMcode mrc;
+
+  if (kind < FTP_TRANSFER_LIST || kind > FTP_TRANSFER_UPLOAD)
+    return make_error_status_message("invalid FTP transfer kind");
+  if (!ensure_curl_loaded())
+    return make_error_status_message(chezpp_optional_library_error(&curl_library));
+  t = (ftp_transfer *)calloc(1, sizeof(*t));
+  if (t == NULL) return make_errno_status();
+  t->kind = (ftp_transfer_kind)kind;
+  t->timeout_ms = -1;
+  memory_buffer_init(&t->buffer);
+  t->easy = p_curl_easy_init();
+  t->multi = p_curl_multi_init();
+  if (t->easy == NULL || t->multi == NULL) {
+    ftp_transfer_release(t);
+    return make_error_status_message("failed to initialize libcurl transfer");
+  }
+  out = ftp_transfer_configure(t, url, path, user, pass, passive, timeout_ms,
+                               use_tls, verify_peer, verify_host);
+  if (out != Strue) {
+    ftp_transfer_release(t);
+    return out;
+  }
+  mrc = p_curl_multi_setopt(t->multi, CURLMOPT_SOCKETFUNCTION, ftp_socket_cb);
+  if (mrc == CURLM_OK)
+    mrc = p_curl_multi_setopt(t->multi, CURLMOPT_SOCKETDATA, t);
+  if (mrc == CURLM_OK)
+    mrc = p_curl_multi_setopt(t->multi, CURLMOPT_TIMERFUNCTION, ftp_timer_cb);
+  if (mrc == CURLM_OK)
+    mrc = p_curl_multi_setopt(t->multi, CURLMOPT_TIMERDATA, t);
+  if (mrc == CURLM_OK)
+    mrc = p_curl_multi_add_handle(t->multi, t->easy);
+  if (mrc != CURLM_OK) {
+    out = make_error_status_message(p_curl_multi_strerror(mrc));
+    ftp_transfer_release(t);
+    return out;
+  }
+  t->added = 1;
+  return make_handle_status("ok", (uptr)t);
+}
+
+static ptr ftp_pending_status(ftp_transfer *t) {
+  ftp_socket_entry *p;
+  iptr count = 0;
+  iptr i = 0;
+  ptr targets;
+  ptr out = Smake_vector(3, Sfalse);
+  for (p = t->sockets; p != NULL; p = p->next) count++;
+  targets = Smake_vector(count, Sfalse);
+  for (p = t->sockets; p != NULL; p = p->next) {
+    ptr target = Smake_vector(2, Sfalse);
+    int events = 0;
+    if (p->action == CURL_POLL_IN || p->action == CURL_POLL_INOUT) events |= POLLIN;
+    if (p->action == CURL_POLL_OUT || p->action == CURL_POLL_INOUT) events |= POLLOUT;
+    Svector_set(target, 0, Sinteger((iptr)p->fd));
+    Svector_set(target, 1, Sinteger(events));
+    Svector_set(targets, i++, target);
+  }
+  Svector_set(out, 0, Sstring_to_symbol("pending"));
+  Svector_set(out, 1, targets);
+  Svector_set(out, 2, t->timeout_ms < 0 ? Sfalse : Sinteger(t->timeout_ms));
+  return out;
+}
+
+ptr chezpp_net_ftp_transfer_step(uptr handle, ptr ready, int timer_expired) {
+  ftp_transfer *t = (ftp_transfer *)handle;
+  CURLMcode mrc = CURLM_OK;
+  CURLMsg *msg;
+  int running = 0;
+  int queued = 0;
+  ptr value;
+
+  if (t == NULL || t->cancelled)
+    return make_error_status_message("FTP transfer is closed or cancelled");
+  if (t->completed) return make_error_status_message("FTP transfer is already complete");
+  if (!Svectorp(ready))
+    return make_error_status_message("FTP ready events must be a vector");
+  if (timer_expired) {
+    mrc = p_curl_multi_socket_action(t->multi, CURL_SOCKET_TIMEOUT, 0, &running);
+  }
+  for (iptr i = 0; i < Svector_length(ready) && mrc == CURLM_OK; i++) {
+    ptr event = Svector_ref(ready, i);
+    if (!Svectorp(event) || Svector_length(event) != 2 ||
+        !Sfixnump(Svector_ref(event, 0)) || !Sfixnump(Svector_ref(event, 1)))
+      return make_error_status_message("invalid FTP ready descriptor/event pair");
+    {
+      int events = (int)Sfixnum_value(Svector_ref(event, 1));
+      int action = 0;
+      if (events & POLLIN) action |= CURL_CSELECT_IN;
+      if (events & POLLOUT) action |= CURL_CSELECT_OUT;
+      if (events & (POLLERR | POLLHUP | POLLNVAL)) action |= CURL_CSELECT_ERR;
+      mrc = p_curl_multi_socket_action(
+          t->multi, (curl_socket_t)Sfixnum_value(Svector_ref(event, 0)), action, &running);
+    }
+  }
+  if (mrc != CURLM_OK)
+    return make_error_status_message(p_curl_multi_strerror(mrc));
+  while ((msg = p_curl_multi_info_read(t->multi, &queued)) != NULL) {
+    if (msg->msg == CURLMSG_DONE && msg->easy_handle == t->easy) {
+      t->completed = 1;
+      t->result = msg->data.result;
+      break;
+    }
+  }
+  if (!t->completed) return ftp_pending_status(t);
+  if (t->result != CURLE_OK) return curl_error_status(t->result);
+  if (t->kind == FTP_TRANSFER_DOWNLOAD) t->download_succeeded = 1;
+  if (t->kind == FTP_TRANSFER_LIST) {
+    value = Smake_bytevector((iptr)t->buffer.len, 0);
+    if (t->buffer.len > 0) memcpy(Sbytevector_data(value), t->buffer.data, t->buffer.len);
+  } else {
+    value = Strue;
+  }
+  return make_status("completed", value);
+}
+
+ptr chezpp_net_ftp_transfer_cancel(uptr handle) {
+  ftp_transfer *t = (ftp_transfer *)handle;
+  if (t == NULL) return Strue;
+  t->cancelled = 1;
+  if (t->added) {
+    (void)p_curl_easy_pause(t->easy, CURLPAUSE_ALL);
+    (void)p_curl_multi_remove_handle(t->multi, t->easy);
+    t->added = 0;
+  }
+  return Strue;
+}
+
+void chezpp_net_ftp_transfer_close(uptr handle) {
+  ftp_transfer_release((ftp_transfer *)handle);
 }
