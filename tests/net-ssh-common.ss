@@ -197,6 +197,28 @@
                  (lambda () (ssh-close session)))))))
         stop-server))))
 
+(define with-test-sftp-session
+  (lambda (procedure)
+    (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (with-env
+           "HOME" home
+           (lambda ()
+             (let ([ssh-session (ssh-open "127.0.0.1" port user)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (ssh-auth-publickey! ssh-session user)
+                   (let ([sftp-session (sftp-open ssh-session)])
+                     (dynamic-wind
+                       void
+                       (lambda () (procedure sftp-session remote-root))
+                       (lambda () (sftp-close sftp-session)))))
+                 (lambda () (ssh-close ssh-session)))))))
+        stop-server))))
+
 (define ssh-test-pty
   (lambda (session)
     (call-with-ssh-channel
@@ -398,13 +420,14 @@
   (lambda (sftp remote-root)
     (and
      (let ([entries (sftp-list sftp remote-root)])
-       (and (member "." entries)
-            (member ".." entries)
-            (member "hello.txt" entries)
-            (member "nested" entries)))
+       (let ([name* (map sftp-attributes-name entries)])
+         (and (member "." name*)
+              (member ".." name*)
+              (member "hello.txt" name*)
+              (member "nested" name*))))
      (let ([info (sftp-stat sftp (string-append remote-root "/hello.txt"))])
-       (and (eq? (cdr (assq 'type info)) 'regular)
-            (= (cdr (assq 'size info)) 10))))))
+       (and (eq? (sftp-attributes-type info) 'regular)
+            (= (sftp-attributes-size info) 10))))))
 
 (define sftp-test-read-apis
   (lambda (sftp remote-root)
@@ -612,13 +635,15 @@
                         (string-append remote-root "/renamed.txt"))
           sftp)
      (let ([entries (sftp-list sftp remote-root)])
-       (and (member "renamed.txt" entries)
-            (member "tmpdir" entries)))
+       (let ([name* (map sftp-attributes-name entries)])
+         (and (member "renamed.txt" name*)
+              (member "tmpdir" name*))))
      (eq? (sftp-delete! sftp (string-append remote-root "/renamed.txt")) sftp)
      (eq? (sftp-rmdir! sftp (string-append remote-root "/tmpdir")) sftp)
      (let ([entries (sftp-list sftp remote-root)])
-       (and (not (member "renamed.txt" entries))
-            (not (member "tmpdir" entries)))))))
+       (let ([name* (map sftp-attributes-name entries)])
+         (and (not (member "renamed.txt" name*))
+              (not (member "tmpdir" name*))))))))
 
 (define sftp-test-timeouts
   (lambda (session sftp remote-root timeout?)

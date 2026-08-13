@@ -88,6 +88,15 @@
           ffi-net-scp-transfer-close
           ffi-net-sftp-list
           ffi-net-sftp-stat
+          ffi-net-sftp-open-directory
+          ffi-net-sftp-read-directory
+          ffi-net-sftp-close-directory
+          ffi-net-sftp-chmod
+          ffi-net-sftp-chown
+          ffi-net-sftp-utimes
+          ffi-net-sftp-symlink
+          ffi-net-sftp-readlink
+          ffi-net-sftp-seek
           ffi-net-sftp-delete
           ffi-net-sftp-mkdir
           ffi-net-sftp-rmdir
@@ -351,6 +360,25 @@
     (foreign-procedure "chezpp_net_sftp_list" (uptr string) scheme-object))
   (define ffi-net-sftp-stat
     (foreign-procedure "chezpp_net_sftp_stat" (uptr string) scheme-object))
+  (define ffi-net-sftp-open-directory
+    (foreign-procedure "chezpp_net_sftp_open_directory" (uptr string) scheme-object))
+  (define ffi-net-sftp-read-directory
+    (foreign-procedure "chezpp_net_sftp_read_directory" (uptr) scheme-object))
+  (define ffi-net-sftp-close-directory
+    (foreign-procedure "chezpp_net_sftp_close_directory" (uptr) scheme-object))
+  (define ffi-net-sftp-chmod
+    (foreign-procedure "chezpp_net_sftp_chmod" (uptr string unsigned) scheme-object))
+  (define ffi-net-sftp-chown
+    (foreign-procedure "chezpp_net_sftp_chown" (uptr string unsigned unsigned) scheme-object))
+  (define ffi-net-sftp-utimes
+    (foreign-procedure "chezpp_net_sftp_utimes" (uptr string integer-64 integer-64)
+                       scheme-object))
+  (define ffi-net-sftp-symlink
+    (foreign-procedure "chezpp_net_sftp_symlink" (uptr string string) scheme-object))
+  (define ffi-net-sftp-readlink
+    (foreign-procedure "chezpp_net_sftp_readlink" (uptr string) scheme-object))
+  (define ffi-net-sftp-seek
+    (foreign-procedure "chezpp_net_sftp_seek" (uptr unsigned-64) scheme-object))
   (define ffi-net-sftp-delete
     (foreign-procedure "chezpp_net_sftp_delete" (uptr string) scheme-object))
   (define ffi-net-sftp-mkdir

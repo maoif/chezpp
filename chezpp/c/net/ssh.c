@@ -32,6 +32,11 @@ typedef struct {
 } chezpp_sftp_file;
 
 typedef struct {
+  sftp_dir dir;
+  chezpp_sftp_session *owner;
+} chezpp_sftp_directory;
+
+typedef struct {
   chezpp_ssh_session *owner;
   ssh_channel channel;
   int fd;
@@ -100,6 +105,7 @@ typedef int (*ssh_channel_is_eof_fn)(ssh_channel);
 typedef socket_t (*ssh_get_fd_fn)(ssh_session);
 typedef int (*ssh_get_poll_flags_fn)(ssh_session);
 typedef void (*ssh_set_blocking_fn)(ssh_session, int);
+typedef void (*ssh_string_free_char_fn)(char *);
 typedef sftp_session (*sftp_new_fn)(ssh_session);
 typedef int (*sftp_init_fn)(sftp_session);
 typedef void (*sftp_free_fn)(sftp_session);
@@ -109,6 +115,12 @@ typedef sftp_attributes (*sftp_readdir_fn)(sftp_session, sftp_dir);
 typedef int (*sftp_dir_eof_fn)(sftp_dir);
 typedef int (*sftp_closedir_fn)(sftp_dir);
 typedef sftp_attributes (*sftp_stat_fn)(sftp_session, const char *);
+typedef int (*sftp_chmod_fn)(sftp_session, const char *, mode_t);
+typedef int (*sftp_chown_fn)(sftp_session, const char *, uid_t, gid_t);
+typedef int (*sftp_utimes_fn)(sftp_session, const char *, const struct timeval *);
+typedef int (*sftp_symlink_fn)(sftp_session, const char *, const char *);
+typedef char *(*sftp_readlink_fn)(sftp_session, const char *);
+typedef int (*sftp_seek64_fn)(sftp_file, uint64_t);
 typedef void (*sftp_attributes_free_fn)(sftp_attributes);
 typedef sftp_file (*sftp_open_fn)(sftp_session, const char *, int, mode_t);
 typedef int (*sftp_close_fn)(sftp_file);
@@ -161,6 +173,7 @@ static ssh_channel_is_eof_fn p_ssh_channel_is_eof = NULL;
 static ssh_get_fd_fn p_ssh_get_fd = NULL;
 static ssh_get_poll_flags_fn p_ssh_get_poll_flags = NULL;
 static ssh_set_blocking_fn p_ssh_set_blocking = NULL;
+static ssh_string_free_char_fn p_ssh_string_free_char = NULL;
 static sftp_new_fn p_sftp_new = NULL;
 static sftp_init_fn p_sftp_init = NULL;
 static sftp_free_fn p_sftp_free = NULL;
@@ -170,6 +183,12 @@ static sftp_readdir_fn p_sftp_readdir = NULL;
 static sftp_dir_eof_fn p_sftp_dir_eof = NULL;
 static sftp_closedir_fn p_sftp_closedir = NULL;
 static sftp_stat_fn p_sftp_stat = NULL;
+static sftp_chmod_fn p_sftp_chmod = NULL;
+static sftp_chown_fn p_sftp_chown = NULL;
+static sftp_utimes_fn p_sftp_utimes = NULL;
+static sftp_symlink_fn p_sftp_symlink = NULL;
+static sftp_readlink_fn p_sftp_readlink = NULL;
+static sftp_seek64_fn p_sftp_seek64 = NULL;
 static sftp_attributes_free_fn p_sftp_attributes_free = NULL;
 static sftp_open_fn p_sftp_open = NULL;
 static sftp_close_fn p_sftp_close = NULL;
@@ -323,6 +342,7 @@ static void initialize_ssh(void) {
       !load_symbol((void **)&p_ssh_get_fd, "ssh_get_fd") ||
       !load_symbol((void **)&p_ssh_get_poll_flags, "ssh_get_poll_flags") ||
       !load_symbol((void **)&p_ssh_set_blocking, "ssh_set_blocking") ||
+      !load_symbol((void **)&p_ssh_string_free_char, "ssh_string_free_char") ||
       !load_symbol((void **)&p_ssh_scp_new, "ssh_scp_new") ||
       !load_symbol((void **)&p_ssh_scp_init, "ssh_scp_init") ||
       !load_symbol((void **)&p_ssh_scp_close, "ssh_scp_close") ||
@@ -348,6 +368,12 @@ static void initialize_ssh(void) {
       !load_symbol((void **)&p_sftp_dir_eof, "sftp_dir_eof") ||
       !load_symbol((void **)&p_sftp_closedir, "sftp_closedir") ||
       !load_symbol((void **)&p_sftp_stat, "sftp_stat") ||
+      !load_symbol((void **)&p_sftp_chmod, "sftp_chmod") ||
+      !load_symbol((void **)&p_sftp_chown, "sftp_chown") ||
+      !load_symbol((void **)&p_sftp_utimes, "sftp_utimes") ||
+      !load_symbol((void **)&p_sftp_symlink, "sftp_symlink") ||
+      !load_symbol((void **)&p_sftp_readlink, "sftp_readlink") ||
+      !load_symbol((void **)&p_sftp_seek64, "sftp_seek64") ||
       !load_symbol((void **)&p_sftp_attributes_free, "sftp_attributes_free") ||
       !load_symbol((void **)&p_sftp_open, "sftp_open") ||
       !load_symbol((void **)&p_sftp_close, "sftp_close") ||
@@ -473,8 +499,8 @@ static ptr sftp_attr_to_vector(sftp_attributes attr) {
   Svector_set(v, 3, Sunsigned((uptr)attr->permissions));
   Svector_set(v, 4, Sunsigned((uptr)attr->uid));
   Svector_set(v, 5, Sunsigned((uptr)attr->gid));
-  Svector_set(v, 6, Sunsigned64(attr->atime64));
-  Svector_set(v, 7, Sunsigned64(attr->mtime64));
+  Svector_set(v, 6, Sunsigned64(attr->atime64 != 0 ? attr->atime64 : attr->atime));
+  Svector_set(v, 7, Sunsigned64(attr->mtime64 != 0 ? attr->mtime64 : attr->mtime));
   return v;
 }
 
@@ -1563,6 +1589,112 @@ ptr chezpp_net_sftp_stat(uptr handle, const char *path) {
   out = sftp_attr_to_vector(attr);
   p_sftp_attributes_free(attr);
   return out;
+}
+
+ptr chezpp_net_sftp_open_directory(uptr handle, const char *path) {
+  chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
+  chezpp_sftp_directory *directory;
+  sftp_dir dir;
+  if (wrapper == NULL || wrapper->sftp == NULL)
+    return make_error_status_message("invalid sftp session");
+  dir = p_sftp_opendir(wrapper->sftp, path);
+  if (dir == NULL) return sftp_error_status(wrapper, "failed to open sftp directory");
+  directory = (chezpp_sftp_directory *)calloc(1, sizeof(*directory));
+  if (directory == NULL) {
+    p_sftp_closedir(dir);
+    return make_errno_status();
+  }
+  directory->dir = dir;
+  directory->owner = wrapper;
+  return make_ssh_handle((uptr)directory);
+}
+
+ptr chezpp_net_sftp_read_directory(uptr handle) {
+  chezpp_sftp_directory *directory = (chezpp_sftp_directory *)TO_VOIDP(handle);
+  sftp_attributes attr;
+  ptr out;
+  if (directory == NULL || directory->dir == NULL || directory->owner == NULL)
+    return make_error_status_message("invalid sftp directory");
+  attr = p_sftp_readdir(directory->owner->sftp, directory->dir);
+  if (attr == NULL) {
+    if (p_sftp_dir_eof(directory->dir)) return Seof_object;
+    return sftp_error_status(directory->owner, "failed to read sftp directory");
+  }
+  out = sftp_attr_to_vector(attr);
+  p_sftp_attributes_free(attr);
+  return out;
+}
+
+ptr chezpp_net_sftp_close_directory(uptr handle) {
+  chezpp_sftp_directory *directory = (chezpp_sftp_directory *)TO_VOIDP(handle);
+  ptr out = Strue;
+  if (directory == NULL) return out;
+  if (directory->dir != NULL && p_sftp_closedir(directory->dir) != SSH_OK)
+    out = sftp_error_status(directory->owner, "failed to close sftp directory");
+  directory->dir = NULL;
+  free(directory);
+  return out;
+}
+
+ptr chezpp_net_sftp_chmod(uptr handle, const char *path, unsigned mode) {
+  chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->sftp == NULL)
+    return make_error_status_message("invalid sftp session");
+  if (p_sftp_chmod(wrapper->sftp, path, (mode_t)mode) != SSH_OK)
+    return sftp_error_status(wrapper, "failed to chmod sftp path");
+  return Strue;
+}
+
+ptr chezpp_net_sftp_chown(uptr handle, const char *path, unsigned uid, unsigned gid) {
+  chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->sftp == NULL)
+    return make_error_status_message("invalid sftp session");
+  if (p_sftp_chown(wrapper->sftp, path, (uid_t)uid, (gid_t)gid) != SSH_OK)
+    return sftp_error_status(wrapper, "failed to chown sftp path");
+  return Strue;
+}
+
+ptr chezpp_net_sftp_utimes(uptr handle, const char *path, int64_t atime, int64_t mtime) {
+  chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
+  struct timeval times[2];
+  if (wrapper == NULL || wrapper->sftp == NULL || atime < 0 || mtime < 0)
+    return make_error_status_message("invalid sftp utimes arguments");
+  times[0].tv_sec = (time_t)atime; times[0].tv_usec = 0;
+  times[1].tv_sec = (time_t)mtime; times[1].tv_usec = 0;
+  if (p_sftp_utimes(wrapper->sftp, path, times) != SSH_OK)
+    return sftp_error_status(wrapper, "failed to set sftp times");
+  return Strue;
+}
+
+ptr chezpp_net_sftp_symlink(uptr handle, const char *target, const char *dest) {
+  chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->sftp == NULL)
+    return make_error_status_message("invalid sftp session");
+  if (p_sftp_symlink(wrapper->sftp, target, dest) != SSH_OK)
+    return sftp_error_status(wrapper, "failed to create sftp symlink");
+  return Strue;
+}
+
+ptr chezpp_net_sftp_readlink(uptr handle, const char *path) {
+  chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
+  char *target;
+  ptr out;
+  if (wrapper == NULL || wrapper->sftp == NULL)
+    return make_error_status_message("invalid sftp session");
+  target = p_sftp_readlink(wrapper->sftp, path);
+  if (target == NULL) return sftp_error_status(wrapper, "failed to read sftp symlink");
+  out = Sstring(target);
+  p_ssh_string_free_char(target);
+  return out;
+}
+
+ptr chezpp_net_sftp_seek(uptr handle, uint64_t offset) {
+  chezpp_sftp_file *wrapper = (chezpp_sftp_file *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->file == NULL)
+    return make_error_status_message("invalid sftp file");
+  if (p_sftp_seek64(wrapper->file, offset) != SSH_OK)
+    return sftp_file_error_status(wrapper, "failed to seek sftp file");
+  return Strue;
 }
 
 ptr chezpp_net_sftp_delete(uptr handle, const char *path) {

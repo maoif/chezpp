@@ -279,6 +279,10 @@ git commit -m "net: add FTP metadata and resumable transfers"
 
 ### Task 4: SFTP Attributes, Directory Streams, Paths, And Metadata Mutation
 
+**Status (2026-08-13): Complete.** Stable attribute records, owned directory streams, normalized
+client-side paths, metadata mutation/link APIs, and recursive transfer helpers are implemented and
+verified against the temporary sshd fixture. The focused SFTP suite passes with empty captures.
+
 **Files:**
 - Modify: `chezpp/c/net/ssh.c`
 - Modify: `chezpp/net/ffi.ss`
