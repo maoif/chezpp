@@ -250,6 +250,43 @@
          (lambda ()
            (stop-server)))))
 
+(mat net-scp-metadata-and-policy
+     (with-test-scp-session
+      (lambda (session remote-root)
+        (let ([local-path "/tmp/chezpp-net-scp-policy.txt"])
+          (dynamic-wind
+            (lambda () (write-u8vec! local-path (string->utf8 "keep")))
+            (lambda ()
+              (let ([attributes (scp-stat session (string-append remote-root "/hello.txt"))])
+                (and (scp-attributes? attributes)
+                     (eq? 'regular (scp-attributes-type attributes))
+                     (= 10 (scp-attributes-size attributes))
+                     (not (scp-stat session (string-append remote-root "/missing")))
+                     ;; Overwrite mode `error` rejects an existing local target.
+                     (scp-error-message-contains?
+                      "local destination exists"
+                      (lambda ()
+                        (scp-download session (string-append remote-root "/hello.txt") local-path
+                                      (make-transfer-policy 'never 'error 4096 #f))))
+                     (equal? local-path
+                             (scp-download session (string-append remote-root "/hello.txt")
+                                           local-path
+                                           (make-transfer-policy 'never 'skip 4096 #f)))
+                     (equal? (read-u8vec local-path) (string->utf8 "keep"))
+                     (equal? local-path
+                             (scp-download session (string-append remote-root "/hello.txt")
+                                           local-path
+                                           (make-transfer-policy 'never 'replace 4096 #f)))
+                     (equal? (read-u8vec local-path) (string->utf8 "hello sftp"))
+                     ;; SCP resume is rejected when no verified restart helper exists.
+                     (scp-error-message-contains?
+                      "restart helper"
+                      (lambda ()
+                        (scp-download session (string-append remote-root "/hello.txt") local-path
+                                      (make-transfer-policy 'resume 'replace 4096 #f)))))))
+            (lambda ()
+              (when (file-exists? local-path) (delete-file local-path #f))))))))
+
 (mat net-scp-nonblocking
      (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
        (dynamic-wind

@@ -1,5 +1,12 @@
 (library (chezpp net scp)
   (export scp-session?
+          scp-attributes?
+          scp-attributes-path
+          scp-attributes-type
+          scp-attributes-size
+          scp-attributes-permissions
+          scp-attributes-modification-time
+          scp-stat
           scp-open
           scp-close
           scp-cancel-pending!
@@ -17,6 +24,7 @@
           (chezpp net ffi)
           (chezpp net poll)
           (chezpp net operation)
+          (chezpp net transfer)
           (chezpp net address)
           (chezpp net socket)
           (chezpp net private)
@@ -30,6 +38,19 @@
             (immutable owns-ssh? scp-session-owns-ssh?)
             (mutable pending scp-session-pending scp-session-pending-set!)
             (mutable closed? scp-session-closed? scp-session-closed?-set!)))
+
+  #|record:scp-attributes
+The `scp-attributes` record is an immutable snapshot of a remote path. Its fields contain the
+path, type, optional byte size, numeric permissions, and Unix modification time.
+|#
+  (define-record-type (scp-attributes %make-scp-attributes scp-attributes?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable path scp-attributes-path)
+            (immutable type scp-attributes-type)
+            (immutable size scp-attributes-size)
+            (immutable permissions scp-attributes-permissions)
+            (immutable modification-time scp-attributes-modification-time)))
 
   (define scp-default-timeout-ms 30000)
 
@@ -93,6 +114,61 @@
          (unless (or (string? auth-arg) (eq? auth-arg #f))
            (errorf who "publickey authentication requires a string passphrase or #f"))
          (ssh-auth-publickey! session user auth-arg)])))
+
+  (define scp-vector->attributes
+    (lambda (path vector)
+      (%make-scp-attributes
+       path
+       (case (vector-ref vector 1)
+         [(1) 'regular] [(2) 'directory] [(3) 'symlink] [(4) 'special]
+         [else 'unknown])
+       (vector-ref vector 2)
+       (vector-ref vector 3)
+       (vector-ref vector 7))))
+
+  #|proc:scp-stat
+The `scp-stat` procedure returns a stable `scp-attributes` record for remote `path` through
+`session`, or `#f` when the path does not exist.
+|#
+  (define-who scp-stat
+    (lambda (session path)
+      (pcheck ([scp-session? session] [string? path])
+              (ensure-session-open who session)
+              (let ([answer (ensure-success
+                             who
+                             (ffi-net-scp-stat
+                              (%ssh-session-handle (scp-session-ssh-session session)) path))])
+                (and answer (scp-vector->attributes path answer))))))
+
+  (define ensure-scp-resume-supported
+    (lambda (who policy)
+      (unless (eq? 'never (transfer-policy-resume policy))
+        (raise-net-error who 'unsupported
+                         "SCP resume requires a verified server-side restart helper" policy))))
+
+  (define scp-download/policy
+    (lambda (who session remote-path local-path policy)
+      (ensure-scp-resume-supported who policy)
+      (let ([exists? (file-exists? local-path)]
+            [overwrite (transfer-policy-overwrite policy)])
+        (cond [(and exists? (eq? overwrite 'skip)) local-path]
+              [(and exists? (eq? overwrite 'error))
+               (errorf who "local destination exists: ~a" local-path)]
+              [else
+               (scp-download session remote-path local-path
+                             (scp-session-timeout-ms session))]))))
+
+  (define scp-upload/policy
+    (lambda (who session local-path remote-path policy)
+      (ensure-scp-resume-supported who policy)
+      (let ([attributes (scp-stat session remote-path)]
+            [overwrite (transfer-policy-overwrite policy)])
+        (cond [(and attributes (eq? overwrite 'skip)) remote-path]
+              [(and attributes (eq? overwrite 'error))
+               (errorf who "remote destination exists: ~a" remote-path)]
+              [else
+               (scp-upload session local-path remote-path
+                           (scp-session-timeout-ms session))]))))
 
   (define ensure-no-pending-mismatch
     (lambda (who session kind args)
@@ -275,10 +351,13 @@ The `scp-download` procedure downloads a single remote file to the exact local t
       [(session remote-path local-path)
        (scp-download session remote-path local-path (scp-session-timeout-ms session))]
       [(session remote-path local-path timeout-ms)
-       (pcheck ([scp-session? session] [string? remote-path local-path] [fixnum? timeout-ms])
-               (check-timeout-ms who timeout-ms)
-               (net-operation-wait
-                (scp-download/nonblocking session remote-path local-path timeout-ms)))]))
+       (pcheck ([scp-session? session] [string? remote-path local-path])
+               (if (transfer-policy? timeout-ms)
+                   (scp-download/policy who session remote-path local-path timeout-ms)
+                   (begin
+                     (check-timeout-ms who timeout-ms)
+                     (net-operation-wait
+                      (scp-download/nonblocking session remote-path local-path timeout-ms)))))]))
 
   #|proc:scp-upload
 The `scp-upload` procedure uploads a single local file to the exact remote target path.
@@ -288,10 +367,13 @@ The `scp-upload` procedure uploads a single local file to the exact remote targe
       [(session local-path remote-path)
        (scp-upload session local-path remote-path (scp-session-timeout-ms session))]
       [(session local-path remote-path timeout-ms)
-       (pcheck ([scp-session? session] [string? local-path remote-path] [fixnum? timeout-ms])
-               (check-timeout-ms who timeout-ms)
-               (net-operation-wait
-                (scp-upload/nonblocking session local-path remote-path timeout-ms)))]))
+       (pcheck ([scp-session? session] [string? local-path remote-path])
+               (if (transfer-policy? timeout-ms)
+                   (scp-upload/policy who session local-path remote-path timeout-ms)
+                   (begin
+                     (check-timeout-ms who timeout-ms)
+                     (net-operation-wait
+                      (scp-upload/nonblocking session local-path remote-path timeout-ms)))))]))
 
   #|proc:scp-download/nonblocking
 The `scp-download/nonblocking` procedure constructs a file download operation.

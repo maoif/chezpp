@@ -219,6 +219,28 @@
                  (lambda () (ssh-close ssh-session)))))))
         stop-server))))
 
+(define with-test-scp-session
+  (lambda (procedure)
+    (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (with-env
+           "HOME" home
+           (lambda ()
+             (let ([ssh-session (ssh-open "127.0.0.1" port user)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (ssh-auth-publickey! ssh-session user)
+                   (let ([scp-session (scp-open ssh-session)])
+                     (dynamic-wind
+                       void
+                       (lambda () (procedure scp-session remote-root))
+                       (lambda () (scp-close scp-session)))))
+                 (lambda () (ssh-close ssh-session)))))))
+        stop-server))))
+
 (define ssh-test-pty
   (lambda (session)
     (call-with-ssh-channel

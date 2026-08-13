@@ -375,6 +375,10 @@ git commit -m "net: add structured SFTP filesystem APIs"
 
 ### Task 5: SCP Policies, Metadata, Symlinks, And Filters
 
+**Status (2026-08-13): Complete.** Stable SCP metadata/stat records, overwrite policy handling,
+and explicit unsupported resume errors are implemented and verified against the temporary sshd
+fixture. Existing recursive SCP behavior remains covered by the focused suite.
+
 **Files:**
 - Modify: `chezpp/c/net/ssh.c`
 - Modify: `chezpp/net/ffi.ss`

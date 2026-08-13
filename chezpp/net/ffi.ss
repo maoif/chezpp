@@ -80,6 +80,7 @@
           ffi-net-sftp-close
           ffi-net-scp-download-file
           ffi-net-scp-upload-file
+          ffi-net-scp-stat
           ffi-net-scp-download-directory
           ffi-net-scp-upload-directory
           ffi-net-scp-transfer-start
@@ -344,6 +345,8 @@
     (foreign-procedure "chezpp_net_scp_download_file" (uptr string string int) scheme-object))
   (define ffi-net-scp-upload-file
     (foreign-procedure "chezpp_net_scp_upload_file" (uptr string string int) scheme-object))
+  (define ffi-net-scp-stat
+    (foreign-procedure "chezpp_net_scp_stat" (uptr string) scheme-object))
   (define ffi-net-scp-download-directory
     (foreign-procedure "chezpp_net_scp_download_directory" (uptr string string int) scheme-object))
   (define ffi-net-scp-upload-directory

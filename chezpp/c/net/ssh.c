@@ -2013,6 +2013,31 @@ ptr chezpp_net_scp_upload_file(uptr handle, const char *local_path, const char *
   return status;
 }
 
+ptr chezpp_net_scp_stat(uptr handle, const char *path) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  sftp_session sftp;
+  sftp_attributes attr;
+  ptr out;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  sftp = p_sftp_new(wrapper->session);
+  if (sftp == NULL) return ssh_error_status_from_wrapper(wrapper, "failed to allocate sftp stat");
+  if (p_sftp_init(sftp) != SSH_OK) {
+    out = ssh_error_status_from_wrapper(wrapper, "failed to initialize sftp stat");
+    p_sftp_free(sftp);
+    return out;
+  }
+  attr = p_sftp_stat(sftp, path);
+  if (attr == NULL) {
+    p_sftp_free(sftp);
+    return Sfalse;
+  }
+  out = sftp_attr_to_vector(attr);
+  p_sftp_attributes_free(attr);
+  p_sftp_free(sftp);
+  return out;
+}
+
 ptr chezpp_net_scp_download_file(uptr handle, const char *remote_path, const char *local_path,
                                  int timeout_ms) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
