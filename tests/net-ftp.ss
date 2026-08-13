@@ -28,6 +28,16 @@
   (lambda (entry*)
     (map ftp-directory-entry-name entry*)))
 
+(define ftp-test-policy
+  (lambda (resume overwrite progress)
+    (make-transfer-policy resume overwrite 3 progress)))
+
+(define ftp-command-seen?
+  (lambda (root command)
+    (let ([path (string-append root ".commands")])
+      (and (file-exists? path)
+           (string-contains? (utf8->string (read-u8vec path)) command)))))
+
 (define ftp-net-error-timeout?
   (lambda (thunk)
     (guard (c [else
@@ -672,3 +682,124 @@
            (lambda ()
              (ftp-close session)
              (stop-server))))))
+
+(mat net-ftp-transfer-policy
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
+             [download-path "/tmp/chezpp-net-ftp-resume-download.bin"]
+             [upload-path "/tmp/chezpp-net-ftp-resume-upload.bin"]
+             [progress '()])
+         (dynamic-wind
+           (lambda ()
+             (write-bytevector-file download-path (string->utf8 "hello"))
+             (write-bytevector-file upload-path (string->utf8 "upload resumed"))
+             (write-bytevector-file (string-append root "/resume-upload.bin")
+                                    (string->utf8 "upload")))
+           (lambda ()
+             (ftp-login! session "user" "pass")
+             (ftp-download
+              session "/hello.txt" download-path
+              (ftp-test-policy
+               'resume 'replace
+               (lambda (protocol direction path completed total)
+                 (set! progress (cons (list protocol direction path completed total)
+                                      progress)))))
+             (ftp-upload
+              session upload-path "/resume-upload.bin"
+              (ftp-test-policy
+               'resume 'replace
+               (lambda (protocol direction path completed total)
+                 (set! progress (cons (list protocol direction path completed total)
+                                      progress)))))
+             (and (equal? (read-u8vec download-path) (string->utf8 "hello ftp"))
+                  (equal? (read-u8vec (string-append root "/resume-upload.bin"))
+                          (string->utf8 "upload resumed"))
+                  (ftp-command-seen? root "REST 5")
+                  (ftp-command-seen? root "REST 6")
+                  (exists (lambda (event) (eq? (cadr event) 'download)) progress)
+                  (exists (lambda (event) (eq? (cadr event) 'upload)) progress)))
+           (lambda ()
+             (ftp-close session)
+             (when (file-exists? download-path) (delete-file download-path #f))
+             (when (file-exists? upload-path) (delete-file upload-path #f))
+             (stop-server)))))
+
+     (with-test-ftp-session
+      (lambda (session)
+        (let ([path "/tmp/chezpp-net-ftp-policy.bin"])
+          (dynamic-wind
+            (lambda () (write-bytevector-file path (string->utf8 "keep")))
+            (lambda ()
+              (and
+               ;; Overwrite mode `error` rejects an existing local destination.
+               (ftp-error-message-contains?
+                "local destination exists"
+                (lambda ()
+                  (ftp-download session "/hello.txt" path
+                                (ftp-test-policy 'never 'error #f))))
+               (equal? (ftp-download session "/hello.txt" path
+                                     (ftp-test-policy 'never 'skip #f))
+                       path)
+               (equal? (read-u8vec path) (string->utf8 "keep"))
+               (equal? (ftp-download session "/hello.txt" path
+                                     (ftp-test-policy 'never 'replace #f))
+                       path)
+               (equal? (read-u8vec path) (string->utf8 "hello ftp"))
+               (begin
+                 (write-bytevector-file path (string->utf8 "hello"))
+                 (ftp-download session "/hello.txt" path
+                               (ftp-test-policy 5 'replace #f))
+                 (equal? (read-u8vec path) (string->utf8 "hello ftp")))
+               (begin
+                 (write-bytevector-file path (string->utf8 "partial"))
+                 ;; A failed non-resume download removes its partial destination.
+                 (guard (c [else #t])
+                   (ftp-download session "/missing.txt" path
+                                 (ftp-test-policy 'never 'replace #f))
+                   #f)
+                 (not (file-exists? path)))))
+            (lambda () (when (file-exists? path) (delete-file path #f))))))))
+
+(mat net-ftp-recursive-transfer
+     (let-values ([(root port stop-server) (start-ftp-test-server)])
+       (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
+             [source "/tmp/chezpp-net-ftp-tree-source"]
+             [dest "/tmp/chezpp-net-ftp-tree-dest"])
+         (dynamic-wind
+           (lambda ()
+             (when (file-exists? source) (file-removetree source #f))
+             (when (file-exists? dest) (file-removetree dest #f))
+             (mkdirs (string-append source "/nested/deep"))
+             (write-bytevector-file (string-append source "/top.txt") (string->utf8 "top"))
+             (write-bytevector-file (string-append source "/nested/deep/data.txt")
+                                    (string->utf8 "nested")))
+           (lambda ()
+             (ftp-login! session "user" "pass")
+             (ftp-upload-directory session source "/tree"
+                                   (ftp-test-policy 'never 'replace #f))
+             (ftp-download-directory session "/tree" dest
+                                     (ftp-test-policy 'never 'replace #f))
+             (and (equal? (read-u8vec (string-append dest "/top.txt"))
+                          (string->utf8 "top"))
+                  (equal? (read-u8vec (string-append dest "/nested/deep/data.txt"))
+                          (string->utf8 "nested"))))
+           (lambda ()
+             (ftp-close session)
+             (when (file-exists? source) (file-removetree source #f))
+             (when (file-exists? dest) (file-removetree dest #f))
+             (stop-server)))))
+
+     ;; Recursive upload rejects symbolic links instead of following them.
+     (with-test-ftp-session
+      (lambda (session)
+        (let ([source "/tmp/chezpp-net-ftp-link-source"])
+          (dynamic-wind
+            (lambda ()
+              (when (file-exists? source) (file-removetree source #f))
+              (mkdirs source)
+              (file-symlink "/tmp" (string-append source "/link")))
+            (lambda ()
+              (ftp-error-message-contains?
+               "rejects symbolic links"
+               (lambda () (ftp-upload-directory session source "/links"))))
+            (lambda () (when (file-exists? source) (file-removetree source #f))))))))

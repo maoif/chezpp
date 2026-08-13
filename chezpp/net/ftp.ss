@@ -935,7 +935,7 @@ The optional `policy` controls resume, overwrite, chunk size, and progress. The 
                                [op (open-file-output-port local-path
                                                          (if (fx= offset 0)
                                                              (file-options no-fail replace)
-                                                             (file-options no-fail))
+                                                             (file-options no-fail no-truncate))
                                                          (buffer-mode block) #f)]
                                [completed? #f])
                           (dynamic-wind
@@ -1267,6 +1267,7 @@ The return value is `file`; repeated close calls are inert.
                         (begin
                           (ensure-success who (ffi-net-ftp-file-finish
                                                (ftp-file-handle file)))
+                          (ftp-file-drive! who file '() #t)
                           (let loop ()
                             (unless (ftp-file-terminal? file)
                               (wait-for-ftp-file! who file)

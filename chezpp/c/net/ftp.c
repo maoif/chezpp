@@ -75,6 +75,7 @@ struct ftp_file {
   ftp_session *session;
   CURL *easy;
   memory_buffer buffer;
+  struct curl_slist *quote;
   size_t buffer_offset;
   CURLcode result;
   int direction;
@@ -957,6 +958,7 @@ static void ftp_file_release(ftp_file *file) {
   if (file->session != NULL && file->session->active == file)
     file->session->active = NULL;
   memory_buffer_free(&file->buffer);
+  if (file->quote != NULL) p_curl_slist_free_all(file->quote);
   ftp_driver_clear(&file->driver);
   free(file);
 }
@@ -1103,8 +1105,20 @@ ptr chezpp_net_ftp_file_open(uptr session_handle, int direction,
     if (rc == CURLE_OK)
       rc = p_curl_easy_setopt(file->easy, CURLOPT_READDATA, file);
   }
-  if (rc == CURLE_OK && offset != 0)
+  if (rc == CURLE_OK && direction == 0 && offset != 0)
     rc = p_curl_easy_setopt(file->easy, CURLOPT_RESUME_FROM_LARGE, (curl_off_t)offset);
+  if (rc == CURLE_OK && direction == 1 && offset != 0) {
+    char command[64];
+    snprintf(command, sizeof(command), "REST %lld", (long long)offset);
+    file->quote = p_curl_slist_append(NULL, command);
+    if (file->quote == NULL) {
+      ftp_file_release(file);
+      return make_errno_status();
+    }
+    rc = p_curl_easy_setopt(file->easy, CURLOPT_QUOTE, file->quote);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(file->easy, CURLOPT_CUSTOMREQUEST, "STOR");
+  }
   if (rc != CURLE_OK) {
     out = curl_error_status(rc);
     ftp_file_release(file);

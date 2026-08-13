@@ -7,6 +7,7 @@
   (lambda ()
     (let ([root (car (command-line-arguments))])
       (define connection-count-path (string-append root ".control-connections"))
+      (define command-log-path (string-append root ".commands"))
       (define accepted-connections 0)
       (let ([listener (open-socket 'inet 'stream)])
         (socket-set-option! listener 'reuse-address #t)
@@ -29,6 +30,16 @@
           (define physical-path
             (lambda (virtual-path)
               (string-append root (normalize-absolute-test-path virtual-path))))
+          (define log-command!
+            (lambda (line)
+              (let ([op (open-file-output-port command-log-path
+                                               (file-options no-fail no-truncate)
+                                               (buffer-mode block)
+                                               (native-transcoder))])
+                (dynamic-wind
+                  (lambda () (file-position op (file-length op)))
+                  (lambda () (put-string op line) (newline op))
+                  (lambda () (close-port op))))))
           (define open-passive
             (lambda ()
               (let ([sock (open-socket 'inet 'stream)])
@@ -84,6 +95,7 @@
                 (let loop ()
                   (let ([line (read-crlf-line ip)])
                     (when line
+                      (log-command! line)
                       (let* ([parts (string-split line #\space)]
                              [cmd (string-upcase (car parts))]
                              [arg (if (> (string-length line) (+ (string-length (car parts)) 1))
@@ -203,7 +215,8 @@
                                     (let* ([dop (open-socket-output-port data)]
                                            [content (read-u8vec path)])
                                       (put-bytevector dop content restart-offset
-                                                      (bytevector-length content))
+                                                      (fx- (bytevector-length content)
+                                                           restart-offset))
                                       (flush-output-port dop)
                                       (close-port dop))
                                     (set! restart-offset 0)

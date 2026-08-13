@@ -199,6 +199,11 @@ git commit -m "net: add persistent FTP file transfers"
 
 ### Task 3: FTP Metadata, FTPS Modes, Resume, And Recursion
 
+**Status (2026-08-13): Complete.** REST-backed upload and download resume now preserve existing
+prefixes, progress callbacks fire, overwrite and cleanup policies are covered, and recursive
+round trips plus symbolic-link rejection pass against the local fixture. The final focused gate
+passes with empty captures.
+
 **Files:**
 - Modify: `chezpp/c/net/ftp.c`
 - Modify: `chezpp/net/ffi.ss`
@@ -246,7 +251,7 @@ Use symbols `plain`, `explicit`, and `implicit`. URI defaults are `ftp -> plain`
 to `CURLOPT_USE_SSL = CURLUSESSL_ALL` on port 21 and implicit to an `ftps://` URL, normally port
 990. Verification remains enabled unless explicitly changed through the existing API.
 
-- [ ] **Step 5: Apply transfer policies**
+- [x] **Step 5: Apply transfer policies**
 
 Use `CURLOPT_RESUME_FROM_LARGE` for upload/download resume, `CURLOPT_RANGE` for bounded reads,
 `CURLOPT_XFERINFOFUNCTION` for progress, and `CURLOPT_NOPROGRESS = 0`. Enforce overwrite policy
@@ -259,10 +264,9 @@ cycles/links that escape the requested root, precreate directories, and report p
 
 - [x] **Step 7: Build, test, and commit**
 
-Implementation note: policy-aware resume, overwrite, progress, and recursive APIs are present,
-including native REST/`CURLOPT_RESUME_FROM_LARGE` plumbing. End-to-end resume and recursive fixture
-coverage remains deferred because the current in-process FTP fixture cannot reliably complete a
-REST upload/download before its control connection timeout.
+Implementation note: policy-aware resume, overwrite, progress, and recursive APIs are present.
+Downloads use `CURLOPT_RESUME_FROM_LARGE`; uploads issue explicit `REST` plus `STOR`. End-to-end
+fixture coverage verifies both directions and recursive transfers.
 
 ```bash
 make clean && make
