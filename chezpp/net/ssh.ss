@@ -25,6 +25,8 @@
           ssh-write/nonblocking
           ssh-write-all/nonblocking
           ssh-request-pty!
+          ssh-request-environment!
+          ssh-request-subsystem!
           ssh-channel-exit-status
           call-with-ssh-session
           call-with-ssh-channel
@@ -341,6 +343,36 @@ The `ssh-open-channel` procedure opens a new SSH session channel.
                                                           timeout-ms))
                 session
                 #f))]))
+
+  #|proc:ssh-request-environment!
+The `ssh-request-environment!` procedure requests environment variable `name` with `value` on open
+`channel`. Both parameters are strings. The return value is `channel` on success.
+|#
+  (define-who ssh-request-environment!
+    (lambda (channel name value)
+      (pcheck ([ssh-channel? channel] [string? name value])
+              (ensure-channel-open who channel)
+              (when (string=? name "")
+                (errorf who "environment variable name must not be empty"))
+              (ensure-success who 'ssh
+                              (ffi-net-ssh-channel-request-environment
+                               (ssh-channel-handle channel) name value))
+              channel)))
+
+  #|proc:ssh-request-subsystem!
+The `ssh-request-subsystem!` procedure requests non-empty `subsystem` on open `channel`. The
+`subsystem` parameter is a string. The return value is `channel` on success.
+|#
+  (define-who ssh-request-subsystem!
+    (lambda (channel subsystem)
+      (pcheck ([ssh-channel? channel] [string? subsystem])
+              (ensure-channel-open who channel)
+              (when (string=? subsystem "")
+                (errorf who "subsystem must not be empty"))
+              (ensure-success who 'ssh
+                              (ffi-net-ssh-channel-request-subsystem
+                               (ssh-channel-handle channel) subsystem))
+              channel)))
 
   #|proc:ssh-close-channel
 The `ssh-close-channel` procedure closes an SSH channel and releases its foreign resources.

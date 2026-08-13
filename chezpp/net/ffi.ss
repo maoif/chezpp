@@ -72,6 +72,8 @@
           ffi-net-ssh-channel-request-exec
           ffi-net-ssh-channel-request-shell
           ffi-net-ssh-channel-request-pty
+          ffi-net-ssh-channel-request-environment
+          ffi-net-ssh-channel-request-subsystem
           ffi-net-ssh-channel-read
           ffi-net-ssh-channel-read-into
           ffi-net-ssh-channel-write
@@ -329,6 +331,11 @@
     (foreign-procedure "chezpp_net_ssh_channel_request_shell" (uptr int) scheme-object))
   (define ffi-net-ssh-channel-request-pty
     (foreign-procedure "chezpp_net_ssh_channel_request_pty" (uptr int) scheme-object))
+  (define ffi-net-ssh-channel-request-environment
+    (foreign-procedure "chezpp_net_ssh_channel_request_environment" (uptr string string)
+                       scheme-object))
+  (define ffi-net-ssh-channel-request-subsystem
+    (foreign-procedure "chezpp_net_ssh_channel_request_subsystem" (uptr string) scheme-object))
   (define ffi-net-ssh-channel-read
     (foreign-procedure "chezpp_net_ssh_channel_read" (uptr int int int int) scheme-object))
   (define ffi-net-ssh-channel-read-into

@@ -151,7 +151,7 @@
       (write-bytevector-file
        config-path
        (string->utf8
-        (format "Port ~a\nListenAddress 127.0.0.1\nHostKey ~a\nPidFile ~a\nAuthorizedKeysFile ~a\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nChallengeResponseAuthentication no\nPubkeyAuthentication yes\nUsePAM no\nPermitRootLogin no\nStrictModes no\nLogLevel ERROR\nSubsystem sftp internal-sftp\nAllowUsers ~a\n"
+        (format "Port ~a\nListenAddress 127.0.0.1\nHostKey ~a\nPidFile ~a\nAuthorizedKeysFile ~a\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nChallengeResponseAuthentication no\nPubkeyAuthentication yes\nUsePAM no\nPermitRootLogin no\nStrictModes no\nLogLevel ERROR\nAcceptEnv CHEZPP_TEST_ENV\nSubsystem sftp internal-sftp\nAllowUsers ~a\n"
                 port
                 host-key
                 pid-path

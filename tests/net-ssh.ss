@@ -118,6 +118,38 @@
                (equal? buffer (string->utf8 "err"))))))
      )
 
+(mat net-ssh-channel-requests
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME" home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (ssh-auth-publickey! session user)
+                    (let ([channel (ssh-open-channel session)]
+                          [subsystem-channel (ssh-open-channel session)])
+                      (dynamic-wind
+                        void
+                        (lambda ()
+                          (and
+                           (eq? (ssh-request-environment!
+                                 channel "CHEZPP_TEST_ENV" "request-value") channel)
+                           (ssh-error-message-contains?
+                            "subsystem must not be empty"
+                            (lambda () (ssh-request-subsystem! subsystem-channel "")))
+                           (eq? (ssh-request-subsystem! subsystem-channel "sftp")
+                                subsystem-channel)))
+                        (lambda ()
+                          (ssh-close-channel subsystem-channel)
+                          (ssh-close-channel channel)))))
+                  (lambda () (ssh-close session)))))))
+         (lambda () (stop-server)))))
+
 (mat net-ssh-known-hosts
      ;; Negative test: strict host-key verification rejects a server when HOME
      ;; has no known_hosts entry.

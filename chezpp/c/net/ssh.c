@@ -96,6 +96,8 @@ typedef int (*ssh_channel_open_session_fn)(ssh_channel);
 typedef int (*ssh_channel_request_exec_fn)(ssh_channel, const char *);
 typedef int (*ssh_channel_request_shell_fn)(ssh_channel);
 typedef int (*ssh_channel_request_pty_fn)(ssh_channel);
+typedef int (*ssh_channel_request_env_fn)(ssh_channel, const char *, const char *);
+typedef int (*ssh_channel_request_subsystem_fn)(ssh_channel, const char *);
 typedef int (*ssh_channel_read_fn)(ssh_channel, void *, uint32_t, int);
 typedef int (*ssh_channel_write_fn)(ssh_channel, const void *, uint32_t);
 typedef int (*ssh_channel_send_eof_fn)(ssh_channel);
@@ -164,6 +166,8 @@ static ssh_channel_open_session_fn p_ssh_channel_open_session = NULL;
 static ssh_channel_request_exec_fn p_ssh_channel_request_exec = NULL;
 static ssh_channel_request_shell_fn p_ssh_channel_request_shell = NULL;
 static ssh_channel_request_pty_fn p_ssh_channel_request_pty = NULL;
+static ssh_channel_request_env_fn p_ssh_channel_request_env = NULL;
+static ssh_channel_request_subsystem_fn p_ssh_channel_request_subsystem = NULL;
 static ssh_channel_read_fn p_ssh_channel_read = NULL;
 static ssh_channel_write_fn p_ssh_channel_write = NULL;
 static ssh_channel_send_eof_fn p_ssh_channel_send_eof = NULL;
@@ -333,6 +337,9 @@ static void initialize_ssh(void) {
       !load_symbol((void **)&p_ssh_channel_request_exec, "ssh_channel_request_exec") ||
       !load_symbol((void **)&p_ssh_channel_request_shell, "ssh_channel_request_shell") ||
       !load_symbol((void **)&p_ssh_channel_request_pty, "ssh_channel_request_pty") ||
+      !load_symbol((void **)&p_ssh_channel_request_env, "ssh_channel_request_env") ||
+      !load_symbol((void **)&p_ssh_channel_request_subsystem,
+                   "ssh_channel_request_subsystem") ||
       !load_symbol((void **)&p_ssh_channel_read, "ssh_channel_read") ||
       !load_symbol((void **)&p_ssh_channel_write, "ssh_channel_write") ||
       !load_symbol((void **)&p_ssh_channel_send_eof, "ssh_channel_send_eof") ||
@@ -1522,6 +1529,25 @@ ptr chezpp_net_ssh_channel_exit_status(uptr handle) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->channel == NULL) return make_error_status_message("invalid ssh channel");
   return Sfixnum((iptr)p_ssh_channel_get_exit_status(wrapper->channel));
+}
+
+ptr chezpp_net_ssh_channel_request_environment(uptr handle, const char *name,
+                                                const char *value) {
+  chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->channel == NULL)
+    return make_error_status_message("invalid ssh channel");
+  if (p_ssh_channel_request_env(wrapper->channel, name, value) != SSH_OK)
+    return ssh_channel_error_status(wrapper, "ssh environment request failed");
+  return Strue;
+}
+
+ptr chezpp_net_ssh_channel_request_subsystem(uptr handle, const char *subsystem) {
+  chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->channel == NULL)
+    return make_error_status_message("invalid ssh channel");
+  if (p_ssh_channel_request_subsystem(wrapper->channel, subsystem) != SSH_OK)
+    return ssh_channel_error_status(wrapper, "ssh subsystem request failed");
+  return Strue;
 }
 
 ptr chezpp_net_sftp_open(uptr handle) {

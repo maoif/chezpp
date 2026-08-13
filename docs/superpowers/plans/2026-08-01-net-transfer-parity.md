@@ -434,6 +434,10 @@ git commit -m "net: add SCP policy and metadata support"
 
 ### Task 6: SSH Follow-Up APIs
 
+**Status (2026-08-13): Partial.** Environment and subsystem channel requests are implemented and
+verified. The installed libssh headers expose no client keepalive API; known-host enumeration,
+explicit-key/keyboard-interactive authentication, and forwarding remain follow-up work.
+
 **Files:**
 - Modify: `chezpp/c/net/ssh.c`
 - Modify: `chezpp/net/ffi.ss`
