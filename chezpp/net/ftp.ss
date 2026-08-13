@@ -1,9 +1,21 @@
 (library (chezpp net ftp)
   (export ftp-session?
+          ftp-mode
           ftp-file?
           ftp-file-direction
           ftp-file-path
           ftp-file-closed?
+          ftp-directory-entry?
+          ftp-directory-entry-name
+          ftp-directory-entry-type
+          ftp-directory-entry-size
+          ftp-directory-entry-modify
+          ftp-directory-entry-unique
+          ftp-directory-entry-permissions
+          ftp-directory-entry-owner
+          ftp-directory-entry-group
+          ftp-directory-entry-facts
+          ftp-parse-mlsd-line
           ftp-open-file
           ftp-close-file
           ftp-read
@@ -25,11 +37,15 @@
           ftp-login!
           ftp-quit!
           ftp-list
+          ftp-list/raw
           ftp-list/nonblocking
+          ftp-stat
           ftp-download
           ftp-download/nonblocking
           ftp-upload
           ftp-upload/nonblocking
+          ftp-download-directory
+          ftp-upload-directory
           ftp-delete!
           ftp-mkdir!
           ftp-rmdir!
@@ -59,6 +75,7 @@
     (opaque #f)
     (fields (mutable handle ftp-session-handle ftp-session-handle-set!)
             (immutable uri ftp-session-uri)
+            (immutable mode ftp-session-mode)
             (mutable username ftp-session-username ftp-session-username-set!)
             (mutable password ftp-session-password ftp-session-password-set!)
             (mutable cwd ftp-session-cwd ftp-session-cwd-set!)
@@ -88,6 +105,22 @@ completed byte count, current poll targets and timer deadline, EOF state, and cl
             (mutable deadline-ms ftp-file-deadline-ms ftp-file-deadline-ms-set!)
             (mutable terminal? ftp-file-terminal? ftp-file-terminal?-set!)
             (mutable closed? ftp-file-closed? ftp-file-closed?-set!)))
+
+  #|record:ftp-directory-entry
+The `ftp-directory-entry` record describes one MLSD or MLST result.
+It stores the entry name, type, optional size, modification timestamp, unique identifier,
+permissions, owner, group, and complete raw fact alist.
+|#
+  (define-record-type (ftp-directory-entry %make-ftp-directory-entry ftp-directory-entry?)
+    (fields (immutable name ftp-directory-entry-name)
+            (immutable type ftp-directory-entry-type)
+            (immutable size ftp-directory-entry-size)
+            (immutable modify ftp-directory-entry-modify)
+            (immutable unique ftp-directory-entry-unique)
+            (immutable permissions ftp-directory-entry-permissions)
+            (immutable owner ftp-directory-entry-owner)
+            (immutable group ftp-directory-entry-group)
+            (immutable facts ftp-directory-entry-facts)))
 
   (define ftp-default-timeout-ms 30000)
 
@@ -233,6 +266,87 @@ completed byte count, current poll targets and timer deadline, EOF state, and cl
               (loop (cdr lines)
                     (if (string=? line "") out (cons line out))))))))
 
+  (define ftp-fact-ref
+    (lambda (facts name)
+      (let ([entry (assoc name facts)])
+        (and entry (cdr entry)))))
+
+  (define ftp-permission-symbols
+    (lambda (text)
+      (and text
+           (let loop ([mapping '((#\r . read) (#\w . write) (#\a . append)
+                                  (#\c . create) (#\d . delete) (#\f . rename)
+                                  (#\l . list) (#\m . mkdir) (#\p . purge))]
+                       [out '()])
+             (if (null? mapping)
+                 (reverse out)
+                 (loop (cdr mapping)
+                       (if (string-contains? text (caar mapping))
+                           (cons (cdar mapping) out)
+                           out)))))))
+
+  #|proc:ftp-parse-mlsd-line
+The `ftp-parse-mlsd-line` procedure parses one MLSD or MLST fact line.
+The `line` parameter contains semicolon-delimited facts, one space, and the entry name.
+The return value is an `ftp-directory-entry`; malformed or duplicate facts raise an FTP error.
+Unknown facts remain available through `ftp-directory-entry-facts`.
+|#
+  (define-who ftp-parse-mlsd-line
+    (lambda (line)
+      (pcheck ([string? line])
+              (let ([separator (string-search line #\space)])
+                (unless separator
+                  (raise-net-error who 'ftp "MLSD line is missing the name delimiter" line))
+                (let* ([name (substring line (+ separator 1) (string-length line))]
+                       [fact-text (substring line 0 separator)]
+                       [facts
+                        (let loop ([part* (string-split fact-text #\;)] [out '()])
+                          (if (null? part*)
+                              (reverse out)
+                              (let ([part (car part*)])
+                                (if (string=? part "")
+                                    (loop (cdr part*) out)
+                                    (let ([equals (string-search part #\=)])
+                                      (unless equals
+                                        (raise-net-error who 'ftp
+                                                         "MLSD fact is missing '='" part))
+                                      (let ([key (string-downcase (substring part 0 equals))]
+                                            [value (substring part (+ equals 1)
+                                                              (string-length part))])
+                                        (when (assoc key out)
+                                          (raise-net-error who 'ftp
+                                                           "MLSD contains a duplicate fact" key))
+                                        (loop (cdr part*)
+                                              (cons (cons key value) out))))))))])
+                  (when (string=? name "")
+                    (raise-net-error who 'ftp "MLSD entry name is empty" line))
+                  (let* ([type-text (ftp-fact-ref facts "type")]
+                         [size-text (ftp-fact-ref facts "size")]
+                         [size (and size-text (string->number size-text))])
+                    (when (and size-text (not (and size (natural? size))))
+                      (raise-net-error who 'ftp "MLSD size is invalid" size-text))
+                    (%make-ftp-directory-entry
+                     name
+                     (cond [(and type-text (string=? type-text "file")) 'file]
+                           [(and type-text (member type-text '("dir" "cdir" "pdir")))
+                            'directory]
+                           [(and type-text (string-startswith? type-text "os.unix=slink"))
+                            'symlink]
+                           [else 'unknown])
+                     size
+                     (ftp-fact-ref facts "modify")
+                     (ftp-fact-ref facts "unique")
+                     (ftp-permission-symbols (ftp-fact-ref facts "perm"))
+                     (or (ftp-fact-ref facts "unix.owner")
+                         (ftp-fact-ref facts "unix.ownername"))
+                     (or (ftp-fact-ref facts "unix.group")
+                         (ftp-fact-ref facts "unix.groupname"))
+                     facts)))))))
+
+  (define ftp-mlsd-bytevector->entries
+    (lambda (bytevector)
+      (map ftp-parse-mlsd-line (ftp-list-bytevector->entries bytevector))))
+
   (define normalize-ftp-uri
     (lambda (who value)
       (let ([u (cond
@@ -300,10 +414,10 @@ completed byte count, current poll targets and timer deadline, EOF state, and cl
   (define session-origin
     (lambda (session)
       (let* ([u (ftp-session-uri session)]
-             [scheme (uri-scheme u)]
+             [scheme (if (eq? 'implicit (ftp-session-mode session)) "ftps" "ftp")]
              [host (uri-host u)]
              [port (uri-port u)]
-             [default-port (if (string=? scheme "ftps") 990 21)])
+             [default-port (if (eq? 'implicit (ftp-session-mode session)) 990 21)])
         (string-append scheme
                        "://"
                        host
@@ -332,7 +446,23 @@ completed byte count, current poll targets and timer deadline, EOF state, and cl
 
   (define session-use-tls?
     (lambda (session)
-      (string=? (uri-scheme (ftp-session-uri session)) "ftps")))
+      (not (eq? 'plain (ftp-session-mode session)))))
+
+  #|proc:ftp-mode
+The `ftp-mode` procedure returns the TLS mode of `session`.
+The `session` parameter is an FTP session. The result is `plain`, `explicit`, or `implicit`.
+|#
+  (define-who ftp-mode
+    (lambda (session)
+      (pcheck ([ftp-session? session])
+              (ftp-session-mode session))))
+
+  (define normalize-ftp-mode
+    (lambda (who uri mode)
+      (let ([mode (or mode (if (string=? (uri-scheme uri) "ftps") 'implicit 'plain))])
+        (unless (memq mode '(plain explicit implicit))
+          (errorf who "FTP mode must be `plain`, `explicit`, or `implicit`, given ~s" mode))
+        mode)))
 
   (define ensure-success
     (lambda (who x)
@@ -352,6 +482,20 @@ completed byte count, current poll targets and timer deadline, EOF state, and cl
                          (if (session-use-tls? session) 1 0)
                          (if (ftp-session-verify-peer? session) 1 0)
                          (if (ftp-session-verify-host? session) 1 0)))))
+
+  (define ftp-stat*
+    (lambda (who session path)
+      (let ([answer
+             (ffi-net-ftp-stat (session-base-url session)
+                               (ftp-session-username session)
+                               (ftp-session-password session)
+                               (if (ftp-session-passive? session) 1 0)
+                               (ftp-session-timeout-ms session)
+                               (if (session-use-tls? session) 1 0)
+                               (if (ftp-session-verify-peer? session) 1 0)
+                               (if (ftp-session-verify-host? session) 1 0)
+                               (resolve-session-path session path))])
+        (if answer (ensure-success who answer) #f))))
 
   (define ftp-command*
     (lambda (who session cmd)
@@ -525,21 +669,28 @@ completed byte count, current poll targets and timer deadline, EOF state, and cl
             (raise-net-error who 'ftp "failed to initialize FTP session" status)))))
 
   #|proc:ftp-open
-The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoint URI or host/port tuple.
+The `ftp-open` procedure constructs an FTP or FTPS session from an endpoint or host and port.
+An endpoint may be followed by a TLS `mode` and timeout. Modes are `plain`, `explicit`, or
+`implicit`; FTP defaults to `plain` and FTPS defaults to `implicit`.
 |#
   (define-who ftp-open
     (case-lambda
       [(endpoint)
-       (ftp-open endpoint ftp-default-timeout-ms)]
-      [(endpoint timeout-ms)
+       (ftp-open endpoint #f ftp-default-timeout-ms)]
+      [(endpoint mode-or-timeout)
+       (if (symbol? mode-or-timeout)
+           (ftp-open endpoint mode-or-timeout ftp-default-timeout-ms)
+           (ftp-open endpoint #f mode-or-timeout))]
+      [(endpoint mode timeout-ms)
        (pcheck ([fixnum? timeout-ms])
          (when (fx< timeout-ms 0)
            (errorf who "timeout must be non-negative, given ~s" timeout-ms))
          (let ([u (normalize-ftp-uri who endpoint)])
            (let-values ([(user pass) (split-userinfo (uri-userinfo u))])
-             (let ([secure? (string=? (uri-scheme u) "ftps")])
+             (let ([mode (normalize-ftp-mode who u mode)])
                (%make-ftp-session (native-ftp-session-open who)
                                   u
+                                  mode
                                   user
                                   pass
                                   (normalize-absolute-path
@@ -548,8 +699,8 @@ The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoi
                                        (uri-path u)))
                                   #t
                                   timeout-ms
-                                  secure?
-                                  secure?
+                                  (not (eq? mode 'plain))
+                                  (not (eq? mode 'plain))
                                   #f
                                   #f
                                   #f)))))]
@@ -569,6 +720,7 @@ The `ftp-open` procedure constructs an FTP or FTPS session record from an endpoi
                         (if secure? "ftps" "ftp")
                         host
                         port)
+                (if secure? 'implicit 'plain)
                 timeout-ms))]))
 
   #|proc:ftp-close
@@ -689,7 +841,7 @@ The `ftp-pwd` procedure returns the current working directory stored on an FTP s
               (ftp-session-cwd session))))
 
   #|proc:ftp-list
-The `ftp-list` procedure returns the names of entries in a remote directory.
+The `ftp-list` procedure returns structured entries from an MLSD remote directory listing.
 |#
   (define-who ftp-list
     (case-lambda
@@ -698,10 +850,42 @@ The `ftp-list` procedure returns the names of entries in a remote directory.
       [(session path)
        (pcheck ([ftp-session? session] [string? path])
                (ensure-session-open who session)
-               (ftp-list-bytevector->entries
+               (ftp-mlsd-bytevector->entries
                 (net-operation-wait
                  (ftp-transfer/nonblocking who session 'ftp-list (list path)
                                            (lambda () (ftp-list* who session path))))))]))
+
+  #|proc:ftp-list/raw
+The `ftp-list/raw` procedure returns the raw MLSD bytevector for remote directory `path`.
+The `session` parameter is an open FTP session. The optional `path` defaults to `.`.
+|#
+  (define-who ftp-list/raw
+    (case-lambda
+      [(session) (ftp-list/raw session ".")]
+      [(session path)
+       (pcheck ([ftp-session? session] [string? path])
+               (net-operation-wait (ftp-list/nonblocking session path)))]))
+
+  #|proc:ftp-stat
+The `ftp-stat` procedure returns structured metadata for remote `path`.
+The `session` parameter is an open FTP session and `path` is a remote path.
+The return value is an `ftp-directory-entry`, or `#f` when the path is absent.
+|#
+  (define-who ftp-stat
+    (lambda (session path)
+      (pcheck ([ftp-session? session] [string? path])
+              (let ([raw (ftp-stat* who session path)])
+                (and raw
+                     (let loop ([line* (ftp-list-bytevector->entries raw)])
+                       (cond [(null? line*)
+                              (raise-net-error who 'ftp "MLST response has no fact line" raw)]
+                             [(and (string-contains? (car line*) #\;)
+                                   (string-contains? (car line*) #\=))
+                              (ftp-parse-mlsd-line
+                               (if (char=? #\space (string-ref (car line*) 0))
+                                   (substring (car line*) 1 (string-length (car line*)))
+                                   (car line*)))]
+                             [else (loop (cdr line*))])))))))
 
   #|proc:ftp-list/nonblocking
 The `ftp-list/nonblocking` procedure starts an incremental directory listing on `session` for
@@ -720,14 +904,57 @@ The `ftp-list/nonblocking` procedure starts an incremental directory listing on 
                                          (lambda () (ftp-list* who session path))))]))
 
   #|proc:ftp-download
-The `ftp-download` procedure downloads a remote file to a local pathname.
+The `ftp-download` procedure downloads `remote-path` to `local-path` through `session`.
+The optional `policy` controls resume, overwrite, chunk size, and progress. The return value is
+`local-path`, including when overwrite mode `skip` leaves an existing file unchanged.
 |#
   (define-who ftp-download
-    (lambda (session remote-path local-path)
-      (pcheck ([ftp-session? session] [string? remote-path local-path])
-              (ensure-session-open who session)
-              (net-operation-wait
-               (ftp-download/nonblocking session remote-path local-path)))))
+    (case-lambda
+      [(session remote-path local-path)
+       (ftp-download session remote-path local-path default-transfer-policy)]
+      [(session remote-path local-path policy)
+       (pcheck ([ftp-session? session] [string? remote-path local-path]
+                [transfer-policy? policy])
+               (ensure-session-open who session)
+               (let* ([exists? (file-exists? local-path)]
+                      [overwrite (transfer-policy-overwrite policy)]
+                      [resume (transfer-policy-resume policy)])
+                 (cond [(and exists? (eq? overwrite 'skip)) local-path]
+                       [(and exists? (eq? overwrite 'error) (eq? resume 'never))
+                        (errorf who "local destination exists: ~a" local-path)]
+                       [else
+                        (let* ([offset (cond [(natural? resume) resume]
+                                             [(and (eq? resume 'resume) exists?)
+                                              (local-file-size local-path)]
+                                             [else 0])]
+                               [effective (make-transfer-policy
+                                           offset overwrite
+                                           (transfer-policy-chunk-size policy)
+                                           (transfer-policy-progress policy))]
+                               [file (ftp-open-file session remote-path 'read effective)]
+                               [op (open-file-output-port local-path
+                                                         (if (fx= offset 0)
+                                                             (file-options no-fail replace)
+                                                             (file-options no-fail))
+                                                         (buffer-mode block) #f)]
+                               [completed? #f])
+                          (dynamic-wind
+                            (lambda () (file-position op offset))
+                            (lambda ()
+                              (let loop ()
+                                (let ([chunk (ftp-read file
+                                                       (transfer-policy-chunk-size policy))])
+                                  (unless (eof-object? chunk)
+                                    (put-bytevector op chunk)
+                                    (loop))))
+                              (set! completed? #t)
+                              local-path)
+                            (lambda ()
+                              (close-port op)
+                              (ftp-close-file file)
+                              (when (and (not completed?) (not (eq? resume 'resume))
+                                         (file-exists? local-path))
+                                (delete-file local-path #f)))))])))]))
 
   #|proc:ftp-download/nonblocking
 The `ftp-download/nonblocking` procedure incrementally downloads `remote-path` from `session` to
@@ -756,14 +983,48 @@ The `ftp-download/nonblocking` procedure incrementally downloads `remote-path` f
                                           local-path)))))
 
   #|proc:ftp-upload
-The `ftp-upload` procedure uploads a local file to a remote pathname.
+The `ftp-upload` procedure uploads `local-path` to `remote-path` through `session`.
+The optional `policy` controls resume, overwrite, chunk size, and progress. The return value is
+`remote-path`, including when overwrite mode `skip` leaves an existing remote file unchanged.
 |#
   (define-who ftp-upload
-    (lambda (session local-path remote-path)
-      (pcheck ([ftp-session? session] [string? local-path remote-path])
-              (ensure-session-open who session)
-              (net-operation-wait
-               (ftp-upload/nonblocking session local-path remote-path)))))
+    (case-lambda
+      [(session local-path remote-path)
+       (ftp-upload session local-path remote-path default-transfer-policy)]
+      [(session local-path remote-path policy)
+       (pcheck ([ftp-session? session] [string? local-path remote-path]
+                [transfer-policy? policy])
+               (ensure-session-open who session)
+               (let* ([entry (ftp-stat session remote-path)]
+                      [overwrite (transfer-policy-overwrite policy)]
+                      [resume (transfer-policy-resume policy)])
+                 (cond [(and entry (eq? overwrite 'skip)) remote-path]
+                       [(and entry (eq? overwrite 'error) (eq? resume 'never))
+                        (errorf who "remote destination exists: ~a" remote-path)]
+                       [else
+                        (let* ([offset (cond [(natural? resume) resume]
+                                             [(and (eq? resume 'resume) entry)
+                                              (or (ftp-directory-entry-size entry) 0)]
+                                             [else 0])]
+                               [effective (make-transfer-policy
+                                           offset overwrite
+                                           (transfer-policy-chunk-size policy)
+                                           (transfer-policy-progress policy))]
+                               [file (ftp-open-file session remote-path 'write effective)]
+                               [ip (open-file-input-port local-path)])
+                          (dynamic-wind
+                            (lambda () (file-position ip offset))
+                            (lambda ()
+                              (let loop ()
+                                (let ([chunk (get-bytevector-n
+                                              ip (transfer-policy-chunk-size policy))])
+                                  (unless (eof-object? chunk)
+                                    (ftp-write-all file chunk)
+                                    (loop))))
+                              remote-path)
+                            (lambda ()
+                              (close-port ip)
+                              (ftp-close-file file))))])))]))
 
   #|proc:ftp-upload/nonblocking
 The `ftp-upload/nonblocking` procedure incrementally uploads `local-path` through `session` to
@@ -806,7 +1067,9 @@ The return value is a new open FTP file. Only one FTP file may be active on a se
                (ensure-session-open who session)
                (unless (memq direction '(read write))
                  (errorf who "direction must be `read` or `write`, given ~s" direction))
-               (let ([status
+               (let* ([resume (transfer-policy-resume policy)]
+                      [offset (if (natural? resume) resume 0)]
+                      [status
                       (ffi-net-ftp-file-open
                        (ftp-session-handle session)
                        (if (eq? direction 'read) 0 1)
@@ -817,11 +1080,12 @@ The return value is a new open FTP file. Only one FTP file may be active on a se
                        (ftp-session-timeout-ms session)
                        (if (session-use-tls? session) 1 0)
                        (if (ftp-session-verify-peer? session) 1 0)
-                       (if (ftp-session-verify-host? session) 1 0))])
+                       (if (ftp-session-verify-host? session) 1 0)
+                       offset)])
                  (unless (and (vector? status) (eq? 'ok (vector-ref status 0)))
                    (raise-net-error who 'ftp "failed to open FTP file" status))
                  (let ([file (%make-ftp-file session (vector-ref status 1) direction
-                                             (resolve-session-path session path) policy 0
+                                             (resolve-session-path session path) policy offset
                                              '() #f #f #f)])
                    (ftp-session-active-file-set! session file)
                    (ftp-file-drive! who file '() #t)
@@ -1034,6 +1298,110 @@ The optional `policy` parameter defaults to `default-transfer-policy`.
                    void
                    (lambda () (procedure file))
                    (lambda () (ftp-close-file file)))))]))
+
+  (define ftp-child-path
+    (lambda (parent name)
+      (if (string=? parent "/")
+          (string-append "/" name)
+          (string-append parent "/" name))))
+
+  (define local-child-path
+    (lambda (parent name)
+      (if (or (string=? parent "")
+              (char=? #\/ (string-ref parent (fx- (string-length parent) 1))))
+          (string-append parent name)
+          (string-append parent "/" name))))
+
+  (define ensure-local-directory
+    (lambda (path)
+      (unless (file-exists? path)
+        (let ([slash (let loop ([index (fx- (string-length path) 1)])
+                       (cond [(fx< index 0) #f]
+                             [(char=? #\/ (string-ref path index)) index]
+                             [else (loop (fx- index 1))]))])
+          (when (and slash (fx> slash 0))
+            (ensure-local-directory (substring path 0 slash)))
+          (mkdir path)))))
+
+  (define local-file-size
+    (lambda (path)
+      (call-with-port (open-file-input-port path)
+        (lambda (port) (file-length port)))))
+
+  #|proc:ftp-download-directory
+The `ftp-download-directory` procedure recursively downloads remote `remote-root` through
+`session` into local directory `local-root`. The optional `policy` applies to every file.
+Symbolic links and unknown entry types are rejected. The return value is `local-root`.
+|#
+  (define-who ftp-download-directory
+    (case-lambda
+      [(session remote-root local-root)
+       (ftp-download-directory session remote-root local-root default-transfer-policy)]
+      [(session remote-root local-root policy)
+       (pcheck ([ftp-session? session] [string? remote-root local-root]
+                [transfer-policy? policy])
+               (ensure-session-open who session)
+               (ensure-local-directory local-root)
+               (let walk ([remote (resolve-session-path session remote-root)]
+                          [local local-root])
+                 (for-each
+                  (lambda (entry)
+                    (let ([name (ftp-directory-entry-name entry)])
+                      (when (member name '("." ".."))
+                        (raise-net-error who 'ftp "unsafe FTP directory entry" name))
+                      (let ([remote-child (ftp-child-path remote name)]
+                            [local-child (local-child-path local name)])
+                        (case (ftp-directory-entry-type entry)
+                          [(directory)
+                           (ensure-local-directory local-child)
+                           (walk remote-child local-child)]
+                          [(file) (ftp-download session remote-child local-child policy)]
+                          [else
+                           (raise-net-error who 'ftp
+                                            "recursive FTP download rejects links or unknown types"
+                                            remote-child)]))))
+                  (ftp-list session remote)))
+               local-root)]))
+
+  #|proc:ftp-upload-directory
+The `ftp-upload-directory` procedure recursively uploads local directory `local-root` through
+`session` into remote directory `remote-root`. The optional `policy` applies to every file.
+Local symbolic links are rejected. Remote directories are created before files are uploaded.
+The return value is `remote-root`.
+|#
+  (define-who ftp-upload-directory
+    (case-lambda
+      [(session local-root remote-root)
+       (ftp-upload-directory session local-root remote-root default-transfer-policy)]
+      [(session local-root remote-root policy)
+       (pcheck ([ftp-session? session] [string? local-root remote-root]
+                [transfer-policy? policy])
+               (ensure-session-open who session)
+               (unless (file-directory? local-root)
+                 (errorf who "local source is not a directory: ~a" local-root))
+               (unless (ftp-stat session remote-root)
+                 (ftp-mkdir! session remote-root))
+               (let walk ([local local-root]
+                          [remote (resolve-session-path session remote-root)])
+                 (for-each
+                  (lambda (name)
+                    (let ([local-child (local-child-path local name)]
+                          [remote-child (ftp-child-path remote name)])
+                      (cond [(file-symbolic-link? local-child)
+                             (raise-net-error who 'ftp
+                                              "recursive FTP upload rejects symbolic links"
+                                              local-child)]
+                            [(file-directory? local-child)
+                             (unless (ftp-stat session remote-child)
+                               (ftp-mkdir! session remote-child))
+                             (walk local-child remote-child)]
+                            [(file-regular? local-child)
+                             (ftp-upload session local-child remote-child policy)]
+                            [else
+                             (raise-net-error who 'ftp "unsupported local file type"
+                                              local-child)])) )
+                  (directory-list local)))
+               remote-root)]))
 
   #|proc:ftp-delete!
 The `ftp-delete!` procedure deletes a remote file.

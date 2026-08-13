@@ -446,6 +446,60 @@ ptr chezpp_net_ftp_list(const char *url, const char *user, const char *pass, int
                        1L);
 }
 
+ptr chezpp_net_ftp_stat(const char *url, const char *user, const char *pass, int passive,
+                        int timeout_ms, int use_tls, int verify_peer, int verify_host,
+                        const char *path) {
+  CURL *curl;
+  CURLcode rc;
+  ptr result;
+  memory_buffer buf;
+  char *command;
+  struct curl_slist *quote = NULL;
+  size_t command_len = strlen(path) + 6;
+
+  if (!ensure_curl_loaded())
+    return make_error_status_message(chezpp_optional_library_error(&curl_library));
+  curl = p_curl_easy_init();
+  command = (char *)malloc(command_len);
+  if (curl == NULL || command == NULL) {
+    if (curl != NULL) p_curl_easy_cleanup(curl);
+    if (command != NULL) free(command);
+    return make_errno_status();
+  }
+  snprintf(command, command_len, "MLST %s", path);
+  memory_buffer_init(&buf);
+  result = apply_common_options(curl, url, user, pass, passive, timeout_ms, use_tls,
+                                verify_peer, verify_host);
+  if (result != Strue) goto cleanup;
+  quote = p_curl_slist_append(quote, command);
+  if (quote == NULL) {
+    result = make_errno_status();
+    goto cleanup;
+  }
+  rc = p_curl_easy_setopt(curl, CURLOPT_QUOTE, quote);
+  if (rc == CURLE_OK) rc = p_curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+  if (rc == CURLE_OK) rc = p_curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, write_memory_cb);
+  if (rc == CURLE_OK) rc = p_curl_easy_setopt(curl, CURLOPT_HEADERDATA, &buf);
+  if (rc == CURLE_OK) rc = p_curl_easy_perform(curl);
+  if (rc == CURLE_QUOTE_ERROR) {
+    result = Sfalse;
+    goto cleanup;
+  }
+  if (rc != CURLE_OK) {
+    result = curl_error_status(rc);
+    goto cleanup;
+  }
+  result = Smake_bytevector((iptr)buf.len, 0);
+  if (buf.len > 0) memcpy(Sbytevector_data(result), buf.data, buf.len);
+
+cleanup:
+  if (quote != NULL) p_curl_slist_free_all(quote);
+  memory_buffer_free(&buf);
+  free(command);
+  p_curl_easy_cleanup(curl);
+  return result;
+}
+
 ptr chezpp_net_ftp_download(const char *url, const char *dest, const char *user, const char *pass,
                             int passive, int timeout_ms, int use_tls, int verify_peer,
                             int verify_host) {
@@ -721,7 +775,9 @@ static ptr ftp_transfer_configure(ftp_transfer *t, const char *url, const char *
     if (rc == CURLE_OK)
       rc = p_curl_easy_setopt(t->easy, CURLOPT_WRITEDATA, &t->buffer);
     if (rc == CURLE_OK)
-      rc = p_curl_easy_setopt(t->easy, CURLOPT_DIRLISTONLY, 1L);
+      rc = p_curl_easy_setopt(t->easy, CURLOPT_DIRLISTONLY, 0L);
+    if (rc == CURLE_OK)
+      rc = p_curl_easy_setopt(t->easy, CURLOPT_CUSTOMREQUEST, "MLSD");
   } else if (t->kind == FTP_TRANSFER_DOWNLOAD) {
     t->local_path = strdup(path);
     if (t->local_path == NULL) return make_errno_status();
@@ -1006,7 +1062,7 @@ ptr chezpp_net_ftp_session_close(uptr handle) {
 ptr chezpp_net_ftp_file_open(uptr session_handle, int direction,
                              const char *url, const char *user, const char *pass,
                              int passive, int timeout_ms, int use_tls,
-                             int verify_peer, int verify_host) {
+                             int verify_peer, int verify_host, iptr offset) {
   ftp_session *session = (ftp_session *)session_handle;
   ftp_file *file;
   ptr out;
@@ -1018,6 +1074,7 @@ ptr chezpp_net_ftp_file_open(uptr session_handle, int direction,
     return make_error_status_message("FTP session already has an active file");
   if (direction != 0 && direction != 1)
     return make_error_status_message("invalid FTP file direction");
+  if (offset < 0) return make_error_status_message("invalid FTP resume offset");
   file = (ftp_file *)calloc(1, sizeof(*file));
   if (file == NULL) return make_errno_status();
   file->session = session;
@@ -1046,6 +1103,8 @@ ptr chezpp_net_ftp_file_open(uptr session_handle, int direction,
     if (rc == CURLE_OK)
       rc = p_curl_easy_setopt(file->easy, CURLOPT_READDATA, file);
   }
+  if (rc == CURLE_OK && offset != 0)
+    rc = p_curl_easy_setopt(file->easy, CURLOPT_RESUME_FROM_LARGE, (curl_off_t)offset);
   if (rc != CURLE_OK) {
     out = curl_error_status(rc);
     ftp_file_release(file);

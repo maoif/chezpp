@@ -24,6 +24,10 @@
                      (raise c))])
         (proc)))))
 
+(define ftp-entry-names
+  (lambda (entry*)
+    (map ftp-directory-entry-name entry*)))
+
 (define ftp-net-error-timeout?
   (lambda (thunk)
     (guard (c [else
@@ -127,11 +131,15 @@
 
 (mat net-ftp-tls-verification-api
      (let ([plain (ftp-open "ftp://127.0.0.1:21/")]
+           [explicit (ftp-open "ftp://127.0.0.1:21/" 'explicit)]
            [secure (ftp-open "ftps://127.0.0.1:21/")])
        (dynamic-wind
          void
          (lambda ()
            (and
+            (eq? 'plain (ftp-mode plain))
+            (eq? 'explicit (ftp-mode explicit))
+            (eq? 'implicit (ftp-mode secure))
             (not (ftp-verify-peer? plain))
             (not (ftp-verify-host? plain))
             (ftp-verify-peer? secure)
@@ -144,7 +152,13 @@
             (ftp-verify-host? secure)))
          (lambda ()
            (ftp-close plain)
-           (ftp-close secure)))))
+           (ftp-close explicit)
+           (ftp-close secure))))
+
+     ;; An unknown FTPS mode is invalid.
+     (ftp-error-message-contains?
+      "FTP mode must be"
+      (lambda () (ftp-open "ftp://127.0.0.1:21/" 'automatic))))
 
 (mat net-ftp-timeout-validation
      (let ([endpoint "ftp://127.0.0.1:21/"])
@@ -187,10 +201,50 @@
                   (let ([entries (begin
                                    (milisleep 50)
                                    (ftp-list session))])
-                    (and (not (not (member "docs" entries)))
-                         (not (not (member "hello.txt" entries)))))))
+                    (let ([name* (ftp-entry-names entries)])
+                      (and (not (not (member "docs" name*)))
+                           (not (not (member "hello.txt" name*))))))))
            (lambda ()
              (stop-server))))))
+
+(mat net-ftp-directory-entry
+     (let ([entry (ftp-parse-mlsd-line
+                   "type=file;size=12;modify=20260801123456;perm=rw; sample.txt")])
+       (and (ftp-directory-entry? entry)
+            (string=? "sample.txt" (ftp-directory-entry-name entry))
+            (eq? 'file (ftp-directory-entry-type entry))
+            (= 12 (ftp-directory-entry-size entry))
+            (string=? "20260801123456" (ftp-directory-entry-modify entry))
+            (equal? '(read write) (ftp-directory-entry-permissions entry))))
+
+     ;; An MLSD line without the fact/name delimiter is invalid.
+     (ftp-error-message-contains?
+      "name delimiter"
+      (lambda () (ftp-parse-mlsd-line "type=file;size=1;missing.txt")))
+
+     ;; A nonnumeric MLSD size is invalid.
+     (ftp-error-message-contains?
+      "size is invalid"
+      (lambda () (ftp-parse-mlsd-line "type=file;size=nope; bad.txt")))
+
+     ;; A duplicate MLSD fact is invalid.
+     (ftp-error-message-contains?
+      "duplicate fact"
+      (lambda () (ftp-parse-mlsd-line "type=file;type=dir; duplicate")))
+
+     ;; An unknown MLSD fact is retained for forward compatibility.
+     (let ([entry (ftp-parse-mlsd-line "type=file;x-vendor=yes; unknown.txt")])
+       (equal? '("x-vendor" . "yes")
+               (assoc "x-vendor" (ftp-directory-entry-facts entry))))
+
+     (with-test-ftp-session
+      (lambda (session)
+        (let ([entry (ftp-stat session "/hello.txt")])
+          (and (ftp-directory-entry? entry)
+               (eq? 'file (ftp-directory-entry-type entry))
+               (= 9 (ftp-directory-entry-size entry))
+               (bytevector? (ftp-list/raw session))
+               (not (ftp-stat session "/missing.txt")))))))
 
 (mat net-ftp-cwd
      (let-values ([(root port stop-server) (start-ftp-test-server)])
@@ -206,7 +260,7 @@
                           '("readme.txt"))
                   (equal? (begin
                             (milisleep 50)
-                            (ftp-list session))
+                            (ftp-entry-names (ftp-list session)))
                           '("readme.txt"))))
            (lambda ()
              (stop-server))))))
@@ -427,9 +481,13 @@
                   (let ([entries (wait-ftp-nonblocking
                                   (lambda ()
                                     (ftp-list/nonblocking session)))])
-                    (and (list? entries)
-                         (not (not (member "docs" entries)))
-                         (not (not (member "hello.txt" entries)))))))
+                    (let ([name* (map (lambda (line)
+                                       (ftp-directory-entry-name
+                                        (ftp-parse-mlsd-line line)))
+                                     entries)])
+                      (and (list? entries)
+                           (not (not (member "docs" name*)))
+                           (not (not (member "hello.txt" name*))))))))
            (lambda ()
              (stop-server))))))
 
@@ -462,10 +520,11 @@
                     (and (net-operation? operation)
                          (eq? (ftp-cancel-pending! session) session)
                          (eq? (net-operation-state operation) 'cancelled)))
-                  (let ([entries (ftp-list session)])
+                  (let* ([entries (ftp-list session)]
+                         [name* (ftp-entry-names entries)])
                     (and (list? entries)
-                         (not (not (member "docs" entries)))
-                         (not (not (member "hello.txt" entries)))))))
+                         (not (not (member "docs" name*)))
+                         (not (not (member "hello.txt" name*)))))))
            (lambda ()
              (stop-server))))))
 
@@ -538,7 +597,7 @@
                          (eq? (net-operation-state operation) 'cancelled)
                          (not (file-exists? download-path))))
                   (let ([entries (ftp-list session)])
-                    (and (member "hello.txt" entries) #t))))
+                    (and (member "hello.txt" (ftp-entry-names entries)) #t))))
            (lambda ()
              (ftp-close session)
              (when (file-exists? download-path)

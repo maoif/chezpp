@@ -42,6 +42,7 @@
           ffi-net-resolver-close
           ffi-net-address->name
           ffi-net-ftp-list
+          ffi-net-ftp-stat
           ffi-net-ftp-download
           ffi-net-ftp-upload
           ffi-net-ftp-command
@@ -240,6 +241,10 @@
     (foreign-procedure "chezpp_net_ftp_list"
                        (string string string int int int int int)
                        scheme-object))
+  (define ffi-net-ftp-stat
+    (foreign-procedure "chezpp_net_ftp_stat"
+                       (string string string int int int int int string)
+                       scheme-object))
   (define ffi-net-ftp-download
     (foreign-procedure "chezpp_net_ftp_download"
                        (string string string string int int int int int)
@@ -272,7 +277,7 @@
     (foreign-procedure "chezpp_net_ftp_session_close" (uptr) scheme-object))
   (define ffi-net-ftp-file-open
     (foreign-procedure "chezpp_net_ftp_file_open"
-                       (uptr int string string string int int int int int)
+                       (uptr int string string string int int int int int iptr)
                        scheme-object))
   (define ffi-net-ftp-file-step
     (foreign-procedure "chezpp_net_ftp_file_step" (uptr scheme-object int) scheme-object))

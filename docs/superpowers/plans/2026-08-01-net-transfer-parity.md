@@ -207,7 +207,7 @@ git commit -m "net: add persistent FTP file transfers"
 - Modify: `tests/net-ftp-server-process.ss`
 - Modify: `tests/net-ftp-common.ss`
 
-- [ ] **Step 1: Add MLSD/MLST parsing tests**
+- [x] **Step 1: Add MLSD/MLST parsing tests**
 
 ```scheme
 (mat net-ftp-directory-entry
@@ -224,7 +224,7 @@ git commit -m "net: add persistent FTP file transfers"
 Add negative cases for missing space delimiter, invalid size, duplicate fact, and unknown fact.
 Each negative case has an error-case comment and blank line.
 
-- [ ] **Step 2: Run and verify failure**
+- [x] **Step 2: Run and verify failure**
 
 ```bash
 cd tests && make test-some TEST='net-ftp'
@@ -232,14 +232,14 @@ cd tests && make test-some TEST='net-ftp'
 
 Expected: FAIL because structured FTP entries and MLST are absent.
 
-- [ ] **Step 3: Implement structured metadata**
+- [x] **Step 3: Implement structured metadata**
 
 Export `ftp-directory-entry?` and accessors for name, type, size, modify, unique, permissions,
 owner, group, and raw facts. `ftp-list` returns a list of entries by default; add
 `ftp-list/raw` for the old bytevector listing. `ftp-stat` issues MLST and returns one entry or `#f`
 for a missing path.
 
-- [ ] **Step 4: Add explicit FTPS modes**
+- [x] **Step 4: Add explicit FTPS modes**
 
 Use symbols `plain`, `explicit`, and `implicit`. URI defaults are `ftp -> plain` and
 `ftps -> implicit` for compatibility; `ftp-open` accepts an explicit mode override. Map explicit
@@ -252,12 +252,17 @@ Use `CURLOPT_RESUME_FROM_LARGE` for upload/download resume, `CURLOPT_RANGE` for 
 `CURLOPT_XFERINFOFUNCTION` for progress, and `CURLOPT_NOPROGRESS = 0`. Enforce overwrite policy
 before starting and preserve partial files only for `resume` mode.
 
-- [ ] **Step 6: Add recursive helpers**
+- [x] **Step 6: Add recursive helpers**
 
 Export `ftp-download-directory` and `ftp-upload-directory`. Traverse structured entries, reject
 cycles/links that escape the requested root, precreate directories, and report progress per file.
 
-- [ ] **Step 7: Build, test, and commit**
+- [x] **Step 7: Build, test, and commit**
+
+Implementation note: policy-aware resume, overwrite, progress, and recursive APIs are present,
+including native REST/`CURLOPT_RESUME_FROM_LARGE` plumbing. End-to-end resume and recursive fixture
+coverage remains deferred because the current in-process FTP fixture cannot reliably complete a
+REST upload/download before its control connection timeout.
 
 ```bash
 make clean && make
