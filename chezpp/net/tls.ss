@@ -1,6 +1,7 @@
 (library (chezpp net tls)
   (export make-tls-context
           tls-context?
+          tls-context-native-handle
           close-tls-context
           tls-context-load-ca-file!
           tls-context-load-ca-path!
@@ -65,6 +66,17 @@
             (immutable context tls-session-context)
             (immutable socket tls-session-socket)
             (mutable closed? tls-session-closed? tls-session-closed?-set!)))
+
+  #|proc:tls-context-native-handle
+The `tls-context-native-handle` procedure returns the opaque native handle owned by `ctx`.
+The handle is intended for Chezpp transport integrations and remains owned by `ctx`.
+|#
+  (define tls-context-native-handle
+    (lambda (ctx)
+      (pcheck ([tls-context? ctx])
+        (when (tls-context-closed? ctx)
+          (errorf 'tls-context-native-handle "TLS context is closed"))
+        (tls-context-handle ctx))))
 
   (define check-format
     (lambda (who fmt)

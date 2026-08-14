@@ -126,8 +126,11 @@
           ffi-net-websocket-connect
           ffi-net-websocket-connect-step
           ffi-net-websocket-close
+          ffi-net-websocket-close-with-reason
+          ffi-net-websocket-state
           ffi-net-websocket-cancel-send
           ffi-net-websocket-send
+          ffi-net-websocket-send-fragment
           ffi-net-websocket-recv
           ffi-net-grpc-channel-open
           ffi-net-grpc-channel-close
@@ -448,21 +451,31 @@
   (define ffi-net-sftp-write
     (foreign-procedure "chezpp_net_sftp_write" (uptr ptr int int int int) scheme-object))
   (define ffi-net-websocket-listen
-    (foreign-procedure "chezpp_net_websocket_listen" (string int string) scheme-object))
+    (foreign-procedure "chezpp_net_websocket_listen"
+                       (string int string string int uptr) scheme-object))
   (define ffi-net-websocket-server-close
     (foreign-procedure "chezpp_net_websocket_server_close" (uptr) scheme-object))
   (define ffi-net-websocket-accept
     (foreign-procedure "chezpp_net_websocket_accept" (uptr int int) scheme-object))
   (define ffi-net-websocket-connect
-    (foreign-procedure "chezpp_net_websocket_connect" (string int string string int int) scheme-object))
+    (foreign-procedure "chezpp_net_websocket_connect"
+                       (string int string string string int int uptr int) scheme-object))
   (define ffi-net-websocket-connect-step
     (foreign-procedure "chezpp_net_websocket_connect_step" (uptr) scheme-object))
   (define ffi-net-websocket-close
     (foreign-procedure "chezpp_net_websocket_close" (uptr) scheme-object))
+  (define ffi-net-websocket-close-with-reason
+    (foreign-procedure "chezpp_net_websocket_close_with_reason"
+                       (uptr int scheme-object) scheme-object))
+  (define ffi-net-websocket-state
+    (foreign-procedure "chezpp_net_websocket_state" (uptr) scheme-object))
   (define ffi-net-websocket-cancel-send
     (foreign-procedure "chezpp_net_websocket_cancel_send" (uptr) scheme-object))
   (define ffi-net-websocket-send
     (foreign-procedure "chezpp_net_websocket_send" (uptr int ptr int int int int) scheme-object))
+  (define ffi-net-websocket-send-fragment
+    (foreign-procedure "chezpp_net_websocket_send_fragment"
+                       (uptr int ptr int int int int int) scheme-object))
   (define ffi-net-websocket-recv
     (foreign-procedure "chezpp_net_websocket_recv" (uptr int int) scheme-object))
   (define ffi-net-grpc-channel-open

@@ -407,3 +407,101 @@
                  (websocket-close client)))))
          (lambda ()
            (websocket-server-close server)))))
+
+(define wait-websocket-write
+  (lambda (answer)
+    (when (net-would-block? answer)
+      (poll (list (make-poll-target (net-would-block-resource answer)
+                                    (net-would-block-events answer)))
+            100))))
+
+(mat net-websocket-phase4-features
+     (let* ([port (reserve-loopback-port)]
+            [options (make-websocket-options #f '("chezpp.v2" "chezpp.v1")
+                                             #t 65536 #f 500)]
+            [server (websocket-listen "127.0.0.1" port options)]
+            [uri (format "ws://127.0.0.1:~a/features" port)]
+            [client #f]
+            [accepted #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (set! client (websocket-connect uri options))
+           (set! accepted (websocket-accept server))
+           (let ([first (websocket-send-fragment/nonblocking client 'text "one-")])
+             (wait-websocket-write first)
+             (let ([second (websocket-send-fragment/nonblocking client 'text "two-")])
+               (wait-websocket-write second)
+               (let ([third (websocket-finish-message/nonblocking client "three")])
+                 (wait-websocket-write third))))
+           (let ([message (websocket-recv accepted)])
+             (let ([pong-thread
+                    (fork-thread
+                     (lambda ()
+                       (guard (condition [else #f])
+                         (let ([ping (websocket-recv accepted 500)])
+                           (when (websocket-message? ping)
+                             (websocket-send-pong accepted #vu8(1 2 3) 500))))))])
+             (and (websocket-message? message)
+                  (eq? (websocket-message-type message) 'text)
+                  (equal? (websocket-message-data message) "one-two-three")
+                  (equal? (websocket-negotiated-subprotocol client) "chezpp.v2")
+                  (equal? (websocket-negotiated-subprotocol accepted) "chezpp.v2")
+                  (eq? (websocket-compression client) 'permessage-deflate)
+                  (eq? (websocket-compression accepted) 'permessage-deflate)
+                  (let ([result
+                         (net-operation-wait
+                          (websocket-ping-operation client #vu8(1 2 3) 500))])
+                    (thread-join pong-thread)
+                    result)
+                  (begin
+                    (websocket-close client 1000 "phase4 complete")
+                    (= (websocket-close-code client) 1000))
+                  (equal? (websocket-close-reason client) "phase4 complete")))))
+         (lambda ()
+           (when (and accepted (not (eof-object? accepted)))
+             (websocket-close accepted))
+           (when client (websocket-close client))
+           (websocket-server-close server)))))
+
+(mat net-websocket-wss
+     (begin
+       (write-test-san-cert-files)
+       (let* ([server-context (make-tls-context 'server)]
+              [client-context (make-tls-context 'client)]
+              [port (reserve-loopback-port)]
+              [server-options #f]
+              [client-options #f]
+              [server #f]
+              [client #f]
+              [accepted #f])
+         (dynamic-wind
+           (lambda ()
+             (tls-context-load-cert! server-context
+                                     "/tmp/chezpp-net-test-san-cert.pem")
+             (tls-context-load-private-key! server-context
+                                            "/tmp/chezpp-net-test-san-key.pem")
+             (tls-context-load-ca-file! client-context
+                                        "/tmp/chezpp-net-test-san-cert.pem")
+             (set! server-options
+                   (make-websocket-options server-context '("chezpp-wss")
+                                           #f 65536 #f 500))
+             (set! client-options
+                   (make-websocket-options client-context '("chezpp-wss")
+                                           #f 65536 #f 500))
+             (set! server (websocket-listen "127.0.0.1" port server-options)))
+           (lambda ()
+             (set! client
+                   (websocket-connect (format "wss://127.0.0.1:~a/secure" port)
+                                      client-options 2000))
+             (set! accepted (websocket-accept server 2000))
+             (and (= (websocket-send-text client "secure") 6)
+                  (let ([message (websocket-recv accepted 2000)])
+                    (and (websocket-message? message)
+                         (equal? (websocket-message-data message) "secure")))))
+           (lambda ()
+             (when accepted (websocket-close accepted))
+             (when client (websocket-close client))
+             (when server (websocket-server-close server))
+             (close-tls-context client-context)
+             (close-tls-context server-context))))))

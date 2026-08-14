@@ -201,6 +201,26 @@ static chezpp_tls_session *session_from_handle(uptr handle) {
   return (chezpp_tls_session *)TO_VOIDP(handle);
 }
 
+void *chezpp_net_tls_context_native(uptr handle) {
+  chezpp_tls_context *ctx = ctx_from_handle(handle);
+  return ctx == NULL ? NULL : ctx->ctx;
+}
+
+int chezpp_net_tls_context_copy_credentials(uptr handle, void *destination) {
+  chezpp_tls_context *source = ctx_from_handle(handle);
+  SSL_CTX *target = (SSL_CTX *)destination;
+  X509 *certificate;
+  EVP_PKEY *private_key;
+
+  if (source == NULL || source->ctx == NULL || target == NULL) return 0;
+  certificate = chezpp_openssl_SSL_CTX_get0_certificate(source->ctx);
+  private_key = chezpp_openssl_SSL_CTX_get0_privatekey(source->ctx);
+  if (certificate == NULL || private_key == NULL) return 0;
+  return chezpp_openssl_SSL_CTX_use_certificate(target, certificate) == 1 &&
+         chezpp_openssl_SSL_CTX_use_PrivateKey(target, private_key) == 1 &&
+         chezpp_openssl_SSL_CTX_check_private_key(target) == 1;
+}
+
 uptr chezpp_net_tls_context_create(int mode) {
   const SSL_METHOD *method;
   SSL_CTX *ctx;

@@ -169,6 +169,8 @@
   X(ssl, SSL_CTX_check_private_key)                                           \
   X(ssl, SSL_CTX_ctrl)                                                        \
   X(ssl, SSL_CTX_free)                                                        \
+  X(ssl, SSL_CTX_get0_certificate)                                            \
+  X(ssl, SSL_CTX_get0_privatekey)                                             \
   X(ssl, SSL_CTX_load_verify_locations)                                       \
   X(ssl, SSL_CTX_new)                                                         \
   X(ssl, SSL_CTX_set_alpn_protos)                                             \
