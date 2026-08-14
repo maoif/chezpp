@@ -159,6 +159,27 @@
         (and (fx<= sn n)
              (string=? suffix (substring s (fx- n sn) n))))))
 
+  (define grpc-metadata-key-character?
+    (lambda (character)
+      (or (char<=? #\a character #\z)
+          (char<=? #\0 character #\9)
+          (memv character '(#\- #\_ #\.)))))
+
+  (define normalize-metadata-key
+    (lambda (who raw-key)
+      (let ([key (cond
+                  [(string? raw-key) raw-key]
+                  [(symbol? raw-key) (symbol->string raw-key)]
+                  [else
+                   (errorf who "expected string or symbol metadata key, given ~s" raw-key)])])
+        (unless (and (positive? (string-length key))
+                     (andmap grpc-metadata-key-character? (string->list key)))
+          (errorf who "invalid gRPC metadata key ~s" key))
+        (when (and (>= (string-length key) 5)
+                   (string=? "grpc-" (substring key 0 5)))
+          (errorf who "caller metadata key uses reserved grpc- prefix: ~s" key))
+        key)))
+
   (define normalize-metadata
     (lambda (who metadata)
       (cond
@@ -170,14 +191,18 @@
                  (errorf who "expected metadata pair, given ~s" entry))
                (let* ([raw-key (car entry)]
                       [raw-value (cdr entry)]
-                      [key (cond
-                            [(string? raw-key) raw-key]
-                            [(symbol? raw-key) (symbol->string raw-key)]
-                            [else (errorf who "expected string or symbol metadata key, given ~s"
-                                          raw-key)])]
+                      [key (normalize-metadata-key who raw-key)]
                       [value (cond
-                              [(bytevector? raw-value) raw-value]
-                              [(string? raw-value) (string->utf8 raw-value)]
+                              [(bytevector? raw-value)
+                               (unless (string-suffix? "-bin" key)
+                                 (errorf who
+                                         "bytevector metadata requires a -bin key: ~s"
+                                         key))
+                               raw-value]
+                              [(string? raw-value)
+                               (when (string-suffix? "-bin" key)
+                                 (errorf who "binary metadata value must be a bytevector: ~s" key))
+                               (string->utf8 raw-value)]
                               [else (errorf who "expected string or bytevector metadata value, given ~s"
                                             raw-value)])])
                  (cons key value)))

@@ -247,7 +247,22 @@
           (= (grpc-status-code resp) 7)
           (equal? (grpc-status-message resp) "status-text")
           (equal? (grpc-metadata-ref resp "x-answer") "ok")
-          (equal? (grpc-metadata-ref resp "x-bin") #vu8(4 5))))))
+          (equal? (grpc-metadata-ref resp "x-bin") #vu8(4 5)))))
+
+     ;; Error case: caller metadata keys may not contain uppercase ASCII characters.
+     (guard (condition [else #t])
+       (grpc-response #f '(("X-Upper" . "bad")))
+       #f)
+
+     ;; Error case: bytevector metadata values require a binary `-bin` key.
+     (guard (condition [else #t])
+       (grpc-response #f '(("x-value" . #vu8(1))))
+       #f)
+
+     ;; Error case: caller metadata may not use the reserved `grpc-` prefix.
+     (guard (condition [else #t])
+       (grpc-response #f '(("grpc-test" . "bad")))
+       #f))
 
 (mat net-grpc-unary
      (with-grpc-env
