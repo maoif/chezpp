@@ -277,6 +277,74 @@
          (lambda ()
            (stop-server)))))
 
+(mat net-ssh-auth-known-hosts-and-forwarding
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME" home
+            (lambda ()
+              (let* ([known-hosts (string-append home "/.ssh/managed_hosts")]
+                     [private-key (string-append home "/.ssh/id_ed25519")]
+                     [public-key (string-append private-key ".pub")]
+                     [listener (open-socket 'inet 'stream)])
+                (dynamic-wind
+                  (lambda ()
+                    (socket-set-option! listener 'reuse-address #t)
+                    (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+                    (socket-listen! listener 1))
+                  (lambda ()
+                    (let* ([echo-port
+                            (socket-address-port (socket-local-address listener))]
+                           [echo-thread
+                            (fork-thread
+                             (lambda ()
+                               (let-values ([(client peer) (socket-accept listener)])
+                                 (dynamic-wind
+                                   void
+                                   (lambda ()
+                                     (let ([payload (socket-recv client 4)])
+                                       (socket-send-all client payload)))
+                                   (lambda () (close-socket client))))))]
+                           [session
+                            (ssh-open-with-policy "127.0.0.1" port user 30000 'insecure)])
+                      (dynamic-wind
+                        void
+                        (lambda ()
+                          (and
+                           (eq? session
+                                (ssh-auth-private-key! session user public-key private-key #f))
+                           (memq (ssh-check-known-host session known-hosts)
+                                 '(not-found unknown))
+                           (ssh-known-host? (ssh-add-known-host! session known-hosts))
+                           (eq? (ssh-check-known-host session known-hosts) 'ok)
+                           (= (length (ssh-list-known-hosts session known-hosts)) 1)
+                           (let ([forward
+                                  (ssh-open-local-forward
+                                   session "127.0.0.1" echo-port "127.0.0.1" 0)])
+                             (dynamic-wind
+                               void
+                               (lambda ()
+                                 (let ([channel (ssh-forwarding-channel forward)])
+                                   (and (fixnum? (ssh-forwarding-descriptor forward))
+                                        (= (ssh-write-all channel (string->utf8 "ping")) 4)
+                                        (equal? (ssh-read channel 4) (string->utf8 "ping")))))
+                               (lambda ()
+                                 (ssh-close-forwarding forward)
+                                 (ssh-close-forwarding forward))))
+                           (= (ssh-remove-known-host! session
+                                                     (car (ssh-list-known-hosts
+                                                           session known-hosts))
+                                                     known-hosts)
+                              1)
+                           (null? (ssh-list-known-hosts session known-hosts))))
+                        (lambda ()
+                          (ssh-close session)
+                          (thread-join echo-thread)))))
+                  (lambda () (close-socket listener)))))))
+         (lambda () (stop-server)))))
+
 (mat net-ssh-port-validation
      (and
       (ssh-error-message-contains?

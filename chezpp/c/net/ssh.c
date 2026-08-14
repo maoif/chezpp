@@ -89,6 +89,23 @@ typedef int (*ssh_session_update_known_hosts_fn)(ssh_session);
 typedef int (*ssh_userauth_password_fn)(ssh_session, const char *, const char *);
 typedef int (*ssh_userauth_publickey_auto_fn)(ssh_session, const char *, const char *);
 typedef int (*ssh_userauth_agent_fn)(ssh_session, const char *);
+typedef int (*ssh_userauth_try_publickey_fn)(ssh_session, const char *, const ssh_key);
+typedef int (*ssh_userauth_publickey_fn)(ssh_session, const char *, const ssh_key);
+typedef int (*ssh_userauth_kbdint_fn)(ssh_session, const char *, const char *);
+typedef const char *(*ssh_userauth_kbdint_getinstruction_fn)(ssh_session);
+typedef const char *(*ssh_userauth_kbdint_getname_fn)(ssh_session);
+typedef int (*ssh_userauth_kbdint_getnprompts_fn)(ssh_session);
+typedef const char *(*ssh_userauth_kbdint_getprompt_fn)(ssh_session, unsigned int, char *);
+typedef int (*ssh_userauth_kbdint_setanswer_fn)(ssh_session, unsigned int, const char *);
+typedef int (*ssh_pki_import_privkey_file_fn)(const char *, const char *, ssh_auth_callback,
+                                              void *, ssh_key *);
+typedef int (*ssh_pki_import_pubkey_file_fn)(const char *, ssh_key *);
+typedef void (*ssh_key_free_fn)(ssh_key);
+typedef int (*ssh_session_export_known_hosts_entry_fn)(ssh_session, char **);
+typedef int (*ssh_channel_open_forward_fn)(ssh_channel, const char *, int, const char *, int);
+typedef int (*ssh_channel_listen_forward_fn)(ssh_session, const char *, int, int *);
+typedef ssh_channel (*ssh_channel_open_forward_port_fn)(ssh_session, int, int *, char **, int *);
+typedef int (*ssh_channel_cancel_forward_fn)(ssh_session, const char *, int);
 typedef ssh_channel (*ssh_channel_new_fn)(ssh_session);
 typedef void (*ssh_channel_free_fn)(ssh_channel);
 typedef ssh_session (*ssh_channel_get_session_fn)(ssh_channel);
@@ -159,6 +176,18 @@ static ssh_session_update_known_hosts_fn p_ssh_session_update_known_hosts = NULL
 static ssh_userauth_password_fn p_ssh_userauth_password = NULL;
 static ssh_userauth_publickey_auto_fn p_ssh_userauth_publickey_auto = NULL;
 static ssh_userauth_agent_fn p_ssh_userauth_agent = NULL;
+static ssh_userauth_try_publickey_fn p_ssh_userauth_try_publickey = NULL;
+static ssh_userauth_publickey_fn p_ssh_userauth_publickey = NULL;
+static ssh_userauth_kbdint_fn p_ssh_userauth_kbdint = NULL;
+static ssh_userauth_kbdint_getinstruction_fn p_ssh_userauth_kbdint_getinstruction = NULL;
+static ssh_userauth_kbdint_getname_fn p_ssh_userauth_kbdint_getname = NULL;
+static ssh_userauth_kbdint_getnprompts_fn p_ssh_userauth_kbdint_getnprompts = NULL;
+static ssh_userauth_kbdint_getprompt_fn p_ssh_userauth_kbdint_getprompt = NULL;
+static ssh_userauth_kbdint_setanswer_fn p_ssh_userauth_kbdint_setanswer = NULL;
+static ssh_pki_import_privkey_file_fn p_ssh_pki_import_privkey_file = NULL;
+static ssh_pki_import_pubkey_file_fn p_ssh_pki_import_pubkey_file = NULL;
+static ssh_key_free_fn p_ssh_key_free = NULL;
+static ssh_session_export_known_hosts_entry_fn p_ssh_session_export_known_hosts_entry = NULL;
 static ssh_channel_new_fn p_ssh_channel_new = NULL;
 static ssh_channel_free_fn p_ssh_channel_free = NULL;
 static ssh_channel_get_session_fn p_ssh_channel_get_session = NULL;
@@ -168,6 +197,10 @@ static ssh_channel_request_shell_fn p_ssh_channel_request_shell = NULL;
 static ssh_channel_request_pty_fn p_ssh_channel_request_pty = NULL;
 static ssh_channel_request_env_fn p_ssh_channel_request_env = NULL;
 static ssh_channel_request_subsystem_fn p_ssh_channel_request_subsystem = NULL;
+static ssh_channel_open_forward_fn p_ssh_channel_open_forward = NULL;
+static ssh_channel_listen_forward_fn p_ssh_channel_listen_forward = NULL;
+static ssh_channel_open_forward_port_fn p_ssh_channel_open_forward_port = NULL;
+static ssh_channel_cancel_forward_fn p_ssh_channel_cancel_forward = NULL;
 static ssh_channel_read_fn p_ssh_channel_read = NULL;
 static ssh_channel_write_fn p_ssh_channel_write = NULL;
 static ssh_channel_send_eof_fn p_ssh_channel_send_eof = NULL;
@@ -330,6 +363,23 @@ static void initialize_ssh(void) {
       !load_symbol((void **)&p_ssh_userauth_password, "ssh_userauth_password") ||
       !load_symbol((void **)&p_ssh_userauth_publickey_auto, "ssh_userauth_publickey_auto") ||
       !load_symbol((void **)&p_ssh_userauth_agent, "ssh_userauth_agent") ||
+      !load_symbol((void **)&p_ssh_userauth_try_publickey, "ssh_userauth_try_publickey") ||
+      !load_symbol((void **)&p_ssh_userauth_publickey, "ssh_userauth_publickey") ||
+      !load_symbol((void **)&p_ssh_userauth_kbdint, "ssh_userauth_kbdint") ||
+      !load_symbol((void **)&p_ssh_userauth_kbdint_getinstruction,
+                   "ssh_userauth_kbdint_getinstruction") ||
+      !load_symbol((void **)&p_ssh_userauth_kbdint_getname, "ssh_userauth_kbdint_getname") ||
+      !load_symbol((void **)&p_ssh_userauth_kbdint_getnprompts,
+                   "ssh_userauth_kbdint_getnprompts") ||
+      !load_symbol((void **)&p_ssh_userauth_kbdint_getprompt,
+                   "ssh_userauth_kbdint_getprompt") ||
+      !load_symbol((void **)&p_ssh_userauth_kbdint_setanswer,
+                   "ssh_userauth_kbdint_setanswer") ||
+      !load_symbol((void **)&p_ssh_pki_import_privkey_file, "ssh_pki_import_privkey_file") ||
+      !load_symbol((void **)&p_ssh_pki_import_pubkey_file, "ssh_pki_import_pubkey_file") ||
+      !load_symbol((void **)&p_ssh_key_free, "ssh_key_free") ||
+      !load_symbol((void **)&p_ssh_session_export_known_hosts_entry,
+                   "ssh_session_export_known_hosts_entry") ||
       !load_symbol((void **)&p_ssh_channel_new, "ssh_channel_new") ||
       !load_symbol((void **)&p_ssh_channel_free, "ssh_channel_free") ||
       !load_symbol((void **)&p_ssh_channel_get_session, "ssh_channel_get_session") ||
@@ -340,6 +390,11 @@ static void initialize_ssh(void) {
       !load_symbol((void **)&p_ssh_channel_request_env, "ssh_channel_request_env") ||
       !load_symbol((void **)&p_ssh_channel_request_subsystem,
                    "ssh_channel_request_subsystem") ||
+      !load_symbol((void **)&p_ssh_channel_open_forward, "ssh_channel_open_forward") ||
+      !load_symbol((void **)&p_ssh_channel_listen_forward, "ssh_channel_listen_forward") ||
+      !load_symbol((void **)&p_ssh_channel_open_forward_port,
+                   "ssh_channel_open_forward_port") ||
+      !load_symbol((void **)&p_ssh_channel_cancel_forward, "ssh_channel_cancel_forward") ||
       !load_symbol((void **)&p_ssh_channel_read, "ssh_channel_read") ||
       !load_symbol((void **)&p_ssh_channel_write, "ssh_channel_write") ||
       !load_symbol((void **)&p_ssh_channel_send_eof, "ssh_channel_send_eof") ||
@@ -1237,6 +1292,87 @@ ptr chezpp_net_ssh_auth_publickey_auto(uptr handle, const char *user, const char
   return ssh_error_status_from_wrapper(wrapper, "ssh publickey authentication failed");
 }
 
+ptr chezpp_net_ssh_auth_publickey(uptr handle, const char *user, const char *public_path,
+                                 const char *private_path, const char *passphrase) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  ssh_key public_key = NULL;
+  ssh_key private_key = NULL;
+  int rc;
+  ptr status;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (public_path != NULL && *public_path != 0) {
+    if (p_ssh_pki_import_pubkey_file(public_path, &public_key) != SSH_OK)
+      return ssh_error_status_from_wrapper(wrapper, "failed to import SSH public key");
+    rc = p_ssh_userauth_try_publickey(wrapper->session,
+                                      user != NULL && *user != 0 ? user : NULL,
+                                      public_key);
+    p_ssh_key_free(public_key);
+    if (rc != SSH_AUTH_SUCCESS)
+      return ssh_error_status_from_wrapper(wrapper, "SSH public key was not accepted");
+  }
+  if (p_ssh_pki_import_privkey_file(private_path,
+                                    passphrase != NULL && *passphrase != 0 ? passphrase : NULL,
+                                    NULL, NULL, &private_key) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper, "failed to import SSH private key");
+  rc = p_ssh_userauth_publickey(wrapper->session,
+                                user != NULL && *user != 0 ? user : NULL,
+                                private_key);
+  p_ssh_key_free(private_key);
+  if (rc == SSH_AUTH_SUCCESS) return Strue;
+  status = ssh_error_status_from_wrapper(wrapper, "SSH private-key authentication failed");
+  return status;
+}
+
+ptr chezpp_net_ssh_auth_keyboard_interactive_step(uptr handle, const char *user) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  int rc;
+  int count;
+  int i;
+  ptr prompts;
+  ptr echoes;
+  ptr result;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  rc = p_ssh_userauth_kbdint(wrapper->session,
+                             user != NULL && *user != 0 ? user : NULL, NULL);
+  if (rc == SSH_AUTH_SUCCESS) return Strue;
+  if (rc != SSH_AUTH_INFO)
+    return ssh_error_status_from_wrapper(wrapper, "SSH keyboard-interactive authentication failed");
+  count = p_ssh_userauth_kbdint_getnprompts(wrapper->session);
+  if (count < 0)
+    return ssh_error_status_from_wrapper(wrapper, "failed to read SSH authentication prompts");
+  prompts = Smake_vector(count, Sfalse);
+  echoes = Smake_vector(count, Sfalse);
+  for (i = 0; i < count; i += 1) {
+    char echo = 0;
+    const char *prompt = p_ssh_userauth_kbdint_getprompt(wrapper->session, (unsigned int)i, &echo);
+    if (prompt == NULL)
+      return ssh_error_status_from_wrapper(wrapper, "failed to read SSH authentication prompt");
+    Svector_set(prompts, i, Sstring(prompt));
+    Svector_set(echoes, i, Sboolean(echo != 0));
+  }
+  result = Smake_vector(4, Sfalse);
+  Svector_set(result, 0, Sstring(p_ssh_userauth_kbdint_getname(wrapper->session) == NULL
+                                 ? "" : p_ssh_userauth_kbdint_getname(wrapper->session)));
+  Svector_set(result, 1,
+              Sstring(p_ssh_userauth_kbdint_getinstruction(wrapper->session) == NULL
+                          ? "" : p_ssh_userauth_kbdint_getinstruction(wrapper->session)));
+  Svector_set(result, 2, prompts);
+  Svector_set(result, 3, echoes);
+  return result;
+}
+
+ptr chezpp_net_ssh_auth_keyboard_interactive_answer(uptr handle, int index,
+                                                    const char *answer) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (p_ssh_userauth_kbdint_setanswer(wrapper->session, (unsigned int)index, answer) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper, "failed to answer SSH authentication prompt");
+  return Strue;
+}
+
 ptr chezpp_net_ssh_auth_agent(uptr handle, const char *user) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   int rc;
@@ -1244,6 +1380,63 @@ ptr chezpp_net_ssh_auth_agent(uptr handle, const char *user) {
   rc = p_ssh_userauth_agent(wrapper->session, user != NULL && *user != 0 ? user : NULL);
   if (rc == SSH_AUTH_SUCCESS) return Strue;
   return ssh_error_status_from_wrapper(wrapper, "ssh agent authentication failed");
+}
+
+ptr chezpp_net_ssh_auth_agent_identity(uptr handle, const char *user, const char *identity) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  int rc;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (identity != NULL && *identity != 0 &&
+      p_ssh_options_set(wrapper->session, SSH_OPTIONS_IDENTITY, identity) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper, "failed to select SSH agent identity");
+  rc = p_ssh_userauth_agent(wrapper->session, user != NULL && *user != 0 ? user : NULL);
+  if (rc == SSH_AUTH_SUCCESS) return Strue;
+  return ssh_error_status_from_wrapper(wrapper, "ssh agent authentication failed");
+}
+
+ptr chezpp_net_ssh_known_host_check(uptr handle, const char *path) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  enum ssh_known_hosts_e state;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (path != NULL && *path != 0 &&
+      p_ssh_options_set(wrapper->session, SSH_OPTIONS_KNOWNHOSTS, path) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper, "failed to select SSH known-hosts file");
+  state = p_ssh_session_is_known_server(wrapper->session);
+  switch (state) {
+  case SSH_KNOWN_HOSTS_OK: return Sstring_to_symbol("ok");
+  case SSH_KNOWN_HOSTS_NOT_FOUND: return Sstring_to_symbol("not-found");
+  case SSH_KNOWN_HOSTS_UNKNOWN: return Sstring_to_symbol("unknown");
+  case SSH_KNOWN_HOSTS_CHANGED: return Sstring_to_symbol("changed");
+  case SSH_KNOWN_HOSTS_OTHER: return Sstring_to_symbol("other");
+  default: return ssh_error_status_from_wrapper(wrapper, "failed to check SSH known host");
+  }
+}
+
+ptr chezpp_net_ssh_known_host_update(uptr handle, const char *path) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (path != NULL && *path != 0 &&
+      p_ssh_options_set(wrapper->session, SSH_OPTIONS_KNOWNHOSTS, path) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper, "failed to select SSH known-hosts file");
+  if (p_ssh_session_update_known_hosts(wrapper->session) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper, "failed to update SSH known host");
+  return Strue;
+}
+
+ptr chezpp_net_ssh_known_host_export(uptr handle) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  char *entry = NULL;
+  ptr result;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (p_ssh_session_export_known_hosts_entry(wrapper->session, &entry) != SSH_OK || entry == NULL)
+    return ssh_error_status_from_wrapper(wrapper, "failed to export SSH known host");
+  result = Sstring(entry);
+  p_ssh_string_free_char(entry);
+  return result;
 }
 
 ptr chezpp_net_ssh_channel_open(uptr handle, int timeout_ms) {
@@ -1294,6 +1487,105 @@ ptr chezpp_net_ssh_channel_open(uptr handle, int timeout_ms) {
   channel_wrapper->channel = channel;
   channel_wrapper->owner = wrapper;
   return make_ssh_handle((uptr)channel_wrapper);
+}
+
+ptr chezpp_net_ssh_channel_open_forward(uptr handle, const char *remote_host, int remote_port,
+                                        const char *source_host, int source_port,
+                                        int timeout_ms) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  chezpp_ssh_channel *channel_wrapper;
+  ssh_channel channel;
+  int rc;
+  int use_nonblocking;
+  int64_t deadline = -1;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (timeout_ms >= 0) {
+    deadline = monotonic_ms();
+    if (deadline < 0) return make_errno_status();
+    deadline += timeout_ms;
+  }
+  channel = p_ssh_channel_new(wrapper->session);
+  if (channel == NULL)
+    return ssh_error_status_from_wrapper(wrapper, "failed to allocate SSH forwarding channel");
+  use_nonblocking = timeout_ms >= 0;
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 0);
+  for (;;) {
+    rc = p_ssh_channel_open_forward(channel, remote_host, remote_port,
+                                    source_host, source_port);
+    if (rc != SSH_AGAIN || timeout_ms < 0) break;
+    {
+      ptr wait_status = wait_ssh_session_until(wrapper->session, POLLIN | POLLOUT, deadline,
+                                               "SSH forwarding channel open timed out");
+      if (wait_status != Strue) {
+        if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 1);
+        p_ssh_channel_free(channel);
+        return wait_status;
+      }
+    }
+  }
+  if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 1);
+  if (rc != SSH_OK) {
+    ptr status = ssh_error_status_from_wrapper(wrapper, "failed to open SSH forwarding channel");
+    p_ssh_channel_free(channel);
+    return status;
+  }
+  channel_wrapper = (chezpp_ssh_channel *)calloc(1, sizeof(chezpp_ssh_channel));
+  if (channel_wrapper == NULL) {
+    p_ssh_channel_close(channel);
+    p_ssh_channel_free(channel);
+    return make_errno_status();
+  }
+  channel_wrapper->channel = channel;
+  channel_wrapper->owner = wrapper;
+  return make_ssh_handle((uptr)channel_wrapper);
+}
+
+ptr chezpp_net_ssh_remote_forward_listen(uptr handle, const char *address, int port) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  int bound_port = 0;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (p_ssh_channel_listen_forward(wrapper->session,
+                                   address != NULL && *address != 0 ? address : NULL,
+                                   port, &bound_port) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper, "failed to request SSH remote forwarding");
+  return Sfixnum(bound_port);
+}
+
+ptr chezpp_net_ssh_remote_forward_accept(uptr handle) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  chezpp_ssh_channel *channel_wrapper;
+  ssh_channel channel;
+  int destination_port = 0;
+  int originator_port = 0;
+  char *originator = NULL;
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  channel = p_ssh_channel_open_forward_port(wrapper->session, 0, &destination_port,
+                                            &originator, &originator_port);
+  if (originator != NULL) p_ssh_string_free_char(originator);
+  if (channel == NULL) return ssh_would_block_status(wrapper->session, POLLIN);
+  channel_wrapper = (chezpp_ssh_channel *)calloc(1, sizeof(chezpp_ssh_channel));
+  if (channel_wrapper == NULL) {
+    p_ssh_channel_close(channel);
+    p_ssh_channel_free(channel);
+    return make_errno_status();
+  }
+  channel_wrapper->channel = channel;
+  channel_wrapper->owner = wrapper;
+  return make_ssh_handle((uptr)channel_wrapper);
+}
+
+ptr chezpp_net_ssh_remote_forward_cancel(uptr handle, const char *address, int port) {
+  chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  if (p_ssh_channel_cancel_forward(wrapper->session,
+                                   address != NULL && *address != 0 ? address : NULL,
+                                   port) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper, "failed to cancel SSH remote forwarding");
+  return Strue;
 }
 
 ptr chezpp_net_ssh_channel_close(uptr handle) {

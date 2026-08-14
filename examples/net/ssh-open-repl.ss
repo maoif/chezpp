@@ -51,41 +51,42 @@ The `ssh-open-repl` procedure opens an authenticated interactive shell on
                (call-with-example-output-ports
                 (lambda (out err)
                   (let ([op (open-ssh-channel-output-port channel)]
-                        [ip (open-ssh-channel-input-port channel)]
-                        [ep (open-ssh-channel-error-port channel)])
-                    (let ([stdout-thread
-                           (fork-thread
-                            (lambda ()
-                              (pump-binary-input-port! ip out)
-                              (vector-set! stop? 0 #t)))]
-                          [stderr-thread
-                           (fork-thread
-                            (lambda ()
-                              (pump-binary-input-port! ep err)
-                              (vector-set! stop? 0 #t)))]
-                          [stdin-thread
-                           (fork-thread
-                            (lambda ()
-                              (let loop ()
-                                (unless (vector-ref stop? 0)
-                                  (if (char-ready? (current-input-port))
-                                      (let ([ch (get-char (current-input-port))])
-                                        (if (eof-object? ch)
-                                            (vector-set! stop? 0 #t)
-                                            (begin
-                                              (put-bytevector op
-                                                              (string->utf8
-                                                               (string ch)))
-                                              (flush-output-port op)
-                                              (loop))))
-                                      (begin
-                                        (milisleep 20)
-                                        (loop)))))))])
-                      (thread-join stdout-thread)
-                      (thread-join stderr-thread)
-                      (vector-set! stop? 0 #t)
-                      (thread-join stdin-thread)
-                      channel)))))))
+                        [stdin-open? #t])
+                    (let loop ([stdout-eof? #f] [stderr-eof? #f] [exit-status #f])
+                      (let* ([stdout (if stdout-eof? #t (ssh-read/nonblocking channel 65536))]
+                             [stderr (if stderr-eof? #t (ssh-read-stderr/nonblocking channel 65536))]
+                             [stdout-eof* (or stdout-eof? (eof-object? stdout))]
+                             [stderr-eof* (or stderr-eof? (eof-object? stderr))]
+                             [status (or exit-status
+                                         (guard (c [else #f])
+                                           (let ([x (ssh-channel-exit-status channel)])
+                                             (and (fixnum? x) (fx>= x 0) x))))]
+                             [targets
+                              (append
+                               (if (net-would-block? stdout)
+                                   (list (make-poll-target
+                                          (net-would-block-resource stdout)
+                                          (net-would-block-events stdout)))
+                                   '())
+                               (if (net-would-block? stderr)
+                                   (list (make-poll-target
+                                          (net-would-block-resource stderr)
+                                          (net-would-block-events stderr)))
+                                   '()))])
+                        (when (bytevector? stdout) (put-bytevector out stdout) (flush-output-port out))
+                        (when (bytevector? stderr) (put-bytevector err stderr) (flush-output-port err))
+                        (when (and stdin-open? (char-ready? (current-input-port)))
+                          (let ([ch (get-char (current-input-port))])
+                            (if (eof-object? ch)
+                                (begin (set! stdin-open? #f) (ssh-write-all channel #vu8()))
+                                (begin
+                                  (put-bytevector op (string->utf8 (string ch)))
+                                  (flush-output-port op)))))
+                        (cond
+                         [(and stdout-eof* stderr-eof* status) (vector-set! stop? 0 #t) channel]
+                         [else
+                          (if (null? targets) (milisleep 5) (poll targets 100))
+                          (loop stdout-eof* stderr-eof* status)])))))))))
           (lambda ()
             (ssh-close session)))))))
 

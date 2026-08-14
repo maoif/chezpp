@@ -66,8 +66,19 @@
           ffi-net-ssh-session-fd
           ffi-net-ssh-auth-password
           ffi-net-ssh-auth-publickey-auto
+          ffi-net-ssh-auth-publickey
+          ffi-net-ssh-auth-keyboard-interactive-step
+          ffi-net-ssh-auth-keyboard-interactive-answer
           ffi-net-ssh-auth-agent
+          ffi-net-ssh-auth-agent-identity
+          ffi-net-ssh-known-host-check
+          ffi-net-ssh-known-host-update
+          ffi-net-ssh-known-host-export
           ffi-net-ssh-channel-open
+          ffi-net-ssh-channel-open-forward
+          ffi-net-ssh-remote-forward-listen
+          ffi-net-ssh-remote-forward-accept
+          ffi-net-ssh-remote-forward-cancel
           ffi-net-ssh-channel-close
           ffi-net-ssh-channel-request-exec
           ffi-net-ssh-channel-request-shell
@@ -319,10 +330,39 @@
     (foreign-procedure "chezpp_net_ssh_auth_password" (uptr string string) scheme-object))
   (define ffi-net-ssh-auth-publickey-auto
     (foreign-procedure "chezpp_net_ssh_auth_publickey_auto" (uptr string string) scheme-object))
+  (define ffi-net-ssh-auth-publickey
+    (foreign-procedure "chezpp_net_ssh_auth_publickey"
+                       (uptr string string string string) scheme-object))
+  (define ffi-net-ssh-auth-keyboard-interactive-step
+    (foreign-procedure "chezpp_net_ssh_auth_keyboard_interactive_step"
+                       (uptr string) scheme-object))
+  (define ffi-net-ssh-auth-keyboard-interactive-answer
+    (foreign-procedure "chezpp_net_ssh_auth_keyboard_interactive_answer"
+                       (uptr int string) scheme-object))
   (define ffi-net-ssh-auth-agent
     (foreign-procedure "chezpp_net_ssh_auth_agent" (uptr string) scheme-object))
+  (define ffi-net-ssh-auth-agent-identity
+    (foreign-procedure "chezpp_net_ssh_auth_agent_identity"
+                       (uptr string string) scheme-object))
+  (define ffi-net-ssh-known-host-check
+    (foreign-procedure "chezpp_net_ssh_known_host_check" (uptr string) scheme-object))
+  (define ffi-net-ssh-known-host-update
+    (foreign-procedure "chezpp_net_ssh_known_host_update" (uptr string) scheme-object))
+  (define ffi-net-ssh-known-host-export
+    (foreign-procedure "chezpp_net_ssh_known_host_export" (uptr) scheme-object))
   (define ffi-net-ssh-channel-open
     (foreign-procedure "chezpp_net_ssh_channel_open" (uptr int) scheme-object))
+  (define ffi-net-ssh-channel-open-forward
+    (foreign-procedure "chezpp_net_ssh_channel_open_forward"
+                       (uptr string int string int int) scheme-object))
+  (define ffi-net-ssh-remote-forward-listen
+    (foreign-procedure "chezpp_net_ssh_remote_forward_listen"
+                       (uptr string int) scheme-object))
+  (define ffi-net-ssh-remote-forward-accept
+    (foreign-procedure "chezpp_net_ssh_remote_forward_accept" (uptr) scheme-object))
+  (define ffi-net-ssh-remote-forward-cancel
+    (foreign-procedure "chezpp_net_ssh_remote_forward_cancel"
+                       (uptr string int) scheme-object))
   (define ffi-net-ssh-channel-close
     (foreign-procedure "chezpp_net_ssh_channel_close" (uptr) scheme-object))
   (define ffi-net-ssh-channel-request-exec

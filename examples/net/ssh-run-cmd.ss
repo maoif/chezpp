@@ -51,19 +51,34 @@ forwards the remote stdout and stderr streams to the local standard ports.
                (ssh-exec channel cmd)
                (call-with-example-output-ports
                 (lambda (out err)
-                  (let ([ip (open-ssh-channel-input-port channel)]
-                        [ep (open-ssh-channel-error-port channel)])
-                    (let ([stdout-thread
-                           (fork-thread
-                            (lambda ()
-                              (pump-binary-input-port! ip out)))]
-                          [stderr-thread
-                           (fork-thread
-                            (lambda ()
-                              (pump-binary-input-port! ep err)))])
-                      (thread-join stdout-thread)
-                      (thread-join stderr-thread)
-                      (ssh-channel-exit-status channel))))))))
+                  (let loop ([stdout-eof? #f] [stderr-eof? #f] [exit-status #f])
+                    (let* ([stdout (if stdout-eof? #t (ssh-read/nonblocking channel 65536))]
+                           [stderr (if stderr-eof? #t (ssh-read-stderr/nonblocking channel 65536))]
+                           [stdout-eof* (or stdout-eof? (eof-object? stdout))]
+                           [stderr-eof* (or stderr-eof? (eof-object? stderr))]
+                           [status (or exit-status
+                                       (guard (c [else #f])
+                                         (let ([x (ssh-channel-exit-status channel)])
+                                           (and (fixnum? x) (fx>= x 0) x))))]
+                           [targets
+                            (append
+                             (if (net-would-block? stdout)
+                                 (list (make-poll-target
+                                        (net-would-block-resource stdout)
+                                        (net-would-block-events stdout)))
+                                 '())
+                             (if (net-would-block? stderr)
+                                 (list (make-poll-target
+                                        (net-would-block-resource stderr)
+                                        (net-would-block-events stderr)))
+                                 '()))])
+                      (when (bytevector? stdout) (put-bytevector out stdout) (flush-output-port out))
+                      (when (bytevector? stderr) (put-bytevector err stderr) (flush-output-port err))
+                      (cond
+                       [(and stdout-eof* stderr-eof* status) status]
+                       [else
+                        (if (null? targets) (milisleep 5) (poll targets 100))
+                        (loop stdout-eof* stderr-eof* status)]))))))))
           (lambda ()
             (ssh-close session)))))))
 
