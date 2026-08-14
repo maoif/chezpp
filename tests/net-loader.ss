@@ -25,4 +25,6 @@
      (check-unavailable 'curl "curl")
      (check-unavailable 'ssh "ssh")
      (check-unavailable 'websockets "websockets")
-     (check-unavailable 'grpc "grpc"))
+     (check-unavailable 'grpc "grpc")
+     (check-unavailable 'zlib "zlib")
+     (check-unavailable 'nghttp2 "nghttp2"))

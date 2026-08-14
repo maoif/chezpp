@@ -140,6 +140,26 @@
   (lambda (thunk)
     (net-operation-wait (thunk))))
 
+(mat net-http-stream-body
+     (let ([source (make-http-body-source (lambda (maximum-bytes) (eof-object)) #f)]
+           [sink (make-http-body-sink (lambda (bytevector start stop) (void)))])
+       (and (http-body-source? source)
+            (not (http-body-source-length source))
+            (eof-object? (http-body-source-read source 65536))
+            (http-body-sink? sink)
+            (begin
+              (http-body-sink-write! sink #vu8(1 2 3) 0 3)
+              (http-body-sink-finish! sink)
+              #t)))
+
+     ;; Error case: a body producer may not exceed the requested maximum.
+     (http-error-message-contains?
+      "producer must return EOF"
+      (lambda ()
+        (http-body-source-read
+         (make-http-body-source (lambda (maximum-bytes) (make-bytevector 2 0)) #f)
+         1))))
+
 (mat net-http-runtime
      (let-values ([(server port th)
                    (start-http-connection-server
@@ -252,7 +272,7 @@
                (http-close client)
                (thread-join th)
                (and (= (http-response-status resp) 200)
-                    (equal? (http-response-body resp) payload)
+                    (not (http-response-body resp))
                     (equal? (read-u8vec download-path) payload)))))))))
 
 (mat net-https
@@ -277,9 +297,10 @@
                                  (format "https://127.0.0.1:~a/secure" port))])
              (begin
                (http-close client)
+               (http-server-close server)
+               (thread-join th)
                (close-tls-context client-ctx)
                (close-tls-context server-ctx)
-               (thread-join th)
                (and (= (http-response-status resp) 200)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
 
@@ -764,7 +785,7 @@
                                  download-path)))])
                    (and (net-operation? first)
                         (= (http-response-status resp) 200)
-                        (equal? (http-response-body resp) payload)
+                        (not (http-response-body resp))
                         (equal? (read-u8vec download-path) payload)))))
              (lambda ()
                (http-close client)

@@ -11,6 +11,26 @@
           http-response-reason
           http-response-headers
           http-response-body
+          http-response-trailers
+          http-response-version
+          http-body-source? make-http-body-source http-body-source-length
+          http-body-source-read
+          http-body-sink? make-http-body-sink http-body-sink-write!
+          http-body-sink-finish!
+          make-http-port-body-source make-http-file-body-source
+          make-http-port-body-sink make-http-file-body-sink
+          http-cookie? make-http-cookie http-cookie-name http-cookie-value
+          http-cookie-domain http-cookie-path http-cookie-secure?
+          http-cookie-jar? make-http-cookie-jar
+          http-proxy? make-http-proxy http-proxy-uri
+          http-multipart-part? make-http-multipart-part
+          http-multipart-part-name http-multipart-part-value
+          http-multipart-part-filename http-multipart-part-content-type
+          http-pool-policy? make-http-pool-policy http-pool-policy-max-idle
+          http-pool-policy-max-active http-pool-policy-idle-timeout-ms
+          http-client-cookie-jar-set! http-client-auth-set!
+          http-client-proxy-set! http-client-pool-policy-set!
+          http-client-version-set! make-http-multipart-body
           http-header-ref
           http-header-set
           http-header-add
@@ -62,7 +82,8 @@
           (chezpp net operation)
           (chezpp net ffi)
           (chezpp net private)
-          (chezpp net tls))
+          (chezpp net tls)
+          (chezpp optional-library))
 
   ;;===----------------------------------------------------------------------===
   ;; Data Types
@@ -88,7 +109,57 @@
     (fields (immutable status http-response-status)
             (immutable reason http-response-reason)
             (immutable headers http-response-headers)
-            (immutable body http-response-body)))
+            (immutable body http-response-body)
+            (immutable trailers http-response-trailers)
+            (immutable version http-response-version)))
+
+  (define-record-type (http-body-source %make-http-body-source http-body-source?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable producer http-body-source-producer)
+            (immutable length http-body-source-length)))
+
+  (define-record-type (http-body-sink %make-http-body-sink http-body-sink?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable consumer http-body-sink-consumer)
+            (immutable finisher http-body-sink-finisher)
+            (mutable finished? http-body-sink-finished? http-body-sink-finished?-set!)))
+
+  (define-record-type (http-cookie %make-http-cookie http-cookie?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable name http-cookie-name)
+            (immutable value http-cookie-value)
+            (immutable domain http-cookie-domain)
+            (immutable path http-cookie-path)
+            (immutable secure? http-cookie-secure?)))
+
+  (define-record-type (http-cookie-jar %make-http-cookie-jar http-cookie-jar?)
+    (sealed #t)
+    (opaque #f)
+    (fields (mutable cookies http-cookie-jar-cookies http-cookie-jar-cookies-set!)
+            (immutable mutex http-cookie-jar-mutex)))
+
+  (define-record-type (http-proxy %make-http-proxy http-proxy?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable uri http-proxy-uri)))
+
+  (define-record-type (http-multipart-part %make-http-multipart-part http-multipart-part?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable name http-multipart-part-name)
+            (immutable value http-multipart-part-value)
+            (immutable filename http-multipart-part-filename)
+            (immutable content-type http-multipart-part-content-type)))
+
+  (define-record-type (http-pool-policy %make-http-pool-policy http-pool-policy?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable max-idle http-pool-policy-max-idle)
+            (immutable max-active http-pool-policy-max-active)
+            (immutable idle-timeout-ms http-pool-policy-idle-timeout-ms)))
 
   (define-record-type (http-client %make-http-client http-client?)
     (sealed #t)
@@ -97,6 +168,11 @@
             (mutable follow-redirects? http-client-follow-redirects? http-client-follow-redirects?-set!)
             (mutable timeout-ms http-client-timeout-ms http-client-timeout-ms-set!)
             (immutable tls-context http-client-tls-context)
+            (mutable cookie-jar http-client-cookie-jar http-client-cookie-jar-set-internal!)
+            (mutable auth http-client-auth http-client-auth-set-internal!)
+            (mutable proxy http-client-proxy http-client-proxy-set-internal!)
+            (mutable pool-policy http-client-pool-policy http-client-pool-policy-set-internal!)
+            (mutable version http-client-version http-client-version-set-internal!)
             (mutable cached-origin http-client-cached-origin http-client-cached-origin-set!)
             (mutable cached-connection http-client-cached-connection http-client-cached-connection-set!)
             (mutable pending http-client-pending http-client-pending-set!)
@@ -149,9 +225,9 @@
   (define normalize-http-body
     (lambda (who body)
       (cond
-       [(or (not body) (string? body) (bytevector? body)) body]
+       [(or (not body) (string? body) (bytevector? body) (http-body-source? body)) body]
        [else
-        (errorf who "expected body to be #f, string, or bytevector, given ~s" body)])))
+        (errorf who "expected body bytes, string, source, or #f, given ~s" body)])))
 
   (define normalize-http-header-name
     (lambda (who name)
@@ -355,7 +431,10 @@
                         (fx+ total size))])))))))
 
   (define http-transfer/nonblocking
-    (lambda (who client kind request finish)
+    (case-lambda
+      [(who client kind request finish)
+       (http-transfer/nonblocking who client kind request finish #f)]
+      [(who client kind request finish response-sink)
       (ensure-client-open who client)
       (ensure-no-pending-mismatch who client kind (request-key request))
       (let ([pending (http-client-pending client)])
@@ -376,12 +455,16 @@
                   [request-headers '()]
                   [head (make-bytevector 0 0)]
                   [body (make-bytevector 0 0)]
+                  [body-source #f]
+                  [body-source-eof? #f]
+                  [body-source-count 0]
                   [write-offset 0]
                   [input (make-bytevector 0 0)]
                   [status #f]
                   [reason ""]
                   [response-headers '()]
                   [body-start 0]
+                  [response-received 0]
                   [owned? #t]
                   [operation #f])
               (define release-transport!
@@ -438,12 +521,64 @@
                   (set! request-headers '())
                   (set! head (make-bytevector 0 0))
                   (set! body (make-bytevector 0 0))
+                  (set! body-source #f)
+                  (set! body-source-eof? #f)
+                  (set! body-source-count 0)
                   (set! write-offset 0)
                   (set! input (make-bytevector 0 0))
                   (set! status #f)
                   (set! reason "")
                   (set! response-headers '())
-                  (set! body-start 0)))
+                  (set! body-start 0)
+                  (set! response-received 0)))
+              (define prepare-request-body!
+                (lambda ()
+                  (let ([request-body (http-request-body current-request)])
+                    (if (http-body-source? request-body)
+                        (begin
+                          (set! body-source request-body)
+                          (set! body-source-eof? #f)
+                          (set! body-source-count 0)
+                          (set! body (make-bytevector 0 0)))
+                        (begin
+                          (set! body-source #f)
+                          (set! body (body->bytevector request-body)))))))
+              (define frame-source-chunk
+                (lambda (chunk)
+                  (if (chunked-transfer? request-headers)
+                      (let-values ([(port get) (open-bytevector-output-port)])
+                        (put-bytevector
+                         port
+                         (string->utf8
+                          (string-append
+                           (number->string (bytevector-length chunk) 16) "\r\n")))
+                        (put-bytevector port chunk)
+                        (put-bytevector port (string->utf8 "\r\n"))
+                        (get))
+                      chunk)))
+              (define refill-source-body!
+                (lambda ()
+                  (let ([chunk (http-body-source-read body-source 65536)])
+                    (if (eof-object? chunk)
+                        (begin
+                          (let ([length (http-body-source-length body-source)])
+                            (when (and length (not (= length body-source-count)))
+                              (errorf who
+                                      "HTTP body source produced ~a bytes; expected ~a"
+                                      body-source-count length)))
+                          (set! body-source-eof? #t)
+                          (set! body
+                                (if (chunked-transfer? request-headers)
+                                    (string->utf8 "0\r\n\r\n")
+                                    (make-bytevector 0 0))))
+                        (begin
+                          (set! body-source-count
+                                (+ body-source-count (bytevector-length chunk)))
+                          (let ([length (http-body-source-length body-source)])
+                            (when (and length (> body-source-count length))
+                              (errorf who "HTTP body source exceeded declared length ~a" length)))
+                          (set! body (frame-source-chunk chunk))))
+                    (set! write-offset 0))))
               (define complete-response
                 (lambda (response)
                   (let ([next-request
@@ -482,6 +617,19 @@
                          [else
                           (set! input (append-http-bytevectors input answer))
                           (advance #f)])))))
+              (define consume-response-input!
+                (lambda (maximum-bytes)
+                  (let* ([available (- (bytevector-length input) body-start)]
+                         [count (min available maximum-bytes)])
+                    (when (positive? count)
+                      (http-body-sink-write! response-sink input body-start
+                                             (+ body-start count))
+                      (set! response-received (+ response-received count))
+                      (set! input
+                            (bytevector-slice input (+ body-start count)
+                                              (bytevector-length input)))
+                      (set! body-start 0))
+                    count)))
               (define advance
                 (lambda (allow-io?)
                   (check-deadline!)
@@ -497,7 +645,7 @@
                                    (merge-request-headers current-request client))
                              (set! head
                                    (serialize-http-request-head current-request request-headers))
-                             (set! body (body->bytevector (http-request-body current-request)))
+                             (prepare-request-body!)
                              (set! phase 'write-head)
                              (yield-update))
                            (if (not resolver-handle)
@@ -561,8 +709,7 @@
                               (set! head
                                     (serialize-http-request-head
                                      current-request request-headers))
-                              (set! body
-                                    (body->bytevector (http-request-body current-request)))
+                              (prepare-request-body!)
                               (set! phase 'write-head)
                               (yield-update)))])]
                     [(tls-handshake)
@@ -578,7 +725,7 @@
                               (merge-request-headers current-request client))
                         (set! head
                               (serialize-http-request-head current-request request-headers))
-                        (set! body (body->bytevector (http-request-body current-request)))
+                        (prepare-request-body!)
                         (set! phase 'write-head)
                         (yield-update)])]
                     [(write-head write-body)
@@ -590,9 +737,13 @@
                              (begin
                                (set! phase 'write-body)
                                (pending-update sock '(write error hup invalid)))
-                             (begin
+                             (cond
+                              [(and body-source (not body-source-eof?))
+                               (refill-source-body!)
+                               (advance #f)]
+                              [else
                                (set! phase 'read-status)
-                               (pending-update sock '(read error hup invalid))))]
+                               (pending-update sock '(read error hup invalid))]))]
                         [(not allow-io?)
                          (pending-update sock '(write error hup invalid))]
                         [else
@@ -640,19 +791,39 @@
                          (let-values ([(done? parsed-body consumed)
                                        (parse-buffered-chunked-body who input body-start)])
                            (if done?
-                               (complete-response
-                                (make-http-response
-                                 status reason response-headers parsed-body))
+                               (if response-sink
+                                   (begin
+                                     (http-body-sink-write!
+                                      response-sink parsed-body 0
+                                      (bytevector-length parsed-body))
+                                     (http-body-sink-finish! response-sink)
+                                     (complete-response
+                                      (make-http-response
+                                       status reason response-headers #f)))
+                                   (complete-response
+                                    (make-http-response
+                                     status reason response-headers parsed-body)))
                                (read-pending allow-io?)))]
                         [content-length
-                         (if (fx>= (fx- (bytevector-length input) body-start)
-                                  content-length)
-                             (complete-response
-                              (make-http-response
-                               status reason response-headers
-                               (bytevector-slice
-                                input body-start (fx+ body-start content-length))))
-                             (read-pending allow-io?))]
+                         (if response-sink
+                             (begin
+                               (consume-response-input!
+                                (- content-length response-received))
+                               (if (= response-received content-length)
+                                   (begin
+                                     (http-body-sink-finish! response-sink)
+                                     (complete-response
+                                      (make-http-response
+                                       status reason response-headers #f)))
+                                   (read-pending allow-io?)))
+                             (if (fx>= (fx- (bytevector-length input) body-start)
+                                      content-length)
+                                 (complete-response
+                                  (make-http-response
+                                   status reason response-headers
+                                   (bytevector-slice
+                                    input body-start (fx+ body-start content-length))))
+                                 (read-pending allow-io?)))]
                         [else
                          (if allow-io?
                              (let ([answer (transport-read)])
@@ -662,13 +833,28 @@
                                   (net-would-block-resource answer)
                                   (net-would-block-events answer))]
                                 [(eof-object? answer)
-                                 (complete-response
-                                  (make-http-response
-                                   status reason response-headers
-                                   (bytevector-slice
-                                    input body-start (bytevector-length input))))]
+                                 (if response-sink
+                                     (begin
+                                       (consume-response-input! (most-positive-fixnum))
+                                       (http-body-sink-finish! response-sink)
+                                       (complete-response
+                                        (make-http-response
+                                         status reason response-headers #f)))
+                                     (complete-response
+                                      (make-http-response
+                                       status reason response-headers
+                                       (bytevector-slice
+                                        input body-start (bytevector-length input)))))]
                                 [else
-                                 (set! input (append-http-bytevectors input answer))
+                                 (if response-sink
+                                     (begin
+                                       (consume-response-input! (most-positive-fixnum))
+                                       (http-body-sink-write!
+                                        response-sink answer 0 (bytevector-length answer))
+                                       (set! response-received
+                                             (+ response-received
+                                                (bytevector-length answer))))
+                                     (set! input (append-http-bytevectors input answer)))
                                  (pending-update sock '(read error hup invalid))]))
                              (pending-update sock '(read error hup invalid)))]))]
                     [else (assert-unreachable)])))
@@ -683,7 +869,7 @@
                        (release-transport!)
                        (http-client-pending-set! client #f))))
               (http-client-pending-set! client operation)
-              operation)))))
+              operation)))]))
 
   (define request-key
     (lambda (request)
@@ -918,9 +1104,101 @@
          [else
           (loop (cdr rest) (cons (car rest) out))]))))
 
+  (define base64-alphabet
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+
+  (define http-base64-encode
+    (lambda (bytes)
+      (let* ([length (bytevector-length bytes)]
+             [output-length (* 4 (quotient (+ length 2) 3))]
+             [output (make-string output-length #\=)])
+        (let loop ([input-index 0] [output-index 0])
+          (when (< input-index length)
+            (let* ([remaining (- length input-index)]
+                   [a (bytevector-u8-ref bytes input-index)]
+                   [b (if (> remaining 1) (bytevector-u8-ref bytes (+ input-index 1)) 0)]
+                   [c (if (> remaining 2) (bytevector-u8-ref bytes (+ input-index 2)) 0)]
+                   [bits (bitwise-ior (bitwise-arithmetic-shift a 16)
+                                      (bitwise-arithmetic-shift b 8) c)])
+              (string-set! output output-index
+                           (string-ref base64-alphabet
+                                       (bitwise-and (bitwise-arithmetic-shift bits -18) 63)))
+              (string-set! output (+ output-index 1)
+                           (string-ref base64-alphabet
+                                       (bitwise-and (bitwise-arithmetic-shift bits -12) 63)))
+              (when (> remaining 1)
+                (string-set! output (+ output-index 2)
+                             (string-ref base64-alphabet
+                                         (bitwise-and (bitwise-arithmetic-shift bits -6) 63))))
+              (when (> remaining 2)
+                (string-set! output (+ output-index 3)
+                             (string-ref base64-alphabet (bitwise-and bits 63))))
+              (loop (+ input-index 3) (+ output-index 4)))))
+        output)))
+
+  (define cookie-domain-matches?
+    (lambda (host domain)
+      (or (string-ci=? host domain)
+          (and (> (string-length host) (string-length domain))
+               (let ([start (- (string-length host) (string-length domain))])
+                 (and (string-ci=? domain (substring host start (string-length host)))
+                      (char=? #\. (string-ref host (- start 1)))))))))
+
+  (define http-string-prefix?
+    (lambda (prefix value)
+      (and (<= (string-length prefix) (string-length value))
+           (string=? prefix (substring value 0 (string-length prefix))))))
+
+  (define http-string-join
+    (lambda (string* separator)
+      (if (null? string*)
+          ""
+          (let loop ([rest (cdr string*)] [answer (car string*)])
+            (if (null? rest)
+                answer
+                (loop (cdr rest) (string-append answer separator (car rest))))))))
+
+  (define request-cookie-header
+    (lambda (client request)
+      (let ([jar (http-client-cookie-jar client)])
+        (and jar
+             (with-mutex (http-cookie-jar-mutex jar)
+               (let* ([uri (http-request-uri request)]
+                      [host (or (uri-host uri) "")]
+                      [path (or (uri-path uri) "/")]
+                      [secure? (string=? (uri-scheme uri) "https")]
+                      [cookie*
+                       (filter
+                        (lambda (cookie)
+                          (and (cookie-domain-matches? host (http-cookie-domain cookie))
+                               (http-string-prefix? (http-cookie-path cookie) path)
+                               (or (not (http-cookie-secure? cookie)) secure?)))
+                        (http-cookie-jar-cookies jar))])
+                 (and (pair? cookie*)
+                      (http-string-join
+                       (map (lambda (cookie)
+                              (string-append (http-cookie-name cookie) "="
+                                             (http-cookie-value cookie)))
+                            cookie*)
+                       "; "))))))))
+
+  (define request-authorization-header
+    (lambda (client request)
+      (let ([auth (http-client-auth client)])
+        (and auth
+             (case (car auth)
+               [(basic)
+                (string-append
+                 "Basic "
+                 (http-base64-encode
+                  (string->utf8
+                   (string-append (car (cdr auth)) ":" (cdr (cdr auth))))))]
+               [(bearer) (string-append "Bearer " (cdr auth))]
+               [else #f])))))
+
   (define merge-request-headers
     (lambda (request client)
-      (let* ([body (body->bytevector (http-request-body request))]
+      (let* ([body (http-request-body request)]
              [headers (header-list-set-many (http-client-default-headers client)
                                             (http-request-headers request))]
              [headers (if (http-header-ref headers "Host" #f)
@@ -929,11 +1207,25 @@
                                            (http-host-header (http-request-uri request))))]
              [headers (if (http-header-ref headers "Connection" #f)
                           headers
-                          (http-header-set headers "Connection" "keep-alive"))])
-        (if (http-header-ref headers "Content-Length" #f)
-            headers
-            (http-header-set headers "Content-Length"
-                             (number->string (bytevector-length body)))))))
+                          (http-header-set headers "Connection" "keep-alive"))]
+             [authorization (request-authorization-header client request)]
+             [headers (if authorization
+                          (http-header-set headers "Authorization" authorization)
+                          headers)]
+             [cookie (request-cookie-header client request)]
+             [headers (if cookie (http-header-set headers "Cookie" cookie) headers)])
+        (cond
+         [(http-body-source? body)
+          (let ([length (http-body-source-length body)])
+            (if length
+                (http-header-set (http-header-remove headers "Transfer-Encoding")
+                                 "Content-Length" (number->string length))
+                (http-header-set (http-header-remove headers "Content-Length")
+                                 "Transfer-Encoding" "chunked")))]
+         [(http-header-ref headers "Content-Length" #f) headers]
+         [else
+          (http-header-set headers "Content-Length"
+                           (number->string (bytevector-length (body->bytevector body))))]))))
 
   (define http-u8-list->bytevector
     (lambda (u8*)
@@ -1674,6 +1966,123 @@
   ;; Data Model API
   ;;===----------------------------------------------------------------------===
 
+  #|proc:make-http-body-source
+The `make-http-body-source` procedure creates a streaming body from `producer` and `length`.
+`producer` has signature `(maximum-bytes) -> bytevector-or-eof` and must not exceed the maximum.
+`length` is the exact byte count or `#f` when unknown. The return value is a body source.
+|#
+  (define make-http-body-source
+    (lambda (producer length)
+      (pcheck ([procedure? producer]
+               [(lambda (value) (or (not value) (natural? value))) length])
+        (%make-http-body-source producer length))))
+
+  #|proc:http-body-source-read
+The `http-body-source-read` procedure asks `source` for at most `maximum-bytes` bytes.
+The return value is a nonempty bytevector or an EOF object.
+|#
+  (define http-body-source-read
+    (lambda (source maximum-bytes)
+      (pcheck ([http-body-source? source] [positive? maximum-bytes])
+        (let ([answer ((http-body-source-producer source) maximum-bytes)])
+          (unless (or (eof-object? answer)
+                      (and (bytevector? answer)
+                           (positive? (bytevector-length answer))
+                           (<= (bytevector-length answer) maximum-bytes)))
+            (errorf 'http-body-source-read
+                    "producer must return EOF or 1 through ~a bytes, given ~s"
+                    maximum-bytes answer))
+          answer))))
+
+  #|proc:make-http-body-sink
+The `make-http-body-sink` procedure creates a streaming sink from `consumer` and optional `finish`.
+`consumer` has signature `(bytevector start stop) -> unspecified`; `finish` has signature
+`() -> unspecified`. The return value is a body sink.
+|#
+  (define make-http-body-sink
+    (case-lambda
+      [(consumer) (make-http-body-sink consumer void)]
+      [(consumer finish)
+       (pcheck ([procedure? consumer finish])
+         (%make-http-body-sink consumer finish #f))]))
+
+  #|proc:http-body-sink-write!
+The `http-body-sink-write!` procedure passes bytevector `bytes` from `start` to `stop` to `sink`.
+The return value is unspecified. Writing after the sink finishes raises an exception.
+|#
+  (define http-body-sink-write!
+    (lambda (sink bytes start stop)
+      (pcheck ([http-body-sink? sink] [bytevector? bytes]
+               [natural? start stop])
+        (when (http-body-sink-finished? sink)
+          (errorf 'http-body-sink-write! "body sink is already finished"))
+        (unless (<= start stop (bytevector-length bytes))
+          (errorf 'http-body-sink-write! "invalid bytevector slice [~a, ~a)" start stop))
+        ((http-body-sink-consumer sink) bytes start stop))))
+
+  #|proc:http-body-sink-finish!
+The `http-body-sink-finish!` procedure completes `sink` and runs its finisher at most once.
+The return value is unspecified.
+|#
+  (define http-body-sink-finish!
+    (lambda (sink)
+      (pcheck ([http-body-sink? sink])
+        (unless (http-body-sink-finished? sink)
+          ((http-body-sink-finisher sink))
+          (http-body-sink-finished?-set! sink #t)))))
+
+  #|proc:make-http-port-body-source
+The `make-http-port-body-source` procedure streams from caller-owned binary input `port`.
+`length` is the exact byte count or `#f`. The returned source never closes `port`.
+|#
+  (define make-http-port-body-source
+    (lambda (port length)
+      (pcheck ([input-port? port]
+               [(lambda (value) (or (not value) (natural? value))) length])
+        (make-http-body-source
+         (lambda (maximum-bytes) (get-bytevector-n port maximum-bytes))
+         length))))
+
+  #|proc:make-http-file-body-source
+The `make-http-file-body-source` procedure streams pathname `path` through an owned input port.
+The returned source reports the file length and closes its port at EOF.
+|#
+  (define make-http-file-body-source
+    (lambda (path)
+      (pcheck ([string? path])
+        (let ([port (open-file-input-port path)] [closed? #f])
+          (make-http-body-source
+           (lambda (maximum-bytes)
+             (let ([answer (get-bytevector-n port maximum-bytes)])
+               (when (and (eof-object? answer) (not closed?))
+                 (close-port port)
+                 (set! closed? #t))
+               answer))
+           (file-size path))))))
+
+  #|proc:make-http-port-body-sink
+The `make-http-port-body-sink` procedure streams bytes to caller-owned binary output `port`.
+The returned sink flushes but never closes `port` when finished.
+|#
+  (define make-http-port-body-sink
+    (lambda (port)
+      (pcheck ([output-port? port])
+        (make-http-body-sink
+         (lambda (bytes start stop) (put-bytevector port bytes start (- stop start)))
+         (lambda () (flush-output-port port))))))
+
+  #|proc:make-http-file-body-sink
+The `make-http-file-body-sink` procedure streams to pathname `path` through an owned output port.
+The returned sink closes its port when finished.
+|#
+  (define make-http-file-body-sink
+    (lambda (path)
+      (pcheck ([string? path])
+        (let ([port (open-file-output-port path (file-options no-fail replace))])
+          (make-http-body-sink
+           (lambda (bytes start stop) (put-bytevector port bytes start (- stop start)))
+           (lambda () (close-port port)))))))
+
   #|proc:make-http-request
 The `make-http-request` procedure constructs an HTTP request record from a method, URI, headers, and optional body.
 |#
@@ -1705,7 +2114,9 @@ The `make-http-response` procedure constructs an HTTP response record from a sta
                (%make-http-response (normalize-http-status who status)
                                     reason
                                     (normalize-http-headers who headers)
-                                    (normalize-http-body who body)))]))
+                                    (normalize-http-body who body)
+                                    '()
+                                    'http/1.1))]))
 
   #|proc:http-header-ref
 The `http-header-ref` procedure returns the first matching header value using case-insensitive name comparison.
@@ -1755,16 +2166,202 @@ The `http-header-add` procedure returns a header list with an additional value a
   ;; Client API
   ;;===----------------------------------------------------------------------===
 
+  #|proc:make-http-cookie
+The `make-http-cookie` procedure creates a cookie named `name` with string `value`.
+`domain` and `path` scope the cookie, and `secure?` restricts it to HTTPS requests.
+The return value is a new HTTP cookie record.
+|#
+  (define make-http-cookie
+    (lambda (name value domain path secure?)
+      (pcheck ([string? name value domain path] [boolean? secure?])
+        (%make-http-cookie name value (string-downcase domain) path secure?))))
+
+  #|proc:make-http-cookie-jar
+The `make-http-cookie-jar` procedure creates a synchronized jar containing optional `cookie*`.
+`cookie*` is a list of HTTP cookie records. The return value is a new cookie jar.
+|#
+  (define make-http-cookie-jar
+    (case-lambda
+      [() (make-http-cookie-jar '())]
+      [(cookie*)
+       (pcheck ([list? cookie*])
+         (unless (andmap http-cookie? cookie*)
+           (errorf 'make-http-cookie-jar "expected a list of HTTP cookies"))
+         (%make-http-cookie-jar cookie* (make-mutex)))]))
+
+  #|proc:make-http-proxy
+The `make-http-proxy` procedure creates a proxy configuration from HTTP URI `uri`.
+The return value is a new HTTP proxy record.
+|#
+  (define make-http-proxy
+    (lambda (uri)
+      (let ([uri (normalize-http-uri 'make-http-proxy uri)])
+        (unless (member (uri-scheme uri) '("http" "https"))
+          (errorf 'make-http-proxy "proxy URI must use HTTP or HTTPS"))
+        (%make-http-proxy uri))))
+
+  #|proc:make-http-multipart-part
+The `make-http-multipart-part` procedure creates form part `name` containing `value`.
+`value` is a string or bytevector; optional `filename` and `content-type` are strings or `#f`.
+The return value is a new multipart part record.
+|#
+  (define make-http-multipart-part
+    (case-lambda
+      [(name value) (make-http-multipart-part name value #f #f)]
+      [(name value filename content-type)
+       (pcheck ([string? name]
+                [(lambda (item) (or (string? item) (bytevector? item))) value]
+                [(lambda (item) (or (not item) (string? item))) filename content-type])
+         (%make-http-multipart-part name value filename content-type))]))
+
+  #|proc:make-http-multipart-body
+The `make-http-multipart-body` procedure encodes the HTTP multipart `part*` list.
+It returns two values: a bounded body source and its `Content-Type` header value.
+|#
+  (define make-http-multipart-body
+    (lambda (part*)
+      (pcheck ([list? part*])
+        (unless (andmap http-multipart-part? part*)
+          (errorf 'make-http-multipart-body "expected a list of multipart parts"))
+        (let ([boundary "chezpp-7d9e4f6a2b1c"])
+          (let-values ([(port get) (open-bytevector-output-port)])
+            (for-each
+             (lambda (part)
+               (when (or (string-contains? (http-multipart-part-name part) "\r")
+                         (string-contains? (http-multipart-part-name part) "\n"))
+                 (errorf 'make-http-multipart-body "multipart name contains a newline"))
+               (put-bytevector port (string->utf8 (string-append "--" boundary "\r\n")))
+               (put-bytevector
+                port
+                (string->utf8
+                 (string-append
+                  "Content-Disposition: form-data; name=\""
+                  (http-multipart-part-name part) "\""
+                  (if (http-multipart-part-filename part)
+                      (string-append "; filename=\""
+                                     (http-multipart-part-filename part) "\"")
+                      "")
+                  "\r\n")))
+               (when (http-multipart-part-content-type part)
+                 (put-bytevector
+                  port
+                  (string->utf8
+                   (string-append "Content-Type: "
+                                  (http-multipart-part-content-type part) "\r\n"))))
+               (put-bytevector port (string->utf8 "\r\n"))
+               (put-bytevector port
+                               (if (string? (http-multipart-part-value part))
+                                   (string->utf8 (http-multipart-part-value part))
+                                   (http-multipart-part-value part)))
+               (put-bytevector port (string->utf8 "\r\n")))
+             part*)
+            (put-bytevector port (string->utf8 (string-append "--" boundary "--\r\n")))
+            (let* ([bytes (get)] [index 0] [length (bytevector-length bytes)])
+              (values
+               (make-http-body-source
+                (lambda (maximum-bytes)
+                  (if (= index length)
+                      (eof-object)
+                      (let* ([stop (min length (+ index maximum-bytes))]
+                             [chunk (bytevector-slice bytes index stop)])
+                        (set! index stop)
+                        chunk)))
+                length)
+               (string-append "multipart/form-data; boundary=" boundary))))))))
+
+  #|proc:make-http-pool-policy
+The `make-http-pool-policy` procedure configures `max-idle`, `max-active`, and `idle-timeout-ms`.
+All parameters are nonnegative integers. The return value is a new pool policy record.
+|#
+  (define make-http-pool-policy
+    (lambda (max-idle max-active idle-timeout-ms)
+      (pcheck ([natural? max-idle max-active idle-timeout-ms])
+        (%make-http-pool-policy max-idle max-active idle-timeout-ms))))
+
+  #|proc:http-client-cookie-jar-set!
+The `http-client-cookie-jar-set!` procedure assigns cookie `jar` or `#f` to `client`.
+The return value is `client`.
+|#
+  (define http-client-cookie-jar-set!
+    (lambda (client jar)
+      (pcheck ([http-client? client]
+               [(lambda (value) (or (not value) (http-cookie-jar? value))) jar])
+        (ensure-client-open 'http-client-cookie-jar-set! client)
+        (http-client-cookie-jar-set-internal! client jar)
+        client)))
+
+  #|proc:http-client-auth-set!
+The `http-client-auth-set!` procedure assigns authentication to `client`.
+`scheme` is `basic`, `bearer`, `#f`, or a procedure with signature
+`(request response-or-#f) -> request`; `credential` supplies scheme-specific data.
+The return value is `client`.
+|#
+  (define http-client-auth-set!
+    (case-lambda
+      [(client scheme) (http-client-auth-set! client scheme #f)]
+      [(client scheme credential)
+       (pcheck ([http-client? client])
+         (unless (or (not scheme) (procedure? scheme) (memq scheme '(basic bearer)))
+           (errorf 'http-client-auth-set! "expected basic, bearer, procedure, or #f"))
+         (when (eq? scheme 'basic)
+           (unless (and (pair? credential) (string? (car credential))
+                        (string? (cdr credential)))
+             (errorf 'http-client-auth-set! "basic credential must be (user . password)")))
+         (when (eq? scheme 'bearer)
+           (unless (string? credential)
+             (errorf 'http-client-auth-set! "bearer credential must be a string")))
+         (http-client-auth-set-internal! client (and scheme (cons scheme credential)))
+         client)]))
+
+  #|proc:http-client-proxy-set!
+The `http-client-proxy-set!` procedure assigns proxy record `proxy` or `#f` to `client`.
+The return value is `client`.
+|#
+  (define http-client-proxy-set!
+    (lambda (client proxy)
+      (pcheck ([http-client? client]
+               [(lambda (value) (or (not value) (http-proxy? value))) proxy])
+        (http-client-proxy-set-internal! client proxy)
+        client)))
+
+  #|proc:http-client-pool-policy-set!
+The `http-client-pool-policy-set!` procedure assigns pool `policy` to `client`.
+The return value is `client`.
+|#
+  (define http-client-pool-policy-set!
+    (lambda (client policy)
+      (pcheck ([http-client? client] [http-pool-policy? policy])
+        (http-client-pool-policy-set-internal! client policy)
+        client)))
+
+  #|proc:http-client-version-set!
+The `http-client-version-set!` procedure sets `client` policy to `auto`, `http/1.1`, or `h2`.
+The return value is `client`.
+|#
+  (define http-client-version-set!
+    (lambda (client version)
+      (pcheck ([http-client? client] [symbol? version])
+        (unless (memq version '(auto http/1.1 h2))
+          (errorf 'http-client-version-set! "expected auto, http/1.1, or h2"))
+        (when (and (eq? version 'h2)
+                   (not (optional-library-available?
+                         (optional-library-info 'nghttp2))))
+          (errorf 'http-client-version-set! "nghttp2 support is unavailable"))
+        (http-client-version-set-internal! client version)
+        client)))
+
   #|proc:http-open
 The `http-open` procedure constructs an HTTP client with optional TLS context state for HTTPS requests.
 |#
   (define-who http-open
     (case-lambda
       [()
-       (%make-http-client '() #f http-default-timeout-ms #f #f #f #f #f)]
+       (%make-http-client '() #f http-default-timeout-ms #f #f #f #f
+                          (%make-http-pool-policy 1 1 30000) 'auto #f #f #f #f)]
       [(tls-context)
        (pcheck ([tls-context? tls-context])
-               (%make-http-client '() #f http-default-timeout-ms tls-context #f #f #f #f))]))
+         (%make-http-client '() #f http-default-timeout-ms tls-context #f #f #f
+                            (%make-http-pool-policy 1 1 30000) 'auto #f #f #f #f))]))
 
   #|proc:http-close
 The `http-close` procedure marks an HTTP client as closed.
@@ -1936,7 +2533,8 @@ The `http-delete` procedure sends an HTTP DELETE request either with a supplied 
   (define http-delete (make-http-verb 'delete))
 
   #|proc:http-download
-The `http-download` procedure downloads a response body to `path` and returns the full HTTP response.
+The `http-download` procedure streams a response body to `path` and returns the HTTP response.
+The response body is `#f` because received bytes are written directly to the destination file.
 |#
   (define-who http-download
     (case-lambda
@@ -1950,10 +2548,7 @@ The `http-download` procedure downloads a response body to `path` and returns th
              (http-close client))))]
       [(client uri path)
        (pcheck ([http-client? client] [string? path])
-               (let ([response (http-get client uri)])
-                 (when (bytevector? (http-response-body response))
-                   (write-u8vec! path (http-response-body response)))
-                 response))]))
+         (net-operation-wait (http-download/nonblocking client uri path)))]))
 
   #|proc:http-download/nonblocking
 The `http-download/nonblocking` procedure constructs a download operation for `client`.
@@ -1963,15 +2558,20 @@ The return value is a `net-operation` whose successful result is an HTTP respons
   (define-who http-download/nonblocking
     (lambda (client uri path)
       (pcheck ([http-client? client] [string? path])
-              (http-transfer/nonblocking
-               who
-               client
-               'http-download
-               (make-http-request 'get uri '() #f)
-               (lambda (response)
-                   (when (bytevector? (http-response-body response))
-                     (write-u8vec! path (http-response-body response)))
-                   response)))))
+        (let* ([request (make-http-request 'get uri '() #f)]
+               [pending (http-client-pending client)])
+          (ensure-client-open who client)
+          (ensure-no-pending-mismatch who client 'http-download (request-key request))
+          (if (and pending (eq? 'pending (net-operation-state pending)))
+              pending
+              (let* ([temporary-path (string-append path ".chezpp-part")]
+                     [sink (make-http-file-body-sink temporary-path)])
+                (http-transfer/nonblocking
+                 who client 'http-download request
+                 (lambda (response)
+                   (rename-file temporary-path path)
+                   response)
+                 sink)))))))
 
   #|proc:http-upload
 The `http-upload` procedure uploads a file as a PUT request body and returns the HTTP response.
@@ -1991,7 +2591,7 @@ The `http-upload` procedure uploads a file as a PUT request body and returns the
                (http-put client
                          uri
                          '(("Content-Type" . "application/octet-stream"))
-                         (read-u8vec path)))]))
+                         (make-http-file-body-source path)))]))
 
   #|proc:http-upload/nonblocking
 The `http-upload/nonblocking` procedure constructs an upload operation for `client`.
@@ -2009,7 +2609,7 @@ The return value is a `net-operation` whose successful result is an HTTP respons
                 'put
                 uri
                 '(("Content-Type" . "application/octet-stream"))
-                (read-u8vec path))
+                (make-http-file-body-source path))
                (lambda (response) response)))))
 
   ;;===----------------------------------------------------------------------===
