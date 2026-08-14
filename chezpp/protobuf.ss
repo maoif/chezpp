@@ -30,7 +30,7 @@
           protobuf-file-descriptor-package protobuf-file-descriptor-dependencies
           protobuf-file-descriptor-messages protobuf-file-descriptor-enums
           protobuf-file-descriptor-services protobuf-file-descriptor-syntax
-          protobuf-file-descriptor-options
+          protobuf-file-descriptor-options protobuf-file-descriptor-raw
           protobuf-message-descriptor? protobuf-message-descriptor-name
           protobuf-message-descriptor-fields protobuf-message-descriptor-nested-messages
           protobuf-message-descriptor-enums protobuf-message-descriptor-oneofs

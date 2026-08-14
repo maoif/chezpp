@@ -43,7 +43,7 @@ protobuf-generate: chez++
 	@chmod +x tools/protoc-gen-chezpp
 	@protoc --plugin=protoc-gen-chezpp=tools/protoc-gen-chezpp \
 	        --chezpp_out=tests/generated --proto_path=tests/data \
-	        tests/data/file-transfer.proto
+	        tests/data/file-transfer.proto tests/data/codegen-features.proto
 
 .PHONY: check-scheme-header
 check-scheme-header:

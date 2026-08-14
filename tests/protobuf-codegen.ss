@@ -1,5 +1,6 @@
 (import (chezpp))
 (load "generated/file-transfer.pb.ss")
+(load "generated/codegen-features.pb.ss")
 
 (define generated-environment
   (environment '(chezpp) '(chezpp examples transfer file-transfer protobuf)))
@@ -7,6 +8,14 @@
 (define generated-eval
   (lambda (expression)
     (eval expression generated-environment)))
+
+(define feature-environment
+  (environment '(except (chezpp) envelope?)
+               '(chezpp tests codegen codegen-features protobuf)))
+
+(define feature-eval
+  (lambda (expression)
+    (eval expression feature-environment)))
 
 (mat protobuf-codegen
      (generated-eval
@@ -42,4 +51,29 @@
                (generated-eval 'file-transfer-upload-method))
 
      (string=? "/chezpp.examples.transfer.FileTransfer/Download"
-               (generated-eval 'file-transfer-download-method)))
+               (generated-eval 'file-transfer-download-method))
+
+     (feature-eval
+      '(let ([counters (make-hashtable string-hash string=?)])
+         (hashtable-set! counters "ok" 7)
+         (let* ([payload (make-envelope-payload -9)]
+                [message (make-envelope 0 #t '#("a" "b") 1 #t payload counters
+                                        '(text . "hello"))]
+                [encoded (envelope-encode message)]
+                [decoded (bytevector->envelope encoded)])
+           (and (envelope-id-present? decoded)
+                (= 0 (envelope-id decoded))
+                (equal? '#("a" "b") (envelope-tags decoded))
+                (envelope-state-present? decoded)
+                (= envelope-state-state-ready (envelope-state decoded))
+                (= -9 (envelope-payload-delta (envelope-payload decoded)))
+                (= 7 (hashtable-ref (envelope-counters decoded) "ok" #f))
+                (equal? '(text . "hello") (envelope-content decoded))
+                (= (bytevector-length encoded) (envelope-encoded-size message))))))
+
+     (feature-eval
+      '(and (string=? "/chezpp.tests.codegen.Shapes/Unary" shapes-unary-method)
+            (string=? "/chezpp.tests.codegen.Shapes/Server" shapes-server-method)
+            (string=? "/chezpp.tests.codegen.Shapes/Client" shapes-client-method)
+            (string=? "/chezpp.tests.codegen.Shapes/Bidi" shapes-bidi-method)
+            (positive? (bytevector-length protobuf-file-descriptor-bytes)))))

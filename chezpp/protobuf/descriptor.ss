@@ -7,7 +7,7 @@
           protobuf-file-descriptor-package protobuf-file-descriptor-dependencies
           protobuf-file-descriptor-messages protobuf-file-descriptor-enums
           protobuf-file-descriptor-services protobuf-file-descriptor-syntax
-          protobuf-file-descriptor-options
+          protobuf-file-descriptor-options protobuf-file-descriptor-raw
           protobuf-message-descriptor? protobuf-message-descriptor-name
           protobuf-message-descriptor-fields protobuf-message-descriptor-nested-messages
           protobuf-message-descriptor-enums protobuf-message-descriptor-oneofs
@@ -49,7 +49,8 @@
             (immutable enums protobuf-file-descriptor-enums)
             (immutable services protobuf-file-descriptor-services)
             (immutable syntax protobuf-file-descriptor-syntax)
-            (immutable options protobuf-file-descriptor-options)))
+            (immutable options protobuf-file-descriptor-options)
+            (immutable raw protobuf-file-descriptor-raw)))
 
   (define-record-type (protobuf-message-descriptor %make-protobuf-message-descriptor
                                                    protobuf-message-descriptor?)
@@ -242,7 +243,7 @@
               (loop))))
         (%make-protobuf-file-descriptor
          name package (list->vector (reverse dependencies)) (list->vector (reverse messages))
-         (list->vector (reverse enums)) (list->vector (reverse services)) syntax options))))
+         (list->vector (reverse enums)) (list->vector (reverse services)) syntax options bytes))))
 
   #|proc:bytevector->protobuf-code-generator-request
 The `bytevector->protobuf-code-generator-request` procedure decodes plugin request `bytes`.
