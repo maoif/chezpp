@@ -37,6 +37,14 @@ all: chez++
 run: chez++
 	@./chez++
 
+.PHONY: protobuf-generate
+protobuf-generate: chez++
+	@mkdir -p tests/generated
+	@chmod +x tools/protoc-gen-chezpp
+	@protoc --plugin=protoc-gen-chezpp=tools/protoc-gen-chezpp \
+	        --chezpp_out=tests/generated --proto_path=tests/data \
+	        tests/data/file-transfer.proto
+
 .PHONY: check-scheme-header
 check-scheme-header:
 	@header='$(SCHEME_INCLUDE_DIR)/scheme.h'; \

@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package chezpp.examples.transfer;
+
+message FileChunk {
+  string name = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+  bytes sha256 = 4;
+  bool done = 5;
+}
+
+message TransferResult {
+  uint64 size = 1;
+  bytes sha256 = 2;
+}
+
+service FileTransfer {
+  rpc Upload(stream FileChunk) returns (TransferResult);
+  rpc Download(FileChunk) returns (stream FileChunk);
+}

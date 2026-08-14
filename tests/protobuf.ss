@@ -25,4 +25,27 @@
      (protobuf-error? (lambda () (protobuf-encode-field 1 'invalid #t)))
 
      ;; Error case: fixed-width decoding requires the complete field width.
-     (protobuf-error? (lambda () (protobuf-decode-fixed32 #vu8(1 2 3)))))
+     (protobuf-error? (lambda () (protobuf-decode-fixed32 #vu8(1 2 3))))
+
+     ;; Error case: an iterator cannot consume a truncated fixed-width field.
+     (protobuf-error?
+      (lambda () (protobuf-decoder-next-field (make-protobuf-decoder #vu8(13 1 2 3)))))
+
+     ;; Error case: a length-delimited field length cannot exceed the remaining input.
+     (protobuf-error?
+      (lambda () (protobuf-decoder-next-field (make-protobuf-decoder #vu8(10 4 1 2 3)))))
+
+     (let* ([decoder (make-protobuf-decoder #vu8(8 150 1 18 3 97 98 99))]
+            [first (protobuf-decoder-next-field decoder)]
+            [second (protobuf-decoder-next-field decoder)])
+       (and (= 1 (protobuf-wire-field-number first))
+            (= 0 (protobuf-wire-field-wire-type first))
+            (= 150 (protobuf-wire-field-value first))
+            (= 2 (protobuf-wire-field-number second))
+            (equal? #vu8(97 98 99) (protobuf-wire-field-value second))
+            (protobuf-decoder-eof? decoder)))
+
+     (let* ([decoder (make-protobuf-decoder #vu8(40 7))]
+            [field (protobuf-decoder-next-field decoder)])
+       (protobuf-decoder-preserve-field! decoder field)
+       (equal? '#(#vu8(40 7)) (protobuf-decoder-unknown-fields decoder))))
