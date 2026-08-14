@@ -2,7 +2,8 @@
   (export)
   (import (chezscheme)
           (chezpp concurrency fiber)
-          (chezpp net operation))
+          (chezpp net operation)
+          (chezpp protobuf))
 
   (export (import (chezpp chez)
                   (chezpp match)
@@ -37,6 +38,7 @@
                   (chezpp uuid)
                   (chezpp hash)
                   (chezpp digest)
+                  (chezpp protobuf)
                   (chezpp optional-library)
                   (chezpp crypto)
                   (chezpp net)

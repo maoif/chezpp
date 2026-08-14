@@ -8,6 +8,7 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
              bittree.ss bitvec.ss dset.ss \
              concurrency.ss \
              cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss optional-openssl.ss net-loader.ss uuid.ss \
+             protobuf.ss \
              $(NET_TESTS) \
              parser.ss
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
