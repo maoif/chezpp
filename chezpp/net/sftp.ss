@@ -39,6 +39,7 @@
           sftp-rmdir!
           sftp-rename!
           sftp-open-file
+          sftp-seek!
           sftp-close-file
           sftp-read
           sftp-read!
@@ -610,6 +611,18 @@ The `sftp-open-file` procedure opens a remote file handle using one or more acce
                 session
                 #f))]))
 
+  #|proc:sftp-seek!
+The `sftp-seek!` procedure moves the remote `file` position to non-negative byte `offset` and
+returns `file`. It is used by resumable transfers and is safe for callers that own the handle.
+|#
+  (define-who sftp-seek!
+    (lambda (file offset)
+      (pcheck ([sftp-file? file] [natural? offset])
+              (ensure-file-open who file)
+              (ensure-success who 'sftp
+                              (ffi-net-sftp-seek (sftp-file-handle file) offset))
+              file)))
+
   #|proc:sftp-chmod!
 The `sftp-chmod!` procedure sets numeric `permissions` on remote `path` through `session`. It
 returns `session`.
@@ -914,17 +927,44 @@ The `sftp-download` procedure downloads a remote file to a local pathname and re
        (pcheck ([sftp-session? session] [string? remote-path local-path]
                 [transfer-policy? policy])
               (ensure-session-open who session)
-              (let ([file (sftp-open-file session remote-path 'read)])
-                (dynamic-wind void
-                  (lambda ()
-                    (call-with-port
-                     (open-file-output-port local-path (file-options no-fail replace)
-                                            (buffer-mode block) #f)
-                     (lambda (op)
-                       (copy-port-chunks
-                        (lambda () (sftp-read file 4096))
-                        (lambda (chunk) (put-bytevector op chunk))))))
-                  (lambda () (sftp-close-file file))))
+              (let* ([attributes (sftp-stat session remote-path)]
+                     [total (and attributes (sftp-attributes-size attributes))]
+                     [existing? (file-exists? local-path)]
+                     [overwrite (transfer-policy-overwrite policy)])
+                (cond
+                 [(and existing? (eq? overwrite 'skip)) local-path]
+                 [(and existing? (eq? overwrite 'error))
+                  (errorf who "local destination exists: ~a" local-path)]
+                 [else
+                  (let* ([local-size (if existing? (local-file-size local-path) 0)]
+                         [resume (transfer-policy-resume policy)]
+                         [offset (cond [(natural? resume) resume]
+                                       [(eq? resume 'resume) local-size]
+                                       [else 0])])
+                    (when (and total (> offset total))
+                      (errorf who "resume offset ~a exceeds remote size ~a" offset total))
+                    (let ([file (sftp-open-file session remote-path 'read)])
+                      (dynamic-wind void
+                        (lambda ()
+                          (when (positive? offset) (sftp-seek! file offset))
+                          (call-with-port
+                           (open-file-output-port
+                            local-path
+                            (if (positive? offset)
+                                (file-options no-fail no-truncate)
+                                (file-options no-fail replace))
+                            (buffer-mode block) #f)
+                           (lambda (op)
+                             (when (positive? offset) (file-position op offset))
+                             (let loop ([completed offset])
+                               (let ([chunk (sftp-read file (transfer-policy-chunk-size policy))])
+                                 (unless (eof-object? chunk)
+                                   (put-bytevector op chunk)
+                                   (let ([next (+ completed (bytevector-length chunk))])
+                                     (transfer-report-progress! policy 'sftp 'download remote-path
+                                                                  next total)
+                                     (loop next))))))))
+                        (lambda () (sftp-close-file file)))))]))
               local-path)]))
 
   #|proc:sftp-upload
@@ -938,16 +978,42 @@ The `sftp-upload` procedure uploads a local file to a remote pathname and return
        (pcheck ([sftp-session? session] [string? local-path remote-path]
                 [transfer-policy? policy])
               (ensure-session-open who session)
-              (let ([file (sftp-open-file session remote-path '(write create truncate))])
-                (dynamic-wind void
-                  (lambda ()
-                    (call-with-port
-                     (open-file-input-port local-path (file-options) (buffer-mode block) #f)
-                     (lambda (ip)
-                       (copy-port-chunks
-                        (lambda () (get-bytevector-n ip 4096))
-                        (lambda (chunk) (sftp-write-all file chunk))))))
-                  (lambda () (sftp-close-file file))))
+              (let* ([existing (sftp-path-exists session remote-path)]
+                     [overwrite (transfer-policy-overwrite policy)])
+                (cond
+                 [(and existing (eq? overwrite 'skip)) remote-path]
+                 [(and existing (eq? overwrite 'error))
+                  (errorf who "remote destination exists: ~a" remote-path)]
+                 [else
+                  (let* ([local-size (local-file-size local-path)]
+                         [resume (transfer-policy-resume policy)]
+                         [remote-size (and existing (sftp-attributes-size existing))]
+                         [offset (cond [(natural? resume) resume]
+                                       [(eq? resume 'resume) (or remote-size 0)]
+                                       [else 0])])
+                    (when (and remote-size (> offset remote-size))
+                      (errorf who "resume offset ~a exceeds remote size ~a" offset remote-size))
+                    (when (> offset local-size)
+                      (errorf who "resume offset ~a exceeds local size ~a" offset local-size))
+                    (let ([file (sftp-open-file
+                                 session remote-path
+                                 (if (zero? offset) '(write create truncate) '(write create)) )])
+                      (dynamic-wind void
+                        (lambda ()
+                          (when (positive? offset) (sftp-seek! file offset))
+                          (call-with-port
+                           (open-file-input-port local-path (file-options) (buffer-mode block) #f)
+                           (lambda (ip)
+                             (when (positive? offset) (file-position ip offset))
+                             (let loop ([completed offset])
+                               (let ([chunk (get-bytevector-n ip (transfer-policy-chunk-size policy))])
+                                 (unless (eof-object? chunk)
+                                   (sftp-write-all file chunk)
+                                   (let ([next (+ completed (bytevector-length chunk))])
+                                     (transfer-report-progress! policy 'sftp 'upload remote-path
+                                                                  next local-size)
+                                     (loop next))))))))
+                        (lambda () (sftp-close-file file)))))]))
               remote-path)]))
 
   #|proc:sftp-download-directory

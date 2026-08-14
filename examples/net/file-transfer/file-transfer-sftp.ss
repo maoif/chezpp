@@ -211,3 +211,25 @@ server state named by `CHEZPP_SFTP_EXAMPLE_STATE`.
                    (ssh-close session)))))))
         (lambda ()
           (delete-file/ignore done-path))))))
+
+#|proc:sftp-transfer-once
+The `sftp-transfer-once` procedure uploads or downloads one file through an SSH `session`.
+`direction` is `upload` or `download`; `source` and `destination` name the corresponding local and
+remote paths. The procedure uses bounded chunks and returns the resulting local path.
+|#
+(define sftp-transfer-once
+  (lambda (session direction source destination)
+    (pcheck ([ssh-session? session] [symbol? direction] [string? source destination])
+      (let ([sftp (sftp-open session)])
+        (dynamic-wind
+          void
+          (lambda ()
+            (case direction
+              [(upload)
+               (sftp-upload sftp source destination default-transfer-policy)
+               source]
+              [(download)
+               (sftp-download sftp source destination default-transfer-policy)
+               destination]
+              [else (errorf 'sftp-transfer-once "direction must be upload or download")]))
+          (lambda () (sftp-close sftp)))))))

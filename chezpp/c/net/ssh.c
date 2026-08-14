@@ -2487,6 +2487,11 @@ ptr chezpp_net_scp_download_directory(uptr handle, const char *remote_path, cons
 static ptr scp_transfer_pending(chezpp_scp_transfer *t, int events);
 static ptr scp_transfer_retry_pending(chezpp_scp_transfer *t, int events);
 
+static ptr scp_transfer_progress(chezpp_scp_transfer *t) {
+  /* POLLOUT normally returns immediately, allowing buffered protocol data to be consumed. */
+  return scp_transfer_pending(t, POLLIN | POLLOUT);
+}
+
 static char *scp_quote_command(const char *mode, const char *path) {
   size_t path_len = strlen(path);
   size_t quote_count = 0;
@@ -2647,14 +2652,14 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     if (rc != SSH_OK) return scp_channel_error(t, "scp channel open failed");
     t->initialized = 1;
     t->phase = 1;
-    return scp_transfer_pending(t, POLLIN | POLLOUT);
+    return scp_transfer_progress(t);
   }
   if (t->phase == 1) {
     rc = p_ssh_channel_request_exec(t->channel, t->command);
     if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLIN | POLLOUT);
     if (rc != SSH_OK) return scp_channel_error(t, "scp exec request failed");
     t->phase = 2;
-    return scp_transfer_pending(t, t->direction == 1 ? POLLIN : POLLOUT);
+    return scp_transfer_progress(t);
   }
   if (t->phase == 2) {
     if (t->direction == 1) {
@@ -2675,14 +2680,14 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       t->header_len = 1;
     }
     t->phase = 3;
-    return scp_transfer_pending(t, POLLOUT);
+    return scp_transfer_progress(t);
   }
   if (t->phase == 3) {
     if (t->direction == 1) {
       ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
       if (ans != Strue) return ans;
       t->phase = 4;
-      return scp_transfer_pending(t, POLLIN);
+      return scp_transfer_progress(t);
     }
     {
       ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
@@ -2690,7 +2695,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       t->header_len = 0;
       t->header_pos = 0;
       t->phase = 4;
-      return scp_transfer_pending(t, POLLIN);
+      return scp_transfer_progress(t);
     }
   }
   if (t->phase == 4) {
@@ -2698,7 +2703,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       ptr ans = scp_read_ack(t);
       if (ans != Strue) return ans;
       t->phase = 5;
-      return scp_transfer_pending(t, POLLOUT);
+      return scp_transfer_progress(t);
     }
     rc = p_ssh_channel_read(t->channel, t->header + t->header_len, 1, 0);
     if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
@@ -2706,7 +2711,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     t->header_len++;
     if (t->header_len >= sizeof(t->header))
       return make_error_status_message("scp file header is too long");
-    if (t->header[t->header_len - 1] != '\n') return scp_transfer_pending(t, POLLIN);
+    if (t->header[t->header_len - 1] != '\n') return scp_transfer_progress(t);
     t->header[t->header_len - 1] = '\0';
     {
       unsigned mode;
@@ -2719,14 +2724,14 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       t->header_len = 1;
       t->header_pos = 0;
       t->phase = 5;
-      return scp_transfer_pending(t, POLLOUT);
+      return scp_transfer_progress(t);
     }
   }
   if (t->phase == 5) {
     if (t->direction == 0 && t->header_pos < t->header_len) {
       ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
       if (ans != Strue) return ans;
-      return scp_transfer_pending(t, POLLIN);
+      return scp_transfer_progress(t);
     }
     if (t->direction == 1) {
       ssize_t n;
@@ -2735,7 +2740,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
         t->header_len = 1;
         t->header_pos = 0;
         t->phase = 6;
-        return scp_transfer_pending(t, POLLOUT);
+        return scp_transfer_progress(t);
       }
       if (t->buffer_pos == t->buffer_len) {
         size_t want = t->remaining > sizeof(t->buffer) ?
@@ -2767,7 +2772,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       t->header_len = 1;
       t->header_pos = 0;
       t->phase = 6;
-      return scp_transfer_pending(t, POLLOUT);
+      return scp_transfer_progress(t);
     }
     {
       size_t want = t->remaining > sizeof(t->buffer) ? sizeof(t->buffer) : (size_t)t->remaining;
@@ -2788,7 +2793,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       }
       t->offset += (uint64_t)rc;
       t->remaining -= (uint64_t)rc;
-      return scp_transfer_pending(t, POLLIN);
+      return scp_transfer_progress(t);
     }
   }
   if (t->phase == 6) {
@@ -2796,7 +2801,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     if (ans != Strue) return ans;
     if (t->direction == 1) {
       t->phase = 7;
-      return scp_transfer_pending(t, POLLIN);
+      return scp_transfer_progress(t);
     }
     t->completed = 1;
     t->phase = 8;

@@ -735,7 +735,9 @@
              [upload-path "/tmp/chezpp-net-sftp-upload.bin"]
              [download-path "/tmp/chezpp-net-sftp-download.bin"])
          (dynamic-wind
-           void
+           (lambda ()
+             (when (file-exists? upload-path) (delete-file upload-path))
+             (when (file-exists? download-path) (delete-file download-path)))
            (lambda ()
              (and
               (eq? (ssh-auth-publickey! session user) session)
@@ -756,7 +758,10 @@
                       upload-path
                       download-path)))
                   (lambda () (sftp-close sftp))))))
-           (lambda () (ssh-close session))))))))
+           (lambda ()
+             (ssh-close session)
+             (when (file-exists? upload-path) (delete-file upload-path))
+             (when (file-exists? download-path) (delete-file download-path)))))))))
 
 (define run-net-sftp-nonblocking-test
   (lambda (remote-root home port user)

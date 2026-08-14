@@ -20,6 +20,7 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp file)
+          (chezpp string)
           (chezpp net errors)
           (chezpp net ffi)
           (chezpp net poll)
@@ -28,7 +29,8 @@
           (chezpp net address)
           (chezpp net socket)
           (chezpp net private)
-          (chezpp net ssh))
+          (chezpp net ssh)
+          (chezpp net sftp))
 
   (define-record-type (scp-session %make-scp-session scp-session?)
     (sealed #t)
@@ -256,30 +258,247 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                        timeout-ms))
       remote-path))
 
+  (define local-scp-attributes
+    (lambda (path relative-path)
+      (%make-scp-attributes relative-path
+                            (cond [(file-symbolic-link? path) 'symlink]
+                                  [(file-directory? path) 'directory]
+                                  [(file-regular? path) 'regular]
+                                  [else 'special])
+                            (and (file-regular? path) (file-size path))
+                            (file-mode path)
+                            (time-second (file-modification-time path)))))
+
+  (define scp-child-path
+    (lambda (parent name)
+      (if (or (string=? parent "")
+              (char=? (string-ref parent (fx1- (string-length parent))) #\/))
+          (string-append parent name)
+          (string-append parent "/" name))))
+
+  (define path-inside-root?
+    (lambda (root path)
+      (let ([root (normalize-scp-path root)] [path (normalize-scp-path path)])
+        (or (string=? root path)
+            (and (> (string-length path) (string-length root))
+                 (string=? root (substring path 0 (string-length root)))
+                 (or (char=? (string-ref root (fx1- (string-length root))) #\/)
+                     (char=? (string-ref path (string-length root)) #\/)))))))
+
+  (define normalize-scp-path
+    (lambda (path)
+      (let ([absolute? (and (> (string-length path) 0)
+                            (char=? (string-ref path 0) #\/))])
+        (let loop ([part* (string-split path #\/)] [stack '()])
+          (if (null? part*)
+              (let join ([rest (reverse stack)] [out (if absolute? "/" "")])
+                (if (null? rest)
+                    (if (string=? out "") "." out)
+                    (join (cdr rest)
+                          (if (or (string=? out "") (string=? out "/"))
+                              (string-append out (car rest))
+                              (string-append out "/" (car rest))))))
+              (let ([part (car part*)])
+                (cond [(or (string=? part "") (string=? part "."))
+                       (loop (cdr part*) stack)]
+                      [(string=? part "..")
+                       (loop (cdr part*) (if (null? stack) stack (cdr stack)))]
+                      [else (loop (cdr part*) (cons part stack))])))))))
+
+  (define remote-scp-attributes
+    (lambda (path attributes)
+      (%make-scp-attributes path
+                            (sftp-attributes-type attributes)
+                            (sftp-attributes-size attributes)
+                            (sftp-attributes-permissions attributes)
+                            (sftp-attributes-modification-time attributes))))
+
+  (define sftp-stat/maybe
+    (lambda (sftp path)
+      (guard (condition [else #f]) (sftp-stat sftp path))))
+
+  (define ensure-local-scp-directory
+    (lambda (path)
+      (cond [(file-directory? path) path]
+            [(file-exists? path) (errorf 'scp-copy-directory "local path is not a directory: ~a" path)]
+            [else (mkdirs path) path])))
+
+  (define ensure-remote-scp-directory
+    (lambda (sftp path)
+      (let ([attributes (sftp-stat/maybe sftp path)])
+        (cond [(not attributes) (sftp-mkdir! sftp path)]
+              [(eq? (sftp-attributes-type attributes) 'directory) sftp]
+              [else (errorf 'scp-copy-directory "remote path is not a directory: ~a" path)]))))
+
+  (define replace-local-symlink!
+    (lambda (who target link-path policy)
+      (let ([exists? (file-exists? link-path #f)])
+        (case (and exists? (transfer-policy-overwrite policy))
+          [(skip) #f]
+          [(error) (errorf who "local destination exists: ~a" link-path)]
+          [else (file-symlink! target link-path) #t]))))
+
+  (define replace-remote-symlink!
+    (lambda (who sftp target link-path policy)
+      (let ([exists? (sftp-stat/maybe sftp link-path)])
+        (case (and exists? (transfer-policy-overwrite policy))
+          [(skip) #f]
+          [(error) (errorf who "remote destination exists: ~a" link-path)]
+          [else
+           (when exists? (sftp-delete! sftp link-path))
+           (sftp-symlink! sftp target link-path)
+           #t]))))
+
+  (define scp-upload-tree-file
+    (lambda (who session local-path remote-path timeout-ms policy)
+      (let ([exists? (scp-stat session remote-path)])
+        (cond [(and exists? (eq? (transfer-policy-overwrite policy) 'skip)) remote-path]
+              [(and exists? (eq? (transfer-policy-overwrite policy) 'error))
+               (errorf who "remote destination exists: ~a" remote-path)]
+              [else (scp-upload* who session local-path remote-path timeout-ms)]))))
+
+  (define scp-download-tree-file
+    (lambda (who session remote-path local-path timeout-ms policy)
+      (let ([exists? (file-exists? local-path)])
+        (cond [(and exists? (eq? (transfer-policy-overwrite policy) 'skip)) local-path]
+              [(and exists? (eq? (transfer-policy-overwrite policy) 'error))
+               (errorf who "local destination exists: ~a" local-path)]
+              [else (scp-download* who session remote-path local-path timeout-ms)]))))
+
   (define scp-copy-directory*
-    (lambda (who session direction source-path target-path timeout-ms)
+    (lambda (who session direction source-path target-path timeout-ms policy filter symlink-policy)
       (ensure-session-open who session)
-      (case direction
-        [(upload)
-         (unless (file-directory? source-path #t)
-           (errorf who "local directory expected, given ~a" source-path))
-         (ensure-success who
-                         (ffi-net-scp-upload-directory
-                          (%ssh-session-handle (scp-session-ssh-session session))
-                          source-path
-                          target-path
-                          timeout-ms))
-         target-path]
-        [(download)
-         (ensure-success who
-                         (ffi-net-scp-download-directory
-                          (%ssh-session-handle (scp-session-ssh-session session))
-                          source-path
-                          target-path
-                          timeout-ms))
-         target-path]
-        [else
-         (errorf who "direction must be one of '(upload download), given ~s" direction)])))
+      (ensure-scp-resume-supported who policy)
+      (unless (or (eq? filter #f) (procedure? filter))
+        (errorf who "filter must be a procedure or #f, given ~s" filter))
+      (unless (memq symlink-policy '(preserve follow reject))
+        (errorf who "invalid SCP symlink policy ~s" symlink-policy))
+      (let ([sftp (sftp-open (scp-session-ssh-session session))])
+        (dynamic-wind
+          void
+          (lambda ()
+            (case direction
+              [(upload)
+               (unless (file-directory? source-path #t)
+                 (errorf who "local directory expected, given ~a" source-path))
+               (ensure-remote-scp-directory sftp target-path)
+               (let ([root (normalize-scp-path source-path)])
+                 (let walk ([local source-path] [remote target-path] [prefix ""] [seen '()])
+                   (let ([normalized (normalize-scp-path local)])
+                     (when (member normalized seen)
+                       (raise-net-error who 'scp "recursive SCP upload found a cycle" local))
+                     (for-each
+                      (lambda (name)
+                        (let* ([local-child (scp-child-path local name)]
+                               [remote-child (scp-child-path remote name)]
+                               [relative (if (string=? prefix "")
+                                             name (scp-child-path prefix name))]
+                               [attributes (local-scp-attributes local-child relative)])
+                          (when (or (not filter) (filter relative attributes))
+                            (case (scp-attributes-type attributes)
+                              [(directory)
+                               (ensure-remote-scp-directory sftp remote-child)
+                               (walk local-child remote-child relative (cons normalized seen))]
+                              [(regular)
+                               (scp-upload-tree-file who session local-child remote-child
+                                                      timeout-ms policy)]
+                              [(symlink)
+                               (case symlink-policy
+                                 [(reject)
+                                  (raise-net-error who 'scp
+                                                   "recursive SCP upload rejects symbolic links"
+                                                   local-child)]
+                                 [(preserve)
+                                  (replace-remote-symlink!
+                                   who sftp (readlink local-child) remote-child policy)]
+                                 [(follow)
+                                  (let ([resolved (normalize-scp-path (readlink2 local-child #t))])
+                                    (unless (path-inside-root? root resolved)
+                                      (raise-net-error who 'scp
+                                                       "followed link escapes source root"
+                                                       local-child))
+                                    (if (file-directory? resolved)
+                                        (begin
+                                          (ensure-remote-scp-directory sftp remote-child)
+                                          (walk resolved remote-child relative
+                                                (cons normalized seen)))
+                                        (scp-upload-tree-file
+                                         who session resolved remote-child timeout-ms policy)))])]
+                              [else
+                               (raise-net-error who 'scp "unsupported local file type"
+                                                local-child)]))))
+                      (directory-list local)))))
+               target-path]
+              [(download)
+               (ensure-local-scp-directory target-path)
+               (let ([root (sftp-normalize-path sftp source-path)])
+                 (let walk ([remote source-path] [local target-path] [prefix ""] [seen '()])
+                   (let ([normalized (sftp-normalize-path sftp remote)])
+                     (when (member normalized seen)
+                       (raise-net-error who 'scp "recursive SCP download found a cycle" remote))
+                     (for-each
+                      (lambda (entry)
+                        (let ([name (sftp-attributes-name entry)])
+                          (unless (member name '("." ".."))
+                            (let* ([remote-child (scp-child-path remote name)]
+                                   [local-child (scp-child-path local name)]
+                                   [relative (if (string=? prefix "")
+                                                 name (scp-child-path prefix name))]
+                                   [attributes (remote-scp-attributes relative entry)])
+                              (when (or (not filter) (filter relative attributes))
+                                (case (scp-attributes-type attributes)
+                                  [(directory)
+                                   (ensure-local-scp-directory local-child)
+                                   (walk remote-child local-child relative
+                                         (cons normalized seen))]
+                                  [(regular)
+                                   (scp-download-tree-file
+                                    who session remote-child local-child timeout-ms policy)]
+                                  [(symlink)
+                                   (case symlink-policy
+                                     [(reject)
+                                      (raise-net-error who 'scp
+                                                       "recursive SCP download rejects links"
+                                                       remote-child)]
+                                     [(preserve)
+                                      (replace-local-symlink!
+                                       who (sftp-readlink sftp remote-child)
+                                       local-child policy)]
+                                     [(follow)
+                                      (let* ([target (sftp-readlink sftp remote-child)]
+                                             [slash (let find ([i (fx1-
+                                                                  (string-length remote-child))])
+                                                      (cond [(fx< i 0) #f]
+                                                            [(char=? (string-ref remote-child i)
+                                                                     #\/)
+                                                             i]
+                                                            [else (find (fx1- i))]))]
+                                             [parent (if slash
+                                                         (substring remote-child 0 slash) ".")]
+                                             [resolved
+                                              (sftp-normalize-path
+                                               sftp (scp-child-path parent target))]
+                                             [resolved-attributes (sftp-stat sftp resolved)])
+                                        (unless (path-inside-root? root resolved)
+                                          (raise-net-error who 'scp
+                                                           "followed link escapes source root"
+                                                           remote-child))
+                                        (if (eq? (sftp-attributes-type resolved-attributes)
+                                                 'directory)
+                                            (begin
+                                              (ensure-local-scp-directory local-child)
+                                              (walk resolved local-child relative
+                                                    (cons normalized seen)))
+                                            (scp-download-tree-file
+                                             who session resolved local-child timeout-ms policy)))])]
+                                  [else
+                                   (raise-net-error who 'scp "unsupported remote file type"
+                                                    remote-child)]))))))
+                      (sftp-list sftp remote)))))
+               target-path]
+              [else
+               (errorf who "direction must be one of '(upload download), given ~s" direction)]))
+          (lambda () (sftp-close sftp))))))
 
   #|proc:scp-open
 The `scp-open` procedure wraps an authenticated SSH session, or opens and authenticates one, for subsequent SCP transfers.
@@ -416,7 +635,10 @@ The return value is a `net-operation` whose successful result is `remote-path`.
                   (scp-upload* who session local-path remote-path timeout-ms))))]))
 
   #|proc:scp-copy-directory
-The `scp-copy-directory` procedure recursively copies a directory tree in the specified `direction`, using exact root-path semantics for the local and remote targets.
+The `scp-copy-directory` procedure recursively copies a directory tree in `direction`. `policy`
+controls overwrite and resume behavior. `filter` has signature
+`(relative-path scp-attributes) -> boolean`, and `symlink-policy` is `preserve`, `follow`, or
+`reject`. The default rejects links and includes every entry.
 |#
   (define-who scp-copy-directory
     (case-lambda
@@ -431,7 +653,17 @@ The `scp-copy-directory` procedure recursively copies a directory tree in the sp
                (check-timeout-ms who timeout-ms)
                (net-operation-wait
                 (scp-copy-directory/nonblocking
-                 session direction source-path target-path timeout-ms)))]))
+                 session direction source-path target-path timeout-ms)))]
+      [(session direction source-path target-path policy filter symlink-policy)
+       (scp-copy-directory session direction source-path target-path
+                           (scp-session-timeout-ms session) policy filter symlink-policy)]
+      [(session direction source-path target-path timeout-ms policy filter symlink-policy)
+       (pcheck ([scp-session? session] [string? source-path target-path]
+                [fixnum? timeout-ms] [transfer-policy? policy])
+               (check-timeout-ms who timeout-ms)
+               (net-operation-wait
+                (scp-copy-directory/nonblocking session direction source-path target-path
+                                                timeout-ms policy filter symlink-policy)))]))
 
   #|proc:scp-copy-directory/nonblocking
 The `scp-copy-directory/nonblocking` procedure constructs a recursive copy operation.
@@ -460,7 +692,20 @@ The return value is a `net-operation` whose successful result is the target path
                                        direction
                                        source-path
                                        target-path
-                                       timeout-ms))))]))
+                                       timeout-ms
+                                       default-transfer-policy
+                                       #f
+                                       'reject))))]
+      [(session direction source-path target-path timeout-ms policy filter symlink-policy)
+       (pcheck ([scp-session? session] [string? source-path target-path]
+                [fixnum? timeout-ms] [transfer-policy? policy])
+               (check-timeout-ms who timeout-ms)
+               (scp-transfer/nonblocking
+                who session 'scp-copy-directory
+                (list direction source-path target-path timeout-ms policy filter symlink-policy)
+                (lambda ()
+                  (scp-copy-directory* who session direction source-path target-path timeout-ms
+                                       policy filter symlink-policy))))]))
 
   #|proc:call-with-scp-session
 The `call-with-scp-session` procedure opens an SCP session, applies a procedure, and closes the session afterwards.

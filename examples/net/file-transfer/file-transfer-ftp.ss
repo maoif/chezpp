@@ -252,3 +252,26 @@ FTP upload server and then uploads the done marker.
           path*)
         (lambda ()
           (delete-file/ignore done-path))))))
+
+#|proc:ftp-transfer-once
+The `ftp-transfer-once` procedure uploads or downloads one file through `endpoint`. `username` and
+`password` authenticate the session; `direction` is `upload` or `download`; `source` and
+`destination` name the corresponding local and remote paths. It returns the resulting local path.
+|#
+(define ftp-transfer-once
+  (lambda (endpoint username password direction source destination)
+    (pcheck ([string? endpoint username password source destination] [symbol? direction])
+      (let ([session (ftp-open endpoint)])
+        (dynamic-wind
+          void
+          (lambda ()
+            (ftp-login! session username password)
+            (case direction
+              [(upload)
+               (ftp-upload session source destination default-transfer-policy)
+               source]
+              [(download)
+               (ftp-download session source destination default-transfer-policy)
+               destination]
+              [else (errorf 'ftp-transfer-once "direction must be upload or download")]))
+          (lambda () (ftp-close session)))))))
