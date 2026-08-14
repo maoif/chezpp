@@ -4,6 +4,8 @@
           protobuf-encode-zigzag protobuf-decode-zigzag
           protobuf-encode-fixed32 protobuf-decode-fixed32
           protobuf-encode-fixed64 protobuf-decode-fixed64
+          protobuf-encode-sfixed32 protobuf-decode-sfixed32
+          protobuf-encode-sfixed64 protobuf-decode-sfixed64
           protobuf-encode-float protobuf-decode-float
           protobuf-encode-double protobuf-decode-double
           protobuf-encode-bool protobuf-decode-bool
@@ -187,6 +189,54 @@ The return value is an unsigned 64-bit integer.
       (pcheck ([bytevector? bytes])
         (unless (= (bytevector-length bytes) 8) (errorf 'protobuf-decode-fixed64 "eight bytes required"))
         (bytevector-u64-ref bytes 0 (endianness little)))))
+
+  #|proc:protobuf-encode-sfixed32
+The `protobuf-encode-sfixed32` procedure encodes signed 32-bit `value` in little-endian order.
+The return value is a four-byte bytevector.
+|#
+  (define protobuf-encode-sfixed32
+    (lambda (value)
+      (pcheck ([integer? value])
+        (unless (<= -2147483648 value 2147483647)
+          (errorf 'protobuf-encode-sfixed32 "signed 32-bit integer required: ~s" value))
+        (let ([out (make-bytevector 4 0)])
+          (bytevector-s32-set! out 0 value (endianness little))
+          out))))
+
+  #|proc:protobuf-decode-sfixed32
+The `protobuf-decode-sfixed32` procedure decodes four little-endian bytes in `bytes`.
+The return value is a signed 32-bit integer.
+|#
+  (define protobuf-decode-sfixed32
+    (lambda (bytes)
+      (pcheck ([bytevector? bytes])
+        (unless (= (bytevector-length bytes) 4)
+          (errorf 'protobuf-decode-sfixed32 "four bytes required"))
+        (bytevector-s32-ref bytes 0 (endianness little)))))
+
+  #|proc:protobuf-encode-sfixed64
+The `protobuf-encode-sfixed64` procedure encodes signed 64-bit `value` in little-endian order.
+The return value is an eight-byte bytevector.
+|#
+  (define protobuf-encode-sfixed64
+    (lambda (value)
+      (pcheck ([integer? value])
+        (unless (<= protobuf-min-s64 value protobuf-max-s64)
+          (errorf 'protobuf-encode-sfixed64 "signed 64-bit integer required: ~s" value))
+        (let ([out (make-bytevector 8 0)])
+          (bytevector-s64-set! out 0 value (endianness little))
+          out))))
+
+  #|proc:protobuf-decode-sfixed64
+The `protobuf-decode-sfixed64` procedure decodes eight little-endian bytes in `bytes`.
+The return value is a signed 64-bit integer.
+|#
+  (define protobuf-decode-sfixed64
+    (lambda (bytes)
+      (pcheck ([bytevector? bytes])
+        (unless (= (bytevector-length bytes) 8)
+          (errorf 'protobuf-decode-sfixed64 "eight bytes required"))
+        (bytevector-s64-ref bytes 0 (endianness little)))))
 
   #|proc:protobuf-encode-float
 The `protobuf-encode-float` procedure encodes real number `value` as IEEE-754 binary32.
@@ -489,9 +539,14 @@ are returned as copied bytevectors, and malformed or truncated fields raise an e
       (case type
        [(bool) (protobuf-encode-varint (if value 1 0))]
        [(enum uint32 uint64) (protobuf-encode-varint value)]
+       [(int32 int64) (protobuf-encode-signed-varint value)]
        [(sint32 sint64) (protobuf-encode-zigzag value)]
        [(fixed32) (protobuf-encode-fixed32 value)]
        [(fixed64) (protobuf-encode-fixed64 value)]
+       [(sfixed32) (protobuf-encode-sfixed32 value)]
+       [(sfixed64) (protobuf-encode-sfixed64 value)]
+       [(float) (protobuf-encode-float value)]
+       [(double) (protobuf-encode-double value)]
        [(bytes) value]
        [(string) (string->utf8 value)]
        [(message) value]
@@ -507,10 +562,10 @@ The return value is a newly allocated wire-format bytevector.
         (unless (and (positive? number) (<= number protobuf-max-field-number))
           (errorf 'protobuf-encode-field "invalid field number: ~s" number))
         (let* ([wire-type (case type
-                            [(bool enum uint32 uint64 sint32 sint64) 0]
-                            [(fixed64) 1]
+                            [(bool enum int32 int64 uint32 uint64 sint32 sint64) 0]
+                            [(double fixed64 sfixed64) 1]
                             [(bytes string message) 2]
-                            [(fixed32) 5]
+                            [(float fixed32 sfixed32) 5]
                             [else (errorf 'protobuf-encode-field "unsupported field type: ~s" type)])]
                [payload (protobuf-field-payload type value)]
                [tag (protobuf-encode-varint (bitwise-ior (bitwise-arithmetic-shift number 3) wire-type))])

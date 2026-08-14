@@ -14,6 +14,7 @@
                   (chezpp net sftp)
                   (chezpp net scp)
                   (chezpp net grpc)
+                  (chezpp net grpc reflection)
                   (chezpp net websocket)
                   (chezpp net http)
                   (chezpp net poll)

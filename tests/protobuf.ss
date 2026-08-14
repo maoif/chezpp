@@ -11,6 +11,11 @@
      (equal? #vu8(8 1 18 3 102 111 111)
              (protobuf-encode-message '((1 bool #t) (2 string "foo"))))
      (= -1 (protobuf-decode-zigzag (protobuf-encode-zigzag -1)))
+     (= -42 (protobuf-decode-signed-varint (protobuf-encode-signed-varint -42)))
+     (= -1234 (protobuf-decode-sfixed32 (protobuf-encode-sfixed32 -1234)))
+     (= -5678 (protobuf-decode-sfixed64 (protobuf-encode-sfixed64 -5678)))
+     (= 1.5 (protobuf-decode-float (protobuf-encode-float 1.5)))
+     (= -2.25 (protobuf-decode-double (protobuf-encode-double -2.25)))
 
      ;; Error case: a varint cannot end while its continuation bit is set.
      (protobuf-error? (lambda () (protobuf-decode-varint #vu8(128))))

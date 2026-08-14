@@ -4,6 +4,8 @@
           protobuf-encode-zigzag protobuf-decode-zigzag
           protobuf-encode-fixed32 protobuf-decode-fixed32
           protobuf-encode-fixed64 protobuf-decode-fixed64
+          protobuf-encode-sfixed32 protobuf-decode-sfixed32
+          protobuf-encode-sfixed64 protobuf-decode-sfixed64
           protobuf-encode-float protobuf-decode-float
           protobuf-encode-double protobuf-decode-double
           protobuf-encode-bool protobuf-decode-bool

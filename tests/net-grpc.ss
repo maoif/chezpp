@@ -228,6 +228,14 @@
         ok?))))
 
 (mat net-grpc-records
+     (let ([registry (make-grpc-reflection-registry)])
+       (and (grpc-reflection-registry? registry)
+            (eq? registry
+                 (grpc-reflection-register-file!
+                  registry "file-transfer.proto" #vu8(10 0)
+                  '("chezpp.examples.transfer.FileChunk")
+                  '("chezpp.examples.transfer.FileTransfer")))))
+
      (let ([req (grpc-request "/chezpp.test.Meta/Inspect"
                               "payload"
                               '(("x-id" . "42")
