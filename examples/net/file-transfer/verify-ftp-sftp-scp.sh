@@ -7,14 +7,19 @@ state_dir=$(mktemp -d /tmp/chezpp-transfer-verify.XXXXXX)
 trap 'rm -rf "$state_dir"' EXIT HUP INT TERM
 
 source_file=$state_dir/source.bin
-roundtrip_file=$state_dir/roundtrip.bin
+ftp_file=$state_dir/ftp.bin
+sftp_file=$state_dir/sftp.bin
+scp_file=$state_dir/scp.bin
 dd if=/dev/zero of="$source_file" bs=1048576 count=16 status=none
 
 # These suites start and stop isolated FTP/FTPS and sshd-backed SFTP/SCP fixtures.
 (cd "$project_root/tests" && make test-some TEST='net-transfer net-ftp net-sftp net-scp')
 
-cp "$source_file" "$roundtrip_file"
+actual=$(
+  cd "$project_root/tests"
+  ../chez++ --script ../examples/net/file-transfer/verify-ftp-sftp-scp.ss \
+    "$source_file" "$ftp_file" "$sftp_file" "$scp_file"
+)
 expected=$(sha256sum "$source_file" | awk '{print $1}')
-actual=$(sha256sum "$roundtrip_file" | awk '{print $1}')
 test "$expected" = "$actual"
-printf 'FTP/FTPS/SFTP/SCP fixture suites passed; SHA-256 %s\n' "$actual"
+printf 'FTP/SFTP/SCP 16 MiB round trips and FTPS fixture checks passed; SHA-256 %s\n' "$actual"

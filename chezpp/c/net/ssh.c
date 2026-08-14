@@ -2527,7 +2527,8 @@ static ptr scp_write_pending_buffer(chezpp_scp_transfer *t, const unsigned char 
   int rc = p_ssh_channel_write(t->channel, buffer + *position,
                                (uint32_t)(length - *position));
   if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLOUT);
-  if (rc <= 0) return scp_channel_error(t, "scp channel write failed");
+  if (rc == 0) return scp_transfer_retry_pending(t, POLLOUT);
+  if (rc < 0) return scp_channel_error(t, "scp channel write failed");
   *position += (size_t)rc;
   if (*position < length) return scp_transfer_pending(t, POLLOUT);
   return Strue;
