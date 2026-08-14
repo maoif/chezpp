@@ -377,7 +377,96 @@
        (let ([resp (http-get (format "http://127.0.0.1:~a/chunked" port))])
          (thread-join th)
          (and (= (http-response-status resp) 200)
-              (equal? (utf8->string (http-response-body resp)) "hello world")))))
+              (equal? (utf8->string (http-response-body resp)) "hello world")
+              (equal? (http-header-ref (http-response-trailers resp) "X-Trailer")
+                      "done"))))
+
+     (let ([path "/tmp/chezpp-net-chunked-download.bin"])
+       (let-values ([(port th)
+                     (start-raw-http-response-server
+                      (string->utf8
+                       "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\nX-Digest: complete\r\n\r\n"))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let ([response
+                    (http-download (format "http://127.0.0.1:~a/download" port)
+                                   path)])
+               (thread-join th)
+               (and (not (http-response-body response))
+                    (equal? (utf8->string (read-u8vec path)) "hello world")
+                    (equal? (http-header-ref (http-response-trailers response)
+                                             "X-Digest")
+                            "complete"))))
+           (lambda ()
+             (when (file-exists? path) (delete-file path)))))))
+
+(mat net-http-cookie-and-auth
+     (let ([seen-cookie #f])
+       (let-values ([(server port th stop)
+                     (start-http-dispatch-loop-server
+                      1
+                      (lambda (server)
+                        (http-register-handler!
+                         server 'get "/set-cookie"
+                         (lambda (request)
+                           (make-http-response
+                            200 "OK"
+                            '(("Set-Cookie" . "session=abc; Path=/private; Secure")
+                              ("Set-Cookie" . "plain=ok; Path=/private"))
+                            "set")))
+                        (http-register-handler!
+                         server 'get "/private/check"
+                         (lambda (request)
+                           (set! seen-cookie
+                                 (http-header-ref (http-request-headers request)
+                                                  "Cookie" #f))
+                           (make-http-response 200 "OK" '() "checked")))))])
+         (let ([client (http-open)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (http-client-cookie-jar-set! client (make-http-cookie-jar))
+               (http-get client (format "http://127.0.0.1:~a/set-cookie" port))
+               (http-get client (format "http://127.0.0.1:~a/private/check" port))
+               (equal? seen-cookie "plain=ok"))
+             (lambda ()
+               (http-close client)
+               (stop)
+               (thread-join th))))))
+
+     (let-values ([(server port th)
+                   (start-http-connection-server
+                    (lambda (connection)
+                      (let ([request (http-read-request connection)])
+                        (http-write-response
+                         connection
+                         (make-http-response
+                          200 "OK" '()
+                          (or (http-header-ref (http-request-headers request)
+                                               "X-Custom-Auth" #f)
+                              "missing"))))))])
+       (let ([client (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (http-client-auth-set!
+              client
+              (lambda (request response)
+                (make-http-request
+                 (http-request-method request)
+                 (http-request-uri request)
+                 (http-header-set (http-request-headers request)
+                                  "X-Custom-Auth" "applied")
+                 (http-request-body request))))
+             (equal? "applied"
+                     (utf8->string
+                      (http-response-body
+                       (http-get client
+                                 (format "http://127.0.0.1:~a/auth" port))))))
+           (lambda ()
+             (http-close client)
+             (thread-join th))))))
 
 (mat net-http-chunked-request
      (let-values ([(server port th)

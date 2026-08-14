@@ -199,6 +199,8 @@
             (immutable input-port http-connection-input-port)
             (immutable output-port http-connection-output-port)
             (immutable secure? http-connection-secure?)
+            (mutable idle-since-ms http-connection-idle-since-ms
+                     http-connection-idle-since-ms-set!)
             (mutable closed? http-connection-closed? http-connection-closed?-set!)))
 
   ;;===----------------------------------------------------------------------===
@@ -401,7 +403,7 @@
       (let loop ([i start] [part* '()] [total 0])
         (let ([line-end (bytevector-find-crlf bv i)])
           (if (not line-end)
-              (values #f #f #f)
+              (values #f #f #f #f)
               (let* ([line (utf8->string (bytevector-slice bv i line-end))]
                      [size (parse-chunk-size who line)]
                      [data-start (fx+ line-end 2)]
@@ -410,7 +412,7 @@
                  [(fx= size 0)
                   (let ([trailer-end (bytevector-find-header-end bv line-end)])
                     (if (not trailer-end)
-                        (values #f #f #f)
+                        (values #f #f #f #f)
                         (let ([out (make-bytevector total 0)])
                           (let fill ([rest (reverse part*)] [offset 0])
                             (unless (null? rest)
@@ -419,9 +421,14 @@
                                                   (bytevector-length part))
                                 (fill (cdr rest)
                                       (fx+ offset (bytevector-length part))))))
-                          (values #t out (fx+ trailer-end 4)))))]
+                          (values
+                           #t out (fx+ trailer-end 4)
+                           (if (= trailer-end line-end)
+                               '()
+                               (parse-buffered-headers
+                                who bv (fx+ line-end 2) (fx+ trailer-end 2)))))))]
                  [(fx> (fx+ data-stop 2) (bytevector-length bv))
-                  (values #f #f #f)]
+                  (values #f #f #f #f)]
                  [(or (not (fx= (bytevector-u8-ref bv data-stop) 13))
                       (not (fx= (bytevector-u8-ref bv (fx1+ data-stop)) 10)))
                   (raise-net-error who 'http "invalid HTTP chunk terminator")]
@@ -436,11 +443,14 @@
        (http-transfer/nonblocking who client kind request finish #f)]
       [(who client kind request finish response-sink)
       (ensure-client-open who client)
+      (when (zero? (http-pool-policy-max-active (http-client-pool-policy client)))
+        (raise-net-error who 'http "HTTP client active connection limit is zero" client))
       (ensure-no-pending-mismatch who client kind (request-key request))
       (let ([pending (http-client-pending client)])
         (if (and pending (eq? 'pending (net-operation-state pending)))
             pending
-            (let ([current-request request]
+            (let ([current-request (apply-request-auth who client request #f)]
+                  [auth-origin (request-origin-key request)]
                   [redirects-left 5]
                   [deadline-ms
                    (timeout->deadline-ms (http-client-timeout-ms client))]
@@ -463,8 +473,11 @@
                   [status #f]
                   [reason ""]
                   [response-headers '()]
+                  [response-trailers '()]
                   [body-start 0]
                   [response-received 0]
+                  [chunk-remaining #f]
+                  [chunk-crlf? #f]
                   [owned? #t]
                   [operation #f])
               (define release-transport!
@@ -529,8 +542,11 @@
                   (set! status #f)
                   (set! reason "")
                   (set! response-headers '())
+                  (set! response-trailers '())
                   (set! body-start 0)
-                  (set! response-received 0)))
+                  (set! response-received 0)
+                  (set! chunk-remaining #f)
+                  (set! chunk-crlf? #f)))
               (define prepare-request-body!
                 (lambda ()
                   (let ([request-body (http-request-body current-request)])
@@ -581,6 +597,8 @@
                     (set! write-offset 0))))
               (define complete-response
                 (lambda (response)
+                  (store-response-cookies!
+                   client current-request (http-response-headers response))
                   (let ([next-request
                          (and (http-client-follow-redirects? client)
                               (fx> redirects-left 0)
@@ -589,7 +607,8 @@
                     (if next-request
                         (begin
                           (set! redirects-left (fx1- redirects-left))
-                          (reset-request! next-request)
+                          (reset-request!
+                           (apply-request-auth who client next-request response))
                           (yield-update))
                         (begin
                           (when (reusable-response? request-headers response
@@ -599,9 +618,13 @@
                                     (make-http-connection*
                                      who sock tls-session
                                      (and tls-session #t) deadline-ms)))
-                            (cache-http-connection!
-                             client (request-origin-key current-request) connection)
-                            (set! owned? #f))
+                            (if (cache-http-connection!
+                                 client (request-origin-key current-request) connection)
+                                (set! owned? #f)
+                                (begin
+                                  (set! connection #f)
+                                  (set! tls-session #f)
+                                  (set! sock #f))))
                           (net-operation-completed (finish response)))))))
               (define read-pending
                 (lambda (allow-io?)
@@ -630,6 +653,81 @@
                                               (bytevector-length input)))
                       (set! body-start 0))
                     count)))
+              (define consume-chunked-response!
+                (lambda ()
+                  (let loop ()
+                    (cond
+                     [chunk-crlf?
+                      (if (< (- (bytevector-length input) body-start) 2)
+                          #f
+                          (begin
+                            (unless (and (= 13 (bytevector-u8-ref input body-start))
+                                         (= 10 (bytevector-u8-ref input (+ body-start 1))))
+                              (raise-net-error who 'http "invalid HTTP chunk terminator"))
+                            (set! input
+                                  (bytevector-slice input (+ body-start 2)
+                                                    (bytevector-length input)))
+                            (set! body-start 0)
+                            (set! chunk-crlf? #f)
+                            (set! chunk-remaining #f)
+                            (loop)))]
+                     [(integer? chunk-remaining)
+                      (let* ([available (- (bytevector-length input) body-start)]
+                             [count (min available chunk-remaining)])
+                        (if (zero? count)
+                            #f
+                            (begin
+                              (http-body-sink-write!
+                               response-sink input body-start (+ body-start count))
+                              (set! response-received (+ response-received count))
+                              (set! chunk-remaining (- chunk-remaining count))
+                              (set! input
+                                    (bytevector-slice input (+ body-start count)
+                                                      (bytevector-length input)))
+                              (set! body-start 0)
+                              (when (zero? chunk-remaining)
+                                (set! chunk-crlf? #t))
+                              (loop))))]
+                     [else
+                      (let ([line-end (bytevector-find-crlf input body-start)])
+                        (if (not line-end)
+                            #f
+                            (let ([size
+                                   (parse-chunk-size
+                                    who
+                                    (utf8->string
+                                     (bytevector-slice input body-start line-end)))])
+                              (set! input
+                                    (bytevector-slice input (+ line-end 2)
+                                                      (bytevector-length input)))
+                              (set! body-start 0)
+                              (if (zero? size)
+                                  (cond
+                                   [(and (>= (bytevector-length input) 2)
+                                         (= 13 (bytevector-u8-ref input 0))
+                                         (= 10 (bytevector-u8-ref input 1)))
+                                    (set! input
+                                          (bytevector-slice input 2
+                                                            (bytevector-length input)))
+                                    (set! response-trailers '())
+                                    #t]
+                                   [else
+                                    (let ([trailer-end
+                                           (bytevector-find-header-end input 0)])
+                                      (if trailer-end
+                                          (begin
+                                            (set! response-trailers
+                                                  (parse-buffered-headers
+                                                   who input 0 (+ trailer-end 2)))
+                                            (set! input
+                                                  (bytevector-slice
+                                                   input (+ trailer-end 4)
+                                                   (bytevector-length input)))
+                                            #t)
+                                          #f))])
+                                  (begin
+                                    (set! chunk-remaining size)
+                                    (loop))))))]))))
               (define advance
                 (lambda (allow-io?)
                   (check-deadline!)
@@ -642,7 +740,10 @@
                              (set! sock (http-connection-socket cached))
                              (set! tls-session (http-connection-tls-session cached))
                              (set! request-headers
-                                   (merge-request-headers current-request client))
+                                   (merge-request-headers
+                                    current-request client
+                                    (equal? auth-origin
+                                            (request-origin-key current-request))))
                              (set! head
                                    (serialize-http-request-head current-request request-headers))
                              (prepare-request-body!)
@@ -705,7 +806,10 @@
                               (yield-update))
                             (begin
                               (set! request-headers
-                                    (merge-request-headers current-request client))
+                                    (merge-request-headers
+                                     current-request client
+                                     (equal? auth-origin
+                                             (request-origin-key current-request))))
                               (set! head
                                     (serialize-http-request-head
                                      current-request request-headers))
@@ -722,7 +826,10 @@
                        [(completed)
                         (set! tls-session (net-operation-result tls-operation))
                         (set! request-headers
-                              (merge-request-headers current-request client))
+                              (merge-request-headers
+                               current-request client
+                               (equal? auth-origin
+                                       (request-origin-key current-request))))
                         (set! head
                               (serialize-http-request-head current-request request-headers))
                         (prepare-request-body!)
@@ -788,22 +895,24 @@
                          (complete-response
                           (make-http-response status reason response-headers #f))]
                         [(chunked-transfer? response-headers)
-                         (let-values ([(done? parsed-body consumed)
-                                       (parse-buffered-chunked-body who input body-start)])
-                           (if done?
-                               (if response-sink
-                                   (begin
-                                     (http-body-sink-write!
-                                      response-sink parsed-body 0
-                                      (bytevector-length parsed-body))
-                                     (http-body-sink-finish! response-sink)
-                                     (complete-response
-                                      (make-http-response
-                                       status reason response-headers #f)))
+                         (if response-sink
+                             (if (consume-chunked-response!)
+                                 (begin
+                                   (http-body-sink-finish! response-sink)
                                    (complete-response
-                                    (make-http-response
-                                     status reason response-headers parsed-body)))
-                               (read-pending allow-io?)))]
+                                    (%make-http-response
+                                     status reason response-headers #f
+                                     response-trailers 'http/1.1)))
+                                 (read-pending allow-io?))
+                             (let-values ([(done? parsed-body consumed trailers)
+                                           (parse-buffered-chunked-body
+                                            who input body-start)])
+                               (if done?
+                                   (complete-response
+                                    (%make-http-response
+                                     status reason response-headers parsed-body
+                                     trailers 'http/1.1))
+                                   (read-pending allow-io?))))]
                         [content-length
                          (if response-sink
                              (begin
@@ -1183,9 +1292,9 @@
                        "; "))))))))
 
   (define request-authorization-header
-    (lambda (client request)
+    (lambda (client request allowed?)
       (let ([auth (http-client-auth client)])
-        (and auth
+        (and allowed? auth
              (case (car auth)
                [(basic)
                 (string-append
@@ -1196,8 +1305,110 @@
                [(bearer) (string-append "Bearer " (cdr auth))]
                [else #f])))))
 
+  (define apply-request-auth
+    (lambda (who client request response)
+      (let ([auth (http-client-auth client)])
+        (if (and auth (procedure? (car auth)))
+            (let ([answer ((car auth) request response)])
+              (unless (http-request? answer)
+                (errorf who "HTTP auth procedure must return a request, given ~s" answer))
+              answer)
+            request))))
+
+  (define default-cookie-path
+    (lambda (request-path)
+      (cond
+       [(or (not request-path) (string=? request-path "")
+            (not (char=? (string-ref request-path 0) #\/)))
+        "/"]
+       [else
+        (let loop ([index (- (string-length request-path) 1)])
+          (cond
+           [(<= index 0) "/"]
+           [(char=? (string-ref request-path index) #\/)
+            (substring request-path 0 index)]
+           [else (loop (- index 1))]))])))
+
+  (define strip-leading-dot
+    (lambda (domain)
+      (if (and (positive? (string-length domain))
+               (char=? (string-ref domain 0) #\.))
+          (substring domain 1 (string-length domain))
+          domain)))
+
+  (define parse-set-cookie
+    (lambda (request value)
+      (let* ([part* (map string-trim (string-split value #\;))]
+             [first (and (pair? part*) (car part*))]
+             [equals (and first (string-search first #\=))])
+        (and equals
+             (positive? equals)
+             (let* ([uri (http-request-uri request)]
+                    [host (string-downcase (or (uri-host uri) ""))]
+                    [name (substring first 0 equals)]
+                    [cookie-value (substring first (+ equals 1) (string-length first))]
+                    [domain host]
+                    [path (default-cookie-path (uri-path uri))]
+                    [secure? #f])
+               (for-each
+                (lambda (attribute)
+                  (let ([index (string-search attribute #\=)])
+                    (if index
+                        (let ([key (string-downcase
+                                    (string-trim (substring attribute 0 index)))]
+                              [attribute-value
+                               (string-trim
+                                (substring attribute (+ index 1)
+                                           (string-length attribute)))])
+                          (cond
+                           [(string=? key "domain")
+                            (set! domain
+                                  (string-downcase (strip-leading-dot attribute-value)))]
+                           [(and (string=? key "path")
+                                 (positive? (string-length attribute-value))
+                                 (char=? (string-ref attribute-value 0) #\/))
+                            (set! path attribute-value)]))
+                        (when (string-ci=? attribute "secure")
+                          (set! secure? #t)))))
+                (cdr part*))
+               (and (cookie-domain-matches? host domain)
+                    (%make-http-cookie name cookie-value domain path secure?)))))))
+
+  (define store-response-cookies!
+    (lambda (client request headers)
+      (let ([jar (http-client-cookie-jar client)])
+        (when jar
+          (let ([cookie*
+                 (fold-right
+                  (lambda (header answer)
+                    (let ([cookie
+                           (and (string-ci=? (car header) "Set-Cookie")
+                                (parse-set-cookie request (cdr header)))])
+                      (if cookie (cons cookie answer) answer)))
+                  '() headers)])
+            (when (pair? cookie*)
+              (with-mutex (http-cookie-jar-mutex jar)
+                (for-each
+                 (lambda (cookie)
+                   (http-cookie-jar-cookies-set!
+                    jar
+                    (cons
+                     cookie
+                     (filter
+                      (lambda (old)
+                        (not (and (string=? (http-cookie-name old)
+                                           (http-cookie-name cookie))
+                                  (string=? (http-cookie-domain old)
+                                           (http-cookie-domain cookie))
+                                  (string=? (http-cookie-path old)
+                                           (http-cookie-path cookie)))))
+                      (http-cookie-jar-cookies jar)))))
+                 cookie*))))))))
+
   (define merge-request-headers
-    (lambda (request client)
+    (case-lambda
+      [(request client) (merge-request-headers request client #t)]
+      [(request client allow-authorization?)
       (let* ([body (http-request-body request)]
              [headers (header-list-set-many (http-client-default-headers client)
                                             (http-request-headers request))]
@@ -1208,7 +1419,8 @@
              [headers (if (http-header-ref headers "Connection" #f)
                           headers
                           (http-header-set headers "Connection" "keep-alive"))]
-             [authorization (request-authorization-header client request)]
+             [authorization
+              (request-authorization-header client request allow-authorization?)]
              [headers (if authorization
                           (http-header-set headers "Authorization" authorization)
                           headers)]
@@ -1225,7 +1437,7 @@
          [(http-header-ref headers "Content-Length" #f) headers]
          [else
           (http-header-set headers "Content-Length"
-                           (number->string (bytevector-length (body->bytevector body))))]))))
+                           (number->string (bytevector-length (body->bytevector body))))]))]))
 
   (define http-u8-list->bytevector
     (lambda (u8*)
@@ -1474,16 +1686,23 @@
                                     sock
                                     (lambda () (vector-ref deadline-cell 0))))
                                secure?
+                               (current-time-ms)
                                #f))))
 
   (define cache-http-connection!
     (lambda (client origin conn)
-      (let ([old (http-client-cached-connection client)])
-        (when (and old (not (eq? old conn)))
-          (close-http-connection old)))
-      (http-client-cached-origin-set! client origin)
-      (http-client-cached-connection-set! client conn)
-      conn))
+      (if (zero? (http-pool-policy-max-idle (http-client-pool-policy client)))
+          (begin
+            (close-http-connection conn)
+            #f)
+          (begin
+            (let ([old (http-client-cached-connection client)])
+              (when (and old (not (eq? old conn)))
+                (close-http-connection old)))
+            (http-connection-idle-since-ms-set! conn (current-time-ms))
+            (http-client-cached-origin-set! client origin)
+            (http-client-cached-connection-set! client conn)
+            conn))))
 
   (define uncache-http-connection!
     (lambda (client conn)
@@ -1506,9 +1725,16 @@
     (lambda (client request deadline-ms)
       (let* ([origin (request-origin-key request)]
              [cached-origin (http-client-cached-origin client)]
-             [cached-conn (http-client-cached-connection client)])
+             [cached-conn (http-client-cached-connection client)]
+             [idle-timeout-ms
+              (http-pool-policy-idle-timeout-ms (http-client-pool-policy client))]
+             [expired?
+              (and cached-conn
+                   (>= (- (current-time-ms) (http-connection-idle-since-ms cached-conn))
+                       idle-timeout-ms))])
         (cond
          [(and cached-conn
+               (not expired?)
                (equal? cached-origin origin)
                (not (http-connection-closed? cached-conn))
                (not (reusable-http-connection-stale? cached-conn)))
@@ -1518,7 +1744,8 @@
           cached-conn]
          [else
           (when (and cached-conn
-                     (or (http-connection-closed? cached-conn)
+                     (or expired?
+                         (http-connection-closed? cached-conn)
                          (reusable-http-connection-stale? cached-conn)))
             (uncache-http-connection! client cached-conn)
             (close-http-connection cached-conn))
@@ -1650,12 +1877,11 @@
                                                    (http-connection-input-port conn)
                                                    (http-request-method request))])
                 (set! keep-open?
-                  (and (reusable-response? request-headers
-                                           response
-                                           (http-request-method request))
-                       (cache-connection-allowed? client pending)))
-                (when keep-open?
-                  (cache-http-connection! client origin conn))
+                      (and (reusable-response? request-headers
+                                               response
+                                               (http-request-method request))
+                           (cache-connection-allowed? client pending)
+                           (cache-http-connection! client origin conn)))
                 (if (and (http-client-follow-redirects? client)
                          (> redirects-left 0)
                          (redirect-status? (http-response-status response)))
@@ -1708,6 +1934,7 @@
                                      (open-tls-input-port session)
                                      (open-tls-output-port session)
                                      #t
+                                     (current-time-ms)
                                      #f)))
           (%make-http-connection sock
                                  #f
@@ -1715,6 +1942,7 @@
                                  (open-socket-input-port sock)
                                  (open-socket-output-port sock)
                                  #f
+                                 (current-time-ms)
                                  #f))))
 
   (define serve-http-connection
@@ -1913,7 +2141,7 @@
                (let ([content-length (response-body-length request-headers)])
                  (cond
                   [(chunked-transfer? request-headers)
-                   (let-values ([(done? body consumed)
+                   (let-values ([(done? body consumed trailers)
                                  (parse-buffered-chunked-body who input body-start)])
                      (if done?
                          (begin
