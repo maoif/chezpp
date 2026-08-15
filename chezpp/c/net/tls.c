@@ -705,6 +705,17 @@ ptr chezpp_net_tls_protocol_version(uptr handle) {
   return Sstring(chezpp_openssl_SSL_get_version(session->ssl));
 }
 
+ptr chezpp_net_tls_negotiated_alpn(uptr handle) {
+  chezpp_tls_session *session = session_from_handle(handle);
+  const unsigned char *selected = NULL;
+  unsigned int selected_len = 0;
+  if (session == NULL || session->ssl == NULL)
+    return make_error_status_message("invalid TLS session");
+  chezpp_openssl_SSL_get0_alpn_selected(session->ssl, &selected, &selected_len);
+  if (selected == NULL || selected_len == 0) return Sfalse;
+  return Sstring_utf8((const char *)selected, (iptr)selected_len);
+}
+
 ptr chezpp_net_tls_cipher_name(uptr handle) {
   chezpp_tls_session *session = session_from_handle(handle);
   const char *name;

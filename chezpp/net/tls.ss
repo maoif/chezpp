@@ -29,6 +29,7 @@
           tls-peer-certificate
           tls-peer-certificate-chain
           tls-protocol-version
+          tls-negotiated-alpn
           tls-cipher-name
           tls-verified?
           call-with-tls-client
@@ -716,6 +717,16 @@ The `tls-protocol-version` procedure returns the negotiated TLS protocol version
       (pcheck ([tls-session? session])
               (ensure-session-open who session)
               (ensure-success who (ffi-net-tls-protocol-version (tls-session-handle session))))))
+
+  #|proc:tls-negotiated-alpn
+The `tls-negotiated-alpn` procedure returns the protocol selected during the `session` handshake.
+The return value is a protocol string, or `#f` when the peers did not negotiate ALPN.
+|#
+  (define-who tls-negotiated-alpn
+    (lambda (session)
+      (pcheck ([tls-session? session])
+        (ensure-session-open who session)
+        (ensure-success who (ffi-net-tls-negotiated-alpn (tls-session-handle session))))))
 
   #|proc:tls-cipher-name
 The `tls-cipher-name` procedure returns the negotiated cipher-suite name.

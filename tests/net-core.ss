@@ -510,6 +510,7 @@
                 (certificate? (tls-peer-certificate session))
                 (list? (tls-peer-certificate-chain session))
                 (string? (tls-protocol-version session))
+                (not (tls-negotiated-alpn session))
                 (string? (tls-cipher-name session))
                 (tls-write-all session payload)
                 (equal? (tls-read session 32) payload)

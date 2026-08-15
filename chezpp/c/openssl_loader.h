@@ -188,6 +188,7 @@
   X(ssl, SSL_free)                                                            \
   X(ssl, SSL_get0_param)                                                      \
   X(ssl, SSL_get1_peer_certificate)                                           \
+  X(ssl, SSL_get0_alpn_selected)                                              \
   X(ssl, SSL_get_current_cipher)                                              \
   X(ssl, SSL_get_error)                                                       \
   X(ssl, SSL_get_peer_cert_chain)                                             \

@@ -19,6 +19,8 @@ typedef int32_t (*submit_request_fn)(nghttp2_session *, const nghttp2_priority_s
                                     void *);
 typedef int (*submit_response_fn)(nghttp2_session *, int32_t, const nghttp2_nv *, size_t,
                                   const nghttp2_data_provider *);
+typedef int (*submit_settings_fn)(nghttp2_session *, uint8_t, const nghttp2_settings_entry *,
+                                  size_t);
 typedef ssize_t (*mem_send_fn)(nghttp2_session *, const uint8_t **);
 typedef ssize_t (*mem_recv_fn)(nghttp2_session *, const uint8_t *, size_t);
 typedef int (*consume_fn)(nghttp2_session *, int32_t, size_t);
@@ -67,6 +69,7 @@ static set_frame_cb_fn p_set_frame_cb;
 static set_close_cb_fn p_set_close_cb;
 static submit_request_fn p_submit_request;
 static submit_response_fn p_submit_response;
+static submit_settings_fn p_submit_settings;
 static mem_send_fn p_mem_send;
 static mem_recv_fn p_mem_recv;
 static consume_fn p_consume;
@@ -107,6 +110,7 @@ static int load_h2_symbols(void) {
   LOAD(session_callbacks_set_on_stream_close_callback, set_close_cb_fn);
   LOAD(submit_request, submit_request_fn);
   LOAD(submit_response, submit_response_fn);
+  LOAD(submit_settings, submit_settings_fn);
   LOAD(session_mem_send, mem_send_fn);
   LOAD(session_mem_recv, mem_recv_fn);
   LOAD(session_consume, consume_fn);
@@ -214,25 +218,12 @@ static ssize_t read_body(nghttp2_session *session, int32_t stream_id, uint8_t *b
   return (ssize_t)count;
 }
 
-static nghttp2_nv *make_headers(ptr headers, size_t *count, int response_status) {
+static nghttp2_nv *make_headers(ptr headers, size_t *count) {
   size_t i, n = Svector_length(headers);
   nghttp2_nv *out;
-  *count = n + (response_status ? 1 : 4);
+  *count = n;
   out = (nghttp2_nv *)calloc(*count, sizeof(*out));
   if (out == NULL) return NULL;
-#define NV_AT(index, nn, vv) do { \
-  const char *n_ = nn, *v_ = vv; size_t nl_ = strlen(n_), vl_ = strlen(v_); \
-  out[index].name = (uint8_t *)strdup(n_); out[index].value = (uint8_t *)strdup(v_); \
-  out[index].namelen = nl_; out[index].valuelen = vl_; \
-} while (0)
-  if (response_status) {
-    NV_AT(0, ":status", "200");
-  } else {
-    NV_AT(0, ":method", "GET");
-    NV_AT(1, ":scheme", "https");
-    NV_AT(2, ":authority", "localhost");
-    NV_AT(3, ":path", "/");
-  }
   for (i = 0; i < n; i++) {
     ptr pair = Svector_ref(headers, i);
     ptr name = Svector_ref(pair, 0), value = Svector_ref(pair, 1);
@@ -243,12 +234,11 @@ static nghttp2_nv *make_headers(ptr headers, size_t *count, int response_status)
     for (j = 0; j < nl; j++) nb[j] = (char)Sstring_ref(name, j);
     for (j = 0; j < vl; j++) vb[j] = (char)Sstring_ref(value, j);
     nb[nl] = 0; vb[vl] = 0;
-    out[(response_status ? 1 : 4) + i].name = (uint8_t *)nb;
-    out[(response_status ? 1 : 4) + i].value = (uint8_t *)vb;
-    out[(response_status ? 1 : 4) + i].namelen = (size_t)nl;
-    out[(response_status ? 1 : 4) + i].valuelen = (size_t)vl;
+    out[i].name = (uint8_t *)nb;
+    out[i].value = (uint8_t *)vb;
+    out[i].namelen = (size_t)nl;
+    out[i].valuelen = (size_t)vl;
   }
-#undef NV_AT
   return out;
 }
 
@@ -273,6 +263,12 @@ ptr chezpp_net_http2_open(int server) {
     p_callbacks_del(state->callbacks); free(state); return h2_error("failed to create nghttp2 session");
   }
   p_set_user_data(state->session, state);
+  if (p_submit_settings(state->session, NGHTTP2_FLAG_NONE, NULL, 0) != 0) {
+    p_session_del(state->session);
+    p_callbacks_del(state->callbacks);
+    free(state);
+    return h2_error("failed to submit initial HTTP/2 settings");
+  }
   return Sunsigned((uptr)state);
 }
 
@@ -301,7 +297,7 @@ ptr chezpp_net_http2_submit_request(uptr handle, ptr headers, ptr body) {
   stream->body_len = (size_t)Sbytevector_length(body);
   stream->body = (unsigned char *)malloc(stream->body_len == 0 ? 1 : stream->body_len);
   if (stream->body_len != 0) memcpy(stream->body, Sbytevector_data(body), stream->body_len);
-  nva = make_headers(headers, &count, 0);
+  nva = make_headers(headers, &count);
   if (nva == NULL) { free(stream->body); free(stream); return h2_error("out of memory"); }
   memset(&provider, 0, sizeof(provider)); provider.source.ptr = stream; provider.read_callback = read_body;
   id = p_submit_request(state->session, NULL, nva, count, stream->body_len ? &provider : NULL, stream);
@@ -321,7 +317,7 @@ ptr chezpp_net_http2_submit_response(uptr handle, int stream_id, ptr headers, pt
   stream->id = stream_id; stream->body_len = (size_t)Sbytevector_length(body);
   stream->body = (unsigned char *)malloc(stream->body_len == 0 ? 1 : stream->body_len);
   if (stream->body_len != 0) memcpy(stream->body, Sbytevector_data(body), stream->body_len);
-  nva = make_headers(headers, &count, 1); memset(&provider, 0, sizeof(provider));
+  nva = make_headers(headers, &count); memset(&provider, 0, sizeof(provider));
   provider.source.ptr = stream; provider.read_callback = read_body;
   rc = p_submit_response(state->session, stream_id, nva, count, stream->body_len ? &provider : NULL);
   free_headers(nva, count);

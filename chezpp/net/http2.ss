@@ -47,6 +47,20 @@
               (vector (string-downcase (car entry)) (cdr entry)))
             headers))))
 
+  (define request-headers->vector
+    (lambda (who method scheme authority path headers)
+      (headers->vector
+       who
+       (append `((":method" . ,method)
+                 (":scheme" . ,scheme)
+                 (":authority" . ,authority)
+                 (":path" . ,path))
+               headers))))
+
+  (define response-headers->vector
+    (lambda (who status headers)
+      (headers->vector who (cons (cons ":status" (number->string status)) headers))))
+
   #|proc:http2-open
 The `http2-open` procedure creates an HTTP/2 client or server session.
 `role` is `client` or `server`; the return value is an open session.
@@ -74,31 +88,47 @@ The `http2-close` procedure closes `session` and returns the same session.
         session)))
 
   #|proc:http2-submit-request
-The `http2-submit-request` procedure queues request `headers` and bytevector `body`.
+The `http2-submit-request` procedure queues a request and bytevector `body` on `session`.
+In the full arity, `method`, `scheme`, `authority`, and `path` supply request pseudo-headers, and
+`headers` supplies regular header pairs. The compatibility arity uses GET, https, localhost, and /.
 It returns the newly assigned numeric stream identifier.
 |#
   (define-who http2-submit-request
-    (lambda (session headers body)
-      (pcheck ([http2-session? session] [list? headers] [bytevector? body])
-        (ensure-open who session)
-        (ensure-result who
-                       (ffi-net-http2-submit-request
-                        (http2-session-handle session)
-                        (headers->vector who headers) body)))))
+    (case-lambda
+      [(session headers body)
+       (http2-submit-request session "GET" "https" "localhost" "/" headers body)]
+      [(session method scheme authority path headers body)
+       (pcheck ([http2-session? session] [string? method scheme authority path]
+                [list? headers] [bytevector? body])
+         (ensure-open who session)
+         (ensure-result who
+                        (ffi-net-http2-submit-request
+                         (http2-session-handle session)
+                         (request-headers->vector
+                          who method scheme authority path headers)
+                         body)))]))
 
   #|proc:http2-submit-response
-The `http2-submit-response` procedure queues response `headers` and `body` for `stream-id`.
+The `http2-submit-response` procedure queues a response for `stream-id` on `session`.
+The full arity sends numeric `status`, regular `headers`, and bytevector `body`.
+The compatibility arity sends status 200.
 It returns unspecified values after the response is accepted.
 |#
   (define-who http2-submit-response
-    (lambda (session stream-id headers body)
-      (pcheck ([http2-session? session] [fixnum? stream-id]
-               [list? headers] [bytevector? body])
-        (ensure-open who session)
-        (ensure-result
-         who
-         (ffi-net-http2-submit-response
-          (http2-session-handle session) stream-id (headers->vector who headers) body)))))
+    (case-lambda
+      [(session stream-id headers body)
+       (http2-submit-response session stream-id 200 headers body)]
+      [(session stream-id status headers body)
+       (pcheck ([http2-session? session] [fixnum? stream-id status]
+                [list? headers] [bytevector? body])
+         (unless (<= 100 status 999)
+           (errorf who "status must be between 100 and 999, given ~s" status))
+         (ensure-open who session)
+         (ensure-result
+          who
+          (ffi-net-http2-submit-response
+           (http2-session-handle session) stream-id
+           (response-headers->vector who status headers) body)))]))
 
   #|proc:http2-send
 The `http2-send` procedure returns pending serialized session bytes or `#f`.

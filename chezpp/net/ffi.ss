@@ -200,6 +200,7 @@
           ffi-net-tls-write
           ffi-net-tls-shutdown
           ffi-net-tls-protocol-version
+          ffi-net-tls-negotiated-alpn
           ffi-net-tls-cipher-name
           ffi-net-tls-verified
           ffi-net-tls-peer-certificate-der
@@ -649,6 +650,8 @@
     (foreign-procedure "chezpp_net_tls_shutdown" (uptr) scheme-object))
   (define ffi-net-tls-protocol-version
     (foreign-procedure "chezpp_net_tls_protocol_version" (uptr) scheme-object))
+  (define ffi-net-tls-negotiated-alpn
+    (foreign-procedure "chezpp_net_tls_negotiated_alpn" (uptr) scheme-object))
   (define ffi-net-tls-cipher-name
     (foreign-procedure "chezpp_net_tls_cipher_name" (uptr) scheme-object))
   (define ffi-net-tls-verified
