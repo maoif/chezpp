@@ -15,8 +15,12 @@
           socket-recv!
           socket-send/nonblocking
           socket-send-all/nonblocking
+          socket-send-to
+          socket-send-to/nonblocking
           socket-recv/nonblocking
           socket-recv!/nonblocking
+          socket-recv-from
+          socket-recv-from/nonblocking
           socket-set-option!
           socket-get-option
           socket-local-address
@@ -390,6 +394,36 @@ a would-block value requesting `write` when no bytes could be written.
                         [(fx= n 0) (fx- i start)]
                         [else (loop (fx+ i n))])))))]))
 
+  (define socket-send-to*
+    (lambda (who sock bytevector start stop address nonblocking?)
+      (pcheck ([socket? sock] [bytevector? bytevector] [socket-address? address])
+        (ensure-open who sock)
+        (check-slice who (bytevector-length bytevector) start stop)
+        (send-result who sock
+                     (ffi-net-socket-send-to
+                      (socket-fd sock) bytevector start stop
+                      (family-symbol->int who (socket-address-family address))
+                      (or (socket-address-host address) "")
+                      (or (socket-address-port address) -1)
+                      (or (socket-address-path address) "")
+                      (if nonblocking? 1 0))))))
+
+  #|proc:socket-send-to
+The `socket-send-to` procedure sends a bytevector slice to datagram `address`.\n+It returns the number of bytes sent.\n+|#
+  (define-who socket-send-to
+    (case-lambda
+      [(sock bv address) (socket-send-to sock bv 0 (bytevector-length bv) address)]
+      [(sock bv start stop address)
+       (socket-send-to* 'socket-send-to sock bv start stop address #f)]))
+
+  #|proc:socket-send-to/nonblocking
+The `socket-send-to/nonblocking` procedure attempts one datagram send without waiting.\n+It returns the byte count or a write would-block value.\n+|#
+  (define-who socket-send-to/nonblocking
+    (case-lambda
+      [(sock bv address) (socket-send-to/nonblocking sock bv 0 (bytevector-length bv) address)]
+      [(sock bv start stop address)
+       (socket-send-to* 'socket-send-to/nonblocking sock bv start stop address #t)]))
+
   #|proc:socket-recv
 The `socket-recv` procedure reads up to `size` bytes from `sock`.
 The `sock` parameter is an open socket. The `size` parameter is the maximum byte count.
@@ -454,6 +488,32 @@ The return value is a byte count, an EOF object, or a would-block value requesti
                 who sock
                 (ffi-net-socket-recv-into
                  (socket-fd sock) bytevector start stop 1)))]))
+
+  (define socket-recv-from*
+    (lambda (who sock size nonblocking?)
+      (pcheck ([socket? sock] [fixnum? size])
+        (check-size who size)
+        (ensure-open who sock)
+        (let ([answer (ffi-net-socket-recv-from (socket-fd sock) size
+                                                (if nonblocking? 1 0))])
+          (cond
+           [(ffi-would-block? answer)
+            (make-net-would-block sock (ffi-would-block-events answer))]
+           [(ffi-error? answer)
+            (raise-net-error who 'socket (ffi-error-message answer) answer)]
+           [else
+            (values (vector-ref answer 0)
+                    (%socket-address-from-ffi (vector-ref answer 1)))])))))
+
+  #|proc:socket-recv-from
+The `socket-recv-from` procedure receives one datagram and returns two values: payload and source address.\n+|#
+  (define-who socket-recv-from
+    (lambda (sock size) (socket-recv-from* who sock size #f)))
+
+  #|proc:socket-recv-from/nonblocking
+The `socket-recv-from/nonblocking` procedure receives one datagram without waiting.\n+It returns payload and source address, or a read would-block value.\n+|#
+  (define-who socket-recv-from/nonblocking
+    (lambda (sock size) (socket-recv-from* who sock size #t)))
 
   #|proc:socket-set-option!
 The `socket-set-option!` procedure updates a supported socket option.

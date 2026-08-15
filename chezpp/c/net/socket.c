@@ -355,6 +355,49 @@ ptr chezpp_net_socket_recv_into(int fd, ptr bv, int start, int stop, int nonbloc
   return Sfixnum((iptr)n);
 }
 
+ptr chezpp_net_socket_send_to(int fd, ptr bv, int start, int stop, int family,
+                              const char *host, int port, const char *path, int nonblocking) {
+  struct sockaddr_storage storage;
+  socklen_t len;
+  int flags = MSG_NOSIGNAL | (nonblocking ? MSG_DONTWAIT : 0);
+  ssize_t n;
+  if (fill_sockaddr(family, host, port, path, 0, &storage, &len) != 0)
+    return make_errno_status("error");
+  n = sendto(fd, Sbytevector_data(bv) + start, (size_t)(stop - start), flags,
+             (struct sockaddr *)&storage, len);
+  if (n < 0) {
+    if (would_block_errno(errno)) return would_block_status("write");
+    return make_errno_status("error");
+  }
+  return Sfixnum((iptr)n);
+}
+
+ptr chezpp_net_socket_recv_from(int fd, int size, int nonblocking) {
+  ptr bv;
+  struct sockaddr_storage storage;
+  socklen_t len = sizeof(storage);
+  ssize_t n;
+  if (size < 0) {
+    errno = EINVAL;
+    return make_errno_status("error");
+  }
+  bv = Smake_bytevector(size, 0);
+  n = recvfrom(fd, Sbytevector_data(bv), (size_t)size,
+               nonblocking ? MSG_DONTWAIT : 0, (struct sockaddr *)&storage, &len);
+  if (n < 0) {
+    if (would_block_errno(errno)) return would_block_status("read");
+    return make_errno_status("error");
+  }
+  {
+    ptr out = Smake_vector(2, Sfalse);
+    ptr payload = n == size ? bv : Smake_bytevector((iptr)n, 0);
+    if (n != size) memcpy(Sbytevector_data(payload), Sbytevector_data(bv), (size_t)n);
+    Svector_set(out, 0, payload);
+    Svector_set(out, 1, make_addr_from_sockaddr((struct sockaddr *)&storage, len));
+    return out;
+  }
+}
+
 ptr chezpp_net_socket_local_address(int fd) {
   struct sockaddr_storage storage;
   socklen_t len = sizeof(storage);
