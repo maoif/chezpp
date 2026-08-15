@@ -8,8 +8,17 @@
           ip-address-loopback?
           ip-address-private?
           ip-address-multicast?
+          ip-address-mapped-ipv4?
+          ip-address-unmap-ipv4
+          ip-address-link-local?
+          ip-address-documentation?
           cidr-parse
+          cidr?
           cidr-contains?
+          cidr-split
+          cidr-merge
+          cidr-address-count
+          cidr-overlaps?
           cidr-network-address
           cidr-prefix-length)
   (import (chezpp chez)
@@ -236,6 +245,20 @@
               (and (fx= (bytevector-u8-ref ma i) (bytevector-u8-ref mb i))
                    (loop (fx1+ i))))))))
 
+  (define cidr-for
+    (lambda (text)
+      (cidr-parse text)))
+
+  (define flip-bit
+    (lambda (bv bit)
+      (let* ([index (fxquotient bit 8)]
+             [offset (fx- 7 (fxmod bit 8))]
+             [out (bytevector-copy bv)])
+        (bytevector-u8-set! out index
+                            (fxlogxor (bytevector-u8-ref out index)
+                                      (fxsll 1 offset)))
+        out)))
+
   #|proc:ipv4-address?
 The `ipv4-address?` procedure returns whether the given value is an IPv4 address object.
 |#
@@ -327,6 +350,53 @@ The `ip-address-multicast?` procedure returns whether an IP address is a multica
                       (and (fx<= 224 a) (fx<= a 239)))
                     (fx= (bytevector-u8-ref bv 0) #xff))))))
 
+  #|proc:ip-address-mapped-ipv4?
+The `ip-address-mapped-ipv4?` procedure reports whether `ip` is an IPv4-mapped IPv6 address.
+The return value is boolean.
+|#
+  (define-who ip-address-mapped-ipv4?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ipv6-address? ip)
+             (let ([bv (ip-address-bytes ip)])
+               (let loop ([i 0])
+                 (or (fx= i 10)
+                     (and (zero? (bytevector-u8-ref bv i)) (loop (fx1+ i)))))
+               (= #xff (bytevector-u8-ref bv 10))
+               (= #xff (bytevector-u8-ref bv 11)))))))
+
+  #|proc:ip-address-unmap-ipv4
+The `ip-address-unmap-ipv4` procedure converts a mapped IPv6 `ip` to an IPv4 address.
+It returns an IPv4 address, or `#f` when `ip` is not mapped.
+|#
+  (define-who ip-address-unmap-ipv4
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ip-address-mapped-ipv4? ip)
+             (let ([bv (ip-address-bytes ip)] [out (make-bytevector 4 0)])
+               (bytevector-copy! bv 12 out 0 4)
+               (%make-ip-address 4 out))))))
+
+  #|proc:ip-address-link-local?
+The `ip-address-link-local?` procedure reports whether `ip` is in a link-local range.
+|#
+  (define-who ip-address-link-local?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (or (cidr-contains? (cidr-for "169.254.0.0/16") ip)
+            (cidr-contains? (cidr-for "fe80::/10") ip)))))
+
+  #|proc:ip-address-documentation?
+The `ip-address-documentation?` procedure reports whether `ip` is in an RFC documentation range.
+|#
+  (define-who ip-address-documentation?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (or (cidr-contains? (cidr-for "192.0.2.0/24") ip)
+            (cidr-contains? (cidr-for "198.51.100.0/24") ip)
+            (cidr-contains? (cidr-for "203.0.113.0/24") ip)
+            (cidr-contains? (cidr-for "2001:db8::/32") ip)))))
+
   #|proc:cidr-parse
 The `cidr-parse` procedure parses a CIDR string and returns a CIDR object, or `#f` on failure.
 |#
@@ -359,4 +429,66 @@ The `cidr-contains?` procedure returns whether an IP address belongs to a CIDR r
                     (ip-address-bytes (cidr-network-address range))
                     (ip-address-bytes ip)
                     (cidr-prefix-length range))))))
+
+  #|proc:cidr-address-count
+The `cidr-address-count` procedure returns the exact number of addresses represented by `range`.
+|#
+  (define-who cidr-address-count
+    (lambda (range)
+      (pcheck ([cidr? range])
+        (expt 2 (- (if (= (ip-address-version (cidr-network-address range)) 4) 32 128)
+                   (cidr-prefix-length range))))))
+
+  #|proc:cidr-overlaps?
+The `cidr-overlaps?` procedure reports whether same-version CIDRs `left` and `right` intersect.
+|#
+  (define-who cidr-overlaps?
+    (lambda (left right)
+      (pcheck ([cidr? left right])
+        (and (= (ip-address-version (cidr-network-address left))
+                (ip-address-version (cidr-network-address right)))
+             (let ([prefix (min (cidr-prefix-length left) (cidr-prefix-length right))])
+               (bytevector-prefix=?
+                (ip-address-bytes (cidr-network-address left))
+                (ip-address-bytes (cidr-network-address right)) prefix))))))
+
+  #|proc:cidr-split
+The `cidr-split` procedure divides non-host `range` into its two equal child CIDRs.
+The return value is a two-element list, or `#f` for a host-length range.
+|#
+  (define-who cidr-split
+    (lambda (range)
+      (pcheck ([cidr? range])
+        (let ([prefix (cidr-prefix-length range)]
+              [limit (if (= (ip-address-version (cidr-network-address range)) 4) 32 128)])
+          (and (< prefix limit)
+               (let* ([next (fx1+ prefix)]
+                      [network (ip-address-bytes (cidr-network-address range))]
+                      [child (%make-cidr (%make-ip-address
+                                          (ip-address-version (cidr-network-address range))
+                                          network) next)]
+                      [sibling (%make-cidr (%make-ip-address
+                                            (ip-address-version (cidr-network-address range))
+                                            (flip-bit network prefix)) next)])
+                 (list child sibling)))))))
+
+  #|proc:cidr-merge
+The `cidr-merge` procedure merges adjacent sibling CIDRs `left` and `right`.
+The return value is the parent CIDR, or `#f` when they cannot be merged.
+|#
+  (define-who cidr-merge
+    (lambda (left right)
+      (pcheck ([cidr? left right])
+        (and (= (cidr-prefix-length left) (cidr-prefix-length right))
+             (> (cidr-prefix-length left) 0)
+             (let ([parent-prefix (fx1- (cidr-prefix-length left))])
+               (and (bytevector-prefix=?
+                     (ip-address-bytes (cidr-network-address left))
+                     (ip-address-bytes (cidr-network-address right)) parent-prefix)
+                    (%make-cidr
+                     (%make-ip-address
+                      (ip-address-version (cidr-network-address left))
+                      (ip-mask-bytevector
+                       (ip-address-bytes (cidr-network-address left)) parent-prefix))
+                     parent-prefix)))))))
   )

@@ -10,7 +10,7 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
              cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss optional-openssl.ss net-loader.ss uuid.ss \
              protobuf.ss protobuf-codegen.ss \
              $(NET_TESTS) \
-             parser.ss net-errors.ss
+             parser.ss net-errors.ss net-ip.ss
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      ?= $(SRCS_TEST)
 TEST_OBJS := $(addsuffix .so,$(basename $(TEST)))
