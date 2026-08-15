@@ -1,5 +1,7 @@
 (library (chezpp net uri)
   (export string->uri
+          make-uri
+          uri-update
           uri->string
           uri?
           uri-scheme
@@ -9,6 +11,11 @@
           uri-path
           uri-query
           uri-fragment
+          uri-raw-userinfo
+          uri-raw-host
+          uri-raw-path
+          uri-raw-query
+          uri-raw-fragment
           uri-authority
           uri-path-segments
           uri-query-alist
@@ -32,6 +39,64 @@
             (immutable path uri-path)
             (immutable query uri-query)
             (immutable fragment uri-fragment)))
+
+  #|proc:make-uri
+The `make-uri` procedure constructs an immutable URI from optional component strings.
+`scheme`, `userinfo`, `host`, `path`, `query`, and `fragment` are strings or `#f`; `port` is
+an integer or `#f`. The return value is a URI object.
+|#
+  (define-who make-uri
+    (lambda (scheme userinfo host port path query fragment)
+      (pcheck ([string? path])
+        (unless (or (not scheme) (string? scheme)) (errorf who "invalid URI scheme"))
+        (unless (or (not userinfo) (string? userinfo)) (errorf who "invalid URI userinfo"))
+        (unless (or (not host) (string? host)) (errorf who "invalid URI host"))
+        (unless (or (not port) (and (fixnum? port) (fx<= 0 port) (fx<= port 65535)))
+          (errorf who "invalid URI port"))
+        (unless (or (not query) (string? query)) (errorf who "invalid URI query"))
+        (unless (or (not fragment) (string? fragment)) (errorf who "invalid URI fragment"))
+        (%make-uri scheme userinfo host port path query fragment))))
+
+  #|proc:uri-update
+The `uri-update` procedure returns a URI copied from `u` with one `field` replaced by `value`.
+`field` is one of `scheme`, `userinfo`, `host`, `port`, `path`, `query`, or `fragment`.
+|#
+  (define-who uri-update
+    (lambda (u field value)
+      (pcheck ([uri? u] [symbol? field])
+        (let ([parts (list (uri-scheme u) (uri-userinfo u) (uri-host u) (uri-port u)
+                           (uri-path u) (uri-query u) (uri-fragment u))])
+          (case field
+            [(scheme) (set-car! parts value)]
+            [(userinfo) (set-car! (cdr parts) value)]
+            [(host) (set-car! (cddr parts) value)]
+            [(port) (set-car! (cdddr parts) value)]
+            [(path) (set-car! (cddddr parts) value)]
+            [(query) (set-car! (cddr (cddr parts)) value)]
+            [(fragment) (set-car! (cddr (cddr (cddr parts))) value)]
+            [else (errorf who "unknown URI field ~s" field)])
+          (apply make-uri parts)))))
+
+  #|proc:uri-raw-userinfo
+The `uri-raw-userinfo` procedure returns the URI userinfo exactly as parsed, or `#f`.
+|#
+  (define uri-raw-userinfo uri-userinfo)
+  #|proc:uri-raw-host
+The `uri-raw-host` procedure returns the URI host exactly as parsed, or `#f`.
+|#
+  (define uri-raw-host uri-host)
+  #|proc:uri-raw-path
+The `uri-raw-path` procedure returns the URI path exactly as parsed.
+|#
+  (define uri-raw-path uri-path)
+  #|proc:uri-raw-query
+The `uri-raw-query` procedure returns the URI query exactly as parsed, or `#f`.
+|#
+  (define uri-raw-query uri-query)
+  #|proc:uri-raw-fragment
+The `uri-raw-fragment` procedure returns the URI fragment exactly as parsed, or `#f`.
+|#
+  (define uri-raw-fragment uri-fragment)
 
   (define join-strings
     (lambda (parts sep)
