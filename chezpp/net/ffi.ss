@@ -148,8 +148,10 @@
           ffi-net-websocket-send-fragment
           ffi-net-websocket-recv
           ffi-net-grpc-channel-open
+          ffi-net-grpc-channel-open-tls
           ffi-net-grpc-channel-close
           ffi-net-grpc-server-open
+          ffi-net-grpc-server-open-tls
           ffi-net-grpc-server-close
           ffi-net-grpc-unary-call
           ffi-net-grpc-unary-start
@@ -529,10 +531,16 @@
     (foreign-procedure "chezpp_net_websocket_recv" (uptr int int) scheme-object))
   (define ffi-net-grpc-channel-open
     (foreign-procedure "chezpp_net_grpc_channel_open" (string) scheme-object))
+  (define ffi-net-grpc-channel-open-tls
+    (foreign-procedure "chezpp_net_grpc_channel_open_tls"
+                       (string string string string) scheme-object))
   (define ffi-net-grpc-channel-close
     (foreign-procedure "chezpp_net_grpc_channel_close" (uptr) scheme-object))
   (define ffi-net-grpc-server-open
     (foreign-procedure "chezpp_net_grpc_server_open" (string int) scheme-object))
+  (define ffi-net-grpc-server-open-tls
+    (foreign-procedure "chezpp_net_grpc_server_open_tls"
+                       (string int string string string) scheme-object))
   (define ffi-net-grpc-server-close
     (foreign-procedure "chezpp_net_grpc_server_close" (uptr) scheme-object))
   (define ffi-net-grpc-unary-call

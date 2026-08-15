@@ -1,5 +1,7 @@
 (library (chezpp net grpc)
   (export grpc-open-channel
+          grpc-channel-credentials? make-grpc-channel-credentials
+          grpc-server-credentials? make-grpc-server-credentials
           grpc-close-channel
           grpc-cancel-pending!
           grpc-channel?
@@ -82,6 +84,45 @@
             (immutable handlers grpc-channel-handlers)
             (mutable pending grpc-channel-pending grpc-channel-pending-set!)
             (mutable closed? grpc-channel-closed? grpc-channel-closed?-set!)))
+
+  (define-record-type (grpc-channel-credentials %make-grpc-channel-credentials
+                                                 grpc-channel-credentials?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable root-certs grpc-channel-credentials-root-certs)
+            (immutable certificate-chain grpc-channel-credentials-certificate-chain)
+            (immutable private-key grpc-channel-credentials-private-key)))
+
+  (define-record-type (grpc-server-credentials %make-grpc-server-credentials
+                                                grpc-server-credentials?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable root-certs grpc-server-credentials-root-certs)
+            (immutable certificate-chain grpc-server-credentials-certificate-chain)
+            (immutable private-key grpc-server-credentials-private-key)))
+
+  #|proc:make-grpc-channel-credentials
+The `make-grpc-channel-credentials` procedure copies optional PEM root, certificate,
+and private-key strings for a TLS client channel. The return value is credentials.
+|#
+  (define make-grpc-channel-credentials
+    (lambda (root-certs certificate-chain private-key)
+      (pcheck ([(lambda (x) (or (not x) (string? x))) root-certs certificate-chain private-key])
+        (%make-grpc-channel-credentials root-certs certificate-chain private-key))))
+
+  #|proc:make-grpc-server-credentials
+The `make-grpc-server-credentials` procedure copies optional PEM roots and required
+certificate/private-key strings for a TLS server. The return value is credentials.
+|#
+  (define make-grpc-server-credentials
+    (lambda (root-certs certificate-chain private-key)
+      (pcheck ([(lambda (x) (or (not x) (string? x))) root-certs certificate-chain private-key])
+        (unless (and certificate-chain private-key)
+          (errorf 'make-grpc-server-credentials "certificate and private key are required"))
+        (%make-grpc-server-credentials root-certs certificate-chain private-key))))
+
+  (define credential-string
+    (lambda (value) (if value value "")))
 
   (define ensure-success
     (lambda (who x)
@@ -482,23 +523,57 @@ Use `(grpc-open-channel endpoint)`, `(grpc-open-channel host port)`, or `(grpc-o
           (make-handler-table)
           '()
           #f))]
-      [(role host port)
-       (pcheck ([symbol? role] [string? host] [fixnum? port])
-               (check-port who port)
-               (case role
-                 [(server)
-                  (let ([ans (ensure-success who (ffi-net-grpc-server-open host port))])
-                    (unless (and (vector? ans) (= (vector-length ans) 2))
-                      (errorf who "unexpected gRPC server open result ~s" ans))
-                    (%make-grpc-channel
-                     'server
-                     (format "~a:~a" host (vector-ref ans 1))
-                     (vector-ref ans 0)
-                     (make-handler-table)
-                     '()
-                     #f))]
-                 [else
-                  (errorf who "invalid gRPC role ~s" role)]))]))
+      [(first second third)
+       (if (grpc-channel-credentials? first)
+           (pcheck ([string? second] [fixnum? third])
+             (check-port who third)
+             (let ([ep (endpoint-string who second third)])
+               (%make-grpc-channel
+                'client ep
+                (ensure-success
+                 who
+                 (ffi-net-grpc-channel-open-tls
+                  ep
+                  (credential-string (grpc-channel-credentials-root-certs first))
+                  (credential-string
+                   (grpc-channel-credentials-certificate-chain first))
+                  (credential-string (grpc-channel-credentials-private-key first))))
+                (make-handler-table) '() #f)))
+           (pcheck ([symbol? first] [string? second] [fixnum? third])
+             (check-port who third)
+             (case first
+               [(server)
+                (let ([ans (ensure-success who (ffi-net-grpc-server-open second third))])
+                  (unless (and (vector? ans) (= (vector-length ans) 2))
+                    (errorf who "unexpected gRPC server open result ~s" ans))
+                  (%make-grpc-channel
+                   'server
+                   (format "~a:~a" second (vector-ref ans 1))
+                   (vector-ref ans 0)
+                   (make-handler-table)
+                   '()
+                   #f))]
+               [else
+                (errorf who "invalid gRPC role ~s" first)])))]
+      [(role credentials host port)
+       (pcheck ([symbol? role] [grpc-server-credentials? credentials]
+                [string? host] [fixnum? port])
+         (unless (eq? role 'server)
+           (errorf who "TLS credentials are only valid for server channels"))
+         (check-port who port)
+         (let ([ans (ensure-success
+                     who
+                     (ffi-net-grpc-server-open-tls
+                      host port
+                      (credential-string (grpc-server-credentials-root-certs credentials))
+                      (credential-string
+                       (grpc-server-credentials-certificate-chain credentials))
+                      (credential-string (grpc-server-credentials-private-key credentials))))])
+           (unless (and (vector? ans) (= (vector-length ans) 2))
+             (errorf who "unexpected gRPC TLS server open result ~s" ans))
+           (%make-grpc-channel
+            'server (format "~a:~a" host (vector-ref ans 1))
+            (vector-ref ans 0) (make-handler-table) '() #f))) ]))
 
   #|proc:grpc-close-channel
 The `grpc-close-channel` procedure closes a gRPC client channel or server listener.

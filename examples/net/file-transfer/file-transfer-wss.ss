@@ -1,0 +1,30 @@
+(import (chezpp) (chezpp net))
+
+(load "examples/net/file-transfer/file-transfer-common.ss")
+(load "examples/net/file-transfer/file-transfer-websocket.ss")
+
+(define secure-context
+  (lambda (role)
+    (let ([ctx (make-tls-context role)])
+      (if (eq? role 'server)
+          (begin
+            (tls-context-load-cert! ctx (getenv "CHEZPP_TRANSFER_CERT"))
+            (tls-context-load-private-key! ctx (getenv "CHEZPP_TRANSFER_KEY")))
+          (begin
+            (tls-context-load-ca-file! ctx (getenv "CHEZPP_TRANSFER_CERT"))
+            (tls-context-set-verify! ctx #t)))
+      ctx)))
+
+(let ([arg* (command-line-arguments)])
+  (unless (= (length arg*) 1)
+    (errorf 'file-transfer-wss "expected one directory or file path"))
+  (let* ([server? (string=? (getenv "CHEZPP_TRANSFER_ROLE") "server")]
+         [ctx (secure-context (if server? 'server 'client))]
+         [options (make-websocket-options ctx '("chezpp-file-transfer") #f
+                                          65536 #f 30000)])
+    (set! websocket-file-transfer-port 41009)
+    (set! websocket-file-transfer-options options)
+    (if server?
+        (websocket-file-server (car arg*))
+        (websocket-file-client (list (car arg*))))
+    (close-tls-context ctx)))

@@ -11,9 +11,14 @@ done frame is received.
       (ensure-upload-directory dir)
       (with-grpc-env
         (lambda ()
-          (let ([server (grpc-open-channel 'server
-                                           file-transfer-host
-                                           grpc-file-transfer-port)])
+          (let ([server (if grpc-file-transfer-server-credentials
+                            (grpc-open-channel 'server
+                                               grpc-file-transfer-server-credentials
+                                               file-transfer-host
+                                               grpc-file-transfer-port)
+                            (grpc-open-channel 'server
+                                               file-transfer-host
+                                               grpc-file-transfer-port))])
             (grpc-register-service!
              server
              grpc-upload-method
@@ -57,7 +62,11 @@ gRPC file server and then calls the `Done` method.
     (validate-file-list 'grpc-file-client path*)
     (with-grpc-env
      (lambda ()
-       (let ([client (grpc-open-channel file-transfer-host grpc-file-transfer-port)])
+       (let ([client (if grpc-file-transfer-client-credentials
+                         (grpc-open-channel grpc-file-transfer-client-credentials
+                                            file-transfer-host
+                                            grpc-file-transfer-port)
+                         (grpc-open-channel file-transfer-host grpc-file-transfer-port))])
          (dynamic-wind
            void
            (lambda ()

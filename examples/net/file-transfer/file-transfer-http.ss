@@ -6,7 +6,8 @@ frame bodies in `dir` until the client sends a `done` frame.
   (lambda (dir)
     (pcheck ([string? dir])
       (ensure-upload-directory dir)
-      (let ([server (http-listen file-transfer-host http-file-transfer-port)]
+      (let ([server (http-listen file-transfer-host http-file-transfer-port
+                                 http-file-transfer-server-tls-context)]
             [done? #f])
         (call-with-values
          (lambda ()
@@ -49,8 +50,12 @@ HTTP file server using streamed request frames and then sends the done frame.
 (define http-file-client
   (lambda (path*)
     (validate-file-list 'http-file-client path*)
-    (let ([client (http-open)]
-          [base (format "http://~a:~a" file-transfer-host http-file-transfer-port)])
+    (let ([client (if http-file-transfer-client-tls-context
+                      (http-open http-file-transfer-client-tls-context)
+                      (http-open))]
+          [base (format "~a://~a:~a"
+                        (if http-file-transfer-client-tls-context "https" "http")
+                        file-transfer-host http-file-transfer-port)])
       (dynamic-wind
         void
         (lambda ()

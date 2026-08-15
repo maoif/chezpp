@@ -6,7 +6,10 @@ stores binary file messages in `dir` until the end marker arrives.
   (lambda (dir)
     (pcheck ([string? dir])
       (ensure-upload-directory dir)
-      (let ([server (websocket-listen file-transfer-host websocket-file-transfer-port)]
+      (let ([server (if websocket-file-transfer-options
+                        (websocket-listen file-transfer-host websocket-file-transfer-port
+                                          websocket-file-transfer-options)
+                        (websocket-listen file-transfer-host websocket-file-transfer-port))]
             [conn #f])
         (call-with-values
          (lambda ()
@@ -53,7 +56,10 @@ localhost WebSocket server and then sends the end marker.
   (lambda (path*)
     (validate-file-list 'websocket-file-client path*)
     (let ([conn (websocket-connect
-                 (format "ws://~a:~a/" file-transfer-host websocket-file-transfer-port))])
+                 (format "~a://~a:~a/"
+                         (if websocket-file-transfer-options "wss" "ws")
+                         file-transfer-host websocket-file-transfer-port)
+                 (or websocket-file-transfer-options "chezpp-websocket"))])
       (dynamic-wind
         void
         (lambda ()

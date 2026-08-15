@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
 #ifdef __linux__
 #include <sys/eventfd.h>
 #endif
@@ -119,6 +120,10 @@ typedef void (*grpc_completion_queue_shutdown_fn)(grpc_completion_queue *);
 typedef void (*grpc_completion_queue_destroy_fn)(grpc_completion_queue *);
 typedef grpc_channel_credentials *(*grpc_insecure_credentials_create_fn)(void);
 typedef grpc_server_credentials *(*grpc_insecure_server_credentials_create_fn)(void);
+typedef grpc_channel_credentials *(*grpc_ssl_credentials_create_fn)(
+    const char *, grpc_ssl_pem_key_cert_pair *, const void *, void *);
+typedef grpc_server_credentials *(*grpc_ssl_server_credentials_create_fn)(
+    const char *, grpc_ssl_pem_key_cert_pair *, size_t, int, void *);
 typedef void (*grpc_channel_credentials_release_fn)(grpc_channel_credentials *);
 typedef void (*grpc_server_credentials_release_fn)(grpc_server_credentials *);
 typedef grpc_channel *(*grpc_channel_create_fn)(const char *, grpc_channel_credentials *,
@@ -165,10 +170,10 @@ typedef gpr_timespec (*gpr_time_add_fn)(gpr_timespec, gpr_timespec);
 typedef void (*gpr_free_fn)(void *);
 typedef const char *(*grpc_version_string_fn)(void);
 
-static const char *const grpc_names[] = {"libgrpc.so.54", NULL};
+static const char *const grpc_names[] = {"libgrpc.so.54", "libgrpc.so.56", NULL};
 static chezpp_optional_library grpc_library =
     CHEZPP_OPTIONAL_LIBRARY_INIT("grpc", grpc_names);
-static const char *const gpr_names[] = {"libgpr.so.54", NULL};
+static const char *const gpr_names[] = {"libgpr.so.54", "libgpr.so.56", NULL};
 static chezpp_optional_library gpr_library =
     CHEZPP_OPTIONAL_LIBRARY_INIT("gpr", gpr_names);
 static pthread_once_t grpc_once = PTHREAD_ONCE_INIT;
@@ -197,6 +202,8 @@ static grpc_completion_queue_shutdown_fn p_grpc_completion_queue_shutdown = NULL
 static grpc_completion_queue_destroy_fn p_grpc_completion_queue_destroy = NULL;
 static grpc_insecure_credentials_create_fn p_grpc_insecure_credentials_create = NULL;
 static grpc_insecure_server_credentials_create_fn p_grpc_insecure_server_credentials_create = NULL;
+static grpc_ssl_credentials_create_fn p_grpc_ssl_credentials_create = NULL;
+static grpc_ssl_server_credentials_create_fn p_grpc_ssl_server_credentials_create = NULL;
 static grpc_channel_credentials_release_fn p_grpc_channel_credentials_release = NULL;
 static grpc_server_credentials_release_fn p_grpc_server_credentials_release = NULL;
 static grpc_channel_create_fn p_grpc_channel_create = NULL;
@@ -489,10 +496,10 @@ static void initialize_grpc(void) {
     return;
   }
   chezpp_optional_library_set_version(&grpc_library, version);
-  if (major != 54) {
+  if (major != 54 && major != 56) {
     chezpp_optional_library_fail(
         &grpc_library,
-        "grpc: runtime ABI major %u (version %u.%u.%u) requires major 54",
+        "grpc: runtime ABI major %u (version %u.%u.%u) requires major 54 or 56",
         major, major, minor, patch);
     return;
   }
@@ -602,6 +609,12 @@ static void initialize_grpc(void) {
         chezpp_optional_library_probe_symbol(
             &grpc_library, "grpc_ssl_server_credentials_create", &symbol))
       grpc_capabilities |= 1U;
+    (void)chezpp_optional_library_symbol(
+        &grpc_library, "grpc_ssl_credentials_create",
+        (void **)&p_grpc_ssl_credentials_create);
+    (void)chezpp_optional_library_symbol(
+        &grpc_library, "grpc_ssl_server_credentials_create",
+        (void **)&p_grpc_ssl_server_credentials_create);
     if (chezpp_optional_library_probe_symbol(
             &grpc_library, "grpc_compression_algorithm_name", &symbol))
       grpc_capabilities |= 2U;
@@ -1335,6 +1348,31 @@ ptr chezpp_net_grpc_channel_open(const char *target) {
   return make_handle((uptr)channel);
 }
 
+ptr chezpp_net_grpc_channel_open_tls(const char *target, const char *root_certs,
+                                     const char *certificate_chain, const char *private_key) {
+  grpc_channel_credentials *creds;
+  grpc_channel *channel;
+  grpc_ssl_pem_key_cert_pair pair;
+  grpc_ssl_pem_key_cert_pair *pair_ptr = NULL;
+  if (!ensure_grpc_loaded() || p_grpc_ssl_credentials_create == NULL)
+    return make_error_status_message("gRPC TLS credentials are unavailable");
+  memset(&pair, 0, sizeof(pair));
+  if (certificate_chain != NULL && certificate_chain[0] != '\0' &&
+      private_key != NULL && private_key[0] != '\0') {
+    pair.cert_chain = certificate_chain;
+    pair.private_key = private_key;
+    pair_ptr = &pair;
+  }
+  creds = p_grpc_ssl_credentials_create(
+      root_certs != NULL && root_certs[0] != '\0' ? root_certs : NULL,
+      pair_ptr, NULL, NULL);
+  if (creds == NULL) return make_error_status_message("failed to create gRPC TLS credentials");
+  channel = p_grpc_channel_create(target, creds, NULL);
+  p_grpc_channel_credentials_release(creds);
+  if (channel == NULL) return make_error_status_message("failed to create gRPC TLS channel");
+  return make_handle((uptr)channel);
+}
+
 ptr chezpp_net_grpc_channel_close(uptr handle) {
   grpc_channel *channel = (grpc_channel *)handle;
   if (channel == NULL) return make_error_status_message("invalid gRPC channel");
@@ -1380,6 +1418,58 @@ ptr chezpp_net_grpc_server_open(const char *host, int port) {
     p_grpc_completion_queue_destroy(server->cq);
     free(server);
     return make_error_status_message("failed to bind gRPC server");
+  }
+  p_grpc_server_start(server->server);
+  server->port = bound_port;
+  out = Smake_vector(2, Sfalse);
+  Svector_set(out, 0, make_handle((uptr)server));
+  Svector_set(out, 1, Sinteger(bound_port));
+  return out;
+}
+
+ptr chezpp_net_grpc_server_open_tls(const char *host, int port, const char *root_certs,
+                                    const char *certificate_chain, const char *private_key) {
+  chezpp_grpc_server *server;
+  grpc_server_credentials *creds;
+  grpc_ssl_pem_key_cert_pair pair;
+  char endpoint[256];
+  int bound_port;
+  ptr out;
+  if (!ensure_grpc_loaded() || p_grpc_ssl_server_credentials_create == NULL)
+    return make_error_status_message("gRPC TLS server credentials are unavailable");
+  if (certificate_chain == NULL || certificate_chain[0] == '\0' ||
+      private_key == NULL || private_key[0] == '\0')
+    return make_error_status_message("gRPC TLS server requires certificate and key");
+  server = (chezpp_grpc_server *)calloc(1, sizeof(*server));
+  if (server == NULL) return make_error_status_message("out of memory");
+  server->cq = p_grpc_completion_queue_create_for_pluck(NULL);
+  server->server = p_grpc_server_create(NULL, NULL);
+  if (server->cq == NULL || server->server == NULL) {
+    if (server->server) p_grpc_server_destroy(server->server);
+    if (server->cq) p_grpc_completion_queue_destroy(server->cq);
+    free(server);
+    return make_error_status_message("failed to create gRPC TLS server");
+  }
+  p_grpc_server_register_completion_queue(server->server, server->cq, NULL);
+  pair.cert_chain = certificate_chain;
+  pair.private_key = private_key;
+  creds = p_grpc_ssl_server_credentials_create(
+      root_certs != NULL && root_certs[0] != '\0' ? root_certs : NULL,
+      &pair, 1, 0, NULL);
+  if (creds == NULL) {
+    p_grpc_server_destroy(server->server);
+    p_grpc_completion_queue_destroy(server->cq);
+    free(server);
+    return make_error_status_message("failed to create gRPC TLS server credentials");
+  }
+  snprintf(endpoint, sizeof(endpoint), "%s:%d", host, port);
+  bound_port = p_grpc_server_add_http2_port(server->server, endpoint, creds);
+  p_grpc_server_credentials_release(creds);
+  if (bound_port == 0) {
+    p_grpc_server_destroy(server->server);
+    p_grpc_completion_queue_destroy(server->cq);
+    free(server);
+    return make_error_status_message("failed to bind gRPC TLS server");
   }
   p_grpc_server_start(server->server);
   server->port = bound_port;

@@ -4,10 +4,15 @@
 
 (define tcp-socket-file-transfer-port 41001)
 (define http-file-transfer-port 41002)
+(define http-file-transfer-server-tls-context #f)
+(define http-file-transfer-client-tls-context #f)
 (define ftp-file-transfer-port 41003)
 (define sftp-file-transfer-port 41004)
 (define websocket-file-transfer-port 41005)
+(define websocket-file-transfer-options #f)
 (define grpc-file-transfer-port 41007)
+(define grpc-file-transfer-client-credentials #f)
+(define grpc-file-transfer-server-credentials #f)
 
 (define file-transfer-done-marker-name ".chezpp-upload.done")
 (define write-bytevector-file

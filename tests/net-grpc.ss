@@ -64,7 +64,45 @@
                   (set! done? #t)
                   (grpc-close-channel client)
                   (grpc-close-channel server)
-                  (thread-join th)))))))))
+                (thread-join th)))))))))
+
+(define read-test-pem
+  (lambda (path)
+    (call-with-port
+     (open-file-input-port path)
+     (lambda (port)
+       (utf8->string (get-bytevector-all port))))))
+
+(define call-with-grpc-tls-peer
+  (lambda (register proc)
+    (write-test-san-cert-files)
+    (let* ([port (reserve-loopback-port)]
+           [certificate (read-test-pem "/tmp/chezpp-net-test-san-cert.pem")]
+           [private-key (read-test-pem "/tmp/chezpp-net-test-san-key.pem")]
+           [server-credentials
+            (make-grpc-server-credentials #f certificate private-key)]
+           [client-credentials
+            (make-grpc-channel-credentials certificate #f #f)]
+           [server (grpc-open-channel 'server server-credentials "127.0.0.1" port)]
+           [client (grpc-open-channel client-credentials "localhost" port)]
+           [done? #f])
+      (register server)
+      (let ([th
+             (fork-thread
+              (lambda ()
+                (let loop ()
+                  (unless done?
+                    (guard (c [else #f])
+                      (grpc-serve server))
+                    (loop)))))])
+        (dynamic-wind
+          void
+          (lambda () (proc server client))
+          (lambda ()
+            (set! done? #t)
+            (grpc-close-channel client)
+            (grpc-close-channel server)
+            (thread-join th)))))))
 
 (define wait-grpc-call/nonblocking
   (lambda (client method payload metadata timeout-ms)
@@ -292,7 +330,7 @@
            (lambda (server client)
              (and
              (grpc-channel? server)
-              (grpc-channel? client)
+             (grpc-channel? client)
               (let ([resp (grpc-call client
                                      "/chezpp.test.Echo/Unary"
                                      "hello grpc"
@@ -619,3 +657,20 @@
        "port must be between 0 and 65535"
        (lambda ()
          (grpc-open-channel 'server "127.0.0.1" 70000)))))
+
+(mat net-grpc-tls
+     ;; Trusted TLS credentials must protect a unary gRPC call and verify localhost.
+     (with-grpc-env
+      (lambda ()
+        (call-with-grpc-tls-peer
+         (lambda (server)
+           (grpc-register-service!
+            server
+            "/chezpp.test.Echo/Unary"
+            (lambda (request)
+              (grpc-response (grpc-request-payload request)))))
+         (lambda (server client)
+           (let ([response (grpc-call client "/chezpp.test.Echo/Unary" "tls-ok" '() 3000)])
+             (and (grpc-response? response)
+                  (= (grpc-status-code response) 0)
+                  (equal? (utf8->string (grpc-response-payload response)) "tls-ok"))))))))
