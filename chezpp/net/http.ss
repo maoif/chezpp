@@ -117,7 +117,19 @@
     (sealed #t)
     (opaque #f)
     (fields (immutable producer http-body-source-producer)
-            (immutable length http-body-source-length)))
+            (immutable length http-body-source-length)
+            (immutable closer http-body-source-closer)
+            (mutable closed? http-body-source-closed? http-body-source-closed?-set!)))
+
+  (define make-http-body-source*
+    (lambda (producer length closer)
+      (%make-http-body-source producer length closer #f)))
+
+  (define close-http-body-source!
+    (lambda (source)
+      (unless (http-body-source-closed? source)
+        (http-body-source-closed?-set! source #t)
+        ((http-body-source-closer source)))))
 
   (define-record-type (http-body-sink %make-http-body-sink http-body-sink?)
     (sealed #t)
@@ -378,14 +390,17 @@
            [else (loop (fx1+ i))])))))
 
   (define serialize-http-request-head
-    (lambda (request headers)
+    (lambda (client request headers)
       (let-values ([(port get) (open-bytevector-output-port)])
         (put-bytevector
          port
          (string->utf8
           (format "~a ~a HTTP/1.1\r\n"
                   (http-request-method request)
-                  (http-uri-target (http-request-uri request)))))
+                  (if (and (http-client-proxy client)
+                           (string=? (uri-scheme (http-request-uri request)) "http"))
+                      (uri->string (http-request-uri request))
+                      (http-uri-target (http-request-uri request))))))
         (write-header-lines port headers)
         (put-bytevector port (string->utf8 "\r\n"))
         (get))))
@@ -437,6 +452,167 @@
                         (cons (bytevector-slice bv data-start data-stop) part*)
                         (fx+ total size))])))))))
 
+  (define http-decompressed-size-limit (* 256 1024 1024))
+  (define http-decompression-ratio-limit 100)
+  (define http-zlib-feed-limit (* 16 1024 1024))
+
+  (define zlib-encoding-mode
+    (lambda (headers)
+      (let ([value (http-header-ref headers "Content-Encoding" #f)])
+        (cond
+         [(and value (string-ci=? (string-trim value) "gzip")) 'gzip]
+         [(and value (string-ci=? (string-trim value) "deflate")) 'deflate]
+         [else #f]))))
+
+  (define zlib-process
+    (lambda (who handle input finish? maximum-output)
+      (let ([answer
+             (ffi-zlib-stream-process handle input 0 (bytevector-length input)
+                                      (if finish? 1 0) maximum-output)])
+        (cond
+         [(and (vector? answer) (= (vector-length answer) 2)
+               (bytevector? (vector-ref answer 0)))
+          (vector-ref answer 0)]
+         [(and (vector? answer) (= (vector-length answer) 2)
+               (eq? (vector-ref answer 0) 'limit))
+          (raise-net-error who 'http "HTTP decompression limit exceeded")]
+         [(ffi-error? answer)
+         (raise-net-error who 'http (ffi-error-message answer))]
+         [else
+          (raise-net-error who 'http "invalid zlib stream result" answer)]))))
+
+  (define make-zlib-body-source
+    (lambda (who source encoding)
+      (let ([handle (ffi-zlib-stream-open 1 (if (eq? encoding 'gzip) 1 0))]
+            [pending (make-bytevector 0 0)]
+            [pending-offset 0]
+            [finished? #f])
+        (when (zero? handle)
+          (raise-net-error who 'unsupported "zlib compression is unavailable"))
+        (make-http-body-source*
+         (lambda (maximum-bytes)
+           (let loop ()
+             (cond
+              [(< pending-offset (bytevector-length pending))
+               (let* ([stop (min (bytevector-length pending)
+                                 (+ pending-offset maximum-bytes))]
+                      [chunk (bytevector-slice pending pending-offset stop)])
+                 (set! pending-offset stop)
+                 chunk)]
+              [finished? (eof-object)]
+              [else
+               (let ([input (http-body-source-read source 65536)])
+                 (if (eof-object? input)
+                     (begin
+                       (set! pending
+                             (zlib-process who handle (make-bytevector 0 0)
+                                           #t http-zlib-feed-limit))
+                       (ffi-zlib-stream-close handle)
+                       (set! handle 0)
+                       (set! finished? #t))
+                     (set! pending
+                           (zlib-process who handle input #f http-zlib-feed-limit)))
+                 (set! pending-offset 0)
+                 (if (zero? (bytevector-length pending))
+                     (loop)
+                     (loop)))])))
+         #f
+         (lambda ()
+           (unless (zero? handle)
+             (ffi-zlib-stream-close handle)
+             (set! handle 0))
+           (close-http-body-source! source))))))
+
+  (define request-with-compressed-body
+    (lambda (who request)
+      (let ([encoding (zlib-encoding-mode (http-request-headers request))]
+            [body (http-request-body request)])
+        (if (and encoding body)
+            (let* ([source
+                    (if (http-body-source? body)
+                        body
+                        (let* ([bytes (body->bytevector body)] [index 0])
+                          (make-http-body-source
+                           (lambda (maximum-bytes)
+                             (if (= index (bytevector-length bytes))
+                                 (eof-object)
+                                 (let* ([stop (min (bytevector-length bytes)
+                                                   (+ index maximum-bytes))]
+                                        [chunk (bytevector-slice bytes index stop)])
+                                   (set! index stop)
+                                   chunk)))
+                           (bytevector-length bytes))))]
+                   [compressed (make-zlib-body-source who source encoding)])
+              (make-http-request
+               (http-request-method request) (http-request-uri request)
+               (http-header-remove (http-request-headers request) "Content-Length")
+               compressed))
+            request))))
+
+  (define make-zlib-body-sink
+    (lambda (who sink encoding)
+      (let ([handle (ffi-zlib-stream-open 0 (if (eq? encoding 'gzip) 1 0))]
+            [compressed-count 0]
+            [decompressed-count 0]
+            [closed? #f])
+        (define close!
+          (lambda ()
+            (unless closed?
+              (set! closed? #t)
+              (ffi-zlib-stream-close handle))))
+        (define feed!
+          (lambda (input finish?)
+            (let* ([remaining (- http-decompressed-size-limit decompressed-count)]
+                   [maximum-output (min http-zlib-feed-limit (max 1 remaining))]
+                   [output (zlib-process who handle input finish? maximum-output)]
+                   [output-length (bytevector-length output)])
+              (set! decompressed-count (+ decompressed-count output-length))
+              (when (> decompressed-count http-decompressed-size-limit)
+                (raise-net-error who 'http "HTTP decompressed body exceeds size limit"))
+              (when (and (> compressed-count 0)
+                         (> decompressed-count
+                            (* compressed-count http-decompression-ratio-limit)))
+                (raise-net-error who 'http "HTTP decompression ratio limit exceeded"))
+              (unless (zero? output-length)
+                (http-body-sink-write! sink output 0 output-length)))))
+        (when (zero? handle)
+          (raise-net-error who 'unsupported "zlib decompression is unavailable"))
+        (make-http-body-sink
+         (lambda (input start stop)
+           (guard (failure [else (close!) (raise failure)])
+             (let ([chunk (bytevector-slice input start stop)])
+               (set! compressed-count (+ compressed-count (bytevector-length chunk)))
+               (feed! chunk #f))))
+         (lambda ()
+           (unless closed?
+             (guard (failure [else (close!) (raise failure)])
+               (feed! (make-bytevector 0 0) #t)
+               (close!)
+               (http-body-sink-finish! sink))))))))
+
+  (define decode-buffered-response
+    (lambda (who response)
+      (let ([encoding (zlib-encoding-mode (http-response-headers response))]
+            [body (http-response-body response)])
+        (if (and encoding (bytevector? body))
+            (let-values ([(port get) (open-bytevector-output-port)])
+              (let ([sink (make-zlib-body-sink
+                           who
+                           (make-http-body-sink
+                            (lambda (bytes start stop)
+                              (put-bytevector port bytes start (- stop start))))
+                           encoding)])
+                (http-body-sink-write! sink body 0 (bytevector-length body))
+                (http-body-sink-finish! sink)
+                (%make-http-response
+                 (http-response-status response) (http-response-reason response)
+                 (http-header-remove
+                  (http-header-remove (http-response-headers response)
+                                      "Content-Encoding")
+                  "Content-Length")
+                 (get) (http-response-trailers response) (http-response-version response))))
+            response))))
+
   (define http-transfer/nonblocking
     (case-lambda
       [(who client kind request finish)
@@ -449,7 +625,9 @@
       (let ([pending (http-client-pending client)])
         (if (and pending (eq? 'pending (net-operation-state pending)))
             pending
-            (let ([current-request (apply-request-auth who client request #f)]
+            (let ([current-request
+                   (request-with-compressed-body
+                    who (apply-request-auth who client request #f))]
                   [auth-origin (request-origin-key request)]
                   [redirects-left 5]
                   [deadline-ms
@@ -462,6 +640,8 @@
                   [connection #f]
                   [connect-operation #f]
                   [tls-operation #f]
+                  [proxy-connect-head (make-bytevector 0 0)]
+                  [proxy-connect-offset 0]
                   [request-headers '()]
                   [head (make-bytevector 0 0)]
                   [body (make-bytevector 0 0)]
@@ -474,6 +654,8 @@
                   [reason ""]
                   [response-headers '()]
                   [response-trailers '()]
+                  [decoded-response? #f]
+                  [base-response-sink response-sink]
                   [body-start 0]
                   [response-received 0]
                   [chunk-remaining #f]
@@ -482,6 +664,9 @@
                   [operation #f])
               (define release-transport!
                 (lambda ()
+                  (let ([source (http-request-body current-request)])
+                    (when (http-body-source? source)
+                      (close-http-body-source! source)))
                   (when resolver-handle
                     (ffi-net-resolver-close resolver-handle)
                     (set! resolver-handle #f)
@@ -531,6 +716,8 @@
                   (set! resolver-fd #f)
                   (set! connect-operation #f)
                   (set! tls-operation #f)
+                  (set! proxy-connect-head (make-bytevector 0 0))
+                  (set! proxy-connect-offset 0)
                   (set! request-headers '())
                   (set! head (make-bytevector 0 0))
                   (set! body (make-bytevector 0 0))
@@ -543,6 +730,8 @@
                   (set! reason "")
                   (set! response-headers '())
                   (set! response-trailers '())
+                  (set! decoded-response? #f)
+                  (set! response-sink base-response-sink)
                   (set! body-start 0)
                   (set! response-received 0)
                   (set! chunk-remaining #f)
@@ -597,6 +786,19 @@
                     (set! write-offset 0))))
               (define complete-response
                 (lambda (response)
+                  (set! response
+                        (if decoded-response?
+                            (%make-http-response
+                             (http-response-status response)
+                             (http-response-reason response)
+                             (http-header-remove
+                              (http-header-remove (http-response-headers response)
+                                                  "Content-Encoding")
+                              "Content-Length")
+                             (http-response-body response)
+                             (http-response-trailers response)
+                             (http-response-version response))
+                            (decode-buffered-response who response)))
                   (store-response-cookies!
                    client current-request (http-response-headers response))
                   (let ([next-request
@@ -608,7 +810,8 @@
                         (begin
                           (set! redirects-left (fx1- redirects-left))
                           (reset-request!
-                           (apply-request-auth who client next-request response))
+                           (request-with-compressed-body
+                            who (apply-request-auth who client next-request response)))
                           (yield-update))
                         (begin
                           (when (reusable-response? request-headers response
@@ -745,12 +948,16 @@
                                     (equal? auth-origin
                                             (request-origin-key current-request))))
                              (set! head
-                                   (serialize-http-request-head current-request request-headers))
+                                   (serialize-http-request-head
+                                    client current-request request-headers))
                              (prepare-request-body!)
                              (set! phase 'write-head)
                              (yield-update))
                            (if (not resolver-handle)
-                               (let* ([u (http-request-uri current-request)]
+                               (let* ([target-uri (http-request-uri current-request)]
+                                      [u (if (http-client-proxy client)
+                                             (http-proxy-uri (http-client-proxy client))
+                                             target-uri)]
                                       [host (or (uri-host u) "localhost")]
                                       [port (default-port-for-uri who u)]
                                       [started
@@ -793,7 +1000,23 @@
                          deadline-ms)]
                        [(failed) (raise (net-operation-condition connect-operation))]
                        [(completed)
-                        (if (string=? (uri-scheme (http-request-uri current-request)) "https")
+                        (if (and (http-client-proxy client)
+                                 (string=? (uri-scheme
+                                            (http-request-uri current-request)) "https"))
+                            (let* ([u (http-request-uri current-request)]
+                                   [authority
+                                    (format "~a:~a" (uri-host u)
+                                            (default-port-for-uri who u))])
+                              (set! proxy-connect-head
+                                    (string->utf8
+                                     (format
+                                      "CONNECT ~a HTTP/1.1\r\nHost: ~a\r\nProxy-Connection: keep-alive\r\n\r\n"
+                                      authority authority)))
+                              (set! proxy-connect-offset 0)
+                              (set! phase 'proxy-write-connect)
+                              (yield-update))
+                            (if (string=? (uri-scheme
+                                           (http-request-uri current-request)) "https")
                             (begin
                               (set! tls-operation
                                     (tls-connect/nonblocking
@@ -812,10 +1035,70 @@
                                              (request-origin-key current-request))))
                               (set! head
                                     (serialize-http-request-head
-                                     current-request request-headers))
+                                     client current-request request-headers))
                               (prepare-request-body!)
                               (set! phase 'write-head)
-                              (yield-update)))])]
+                              (yield-update))))])]
+                    [(proxy-write-connect)
+                     (cond
+                      [(= proxy-connect-offset (bytevector-length proxy-connect-head))
+                       (set! input (make-bytevector 0 0))
+                       (set! phase 'proxy-read-connect-status)
+                       (pending-update sock '(read error hup invalid))]
+                      [(not allow-io?)
+                       (pending-update sock '(write error hup invalid))]
+                      [else
+                       (let ([answer (transport-write proxy-connect-head proxy-connect-offset)])
+                         (if (net-would-block? answer)
+                             (pending-update (net-would-block-resource answer)
+                                             (net-would-block-events answer))
+                             (begin
+                               (set! proxy-connect-offset (+ proxy-connect-offset answer))
+                               (advance #f))))])]
+                    [(proxy-read-connect-status)
+                     (let ([line-end (bytevector-find-crlf input 0)])
+                       (if line-end
+                           (let-values ([(connect-status connect-reason)
+                                         (parse-response-line
+                                          who
+                                          (utf8->string
+                                           (bytevector-slice input 0 line-end)))])
+                             (unless (= connect-status 200)
+                               (raise-net-error who 'http
+                                                "HTTP proxy CONNECT failed"
+                                                connect-status))
+                             (set! body-start (+ line-end 2))
+                             (set! phase 'proxy-read-connect-headers)
+                             (advance allow-io?))
+                           (read-pending allow-io?)))]
+                    [(proxy-read-connect-headers)
+                     (let* ([empty-headers?
+                             (and (fx<= (fx+ body-start 2)
+                                        (bytevector-length input))
+                                  (fx= (bytevector-u8-ref input body-start) 13)
+                                  (fx= (bytevector-u8-ref input (fx1+ body-start)) 10))]
+                            [header-end
+                             (and (not empty-headers?)
+                                  (bytevector-find-header-end input body-start))])
+                       (if (or empty-headers? header-end)
+                           (begin
+                             (set! input
+                                   (bytevector-slice input
+                                                     (if empty-headers?
+                                                         (fx+ body-start 2)
+                                                         (fx+ header-end 4))
+                                                     (bytevector-length input)))
+                             (set! body-start 0)
+                             (set! tls-operation
+                                   (tls-connect/nonblocking
+                                    (or (http-client-tls-context client)
+                                        (make-tls-context 'client))
+                                    sock
+                                    (uri-host (http-request-uri current-request))
+                                    (remaining-timeout-ms deadline-ms)))
+                             (set! phase 'tls-handshake)
+                             (yield-update))
+                           (read-pending allow-io?)))]
                     [(tls-handshake)
                      (net-operation-step! tls-operation)
                      (case (net-operation-state tls-operation)
@@ -831,7 +1114,8 @@
                                (equal? auth-origin
                                        (request-origin-key current-request))))
                         (set! head
-                              (serialize-http-request-head current-request request-headers))
+                                    (serialize-http-request-head
+                                     client current-request request-headers))
                         (prepare-request-body!)
                         (set! phase 'write-head)
                         (yield-update)])]
@@ -883,6 +1167,12 @@
                              (set! response-headers
                                    (parse-buffered-headers
                                     who input body-start (fx+ header-end 2)))
+                             (let ([encoding (zlib-encoding-mode response-headers)])
+                               (when (and encoding response-sink)
+                                 (set! response-sink
+                                       (make-zlib-body-sink
+                                        who response-sink encoding))
+                                 (set! decoded-response? #t)))
                              (set! body-start (fx+ header-end 4))
                              (set! phase 'read-body)
                              (advance allow-io?))
@@ -2203,7 +2493,7 @@ The `make-http-body-source` procedure creates a streaming body from `producer` a
     (lambda (producer length)
       (pcheck ([procedure? producer]
                [(lambda (value) (or (not value) (natural? value))) length])
-        (%make-http-body-source producer length))))
+        (make-http-body-source* producer length void))))
 
   #|proc:http-body-source-read
 The `http-body-source-read` procedure asks `source` for at most `maximum-bytes` bytes.
@@ -2279,14 +2569,18 @@ The returned source reports the file length and closes its port at EOF.
     (lambda (path)
       (pcheck ([string? path])
         (let ([port (open-file-input-port path)] [closed? #f])
-          (make-http-body-source
+          (make-http-body-source*
            (lambda (maximum-bytes)
              (let ([answer (get-bytevector-n port maximum-bytes)])
                (when (and (eof-object? answer) (not closed?))
                  (close-port port)
                  (set! closed? #t))
                answer))
-           (file-size path))))))
+           (file-size path)
+           (lambda ()
+             (unless closed?
+               (close-port port)
+               (set! closed? #t))))))))
 
   #|proc:make-http-port-body-sink
 The `make-http-port-body-sink` procedure streams bytes to caller-owned binary output `port`.
@@ -2424,13 +2718,14 @@ The return value is a new HTTP proxy record.
   (define make-http-proxy
     (lambda (uri)
       (let ([uri (normalize-http-uri 'make-http-proxy uri)])
-        (unless (member (uri-scheme uri) '("http" "https"))
-          (errorf 'make-http-proxy "proxy URI must use HTTP or HTTPS"))
+        (unless (string=? (uri-scheme uri) "http")
+          (errorf 'make-http-proxy "proxy URI must use HTTP"))
         (%make-http-proxy uri))))
 
   #|proc:make-http-multipart-part
 The `make-http-multipart-part` procedure creates form part `name` containing `value`.
-`value` is a string or bytevector; optional `filename` and `content-type` are strings or `#f`.
+`value` is a string, bytevector, or body source; optional `filename` and `content-type` are
+strings or `#f`. Body sources allow file parts to be streamed without buffering them in memory.
 The return value is a new multipart part record.
 |#
   (define make-http-multipart-part
@@ -2438,7 +2733,8 @@ The return value is a new multipart part record.
       [(name value) (make-http-multipart-part name value #f #f)]
       [(name value filename content-type)
        (pcheck ([string? name]
-                [(lambda (item) (or (string? item) (bytevector? item))) value]
+                [(lambda (item)
+                   (or (string? item) (bytevector? item) (http-body-source? item))) value]
                 [(lambda (item) (or (not item) (string? item))) filename content-type])
          (%make-http-multipart-part name value filename content-type))]))
 
@@ -2452,50 +2748,79 @@ It returns two values: a bounded body source and its `Content-Type` header value
         (unless (andmap http-multipart-part? part*)
           (errorf 'make-http-multipart-body "expected a list of multipart parts"))
         (let ([boundary "chezpp-7d9e4f6a2b1c"])
-          (let-values ([(port get) (open-bytevector-output-port)])
-            (for-each
-             (lambda (part)
-               (when (or (string-contains? (http-multipart-part-name part) "\r")
-                         (string-contains? (http-multipart-part-name part) "\n"))
-                 (errorf 'make-http-multipart-body "multipart name contains a newline"))
-               (put-bytevector port (string->utf8 (string-append "--" boundary "\r\n")))
-               (put-bytevector
-                port
-                (string->utf8
-                 (string-append
-                  "Content-Disposition: form-data; name=\""
-                  (http-multipart-part-name part) "\""
-                  (if (http-multipart-part-filename part)
-                      (string-append "; filename=\""
-                                     (http-multipart-part-filename part) "\"")
-                      "")
-                  "\r\n")))
-               (when (http-multipart-part-content-type part)
-                 (put-bytevector
-                  port
-                  (string->utf8
-                   (string-append "Content-Type: "
-                                  (http-multipart-part-content-type part) "\r\n"))))
-               (put-bytevector port (string->utf8 "\r\n"))
-               (put-bytevector port
-                               (if (string? (http-multipart-part-value part))
-                                   (string->utf8 (http-multipart-part-value part))
-                                   (http-multipart-part-value part)))
-               (put-bytevector port (string->utf8 "\r\n")))
-             part*)
-            (put-bytevector port (string->utf8 (string-append "--" boundary "--\r\n")))
-            (let* ([bytes (get)] [index 0] [length (bytevector-length bytes)])
-              (values
-               (make-http-body-source
-                (lambda (maximum-bytes)
-                  (if (= index length)
+          (define part-segments
+            (lambda (part)
+              (when (or (string-contains? (http-multipart-part-name part) "\r")
+                        (string-contains? (http-multipart-part-name part) "\n"))
+                (errorf 'make-http-multipart-body "multipart name contains a newline"))
+              (when (and (http-multipart-part-filename part)
+                         (or (string-contains? (http-multipart-part-filename part) "\r")
+                             (string-contains? (http-multipart-part-filename part) "\n")))
+                (errorf 'make-http-multipart-body "multipart filename contains a newline"))
+              (let ([value (http-multipart-part-value part)])
+                (list
+                 (string->utf8
+                  (string-append
+                   "--" boundary "\r\nContent-Disposition: form-data; name=\""
+                   (http-multipart-part-name part) "\""
+                   (if (http-multipart-part-filename part)
+                       (string-append "; filename=\""
+                                      (http-multipart-part-filename part) "\"")
+                       "")
+                   "\r\n"
+                   (if (http-multipart-part-content-type part)
+                       (string-append "Content-Type: "
+                                      (http-multipart-part-content-type part) "\r\n")
+                       "")
+                   "\r\n"))
+                 (if (string? value) (string->utf8 value) value)
+                 (string->utf8 "\r\n")))))
+          (let* ([segments
+                  (append (fold-right append '() (map part-segments part*))
+                          (list (string->utf8 (string-append "--" boundary "--\r\n"))))]
+                 [remaining segments]
+                 [byte-offset 0]
+                 [length
+                  (let loop ([rest segments] [total 0])
+                    (cond
+                     [(null? rest) total]
+                     [(bytevector? (car rest))
+                      (loop (cdr rest) (+ total (bytevector-length (car rest))))]
+                     [(http-body-source-length (car rest)) =>
+                      (lambda (n) (loop (cdr rest) (+ total n)))]
+                     [else #f]))])
+            (values
+             (make-http-body-source*
+              (lambda (maximum-bytes)
+                (let loop ()
+                  (if (null? remaining)
                       (eof-object)
-                      (let* ([stop (min length (+ index maximum-bytes))]
-                             [chunk (bytevector-slice bytes index stop)])
-                        (set! index stop)
-                        chunk)))
-                length)
-               (string-append "multipart/form-data; boundary=" boundary))))))))
+                      (let ([segment (car remaining)])
+                        (cond
+                         [(bytevector? segment)
+                          (let* ([stop (min (bytevector-length segment)
+                                            (+ byte-offset maximum-bytes))]
+                                 [chunk (bytevector-slice segment byte-offset stop)])
+                            (set! byte-offset stop)
+                            (when (= byte-offset (bytevector-length segment))
+                              (set! remaining (cdr remaining))
+                              (set! byte-offset 0))
+                            (if (zero? (bytevector-length chunk)) (loop) chunk))]
+                         [else
+                          (let ([chunk (http-body-source-read segment maximum-bytes)])
+                            (if (eof-object? chunk)
+                                (begin
+                                  (set! remaining (cdr remaining))
+                                  (loop))
+                                chunk))])))))
+              length
+              (lambda ()
+                (for-each
+                 (lambda (segment)
+                   (when (http-body-source? segment)
+                     (close-http-body-source! segment)))
+                 segments)))
+             (string-append "multipart/form-data; boundary=" boundary)))))))
 
   #|proc:make-http-pool-policy
 The `make-http-pool-policy` procedure configures `max-idle`, `max-active`, and `idle-timeout-ms`.
@@ -2549,6 +2874,11 @@ The return value is `client`.
     (lambda (client proxy)
       (pcheck ([http-client? client]
                [(lambda (value) (or (not value) (http-proxy? value))) proxy])
+        (let ([connection (http-client-cached-connection client)])
+          (when connection
+            (http-client-cached-origin-set! client #f)
+            (http-client-cached-connection-set! client #f)
+            (close-http-connection connection)))
         (http-client-proxy-set-internal! client proxy)
         client)))
 

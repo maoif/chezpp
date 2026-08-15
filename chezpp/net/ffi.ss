@@ -1,6 +1,9 @@
 (library (chezpp net ffi)
   (export net-af-inet
           ffi-optional-library-info
+          ffi-zlib-stream-open
+          ffi-zlib-stream-process
+          ffi-zlib-stream-close
           net-af-inet6
           net-af-unix
           net-pollin
@@ -192,6 +195,13 @@
 
   (define ffi-optional-library-info
     (foreign-procedure "chezpp_optional_library_info" (string) scheme-object))
+  (define ffi-zlib-stream-open
+    (foreign-procedure "chezpp_zlib_stream_open" (int int) uptr))
+  (define ffi-zlib-stream-process
+    (foreign-procedure "chezpp_zlib_stream_process"
+                       (uptr scheme-object int int int int) scheme-object))
+  (define ffi-zlib-stream-close
+    (foreign-procedure "chezpp_zlib_stream_close" (uptr) void))
 
   (define net-af-inet (foreign-procedure "chezpp_net_af_inet" () int))
   (define net-af-inet6 (foreign-procedure "chezpp_net_af_inet6" () int))

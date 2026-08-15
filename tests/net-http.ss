@@ -136,6 +136,113 @@
                   (close-socket client)
                   (close-socket listener)))))))))))
 
+(define start-http-proxy-fixture
+  (lambda ()
+    (let ([listener (open-socket 'inet 'stream)]
+          [request-line #f])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values
+         port
+         (fork-thread
+          (lambda ()
+            (let-values ([(client peer) (socket-accept listener)])
+              (let ([ip (open-socket-input-port client)]
+                    [op (open-socket-output-port client)])
+                (set! request-line (read-crlf-line ip))
+                (let loop ()
+                  (unless (string=? (read-crlf-line ip) "") (loop)))
+                (put-bytevector
+                 op
+                 (string->utf8
+                  "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\nproxied"))
+                (flush-output-port op)
+                (close-port ip)
+                (close-port op))
+              (close-socket client)
+              (close-socket listener))))
+         (lambda () request-line))))))
+
+(define start-http-connect-proxy
+  (lambda (target-port)
+    (let ([listener (open-socket 'inet 'stream)])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values
+         port
+         (fork-thread
+          (lambda ()
+            (let-values ([(client peer) (socket-accept listener)])
+              (let wait-for-head ([matched 0])
+                (let ([byte (socket-recv client 1)])
+                  (unless (eof-object? byte)
+                    (let* ([value (bytevector-u8-ref byte 0)]
+                           [next
+                            (case matched
+                              [(0) (if (= value 13) 1 0)]
+                              [(1) (if (= value 10) 2 (if (= value 13) 1 0))]
+                              [(2) (if (= value 13) 3 0)]
+                              [(3) (if (= value 10) 4 (if (= value 13) 1 0))])])
+                      (unless (= next 4)
+                        (wait-for-head next))))))
+              (let ([target (open-socket 'inet 'stream)])
+                (socket-connect! target
+                                 (make-socket-address 'inet "127.0.0.1" target-port))
+                (socket-send-all
+                 client
+                 (string->utf8
+                  "HTTP/1.1 200 Connection Established\r\n\r\n"))
+                (let ([relay
+                       (lambda (source destination)
+                         (let loop ()
+                           (let ([chunk (socket-recv source 4096)])
+                             (if (eof-object? chunk)
+                                 (guard (c [else #f])
+                                   (socket-shutdown! destination 'write))
+                                 (begin
+                                   (socket-send-all destination chunk)
+                                   (loop))))))])
+                  (let ([client-to-target
+                         (fork-thread (lambda () (relay client target)))])
+                    (relay target client)
+                    (thread-join client-to-target)))
+                (close-socket target))
+              (close-socket client)
+              (close-socket listener))))
+         )))))
+
+(define start-http-connect-reject-proxy
+  (lambda ()
+    (let ([listener (open-socket 'inet 'stream)])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values
+         port
+         (fork-thread
+          (lambda ()
+            (let-values ([(client peer) (socket-accept listener)])
+              (let ([input (open-socket-input-port client)]
+                    [output (open-socket-output-port client)])
+                (read-crlf-line input)
+                (let loop ()
+                  (unless (string=? (read-crlf-line input) "")
+                    (loop)))
+                (put-bytevector
+                 output
+                 (string->utf8
+                  "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n"))
+                (flush-output-port output)
+                (close-port input)
+                (close-port output))
+              (close-socket client)
+              (close-socket listener)))))))))
+
 (define await-http-nonblocking
   (lambda (thunk)
     (net-operation-wait (thunk))))
@@ -304,6 +411,65 @@
                (and (= (http-response-status resp) 200)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
 
+(mat net-https-connect-proxy
+     ;; HTTPS requests through an HTTP proxy must establish CONNECT before TLS.
+     (let ()
+       (write-test-san-cert-files)
+       (let ([server-ctx (make-test-http-verified-server-context)]
+             [client-ctx (make-test-http-verified-client-context)])
+       (let-values ([(server origin-port origin-th)
+                     (start-http-connection-server
+                      (lambda (conn)
+                        (let ([req (http-read-request conn)])
+                          (http-write-response
+                           conn
+                           (make-http-response
+                            200
+                            "OK"
+                            '(("Content-Type" . "text/plain"))
+                            "proxied-secure"))))
+                      server-ctx)])
+         (let-values ([(proxy-port proxy-th)
+                       (start-http-connect-proxy origin-port)])
+           (let ([client (http-open client-ctx)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (http-client-proxy-set!
+                client
+                (make-http-proxy (format "http://127.0.0.1:~a" proxy-port)))
+               (let ([resp (http-get client
+                                     (format "https://localhost:~a/secure"
+                                             origin-port))])
+                 (and (= (http-response-status resp) 200)
+                      (equal? (utf8->string (http-response-body resp))
+                              "proxied-secure"))))
+             (lambda ()
+               (http-close client)
+               (http-server-close server)
+               (thread-join origin-th)
+               (thread-join proxy-th)
+                 (close-tls-context client-ctx)
+                 (close-tls-context server-ctx)))))))))
+
+(mat net-https-connect-proxy-rejection
+     ;; Error case: an HTTPS request must fail when the proxy rejects CONNECT.
+     (let-values ([(proxy-port proxy-th) (start-http-connect-reject-proxy)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           (lambda ()
+             (http-client-proxy-set!
+              client
+              (make-http-proxy (format "http://127.0.0.1:~a" proxy-port))))
+           (lambda ()
+             (http-error-message-contains?
+              "HTTP proxy CONNECT failed"
+              (lambda ()
+                (http-get client "https://localhost:443/rejected"))))
+           (lambda ()
+             (http-close client)
+             (thread-join proxy-th))))))
+
 (mat net-https-verification
      ;; Verified HTTPS succeeds when the local test certificate is trusted and
      ;; the URI address matches the certificate IP subjectAltName.
@@ -467,6 +633,198 @@
            (lambda ()
              (http-close client)
              (thread-join th))))))
+
+(mat net-http-proxy-and-multipart
+     (let-values ([(port thread request-line) (start-http-proxy-fixture)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           (lambda ()
+             (http-client-proxy-set!
+              client (make-http-proxy (format "http://127.0.0.1:~a" port))))
+           (lambda ()
+             (let ([response (http-get client "http://example.invalid/data?q=1")])
+               (thread-join thread)
+               (and (equal? (utf8->string (http-response-body response)) "proxied")
+                    (equal? (request-line)
+                            "GET http://example.invalid/data?q=1 HTTP/1.1"))))
+           (lambda () (http-close client)))))
+
+     (let ([maximum-requested 0]
+           [sent? #f]
+           [received #f]
+           [received-type #f])
+       (let ([file-source
+              (make-http-body-source
+               (lambda (maximum-bytes)
+                 (set! maximum-requested (max maximum-requested maximum-bytes))
+                 (if sent?
+                     (eof-object)
+                     (begin
+                       (set! sent? #t)
+                       (string->utf8 "streamed-file"))))
+               13)])
+         (let-values ([(body content-type)
+                       (make-http-multipart-body
+                        (list (make-http-multipart-part "field" "value")
+                              (make-http-multipart-part
+                               "upload" file-source "payload.txt" "text/plain")))])
+           (let-values ([(server port thread)
+                         (start-http-connection-server
+                          (lambda (connection)
+                            (let ([request (http-read-request connection)])
+                              (set! received (utf8->string (http-request-body request)))
+                              (set! received-type
+                                    (http-header-ref (http-request-headers request)
+                                                     "Content-Type" #f))
+                              (http-write-response
+                               connection (make-http-response 200 "OK" '() "ok")))))])
+             (let ([client (http-open)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (let ([response
+                          (http-post
+                           client
+                           (format "http://127.0.0.1:~a/multipart" port)
+                           `(("Content-Type" . ,content-type))
+                           body)])
+                     (thread-join thread)
+                     (and (= (http-response-status response) 200)
+                          (<= maximum-requested 65536)
+                          (equal? received-type content-type)
+                          (string-contains? received "name=\"field\"")
+                          (string-contains? received "value")
+                          (string-contains? received "filename=\"payload.txt\"")
+                          (string-contains? received "streamed-file"))))
+                 (lambda ()
+                   (http-close client)
+                   (http-server-close server)))))))))
+
+(define http-compression-roundtrip
+  (lambda (encoding payload stream-to-file?)
+    (let ([compressed #f])
+      (let-values ([(server port thread)
+                    (start-http-connection-server
+                     (lambda (connection)
+                       (let ([request (http-read-request connection)])
+                         (set! compressed (http-request-body request))
+                         (http-write-response
+                          connection (make-http-response 200 "OK" '() "captured")))))])
+        (let ([client (http-open)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (http-post client
+                         (format "http://127.0.0.1:~a/compress" port)
+                         `(("Content-Encoding" . ,encoding))
+                         payload)
+              (thread-join thread))
+            (lambda ()
+              (http-close client)
+              (http-server-close server)))))
+      (let-values ([(port thread)
+                    (start-raw-http-response-server
+                     (let-values ([(port get) (open-bytevector-output-port)])
+                       (put-bytevector
+                        port
+                        (string->utf8
+                         (format
+                          "HTTP/1.1 200 OK\r\nContent-Encoding: ~a\r\nContent-Length: ~a\r\nConnection: close\r\n\r\n"
+                          encoding (bytevector-length compressed))))
+                       (put-bytevector port compressed)
+                       (get)))])
+        (if stream-to-file?
+            (let ([path (format "/tmp/chezpp-http-~a-output.bin" encoding)])
+              (dynamic-wind
+                void
+                (lambda ()
+                  (let ([response
+                         (http-download
+                          (format "http://127.0.0.1:~a/decompress" port) path)])
+                    (thread-join thread)
+                    (and (not (http-response-body response))
+                         (not (http-header-ref (http-response-headers response)
+                                               "Content-Encoding" #f))
+                         (equal? (read-u8vec path) payload))))
+                (lambda ()
+                  (when (file-exists? path) (delete-file path)))))
+            (let ([response
+                   (http-get (format "http://127.0.0.1:~a/decompress" port))])
+              (thread-join thread)
+              (and (not (http-header-ref (http-response-headers response)
+                                         "Content-Encoding" #f))
+                   (equal? (http-response-body response) payload))))))))
+
+(define http-compress-payload
+  (lambda (encoding payload)
+    (let ([compressed #f])
+      (let-values ([(server port thread)
+                    (start-http-connection-server
+                     (lambda (connection)
+                       (let ([request (http-read-request connection)])
+                         (set! compressed (http-request-body request))
+                         (http-write-response
+                          connection (make-http-response 200 "OK" '() "captured")))))])
+        (let ([client (http-open)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (http-post client
+                         (format "http://127.0.0.1:~a/compress" port)
+                         `(("Content-Encoding" . ,encoding))
+                         payload)
+              (thread-join thread)
+              compressed)
+            (lambda ()
+              (http-close client)
+              (http-server-close server))))))))
+
+(define start-compressed-response-server
+  (lambda (encoding compressed)
+    (start-raw-http-response-server
+     (let-values ([(port get) (open-bytevector-output-port)])
+       (put-bytevector
+        port
+        (string->utf8
+         (format
+          "HTTP/1.1 200 OK\r\nContent-Encoding: ~a\r\nContent-Length: ~a\r\nConnection: close\r\n\r\n"
+          encoding (bytevector-length compressed))))
+       (put-bytevector port compressed)
+       (get)))))
+
+(mat net-http-compression
+     (let ([payload (make-bytevector 8192 0)])
+       (do ([index 0 (+ index 1)])
+           ((= index (bytevector-length payload)))
+         (bytevector-u8-set! payload index (mod index 251)))
+       (and (http-compression-roundtrip "gzip" payload #f)
+            (http-compression-roundtrip "gzip" payload #t)
+            (http-compression-roundtrip "deflate" payload #f))))
+
+(mat net-http-compression-errors
+     ;; Error case: malformed bytes advertised as gzip must fail decompression.
+     (let-values ([(port thread)
+                   (start-compressed-response-server "gzip" #vu8(1 2 3 4 5))])
+       (let ([failed?
+              (http-error-message-contains?
+               "header"
+               (lambda ()
+                 (http-get (format "http://127.0.0.1:~a/malformed" port))))])
+         (thread-join thread)
+         failed?))
+
+     ;; Error case: a response expanding beyond the configured ratio must fail.
+     (let* ([payload (make-bytevector (* 1024 1024) 0)]
+            [compressed (http-compress-payload "gzip" payload)])
+       (let-values ([(port thread)
+                     (start-compressed-response-server "gzip" compressed)])
+         (let ([failed?
+                (http-error-message-contains?
+                 "ratio limit"
+                 (lambda ()
+                   (http-get (format "http://127.0.0.1:~a/ratio" port))))])
+           (thread-join thread)
+           failed?))))
 
 (mat net-http-chunked-request
      (let-values ([(server port th)
