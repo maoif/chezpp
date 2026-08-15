@@ -15,6 +15,11 @@ typedef nghttp2_info *(*nghttp2_version_fn)(int);
 static const char *const required_symbols[] = {
     "nghttp2_session_callbacks_new", "nghttp2_session_callbacks_del",
     "nghttp2_session_client_new", "nghttp2_session_server_new",
+    "nghttp2_session_set_user_data",
+    "nghttp2_session_callbacks_set_on_header_callback",
+    "nghttp2_session_callbacks_set_on_data_chunk_recv_callback",
+    "nghttp2_session_callbacks_set_on_frame_recv_callback",
+    "nghttp2_session_callbacks_set_on_stream_close_callback",
     "nghttp2_session_del", "nghttp2_submit_request", "nghttp2_submit_response",
     "nghttp2_submit_rst_stream", "nghttp2_submit_goaway",
     "nghttp2_session_mem_recv", "nghttp2_session_mem_send",
@@ -60,4 +65,11 @@ int chezpp_nghttp2_require(void) {
 const chezpp_optional_library *chezpp_nghttp2_library(void) {
   (void)chezpp_nghttp2_require();
   return &nghttp2_library;
+}
+
+void *chezpp_nghttp2_symbol(const char *name) {
+  void *symbol = NULL;
+  if (name == NULL || !chezpp_nghttp2_require()) return NULL;
+  if (!chezpp_optional_library_symbol(&nghttp2_library, name, &symbol)) return NULL;
+  return symbol;
 }

@@ -4,6 +4,18 @@
           ffi-zlib-stream-open
           ffi-zlib-stream-process
           ffi-zlib-stream-close
+          ffi-net-http2-open
+          ffi-net-http2-close
+          ffi-net-http2-submit-request
+          ffi-net-http2-submit-response
+          ffi-net-http2-mem-send
+          ffi-net-http2-mem-recv
+          ffi-net-http2-next-event
+          ffi-net-http2-consume
+          ffi-net-http2-rst
+          ffi-net-http2-goaway
+          ffi-net-http2-want-read
+          ffi-net-http2-want-write
           net-af-inet6
           net-af-unix
           net-pollin
@@ -202,6 +214,33 @@
                        (uptr scheme-object int int int int) scheme-object))
   (define ffi-zlib-stream-close
     (foreign-procedure "chezpp_zlib_stream_close" (uptr) void))
+  (define ffi-net-http2-open
+    (foreign-procedure "chezpp_net_http2_open" (int) scheme-object))
+  (define ffi-net-http2-close
+    (foreign-procedure "chezpp_net_http2_close" (uptr) scheme-object))
+  (define ffi-net-http2-submit-request
+    (foreign-procedure "chezpp_net_http2_submit_request" (uptr scheme-object scheme-object)
+                       scheme-object))
+  (define ffi-net-http2-submit-response
+    (foreign-procedure "chezpp_net_http2_submit_response"
+                       (uptr int scheme-object scheme-object) scheme-object))
+  (define ffi-net-http2-mem-send
+    (foreign-procedure "chezpp_net_http2_mem_send" (uptr) scheme-object))
+  (define ffi-net-http2-mem-recv
+    (foreign-procedure "chezpp_net_http2_mem_recv"
+                       (uptr scheme-object int int) scheme-object))
+  (define ffi-net-http2-next-event
+    (foreign-procedure "chezpp_net_http2_next_event" (uptr) scheme-object))
+  (define ffi-net-http2-consume
+    (foreign-procedure "chezpp_net_http2_consume" (uptr int int) scheme-object))
+  (define ffi-net-http2-rst
+    (foreign-procedure "chezpp_net_http2_rst" (uptr int int) scheme-object))
+  (define ffi-net-http2-goaway
+    (foreign-procedure "chezpp_net_http2_goaway" (uptr int int) scheme-object))
+  (define ffi-net-http2-want-read
+    (foreign-procedure "chezpp_net_http2_want_read" (uptr) scheme-object))
+  (define ffi-net-http2-want-write
+    (foreign-procedure "chezpp_net_http2_want_write" (uptr) scheme-object))
 
   (define net-af-inet (foreign-procedure "chezpp_net_af_inet" () int))
   (define net-af-inet6 (foreign-procedure "chezpp_net_af_inet6" () int))

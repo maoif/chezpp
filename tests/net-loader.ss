@@ -28,3 +28,25 @@
      (check-unavailable 'grpc "grpc")
      (check-unavailable 'zlib "zlib")
      (check-unavailable 'nghttp2 "nghttp2"))
+
+(mat net-http2-session-adapter
+     ;; The dynamically loaded adapter must exchange the client preface and settings.
+     (let ([client (http2-open 'client)]
+           [server (http2-open 'server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let drain-client ([bytes (http2-send client)])
+             (if (not bytes)
+                 (let drain-server ([settings (http2-send server)])
+                   (if (not settings)
+                       #t
+                       (and (= (http2-receive client settings 0 (bytevector-length settings))
+                               (bytevector-length settings))
+                            (drain-server (http2-send server)))))
+                 (and (= (http2-receive server bytes 0 (bytevector-length bytes))
+                         (bytevector-length bytes))
+                      (drain-client (http2-send client))))))
+         (lambda ()
+           (http2-close client)
+           (http2-close server)))))

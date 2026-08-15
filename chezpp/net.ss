@@ -17,6 +17,7 @@
                   (chezpp net grpc reflection)
                   (chezpp net websocket)
                   (chezpp net http)
+                  (chezpp net http2)
                   (chezpp net poll)
                   (chezpp net address)
                   (chezpp net dns)
