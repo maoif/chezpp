@@ -23,7 +23,7 @@ The `optional-library-info` record describes one supported native optional depen
             (immutable error optional-library-error)))
 
   (define supported-optional-libraries
-    '(openssl xxhash blake3 curl ssh websockets grpc zlib nghttp2 cares))
+    '(openssl xxhash blake3 curl ssh websockets grpc zlib nghttp2 cares idn2))
 
   #|proc:optional-library-info
 The `optional-library-info` procedure probes the supported native library named by `name`.

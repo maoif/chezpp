@@ -28,7 +28,8 @@
      (check-unavailable 'grpc "grpc")
      (check-unavailable 'zlib "zlib")
      (check-unavailable 'nghttp2 "nghttp2")
-     (check-unavailable 'cares "c-ares"))
+     (check-unavailable 'cares "c-ares")
+     (check-unavailable 'idn2 "libidn2"))
 
 (mat net-http2-session-adapter
      ;; The dynamically loaded adapter must exchange the client preface and settings.

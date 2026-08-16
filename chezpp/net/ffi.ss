@@ -59,6 +59,8 @@
           ffi-net-dns-advance
           ffi-net-dns-cancel
           ffi-net-dns-close
+          ffi-net-idna->ascii
+          ffi-net-idna->unicode
           ffi-net-address->name
           ffi-net-ftp-list
           ffi-net-ftp-stat
@@ -327,6 +329,10 @@
     (foreign-procedure "chezpp_net_dns_cancel" (uptr) scheme-object))
   (define ffi-net-dns-close
     (foreign-procedure "chezpp_net_dns_close" (uptr) void))
+  (define ffi-net-idna->ascii
+    (foreign-procedure "chezpp_net_idna_to_ascii" (string) scheme-object))
+  (define ffi-net-idna->unicode
+    (foreign-procedure "chezpp_net_idna_to_unicode" (string) scheme-object))
   (define ffi-net-address->name
     (foreign-procedure "chezpp_net_address_to_name" (int string int string) scheme-object))
   (define ffi-net-ftp-list

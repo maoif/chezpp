@@ -29,10 +29,16 @@
           uri-encode
           uri-decode
           form-urlencode
-          form-urldecode)
+          form-urldecode
+          idna->ascii
+          idna->unicode
+          idna-domain->ascii
+          idna-domain->unicode)
   (import (chezpp chez)
           (chezpp utils)
-          (chezpp string))
+          (chezpp string)
+          (chezpp net ffi)
+          (chezpp net errors))
 
   (define-record-type (uri %make-uri/raw uri?)
     (sealed #t)
@@ -539,6 +545,56 @@ The `uri-decode` procedure decodes percent escapes in a URI component string.
     (lambda (str)
       (pcheck ([string? str])
               (percent-decode who str #f))))
+
+  (define idna-convert
+    (lambda (who domain convert)
+      (define control-character?
+        (lambda (character)
+          (let ([codepoint (char->integer character)])
+            (or (fx< codepoint #x20)
+                (and (fx<= #x7f codepoint) (fx<= codepoint #x9f))))))
+      (when (exists control-character? (string->list domain))
+        (raise-net-error 'uri 'idna "domain contains a control character"
+                         'invalid-domain #f domain #f #f #f))
+      (let ([answer (convert domain)])
+        (if (string? answer)
+            answer
+            (if (and (vector? answer) (fx= (vector-length answer) 2)
+                     (eq? (vector-ref answer 0) 'error)
+                     (string? (vector-ref answer 1)))
+                (raise-net-error 'uri 'idna (vector-ref answer 1)
+                                 'invalid-domain #f domain #f #f answer)
+                (raise-net-error who 'internal-ffi "malformed libidn2 result" answer))))))
+
+  #|proc:idna->ascii
+The `idna->ascii` procedure converts Unicode `domain` to lowercase IDNA ASCII form.
+The return value is an ASCII domain string; invalid labels raise a structured URI error.
+|#
+  (define-who idna->ascii
+    (lambda (domain)
+      (pcheck ([string? domain])
+        (string-downcase (idna-convert who domain ffi-net-idna->ascii)))))
+
+  #|proc:idna->unicode
+The `idna->unicode` procedure converts IDNA ASCII `domain` to normalized Unicode form.
+The return value is a Unicode domain string; invalid labels raise a structured URI error.
+|#
+  (define-who idna->unicode
+    (lambda (domain)
+      (pcheck ([string? domain])
+        (string-downcase (idna-convert who domain ffi-net-idna->unicode)))))
+
+  #|proc:idna-domain->ascii
+The `idna-domain->ascii` procedure converts Unicode `domain` to lowercase IDNA ASCII form.
+It is an alias for `idna->ascii` and returns an ASCII domain string.
+|#
+  (define idna-domain->ascii idna->ascii)
+
+  #|proc:idna-domain->unicode
+The `idna-domain->unicode` procedure converts IDNA ASCII `domain` to normalized Unicode form.
+It is an alias for `idna->unicode` and returns a Unicode domain string.
+|#
+  (define idna-domain->unicode idna->unicode)
 
   #|proc:form-urlencode
 The `form-urlencode` procedure encodes an association list into an `application/x-www-form-urlencoded` string.

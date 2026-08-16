@@ -78,3 +78,24 @@
           (string=? (cdr example)
                     (uri->string (uri-resolve base (string->uri (car example))))))
         rfc3986-resolution-examples)))
+
+(define idna-error?
+  (lambda (domain)
+    (guard (condition
+            [(net-error? condition)
+             (and (eq? 'uri (net-error-kind condition))
+                  (eq? 'idna (net-error-operation condition)))]
+            [else #f])
+      (idna->ascii domain)
+      #f)))
+
+(mat net-uri-idna
+     (string=? "xn--bcher-kva.example" (idna->ascii "bücher.example"))
+     (string=? "bücher.example" (idna->unicode "xn--bcher-kva.example"))
+     (string=? "xn--bcher-kva.example" (idna->ascii "BÜCHER.EXAMPLE"))
+
+     ;; IDNA labels may not contain control characters.
+     (idna-error? (string-append "bad" (string (integer->char 1)) ".example"))
+
+     ;; A label mixing left-to-right Latin and right-to-left Hebrew violates bidi rules.
+     (idna-error? "aא.example"))
