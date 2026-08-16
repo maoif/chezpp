@@ -134,8 +134,8 @@
 
   (define uri-path*
     (lambda (u)
-      (let ([path (uri-path u)]
-            [query (uri-query u)])
+      (let ([path (uri-raw-path u)]
+            [query (uri-raw-query u)])
         (string-append
          (if (or (not path) (string=? path "")) "/" path)
          (if query (string-append "?" query) "")))))
