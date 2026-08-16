@@ -8,6 +8,15 @@
           ip-address-loopback?
           ip-address-private?
           ip-address-multicast?
+          ip-address-unspecified?
+          ip-address-broadcast?
+          ip-address-carrier-grade-nat?
+          ip-address-benchmarking?
+          ip-address-discard-only?
+          ip-address-unique-local?
+          ip-address-site-local?
+          ip-address-reserved?
+          ip-address-multicast-scope
           ip-address-mapped-ipv4?
           ip-address-unmap-ipv4
           ip-address-link-local?
@@ -350,6 +359,99 @@ The `ip-address-multicast?` procedure returns whether an IP address is a multica
                       (and (fx<= 224 a) (fx<= a 239)))
                     (fx= (bytevector-u8-ref bv 0) #xff))))))
 
+  (define ip-in-cidr?
+    (lambda (text ip)
+      (cidr-contains? (cidr-for text) ip)))
+
+  #|proc:ip-address-unspecified?
+The `ip-address-unspecified?` procedure reports whether `ip` is the all-zero unspecified address.
+|#
+  (define-who ip-address-unspecified?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (ip-in-cidr? (if (ipv4-address? ip) "0.0.0.0/32" "::/128") ip))))
+
+  #|proc:ip-address-broadcast?
+The `ip-address-broadcast?` procedure reports whether `ip` is the IPv4 limited broadcast address.
+|#
+  (define-who ip-address-broadcast?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ipv4-address? ip) (ip-in-cidr? "255.255.255.255/32" ip)))))
+
+  #|proc:ip-address-carrier-grade-nat?
+The `ip-address-carrier-grade-nat?` procedure reports whether `ip` is in 100.64.0.0/10.
+|#
+  (define-who ip-address-carrier-grade-nat?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ipv4-address? ip) (ip-in-cidr? "100.64.0.0/10" ip)))))
+
+  #|proc:ip-address-benchmarking?
+The `ip-address-benchmarking?` procedure reports whether `ip` is in a benchmarking range.
+|#
+  (define-who ip-address-benchmarking?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (ip-in-cidr? (if (ipv4-address? ip) "198.18.0.0/15" "2001:2::/48") ip))))
+
+  #|proc:ip-address-discard-only?
+The `ip-address-discard-only?` procedure reports whether `ip` is in the IPv6 discard prefix.
+|#
+  (define-who ip-address-discard-only?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ipv6-address? ip) (ip-in-cidr? "100::/64" ip)))))
+
+  #|proc:ip-address-unique-local?
+The `ip-address-unique-local?` procedure reports whether `ip` is in fc00::/7.
+|#
+  (define-who ip-address-unique-local?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ipv6-address? ip) (ip-in-cidr? "fc00::/7" ip)))))
+
+  #|proc:ip-address-site-local?
+The `ip-address-site-local?` procedure reports whether `ip` is in the deprecated fec0::/10 range.
+|#
+  (define-who ip-address-site-local?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ipv6-address? ip) (ip-in-cidr? "fec0::/10" ip)))))
+
+  #|proc:ip-address-reserved?
+The `ip-address-reserved?` procedure reports whether `ip` is in a reserved address range.
+|#
+  (define-who ip-address-reserved?
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ipv4-address? ip) (ip-in-cidr? "240.0.0.0/4" ip)))))
+
+  #|proc:ip-address-multicast-scope
+The `ip-address-multicast-scope` procedure returns the multicast scope symbol for `ip`, or `#f`.
+IPv6 scopes follow RFC 7346; IPv4 link-local and administratively scoped ranges are recognized.
+|#
+  (define-who ip-address-multicast-scope
+    (lambda (ip)
+      (pcheck ([ip-address? ip])
+        (and (ip-address-multicast? ip)
+             (if (ipv4-address? ip)
+                 (let ([bv (ip-address-bytes ip)])
+                   (cond
+                    [(and (= (bytevector-u8-ref bv 0) 224)
+                          (< (bytevector-u8-ref bv 1) 1)) 'link-local]
+                    [(= (bytevector-u8-ref bv 0) 239) 'administrative]
+                    [else 'global]))
+                 (case (fxlogand (bytevector-u8-ref (ip-address-bytes ip) 1) #x0f)
+                   [(1) 'interface-local]
+                   [(2) 'link-local]
+                   [(3) 'realm-local]
+                   [(4) 'administrative]
+                   [(5) 'site-local]
+                   [(8) 'organization-local]
+                   [(14) 'global]
+                   [else 'reserved]))))))
+
   #|proc:ip-address-mapped-ipv4?
 The `ip-address-mapped-ipv4?` procedure reports whether `ip` is an IPv4-mapped IPv6 address.
 The return value is boolean.
@@ -479,12 +581,18 @@ The return value is the parent CIDR, or `#f` when they cannot be merged.
   (define-who cidr-merge
     (lambda (left right)
       (pcheck ([cidr? left right])
-        (and (= (cidr-prefix-length left) (cidr-prefix-length right))
+        (and (= (ip-address-version (cidr-network-address left))
+                (ip-address-version (cidr-network-address right)))
+             (= (cidr-prefix-length left) (cidr-prefix-length right))
              (> (cidr-prefix-length left) 0)
              (let ([parent-prefix (fx1- (cidr-prefix-length left))])
                (and (bytevector-prefix=?
                      (ip-address-bytes (cidr-network-address left))
                      (ip-address-bytes (cidr-network-address right)) parent-prefix)
+                    (not (bytevector-prefix=?
+                          (ip-address-bytes (cidr-network-address left))
+                          (ip-address-bytes (cidr-network-address right))
+                          (cidr-prefix-length left)))
                     (%make-cidr
                      (%make-ip-address
                       (ip-address-version (cidr-network-address left))
