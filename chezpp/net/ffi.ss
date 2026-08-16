@@ -54,10 +54,11 @@
           ffi-net-socket-get-option
           ffi-net-poll
           ffi-net-resolve-addresses
-          ffi-net-resolver-start
-          ffi-net-resolver-poll
-          ffi-net-resolver-cancel
-          ffi-net-resolver-close
+          ffi-net-service->port
+          ffi-net-dns-start
+          ffi-net-dns-advance
+          ffi-net-dns-cancel
+          ffi-net-dns-close
           ffi-net-address->name
           ffi-net-ftp-list
           ffi-net-ftp-stat
@@ -316,14 +317,16 @@
     (foreign-procedure "chezpp_net_poll" (scheme-object int) scheme-object))
   (define ffi-net-resolve-addresses
     (foreign-procedure "chezpp_net_resolve_addresses" (string int int int) scheme-object))
-  (define ffi-net-resolver-start
-    (foreign-procedure "chezpp_net_resolver_start" (string int int int) scheme-object))
-  (define ffi-net-resolver-poll
-    (foreign-procedure "chezpp_net_resolver_poll" (uptr) scheme-object))
-  (define ffi-net-resolver-cancel
-    (foreign-procedure "chezpp_net_resolver_cancel" (uptr) scheme-object))
-  (define ffi-net-resolver-close
-    (foreign-procedure "chezpp_net_resolver_close" (uptr) void))
+  (define ffi-net-service->port
+    (foreign-procedure "chezpp_net_service_to_port" (string int) scheme-object))
+  (define ffi-net-dns-start
+    (foreign-procedure "chezpp_net_dns_start" (string int int) uptr))
+  (define ffi-net-dns-advance
+    (foreign-procedure "chezpp_net_dns_advance" (uptr) scheme-object))
+  (define ffi-net-dns-cancel
+    (foreign-procedure "chezpp_net_dns_cancel" (uptr) scheme-object))
+  (define ffi-net-dns-close
+    (foreign-procedure "chezpp_net_dns_close" (uptr) void))
   (define ffi-net-address->name
     (foreign-procedure "chezpp_net_address_to_name" (int string int string) scheme-object))
   (define ffi-net-ftp-list

@@ -77,6 +77,7 @@
           (chezpp net uri)
           (chezpp net errors)
           (chezpp net address)
+          (chezpp net dns)
           (chezpp net socket)
           (chezpp net poll)
           (chezpp net operation)
@@ -633,8 +634,7 @@
                   [deadline-ms
                    (timeout->deadline-ms (http-client-timeout-ms client))]
                   [phase 'resolve]
-                  [resolver-handle #f]
-                  [resolver-fd #f]
+                  [resolver-operation #f]
                   [sock #f]
                   [tls-session #f]
                   [connection #f]
@@ -667,10 +667,10 @@
                   (let ([source (http-request-body current-request)])
                     (when (http-body-source? source)
                       (close-http-body-source! source)))
-                  (when resolver-handle
-                    (ffi-net-resolver-close resolver-handle)
-                    (set! resolver-handle #f)
-                    (set! resolver-fd #f))
+                  (when resolver-operation
+                    (when (eq? 'pending (net-operation-state resolver-operation))
+                      (net-operation-cancel! resolver-operation))
+                    (set! resolver-operation #f))
                   (when owned?
                     (cond
                      [connection (close-http-connection connection)]
@@ -712,8 +712,7 @@
                   (set! owned? #t)
                   (set! current-request next-request)
                   (set! phase 'resolve)
-                  (set! resolver-handle #f)
-                  (set! resolver-fd #f)
+                  (set! resolver-operation #f)
                   (set! connect-operation #f)
                   (set! tls-operation #f)
                   (set! proxy-connect-head (make-bytevector 0 0))
@@ -953,44 +952,59 @@
                              (prepare-request-body!)
                              (set! phase 'write-head)
                              (yield-update))
-                           (if (not resolver-handle)
+                           (if (not resolver-operation)
                                (let* ([target-uri (http-request-uri current-request)]
                                       [u (if (http-client-proxy client)
                                              (http-proxy-uri (http-client-proxy client))
                                              target-uri)]
                                       [host (or (uri-host u) "localhost")]
                                       [port (default-port-for-uri who u)]
-                                      [started
-                                       (ffi-net-resolver-start
-                                        host port 0 (net-sock-stream))])
-                                 (when (ffi-error? started)
-                                   (raise-net-error who 'http
-                                                    "failed to start HTTP resolver" started))
-                                 (set! resolver-handle (vector-ref started 0))
-                                 (set! resolver-fd (vector-ref started 1))
-                                 (pending-update resolver-fd '(read error hup invalid)))
-                               (let ([resolved (ffi-net-resolver-poll resolver-handle)])
-                                 (cond
-                                  [(not resolved)
-                                   (pending-update resolver-fd '(read error hup invalid))]
-                                  [(ffi-error? resolved)
-                                   (raise-net-error who 'http
-                                                    "failed to resolve HTTP endpoint" resolved)]
-                                  [else
-                                   (let ([address (%socket-address-from-ffi resolved)])
-                                     (ffi-net-resolver-close resolver-handle)
-                                     (set! resolver-handle #f)
-                                     (set! resolver-fd #f)
-                                     (set! sock
-                                           (open-socket
-                                            (socket-address-family address) 'stream))
-                                     (socket-set-blocking! sock #f)
-                                     (set! connect-operation
-                                           (socket-connect/nonblocking
-                                            sock address
-                                            (remaining-timeout-ms deadline-ms)))
-                                     (set! phase 'connect)
-                                     (yield-update))])))))]
+                                      [timeout-ms (remaining-timeout-ms deadline-ms)])
+                                 (set! resolver-operation
+                                       (dns-resolve/nonblocking
+                                        host
+                                        (make-dns-options 'unspecified 'address
+                                                          timeout-ms #t)))
+                                 (advance #f))
+                               (begin
+                                 (net-operation-step! resolver-operation)
+                                 (case (net-operation-state resolver-operation)
+                                   [(pending)
+                                    (net-operation-pending
+                                     (net-operation-poll-targets resolver-operation)
+                                     deadline-ms)]
+                                   [(failed)
+                                    (raise (net-operation-condition resolver-operation))]
+                                   [(completed)
+                                    (let* ([result (net-operation-result resolver-operation)]
+                                           [resolved (dns-result-addresses result)])
+                                      (when (null? resolved)
+                                        (raise-net-error who 'http
+                                                         "HTTP resolver returned no addresses"
+                                                         result))
+                                      (let* ([resolved (car resolved)]
+                                             [address
+                                              (make-socket-address
+                                               (socket-address-family resolved)
+                                               (socket-address-host resolved)
+                                               (default-port-for-uri
+                                                who
+                                                (if (http-client-proxy client)
+                                                    (http-proxy-uri
+                                                     (http-client-proxy client))
+                                                    (http-request-uri current-request))))])
+                                        (set! resolver-operation #f)
+                                        (set! sock
+                                              (open-socket
+                                               (socket-address-family address) 'stream))
+                                        (socket-set-blocking! sock #f)
+                                        (set! connect-operation
+                                              (socket-connect/nonblocking
+                                               sock address
+                                               (remaining-timeout-ms deadline-ms)))
+                                        (set! phase 'connect)
+                                        (advance #f)))]
+                                   [else (assert-unreachable)])))))]
                     [(connect)
                      (net-operation-step! connect-operation)
                      (case (net-operation-state connect-operation)

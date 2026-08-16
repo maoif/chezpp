@@ -18,6 +18,12 @@
           dns-result?
           dns-result-addresses
           dns-result-canonname
+          dns-result-query-name
+          dns-result-aliases
+          dns-result-record-type
+          dns-result-ttls
+          dns-result-status
+          dns-result-partial-errors
           %make-socket-address
           %make-dns-result
           %socket-address-from-ffi
@@ -59,8 +65,14 @@
   (define-record-type (dns-result %make-dns-result dns-result?)
     (sealed #t)
     (opaque #f)
-    (fields (immutable addresses dns-result-addresses)
-            (immutable canonname dns-result-canonname)))
+    (fields (immutable query-name dns-result-query-name)
+            (immutable canonname dns-result-canonname)
+            (immutable addresses dns-result-addresses)
+            (immutable aliases dns-result-aliases)
+            (immutable record-type dns-result-record-type)
+            (immutable ttls dns-result-ttls)
+            (immutable status dns-result-status)
+            (immutable partial-errors dns-result-partial-errors)))
 
   (define raise-malformed-ffi
     (lambda (who expected value)
@@ -165,8 +177,10 @@
                    (list? (vector-ref value 1)))
         (raise-malformed-ffi '%dns-result-from-ffi
                              "#(canonical-name-or-#f socket-address-list)" value))
-      (%make-dns-result (map %socket-address-from-ffi (vector-ref value 1))
-                        (vector-ref value 0))))
+      (%make-dns-result #f
+                        (vector-ref value 0)
+                        (map %socket-address-from-ffi (vector-ref value 1))
+                        '() 'address '() 'success '())))
 
   (define family-symbol->int
     (lambda (who family)

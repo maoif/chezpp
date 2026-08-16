@@ -27,7 +27,8 @@
      (check-unavailable 'websockets "websockets")
      (check-unavailable 'grpc "grpc")
      (check-unavailable 'zlib "zlib")
-     (check-unavailable 'nghttp2 "nghttp2"))
+     (check-unavailable 'nghttp2 "nghttp2")
+     (check-unavailable 'cares "c-ares"))
 
 (mat net-http2-session-adapter
      ;; The dynamically loaded adapter must exchange the client preface and settings.

@@ -46,7 +46,6 @@
           (chezpp net errors)
           (chezpp net ffi)
           (chezpp net private)
-          (chezpp net address)
           (chezpp net poll)
           (chezpp net operation))
 
