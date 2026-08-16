@@ -1,4 +1,14 @@
-(import (chezpp))
+(import (chezpp)
+        (chezpp net private))
+
+(define internal-ffi-error?
+  (lambda (thunk)
+    (guard (condition
+            [(net-error? condition)
+             (eq? 'internal-ffi (net-error-kind condition))]
+            [else #f])
+      (thunk)
+      #f)))
 
 (mat net-error-fields
      (let* ([cause (condition (make-message-condition "inner"))]
@@ -29,3 +39,19 @@
           (lambda () (error "ordinary"))
           (lambda (error) (set! handled? #t)))
          #f)))
+
+(mat net-private-ffi-validation
+     ;; An error vector must carry an owned Scheme string message.
+     (internal-ffi-error? (lambda () (ffi-error? '#(error 5))))
+
+     ;; A direction-specific blocking result must contain its matching event.
+     (internal-ffi-error?
+      (lambda () (ffi-would-block-events '#(would-block-read write))))
+
+     ;; A socket-address vector must have all four fields with the documented types.
+     (internal-ffi-error?
+      (lambda () (%socket-address-from-ffi '#(inet "127.0.0.1" "80" #f))))
+
+     ;; A DNS vector must contain a proper list of socket-address vectors.
+     (internal-ffi-error?
+      (lambda () (%dns-result-from-ffi '#(#f not-a-list)))))

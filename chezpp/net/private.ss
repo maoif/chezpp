@@ -35,7 +35,8 @@
           ffi-error-message)
   (import (chezpp chez)
           (chezpp utils)
-          (chezpp net ffi))
+          (chezpp net ffi)
+          (chezpp net errors))
 
   (define-record-type (socket %make-socket socket?)
     (sealed #t)
@@ -61,29 +62,44 @@
     (fields (immutable addresses dns-result-addresses)
             (immutable canonname dns-result-canonname)))
 
-  (define ffi-error?
-    (lambda (x)
-      (and (vector? x)
-           (= (vector-length x) 2)
-           (eq? (vector-ref x 0) 'error))))
+  (define raise-malformed-ffi
+    (lambda (who expected value)
+      (raise-net-error who 'internal-ffi
+                       (format "malformed native result; expected ~a" expected)
+                       value)))
 
+  ;; Error result: #(error message), where message is an owned Scheme string.
+  (define ffi-error?
+    (lambda (value)
+      (and (vector? value)
+           (fx> (vector-length value) 0)
+           (eq? (vector-ref value 0) 'error)
+           (if (and (fx= (vector-length value) 2)
+                    (string? (vector-ref value 1)))
+               #t
+               (raise-malformed-ffi 'ffi-error? "#(error string)" value)))))
+
+  ;; Blocking result: #(tag events). The tag names a blocking direction. For the generic tag,
+  ;; events is an event symbol or a nonempty list of event symbols. All values are Scheme-owned.
   (define ffi-would-block?
-    (lambda (x)
-      (and (vector? x)
-           (= (vector-length x) 2)
-           (memq (vector-ref x 0) '(would-block would-block-read would-block-write)))))
+    (lambda (value)
+      (and (vector? value)
+           (fx> (vector-length value) 0)
+           (memq (vector-ref value 0) '(would-block would-block-read would-block-write))
+           (begin
+             (unless (fx= (vector-length value) 2)
+               (raise-malformed-ffi 'ffi-would-block? "#(would-block-tag events)" value))
+             #t))))
 
   (define ffi-would-block-read?
-    (lambda (x)
-      (and (vector? x)
-           (= (vector-length x) 2)
-           (eq? (vector-ref x 0) 'would-block-read))))
+    (lambda (value)
+      (and (ffi-would-block? value)
+           (eq? (vector-ref value 0) 'would-block-read))))
 
   (define ffi-would-block-write?
-    (lambda (x)
-      (and (vector? x)
-           (= (vector-length x) 2)
-           (eq? (vector-ref x 0) 'would-block-write))))
+    (lambda (value)
+      (and (ffi-would-block? value)
+           (eq? (vector-ref value 0) 'would-block-write))))
 
   (define ffi-would-block-event
     (lambda (answer)
@@ -91,30 +107,66 @@
 
   (define ffi-would-block-events
     (lambda (answer)
+      (unless (and (vector? answer) (fx= (vector-length answer) 2))
+        (raise-malformed-ffi 'ffi-would-block-events "#(would-block-tag events)" answer))
       (case (vector-ref answer 0)
-        [(would-block-read) '(read)]
-        [(would-block-write) '(write)]
+        [(would-block-read)
+         (unless (memq (vector-ref answer 1) '(#f read))
+           (raise-malformed-ffi 'ffi-would-block-events
+                                "#(would-block-read #f-or-read)" answer))
+         '(read)]
+        [(would-block-write)
+         (unless (memq (vector-ref answer 1) '(#f write))
+           (raise-malformed-ffi 'ffi-would-block-events
+                                "#(would-block-write #f-or-write)" answer))
+         '(write)]
         [(would-block)
          (let ([event* (vector-ref answer 1)])
-           (if (pair? event*) event* (list event*)))]
-        [else (assert-unreachable)])))
+           (let ([events (if (pair? event*) event* (list event*))])
+             (unless (and (pair? events)
+                          (andmap (lambda (event) (memq event '(read write))) events))
+               (raise-malformed-ffi 'ffi-would-block-events
+                                    "#(would-block read-or-write-events)" answer))
+             events))]
+        [else
+         (raise-malformed-ffi 'ffi-would-block-events "#(would-block-tag events)" answer)])))
 
   (define ffi-error-message
-    (lambda (x)
-      (and (ffi-error? x)
-           (vector-ref x 1))))
+    (lambda (value)
+      (and (ffi-error? value)
+           (vector-ref value 1))))
 
+  ;; Socket address result: #(family host port path). Family is inet, inet6, or unix. Host and
+  ;; path are strings or #f; port is an integer in [0, 65535] or #f. Strings are Scheme-owned.
   (define %socket-address-from-ffi
-    (lambda (v)
-      (%make-socket-address (vector-ref v 0)
-                            (vector-ref v 1)
-                            (vector-ref v 2)
-                            (vector-ref v 3))))
+    (lambda (value)
+      (unless (and (vector? value)
+                   (fx= (vector-length value) 4)
+                   (memq (vector-ref value 0) '(inet inet6 unix))
+                   (or (string? (vector-ref value 1)) (not (vector-ref value 1)))
+                   (or (and (fixnum? (vector-ref value 2))
+                            (fx<= 0 (vector-ref value 2) 65535))
+                       (not (vector-ref value 2)))
+                   (or (string? (vector-ref value 3)) (not (vector-ref value 3))))
+        (raise-malformed-ffi '%socket-address-from-ffi
+                             "#(family host-or-#f port-or-#f path-or-#f)" value))
+      (%make-socket-address (vector-ref value 0)
+                            (vector-ref value 1)
+                            (vector-ref value 2)
+                            (vector-ref value 3))))
 
+  ;; DNS result: #(canonical-name addresses). Canonical-name is a string or #f and addresses is a
+  ;; proper list of socket address vectors. The list and all nested vectors are Scheme-owned.
   (define %dns-result-from-ffi
-    (lambda (v)
-      (%make-dns-result (map %socket-address-from-ffi (vector-ref v 1))
-                        (vector-ref v 0))))
+    (lambda (value)
+      (unless (and (vector? value)
+                   (fx= (vector-length value) 2)
+                   (or (string? (vector-ref value 0)) (not (vector-ref value 0)))
+                   (list? (vector-ref value 1)))
+        (raise-malformed-ffi '%dns-result-from-ffi
+                             "#(canonical-name-or-#f socket-address-list)" value))
+      (%make-dns-result (map %socket-address-from-ffi (vector-ref value 1))
+                        (vector-ref value 0))))
 
   (define family-symbol->int
     (lambda (who family)
