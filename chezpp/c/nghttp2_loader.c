@@ -14,7 +14,9 @@ typedef nghttp2_info *(*nghttp2_version_fn)(int);
 
 static const char *const required_symbols[] = {
     "nghttp2_session_callbacks_new", "nghttp2_session_callbacks_del",
-    "nghttp2_session_client_new", "nghttp2_session_server_new",
+    "nghttp2_session_client_new2", "nghttp2_session_server_new2",
+    "nghttp2_option_new", "nghttp2_option_del",
+    "nghttp2_option_set_no_auto_window_update",
     "nghttp2_session_set_user_data",
     "nghttp2_session_callbacks_set_on_header_callback",
     "nghttp2_session_callbacks_set_on_data_chunk_recv_callback",

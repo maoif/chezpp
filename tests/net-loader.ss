@@ -96,3 +96,48 @@
          (lambda ()
            (http2-close client)
            (http2-close server)))))
+
+(mat net-http2-goaway
+     ;; GOAWAY rejects later streams while allowing an eligible submitted stream to finish.
+     (let ([client (http2-open 'client)]
+           [server (http2-open 'server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (exchange-http2! client server)
+           (exchange-http2! server client)
+           (let ([stream-id
+                  (http2-submit-request
+                   client "GET" "https" "example.test" "/before-goaway" '() #vu8())])
+             (exchange-http2! client server)
+             (http2-goaway! server stream-id 0)
+             (http2-submit-response server stream-id 200 '() (string->utf8 "complete"))
+             (exchange-http2! server client)
+             (let loop ([event (http2-next-event client)]
+                        [saw-goaway? #f]
+                        [saw-status? #f])
+               (if event
+                   (loop
+                    (http2-next-event client)
+                    (or saw-goaway?
+                        (and (= 5 (vector-ref event 0))
+                             (= stream-id (vector-ref event 1))))
+                    (or saw-status?
+                        (and (= 1 (vector-ref event 0))
+                             (= stream-id (vector-ref event 1))
+                             (string=? ":status"
+                                       (vector-ref (vector-ref event 3) 0))
+                             (string=? "200"
+                                       (vector-ref (vector-ref event 3) 1)))))
+                   (and saw-goaway?
+                        saw-status?
+                        ;; Error case: nghttp2 must reject a stream submitted after GOAWAY.
+                        (guard (condition
+                                [(net-error? condition) #t]
+                                [else #f])
+                          (http2-submit-request
+                           client "GET" "https" "example.test" "/too-late" '() #vu8())
+                          #f))))))
+         (lambda ()
+           (http2-close client)
+           (http2-close server)))))

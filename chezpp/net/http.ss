@@ -84,6 +84,7 @@
           (chezpp net ffi)
           (chezpp net private)
           (chezpp net tls)
+          (chezpp net http2)
           (chezpp optional-library))
 
   ;;===----------------------------------------------------------------------===
@@ -188,8 +189,43 @@
             (mutable version http-client-version http-client-version-set-internal!)
             (mutable cached-origin http-client-cached-origin http-client-cached-origin-set!)
             (mutable cached-connection http-client-cached-connection http-client-cached-connection-set!)
+            (mutable http2-origin http-client-http2-origin http-client-http2-origin-set!)
+            (mutable http2-transport http-client-http2-transport
+                     http-client-http2-transport-set!)
             (mutable pending http-client-pending http-client-pending-set!)
             (mutable closed? http-client-closed? http-client-closed?-set!)))
+
+  (define-record-type (http2-client-transport %make-http2-client-transport
+                                               http2-client-transport?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable connection http2-client-transport-connection)
+            (immutable session http2-client-transport-session)
+            (immutable stream-table http2-client-transport-stream-table)
+            (mutable output http2-client-transport-output
+                     http2-client-transport-output-set!)
+            (mutable output-offset http2-client-transport-output-offset
+                     http2-client-transport-output-offset-set!)
+            (mutable goaway-last-stream-id http2-client-transport-goaway-last-stream-id
+                     http2-client-transport-goaway-last-stream-id-set!)
+            (mutable closed? http2-client-transport-closed?
+                     http2-client-transport-closed?-set!)))
+
+  (define-record-type (http2-client-stream %make-http2-client-stream http2-client-stream?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable id http2-client-stream-id)
+            (immutable request http2-client-stream-request)
+            (immutable finish http2-client-stream-finish)
+            (immutable sink http2-client-stream-sink)
+            (mutable status http2-client-stream-status http2-client-stream-status-set!)
+            (mutable headers http2-client-stream-headers http2-client-stream-headers-set!)
+            (mutable body-parts http2-client-stream-body-parts
+                     http2-client-stream-body-parts-set!)
+            (mutable body-length http2-client-stream-body-length
+                     http2-client-stream-body-length-set!)
+            (mutable response http2-client-stream-response http2-client-stream-response-set!)
+            (mutable failure http2-client-stream-failure http2-client-stream-failure-set!)))
 
   (define-record-type (http-server %make-http-server http-server?)
     (sealed #t)
@@ -614,10 +650,10 @@
                  (get) (http-response-trailers response) (http-response-version response))))
             response))))
 
-  (define http-transfer/nonblocking
+  (define http1-transfer/nonblocking
     (case-lambda
       [(who client kind request finish)
-       (http-transfer/nonblocking who client kind request finish #f)]
+       (http1-transfer/nonblocking who client kind request finish #f)]
       [(who client kind request finish response-sink)
       (ensure-client-open who client)
       (when (zero? (http-pool-policy-max-active (http-client-pool-policy client)))
@@ -1283,6 +1319,317 @@
                        (http-client-pending-set! client #f))))
               (http-client-pending-set! client operation)
               operation)))]))
+
+  (define http2-connection-socket
+    (lambda (transport)
+      (http-connection-socket (http2-client-transport-connection transport))))
+
+  (define http2-connection-tls-session
+    (lambda (transport)
+      (http-connection-tls-session
+       (http2-client-transport-connection transport))))
+
+  (define http2-transport-read
+    (lambda (transport)
+      (let ([tls-session (http2-connection-tls-session transport)]
+            [sock (http2-connection-socket transport)])
+        (if tls-session
+            (tls-read/nonblocking tls-session 65536)
+            (socket-recv/nonblocking sock 65536)))))
+
+  (define http2-transport-write
+    (lambda (transport bytes start)
+      (let ([tls-session (http2-connection-tls-session transport)]
+            [sock (http2-connection-socket transport)])
+        (if tls-session
+            (tls-write/nonblocking tls-session bytes start (bytevector-length bytes))
+            (socket-send/nonblocking sock bytes start (bytevector-length bytes))))))
+
+  (define append-http2-stream-body!
+    (lambda (stream bytes)
+      (let ([sink (http2-client-stream-sink stream)]
+            [count (bytevector-length bytes)])
+        (if sink
+            (http-body-sink-write! sink bytes 0 count)
+            (begin
+              (http2-client-stream-body-parts-set!
+               stream (cons bytes (http2-client-stream-body-parts stream)))
+              (http2-client-stream-body-length-set!
+               stream (fx+ (http2-client-stream-body-length stream) count)))))))
+
+  (define collect-http2-stream-body
+    (lambda (stream)
+      (let ([body (make-bytevector (http2-client-stream-body-length stream) 0)])
+        (let loop ([part* (reverse (http2-client-stream-body-parts stream))]
+                   [offset 0])
+          (if (null? part*)
+              body
+              (let* ([part (car part*)]
+                     [count (bytevector-length part)])
+                (bytevector-copy! part 0 body offset count)
+                (loop (cdr part*) (fx+ offset count))))))))
+
+  (define complete-http2-stream!
+    (lambda (client stream)
+      (unless (or (http2-client-stream-response stream)
+                  (http2-client-stream-failure stream))
+        (let ([status (http2-client-stream-status stream)])
+          (if (not status)
+              (http2-client-stream-failure-set! stream 'missing-status)
+              (let* ([sink (http2-client-stream-sink stream)]
+                     [body (if sink
+                               (begin
+                                 (http-body-sink-finish! sink)
+                                 #f)
+                               (collect-http2-stream-body stream))]
+                     [response
+                      (%make-http-response
+                       status
+                       (default-reason status)
+                       (reverse (http2-client-stream-headers stream))
+                       body '() 'h2)])
+                (store-response-cookies!
+                 client (http2-client-stream-request stream)
+                 (http-response-headers response))
+                (http2-client-stream-response-set!
+                 stream ((http2-client-stream-finish stream) response))))))))
+
+  (define process-http2-event!
+    (lambda (client transport event)
+      (let* ([type (vector-ref event 0)]
+             [stream-id (vector-ref event 1)]
+             [stream (hashtable-ref
+                      (http2-client-transport-stream-table transport)
+                      stream-id #f)])
+        (case type
+          [(1)
+           (when stream
+             (let* ([header (vector-ref event 3)]
+                    [name (vector-ref header 0)]
+                    [value (vector-ref header 1)])
+               (if (string=? name ":status")
+                   (let ([status (string->number value)])
+                     (if (and status (integer? status))
+                         (http2-client-stream-status-set! stream status)
+                         (http2-client-stream-failure-set! stream 'invalid-status)))
+                   (http2-client-stream-headers-set!
+                    stream
+                    (cons (cons name value)
+                          (http2-client-stream-headers stream))))))]
+          [(2)
+           (when stream
+             (let ([bytes (vector-ref event 3)])
+               (append-http2-stream-body! stream bytes)
+               (http2-consume! (http2-client-transport-session transport)
+                               stream-id (bytevector-length bytes))))]
+          [(4)
+           (when stream
+             (if (zero? (vector-ref event 2))
+                 (complete-http2-stream! client stream)
+                 (http2-client-stream-failure-set!
+                  stream (vector-ref event 2))))]
+          [(5)
+           (http2-client-transport-goaway-last-stream-id-set!
+            transport stream-id)]
+          [else (void)]))))
+
+  (define drain-http2-events!
+    (lambda (client transport)
+      (let loop ([event (http2-next-event
+                         (http2-client-transport-session transport))])
+        (when event
+          (process-http2-event! client transport event)
+          (loop (http2-next-event
+                 (http2-client-transport-session transport)))))))
+
+  (define fail-http2-streams!
+    (lambda (transport failure)
+      (let-values ([(key* stream*)
+                    (hashtable-entries
+                     (http2-client-transport-stream-table transport))])
+        (vector-for-each
+         (lambda (stream)
+           (unless (http2-client-stream-response stream)
+             (http2-client-stream-failure-set! stream failure)))
+         stream*))))
+
+  (define pump-http2-transport!
+    (lambda (client transport)
+      (unless (http2-client-transport-closed? transport)
+        (let write-loop ()
+          (let ([output (or (http2-client-transport-output transport)
+                            (http2-send
+                             (http2-client-transport-session transport)))])
+            (when output
+              (http2-client-transport-output-set! transport output)
+              (let ([answer
+                     (http2-transport-write
+                      transport output
+                      (http2-client-transport-output-offset transport))])
+                (unless (net-would-block? answer)
+                  (let ([next (fx+ (http2-client-transport-output-offset transport)
+                                   answer)])
+                    (if (fx= next (bytevector-length output))
+                        (begin
+                          (http2-client-transport-output-set! transport #f)
+                          (http2-client-transport-output-offset-set! transport 0)
+                          (write-loop))
+                        (http2-client-transport-output-offset-set! transport next))))))))
+        (let read-loop ([answer (http2-transport-read transport)])
+          (cond
+           [(net-would-block? answer) (void)]
+           [(eof-object? answer)
+            (fail-http2-streams! transport 'eof)
+            (close-http2-client-transport! transport)]
+           [else
+            (http2-receive (http2-client-transport-session transport)
+                           answer 0 (bytevector-length answer))
+            (read-loop (http2-transport-read transport))]))
+        (drain-http2-events! client transport))))
+
+  (define http2-request-headers
+    (lambda (request client)
+      (filter
+       (lambda (header)
+         (not (member (string-downcase (car header))
+                      '("connection" "host" "keep-alive" "proxy-connection"
+                        "transfer-encoding" "upgrade"))))
+       (merge-request-headers request client))))
+
+  (define ensure-http2-client-transport
+    (lambda (who client request deadline-ms)
+      (let* ([origin (request-origin-key request)]
+             [old (http-client-http2-transport client)])
+        (cond
+         [(and old
+               (equal? origin (http-client-http2-origin client))
+               (not (http2-client-transport-closed? old))
+               (not (http2-client-transport-goaway-last-stream-id old)))
+          old]
+         [(and old
+               (http2-client-transport-goaway-last-stream-id old)
+               (positive? (hashtable-size
+                           (http2-client-transport-stream-table old))))
+          (raise-net-error who 'http2
+                           "HTTP/2 GOAWAY prevents new streams while active streams finish"
+                           (http2-client-transport-goaway-last-stream-id old))]
+         [else
+          (when old
+            (close-http2-client-transport! old)
+            (http-client-http2-origin-set! client #f)
+            (http-client-http2-transport-set! client #f))
+          (let* ([connection (open-http-connection who client request deadline-ms)]
+                 [secure? (http-connection-secure? connection)]
+                 [selected (and secure?
+                                (tls-negotiated-alpn
+                                 (http-connection-tls-session connection)))]
+                 [h2? (or (and (not secure?)
+                               (eq? 'h2 (http-client-version client)))
+                          (and selected (string=? selected "h2")))])
+            (cond
+             [h2?
+              (let ([transport
+                     (%make-http2-client-transport
+                      connection (http2-open 'client) (make-eqv-hashtable)
+                      #f 0 #f #f)])
+                (http-client-http2-origin-set! client origin)
+                (http-client-http2-transport-set! client transport)
+                transport)]
+             [(eq? 'h2 (http-client-version client))
+              (close-http-connection connection)
+              (raise-net-error who 'http
+                               "server did not negotiate required HTTP/2" selected)]
+             [else
+              (cache-http-connection! client origin connection)
+              #f]))]))))
+
+  (define http2-transfer/nonblocking
+    (lambda (who client kind request finish response-sink)
+      (let ([body (http-request-body request)])
+        (when (http-body-source? body)
+          (raise-net-error who 'unsupported
+                           "streaming HTTP/2 request bodies are unavailable" request))
+        (let* ([deadline-ms (timeout->deadline-ms (http-client-timeout-ms client))]
+               [transport
+                (ensure-http2-client-transport who client request deadline-ms)])
+          (and transport
+               (let* ([uri (http-request-uri request)]
+                      [stream-id
+                       (http2-submit-request
+                        (http2-client-transport-session transport)
+                        (http-request-method request)
+                        (uri-scheme uri)
+                        (http-host-header uri)
+                        (http-uri-target uri)
+                        (http2-request-headers request client)
+                        (body->bytevector body))]
+                      [stream
+                       (%make-http2-client-stream
+                        stream-id request finish response-sink #f '() '() 0 #f #f)]
+                      [operation #f])
+                 (hashtable-set!
+                  (http2-client-transport-stream-table transport) stream-id stream)
+                 (set! operation
+                       (make-net-operation
+                        kind
+                        (lambda ()
+                          (cond
+                           [(and deadline-ms (fx>= (current-time-ms) deadline-ms))
+                            (http2-reset-stream!
+                             (http2-client-transport-session transport) stream-id 8)
+                            (raise-http-timeout who "HTTP/2 stream timed out" request)]
+                           [else
+                            (pump-http2-transport! client transport)
+                            (cond
+                             [(http2-client-stream-response stream)
+                              (net-operation-completed
+                               (http2-client-stream-response stream))]
+                             [(http2-client-stream-failure stream)
+                              (raise-net-error
+                               who 'http2 "HTTP/2 stream failed"
+                               (http2-client-stream-failure stream))]
+                             [else
+                              (net-operation-pending
+                               (list
+                                (make-poll-target
+                                 (http2-connection-socket transport)
+                                 (if (or (http2-client-transport-output transport)
+                                         (http2-want-write?
+                                          (http2-client-transport-session transport)))
+                                     '(read write error hup invalid)
+                                     '(read error hup invalid))))
+                               deadline-ms)])]))
+                        (lambda ()
+                          (unless (or (http2-client-stream-response stream)
+                                      (http2-client-stream-failure stream))
+                            (http2-reset-stream!
+                             (http2-client-transport-session transport) stream-id 8)))
+                        (lambda ()
+                          (hashtable-delete!
+                           (http2-client-transport-stream-table transport) stream-id))))
+                 operation))))))
+
+  (define http-transfer/nonblocking
+    (case-lambda
+      [(who client kind request finish)
+       (http-transfer/nonblocking who client kind request finish #f)]
+      [(who client kind request finish response-sink)
+       (let* ([uri (http-request-uri request)]
+              [secure? (string=? (uri-scheme uri) "https")]
+              [try-h2?
+               (and (not (http-client-proxy client))
+                    (or (not (http-body-source? (http-request-body request)))
+                        (eq? 'h2 (http-client-version client)))
+                    (or (eq? 'h2 (http-client-version client))
+                        (and secure?
+                             (eq? 'auto (http-client-version client))
+                             (optional-library-available?
+                              (optional-library-info 'nghttp2)))))])
+         (or (and try-h2?
+                  (http2-transfer/nonblocking
+                   who client kind request finish response-sink))
+             (http1-transfer/nonblocking
+              who client kind request finish response-sink)))]))
 
   (define request-key
     (lambda (request)
@@ -2100,6 +2447,19 @@
               (if (string=? (uri-scheme u) "https")
                   (let ([ctx (or (http-client-tls-context client)
                                  (make-tls-context 'client))])
+                    (tls-context-set-alpn!
+                     ctx
+                     (case (http-client-version client)
+                       [(h2) '("h2")]
+                       [(http/1.1) '("http/1.1")]
+                       [else
+                        (if (and (not (http-client-proxy client))
+                                 (not (http-body-source?
+                                       (http-request-body request)))
+                                 (optional-library-available?
+                                  (optional-library-info 'nghttp2)))
+                            '("h2" "http/1.1")
+                            '("http/1.1"))]))
                     (set! session
                           (call-with-http-timeout-translation
                            who
@@ -2125,6 +2485,19 @@
         (guard (c [else #f])
           (close-socket (http-connection-socket conn)))
         (http-connection-closed?-set! conn #t))))
+
+  (define close-http2-client-transport!
+    (lambda (transport)
+      (unless (http2-client-transport-closed? transport)
+        (fail-http2-streams! transport 'closed)
+        (let ([tls-session (http2-connection-tls-session transport)])
+          (when tls-session
+            (guard (failure [else #f])
+              (tls-shutdown! tls-session))))
+        (guard (failure [else #f])
+          (http2-close (http2-client-transport-session transport)))
+        (close-http-connection (http2-client-transport-connection transport))
+        (http2-client-transport-closed?-set! transport #t))))
 
   (define server-prepare-response
     (lambda (request response)
@@ -2249,30 +2622,167 @@
                                  (current-time-ms)
                                  #f))))
 
+  (define http2-server-transport-read
+    (lambda (conn)
+      (let ([session (http-connection-tls-session conn)])
+        (if session
+            (tls-read session 65536)
+            (socket-recv (http-connection-socket conn) 65536)))))
+
+  (define http2-server-transport-write-all
+    (lambda (conn bytes)
+      (let ([session (http-connection-tls-session conn)])
+        (if session
+            (tls-write-all session bytes)
+            (socket-send-all (http-connection-socket conn) bytes)))))
+
+  (define drain-http2-server-output!
+    (lambda (conn session)
+      (let loop ([bytes (http2-send session)])
+        (when bytes
+          (http2-server-transport-write-all conn bytes)
+          (loop (http2-send session))))))
+
+  (define http2-server-request-state
+    (lambda (stream-table stream-id)
+      (or (hashtable-ref stream-table stream-id #f)
+          (let ([state (vector '() '() 0)])
+            (hashtable-set! stream-table stream-id state)
+            state))))
+
+  (define http2-server-request
+    (lambda (who state)
+      (let* ([header* (reverse (vector-ref state 0))]
+             [method-entry (assoc ":method" header*)]
+             [scheme-entry (assoc ":scheme" header*)]
+             [authority-entry (assoc ":authority" header*)]
+             [path-entry (assoc ":path" header*)])
+        (unless (and method-entry scheme-entry authority-entry path-entry)
+          (raise-net-error who 'http2 "HTTP/2 request is missing pseudo-headers" header*))
+        (let* ([body-length (vector-ref state 2)]
+               [body (make-bytevector body-length 0)])
+          (let fill ([part* (reverse (vector-ref state 1))] [offset 0])
+            (unless (null? part*)
+              (let* ([part (car part*)]
+                     [count (bytevector-length part)])
+                (bytevector-copy! part 0 body offset count)
+                (fill (cdr part*) (fx+ offset count)))))
+          (make-http-request
+           (cdr method-entry)
+           (string-append (cdr scheme-entry) "://" (cdr authority-entry)
+                          (cdr path-entry))
+           (filter (lambda (header)
+                     (not (char=? #\: (string-ref (car header) 0))))
+                   header*)
+           (if (zero? body-length) #f body))))))
+
+  (define http2-response-headers
+    (lambda (response)
+      (filter
+       (lambda (header)
+         (not (member (string-downcase (car header))
+                      '("connection" "keep-alive" "proxy-connection"
+                        "transfer-encoding" "upgrade"))))
+       (http-response-headers response))))
+
+  (define dispatch-http2-server-stream!
+    (lambda (who server session stream-table stream-id state)
+      (let* ([request (http2-server-request who state)]
+             [handler (or (lookup-handler server request) default-handler)]
+             [response (handler request)])
+        (unless (http-response? response)
+          (errorf who "HTTP handler must return an HTTP response, given ~s" response))
+        (when (http-body-source? (http-response-body response))
+          (raise-net-error who 'unsupported
+                           "streaming HTTP/2 response bodies are unavailable" response))
+        (http2-submit-response
+         session stream-id (http-response-status response)
+         (http2-response-headers response)
+         (body->bytevector (http-response-body response)))
+        (hashtable-delete! stream-table stream-id))))
+
+  (define process-http2-server-events!
+    (lambda (who server session stream-table)
+      (let loop ([event (http2-next-event session)])
+        (when event
+          (let* ([type (vector-ref event 0)]
+                 [stream-id (vector-ref event 1)])
+            (case type
+              [(1)
+               (let* ([state (http2-server-request-state stream-table stream-id)]
+                      [header (vector-ref event 3)])
+                 (vector-set! state 0
+                              (cons (cons (vector-ref header 0)
+                                          (vector-ref header 1))
+                                    (vector-ref state 0))))]
+              [(2)
+               (let* ([state (http2-server-request-state stream-table stream-id)]
+                      [bytes (vector-ref event 3)])
+                 (vector-set! state 1 (cons bytes (vector-ref state 1)))
+                 (vector-set! state 2
+                              (fx+ (vector-ref state 2)
+                                   (bytevector-length bytes)))
+                 (http2-consume! session stream-id (bytevector-length bytes)))]
+              [(3)
+               (when (and (not (zero? (bitwise-and (vector-ref event 2) 1)))
+                          (hashtable-ref stream-table stream-id #f))
+                 (dispatch-http2-server-stream!
+                  who server session stream-table stream-id
+                  (hashtable-ref stream-table stream-id #f)))]
+              [else (void)]))
+          (loop (http2-next-event session))))))
+
+  (define serve-http2-connection
+    (lambda (who server conn)
+      (let ([session (http2-open 'server)]
+            [stream-table (make-eqv-hashtable)])
+        (dynamic-wind
+          void
+          (lambda ()
+            (drain-http2-server-output! conn session)
+            (let loop ()
+              (let ([bytes (http2-server-transport-read conn)])
+                (unless (eof-object? bytes)
+                  (http2-receive session bytes 0 (bytevector-length bytes))
+                  (process-http2-server-events! who server session stream-table)
+                  (drain-http2-server-output! conn session)
+                  (loop)))))
+          (lambda () (http2-close session))))))
+
   (define serve-http-connection
     (lambda (who server conn)
       (dynamic-wind
         void
         (lambda ()
-          (let loop ()
-            (let ([request (guard (c [(and (net-error? c)
-                                           (string=? (net-error-message c)
-                                                     "unexpected EOF while reading HTTP request"))
-                                      #f]
-                                  [else (raise c)])
-                             (http-read-request conn))])
-              (when request
-                (let* ([handler (or (lookup-handler server request)
-                                    default-handler)]
-                       [response (handler request)])
-                  (unless (http-response? response)
-                    (errorf who "HTTP handler must return an HTTP response, given ~s"
-                            response))
-                  (let-values ([(close? prepared)
-                                (server-prepare-response request response)])
-                    (http-write-response conn prepared)
-                    (unless close?
-                      (loop))))))))
+          (if (and (http-connection-tls-session conn)
+                   (equal? "h2"
+                           (tls-negotiated-alpn
+                            (http-connection-tls-session conn))))
+              (serve-http2-connection who server conn)
+              (let loop ()
+                (let ([request (guard (c [(and (net-error? c)
+                                               (or (string=?
+                                                    (net-error-message c)
+                                                    "unexpected EOF while reading HTTP request")
+                                                   (and (eq? 'tls (net-error-kind c))
+                                                        (string-contains?
+                                                         (net-error-message c)
+                                                         "unexpected eof while reading"))))
+                                          #f]
+                                      [else (raise c)])
+                                 (http-read-request conn))])
+                  (when request
+                    (let* ([handler (or (lookup-handler server request)
+                                        default-handler)]
+                           [response (handler request)])
+                      (unless (http-response? response)
+                        (errorf who "HTTP handler must return an HTTP response, given ~s"
+                                response))
+                      (let-values ([(close? prepared)
+                                    (server-prepare-response request response)])
+                        (http-write-response conn prepared)
+                        (unless close?
+                          (loop)))))))))
         (lambda ()
           (http-connection-close conn)))))
 
@@ -2893,6 +3403,11 @@ The return value is `client`.
             (http-client-cached-origin-set! client #f)
             (http-client-cached-connection-set! client #f)
             (close-http-connection connection)))
+        (let ([transport (http-client-http2-transport client)])
+          (when transport
+            (close-http2-client-transport! transport)
+            (http-client-http2-origin-set! client #f)
+            (http-client-http2-transport-set! client #f)))
         (http-client-proxy-set-internal! client proxy)
         client)))
 
@@ -2919,6 +3434,11 @@ The return value is `client`.
                    (not (optional-library-available?
                          (optional-library-info 'nghttp2))))
           (errorf 'http-client-version-set! "nghttp2 support is unavailable"))
+        (let ([transport (http-client-http2-transport client)])
+          (when transport
+            (close-http2-client-transport! transport)
+            (http-client-http2-origin-set! client #f)
+            (http-client-http2-transport-set! client #f)))
         (http-client-version-set-internal! client version)
         client)))
 
@@ -2929,11 +3449,13 @@ The `http-open` procedure constructs an HTTP client with optional TLS context st
     (case-lambda
       [()
        (%make-http-client '() #f http-default-timeout-ms #f #f #f #f
-                          (%make-http-pool-policy 1 1 30000) 'auto #f #f #f #f)]
+                          (%make-http-pool-policy 1 1 30000) 'auto
+                          #f #f #f #f #f #f)]
       [(tls-context)
        (pcheck ([tls-context? tls-context])
          (%make-http-client '() #f http-default-timeout-ms tls-context #f #f #f
-                            (%make-http-pool-policy 1 1 30000) 'auto #f #f #f #f))]))
+                            (%make-http-pool-policy 1 1 30000) 'auto
+                            #f #f #f #f #f #f))]))
 
   #|proc:http-close
 The `http-close` procedure marks an HTTP client as closed.
@@ -2948,6 +3470,11 @@ The `http-close` procedure marks an HTTP client as closed.
                 (when conn
                   (uncache-http-connection! client conn)
                   (close-http-connection conn)))
+              (let ([transport (http-client-http2-transport client)])
+                (when transport
+                  (close-http2-client-transport! transport)
+                  (http-client-http2-origin-set! client #f)
+                  (http-client-http2-transport-set! client #f)))
               (http-client-closed?-set! client #t)
               client)))
 

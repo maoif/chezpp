@@ -7,8 +7,12 @@
 
 typedef int (*callbacks_new_fn)(nghttp2_session_callbacks **);
 typedef void (*callbacks_del_fn)(nghttp2_session_callbacks *);
-typedef int (*session_new_fn)(nghttp2_session **, const nghttp2_session_callbacks *, void *);
+typedef int (*session_new_fn)(nghttp2_session **, const nghttp2_session_callbacks *, void *,
+                              const nghttp2_option *);
 typedef void (*session_del_fn)(nghttp2_session *);
+typedef int (*option_new_fn)(nghttp2_option **);
+typedef void (*option_del_fn)(nghttp2_option *);
+typedef void (*option_no_auto_window_fn)(nghttp2_option *, int);
 typedef void (*set_user_data_fn)(nghttp2_session *, void *);
 typedef void (*set_header_cb_fn)(nghttp2_session_callbacks *, nghttp2_on_header_callback);
 typedef void (*set_data_cb_fn)(nghttp2_session_callbacks *, nghttp2_on_data_chunk_recv_callback);
@@ -55,12 +59,16 @@ struct h2_session {
   h2_stream *streams;
   h2_event *events;
   h2_event *events_tail;
+  int goaway_received;
 };
 
 static callbacks_new_fn p_callbacks_new;
 static callbacks_del_fn p_callbacks_del;
 static session_new_fn p_client_new;
 static session_new_fn p_server_new;
+static option_new_fn p_option_new;
+static option_del_fn p_option_del;
+static option_no_auto_window_fn p_option_no_auto_window;
 static session_del_fn p_session_del;
 static set_user_data_fn p_set_user_data;
 static set_header_cb_fn p_set_header_cb;
@@ -99,9 +107,15 @@ static int load_h2_symbols(void) {
   *(void **)(&p_callbacks_new) = chezpp_nghttp2_symbol("nghttp2_session_callbacks_new");
   *(void **)(&p_callbacks_del) = chezpp_nghttp2_symbol("nghttp2_session_callbacks_del");
   if (p_callbacks_new == NULL || p_callbacks_del == NULL) return 0;
-  *(void **)(&p_client_new) = chezpp_nghttp2_symbol("nghttp2_session_client_new");
-  *(void **)(&p_server_new) = chezpp_nghttp2_symbol("nghttp2_session_server_new");
+  *(void **)(&p_client_new) = chezpp_nghttp2_symbol("nghttp2_session_client_new2");
+  *(void **)(&p_server_new) = chezpp_nghttp2_symbol("nghttp2_session_server_new2");
   if (p_client_new == NULL || p_server_new == NULL) return 0;
+  *(void **)(&p_option_new) = chezpp_nghttp2_symbol("nghttp2_option_new");
+  *(void **)(&p_option_del) = chezpp_nghttp2_symbol("nghttp2_option_del");
+  *(void **)(&p_option_no_auto_window) =
+      chezpp_nghttp2_symbol("nghttp2_option_set_no_auto_window_update");
+  if (p_option_new == NULL || p_option_del == NULL || p_option_no_auto_window == NULL)
+    return 0;
   LOAD(session_del, session_del_fn);
   LOAD(session_set_user_data, set_user_data_fn);
   LOAD(session_callbacks_set_on_header_callback, set_header_cb_fn);
@@ -193,6 +207,10 @@ static int on_frame(nghttp2_session *session, const nghttp2_frame *frame, void *
   (void)session;
   if (frame->hd.type == NGHTTP2_HEADERS || frame->hd.type == NGHTTP2_DATA)
     push_event(state, 3, frame->hd.stream_id, frame->hd.flags, NULL, 0);
+  else if (frame->hd.type == NGHTTP2_GOAWAY) {
+    state->goaway_received = 1;
+    push_event(state, 5, frame->goaway.last_stream_id, frame->goaway.error_code, NULL, 0);
+  }
   return 0;
 }
 
@@ -251,6 +269,7 @@ static void free_headers(nghttp2_nv *headers, size_t count) {
 
 ptr chezpp_net_http2_open(int server) {
   h2_session *state;
+  nghttp2_option *option = NULL;
   if (!load_h2_symbols()) return h2_error("nghttp2 adapter symbols are unavailable");
   state = (h2_session *)calloc(1, sizeof(*state));
   if (state == NULL) return h2_error("out of memory");
@@ -259,9 +278,17 @@ ptr chezpp_net_http2_open(int server) {
   p_set_data_cb(state->callbacks, on_data);
   p_set_frame_cb(state->callbacks, on_frame);
   p_set_close_cb(state->callbacks, on_close);
-  if ((server ? p_server_new : p_client_new)(&state->session, state->callbacks, state) != 0) {
+  if (p_option_new(&option) != 0) {
+    p_callbacks_del(state->callbacks); free(state);
+    return h2_error("failed to create nghttp2 options");
+  }
+  p_option_no_auto_window(option, 1);
+  if ((server ? p_server_new : p_client_new)(&state->session, state->callbacks, state,
+                                              option) != 0) {
+    p_option_del(option);
     p_callbacks_del(state->callbacks); free(state); return h2_error("failed to create nghttp2 session");
   }
+  p_option_del(option);
   p_set_user_data(state->session, state);
   if (p_submit_settings(state->session, NGHTTP2_FLAG_NONE, NULL, 0) != 0) {
     p_session_del(state->session);
@@ -292,10 +319,12 @@ ptr chezpp_net_http2_submit_request(uptr handle, ptr headers, ptr body) {
   size_t count;
   int32_t id;
   if (state == NULL || !Svectorp(headers) || !Sbytevectorp(body)) return h2_error("invalid HTTP/2 request");
+  if (state->goaway_received) return h2_error("HTTP/2 GOAWAY prevents new streams");
   stream = (h2_stream *)calloc(1, sizeof(*stream));
   if (stream == NULL) return h2_error("out of memory");
   stream->body_len = (size_t)Sbytevector_length(body);
   stream->body = (unsigned char *)malloc(stream->body_len == 0 ? 1 : stream->body_len);
+  if (stream->body == NULL) { free(stream); return h2_error("out of memory"); }
   if (stream->body_len != 0) memcpy(stream->body, Sbytevector_data(body), stream->body_len);
   nva = make_headers(headers, &count);
   if (nva == NULL) { free(stream->body); free(stream); return h2_error("out of memory"); }
@@ -316,6 +345,7 @@ ptr chezpp_net_http2_submit_response(uptr handle, int stream_id, ptr headers, pt
   if (stream == NULL) return h2_error("out of memory");
   stream->id = stream_id; stream->body_len = (size_t)Sbytevector_length(body);
   stream->body = (unsigned char *)malloc(stream->body_len == 0 ? 1 : stream->body_len);
+  if (stream->body == NULL) { free(stream); return h2_error("out of memory"); }
   if (stream->body_len != 0) memcpy(stream->body, Sbytevector_data(body), stream->body_len);
   nva = make_headers(headers, &count); memset(&provider, 0, sizeof(provider));
   provider.source.ptr = stream; provider.read_callback = read_body;
@@ -369,7 +399,10 @@ ptr chezpp_net_http2_next_event(uptr handle) {
 
 ptr chezpp_net_http2_consume(uptr handle, int stream_id, int count) {
   h2_session *state = (h2_session *)TO_VOIDP(handle);
-  return state == NULL ? h2_error("invalid HTTP/2 session") : Sinteger(p_consume(state->session, stream_id, (size_t)count));
+  int rc;
+  if (state == NULL) return h2_error("invalid HTTP/2 session");
+  rc = p_consume(state->session, stream_id, (size_t)count);
+  return rc < 0 ? h2_error("failed to consume HTTP/2 flow-control bytes") : Sinteger(rc);
 }
 
 ptr chezpp_net_http2_rst(uptr handle, int stream_id, int error_code) {

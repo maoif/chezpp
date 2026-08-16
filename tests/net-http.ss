@@ -409,7 +409,55 @@
                (close-tls-context client-ctx)
                (close-tls-context server-ctx)
                (and (= (http-response-status resp) 200)
+                    (eq? (http-response-version resp) 'http/1.1)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
+
+(mat net-http2-multiplexing
+     (let ([server-ctx (make-test-http-server-context)]
+           [client-ctx (make-test-http-client-context)])
+       (tls-context-set-alpn! server-ctx '("h2" "http/1.1"))
+       (let* ([port (reserve-loopback-port)]
+              [server (http-listen "127.0.0.1" port server-ctx)])
+         (do ([index 0 (+ index 1)])
+             [(= index 10)]
+           (let ([path (format "/stream/~a" index)])
+             (http-register-handler!
+              server 'get path
+              (lambda (request)
+                (make-http-response 200 "OK" '() path)))))
+         (let ([thread (fork-thread (lambda () (http-serve server)))]
+               [client (http-open client-ctx)])
+           (dynamic-wind
+             (lambda () (http-client-version-set! client 'auto))
+             (lambda ()
+               (let ([operation*
+                      (map
+                       (lambda (index)
+                         (http-send/nonblocking
+                          client
+                          (make-http-request
+                           'get
+                           (format "https://127.0.0.1:~a/stream/~a" port index))))
+                       (iota 10))])
+                 ;; Error case: cancelling one HTTP/2 stream must not close its siblings.
+                 (net-operation-cancel! (car operation*))
+                 (and
+                  (eq? 'cancelled (net-operation-state (car operation*)))
+                  (for-all
+                   (lambda (operation index)
+                     (let ([response (net-operation-wait operation)])
+                       (and (= 200 (http-response-status response))
+                            (eq? 'h2 (http-response-version response))
+                            (string=? (format "/stream/~a" index)
+                                      (utf8->string (http-response-body response))))))
+                   (cdr operation*)
+                   (cdr (iota 10))))))
+             (lambda ()
+               (http-close client)
+               (http-server-close server)
+               (thread-join thread)
+               (close-tls-context client-ctx)
+               (close-tls-context server-ctx)))))))
 
 (mat net-https-connect-proxy
      ;; HTTPS requests through an HTTP proxy must establish CONNECT before TLS.
