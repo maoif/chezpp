@@ -21,6 +21,8 @@
           socket-recv!/nonblocking
           socket-recv-from
           socket-recv-from/nonblocking
+          socket-recv-from!
+          socket-recv-from!/nonblocking
           socket-set-option!
           socket-get-option
           socket-local-address
@@ -409,20 +411,32 @@ a would-block value requesting `write` when no bytes could be written.
                       (if nonblocking? 1 0))))))
 
   #|proc:socket-send-to
-The `socket-send-to` procedure sends a bytevector slice to datagram `address`.\n+It returns the number of bytes sent.\n+|#
+The `socket-send-to` procedure sends a datagram from `sock` to `address`.
+The `sock` parameter is an open datagram socket, and `bytevector` supplies the bytes to send.
+The optional `start` and `stop` parameters delimit the half-open bytevector slice to send.
+The `address` parameter is the destination socket address.
+The return value is the number of bytes sent.
+|#
   (define-who socket-send-to
     (case-lambda
-      [(sock bv address) (socket-send-to sock bv 0 (bytevector-length bv) address)]
-      [(sock bv start stop address)
-       (socket-send-to* 'socket-send-to sock bv start stop address #f)]))
+      [(sock bytevector address)
+       (socket-send-to sock bytevector 0 (bytevector-length bytevector) address)]
+      [(sock bytevector start stop address)
+       (socket-send-to* 'socket-send-to sock bytevector start stop address #f)]))
 
   #|proc:socket-send-to/nonblocking
-The `socket-send-to/nonblocking` procedure attempts one datagram send without waiting.\n+It returns the byte count or a write would-block value.\n+|#
+The `socket-send-to/nonblocking` procedure attempts one datagram send without waiting.
+The `sock` parameter is an open datagram socket, and `bytevector` supplies the bytes to send.
+The optional `start` and `stop` parameters delimit the half-open bytevector slice to send.
+The `address` parameter is the destination socket address.
+The return value is the number of bytes sent or a would-block value requesting `write`.
+|#
   (define-who socket-send-to/nonblocking
     (case-lambda
-      [(sock bv address) (socket-send-to/nonblocking sock bv 0 (bytevector-length bv) address)]
-      [(sock bv start stop address)
-       (socket-send-to* 'socket-send-to/nonblocking sock bv start stop address #t)]))
+      [(sock bytevector address)
+       (socket-send-to/nonblocking sock bytevector 0 (bytevector-length bytevector) address)]
+      [(sock bytevector start stop address)
+       (socket-send-to* 'socket-send-to/nonblocking sock bytevector start stop address #t)]))
 
   #|proc:socket-recv
 The `socket-recv` procedure reads up to `size` bytes from `sock`.
@@ -501,41 +515,121 @@ The return value is a byte count, an EOF object, or a would-block value requesti
             (make-net-would-block sock (ffi-would-block-events answer))]
            [(ffi-error? answer)
             (raise-net-error who 'socket (ffi-error-message answer) answer)]
-           [else
+           [(and (vector? answer) (fx= (vector-length answer) 2)
+                 (bytevector? (vector-ref answer 0)))
             (values (vector-ref answer 0)
-                    (%socket-address-from-ffi (vector-ref answer 1)))])))))
+                    (%socket-address-from-ffi (vector-ref answer 1)))]
+           [else
+            (raise-net-error who 'internal-ffi "malformed recv-from result" answer)])))))
+
+  (define socket-recv-from-into*
+    (lambda (who sock bytevector start stop nonblocking?)
+      (pcheck ([socket? sock] [bytevector? bytevector])
+        (ensure-open who sock)
+        (check-slice who (bytevector-length bytevector) start stop)
+        (let ([answer
+               (ffi-net-socket-recv-from-into
+                (socket-fd sock) bytevector start stop (if nonblocking? 1 0))])
+          (cond
+           [(ffi-would-block? answer)
+            (make-net-would-block sock (ffi-would-block-events answer))]
+           [(ffi-error? answer)
+            (raise-net-error who 'socket (ffi-error-message answer) answer)]
+           [(and (vector? answer) (fx= (vector-length answer) 2)
+                 (fixnum? (vector-ref answer 0)))
+            (values (vector-ref answer 0)
+                    (%socket-address-from-ffi (vector-ref answer 1)))]
+           [else
+            (raise-net-error who 'internal-ffi "malformed recv-from-into result" answer)])))))
 
   #|proc:socket-recv-from
-The `socket-recv-from` procedure receives one datagram and returns two values: payload and source address.\n+|#
+The `socket-recv-from` procedure receives one datagram from `sock`.
+The `sock` parameter is an open datagram socket, and `size` is the maximum byte count to receive.
+The procedure returns two values: a payload bytevector and its source socket address.
+|#
   (define-who socket-recv-from
     (lambda (sock size) (socket-recv-from* who sock size #f)))
 
   #|proc:socket-recv-from/nonblocking
-The `socket-recv-from/nonblocking` procedure receives one datagram without waiting.\n+It returns payload and source address, or a read would-block value.\n+|#
+The `socket-recv-from/nonblocking` procedure attempts to receive one datagram without waiting.
+The `sock` parameter is an open datagram socket, and `size` is the maximum byte count to receive.
+It returns a read would-block value, or two values containing the payload and source address.
+|#
   (define-who socket-recv-from/nonblocking
     (lambda (sock size) (socket-recv-from* who sock size #t)))
 
+  #|proc:socket-recv-from!
+The `socket-recv-from!` procedure receives one datagram into `bytevector` from `sock`.
+The optional `start` and `stop` parameters delimit the half-open destination slice.
+It returns two values: the received byte count and the source socket address.
+|#
+  (define-who socket-recv-from!
+    (case-lambda
+      [(sock bytevector)
+       (socket-recv-from! sock bytevector 0 (bytevector-length bytevector))]
+      [(sock bytevector start)
+       (socket-recv-from! sock bytevector start (bytevector-length bytevector))]
+      [(sock bytevector start stop)
+       (socket-recv-from-into* who sock bytevector start stop #f)]))
+
+  #|proc:socket-recv-from!/nonblocking
+The `socket-recv-from!/nonblocking` procedure attempts a datagram receive into `bytevector`.
+The optional `start` and `stop` parameters delimit the half-open destination slice.
+It returns a read would-block value, or two values containing the byte count and source address.
+|#
+  (define-who socket-recv-from!/nonblocking
+    (case-lambda
+      [(sock bytevector)
+       (socket-recv-from!/nonblocking sock bytevector 0 (bytevector-length bytevector))]
+      [(sock bytevector start)
+       (socket-recv-from!/nonblocking sock bytevector start (bytevector-length bytevector))]
+      [(sock bytevector start stop)
+       (socket-recv-from-into* who sock bytevector start stop #t)]))
+
+  (define boolean-socket-options
+    '(reuse-address reuse-port keepalive broadcast tcp-nodelay ipv6-only))
+
+  (define positive-socket-options
+    '(recv-buffer send-buffer keepalive-idle keepalive-interval keepalive-count))
+
+  (define check-socket-option
+    (lambda (who option value setting?)
+      (unless (symbol? option)
+        (errorf who "expected socket option symbol, given ~s" option))
+      (cond
+       [(memq option boolean-socket-options)
+        (when (and setting? (not (boolean? value)))
+          (errorf who "option ~s requires a boolean, given ~s" option value))]
+       [(memq option positive-socket-options)
+        (when (and setting? (not (and (fixnum? value) (fx> value 0))))
+          (errorf who "option ~s requires a positive fixnum, given ~s" option value))]
+       [(eq? option 'multicast-ttl)
+        (when (and setting? (not (and (fixnum? value) (fx<= 0 value 255))))
+          (errorf who "multicast-ttl requires a fixnum from 0 through 255, given ~s" value))]
+       [else (errorf who "unsupported socket option ~s" option)])))
+
   #|proc:socket-set-option!
-The `socket-set-option!` procedure updates a supported socket option.
+The `socket-set-option!` procedure assigns `value` to socket `option` on open `sock`.
+The return value is `#t`; unsupported options and invalid values raise an error.
 |#
   (define-who socket-set-option!
     (lambda (sock option value)
-      (pcheck ([socket? sock])
+      (pcheck ([socket? sock] [symbol? option])
               (ensure-open who sock)
-              (unless (or (boolean? value) (fixnum? value))
-                (errorf who "expected boolean or fixnum socket option value, given ~s" value))
+              (check-socket-option who option value #t)
               (ensure-ffi-success
                who
                (ffi-net-socket-set-option (socket-fd sock) (symbol->string option) value)
                'socket))))
 
   #|proc:socket-get-option
-The `socket-get-option` procedure returns a supported socket option value.
+The `socket-get-option` procedure returns the current value of `option` on open `sock`.
 |#
   (define-who socket-get-option
     (lambda (sock option)
       (pcheck ([socket? sock] [symbol? option])
               (ensure-open who sock)
+              (check-socket-option who option #f #f)
               (ensure-ffi-success
                who
                (ffi-net-socket-get-option (socket-fd sock) (symbol->string option))

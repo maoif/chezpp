@@ -44,6 +44,7 @@
           ffi-net-socket-recv-into
           ffi-net-socket-send-to
           ffi-net-socket-recv-from
+          ffi-net-socket-recv-from-into
           ffi-net-socket-local-address
           ffi-net-socket-peer-address
           ffi-net-socket-set-blocking
@@ -294,6 +295,9 @@
                        (int ptr int int int string int string int) scheme-object))
   (define ffi-net-socket-recv-from
     (foreign-procedure "chezpp_net_socket_recv_from" (int int int) scheme-object))
+  (define ffi-net-socket-recv-from-into
+    (foreign-procedure "chezpp_net_socket_recv_from_into"
+                       (int ptr int int int) scheme-object))
   (define ffi-net-socket-local-address
     (foreign-procedure "chezpp_net_socket_local_address" (int) scheme-object))
   (define ffi-net-socket-peer-address

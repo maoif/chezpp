@@ -398,6 +398,24 @@ ptr chezpp_net_socket_recv_from(int fd, int size, int nonblocking) {
   }
 }
 
+ptr chezpp_net_socket_recv_from_into(int fd, ptr bv, int start, int stop, int nonblocking) {
+  struct sockaddr_storage storage;
+  socklen_t len = sizeof(storage);
+  ssize_t n = recvfrom(fd, Sbytevector_data(bv) + start, (size_t)(stop - start),
+                       nonblocking ? MSG_DONTWAIT : 0,
+                       (struct sockaddr *)&storage, &len);
+  if (n < 0) {
+    if (would_block_errno(errno)) return would_block_status("read");
+    return make_errno_status("error");
+  }
+  {
+    ptr out = Smake_vector(2, Sfalse);
+    Svector_set(out, 0, Sfixnum((iptr)n));
+    Svector_set(out, 1, make_addr_from_sockaddr((struct sockaddr *)&storage, len));
+    return out;
+  }
+}
+
 ptr chezpp_net_socket_local_address(int fd) {
   struct sockaddr_storage storage;
   socklen_t len = sizeof(storage);
@@ -450,6 +468,11 @@ ptr chezpp_net_socket_set_option(int fd, const char *name, ptr value) {
   if (strcmp(name, "reuse-address") == 0) {
     optname = SO_REUSEADDR;
     ivalue = Sboolean_value(value) ? 1 : 0;
+#ifdef SO_REUSEPORT
+  } else if (strcmp(name, "reuse-port") == 0) {
+    optname = SO_REUSEPORT;
+    ivalue = Sboolean_value(value) ? 1 : 0;
+#endif
   } else if (strcmp(name, "keepalive") == 0) {
     optname = SO_KEEPALIVE;
     ivalue = Sboolean_value(value) ? 1 : 0;
@@ -460,6 +483,32 @@ ptr chezpp_net_socket_set_option(int fd, const char *name, ptr value) {
     level = IPPROTO_TCP;
     optname = TCP_NODELAY;
     ivalue = Sboolean_value(value) ? 1 : 0;
+  } else if (strcmp(name, "ipv6-only") == 0) {
+    level = IPPROTO_IPV6;
+    optname = IPV6_V6ONLY;
+    ivalue = Sboolean_value(value) ? 1 : 0;
+#ifdef TCP_KEEPIDLE
+  } else if (strcmp(name, "keepalive-idle") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPIDLE;
+    ivalue = Sfixnum_value(value);
+#endif
+#ifdef TCP_KEEPINTVL
+  } else if (strcmp(name, "keepalive-interval") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPINTVL;
+    ivalue = Sfixnum_value(value);
+#endif
+#ifdef TCP_KEEPCNT
+  } else if (strcmp(name, "keepalive-count") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPCNT;
+    ivalue = Sfixnum_value(value);
+#endif
+  } else if (strcmp(name, "multicast-ttl") == 0) {
+    level = IPPROTO_IP;
+    optname = IP_MULTICAST_TTL;
+    ivalue = Sfixnum_value(value);
   } else if (strcmp(name, "recv-buffer") == 0) {
     optname = SO_RCVBUF;
     ivalue = Sfixnum_value(value);
@@ -483,6 +532,10 @@ ptr chezpp_net_socket_get_option(int fd, const char *name) {
 
   if (strcmp(name, "reuse-address") == 0) {
     optname = SO_REUSEADDR;
+#ifdef SO_REUSEPORT
+  } else if (strcmp(name, "reuse-port") == 0) {
+    optname = SO_REUSEPORT;
+#endif
   } else if (strcmp(name, "keepalive") == 0) {
     optname = SO_KEEPALIVE;
   } else if (strcmp(name, "broadcast") == 0) {
@@ -490,6 +543,27 @@ ptr chezpp_net_socket_get_option(int fd, const char *name) {
   } else if (strcmp(name, "tcp-nodelay") == 0) {
     level = IPPROTO_TCP;
     optname = TCP_NODELAY;
+  } else if (strcmp(name, "ipv6-only") == 0) {
+    level = IPPROTO_IPV6;
+    optname = IPV6_V6ONLY;
+#ifdef TCP_KEEPIDLE
+  } else if (strcmp(name, "keepalive-idle") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPIDLE;
+#endif
+#ifdef TCP_KEEPINTVL
+  } else if (strcmp(name, "keepalive-interval") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPINTVL;
+#endif
+#ifdef TCP_KEEPCNT
+  } else if (strcmp(name, "keepalive-count") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPCNT;
+#endif
+  } else if (strcmp(name, "multicast-ttl") == 0) {
+    level = IPPROTO_IP;
+    optname = IP_MULTICAST_TTL;
   } else if (strcmp(name, "recv-buffer") == 0) {
     optname = SO_RCVBUF;
   } else if (strcmp(name, "send-buffer") == 0) {
@@ -501,7 +575,9 @@ ptr chezpp_net_socket_get_option(int fd, const char *name) {
 
   if (getsockopt(fd, level, optname, &ivalue, &len) < 0) return make_errno_status("error");
 
-  if (strcmp(name, "recv-buffer") == 0 || strcmp(name, "send-buffer") == 0)
+  if (strcmp(name, "recv-buffer") == 0 || strcmp(name, "send-buffer") == 0 ||
+      strcmp(name, "keepalive-idle") == 0 || strcmp(name, "keepalive-interval") == 0 ||
+      strcmp(name, "keepalive-count") == 0 || strcmp(name, "multicast-ttl") == 0)
     return Sfixnum(ivalue);
   return Sboolean(ivalue != 0);
 }
