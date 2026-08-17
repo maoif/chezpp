@@ -729,6 +729,7 @@ The `websocket-ping-operation` procedure sends `payload` on `conn` and waits for
             'websocket-ping
             (lambda ()
               (when (fx<= (remaining-timeout-ms deadline-ms) 0)
+                (websocket-close conn 1001 "pong timeout")
                 (raise-net-error 'websocket-ping-operation 'websocket
                                  "websocket pong timed out" conn))
               (if (not sent?)

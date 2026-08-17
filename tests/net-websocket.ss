@@ -464,6 +464,30 @@
            (when client (websocket-close client))
            (websocket-server-close server)))))
 
+(mat net-websocket-pong-timeout
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [client #f]
+            [accepted #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (set! client
+                 (websocket-connect (format "ws://127.0.0.1:~a/timeout" port)))
+           (set! accepted (websocket-accept server))
+           (and
+            (websocket-net-error-message?
+             "websocket pong timed out"
+             (lambda ()
+               (net-operation-wait
+                (websocket-ping-operation client #vu8(9) 20))))
+            (= (websocket-close-code client) 1001)
+            (equal? (websocket-close-reason client) "pong timeout")))
+         (lambda ()
+           (when accepted (websocket-close accepted))
+           (when client (websocket-close client))
+           (websocket-server-close server)))))
+
 (mat net-websocket-wss
      (begin
        (write-test-san-cert-files)
