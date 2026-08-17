@@ -58,6 +58,11 @@
   (define grpc-status-unimplemented 12)
   (define grpc-default-timeout-ms 30000)
 
+  #|record:grpc-request-record
+The `grpc-request-record` record is an immutable server-side gRPC request view.
+Its method is the RPC path, payload is copied message bytes, and metadata is the received alist.
+The native handle remains owned by the serving channel and is not exposed to callers.
+|#
   (define-record-type (grpc-request-record %make-grpc-request-record grpc-request-record?)
     (sealed #t)
     (opaque #f)
@@ -73,6 +78,11 @@
             (immutable message grpc-status-record-message)
             (immutable details grpc-status-record-details)))
 
+  #|record:grpc-response-record
+The `grpc-response-record` record is an immutable completed gRPC response.
+Its payload is copied message bytes, metadata is the response metadata alist, and status is an
+immutable gRPC status. The record remains valid after the call or stream closes.
+|#
   (define-record-type (grpc-response-record %make-grpc-response-record grpc-response?)
     (sealed #t)
     (opaque #f)
@@ -82,6 +92,11 @@
 
   (define grpc-request? grpc-request-record?)
 
+  #|record:grpc-stream
+The `grpc-stream` record owns one native streaming RPC with a fixed side and call shape.
+Send and receive closure are tracked independently. `grpc-stream-close` releases the handle and
+marks both directions closed; subsequent stream operations raise an error.
+|#
   (define-record-type (grpc-stream %make-grpc-stream grpc-stream?)
     (sealed #t)
     (opaque #f)
@@ -92,6 +107,11 @@
             (mutable recv-closed? grpc-stream-recv-closed? grpc-stream-recv-closed?-set!)
             (mutable closed? grpc-stream-closed? grpc-stream-closed?-set!)))
 
+  #|record:grpc-channel
+The `grpc-channel` record owns a client channel or server listener for an immutable endpoint.
+Server channels retain registered handlers. Closing releases the native handle, cancels pending
+work, and causes later channel operations to raise an error.
+|#
   (define-record-type (grpc-channel %make-grpc-channel grpc-channel?)
     (sealed #t)
     (opaque #f)
@@ -102,6 +122,11 @@
             (mutable pending grpc-channel-pending grpc-channel-pending-set!)
             (mutable closed? grpc-channel-closed? grpc-channel-closed?-set!)))
 
+  #|record:grpc-channel-credentials
+The `grpc-channel-credentials` record is immutable client TLS configuration.
+Root certificates are PEM trust bytes. The optional certificate chain and private key are PEM
+bytes used together for mutual TLS. Credential bytevectors are retained by the record.
+|#
   (define-record-type (grpc-channel-credentials %make-grpc-channel-credentials
                                                  grpc-channel-credentials?)
     (sealed #t)
@@ -110,6 +135,11 @@
             (immutable certificate-chain grpc-channel-credentials-certificate-chain)
             (immutable private-key grpc-channel-credentials-private-key)))
 
+  #|record:grpc-server-credentials
+The `grpc-server-credentials` record is immutable server TLS configuration.
+The PEM certificate chain and private key identify the server. Optional PEM roots enable and
+authenticate mutual TLS clients. Credential bytevectors are retained by the record.
+|#
   (define-record-type (grpc-server-credentials %make-grpc-server-credentials
                                                 grpc-server-credentials?)
     (sealed #t)
@@ -118,6 +148,11 @@
             (immutable certificate-chain grpc-server-credentials-certificate-chain)
             (immutable private-key grpc-server-credentials-private-key)))
 
+  #|record:grpc-call-options
+The `grpc-call-options` record is immutable policy shared by every gRPC call shape.
+Metadata is an alist of request headers, timeout-ms is a positive deadline interval, and
+compression is one of `identity`, `deflate`, or `gzip`.
+|#
   (define-record-type (grpc-call-options %make-grpc-call-options grpc-call-options?)
     (sealed #t)
     (opaque #f)
@@ -125,6 +160,11 @@
             (immutable timeout-ms grpc-call-options-timeout-ms)
             (immutable compression grpc-call-options-compression)))
 
+  #|record:grpc-capabilities-record
+The `grpc-capabilities-record` record is an immutable runtime feature snapshot.
+Its boolean fields report TLS, compression, deadline, cancellation, status-detail, and reflection
+support. Compression-algorithms lists the accepted compression symbols.
+|#
   (define-record-type (grpc-capabilities-record %make-grpc-capabilities
                                                 grpc-capabilities?)
     (sealed #t)

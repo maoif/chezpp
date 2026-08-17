@@ -97,6 +97,11 @@
         (errorf who "backlog must be non-negative, given ~s" backlog))
       backlog))
 
+  #|record:http-request-record
+The `http-request-record` record is an immutable HTTP request.
+Method is a normalized string, uri is a URI, headers are a normalized alist, and body is `#f`, a
+string, a bytevector, or an HTTP body source. A streaming body source remains caller-owned.
+|#
   (define-record-type (http-request-record %make-http-request http-request?)
     (sealed #t)
     (opaque #f)
@@ -105,6 +110,11 @@
             (immutable headers http-request-headers)
             (immutable body http-request-body)))
 
+  #|record:http-response-record
+The `http-response-record` record is an immutable completed HTTP response.
+It contains numeric status, reason text, normalized header and trailer alists, body bytes or a sink
+result, and the negotiated HTTP version symbol.
+|#
   (define-record-type (http-response-record %make-http-response http-response?)
     (sealed #t)
     (opaque #f)
@@ -115,6 +125,11 @@
             (immutable trailers http-response-trailers)
             (immutable version http-response-version)))
 
+  #|record:http-body-source
+The `http-body-source` record owns a pull-based streaming body.
+Its producer has signature `(lambda (maximum-count) bytevector-or-eof)`, length is a byte count or
+`#f`, and its zero-argument closer releases resources once. Reads after closure raise an error.
+|#
   (define-record-type (http-body-source %make-http-body-source http-body-source?)
     (sealed #t)
     (opaque #f)
@@ -133,6 +148,11 @@
         (http-body-source-closed?-set! source #t)
         ((http-body-source-closer source)))))
 
+  #|record:http-body-sink
+The `http-body-sink` record owns a push-based streaming destination.
+Its consumer has signature `(lambda (bytes start count) any)` and its finisher has signature
+`(lambda () result)`. Finishing occurs once and returns the destination-specific result.
+|#
   (define-record-type (http-body-sink %make-http-body-sink http-body-sink?)
     (sealed #t)
     (opaque #f)
@@ -140,6 +160,11 @@
             (immutable finisher http-body-sink-finisher)
             (mutable finished? http-body-sink-finished? http-body-sink-finished?-set!)))
 
+  #|record:http-cookie
+The `http-cookie` record is an immutable HTTP cookie.
+Name and value are strings, domain and path constrain matching, and secure? restricts transmission
+to secure requests. The record does not contain expiration state.
+|#
   (define-record-type (http-cookie %make-http-cookie http-cookie?)
     (sealed #t)
     (opaque #f)
@@ -149,17 +174,30 @@
             (immutable path http-cookie-path)
             (immutable secure? http-cookie-secure?)))
 
+  #|record:http-cookie-jar
+The `http-cookie-jar` record is a synchronized mutable collection of HTTP cookies.
+Clients may share a jar; request matching and response updates hold its private mutex.
+|#
   (define-record-type (http-cookie-jar %make-http-cookie-jar http-cookie-jar?)
     (sealed #t)
     (opaque #f)
     (fields (mutable cookies http-cookie-jar-cookies http-cookie-jar-cookies-set!)
             (immutable mutex http-cookie-jar-mutex)))
 
+  #|record:http-proxy
+The `http-proxy` record is immutable proxy configuration containing an HTTP proxy URI.
+The URI is retained and used when a client opens proxied requests.
+|#
   (define-record-type (http-proxy %make-http-proxy http-proxy?)
     (sealed #t)
     (opaque #f)
     (fields (immutable uri http-proxy-uri)))
 
+  #|record:http-multipart-part
+The `http-multipart-part` record is an immutable form part.
+Name identifies the field, value is its string or byte content, and optional filename and
+content-type strings describe file data.
+|#
   (define-record-type (http-multipart-part %make-http-multipart-part http-multipart-part?)
     (sealed #t)
     (opaque #f)
@@ -168,6 +206,11 @@
             (immutable filename http-multipart-part-filename)
             (immutable content-type http-multipart-part-content-type)))
 
+  #|record:http-pool-policy
+The `http-pool-policy` record is immutable connection reuse policy.
+Max-idle and max-active are nonnegative connection limits, and idle-timeout-ms is the maximum
+idle duration before a cached connection is closed.
+|#
   (define-record-type (http-pool-policy %make-http-pool-policy http-pool-policy?)
     (sealed #t)
     (opaque #f)
@@ -175,6 +218,11 @@
             (immutable max-active http-pool-policy-max-active)
             (immutable idle-timeout-ms http-pool-policy-idle-timeout-ms)))
 
+  #|record:http-client
+The `http-client` record owns reusable HTTP/1.1 and HTTP/2 connections and pending operations.
+Its mutable request policy includes headers, redirects, timeout, cookies, authentication, proxy,
+pool limits, and version. `http-close` cancels work and releases every owned connection.
+|#
   (define-record-type (http-client %make-http-client http-client?)
     (sealed #t)
     (opaque #f)
@@ -227,6 +275,11 @@
             (mutable response http2-client-stream-response http2-client-stream-response-set!)
             (mutable failure http2-client-stream-failure http2-client-stream-failure-set!)))
 
+  #|record:http-server
+The `http-server` record owns a listening socket and accepted operations for one host and port.
+Its optional TLS context remains caller-owned. `http-server-close` closes the listener and active
+operations; handler registration is synchronized with serving.
+|#
   (define-record-type (http-server %make-http-server http-server?)
     (sealed #t)
     (opaque #f)
@@ -239,6 +292,11 @@
             (mutable closed? http-server-closed? http-server-closed?-set!)
             (immutable close-mutex http-server-close-mutex)))
 
+  #|record:http-connection
+The `http-connection` record owns one accepted or outbound transport and its I/O ports.
+It reports whether TLS is active and tracks idle time. `http-connection-close` closes the TLS
+session or socket and ports once; later I/O raises an error.
+|#
   (define-record-type (http-connection %make-http-connection http-connection?)
     (sealed #t)
     (opaque #f)
@@ -3130,7 +3188,8 @@ The returned sink closes its port when finished.
            (lambda () (close-port port)))))))
 
   #|proc:make-http-request
-The `make-http-request` procedure constructs an HTTP request record from a method, URI, headers, and optional body.
+The `make-http-request` procedure constructs an HTTP request record from a method, URI, headers,
+and optional body.
 |#
   (define-who make-http-request
     (case-lambda
@@ -3145,7 +3204,8 @@ The `make-http-request` procedure constructs an HTTP request record from a metho
                            (normalize-http-body who body))]))
 
   #|proc:make-http-response
-The `make-http-response` procedure constructs an HTTP response record from a status, reason, headers, and optional body.
+The `make-http-response` procedure constructs an HTTP response record from a status, reason,
+headers, and optional body.
 |#
   (define-who make-http-response
     (case-lambda
@@ -3165,7 +3225,8 @@ The `make-http-response` procedure constructs an HTTP response record from a sta
                                     'http/1.1))]))
 
   #|proc:http-header-ref
-The `http-header-ref` procedure returns the first matching header value using case-insensitive name comparison.
+The `http-header-ref` procedure returns the first matching header value using case-insensitive
+name comparison.
 |#
   (define-who http-header-ref
     (case-lambda
@@ -3200,7 +3261,8 @@ The `http-header-set` procedure returns a header list with a single value for th
                     (loop (cdr rest) (cons (car rest) out) seen?)]))))))
 
   #|proc:http-header-add
-The `http-header-add` procedure returns a header list with an additional value appended for the named header.
+The `http-header-add` procedure returns a header list with an additional value appended for the
+named header.
 |#
   (define-who http-header-add
     (lambda (headers name value)
@@ -3443,7 +3505,8 @@ The return value is `client`.
         client)))
 
   #|proc:http-open
-The `http-open` procedure constructs an HTTP client with optional TLS context state for HTTPS requests.
+The `http-open` procedure constructs an HTTP client with optional TLS context state for HTTPS
+requests.
 |#
   (define-who http-open
     (case-lambda
@@ -3479,7 +3542,8 @@ The `http-close` procedure marks an HTTP client as closed.
               client)))
 
   #|proc:http-follow-redirects!
-The `http-follow-redirects!` procedure enables or disables automatic redirect handling on an HTTP client.
+The `http-follow-redirects!` procedure enables or disables automatic redirect handling on an HTTP
+client.
 |#
   (define-who http-follow-redirects!
     (lambda (client follow?)
@@ -3501,7 +3565,8 @@ The `http-set-header!` procedure sets a default header on an HTTP client.
               client)))
 
   #|proc:http-set-timeout!
-The `http-set-timeout!` procedure records a client timeout value in milliseconds for future request operations.
+The `http-set-timeout!` procedure records a client timeout value in milliseconds for future
+request operations.
 |#
   (define-who http-set-timeout!
     (lambda (client timeout-ms)
@@ -3526,7 +3591,8 @@ The return value is `client`.
               client)))
 
   #|proc:http-send
-The `http-send` procedure sends an HTTP request with a configured client and returns an HTTP response.
+The `http-send` procedure sends an HTTP request with a configured client and returns an HTTP
+response.
 |#
   (define-who http-send
     (lambda (client request)
@@ -3553,7 +3619,8 @@ The return value is a `net-operation` whose successful result is an HTTP respons
                (lambda (response) response)))))
 
   #|proc:http-request
-The `http-request` procedure sends a one-shot HTTP request without manually managing a client object.
+The `http-request` procedure sends a one-shot HTTP request without manually managing a client
+object.
 |#
   (define-who http-request
     (case-lambda
@@ -3607,27 +3674,32 @@ The return value is a `net-operation` whose successful result is an HTTP respons
                  (http-send client (make-http-request method uri headers body)))])))
 
   #|proc:http-get
-The `http-get` procedure sends an HTTP GET request either with a supplied client or as a one-shot operation.
+The `http-get` procedure sends an HTTP GET request either with a supplied client or as a one-shot
+operation.
 |#
   (define http-get (make-http-verb 'get))
 
   #|proc:http-head
-The `http-head` procedure sends an HTTP HEAD request either with a supplied client or as a one-shot operation.
+The `http-head` procedure sends an HTTP HEAD request either with a supplied client or as a one-shot
+operation.
 |#
   (define http-head (make-http-verb 'head))
 
   #|proc:http-post
-The `http-post` procedure sends an HTTP POST request either with a supplied client or as a one-shot operation.
+The `http-post` procedure sends an HTTP POST request either with a supplied client or as a one-shot
+operation.
 |#
   (define http-post (make-http-verb 'post))
 
   #|proc:http-put
-The `http-put` procedure sends an HTTP PUT request either with a supplied client or as a one-shot operation.
+The `http-put` procedure sends an HTTP PUT request either with a supplied client or as a one-shot
+operation.
 |#
   (define http-put (make-http-verb 'put))
 
   #|proc:http-delete
-The `http-delete` procedure sends an HTTP DELETE request either with a supplied client or as a one-shot operation.
+The `http-delete` procedure sends an HTTP DELETE request either with a supplied client or as a
+one-shot operation.
 |#
   (define http-delete (make-http-verb 'delete))
 
@@ -3716,7 +3788,8 @@ The return value is a `net-operation` whose successful result is an HTTP respons
   ;;===----------------------------------------------------------------------===
 
   #|proc:http-listen
-The `http-listen` procedure opens a listening HTTP server on `host` and `port`, optionally wrapping accepted connections with TLS.
+The `http-listen` procedure opens a listening HTTP server on `host` and `port`, optionally wrapping
+accepted connections with TLS.
 |#
   (define-who http-listen
     (case-lambda
@@ -3819,7 +3892,8 @@ The `http-unregister-handler!` procedure removes a handler from `server` for `pa
                  old))]))
 
   #|proc:http-accept
-The `http-accept` procedure accepts a client connection from an HTTP server and returns an HTTP connection object.
+The `http-accept` procedure accepts a client connection from an HTTP server and returns an HTTP
+connection object.
 |#
   (define-who http-accept
     (lambda (server)
@@ -3830,7 +3904,8 @@ The `http-accept` procedure accepts a client connection from an HTTP server and 
                 (make-server-connection sock (http-server-tls-context server))))))
 
   #|proc:http-accept/nonblocking
-The `http-accept/nonblocking` procedure accepts an HTTP connection if one is ready and returns `#f` otherwise.
+The `http-accept/nonblocking` procedure accepts an HTTP connection if one is ready and returns `#f`
+otherwise.
 |#
   (define-who http-accept/nonblocking
     (lambda (server)
@@ -3880,7 +3955,8 @@ The `http-read-request` procedure reads one HTTP request from an accepted connec
                     (make-http-request method u headers body)))))))
 
   #|proc:http-read-request/nonblocking
-The `http-read-request/nonblocking` procedure attempts to read one HTTP request if the connection is currently readable, and returns `#f` otherwise.
+The `http-read-request/nonblocking` procedure attempts to read one HTTP request if the connection
+is currently readable, and returns `#f` otherwise.
 |#
   (define-who http-read-request/nonblocking
     (lambda (conn)
@@ -3904,7 +3980,8 @@ The `http-write-response` procedure writes one HTTP response to an accepted conn
               response)))
 
   #|proc:http-write-response/nonblocking
-The `http-write-response/nonblocking` procedure writes an HTTP response if the connection is currently writable, and returns `#f` otherwise.
+The `http-write-response/nonblocking` procedure writes an HTTP response if the connection is
+currently writable, and returns `#f` otherwise.
 |#
   (define-who http-write-response/nonblocking
     (lambda (conn response)
@@ -3918,7 +3995,8 @@ The `http-write-response/nonblocking` procedure writes an HTTP response if the c
                     #f)))))
 
   #|proc:http-serve
-The `http-serve` procedure accepts one connection, dispatches requests through the registered handler table, and keeps serving that connection until either side asks to close it.
+The `http-serve` procedure accepts one connection, dispatches requests through the registered
+handler table, and keeps serving that connection until either side asks to close it.
 |#
   (define-who http-serve
     (lambda (server)

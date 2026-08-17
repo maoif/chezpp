@@ -17,6 +17,10 @@
           (chezpp net ffi)
           (chezpp net errors))
 
+  #|record:http2-session
+The `http2-session` record owns a native HTTP/2 session for an immutable client or server role.
+Its handle is valid until `http2-close` releases it; operations on a closed session raise an error.
+|#
   (define-record-type (http2-session %make-http2-session http2-session?)
     (sealed #t)
     (opaque #f)
@@ -112,7 +116,7 @@ It returns the newly assigned numeric stream identifier.
 The `http2-submit-response` procedure queues a response for `stream-id` on `session`.
 The full arity sends numeric `status`, regular `headers`, and bytevector `body`.
 The compatibility arity sends status 200.
-It returns unspecified values after the response is accepted.
+It produces no useful return value after the response is accepted.
 |#
   (define-who http2-submit-response
     (case-lambda

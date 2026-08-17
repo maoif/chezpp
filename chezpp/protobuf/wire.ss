@@ -414,6 +414,11 @@ It returns the field number and wire type as two values.
             (errorf 'protobuf-decode-tag "invalid wire type: ~s" wire-type))
           (values number wire-type)))))
 
+  #|record:protobuf-wire-field
+The `protobuf-wire-field` record is an immutable decoded protobuf field occurrence.
+Number is the positive field number, wire-type is `0`, `1`, `2`, or `5`, value is the decoded
+scalar or payload bytes, and raw is the complete copied encoded field bytes.
+|#
   (define-record-type (protobuf-wire-field %make-protobuf-wire-field protobuf-wire-field?)
     (sealed #t)
     (opaque #f)
@@ -422,6 +427,11 @@ It returns the field number and wire type as two values.
             (immutable value protobuf-wire-field-value)
             (immutable raw protobuf-wire-field-raw)))
 
+  #|record:protobuf-decoder
+The `protobuf-decoder` record is a mutable cursor over a retained source bytevector.
+It tracks current index, bounded limit, recursion depth and limit, and copied unknown fields.
+Decoder operations advance the index; the source remains owned by the caller and must not change.
+|#
   (define-record-type (protobuf-decoder %make-protobuf-decoder protobuf-decoder?)
     (sealed #t)
     (opaque #f)

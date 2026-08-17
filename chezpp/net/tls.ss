@@ -89,6 +89,11 @@
 
   (define tls-formats '(pem der))
 
+  #|record:tls-context
+The `tls-context` record owns mutable OpenSSL client or server configuration.
+Its policy and SNI selector may change before handshakes. `close-tls-context` releases the native
+handle; existing sessions retain their selected context, while new operations raise an error.
+|#
   (define-record-type (tls-context %make-tls-context tls-context?)
     (sealed #t)
     (opaque #f)
@@ -99,6 +104,11 @@
                      tls-context-sni-selector-set-internal!)
             (mutable closed? tls-context-closed? tls-context-closed?-set!)))
 
+  #|record:tls-session
+The `tls-session` record owns one established or handshaking TLS connection and its socket.
+It retains the configured and SNI-selected contexts. `close-tls-session` releases its native
+handle and marks it closed; later session I/O raises an error.
+|#
   (define-record-type (tls-session %make-tls-session tls-session?)
     (sealed #t)
     (opaque #f)
@@ -598,7 +608,8 @@ The `tls-context-load-ca-path!` procedure loads trusted CA certificates from a d
               (ensure-success who (ffi-net-tls-context-load-ca-path (tls-context-handle ctx) path)))))
 
   #|proc:tls-context-load-default-ca!
-The `tls-context-load-default-ca!` procedure loads the platform default trusted certificate locations into a TLS context.
+The `tls-context-load-default-ca!` procedure loads the platform default trusted certificate
+locations into a TLS context.
 |#
   (define-who tls-context-load-default-ca!
     (lambda (ctx)
@@ -609,7 +620,8 @@ The `tls-context-load-default-ca!` procedure loads the platform default trusted 
                                (tls-context-handle ctx))))))
 
   #|proc:tls-context-load-cert!
-The `tls-context-load-cert!` procedure loads a TLS certificate from a pathname string or bytevector data.
+The `tls-context-load-cert!` procedure loads a TLS certificate from a pathname string or
+bytevector data.
 |#
   (define-who tls-context-load-cert!
     (case-lambda
@@ -638,7 +650,8 @@ The `tls-context-load-cert!` procedure loads a TLS certificate from a pathname s
                          source)]))]))
 
   #|proc:tls-context-load-private-key!
-The `tls-context-load-private-key!` procedure loads a TLS private key from a pathname string or bytevector data.
+The `tls-context-load-private-key!` procedure loads a TLS private key from a pathname string or
+bytevector data.
 |#
   (define-who tls-context-load-private-key!
     (case-lambda
@@ -895,7 +908,8 @@ The return value is a byte count, EOF, or a would-block value naming the session
                (tls-read-into* who session bv start stop tls-no-timeout #t))]))
 
   #|proc:tls-write
-The `tls-write` procedure writes a bytevector slice to a TLS session and returns the number of bytes written.
+The `tls-write` procedure writes a bytevector slice to a TLS session and returns the number of
+bytes written.
 |#
   (define-who tls-write
     (case-lambda
@@ -989,7 +1003,8 @@ The `tls-shutdown!` procedure performs an orderly TLS shutdown.
               (ensure-success who (ffi-net-tls-shutdown (tls-session-handle session))))))
 
   #|proc:tls-peer-certificate
-The `tls-peer-certificate` procedure returns the peer certificate as a `(chezpp crypto cert)` certificate object, or `#f`.
+The `tls-peer-certificate` procedure returns the peer certificate as a `(chezpp crypto cert)`
+certificate object, or `#f`.
 |#
   (define-who tls-peer-certificate
     (lambda (session)
@@ -999,7 +1014,8 @@ The `tls-peer-certificate` procedure returns the peer certificate as a `(chezpp 
                 (maybe-derive-peer-certificate ans)))))
 
   #|proc:tls-peer-certificate-chain
-The `tls-peer-certificate-chain` procedure returns the presented certificate chain as a list of certificate objects.
+The `tls-peer-certificate-chain` procedure returns the presented certificate chain as a list of
+certificate objects.
 |#
   (define-who tls-peer-certificate-chain
     (lambda (session)
@@ -1136,7 +1152,8 @@ The return value is an association list with Boolean session, SNI, and OCSP capa
         (ocsp-stapling . #t))))
 
   #|proc:call-with-tls-client
-The `call-with-tls-client` procedure performs a client TLS handshake, passes the session to a procedure, and closes the session afterwards.
+The `call-with-tls-client` procedure performs a client TLS handshake, passes the session to a
+procedure, and closes the session afterwards.
 |#
   (define-who call-with-tls-client
     (case-lambda
@@ -1168,7 +1185,8 @@ The `call-with-tls-client` procedure performs a client TLS handshake, passes the
                    (lambda () (when session (close-tls-session session))))))]))
 
   #|proc:call-with-tls-server
-The `call-with-tls-server` procedure performs a server TLS handshake, passes the session to a procedure, and closes the session afterwards.
+The `call-with-tls-server` procedure performs a server TLS handshake, passes the session to a
+procedure, and closes the session afterwards.
 |#
   (define-who call-with-tls-server
     (case-lambda
@@ -1242,7 +1260,8 @@ The `open-tls-text-output-port` procedure opens a text output port layered over 
               (transcoded-port (open-tls-output-port session) (native-transcoder)))))
 
   #|proc:call-with-tls-ports
-The `call-with-tls-ports` procedure opens binary TLS ports, passes them to a procedure, and closes the wrapper ports afterwards.
+The `call-with-tls-ports` procedure opens binary TLS ports, passes them to a procedure, and closes
+the wrapper ports afterwards.
 |#
   (define-who call-with-tls-ports
     (lambda (session proc)

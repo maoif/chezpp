@@ -40,6 +40,11 @@
           (chezpp net ffi)
           (chezpp net errors))
 
+  #|record:uri
+The `uri` record is an immutable parsed or constructed URI.
+Scheme and port are normalized values. Userinfo, host, path, query, and fragment are decoded
+strings or `#f`; their raw accessors preserve original percent escapes for lossless rendering.
+|#
   (define-record-type (uri %make-uri/raw uri?)
     (sealed #t)
     (opaque #f)
@@ -395,7 +400,8 @@ The `uri-raw-fragment` procedure returns the URI fragment exactly as parsed, or 
        [else #f])))
 
   #|proc:string->uri
-The `string->uri` procedure parses a URI or URI reference string and returns a URI object, or `#f` on failure.
+The `string->uri` procedure parses a URI or URI reference string and returns a URI object, or `#f`
+on failure.
 |#
   (define-who string->uri
     (lambda (str)
@@ -597,7 +603,8 @@ It is an alias for `idna->unicode` and returns a Unicode domain string.
   (define idna-domain->unicode idna->unicode)
 
   #|proc:form-urlencode
-The `form-urlencode` procedure encodes an association list into an `application/x-www-form-urlencoded` string.
+The `form-urlencode` procedure encodes an association list into an
+`application/x-www-form-urlencoded` string.
 |#
   (define-who form-urlencode
     (lambda (alist)
@@ -632,7 +639,8 @@ The `form-urlencode` procedure encodes an association list into an `application/
          "&"))))
 
   #|proc:form-urldecode
-The `form-urldecode` procedure decodes an `application/x-www-form-urlencoded` string into an association list.
+The `form-urldecode` procedure decodes an `application/x-www-form-urlencoded` string into an
+association list.
 |#
   (define-who form-urldecode
     (lambda (str)

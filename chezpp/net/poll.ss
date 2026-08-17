@@ -15,6 +15,11 @@
           (chezpp net private)
           (chezpp net operation private))
 
+  #|record:poll-target
+The `poll-target` record is an immutable snapshot of one requested or completed poll target.
+Its resource retains the descriptor, fd is its integer descriptor, events are requested event
+symbols, and ready-events are the separate event symbols reported by `poll`.
+|#
   (define-record-type (poll-target %make-poll-target poll-target?)
     (sealed #t)
     (opaque #f)

@@ -10,8 +10,10 @@
           (chezpp utils)
           (chezpp net ffi))
 
-  #|record:optional-library-info
-The `optional-library-info` record describes one supported native optional dependency.
+  #|record:optional-library-info-record
+The `optional-library-info-record` record is an immutable native dependency probe result.
+Its name is a symbol, availability is a boolean, version is a string or `#f`, capabilities are
+dependency-specific data, and error is a diagnostic string or `#f`.
 |#
   (define-record-type (optional-library-info-record %make-optional-library-info
                                              optional-library-info?)

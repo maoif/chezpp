@@ -32,6 +32,11 @@
           (chezpp net ssh)
           (chezpp net sftp))
 
+  #|record:scp-session
+The `scp-session` record owns SCP operations over an SSH session with a fixed timeout.
+It records whether it owns that SSH session and tracks one pending operation. `scp-close` cancels
+pending work and closes the underlying SSH session only when ownership was requested.
+|#
   (define-record-type (scp-session %make-scp-session scp-session?)
     (sealed #t)
     (opaque #f)
@@ -501,7 +506,8 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
           (lambda () (sftp-close sftp))))))
 
   #|proc:scp-open
-The `scp-open` procedure wraps an authenticated SSH session, or opens and authenticates one, for subsequent SCP transfers.
+The `scp-open` procedure wraps an authenticated SSH session, or opens and authenticates one, for
+subsequent SCP transfers.
 |#
   (define-who scp-open
     (case-lambda
@@ -532,7 +538,8 @@ The `scp-open` procedure wraps an authenticated SSH session, or opens and authen
                          (ssh-close ssh-session)))))))]))
 
   #|proc:scp-close
-The `scp-close` procedure closes an SCP session and, if it owns the wrapped SSH session, closes that SSH session as well.
+The `scp-close` procedure closes an SCP session and, if it owns the wrapped SSH session, closes
+that SSH session as well.
 |#
   (define-who scp-close
     (lambda (session)
@@ -708,7 +715,8 @@ The return value is a `net-operation` whose successful result is the target path
                                        policy filter symlink-policy))))]))
 
   #|proc:call-with-scp-session
-The `call-with-scp-session` procedure opens an SCP session, applies a procedure, and closes the session afterwards.
+The `call-with-scp-session` procedure opens an SCP session, applies a procedure, and closes the
+session afterwards.
 |#
   (define-who call-with-scp-session
     (case-lambda

@@ -64,6 +64,11 @@
           (chezpp net private)
           (chezpp net operation))
 
+  #|record:ssh-session
+The `ssh-session` record owns an authenticated or unauthenticated SSH transport.
+Host, port, and known-hosts path identify the connection; user changes during authentication.
+`ssh-close` releases the handle and all channels, after which session operations raise an error.
+|#
   (define-record-type (ssh-session %make-ssh-session ssh-session?)
     (sealed #t)
     (opaque #f)
@@ -74,6 +79,11 @@
             (immutable known-hosts-path ssh-session-known-hosts-path)
             (mutable closed? ssh-session-closed? ssh-session-closed?-set!)))
 
+  #|record:ssh-channel
+The `ssh-channel` record owns one channel retained by its SSH session.
+`ssh-close-channel` releases the native handle and marks it closed; closing the owning session also
+invalidates it. Operations on a closed channel raise an error.
+|#
   (define-record-type (ssh-channel %make-ssh-channel ssh-channel?)
     (sealed #t)
     (opaque #f)
@@ -271,7 +281,8 @@ The `%ssh-session-handle` procedure returns the foreign handle stored inside an 
               (ssh-session-handle session))))
 
   #|proc:ssh-open
-The `ssh-open` procedure opens a network SSH session to a remote host using strict host-key verification.
+The `ssh-open` procedure opens a network SSH session to a remote host using strict host-key
+verification.
 |#
   (define-who ssh-open
     (case-lambda
@@ -288,7 +299,8 @@ The `ssh-open` procedure opens a network SSH session to a remote host using stri
                (ssh-open-with-policy host port user timeout-ms 'strict))]))
 
   #|proc:ssh-open-with-policy
-The `ssh-open-with-policy` procedure opens an SSH session using an explicit host-key policy. The policy must be one of `strict`, `accept-new`, or `insecure`.
+The `ssh-open-with-policy` procedure opens an SSH session using an explicit host-key policy.
+The policy must be one of `strict`, `accept-new`, or `insecure`.
 |#
   (define-who ssh-open-with-policy
     (lambda (host port user timeout-ms policy)
@@ -342,7 +354,8 @@ The `ssh-auth-password!` procedure authenticates an SSH session with a password.
                session)]))
 
   #|proc:ssh-auth-publickey!
-The `ssh-auth-publickey!` procedure authenticates an SSH session using libssh's automatic public-key discovery.
+The `ssh-auth-publickey!` procedure authenticates an SSH session using libssh's automatic
+public-key discovery.
 |#
   (define-who ssh-auth-publickey!
     (case-lambda
@@ -1220,7 +1233,8 @@ The `ssh-channel-exit-status` procedure returns the remote process exit status f
                               (ffi-net-ssh-channel-exit-status (ssh-channel-handle channel))))))
 
   #|proc:call-with-ssh-session
-The `call-with-ssh-session` procedure opens an SSH session, applies a procedure, and closes the session afterwards.
+The `call-with-ssh-session` procedure opens an SSH session, applies a procedure, and closes the
+session afterwards.
 |#
   (define-who call-with-ssh-session
     (case-lambda
@@ -1242,7 +1256,8 @@ The `call-with-ssh-session` procedure opens an SSH session, applies a procedure,
                    (lambda () (ssh-close session)))))]))
 
   #|proc:call-with-ssh-channel
-The `call-with-ssh-channel` procedure opens an SSH channel, applies a procedure, and closes the channel afterwards.
+The `call-with-ssh-channel` procedure opens an SSH channel, applies a procedure, and closes the
+channel afterwards.
 |#
   (define-who call-with-ssh-channel
     (case-lambda
@@ -1263,7 +1278,8 @@ The `call-with-ssh-channel` procedure opens an SSH channel, applies a procedure,
                    (lambda () (ssh-close-channel channel)))))]))
 
   #|proc:open-ssh-channel-input-port
-The `open-ssh-channel-input-port` procedure opens a binary input port over an SSH channel's stdout stream.
+The `open-ssh-channel-input-port` procedure opens a binary input port over an SSH channel's stdout
+stream.
 |#
   (define-who open-ssh-channel-input-port
     (lambda (channel)
@@ -1272,7 +1288,8 @@ The `open-ssh-channel-input-port` procedure opens a binary input port over an SS
               (make-binary-input-port who channel #f))))
 
   #|proc:open-ssh-channel-output-port
-The `open-ssh-channel-output-port` procedure opens a binary output port over an SSH channel's stdin stream.
+The `open-ssh-channel-output-port` procedure opens a binary output port over an SSH channel's stdin
+stream.
 |#
   (define-who open-ssh-channel-output-port
     (lambda (channel)
@@ -1281,7 +1298,8 @@ The `open-ssh-channel-output-port` procedure opens a binary output port over an 
               (make-binary-output-port channel))))
 
   #|proc:open-ssh-channel-error-port
-The `open-ssh-channel-error-port` procedure opens a binary input port over an SSH channel's stderr stream.
+The `open-ssh-channel-error-port` procedure opens a binary input port over an SSH channel's stderr
+stream.
 |#
   (define-who open-ssh-channel-error-port
     (lambda (channel)

@@ -9,6 +9,11 @@
   (define grpc-reflection-method
     "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo")
 
+  #|record:grpc-reflection-registry
+The `grpc-reflection-registry` record owns synchronized descriptor indexes used by reflection.
+Its hash tables index immutable file bytes by file, dependency, symbol, service, and extension
+names. Registration updates those indexes while holding the registry's mutex.
+|#
   (define-record-type (grpc-reflection-registry %make-grpc-reflection-registry
                                                 grpc-reflection-registry?)
     (sealed #t)

@@ -65,6 +65,12 @@
           (chezpp net poll)
           (chezpp net operation))
 
+  #|record:sftp-session
+The `sftp-session` record owns an SFTP subsystem attached to an SSH session.
+It tracks the remote working directory. `sftp-close` releases its native handle and closes open
+operations; later session operations raise an error. The underlying SSH session remains owned by
+its caller.
+|#
   (define-record-type (sftp-session %make-sftp-session sftp-session?)
     (sealed #t)
     (opaque #f)
@@ -73,6 +79,11 @@
             (mutable cwd sftp-session-cwd sftp-session-cwd-set!)
             (mutable closed? sftp-session-closed? sftp-session-closed?-set!)))
 
+  #|record:sftp-file
+The `sftp-file` record owns one remote file handle and retains its SFTP session.
+`sftp-close-file` releases the handle and marks the file closed; later file operations raise an
+error. Closing the owning session also invalidates the file.
+|#
   (define-record-type (sftp-file %make-sftp-file sftp-file?)
     (sealed #t)
     (opaque #f)
@@ -1102,7 +1113,8 @@ times. Local links and unknown file types are rejected. The return value is `rem
                remote-root)]))
 
   #|proc:call-with-sftp-session
-The `call-with-sftp-session` procedure opens an SFTP session, applies a procedure, and closes it afterwards.
+The `call-with-sftp-session` procedure opens an SFTP session, applies a procedure, and closes it
+afterwards.
 |#
   (define-who call-with-sftp-session
     (lambda (ssh-session proc)

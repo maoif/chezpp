@@ -44,6 +44,11 @@
   (define websocket-default-timeout-ms 30000)
   (define websocket-no-timeout -1)
 
+  #|record:websocket-options
+The `websocket-options` record is immutable connection and listener policy.
+It contains an optional TLS context, ordered subprotocol strings, compression flag, positive
+fragment size, and optional positive ping interval and pong timeout in milliseconds.
+|#
   (define-record-type (websocket-options %make-websocket-options websocket-options?)
     (sealed #t)
     (opaque #f)
@@ -54,6 +59,11 @@
             (immutable ping-interval-ms websocket-options-ping-interval-ms)
             (immutable pong-timeout-ms websocket-options-pong-timeout-ms)))
 
+  #|record:websocket-server
+The `websocket-server` record owns a listener for one host, port, protocol, and options value.
+`websocket-server-close` releases the native listener once; later accepts raise an error.
+The TLS context in its options remains caller-owned.
+|#
   (define-record-type (websocket-server %make-websocket-server websocket-server?)
     (sealed #t)
     (opaque #f)
@@ -64,6 +74,11 @@
             (immutable options websocket-server-options)
             (mutable closed? websocket-server-closed? websocket-server-closed?-set!)))
 
+  #|record:websocket-connection
+The `websocket-connection` record owns one client or accepted WebSocket transport.
+It records endpoint and negotiated subprotocol and compression, then close code and reason during
+shutdown. `websocket-close` releases the handle and makes later send or receive operations fail.
+|#
   (define-record-type (websocket-connection %make-websocket-connection websocket-connection?)
     (sealed #t)
     (opaque #f)
@@ -89,6 +104,10 @@
   (define default-websocket-options
     (%make-websocket-options #f '("chezpp-websocket") #f 65536 #f 30000))
 
+  #|record:websocket-message-record
+The `websocket-message-record` record is an immutable complete WebSocket message.
+Type is `text`, `binary`, `ping`, or `pong`, and data is the copied message bytevector.
+|#
   (define-record-type (websocket-message-record %make-websocket-message websocket-message?)
     (sealed #t)
     (opaque #f)
@@ -449,7 +468,8 @@ The return value is a connection, EOF, or a would-block value naming a service d
                                                        websocket-no-timeout)))))
 
   #|proc:websocket-connect
-The `websocket-connect` procedure connects to a WebSocket endpoint described by a `ws:` or `wss:` URI.
+The `websocket-connect` procedure connects to a WebSocket endpoint described by a `ws:` or `wss:`
+URI.
 |#
   (define-who websocket-connect
     (case-lambda
@@ -633,7 +653,8 @@ The `websocket-send-pong` procedure sends a pong frame on a WebSocket connection
                   (do-send who conn 'pong payload #t websocket-no-timeout))))]))
 
   #|proc:websocket-cancel-pending-send!
-The `websocket-cancel-pending-send!` procedure cancels and discards the currently pending non-blocking send on a WebSocket connection, if any.
+The `websocket-cancel-pending-send!` procedure cancels and discards the currently pending
+non-blocking send on a WebSocket connection, if any.
 |#
   (define-who websocket-cancel-pending-send!
     (lambda (conn)
@@ -818,7 +839,8 @@ The `websocket-next-message` procedure is an alias of `websocket-recv`.
                (websocket-recv conn timeout-ms))]))
 
   #|proc:call-with-websocket
-The `call-with-websocket` procedure opens a WebSocket connection, passes it to `proc`, and closes it afterward.
+The `call-with-websocket` procedure opens a WebSocket connection, passes it to `proc`, and closes
+it afterward.
 |#
   (define-who call-with-websocket
     (case-lambda

@@ -70,6 +70,11 @@
           (chezpp net ffi)
           (chezpp net private))
 
+  #|record:ftp-session
+The `ftp-session` record owns one FTP or FTPS control connection for its immutable URI and mode.
+It tracks credentials, working directory, transfer mode, timeout, TLS verification, pending work,
+and the active file. `ftp-close` cancels work, closes the active file, and releases the handle.
+|#
   (define-record-type (ftp-session %make-ftp-session ftp-session?)
     (sealed #t)
     (opaque #f)
@@ -744,7 +749,8 @@ The `ftp-close` procedure marks an FTP session as closed.
               session)))
 
   #|proc:ftp-verify-peer?
-The `ftp-verify-peer?` procedure returns whether an FTPS session verifies the server certificate chain.
+The `ftp-verify-peer?` procedure returns whether an FTPS session verifies the server certificate
+chain.
 |#
   (define-who ftp-verify-peer?
     (lambda (session)
@@ -752,7 +758,8 @@ The `ftp-verify-peer?` procedure returns whether an FTPS session verifies the se
               (ftp-session-verify-peer? session))))
 
   #|proc:ftp-verify-host?
-The `ftp-verify-host?` procedure returns whether an FTPS session verifies the server certificate hostname.
+The `ftp-verify-host?` procedure returns whether an FTPS session verifies the server certificate
+hostname.
 |#
   (define-who ftp-verify-host?
     (lambda (session)
@@ -760,7 +767,8 @@ The `ftp-verify-host?` procedure returns whether an FTPS session verifies the se
               (ftp-session-verify-host? session))))
 
   #|proc:ftp-set-tls-verification!
-The `ftp-set-tls-verification!` procedure sets FTPS certificate-chain and hostname verification flags on a session.
+The `ftp-set-tls-verification!` procedure sets FTPS certificate-chain and hostname verification
+flags on a session.
 |#
   (define-who ftp-set-tls-verification!
     (lambda (session verify-peer? verify-host?)
@@ -1459,7 +1467,8 @@ The `ftp-rename!` procedure renames or moves a remote file or directory.
               session)))
 
   #|proc:call-with-ftp-session
-The `call-with-ftp-session` procedure opens an FTP session, applies a procedure to it, and closes it afterward.
+The `call-with-ftp-session` procedure opens an FTP session, applies a procedure to it, and closes it
+afterward.
 |#
   (define-who call-with-ftp-session
     (case-lambda
@@ -1497,7 +1506,8 @@ The `open-ftp-input-port` procedure opens a binary input port for a remote FTP f
               (make-ftp-input-port session remote-path))))
 
   #|proc:open-ftp-output-port
-The `open-ftp-output-port` procedure opens a binary output port that uploads its contents to a remote FTP file when closed.
+The `open-ftp-output-port` procedure opens a binary output port that uploads its contents to a
+remote FTP file when closed.
 |#
   (define-who open-ftp-output-port
     (lambda (session remote-path)

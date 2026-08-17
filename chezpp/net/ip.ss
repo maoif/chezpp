@@ -34,12 +34,21 @@
           (chezpp utils)
           (chezpp string))
 
+  #|record:ip-address
+The `ip-address` record is an immutable canonical IPv4 or IPv6 address.
+Version is `4` or `6`, and the internal bytes are four or sixteen network-order octets.
+Use `ip-address->string` for a stable textual representation.
+|#
   (define-record-type (ip-address %make-ip-address ip-address?)
     (sealed #t)
     (opaque #f)
     (fields (immutable version ip-address-version)
             (immutable bytes ip-address-bytes)))
 
+  #|record:cidr
+The `cidr` record is an immutable normalized IP network.
+Its network-address has all host bits cleared, and prefix-length is valid for that address family.
+|#
   (define-record-type (cidr %make-cidr cidr?)
     (sealed #t)
     (opaque #f)
@@ -285,7 +294,8 @@ The `ipv6-address?` procedure returns whether the given value is an IPv6 address
            (fx= (ip-address-version x) 6))))
 
   #|proc:string->ip-address
-The `string->ip-address` procedure parses an IPv4 or IPv6 address string and returns an address object, or `#f` on failure.
+The `string->ip-address` procedure parses an IPv4 or IPv6 address string and returns an address
+object, or `#f` on failure.
 |#
   (define-who string->ip-address
     (lambda (str)
