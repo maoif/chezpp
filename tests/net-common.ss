@@ -78,6 +78,77 @@
                      (close-socket server)
                      (close-tls-context ctx)))))))))
 
+(define start-tls-sni-echo-server
+  (lambda ()
+    (let ([server (open-socket 'inet 'stream)]
+          [default-ctx (make-tls-context 'server)]
+          [selected-ctx (make-tls-context 'server)]
+          [selected-name #f])
+      (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
+      (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)
+      (write-bytevector-file "/tmp/chezpp-net-test-san-cert.pem" tls-test-san-certificate)
+      (write-bytevector-file "/tmp/chezpp-net-test-san-key.pem" tls-test-san-private-key)
+      (tls-context-load-cert! default-ctx "/tmp/chezpp-net-test-cert.pem")
+      (tls-context-load-private-key! default-ctx "/tmp/chezpp-net-test-key.pem")
+      (tls-context-load-cert! selected-ctx "/tmp/chezpp-net-test-san-cert.pem")
+      (tls-context-load-private-key! selected-ctx "/tmp/chezpp-net-test-san-key.pem")
+      (tls-context-sni-selector-set!
+       default-ctx
+       (lambda (server-name)
+         (set! selected-name server-name)
+         (and (string=? server-name "localhost") selected-ctx)))
+      (socket-set-option! server 'reuse-address #t)
+      (socket-bind! server (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! server 8)
+      (let ([port (socket-address-port (socket-local-address server))])
+        (values
+         server
+         port
+         (fork-thread
+          (lambda ()
+            (let-values ([(client peer) (socket-accept server)])
+              (guard (c [else #f])
+                (let ([session (tls-accept default-ctx client 3000)])
+                  (let ([payload (tls-read session 32 3000)])
+                    (when (bytevector? payload)
+                      (tls-write-all session payload)))
+                  (close-tls-session session)))
+              (close-socket client)
+              (close-socket server)
+              (close-tls-context selected-ctx)
+              (close-tls-context default-ctx))))
+         (lambda () selected-name))))))
+
+(define start-tls-resumption-server
+  (lambda ()
+    (let ([server (open-socket 'inet 'stream)]
+          [ctx (make-tls-context 'server)])
+      (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
+      (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)
+      (tls-context-load-cert! ctx "/tmp/chezpp-net-test-cert.pem")
+      (tls-context-load-private-key! ctx "/tmp/chezpp-net-test-key.pem")
+      (socket-set-option! server 'reuse-address #t)
+      (socket-bind! server (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! server 8)
+      (let ([port (socket-address-port (socket-local-address server))])
+        (values
+         server
+         port
+         (fork-thread
+          (lambda ()
+            (do ([i 0 (fx1+ i)])
+                ((fx= i 2))
+              (let-values ([(client peer) (socket-accept server)])
+                (guard (c [else #f])
+                  (let ([session (tls-accept ctx client 3000)])
+                    (let ([payload (tls-read session 32 3000)])
+                      (when (bytevector? payload)
+                        (tls-write-all session payload)))
+                    (close-tls-session session)))
+                (close-socket client)))
+            (close-socket server)
+            (close-tls-context ctx))))))))
+
 (define reserve-loopback-port
   (lambda ()
     (let ([sock (open-socket 'inet 'stream)])

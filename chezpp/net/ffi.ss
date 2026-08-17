@@ -197,6 +197,9 @@
           ffi-net-tls-context-check-key
           ffi-net-tls-context-set-verify
           ffi-net-tls-context-set-alpn
+          ffi-net-tls-context-set-policy
+          ffi-net-tls-context-import-session
+          ffi-net-tls-context-enable-sni
           ffi-net-tls-connect
           ffi-net-tls-accept
           ffi-net-tls-handshake-step
@@ -209,6 +212,11 @@
           ffi-net-tls-negotiated-alpn
           ffi-net-tls-cipher-name
           ffi-net-tls-verified
+          ffi-net-tls-session-export
+          ffi-net-tls-session-reused
+          ffi-net-tls-session-select-context
+          ffi-net-tls-stapled-ocsp
+          ffi-net-tls-ocsp-result
           ffi-net-tls-peer-certificate-der
           ffi-net-tls-peer-certificate-chain-der)
   (import (chezpp chez)
@@ -652,6 +660,14 @@
     (foreign-procedure "chezpp_net_tls_context_set_verify" (uptr int) scheme-object))
   (define ffi-net-tls-context-set-alpn
     (foreign-procedure "chezpp_net_tls_context_set_alpn" (uptr ptr int int) scheme-object))
+  (define ffi-net-tls-context-set-policy
+    (foreign-procedure "chezpp_net_tls_context_set_policy"
+                       (uptr int int string string int) scheme-object))
+  (define ffi-net-tls-context-import-session
+    (foreign-procedure "chezpp_net_tls_context_import_session"
+                       (uptr ptr int int) scheme-object))
+  (define ffi-net-tls-context-enable-sni
+    (foreign-procedure "chezpp_net_tls_context_enable_sni" (uptr) scheme-object))
   (define ffi-net-tls-connect
     (foreign-procedure "chezpp_net_tls_connect" (uptr int string int) scheme-object))
   (define ffi-net-tls-accept
@@ -676,6 +692,16 @@
     (foreign-procedure "chezpp_net_tls_cipher_name" (uptr) scheme-object))
   (define ffi-net-tls-verified
     (foreign-procedure "chezpp_net_tls_verified" (uptr) scheme-object))
+  (define ffi-net-tls-session-export
+    (foreign-procedure "chezpp_net_tls_session_export" (uptr) scheme-object))
+  (define ffi-net-tls-session-reused
+    (foreign-procedure "chezpp_net_tls_session_reused" (uptr) scheme-object))
+  (define ffi-net-tls-session-select-context
+    (foreign-procedure "chezpp_net_tls_session_select_context" (uptr uptr) scheme-object))
+  (define ffi-net-tls-stapled-ocsp
+    (foreign-procedure "chezpp_net_tls_stapled_ocsp" (uptr) scheme-object))
+  (define ffi-net-tls-ocsp-result
+    (foreign-procedure "chezpp_net_tls_ocsp_result" (uptr) scheme-object))
   (define ffi-net-tls-peer-certificate-der
     (foreign-procedure "chezpp_net_tls_peer_certificate_der" (uptr) scheme-object))
   (define ffi-net-tls-peer-certificate-chain-der

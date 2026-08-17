@@ -766,6 +766,143 @@
              (close-socket client)
              (thread-join th))))))
 
+(mat net-tls-policy
+     (let ([ctx (make-tls-context 'client)]
+           [policy (make-tls-policy 'tls1.2 'tls1.3
+                                    "ECDHE+AESGCM" #f
+                                    '("h2" "http/1.1") 'disabled)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (eq? (tls-context-policy-set! ctx policy) policy)
+                (eq? (tls-policy-minimum-version policy) 'tls1.2)
+                (eq? (tls-policy-maximum-version policy) 'tls1.3)
+                (equal? (tls-policy-alpn-protocols policy) '("h2" "http/1.1"))
+                (and (assq 'session-serialization (tls-capabilities)) #t)))
+         (lambda () (close-tls-context ctx)))))
+
+(mat net-tls-chain-records
+     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([session (tls-connect ctx client "localhost")])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (let ([record* (tls-peer-certificate-chain-records session)])
+                     (tls-write-all session (string->utf8 "chain"))
+                     (and (equal? (tls-read session 32) (string->utf8 "chain"))
+                          (pair? record*)
+                          (tls-certificate? (car record*))
+                          (zero? (tls-certificate-chain-position (car record*)))
+                          (tls-certificate-verified? (car record*))
+                          (bytevector? (tls-certificate-der (car record*)))
+                          (string? (tls-certificate-subject (car record*)))
+                          (pair? (tls-certificate-public-key-summary (car record*))))))
+                 (lambda () (close-tls-session session)))))
+           (lambda ()
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
+
+(mat net-tls-required-ocsp
+     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (tls-context-policy-set!
+              ctx (make-tls-policy 'tls1.2 #f #f #f '() 'required))
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             ;; A required OCSP policy rejects a server that sends no staple.
+             (tls-error-message-contains?
+              "required stapled OCSP response is missing"
+              (lambda () (tls-connect ctx client "localhost" 3000))))
+           (lambda ()
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
+
+(mat net-tls-session-resumption
+     (let-values ([(server port th) (start-tls-resumption-server)])
+       (let ([ctx (make-tls-context 'client)]
+             [ticket #f]
+             [reused? #f])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (do ([i 0 (fx1+ i)])
+                 ((fx= i 2))
+               (let ([client (open-socket 'inet 'stream)])
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (socket-connect!
+                      client (make-socket-address 'inet "127.0.0.1" port))
+                     (let ([session (tls-connect ctx client "localhost" 3000)])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (tls-write-all session (string->utf8 "resume"))
+                           (unless (equal? (tls-read session 32 3000)
+                                           (string->utf8 "resume"))
+                             (error 'net-tls-session-resumption "echo mismatch"))
+                           (if (fx= i 0)
+                               (begin
+                                 (set! ticket (tls-session-export-ticket session))
+                                 (tls-context-session-ticket-set! ctx ticket))
+                               (set! reused? (tls-session-reused? session))))
+                         (lambda () (close-tls-session session)))))
+                   (lambda () (close-socket client)))))
+             (and (tls-session-ticket? ticket)
+                  (positive? (bytevector-length (tls-session-ticket-data ticket)))
+                  reused?))
+           (lambda ()
+             (close-tls-context ctx)
+             (thread-join th))))))
+
+(mat net-tls-sni-selection
+     (let-values ([(server port th selected-name) (start-tls-sni-echo-server)])
+       (let ([ctx (make-tls-context 'client)]
+             [client (open-socket 'inet 'stream)]
+             [expected (load-certificate tls-test-san-certificate 'pem)]
+             [peer-cert #f])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-san-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([session (tls-connect ctx client "localhost" 3000)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (set! peer-cert (tls-peer-certificate session))
+                   (tls-write-all session (string->utf8 "sni"))
+                   (and (equal? (tls-read session 32 3000) (string->utf8 "sni"))
+                        (string=? (selected-name) "localhost")
+                        (equal? (certificate-fingerprint peer-cert)
+                                (certificate-fingerprint expected))))
+                 (lambda () (close-tls-session session)))))
+           (lambda ()
+             (when peer-cert (destroy-certificate! peer-cert))
+             (destroy-certificate! expected)
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
+
 (mat net-tls-size-validation
      (let-values ([(server server-ctx port th) (start-tls-echo-server)])
        (let ([client (open-socket 'inet 'stream)]

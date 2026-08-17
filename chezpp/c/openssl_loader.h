@@ -12,6 +12,7 @@
 #include <openssl/kdf.h>
 #include <openssl/params.h>
 #include <openssl/pem.h>
+#include <openssl/ocsp.h>
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
 #include <openssl/ssl.h>
@@ -121,6 +122,15 @@
   X(crypto, OPENSSL_sk_pop_free)                                              \
   X(crypto, OPENSSL_sk_push)                                                  \
   X(crypto, OPENSSL_sk_value)                                                 \
+  X(crypto, OCSP_BASICRESP_free)                                              \
+  X(crypto, OCSP_CERTID_free)                                                 \
+  X(crypto, OCSP_RESPONSE_free)                                               \
+  X(crypto, OCSP_basic_verify)                                                \
+  X(crypto, OCSP_cert_to_id)                                                  \
+  X(crypto, OCSP_check_validity)                                              \
+  X(crypto, OCSP_resp_find_status)                                            \
+  X(crypto, OCSP_response_get1_basic)                                         \
+  X(crypto, OCSP_response_status)                                             \
   X(crypto, OSSL_PARAM_construct_end)                                         \
   X(crypto, OSSL_PARAM_construct_int)                                         \
   X(crypto, OSSL_PARAM_construct_octet_string)                                \
@@ -159,6 +169,7 @@
   X(crypto, X509_verify_cert)                                                 \
   X(crypto, X509_verify_cert_error_string)                                    \
   X(crypto, d2i_PUBKEY_bio)                                                   \
+  X(crypto, d2i_OCSP_RESPONSE)                                                \
   X(crypto, d2i_PrivateKey_bio)                                               \
   X(crypto, d2i_X509_bio)                                                     \
   X(crypto, i2d_PUBKEY_bio)                                                   \
@@ -166,11 +177,16 @@
   X(crypto, i2d_X509)                                                         \
   X(ssl, OPENSSL_init_ssl)                                                    \
   X(ssl, SSL_CIPHER_get_name)                                                 \
+  X(ssl, SSL_client_hello_get0_ext)                                           \
   X(ssl, SSL_CTX_check_private_key)                                           \
+  X(ssl, SSL_CTX_set_client_hello_cb)                                         \
+  X(ssl, SSL_CTX_set_cipher_list)                                             \
+  X(ssl, SSL_CTX_set_ciphersuites)                                            \
   X(ssl, SSL_CTX_ctrl)                                                        \
   X(ssl, SSL_CTX_free)                                                        \
   X(ssl, SSL_CTX_get0_certificate)                                            \
   X(ssl, SSL_CTX_get0_privatekey)                                             \
+  X(ssl, SSL_CTX_get_cert_store)                                              \
   X(ssl, SSL_CTX_load_verify_locations)                                       \
   X(ssl, SSL_CTX_new)                                                         \
   X(ssl, SSL_CTX_set_alpn_protos)                                             \
@@ -189,16 +205,27 @@
   X(ssl, SSL_get0_param)                                                      \
   X(ssl, SSL_get1_peer_certificate)                                           \
   X(ssl, SSL_get0_alpn_selected)                                              \
+  X(ssl, SSL_get1_session)                                                    \
   X(ssl, SSL_get_current_cipher)                                              \
+  X(ssl, SSL_get_SSL_CTX)                                                     \
   X(ssl, SSL_get_error)                                                       \
   X(ssl, SSL_get_peer_cert_chain)                                             \
   X(ssl, SSL_get_verify_result)                                               \
   X(ssl, SSL_get_version)                                                     \
+  X(ssl, SSL_get_servername)                                                  \
+  X(ssl, SSL_get_ex_data)                                                     \
+  X(ssl, SSL_session_reused)                                                  \
   X(ssl, SSL_new)                                                             \
   X(ssl, SSL_read_ex)                                                         \
   X(ssl, SSL_select_next_proto)                                               \
+  X(ssl, SSL_SESSION_free)                                                    \
+  X(ssl, d2i_SSL_SESSION)                                                     \
+  X(ssl, i2d_SSL_SESSION)                                                     \
   X(ssl, SSL_set1_host)                                                       \
+  X(ssl, SSL_set_SSL_CTX)                                                     \
+  X(ssl, SSL_set_ex_data)                                                     \
   X(ssl, SSL_set_fd)                                                          \
+  X(ssl, SSL_set_session)                                                     \
   X(ssl, SSL_shutdown)                                                        \
   X(ssl, SSL_write_ex)                                                        \
   X(ssl, TLS_client_method)                                                   \
