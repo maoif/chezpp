@@ -73,16 +73,42 @@
      (lambda (port)
        (utf8->string (get-bytevector-all port))))))
 
-(define call-with-grpc-tls-peer
-  (lambda (register proc)
+(define grpc-reflection-descriptor*
+  (lambda (response)
+    (let ([outer (make-protobuf-decoder response)] [file-response #f])
+      (let outer-loop ()
+        (let ([field (protobuf-decoder-next-field outer)])
+          (when field
+            (when (= (protobuf-wire-field-number field) 4)
+              (set! file-response (protobuf-wire-field-value field)))
+            (outer-loop))))
+      (if (not file-response)
+          '()
+          (let ([inner (make-protobuf-decoder file-response)] [descriptor* '()])
+            (let inner-loop ()
+              (let ([field (protobuf-decoder-next-field inner)])
+                (if (not field)
+                    (reverse descriptor*)
+                    (begin
+                      (when (= (protobuf-wire-field-number field) 1)
+                        (set! descriptor*
+                              (cons (protobuf-wire-field-value field) descriptor*)))
+                      (inner-loop))))))))))
+
+(define call-with-grpc-tls-peer*
+  (lambda (mutual? register proc)
     (write-test-san-cert-files)
     (let* ([port (reserve-loopback-port)]
            [certificate (read-test-pem "/tmp/chezpp-net-test-san-cert.pem")]
            [private-key (read-test-pem "/tmp/chezpp-net-test-san-key.pem")]
            [server-credentials
-            (make-grpc-server-credentials #f certificate private-key)]
+            (make-grpc-server-credentials
+             (and mutual? certificate) certificate private-key)]
            [client-credentials
-            (make-grpc-channel-credentials certificate #f #f)]
+            (make-grpc-channel-credentials
+             certificate
+             (and mutual? certificate)
+             (and mutual? private-key))]
            [server (grpc-open-channel 'server server-credentials "127.0.0.1" port)]
            [client (grpc-open-channel client-credentials "localhost" port)]
            [done? #f])
@@ -103,6 +129,14 @@
             (grpc-close-channel client)
             (grpc-close-channel server)
             (thread-join th)))))))
+
+(define call-with-grpc-tls-peer
+  (lambda (register proc)
+    (call-with-grpc-tls-peer* #f register proc)))
+
+(define call-with-grpc-mutual-tls-peer
+  (lambda (register proc)
+    (call-with-grpc-tls-peer* #t register proc)))
 
 (define wait-grpc-call/nonblocking
   (lambda (client method payload metadata timeout-ms)
@@ -266,6 +300,22 @@
         ok?))))
 
 (mat net-grpc-records
+     (let ([options (make-grpc-call-options '(("x-test" . "value")) 2500 'gzip)])
+       (and (grpc-call-options? options)
+            (= (grpc-call-options-timeout-ms options) 2500)
+            (eq? (grpc-call-options-compression options) 'gzip)
+            (equal? (grpc-call-options-metadata options) '(("x-test" . "value")))))
+
+     (let ([capabilities (grpc-capabilities)])
+       (and (grpc-capabilities? capabilities)
+            (boolean? (grpc-capabilities-tls? capabilities))
+            (boolean? (grpc-capabilities-compression? capabilities))
+            (memq 'identity (grpc-capabilities-compression-algorithms capabilities))
+            (grpc-capabilities-deadlines? capabilities)
+            (grpc-capabilities-cancellation? capabilities)
+            (grpc-capabilities-status-details? capabilities)
+            (grpc-capabilities-reflection? capabilities)))
+
      (let ([registry (make-grpc-reflection-registry)])
        (and (grpc-reflection-registry? registry)
             (eq? registry
@@ -282,7 +332,8 @@
                                   '(("x-answer" . "ok")
                                     ("x-bin" . #vu8(4 5)))
                                   7
-                                  "status-text")])
+                                  "status-text"
+                                  #vu8(0 255 1))])
          (and
           (grpc-request? req)
           (equal? (utf8->string (grpc-request-payload req)) "payload")
@@ -292,6 +343,9 @@
           (equal? (grpc-response-payload resp) #vu8(9 8))
           (= (grpc-status-code resp) 7)
           (equal? (grpc-status-message resp) "status-text")
+          (equal? (grpc-status-details resp) #vu8(0 255 1))
+          (grpc-status? (grpc-response-status resp))
+          (= (grpc-status-code (grpc-response-status resp)) 7)
           (equal? (grpc-metadata-ref resp "x-answer") "ok")
           (equal? (grpc-metadata-ref resp "x-bin") #vu8(4 5)))))
 
@@ -308,14 +362,72 @@
      ;; Error case: caller metadata may not use the reserved `grpc-` prefix.
      (guard (condition [else #t])
        (grpc-response #f '(("grpc-test" . "bad")))
+       #f)
+
+     ;; Error case: unsupported compression names are rejected before a call starts.
+     (guard (condition [else #t])
+       (make-grpc-call-options '() 1000 'brotli)
        #f))
+
+(mat net-grpc-reflection
+     (with-grpc-env
+      (lambda ()
+        (let* ([dependency
+                (protobuf-encode-message (list (list 1 'string "dependency.proto")))]
+               [extension
+                (protobuf-encode-message
+                 (list (list 1 'string "extra")
+                       (list 2 'string ".chezpp.test.Base")
+                       (list 3 'uint32 100)))]
+               [root
+                (protobuf-encode-message
+                 (list (list 1 'string "root.proto")
+                       (list 2 'string "chezpp.test")
+                       (list 3 'string "dependency.proto")
+                       (list 7 'message extension)))]
+               [registry (make-grpc-reflection-registry)])
+          (grpc-reflection-register-file!
+           registry "dependency.proto" dependency '("chezpp.test.Base") '())
+          (grpc-reflection-register-file!
+           registry "root.proto" root '("chezpp.test.Root") '())
+          (call-with-grpc-peer
+           1
+           (lambda (server) (grpc-register-reflection! server registry))
+           (lambda (server client)
+             (let ([stream
+                    (grpc-call/bidi-stream
+                     client
+                     "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"
+                     '()
+                     2000)])
+               (grpc-stream-send
+                stream
+                (protobuf-encode-message (list (list 4 'string "chezpp.test.Root"))))
+               (let ([symbol-descriptor*
+                      (grpc-reflection-descriptor* (grpc-stream-recv stream))])
+                 (grpc-stream-send
+                  stream
+                  (protobuf-encode-message
+                   (list
+                    (list 5 'message
+                          (protobuf-encode-message
+                           (list (list 1 'string "chezpp.test.Base")
+                                 (list 2 'uint32 100)))))))
+                 (let ([extension-descriptor*
+                        (grpc-reflection-descriptor* (grpc-stream-recv stream))])
+                   (grpc-stream-close-send stream)
+                   (let ([done (grpc-stream-recv stream)])
+                     (grpc-stream-close stream)
+                     (and (equal? symbol-descriptor* (list root dependency))
+                          (equal? extension-descriptor* (list root dependency))
+                          (eof-object? done))))))))))))
 
 (mat net-grpc-unary
      (with-grpc-env
       (lambda ()
         (let ([seen '()])
           (call-with-grpc-peer
-           3
+           4
            (lambda (server)
              (grpc-register-service!
               server
@@ -353,6 +465,13 @@
                  (= (grpc-status-code resp) 0)
                  (equal? (grpc-response-payload resp) #vu8(1 2 3 4))
                  (equal? (grpc-metadata-ref resp "x-reply") "ok")))
+              (let ([resp
+                     (grpc-call
+                      client "/chezpp.test.Echo/Unary" "compressed"
+                      (make-grpc-call-options '(("x-mode" . "gzip")) 2000 'gzip))])
+                (and
+                 (equal? (utf8->string (grpc-response-payload resp)) "compressed")
+                 (equal? (grpc-metadata-ref resp "grpc-encoding") "gzip")))
               (let ([resp (grpc-call client
                                      "/chezpp.test.Echo/Missing"
                                      #f
@@ -363,7 +482,7 @@
                  (= (grpc-status-code resp) 12)
                  (equal? (grpc-status-message resp) "unimplemented")
                  (not (grpc-response-payload resp))))
-              (equal? (reverse seen) '("blocking" "nonblocking")))))))))
+              (equal? (reverse seen) '("blocking" "nonblocking" "gzip")))))))))
 
 (mat net-grpc-streams
      (with-grpc-env
@@ -673,4 +792,22 @@
            (let ([response (grpc-call client "/chezpp.test.Echo/Unary" "tls-ok" '() 3000)])
              (and (grpc-response? response)
                   (= (grpc-status-code response) 0)
-                  (equal? (utf8->string (grpc-response-payload response)) "tls-ok"))))))))
+                  (equal? (utf8->string (grpc-response-payload response)) "tls-ok")))))))
+
+     ;; A server configured with trust roots requires and verifies a client certificate.
+     (with-grpc-env
+      (lambda ()
+        (call-with-grpc-mutual-tls-peer
+         (lambda (server)
+           (grpc-register-service!
+            server
+            "/chezpp.test.Echo/MutualTLS"
+            (lambda (request)
+              (grpc-response (grpc-request-payload request)))))
+         (lambda (server client)
+           (let ([response
+                  (grpc-call client "/chezpp.test.Echo/MutualTLS" "mtls-ok" '() 3000)])
+             (and (grpc-response? response)
+                  (= (grpc-status-code response) 0)
+                  (equal? (utf8->string (grpc-response-payload response))
+                          "mtls-ok"))))))))

@@ -2,6 +2,14 @@
   (export grpc-open-channel
           grpc-channel-credentials? make-grpc-channel-credentials
           grpc-server-credentials? make-grpc-server-credentials
+          grpc-call-options? make-grpc-call-options
+          grpc-call-options-metadata grpc-call-options-timeout-ms
+          grpc-call-options-compression
+          grpc-capabilities grpc-capabilities?
+          grpc-capabilities-tls? grpc-capabilities-compression?
+          grpc-capabilities-compression-algorithms
+          grpc-capabilities-deadlines? grpc-capabilities-cancellation?
+          grpc-capabilities-status-details? grpc-capabilities-reflection?
           grpc-close-channel
           grpc-cancel-pending!
           grpc-channel?
@@ -29,8 +37,11 @@
           grpc-response?
           grpc-response-payload
           grpc-response-metadata
+          grpc-response-status
+          grpc-status? make-grpc-status
           grpc-status-code
           grpc-status-message
+          grpc-status-details
           grpc-metadata-ref)
   (import (chezpp chez)
           (chezpp utils)
@@ -55,13 +66,19 @@
             (immutable payload grpc-request-payload)
             (immutable metadata grpc-request-metadata)))
 
+  (define-record-type (grpc-status-record %make-grpc-status-record grpc-status-record?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable code grpc-status-record-code)
+            (immutable message grpc-status-record-message)
+            (immutable details grpc-status-record-details)))
+
   (define-record-type (grpc-response-record %make-grpc-response-record grpc-response?)
     (sealed #t)
     (opaque #f)
     (fields (immutable payload grpc-response-payload)
             (immutable metadata grpc-response-metadata)
-            (immutable status-code grpc-status-code)
-            (immutable status-message grpc-status-message)))
+            (immutable status grpc-response-status)))
 
   (define grpc-request? grpc-request-record?)
 
@@ -100,6 +117,103 @@
     (fields (immutable root-certs grpc-server-credentials-root-certs)
             (immutable certificate-chain grpc-server-credentials-certificate-chain)
             (immutable private-key grpc-server-credentials-private-key)))
+
+  (define-record-type (grpc-call-options %make-grpc-call-options grpc-call-options?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable metadata grpc-call-options-metadata)
+            (immutable timeout-ms grpc-call-options-timeout-ms)
+            (immutable compression grpc-call-options-compression)))
+
+  (define-record-type (grpc-capabilities-record %make-grpc-capabilities
+                                                grpc-capabilities?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable tls? grpc-capabilities-tls?)
+            (immutable compression? grpc-capabilities-compression?)
+            (immutable compression-algorithms grpc-capabilities-compression-algorithms)
+            (immutable deadlines? grpc-capabilities-deadlines?)
+            (immutable cancellation? grpc-capabilities-cancellation?)
+            (immutable status-details? grpc-capabilities-status-details?)
+            (immutable reflection? grpc-capabilities-reflection?)))
+
+  (define grpc-status? grpc-status-record?)
+
+  #|proc:make-grpc-status
+The `make-grpc-status` procedure constructs a gRPC status. `code` is the integer status code,
+`message` is its text, and `details` is the copied binary detail payload. It returns a status.
+|#
+  (define make-grpc-status
+    (lambda (code message details)
+      (pcheck ([fixnum? code] [string? message] [bytevector? details])
+        (%make-grpc-status-record code message (bytevector-copy details)))))
+
+  #|proc:grpc-status-code
+The `grpc-status-code` procedure accepts a gRPC status or response and returns its integer code.
+|#
+  (define grpc-status-code
+    (lambda (status-or-response)
+      (pcheck ([(lambda (value) (or (grpc-status? value) (grpc-response? value)))
+                status-or-response])
+        (grpc-status-record-code
+         (if (grpc-response? status-or-response)
+             (grpc-response-status status-or-response)
+             status-or-response)))))
+
+  #|proc:grpc-status-message
+The `grpc-status-message` procedure accepts a gRPC status or response and returns its message.
+|#
+  (define grpc-status-message
+    (lambda (status-or-response)
+      (pcheck ([(lambda (value) (or (grpc-status? value) (grpc-response? value)))
+                status-or-response])
+        (grpc-status-record-message
+         (if (grpc-response? status-or-response)
+             (grpc-response-status status-or-response)
+             status-or-response)))))
+
+  #|proc:grpc-status-details
+The `grpc-status-details` procedure accepts a gRPC status or response and returns detail bytes.
+|#
+  (define grpc-status-details
+    (lambda (status-or-response)
+      (pcheck ([(lambda (value) (or (grpc-status? value) (grpc-response? value)))
+                status-or-response])
+        (grpc-status-record-details
+         (if (grpc-response? status-or-response)
+             (grpc-response-status status-or-response)
+             status-or-response)))))
+
+  #|proc:make-grpc-call-options
+The `make-grpc-call-options` procedure constructs call options. `metadata` is an ordered alist,
+`timeout-ms` is the non-negative call timeout, and `compression` is `identity`, `deflate`, or
+`gzip`. The return value is an immutable call-options record.
+|#
+  (define make-grpc-call-options
+    (case-lambda
+      [() (make-grpc-call-options '() grpc-default-timeout-ms 'identity)]
+      [(metadata) (make-grpc-call-options metadata grpc-default-timeout-ms 'identity)]
+      [(metadata timeout-ms) (make-grpc-call-options metadata timeout-ms 'identity)]
+      [(metadata timeout-ms compression)
+       (pcheck ([fixnum? timeout-ms] [symbol? compression])
+         (check-timeout-ms 'make-grpc-call-options timeout-ms)
+         (unless (memq compression '(identity deflate gzip))
+           (errorf 'make-grpc-call-options "unsupported compression algorithm ~s" compression))
+         (%make-grpc-call-options metadata timeout-ms compression))]))
+
+  #|proc:grpc-capabilities
+The `grpc-capabilities` procedure reports the features supported by the loaded gRPC runtime.
+The return value is an immutable gRPC capabilities record.
+|#
+  (define grpc-capabilities
+    (lambda ()
+      (let* ([bits (ffi-net-grpc-capabilities)]
+             [compression? (not (zero? (bitwise-and bits 2)))])
+        (%make-grpc-capabilities
+         (not (zero? (bitwise-and bits 1)))
+         compression?
+         (if compression? '(identity deflate gzip) '(identity))
+         #t #t #t #t))))
 
   #|proc:make-grpc-channel-credentials
 The `make-grpc-channel-credentials` procedure copies optional PEM root, certificate,
@@ -251,6 +365,31 @@ certificate/private-key strings for a TLS server. The return value is credential
        [else
         (errorf who "expected metadata alist or #f, given ~s" metadata)])))
 
+  (define normalize-call-metadata
+    (lambda (who metadata compression)
+      (let ([metadata* (normalize-metadata who metadata)])
+        (case compression
+          [(identity) metadata*]
+          [(deflate gzip)
+           (unless (grpc-capabilities-compression? (grpc-capabilities))
+             (raise-net-error who 'unsupported
+                              "the loaded gRPC runtime does not support compression"
+                              compression))
+           (cons (cons "grpc-internal-encoding-request"
+                       (string->utf8 (symbol->string compression)))
+                 metadata*)]
+          [else (errorf who "unsupported compression algorithm ~s" compression)]))))
+
+  (define response-with-compression
+    (lambda (response compression)
+      (if (or (not response) (eq? compression 'identity))
+          response
+          (%make-grpc-response-record
+           (grpc-response-payload response)
+           (cons (cons "grpc-encoding" (string->utf8 (symbol->string compression)))
+                 (grpc-response-metadata response))
+           (grpc-response-status response)))))
+
   (define metadata-value->scheme
     (lambda (key value)
       (cond
@@ -277,12 +416,14 @@ certificate/private-key strings for a TLS server. The return value is credential
     (lambda (who x)
       (cond
        [(eq? x #f) #f]
-       [(and (vector? x) (= (vector-length x) 4))
+       [(and (vector? x) (= (vector-length x) 5))
         (%make-grpc-response-record
          (vector-ref x 0)
          (vector-ref x 1)
-         (vector-ref x 2)
-         (vector-ref x 3))]
+         (%make-grpc-status-record
+          (vector-ref x 2)
+          (vector-ref x 3)
+          (vector-ref x 4)))]
        [else
         (errorf who "unexpected gRPC response payload ~s" x)])))
 
@@ -301,7 +442,9 @@ certificate/private-key strings for a TLS server. The return value is credential
       (cond
        [(grpc-response? value) value]
        [(or (bytevector? value) (string? value) (eq? value #f))
-        (%make-grpc-response-record (normalize-payload 'grpc-response value) '() grpc-status-ok "")]
+        (%make-grpc-response-record
+         (normalize-payload 'grpc-response value) '()
+         (%make-grpc-status-record grpc-status-ok "" #vu8()))]
        [else
         (errorf 'grpc-serve "handler must return a gRPC response, string, bytevector, or #f: ~s" value)])))
 
@@ -467,7 +610,10 @@ The `grpc-request` procedure constructs a gRPC request record.
         (normalize-metadata who metadata))]))
 
   #|proc:grpc-response
-The `grpc-response` procedure constructs a gRPC response record.
+The `grpc-response` procedure constructs a gRPC response record. `payload` is a bytevector,
+string, or `#f`, and `metadata` is an ordered metadata alist. `status-code` and
+`status-message` describe completion. Optional `status-details` contains binary detail bytes.
+The return value is an immutable gRPC response.
 |#
   (define-who grpc-response
     (case-lambda
@@ -476,15 +622,17 @@ The `grpc-response` procedure constructs a gRPC response record.
       [(payload metadata)
        (grpc-response payload metadata grpc-status-ok "")]
       [(payload metadata status-code status-message)
+       (grpc-response payload metadata status-code status-message #vu8())]
+      [(payload metadata status-code status-message status-details)
        (pcheck ([fixnum? status-code] [string? status-message])
                (%make-grpc-response-record
                 (normalize-payload who payload)
                 (normalize-metadata who metadata)
-                status-code
-                status-message))]))
+                (make-grpc-status status-code status-message status-details)))]))
 
   #|proc:grpc-metadata-ref
-The `grpc-metadata-ref` procedure looks up a metadata entry from a gRPC metadata alist or gRPC request/response record.
+The `grpc-metadata-ref` procedure looks up `key` in metadata alist or request/response `x`.
+The optional `default` is returned when the key is absent. The return value is the first value.
 |#
   (define-who grpc-metadata-ref
     (case-lambda
@@ -500,8 +648,9 @@ The `grpc-metadata-ref` procedure looks up a metadata entry from a gRPC metadata
          (metadata-ref* metadata key default))]))
 
   #|proc:grpc-open-channel
-The `grpc-open-channel` procedure opens a client gRPC channel or a server listener.
-Use `(grpc-open-channel endpoint)`, `(grpc-open-channel host port)`, or `(grpc-open-channel 'server host port)`.
+The `grpc-open-channel` procedure opens a client channel or server listener at an endpoint.
+The parameters select an endpoint string, host and port, role, and optional TLS credentials.
+The return value is an open gRPC channel.
 |#
   (define-who grpc-open-channel
     (case-lambda
@@ -621,12 +770,12 @@ The `grpc-register-service!` procedure registers a gRPC handler on a server chan
                channel)]))
 
   (define call-unary
-    (lambda (who channel method payload metadata timeout-ms)
+    (lambda (who channel method payload metadata timeout-ms compression)
       (ensure-channel-open who channel)
       (ensure-role who channel 'client)
       (let* ([method* (method-name who method)]
              [payload* (normalize-payload who payload)]
-             [metadata* (normalize-metadata who metadata)]
+             [metadata* (normalize-call-metadata who metadata compression)]
              [ans (ensure-success who
                                   (ffi-net-grpc-unary-call (grpc-channel-handle channel)
                                                            method*
@@ -637,7 +786,7 @@ The `grpc-register-service!` procedure registers a gRPC handler on a server chan
                                                                0)
                                                            metadata*
                                                            timeout-ms))])
-        (maybe-response-from-ffi who ans))))
+        (response-with-compression (maybe-response-from-ffi who ans) compression))))
 
   #|proc:grpc-call
 The `grpc-call` procedure performs a blocking unary gRPC call and returns a gRPC response record.
@@ -647,17 +796,24 @@ The `grpc-call` procedure performs a blocking unary gRPC call and returns a gRPC
       [(channel method payload)
        (grpc-call channel method payload '() grpc-default-timeout-ms)]
       [(channel method payload metadata)
-       (grpc-call channel method payload metadata grpc-default-timeout-ms)]
+       (if (grpc-call-options? metadata)
+           (grpc-call channel method payload
+                      (grpc-call-options-metadata metadata)
+                      (grpc-call-options-timeout-ms metadata)
+                      (grpc-call-options-compression metadata))
+           (grpc-call channel method payload metadata grpc-default-timeout-ms))]
       [(channel method payload metadata timeout-ms)
+       (grpc-call channel method payload metadata timeout-ms 'identity)]
+      [(channel method payload metadata timeout-ms compression)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
-               (call-unary who channel method payload metadata timeout-ms))]))
+               (call-unary who channel method payload metadata timeout-ms compression))]))
 
   (define start-pending-unary!
-    (lambda (who channel method payload metadata timeout-ms)
+    (lambda (who channel method payload metadata timeout-ms compression)
       (let* ([method* (method-name who method)]
              [payload* (normalize-payload who payload)]
-             [metadata* (normalize-metadata who metadata)]
+             [metadata* (normalize-call-metadata who metadata compression)]
              [args (list method* payload* metadata* timeout-ms)]
              [deadline-ms (+ (current-time-ms) timeout-ms)]
              [handle #f]
@@ -685,7 +841,9 @@ The `grpc-call` procedure performs a blocking unary gRPC call and returns a gRPC
                           deadline-ms)
                          (begin
                            (set! handle #f)
-                           (net-operation-completed (maybe-response-from-ffi who answer)))))))
+                           (net-operation-completed
+                            (response-with-compression
+                             (maybe-response-from-ffi who answer) compression)))))))
                (lambda ()
                  (when handle
                    (ffi-net-grpc-unary-close handle)
@@ -710,21 +868,29 @@ The return value is a network operation whose result is a gRPC response.
       [(channel method payload)
        (grpc-call/nonblocking channel method payload '() grpc-default-timeout-ms)]
       [(channel method payload metadata)
-       (grpc-call/nonblocking channel method payload metadata grpc-default-timeout-ms)]
+       (if (grpc-call-options? metadata)
+           (grpc-call/nonblocking channel method payload
+                                  (grpc-call-options-metadata metadata)
+                                  (grpc-call-options-timeout-ms metadata)
+                                  (grpc-call-options-compression metadata))
+           (grpc-call/nonblocking channel method payload metadata grpc-default-timeout-ms))]
       [(channel method payload metadata timeout-ms)
+       (grpc-call/nonblocking channel method payload metadata timeout-ms 'identity)]
+      [(channel method payload metadata timeout-ms compression)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
                (ensure-channel-open who channel)
                (ensure-role who channel 'client)
-               (start-pending-unary! who channel method payload metadata timeout-ms))]))
+               (start-pending-unary!
+                who channel method payload metadata timeout-ms compression))]))
 
   (define open-stream/nonblocking
-    (lambda (who channel kind method shape payload metadata timeout-ms)
+    (lambda (who channel kind method shape payload metadata timeout-ms compression)
       (ensure-channel-open who channel)
       (ensure-role who channel 'client)
       (let* ([method* (method-name who method)]
              [payload* (normalize-payload who payload)]
-             [metadata* (normalize-metadata who metadata)]
+             [metadata* (normalize-call-metadata who metadata compression)]
              [args (list kind method* payload* metadata* timeout-ms)]
              [deadline-ms (+ (current-time-ms) timeout-ms)])
         (let ([handle #f]
@@ -882,7 +1048,8 @@ The `grpc-stream-send` procedure sends one message on a gRPC streaming call.
                 stream))))
 
   #|proc:grpc-stream-recv
-The `grpc-stream-recv` procedure receives one message from a gRPC streaming call and returns an EOF object when the peer finishes sending.
+The `grpc-stream-recv` procedure receives one message from `stream`.
+It returns a payload bytevector or an EOF object when the peer finishes sending.
 |#
   (define-who grpc-stream-recv
     (lambda (stream)
@@ -941,16 +1108,24 @@ The `grpc-stream-close` procedure closes a gRPC streaming call and releases its 
               stream)))
 
   #|proc:grpc-call/server-stream
-The `grpc-call/server-stream` procedure opens a blocking server-streaming gRPC call and returns a gRPC stream object.
+The `grpc-call/server-stream` procedure opens a blocking server-streaming call on `channel`.
+`method` identifies the RPC, `payload` is its request, and metadata, options, or timeout may follow.
+The return value is an open gRPC stream.
 |#
   (define-who grpc-call/server-stream
     (case-lambda
       [(channel method payload)
        (grpc-call/server-stream channel method payload '() grpc-default-timeout-ms)]
       [(channel method payload metadata-or-timeout)
-       (if (fixnum? metadata-or-timeout)
-           (grpc-call/server-stream channel method payload '() metadata-or-timeout)
-           (grpc-call/server-stream channel method payload metadata-or-timeout grpc-default-timeout-ms))]
+       (cond
+        [(fixnum? metadata-or-timeout)
+         (grpc-call/server-stream channel method payload '() metadata-or-timeout)]
+        [(grpc-call-options? metadata-or-timeout)
+         (net-operation-wait
+          (grpc-call/server-stream/nonblocking channel method payload metadata-or-timeout))]
+        [else
+         (grpc-call/server-stream
+          channel method payload metadata-or-timeout grpc-default-timeout-ms)])]
       [(channel method payload metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
@@ -959,16 +1134,24 @@ The `grpc-call/server-stream` procedure opens a blocking server-streaming gRPC c
                  channel method payload metadata timeout-ms)))]))
 
   #|proc:grpc-call/client-stream
-The `grpc-call/client-stream` procedure opens a blocking client-streaming gRPC call and returns a gRPC stream object.
+The `grpc-call/client-stream` procedure opens a blocking client-streaming call on `channel`.
+`method` identifies the RPC, and metadata, options, or timeout may follow.
+The return value is an open gRPC stream.
 |#
   (define-who grpc-call/client-stream
     (case-lambda
       [(channel method)
        (grpc-call/client-stream channel method '() grpc-default-timeout-ms)]
       [(channel method metadata-or-timeout)
-       (if (fixnum? metadata-or-timeout)
-           (grpc-call/client-stream channel method '() metadata-or-timeout)
-           (grpc-call/client-stream channel method metadata-or-timeout grpc-default-timeout-ms))]
+       (cond
+        [(fixnum? metadata-or-timeout)
+         (grpc-call/client-stream channel method '() metadata-or-timeout)]
+        [(grpc-call-options? metadata-or-timeout)
+         (net-operation-wait
+          (grpc-call/client-stream/nonblocking channel method metadata-or-timeout))]
+        [else
+         (grpc-call/client-stream
+          channel method metadata-or-timeout grpc-default-timeout-ms)])]
       [(channel method metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
@@ -976,16 +1159,24 @@ The `grpc-call/client-stream` procedure opens a blocking client-streaming gRPC c
                 (grpc-call/client-stream/nonblocking channel method metadata timeout-ms)))]))
 
   #|proc:grpc-call/bidi-stream
-The `grpc-call/bidi-stream` procedure opens a blocking bidirectional gRPC streaming call and returns a gRPC stream object.
+The `grpc-call/bidi-stream` procedure opens a blocking bidirectional call on `channel`.
+`method` identifies the RPC, and metadata, options, or timeout may follow.
+The return value is an open gRPC stream.
 |#
   (define-who grpc-call/bidi-stream
     (case-lambda
       [(channel method)
        (grpc-call/bidi-stream channel method '() grpc-default-timeout-ms)]
       [(channel method metadata-or-timeout)
-       (if (fixnum? metadata-or-timeout)
-           (grpc-call/bidi-stream channel method '() metadata-or-timeout)
-           (grpc-call/bidi-stream channel method metadata-or-timeout grpc-default-timeout-ms))]
+       (cond
+        [(fixnum? metadata-or-timeout)
+         (grpc-call/bidi-stream channel method '() metadata-or-timeout)]
+        [(grpc-call-options? metadata-or-timeout)
+         (net-operation-wait
+          (grpc-call/bidi-stream/nonblocking channel method metadata-or-timeout))]
+        [else
+         (grpc-call/bidi-stream
+          channel method metadata-or-timeout grpc-default-timeout-ms)])]
       [(channel method metadata timeout-ms)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
@@ -1002,10 +1193,22 @@ The return value is a network operation whose result is a gRPC stream.
       [(channel method payload)
        (grpc-call/server-stream/nonblocking channel method payload '() grpc-default-timeout-ms)]
       [(channel method payload metadata-or-timeout)
-       (if (fixnum? metadata-or-timeout)
-           (grpc-call/server-stream/nonblocking channel method payload '() metadata-or-timeout)
-           (grpc-call/server-stream/nonblocking channel method payload metadata-or-timeout grpc-default-timeout-ms))]
+       (cond
+        [(fixnum? metadata-or-timeout)
+         (grpc-call/server-stream/nonblocking channel method payload '() metadata-or-timeout)]
+        [(grpc-call-options? metadata-or-timeout)
+         (grpc-call/server-stream/nonblocking
+          channel method payload
+          (grpc-call-options-metadata metadata-or-timeout)
+          (grpc-call-options-timeout-ms metadata-or-timeout)
+          (grpc-call-options-compression metadata-or-timeout))]
+        [else
+         (grpc-call/server-stream/nonblocking
+          channel method payload metadata-or-timeout grpc-default-timeout-ms)])]
       [(channel method payload metadata timeout-ms)
+       (grpc-call/server-stream/nonblocking
+        channel method payload metadata timeout-ms 'identity)]
+      [(channel method payload metadata timeout-ms compression)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
                (open-stream/nonblocking
@@ -1016,7 +1219,8 @@ The return value is a network operation whose result is a gRPC stream.
                 'server
                 payload
                 metadata
-                timeout-ms))]))
+                timeout-ms
+                compression))]))
 
   #|proc:grpc-call/client-stream/nonblocking
 The `grpc-call/client-stream/nonblocking` procedure starts a client-streaming call on `channel`.
@@ -1028,10 +1232,21 @@ The return value is a network operation whose result is a gRPC stream.
       [(channel method)
        (grpc-call/client-stream/nonblocking channel method '() grpc-default-timeout-ms)]
       [(channel method metadata-or-timeout)
-       (if (fixnum? metadata-or-timeout)
-           (grpc-call/client-stream/nonblocking channel method '() metadata-or-timeout)
-           (grpc-call/client-stream/nonblocking channel method metadata-or-timeout grpc-default-timeout-ms))]
+       (cond
+        [(fixnum? metadata-or-timeout)
+         (grpc-call/client-stream/nonblocking channel method '() metadata-or-timeout)]
+        [(grpc-call-options? metadata-or-timeout)
+         (grpc-call/client-stream/nonblocking
+          channel method
+          (grpc-call-options-metadata metadata-or-timeout)
+          (grpc-call-options-timeout-ms metadata-or-timeout)
+          (grpc-call-options-compression metadata-or-timeout))]
+        [else
+         (grpc-call/client-stream/nonblocking
+          channel method metadata-or-timeout grpc-default-timeout-ms)])]
       [(channel method metadata timeout-ms)
+       (grpc-call/client-stream/nonblocking channel method metadata timeout-ms 'identity)]
+      [(channel method metadata timeout-ms compression)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
                (open-stream/nonblocking
@@ -1042,7 +1257,8 @@ The return value is a network operation whose result is a gRPC stream.
                 'client
                 #f
                 metadata
-                timeout-ms))]))
+                timeout-ms
+                compression))]))
 
   #|proc:grpc-call/bidi-stream/nonblocking
 The `grpc-call/bidi-stream/nonblocking` procedure starts a bidirectional call on `channel`.
@@ -1054,10 +1270,21 @@ The return value is a network operation whose result is a gRPC stream.
       [(channel method)
        (grpc-call/bidi-stream/nonblocking channel method '() grpc-default-timeout-ms)]
       [(channel method metadata-or-timeout)
-       (if (fixnum? metadata-or-timeout)
-           (grpc-call/bidi-stream/nonblocking channel method '() metadata-or-timeout)
-           (grpc-call/bidi-stream/nonblocking channel method metadata-or-timeout grpc-default-timeout-ms))]
+       (cond
+        [(fixnum? metadata-or-timeout)
+         (grpc-call/bidi-stream/nonblocking channel method '() metadata-or-timeout)]
+        [(grpc-call-options? metadata-or-timeout)
+         (grpc-call/bidi-stream/nonblocking
+          channel method
+          (grpc-call-options-metadata metadata-or-timeout)
+          (grpc-call-options-timeout-ms metadata-or-timeout)
+          (grpc-call-options-compression metadata-or-timeout))]
+        [else
+         (grpc-call/bidi-stream/nonblocking
+          channel method metadata-or-timeout grpc-default-timeout-ms)])]
       [(channel method metadata timeout-ms)
+       (grpc-call/bidi-stream/nonblocking channel method metadata timeout-ms 'identity)]
+      [(channel method metadata timeout-ms compression)
        (pcheck ([grpc-channel? channel] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
                (open-stream/nonblocking
@@ -1068,4 +1295,5 @@ The return value is a network operation whose result is a gRPC stream.
                 'bidi
                 #f
                 metadata
-                timeout-ms))])))
+                timeout-ms
+                compression))])))

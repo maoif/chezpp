@@ -174,6 +174,7 @@
           ffi-net-grpc-server-request
           ffi-net-grpc-server-request-stream
           ffi-net-grpc-server-respond
+          ffi-net-grpc-capabilities
           ffi-net-grpc-driver-fd
           ffi-net-grpc-driver-drain
           ffi-net-sftp-flag-read
@@ -614,6 +615,8 @@
     (foreign-procedure "chezpp_net_grpc_server_respond"
                        (uptr ptr int int int string scheme-object)
                        scheme-object))
+  (define ffi-net-grpc-capabilities
+    (foreign-procedure "chezpp_net_grpc_capabilities" () unsigned-int))
   (define ffi-net-grpc-driver-fd
     (foreign-procedure "chezpp_net_grpc_driver_fd" () int))
   (define ffi-net-grpc-driver-drain

@@ -843,12 +843,13 @@ static grpc_byte_buffer *make_request_buffer(ptr payload, int start, int stop) {
 }
 
 static ptr make_response_vector(ptr payload, ptr metadata, grpc_status_code status,
-                                const char *message) {
-  ptr out = Smake_vector(4, Sfalse);
+                                const char *message, ptr details) {
+  ptr out = Smake_vector(5, Sfalse);
   Svector_set(out, 0, payload);
   Svector_set(out, 1, metadata);
   Svector_set(out, 2, Sinteger((iptr)status));
   Svector_set(out, 3, Sstring(message == NULL ? "" : message));
+  Svector_set(out, 4, details);
   return out;
 }
 
@@ -1195,15 +1196,17 @@ static ptr finalize_unary_call(chezpp_grpc_unary_call *op) {
   ptr payload = maybe_bytevector_from_buffer(op->recv_message);
   ptr metadata = metadata_array_to_scheme(&op->recv_trailing_metadata);
   ptr message = Sstring("");
+  ptr details = Smake_bytevector(0, 0);
   ptr response;
 
   if (GRPC_SLICE_LENGTH(op->status_details) > 0) {
     message = maybe_string_from_slice(op->status_details);
+    details = bytevector_from_slice(op->status_details);
   } else if (op->error_string != NULL) {
     message = Sstring(op->error_string);
   }
 
-  response = make_response_vector(payload, metadata, op->status, "");
+  response = make_response_vector(payload, metadata, op->status, "", details);
   Svector_set(response, 3, message);
   cleanup_unary_call(op);
   return response;
@@ -1455,7 +1458,7 @@ ptr chezpp_net_grpc_server_open_tls(const char *host, int port, const char *root
   pair.private_key = private_key;
   creds = p_grpc_ssl_server_credentials_create(
       root_certs != NULL && root_certs[0] != '\0' ? root_certs : NULL,
-      &pair, 1, 0, NULL);
+      &pair, 1, root_certs != NULL && root_certs[0] != '\0', NULL);
   if (creds == NULL) {
     p_grpc_server_destroy(server->server);
     p_grpc_completion_queue_destroy(server->cq);
