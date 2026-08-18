@@ -56,10 +56,52 @@ EOF
     rg -o '"('"$prefixes"')_[A-Za-z0-9_]+"' \
       "$project_root/chezpp/c/net/$source" | tr -d '"' | sort -u | \
       while IFS= read -r symbol; do
-        if test "$symbol" != "$version_symbol" && test "$symbol" != "$omitted"; then
+        if test "$symbol" != "$version_symbol" && test "$symbol" != "$omitted" && \
+           test "$symbol" != grpc_completion_queue_create_for_next && \
+           test "$symbol" != grpc_completion_queue_next; then
           printf 'long %s(void) { return 0; }\n' "$symbol"
         fi
       done >"$temporary_directory/stubs.c"
+    if test "$name" = grpc; then
+      cat >>"$temporary_directory/stubs.c" <<'EOF'
+typedef struct grpc_completion_queue grpc_completion_queue;
+typedef enum grpc_completion_type {
+  GRPC_QUEUE_SHUTDOWN,
+  GRPC_QUEUE_TIMEOUT,
+  GRPC_OP_COMPLETE
+} grpc_completion_type;
+typedef enum gpr_clock_type {
+  GPR_CLOCK_MONOTONIC,
+  GPR_CLOCK_REALTIME,
+  GPR_CLOCK_PRECISE,
+  GPR_TIMESPAN
+} gpr_clock_type;
+typedef struct gpr_timespec {
+  long tv_sec;
+  int tv_nsec;
+  gpr_clock_type clock_type;
+} gpr_timespec;
+typedef struct grpc_event {
+  grpc_completion_type type;
+  int success;
+  void *tag;
+} grpc_event;
+static int fixture_completion_queue;
+grpc_completion_queue *grpc_completion_queue_create_for_next(void *reserved) {
+  (void)reserved;
+  return (grpc_completion_queue *)&fixture_completion_queue;
+}
+grpc_event grpc_completion_queue_next(grpc_completion_queue *queue,
+                                      gpr_timespec deadline,
+                                      void *reserved) {
+  grpc_event event = {GRPC_QUEUE_SHUTDOWN, 0, 0};
+  (void)queue;
+  (void)deadline;
+  (void)reserved;
+  return event;
+}
+EOF
+    fi
   else
     : >"$temporary_directory/stubs.c"
   fi

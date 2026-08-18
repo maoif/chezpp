@@ -14,7 +14,8 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 source_file=$state_dir/source.bin
-dd if=/dev/urandom of="$source_file" bs=1048576 count=64 status=none
+transfer_mib=${CHEZPP_TRANSFER_MIB:-64}
+dd if=/dev/zero of="$source_file" bs=1048576 count="$transfer_mib" status=none
 expected=$(sha256sum "$source_file" | awk '{print $1}')
 
 cert=$state_dir/cert.pem
@@ -35,8 +36,15 @@ run_variant() {
   client_script=$3
   port=$4
   secure=${5:-0}
+  if [ -n "${CHEZPP_TRANSFER_ONLY:-}" ] && [ "$CHEZPP_TRANSFER_ONLY" != "$name" ]; then
+    return 0
+  fi
   destination=$state_dir/$name
+  download=$state_dir/$name.download
   mkdir -p "$destination"
+  export CHEZPP_TRANSFER_DOWNLOAD=$download
+  export CHEZPP_TRANSFER_REQUESTS=2
+  export CHEZPP_TRANSFER_RSS_FILE=$state_dir/$name.client.rss
   if [ "$secure" -eq 1 ]; then
     export CHEZPP_TRANSFER_CERT=$cert
     export CHEZPP_TRANSFER_KEY=$key
@@ -50,14 +58,40 @@ run_variant() {
   if [ "$secure" -eq 1 ]; then
     export CHEZPP_TRANSFER_ROLE=client
   fi
-  (cd "$project_root" && ./chez++ --script "$client_script" "$source_file")
-  wait "$server_pid" || true
+  if ! (cd "$project_root" && ./chez++ --script "$client_script" "$source_file") \
+      >"$state_dir/$name.client.out" 2>"$state_dir/$name.client.err"; then
+    cat "$state_dir/$name.client.out"
+    cat "$state_dir/$name.client.err" >&2
+    cat "$state_dir/$name.server.out"
+    cat "$state_dir/$name.server.err" >&2
+    kill "$server_pid" 2>/dev/null || true
+    return 1
+  fi
+  if ! wait "$server_pid"; then
+    cat "$state_dir/$name.server.out"
+    cat "$state_dir/$name.server.err" >&2
+    return 1
+  fi
   server_pids=$(printf '%s' "$server_pids" | sed "s/ $server_pid//")
   actual_file=$destination/$(basename "$source_file")
   test -f "$actual_file"
   actual=$(sha256sum "$actual_file" | awk '{print $1}')
   test "$actual" = "$expected"
-  printf '%s %s\n' "$name" "$actual"
+  test -f "$download"
+  downloaded=$(sha256sum "$download" | awk '{print $1}')
+  test "$downloaded" = "$expected"
+  test ! -s "$state_dir/$name.server.out"
+  test ! -s "$state_dir/$name.server.err"
+  test ! -s "$state_dir/$name.client.out"
+  test ! -s "$state_dir/$name.client.err"
+  client_rss=$(cat "$state_dir/$name.client.rss")
+  rss_growth=$client_rss
+  if [ "$rss_growth" -gt 16384 ]; then
+    printf '%s RSS grew by %s KiB, limit is 16384 KiB\n' "$name" "$rss_growth" >&2
+    return 1
+  fi
+  printf '%s upload=%s download=%s rss-growth=%s-KiB\n' \
+    "$name" "$actual" "$downloaded" "$rss_growth"
 }
 
 run_variant grpc-tls \

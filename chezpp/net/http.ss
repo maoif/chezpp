@@ -2307,20 +2307,27 @@ session or socket and ports once; later I/O raises an error.
 
   (define ensure-response-headers
     (lambda (response)
-      (let* ([body (body->bytevector (http-response-body response))]
+      (let* ([body (http-response-body response)]
              [headers (if (http-header-ref (http-response-headers response) "Connection" #f)
                           (http-response-headers response)
                           (http-header-set (http-response-headers response)
                                            "Connection"
                                            "close"))])
         (cond
+         [(http-body-source? body)
+          (let ([length (http-body-source-length body)])
+            (if length
+                (http-header-set (http-header-remove headers "Transfer-Encoding")
+                                 "Content-Length" (number->string length))
+                (http-header-set (http-header-remove headers "Content-Length")
+                                 "Transfer-Encoding" "chunked")))]
          [(chunked-transfer? headers)
           (http-header-remove headers "Content-Length")]
          [(http-header-ref headers "Content-Length" #f)
           headers]
          [else
           (http-header-set headers "Content-Length"
-                           (number->string (bytevector-length body)))]))))
+                           (number->string (bytevector-length (body->bytevector body))))]))))
 
   (define write-http-body/chunked
     (lambda (op body)
@@ -2333,10 +2340,35 @@ session or socket and ports once; later I/O raises an error.
           (put-bytevector op (string->utf8 "\r\n")))
         (put-bytevector op (string->utf8 "0\r\n\r\n")))))
 
+  (define write-http-body-source
+    (lambda (op source chunked?)
+      (dynamic-wind
+        void
+        (lambda ()
+          (let loop ()
+            (let ([chunk (http-body-source-read source 65536)])
+              (if (eof-object? chunk)
+                  (when chunked?
+                    (put-bytevector op (string->utf8 "0\r\n\r\n")))
+                  (begin
+                    (if chunked?
+                        (begin
+                          (put-bytevector
+                           op
+                           (string->utf8
+                            (string-append
+                             (number->string (bytevector-length chunk) 16) "\r\n")))
+                          (put-bytevector op chunk)
+                          (put-bytevector op (string->utf8 "\r\n")))
+                        (put-bytevector op chunk))
+                    (loop))))))
+        (lambda ()
+          (close-http-body-source! source)))))
+
   (define write-response-port
     (lambda (op response)
       (let ([headers (ensure-response-headers response)]
-            [body (body->bytevector (http-response-body response))])
+            [body (http-response-body response)])
         (put-bytevector op
                         (string->utf8
                          (format "HTTP/1.1 ~a ~a\r\n"
@@ -2344,10 +2376,15 @@ session or socket and ports once; later I/O raises an error.
                                  (http-response-reason response))))
         (write-header-lines op headers)
         (put-bytevector op (string->utf8 "\r\n"))
-        (if (chunked-transfer? headers)
-            (write-http-body/chunked op body)
-            (unless (fx= 0 (bytevector-length body))
-              (put-bytevector op body)))
+        (cond
+         [(http-body-source? body)
+          (write-http-body-source op body (chunked-transfer? headers))]
+         [else
+          (let ([bytes (body->bytevector body)])
+            (if (chunked-transfer? headers)
+                (write-http-body/chunked op bytes)
+                (unless (fx= 0 (bytevector-length bytes))
+                  (put-bytevector op bytes))))])
         (flush-output-port op))))
 
   (define read-http-response*

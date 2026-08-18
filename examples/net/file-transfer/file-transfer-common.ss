@@ -1,5 +1,8 @@
 ;; Shared configuration and helpers for the file-transfer examples.
 
+(load "tests/generated/file-transfer.pb.ss")
+(import (chezpp examples transfer file-transfer protobuf))
+
 (define file-transfer-host "127.0.0.1")
 
 (define tcp-socket-file-transfer-port 41001)
@@ -13,6 +16,8 @@
 (define grpc-file-transfer-port 41007)
 (define grpc-file-transfer-client-credentials #f)
 (define grpc-file-transfer-server-credentials #f)
+
+(define file-transfer-chunk-size 65536)
 
 (define file-transfer-done-marker-name ".chezpp-upload.done")
 (define write-bytevector-file
@@ -218,6 +223,43 @@
     (unless (= (system cmd) 0)
       (errorf who "command failed: ~a" cmd))))
 
+(define current-peak-rss-kib
+  (lambda ()
+    (guard (condition [else 0])
+      (call-with-port
+       (open-input-file "/proc/self/status")
+       (lambda (port)
+         (let loop ([line (get-line port)])
+           (cond
+            [(eof-object? line) 0]
+            [(and (>= (string-length line) 6)
+                  (string=? "VmHWM:" (substring line 0 6)))
+             (let find-start ([index 0])
+               (cond
+                [(= index (string-length line)) 0]
+                [(char-numeric? (string-ref line index))
+                 (let find-stop ([stop (+ index 1)])
+                   (if (and (< stop (string-length line))
+                            (char-numeric? (string-ref line stop)))
+                       (find-stop (+ stop 1))
+                       (string->number (substring line index stop))))]
+                [else (find-start (+ index 1))]))]
+            [else (loop (get-line port))])))))))
+
+(define write-transfer-rss-growth-value!
+  (lambda (growth-kib)
+    (let ([path (getenv "CHEZPP_TRANSFER_RSS_FILE")])
+      (when (and path (not (string=? path "")))
+        (call-with-output-file path
+          (lambda (port)
+            (display (max 0 growth-kib) port)
+            (newline port))
+          'replace)))))
+
+(define write-transfer-rss-growth!
+  (lambda (before-kib)
+    (write-transfer-rss-growth-value! (- (current-peak-rss-kib) before-kib))))
+
 (define wait-for-ready-server
   (lambda (host port)
     (let loop ([attempt 50])
@@ -346,6 +388,119 @@
                (send-frame transfer-frame-tag-chunk "" chunk)
                (loop))))))
       (send-frame transfer-frame-tag-end "" #vu8()))))
+
+(define check-file-chunk
+  (lambda (who chunk)
+    (unless (file-chunk? chunk)
+      (errorf who "expected FileChunk message, given ~s" chunk))
+    (when (> (bytevector-length (file-chunk-data chunk)) file-transfer-chunk-size)
+      (errorf who "FileChunk data exceeds ~a bytes" file-transfer-chunk-size))
+    (when (string=? (file-chunk-name chunk) "")
+      (errorf who "FileChunk name must not be empty"))
+    (if (file-chunk-done? chunk)
+        (unless (= (bytevector-length (file-chunk-sha256 chunk)) 32)
+          (errorf who "final FileChunk must contain a SHA-256 digest"))
+        (unless (= (bytevector-length (file-chunk-sha256 chunk)) 0)
+          (errorf who "non-final FileChunk must not contain a SHA-256 digest")))
+    chunk))
+
+(define send-path-via-file-chunks
+  (case-lambda
+    [(send-chunk path)
+     (send-path-via-file-chunks send-chunk path 0)]
+    [(send-chunk path start-offset)
+     (unless (and (procedure? send-chunk) (string? path) (natural? start-offset))
+       (errorf 'send-path-via-file-chunks "invalid transfer arguments"))
+     (let ([name (path-basename path)]
+           [size (file-size path)])
+       (when (> start-offset size)
+         (errorf 'send-path-via-file-chunks
+                 "start offset ~a exceeds file size ~a" start-offset size))
+       (call-with-port
+        (open-file-input-port path (file-options) (buffer-mode block) #f)
+        (lambda (port)
+          (set-port-position! port start-offset)
+          (let loop ([offset start-offset] [chunk-count 0])
+            (let ([data (get-bytevector-n port file-transfer-chunk-size)])
+              (unless (eof-object? data)
+                (send-chunk (make-file-chunk name offset data #vu8() #f))
+                (collect)
+                (loop (+ offset (bytevector-length data)) (+ chunk-count 1)))))))
+       (send-chunk (make-file-chunk name size #vu8() (sha256-file path) #t))
+       size)]))
+
+(define make-file-chunk-writer
+  (lambda (who path start-offset)
+    (unless (and (string? path) (natural? start-offset))
+      (errorf who "invalid file chunk writer arguments"))
+    (let ([port #f]
+          [next-offset start-offset]
+          [complete? #f])
+      (define close!
+        (lambda ()
+          (when port
+            (close-port port)
+            (set! port #f))))
+      (define ensure-port!
+        (lambda ()
+          (unless port
+            (set! port
+                  (open-file-output-port
+                   path
+                   (if (= start-offset 0)
+                       (file-options no-fail replace)
+                       (file-options no-fail))
+                   (buffer-mode block)
+                   #f))
+            (when (> start-offset 0)
+              (set-port-position! port start-offset)))))
+      (values
+       (lambda (chunk)
+         (check-file-chunk who chunk)
+         (when complete?
+           (errorf who "received FileChunk after completion"))
+         (unless (= (file-chunk-offset chunk) next-offset)
+           (errorf who "expected FileChunk offset ~a, given ~a"
+                   next-offset (file-chunk-offset chunk)))
+         (ensure-port!)
+         (let ([data (file-chunk-data chunk)])
+           (unless (= (bytevector-length data) 0)
+             (put-bytevector port data)
+             (set! next-offset (+ next-offset (bytevector-length data)))))
+         (when (file-chunk-done? chunk)
+           (close!)
+           (unless (equal? (file-chunk-sha256 chunk) (sha256-file path))
+             (errorf who "FileChunk SHA-256 mismatch for ~a" path))
+           (set! complete? #t))
+         complete?)
+       close!
+       (lambda () next-offset)))))
+
+(define make-upload-file-chunk-handler
+  (lambda (who dir)
+    (let ([name #f]
+          [write-chunk! #f]
+          [close! void]
+          [next-offset (lambda () 0)])
+      (values
+       (lambda (chunk)
+         (check-file-chunk who chunk)
+         (unless name
+           (set! name (file-chunk-name chunk))
+           (call-with-values
+            (lambda ()
+              (make-file-chunk-writer who (validated-upload-path who dir name) 0))
+            (lambda (writer closer offset)
+              (set! write-chunk! writer)
+              (set! close! closer)
+              (set! next-offset offset))))
+         (unless (string=? name (file-chunk-name chunk))
+           (errorf who "FileChunk name changed from ~s to ~s"
+                   name (file-chunk-name chunk)))
+         (let ([done? (write-chunk! chunk)])
+           (and done?
+                (make-transfer-result (next-offset) (file-chunk-sha256 chunk)))))
+       (lambda () (close!))))))
 
 (define await-websocket-client
   (lambda (server)
