@@ -413,14 +413,14 @@
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
 
 (define drain-http2-test-output!
-  (lambda (socket session)
+  (lambda (write-all session)
     (let loop ([bytes (http2-send session)])
       (when bytes
-        (socket-send-all socket bytes)
+        (write-all bytes)
         (loop (http2-send session))))))
 
-(define start-cleartext-http2-test-server
-  (lambda ()
+(define start-http2-test-server
+  (lambda (tls-context)
     (let ([listener (open-socket 'inet 'stream)])
       (socket-set-option! listener 'reuse-address #t)
       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
@@ -431,38 +431,57 @@
          (fork-thread
           (lambda ()
             (let-values ([(socket peer) (socket-accept listener)])
-              (let ([session (http2-open 'server)]
+              (let ([tls-session (and tls-context (tls-accept tls-context socket))]
+                    [session (http2-open 'server)]
                     [path-table (make-eqv-hashtable)])
+                (define transport-read
+                  (lambda ()
+                    (if tls-session
+                        (tls-read/nonblocking tls-session 65536)
+                        (socket-recv/nonblocking socket 65536))))
+                (define transport-write-all
+                  (lambda (bytes)
+                    (if tls-session
+                        (tls-write-all tls-session bytes)
+                        (socket-send-all socket bytes))))
                 (dynamic-wind
                   void
                   (lambda ()
-                    (drain-http2-test-output! socket session)
-                    (let read-loop ([bytes (socket-recv socket 65536)])
-                      (unless (eof-object? bytes)
-                        (http2-receive session bytes 0 (bytevector-length bytes))
-                        (let event-loop ([event (http2-next-event session)])
-                          (when event
-                            (let ([type (vector-ref event 0)]
-                                  [stream-id (vector-ref event 1)])
-                              (cond
-                               [(= type 1)
-                                (let ([header (vector-ref event 3)])
-                                  (when (string=? ":path" (vector-ref header 0))
-                                    (hashtable-set!
-                                     path-table stream-id (vector-ref header 1))))]
-                               [(and (= type 3)
-                                     (not (zero?
-                                           (bitwise-and (vector-ref event 2) 1))))
-                                (let ([path (hashtable-ref path-table stream-id #f)])
-                                  (when path
-                                    (http2-submit-response
-                                     session stream-id 200 '() (string->utf8 path))
-                                    (hashtable-delete! path-table stream-id)))]))
-                            (event-loop (http2-next-event session))))
-                        (drain-http2-test-output! socket session)
-                        (read-loop (socket-recv socket 65536)))))
+                    (drain-http2-test-output! transport-write-all session)
+                    (let read-loop ()
+                      (let ([bytes (transport-read)])
+                        (cond
+                         [(net-would-block? bytes)
+                          (milisleep 1)
+                          (read-loop)]
+                         [(eof-object? bytes) (void)]
+                         [else
+                          (http2-receive session bytes 0 (bytevector-length bytes))
+                          (let event-loop ([event (http2-next-event session)])
+                            (when event
+                              (let ([type (vector-ref event 0)]
+                                    [stream-id (vector-ref event 1)])
+                                (cond
+                                 [(= type 1)
+                                  (let ([header (vector-ref event 3)])
+                                    (when (string=? ":path" (vector-ref header 0))
+                                      (hashtable-set!
+                                       path-table stream-id (vector-ref header 1))))]
+                                 [(and (= type 3)
+                                       (not (zero?
+                                             (bitwise-and (vector-ref event 2) 1))))
+                                  (let ([path (hashtable-ref path-table stream-id #f)])
+                                    (when path
+                                      (http2-submit-response
+                                       session stream-id 200 '() (string->utf8 path))
+                                      (hashtable-delete! path-table stream-id)))]))
+                              (event-loop (http2-next-event session))))
+                          (drain-http2-test-output! transport-write-all session)
+                          (read-loop)]))))
                   (lambda ()
                     (http2-close session)
+                    (when tls-session
+                      (close-tls-session tls-session))
                     (close-socket socket)
                     (guard (condition [else #f])
                       (close-socket listener))))))))
@@ -502,17 +521,8 @@
         (let ([server-ctx (make-test-http-server-context)]
               [client-ctx (make-test-http-client-context)])
           (tls-context-set-alpn! server-ctx '("h2" "http/1.1"))
-          (let* ([port (reserve-loopback-port)]
-                 [server (http-listen "127.0.0.1" port server-ctx)])
-            (do ([index 0 (+ index 1)])
-                [(= index 10)]
-              (let ([path (format "/stream/~a" index)])
-                (http-register-handler!
-                 server 'get path
-                 (lambda (request)
-                   (make-http-response 200 "OK" '() path)))))
-            (let ([thread (fork-thread (lambda () (http-serve server)))]
-                  [client (http-open client-ctx)])
+          (let-values ([(port thread stop) (start-http2-test-server server-ctx)])
+            (let ([client (http-open client-ctx)])
               (dynamic-wind
                 (lambda () (http-client-version-set! client 'auto))
                 (lambda ()
@@ -521,14 +531,15 @@
                    wait-index* cancellation-index))
                 (lambda ()
                   (http-close client)
-                  (http-server-close server)
+                  (stop)
                   (thread-join thread)
                   (close-tls-context client-ctx)
                   (close-tls-context server-ctx))))))
-        (let-values ([(port thread stop) (start-cleartext-http2-test-server)])
+        (let-values ([(port thread stop) (start-http2-test-server #f)])
           (let ([client (http-open)])
             (dynamic-wind
-              (lambda () (http-client-version-set! client 'h2))
+              (lambda ()
+                (http-client-version-set! client 'h2))
               (lambda ()
                 (check-http2-operation-results
                  client (format "http://127.0.0.1:~a" port)
@@ -543,6 +554,16 @@
 
 (mat net-http2-last-stream-first
      (check-http2-multiplexing-order #t (cons 9 (iota 9)) #f))
+
+(mat net-http2-forward-order
+     (check-http2-multiplexing-order #t (iota 10) #f))
+
+(mat net-http2-reverse-order
+     (check-http2-multiplexing-order #t (reverse (iota 10)) #f))
+
+(mat net-http2-cancel-last-before-wait
+     ;; Error case: a cancelled final request must not prevent earlier siblings from completing.
+     (check-http2-multiplexing-order #t (iota 9) 9))
 
 (mat net-http2-cleartext-last-stream-first
      (check-http2-multiplexing-order #f (cons 9 (iota 9)) #f))

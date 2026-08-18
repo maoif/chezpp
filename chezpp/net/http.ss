@@ -250,30 +250,46 @@ pool limits, and version. `http-close` cancels work and releases every owned con
     (fields (immutable connection http2-client-transport-connection)
             (immutable session http2-client-transport-session)
             (immutable stream-table http2-client-transport-stream-table)
+            (mutable queue-front http2-client-transport-queue-front
+                     http2-client-transport-queue-front-set!)
+            (mutable queue-back http2-client-transport-queue-back
+                     http2-client-transport-queue-back-set!)
             (mutable output http2-client-transport-output
                      http2-client-transport-output-set!)
             (mutable output-offset http2-client-transport-output-offset
                      http2-client-transport-output-offset-set!)
             (mutable goaway-last-stream-id http2-client-transport-goaway-last-stream-id
                      http2-client-transport-goaway-last-stream-id-set!)
+            (mutable advancing? http2-client-transport-advancing?
+                     http2-client-transport-advancing?-set!)
             (mutable closed? http2-client-transport-closed?
                      http2-client-transport-closed?-set!)))
 
-  (define-record-type (http2-client-stream %make-http2-client-stream http2-client-stream?)
+  (define-record-type
+      (http2-client-request-state %make-http2-client-request-state
+                                  http2-client-request-state?)
     (sealed #t)
     (opaque #f)
-    (fields (immutable id http2-client-stream-id)
-            (immutable request http2-client-stream-request)
-            (immutable finish http2-client-stream-finish)
-            (immutable sink http2-client-stream-sink)
-            (mutable status http2-client-stream-status http2-client-stream-status-set!)
-            (mutable headers http2-client-stream-headers http2-client-stream-headers-set!)
-            (mutable body-parts http2-client-stream-body-parts
-                     http2-client-stream-body-parts-set!)
-            (mutable body-length http2-client-stream-body-length
-                     http2-client-stream-body-length-set!)
-            (mutable response http2-client-stream-response http2-client-stream-response-set!)
-            (mutable failure http2-client-stream-failure http2-client-stream-failure-set!)))
+    (fields (immutable request http2-client-request-state-request)
+            (immutable finish http2-client-request-state-finish)
+            (immutable sink http2-client-request-state-sink)
+            (immutable deadline-ms http2-client-request-state-deadline-ms)
+            (mutable lifecycle http2-client-request-state-lifecycle
+                     http2-client-request-state-lifecycle-set!)
+            (mutable stream-id http2-client-request-state-stream-id
+                     http2-client-request-state-stream-id-set!)
+            (mutable status http2-client-request-state-status
+                     http2-client-request-state-status-set!)
+            (mutable headers http2-client-request-state-headers
+                     http2-client-request-state-headers-set!)
+            (mutable body-parts http2-client-request-state-body-parts
+                     http2-client-request-state-body-parts-set!)
+            (mutable body-length http2-client-request-state-body-length
+                     http2-client-request-state-body-length-set!)
+            (mutable response http2-client-request-state-response
+                     http2-client-request-state-response-set!)
+            (mutable failure http2-client-request-state-failure
+                     http2-client-request-state-failure-set!)))
 
   #|record:http-server
 The `http-server` record owns a listening socket and accepted operations for one host and port.
@@ -1403,22 +1419,85 @@ session or socket and ports once; later I/O raises an error.
             (tls-write/nonblocking tls-session bytes start (bytevector-length bytes))
             (socket-send/nonblocking sock bytes start (bytevector-length bytes))))))
 
-  (define append-http2-stream-body!
-    (lambda (stream bytes)
-      (let ([sink (http2-client-stream-sink stream)]
+  (define http2-request-terminal?
+    (lambda (state)
+      (memq (http2-client-request-state-lifecycle state)
+            '(completed failed cancelled))))
+
+  (define transition-http2-request!
+    (lambda (state next)
+      (let ([current (http2-client-request-state-lifecycle state)])
+        (unless (case current
+                  [(queued) (memq next '(active failed cancelled))]
+                  [(active) (memq next '(completed failed cancelled))]
+                  [else #f])
+          (errorf 'transition-http2-request!
+                  "invalid HTTP/2 request transition from ~s to ~s" current next))
+        (http2-client-request-state-lifecycle-set! state next))))
+
+  (define fail-http2-request!
+    (lambda (state failure)
+      (unless (http2-request-terminal? state)
+        (http2-client-request-state-failure-set! state failure)
+        (transition-http2-request! state 'failed))))
+
+  (define http2-queue-empty?
+    (lambda (transport)
+      (and (null? (http2-client-transport-queue-front transport))
+           (null? (http2-client-transport-queue-back transport)))))
+
+  (define normalize-http2-queue!
+    (lambda (transport)
+      (when (and (null? (http2-client-transport-queue-front transport))
+                 (pair? (http2-client-transport-queue-back transport)))
+        (http2-client-transport-queue-front-set!
+         transport (reverse (http2-client-transport-queue-back transport)))
+        (http2-client-transport-queue-back-set! transport '()))))
+
+  (define enqueue-http2-request!
+    (lambda (transport state)
+      (unless (eq? 'queued (http2-client-request-state-lifecycle state))
+        (errorf 'enqueue-http2-request! "HTTP/2 request is not queued: ~s" state))
+      (http2-client-transport-queue-back-set!
+       transport (cons state (http2-client-transport-queue-back transport)))))
+
+  (define pop-http2-request!
+    (lambda (transport)
+      (normalize-http2-queue! transport)
+      (let ([front (http2-client-transport-queue-front transport)])
+        (and (pair? front)
+             (begin
+               (http2-client-transport-queue-front-set! transport (cdr front))
+               (car front))))))
+
+  (define remove-queued-http2-request!
+    (lambda (transport state)
+      (let* ([state* (append (http2-client-transport-queue-front transport)
+                             (reverse
+                              (http2-client-transport-queue-back transport)))]
+             [kept (filter (lambda (queued) (not (eq? queued state))) state*)])
+        (http2-client-transport-queue-front-set! transport kept)
+        (http2-client-transport-queue-back-set! transport '())
+        (not (fx= (length kept) (length state*))))))
+
+  (define append-http2-request-body!
+    (lambda (state bytes)
+      (let ([sink (http2-client-request-state-sink state)]
             [count (bytevector-length bytes)])
         (if sink
             (http-body-sink-write! sink bytes 0 count)
             (begin
-              (http2-client-stream-body-parts-set!
-               stream (cons bytes (http2-client-stream-body-parts stream)))
-              (http2-client-stream-body-length-set!
-               stream (fx+ (http2-client-stream-body-length stream) count)))))))
+              (http2-client-request-state-body-parts-set!
+               state (cons bytes (http2-client-request-state-body-parts state)))
+              (http2-client-request-state-body-length-set!
+               state (fx+ (http2-client-request-state-body-length state) count)))))))
 
-  (define collect-http2-stream-body
-    (lambda (stream)
-      (let ([body (make-bytevector (http2-client-stream-body-length stream) 0)])
-        (let loop ([part* (reverse (http2-client-stream-body-parts stream))]
+  (define collect-http2-request-body
+    (lambda (state)
+      (let ([body (make-bytevector
+                   (http2-client-request-state-body-length state) 0)])
+        (let loop ([part* (reverse
+                           (http2-client-request-state-body-parts state))]
                    [offset 0])
           (if (null? part*)
               body
@@ -1427,68 +1506,100 @@ session or socket and ports once; later I/O raises an error.
                 (bytevector-copy! part 0 body offset count)
                 (loop (cdr part*) (fx+ offset count))))))))
 
-  (define complete-http2-stream!
-    (lambda (client stream)
-      (unless (or (http2-client-stream-response stream)
-                  (http2-client-stream-failure stream))
-        (let ([status (http2-client-stream-status stream)])
-          (if (not status)
-              (http2-client-stream-failure-set! stream 'missing-status)
-              (let* ([sink (http2-client-stream-sink stream)]
+  (define complete-http2-request!
+    (lambda (client state)
+      (let ([status (http2-client-request-state-status state)])
+        (if (not status)
+            (fail-http2-request! state 'missing-status)
+            (guard (failure [else (fail-http2-request! state failure)])
+              (let* ([sink (http2-client-request-state-sink state)]
                      [body (if sink
                                (begin
                                  (http-body-sink-finish! sink)
                                  #f)
-                               (collect-http2-stream-body stream))]
+                               (collect-http2-request-body state))]
                      [response
                       (%make-http-response
                        status
                        (default-reason status)
-                       (reverse (http2-client-stream-headers stream))
+                       (reverse (http2-client-request-state-headers state))
                        body '() 'h2)])
                 (store-response-cookies!
-                 client (http2-client-stream-request stream)
+                 client (http2-client-request-state-request state)
                  (http-response-headers response))
-                (http2-client-stream-response-set!
-                 stream ((http2-client-stream-finish stream) response))))))))
+                (http2-client-request-state-response-set!
+                 state ((http2-client-request-state-finish state) response))
+                (transition-http2-request! state 'completed)))))))
+
+  (define submit-http2-queued!
+    (lambda (client transport)
+      (let loop ()
+        (when (and (not (http2-client-transport-closed? transport))
+                   (not (http2-client-transport-goaway-last-stream-id transport))
+                   (not (http2-queue-empty? transport))
+                   (< (hashtable-size
+                       (http2-client-transport-stream-table transport))
+                      (http2-peer-max-concurrent-streams
+                       (http2-client-transport-session transport))))
+          (let ([state (pop-http2-request! transport)])
+            (when state
+              (guard (failure [else (fail-http2-request! state failure)])
+                (let* ([request (http2-client-request-state-request state)]
+                       [uri (http-request-uri request)]
+                       [stream-id
+                        (http2-submit-request
+                         (http2-client-transport-session transport)
+                         (http-request-method request)
+                         (uri-scheme uri)
+                         (http-host-header uri)
+                         (http-uri-target uri)
+                         (http2-request-headers request client)
+                         (body->bytevector (http-request-body request)))])
+                  (http2-client-request-state-stream-id-set! state stream-id)
+                  (transition-http2-request! state 'active)
+                  (hashtable-set!
+                   (http2-client-transport-stream-table transport) stream-id state))
+              (loop))))))))
 
   (define process-http2-event!
     (lambda (client transport event)
       (let* ([type (vector-ref event 0)]
              [stream-id (vector-ref event 1)]
-             [stream (hashtable-ref
-                      (http2-client-transport-stream-table transport)
-                      stream-id #f)])
+             [state (hashtable-ref
+                     (http2-client-transport-stream-table transport)
+                     stream-id #f)])
         (case type
           [(1)
-           (when stream
+           (when state
              (let* ([header (vector-ref event 3)]
                     [name (vector-ref header 0)]
                     [value (vector-ref header 1)])
                (if (string=? name ":status")
                    (let ([status (string->number value)])
                      (if (and status (integer? status))
-                         (http2-client-stream-status-set! stream status)
-                         (http2-client-stream-failure-set! stream 'invalid-status)))
-                   (http2-client-stream-headers-set!
-                    stream
+                         (http2-client-request-state-status-set! state status)
+                         (fail-http2-request! state 'invalid-status)))
+                   (http2-client-request-state-headers-set!
+                    state
                     (cons (cons name value)
-                          (http2-client-stream-headers stream))))))]
+                          (http2-client-request-state-headers state))))))]
           [(2)
-           (when stream
+           (when state
              (let ([bytes (vector-ref event 3)])
-               (append-http2-stream-body! stream bytes)
+               (append-http2-request-body! state bytes)
                (http2-consume! (http2-client-transport-session transport)
                                stream-id (bytevector-length bytes))))]
           [(4)
-           (when stream
+           (when state
+             (hashtable-delete!
+              (http2-client-transport-stream-table transport) stream-id)
              (if (zero? (vector-ref event 2))
-                 (complete-http2-stream! client stream)
-                 (http2-client-stream-failure-set!
-                  stream (vector-ref event 2))))]
+                 (complete-http2-request! client state)
+                 (fail-http2-request! state (vector-ref event 2))))]
           [(5)
            (http2-client-transport-goaway-last-stream-id-set!
             transport stream-id)]
+          [(6) (void)]
           [else (void)]))))
 
   (define drain-http2-events!
@@ -1500,50 +1611,139 @@ session or socket and ports once; later I/O raises an error.
           (loop (http2-next-event
                  (http2-client-transport-session transport)))))))
 
-  (define fail-http2-streams!
+  (define fail-http2-requests!
     (lambda (transport failure)
-      (let-values ([(key* stream*)
+      (let ([queued (append (http2-client-transport-queue-front transport)
+                            (reverse
+                             (http2-client-transport-queue-back transport)))])
+        (http2-client-transport-queue-front-set! transport '())
+        (http2-client-transport-queue-back-set! transport '())
+        (for-each (lambda (state) (fail-http2-request! state failure)) queued))
+      (let-values ([(key* state*)
                     (hashtable-entries
                      (http2-client-transport-stream-table transport))])
+        (hashtable-clear! (http2-client-transport-stream-table transport))
         (vector-for-each
-         (lambda (stream)
-           (unless (http2-client-stream-response stream)
-             (http2-client-stream-failure-set! stream failure)))
-         stream*))))
+         (lambda (state) (fail-http2-request! state failure)) state*))))
 
-  (define pump-http2-transport!
+  (define flush-http2-output!
+    (lambda (transport)
+      (let loop ()
+        (let ([output (or (http2-client-transport-output transport)
+                          (http2-send
+                           (http2-client-transport-session transport)))])
+          (when output
+            (http2-client-transport-output-set! transport output)
+            (let ([answer
+                   (http2-transport-write
+                    transport output
+                    (http2-client-transport-output-offset transport))])
+              (unless (net-would-block? answer)
+                (let ([next (fx+ (http2-client-transport-output-offset transport)
+                                 answer)])
+                  (if (fx= next (bytevector-length output))
+                      (begin
+                        (http2-client-transport-output-set! transport #f)
+                        (http2-client-transport-output-offset-set! transport 0)
+                        (loop))
+                      (http2-client-transport-output-offset-set!
+                       transport next))))))))))
+
+  (define read-http2-input!
+    (lambda (transport)
+      (let loop ([answer (http2-transport-read transport)])
+        (cond
+         [(net-would-block? answer) (void)]
+         [(eof-object? answer)
+          (fail-http2-requests! transport 'eof)
+          (close-http2-client-transport! transport)]
+         [else
+          (http2-receive (http2-client-transport-session transport)
+                         answer 0 (bytevector-length answer))
+          (loop (http2-transport-read transport))]))))
+
+  (define expire-http2-requests!
+    (lambda (transport)
+      (let ([now (current-time-ms)])
+        (let ([queued (append (http2-client-transport-queue-front transport)
+                              (reverse
+                               (http2-client-transport-queue-back transport)))])
+          (http2-client-transport-queue-front-set! transport '())
+          (http2-client-transport-queue-back-set! transport '())
+          (for-each
+           (lambda (state)
+             (let ([deadline-ms
+                    (http2-client-request-state-deadline-ms state)])
+               (if (and deadline-ms (fx>= now deadline-ms))
+                   (fail-http2-request! state 'timeout)
+                   (enqueue-http2-request! transport state))))
+           queued))
+        (let-values ([(stream-id* state*)
+                      (hashtable-entries
+                       (http2-client-transport-stream-table transport))])
+          (vector-for-each
+           (lambda (stream-id state)
+             (let ([deadline-ms
+                    (http2-client-request-state-deadline-ms state)])
+               (when (and deadline-ms (fx>= now deadline-ms))
+                 (http2-reset-stream!
+                  (http2-client-transport-session transport) stream-id 8)
+                 (hashtable-delete!
+                  (http2-client-transport-stream-table transport) stream-id)
+                 (fail-http2-request! state 'timeout))))
+           stream-id* state*)))))
+
+  (define http2-transport-poll-events
+    (lambda (transport)
+      (let ([write?
+             (or (http2-client-transport-output transport)
+                 (http2-want-write?
+                  (http2-client-transport-session transport))
+                 (and (not (http2-queue-empty? transport))
+                      (not (http2-client-transport-goaway-last-stream-id transport))
+                      (< (hashtable-size
+                          (http2-client-transport-stream-table transport))
+                         (http2-peer-max-concurrent-streams
+                          (http2-client-transport-session transport)))))])
+        (if write?
+            '(read write error hup invalid)
+            '(read error hup invalid)))))
+
+  (define advance-http2-transport!
     (lambda (client transport)
-      (unless (http2-client-transport-closed? transport)
-        (let write-loop ()
-          (let ([output (or (http2-client-transport-output transport)
-                            (http2-send
-                             (http2-client-transport-session transport)))])
-            (when output
-              (http2-client-transport-output-set! transport output)
-              (let ([answer
-                     (http2-transport-write
-                      transport output
-                      (http2-client-transport-output-offset transport))])
-                (unless (net-would-block? answer)
-                  (let ([next (fx+ (http2-client-transport-output-offset transport)
-                                   answer)])
-                    (if (fx= next (bytevector-length output))
-                        (begin
-                          (http2-client-transport-output-set! transport #f)
-                          (http2-client-transport-output-offset-set! transport 0)
-                          (write-loop))
-                        (http2-client-transport-output-offset-set! transport next))))))))
-        (let read-loop ([answer (http2-transport-read transport)])
-          (cond
-           [(net-would-block? answer) (void)]
-           [(eof-object? answer)
-            (fail-http2-streams! transport 'eof)
-            (close-http2-client-transport! transport)]
-           [else
-            (http2-receive (http2-client-transport-session transport)
-                           answer 0 (bytevector-length answer))
-            (read-loop (http2-transport-read transport))]))
-        (drain-http2-events! client transport))))
+      (when (http2-client-transport-advancing? transport)
+        (errorf 'advance-http2-transport! "recursive HTTP/2 transport advancement"))
+      (dynamic-wind
+        (lambda () (http2-client-transport-advancing?-set! transport #t))
+        (lambda ()
+          (unless (http2-client-transport-closed? transport)
+            (guard (failure
+                    [else
+                     (fail-http2-requests! transport failure)])
+              (submit-http2-queued! client transport)
+              (flush-http2-output! transport)
+              (read-http2-input! transport)
+              (drain-http2-events! client transport)
+              (expire-http2-requests! transport)
+              (submit-http2-queued! client transport)
+              (flush-http2-output! transport)))
+          (http2-transport-poll-events transport))
+        (lambda () (http2-client-transport-advancing?-set! transport #f)))))
+
+  (define cancel-http2-request!
+    (lambda (transport state)
+      (case (http2-client-request-state-lifecycle state)
+        [(queued)
+         (remove-queued-http2-request! transport state)
+         (transition-http2-request! state 'cancelled)]
+        [(active)
+         (let ([stream-id (http2-client-request-state-stream-id state)])
+           (http2-reset-stream!
+            (http2-client-transport-session transport) stream-id 8)
+           (hashtable-delete!
+            (http2-client-transport-stream-table transport) stream-id)
+           (transition-http2-request! state 'cancelled))]
+        [else (void)])))
 
   (define http2-request-headers
     (lambda (request client)
@@ -1589,7 +1789,7 @@ session or socket and ports once; later I/O raises an error.
               (let ([transport
                      (%make-http2-client-transport
                       connection (http2-open 'client) (make-eqv-hashtable)
-                      #f 0 #f #f)])
+                      '() '() #f 0 #f #f #f)])
                 (http-client-http2-origin-set! client origin)
                 (http-client-http2-transport-set! client transport)
                 transport)]
@@ -1611,60 +1811,40 @@ session or socket and ports once; later I/O raises an error.
                [transport
                 (ensure-http2-client-transport who client request deadline-ms)])
           (and transport
-               (let* ([uri (http-request-uri request)]
-                      [stream-id
-                       (http2-submit-request
-                        (http2-client-transport-session transport)
-                        (http-request-method request)
-                        (uri-scheme uri)
-                        (http-host-header uri)
-                        (http-uri-target uri)
-                        (http2-request-headers request client)
-                        (body->bytevector body))]
-                      [stream
-                       (%make-http2-client-stream
-                        stream-id request finish response-sink #f '() '() 0 #f #f)]
+               (let* ([state
+                       (%make-http2-client-request-state
+                        request finish response-sink deadline-ms 'queued #f
+                        #f '() '() 0 #f #f)]
                       [operation #f])
-                 (hashtable-set!
-                  (http2-client-transport-stream-table transport) stream-id stream)
+                 (enqueue-http2-request! transport state)
                  (set! operation
                        (make-net-operation
                         kind
                         (lambda ()
-                          (cond
-                           [(and deadline-ms (fx>= (current-time-ms) deadline-ms))
-                            (http2-reset-stream!
-                             (http2-client-transport-session transport) stream-id 8)
-                            (raise-http-timeout who "HTTP/2 stream timed out" request)]
-                           [else
-                            (pump-http2-transport! client transport)
-                            (cond
-                             [(http2-client-stream-response stream)
-                              (net-operation-completed
-                               (http2-client-stream-response stream))]
-                             [(http2-client-stream-failure stream)
-                              (raise-net-error
-                               who 'http2 "HTTP/2 stream failed"
-                               (http2-client-stream-failure stream))]
-                             [else
-                              (net-operation-pending
-                               (list
-                                (make-poll-target
-                                 (http2-connection-socket transport)
-                                 (if (or (http2-client-transport-output transport)
-                                         (http2-want-write?
-                                          (http2-client-transport-session transport)))
-                                     '(read write error hup invalid)
-                                     '(read error hup invalid))))
-                               deadline-ms)])]))
-                        (lambda ()
-                          (unless (or (http2-client-stream-response stream)
-                                      (http2-client-stream-failure stream))
-                            (http2-reset-stream!
-                             (http2-client-transport-session transport) stream-id 8)))
-                        (lambda ()
-                          (hashtable-delete!
-                           (http2-client-transport-stream-table transport) stream-id))))
+                          (let ([event* (advance-http2-transport! client transport)])
+                            (case (http2-client-request-state-lifecycle state)
+                              [(completed)
+                               (net-operation-completed
+                                (http2-client-request-state-response state))]
+                              [(failed)
+                               (let ([failure
+                                      (http2-client-request-state-failure state)])
+                                 (cond
+                                  [(eq? failure 'timeout)
+                                   (raise-http-timeout
+                                    who "HTTP/2 stream timed out" request)]
+                                  [(condition? failure) (raise failure)]
+                                  [else
+                                   (raise-net-error
+                                    who 'http2 "HTTP/2 stream failed" failure)]))]
+                              [else
+                               (net-operation-pending
+                                (list
+                                 (make-poll-target
+                                  (http2-connection-socket transport) event*))
+                                deadline-ms)])))
+                        (lambda () (cancel-http2-request! transport state))
+                        void))
                  operation))))))
 
   (define http-transfer/nonblocking
@@ -2584,7 +2764,7 @@ session or socket and ports once; later I/O raises an error.
   (define close-http2-client-transport!
     (lambda (transport)
       (unless (http2-client-transport-closed? transport)
-        (fail-http2-streams! transport 'closed)
+        (fail-http2-requests! transport 'closed)
         (let ([tls-session (http2-connection-tls-session transport)])
           (when tls-session
             (guard (failure [else #f])
