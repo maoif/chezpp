@@ -11,7 +11,8 @@
           http2-reset-stream!
           http2-goaway!
           http2-want-read?
-          http2-want-write?)
+          http2-want-write?
+          http2-peer-max-concurrent-streams)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp net ffi)
@@ -218,4 +219,17 @@ The `http2-want-write?` procedure reports whether `session` has output bytes.
       (pcheck ([http2-session? session])
         (ensure-open who session)
         (ffi-net-http2-want-write (http2-session-handle session)))))
+
+#|proc:http2-peer-max-concurrent-streams
+The `http2-peer-max-concurrent-streams` procedure queries an open HTTP/2 `session`.
+The return value is the peer's current concurrent stream limit as a natural number.
+|#
+  (define-who http2-peer-max-concurrent-streams
+    (lambda (session)
+      (pcheck ([http2-session? session])
+        (ensure-open who session)
+        (ensure-result
+         who
+         (ffi-net-http2-peer-max-concurrent-streams
+          (http2-session-handle session))))))
 )

@@ -31,12 +31,14 @@ typedef int (*consume_fn)(nghttp2_session *, int32_t, size_t);
 typedef int (*rst_fn)(nghttp2_session *, uint8_t, int32_t, uint32_t);
 typedef int (*goaway_fn)(nghttp2_session *, uint8_t, int32_t, uint32_t, const uint8_t *, size_t);
 typedef int (*want_fn)(nghttp2_session *);
+typedef uint32_t (*remote_settings_fn)(nghttp2_session *, nghttp2_settings_id);
 
 typedef struct h2_event h2_event;
 typedef struct h2_stream h2_stream;
 typedef struct h2_session h2_session;
 
 struct h2_event {
+  /* 1 header, 2 data, 3 frame, 4 close, 5 GOAWAY, 6 settings. */
   int type;
   int32_t stream_id;
   uint32_t flags;
@@ -98,6 +100,7 @@ static rst_fn p_submit_rst_stream;
 static goaway_fn p_submit_goaway;
 static want_fn p_session_want_read;
 static want_fn p_session_want_write;
+static remote_settings_fn p_session_get_remote_settings;
 
 static int load_h2_symbols(void) {
   if (h2_symbols_loaded) return 1;
@@ -132,6 +135,7 @@ static int load_h2_symbols(void) {
   LOAD(submit_goaway, goaway_fn);
   LOAD(session_want_read, want_fn);
   LOAD(session_want_write, want_fn);
+  LOAD(session_get_remote_settings, remote_settings_fn);
 #undef LOAD
   p_set_user_data = p_session_set_user_data;
   p_set_header_cb = p_session_callbacks_set_on_header_callback;
@@ -211,6 +215,9 @@ static int on_frame(nghttp2_session *session, const nghttp2_frame *frame, void *
     state->goaway_received = 1;
     push_event(state, 5, frame->goaway.last_stream_id, frame->goaway.error_code, NULL, 0);
   }
+  else if (frame->hd.type == NGHTTP2_SETTINGS &&
+           (frame->hd.flags & NGHTTP2_FLAG_ACK) == 0)
+    push_event(state, 6, 0, frame->hd.flags, NULL, 0);
   return 0;
 }
 
@@ -417,3 +424,12 @@ ptr chezpp_net_http2_goaway(uptr handle, int stream_id, int error_code) {
 
 ptr chezpp_net_http2_want_read(uptr handle) { h2_session *s = (h2_session *)TO_VOIDP(handle); return s ? (p_want_read(s->session) ? Strue : Sfalse) : Sfalse; }
 ptr chezpp_net_http2_want_write(uptr handle) { h2_session *s = (h2_session *)TO_VOIDP(handle); return s ? (p_want_write(s->session) ? Strue : Sfalse) : Sfalse; }
+
+ptr chezpp_net_http2_peer_max_concurrent_streams(uptr handle) {
+  h2_session *state = (h2_session *)TO_VOIDP(handle);
+  uint32_t value;
+  if (state == NULL) return h2_error("invalid HTTP/2 session");
+  value = p_session_get_remote_settings(
+      state->session, NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS);
+  return Sunsigned((uptr)value);
+}

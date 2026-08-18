@@ -16,6 +16,7 @@
           ffi-net-http2-goaway
           ffi-net-http2-want-read
           ffi-net-http2-want-write
+          ffi-net-http2-peer-max-concurrent-streams
           net-af-inet6
           net-af-unix
           net-pollin
@@ -259,6 +260,8 @@
     (foreign-procedure "chezpp_net_http2_want_read" (uptr) scheme-object))
   (define ffi-net-http2-want-write
     (foreign-procedure "chezpp_net_http2_want_write" (uptr) scheme-object))
+  (define ffi-net-http2-peer-max-concurrent-streams
+    (foreign-procedure "chezpp_net_http2_peer_max_concurrent_streams" (uptr) scheme-object))
 
   (define net-af-inet (foreign-procedure "chezpp_net_af_inet" () int))
   (define net-af-inet6 (foreign-procedure "chezpp_net_af_inet6" () int))

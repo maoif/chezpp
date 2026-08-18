@@ -60,6 +60,24 @@
         (http2-receive receiver bytes 0 (bytevector-length bytes))
         (loop (http2-send sender))))))
 
+(mat net-http2-peer-settings
+     (let ([client (http2-open 'client)]
+           [server (http2-open 'server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (exchange-http2! client server)
+           (exchange-http2! server client)
+           (let ([limit (http2-peer-max-concurrent-streams client)])
+             (let loop ([event (http2-next-event client)] [saw-settings? #f])
+               (if event
+                   (loop (http2-next-event client)
+                         (or saw-settings? (= 6 (vector-ref event 0))))
+                   (and (natural? limit) (positive? limit) saw-settings?)))))
+         (lambda ()
+           (http2-close client)
+           (http2-close server)))))
+
 (define collect-http2-headers
   (lambda (session stream-id)
     (let loop ([headers '()])

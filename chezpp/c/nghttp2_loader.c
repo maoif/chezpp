@@ -26,7 +26,7 @@ static const char *const required_symbols[] = {
     "nghttp2_submit_rst_stream", "nghttp2_submit_goaway",
     "nghttp2_session_mem_recv", "nghttp2_session_mem_send",
     "nghttp2_session_consume", "nghttp2_session_want_read",
-    "nghttp2_session_want_write", NULL};
+    "nghttp2_session_want_write", "nghttp2_session_get_remote_settings", NULL};
 
 static void initialize_nghttp2(void) {
   nghttp2_version_fn version_fn = NULL;
