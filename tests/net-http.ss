@@ -412,52 +412,140 @@
                     (eq? (http-response-version resp) 'http/1.1)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
 
+(define drain-http2-test-output!
+  (lambda (socket session)
+    (let loop ([bytes (http2-send session)])
+      (when bytes
+        (socket-send-all socket bytes)
+        (loop (http2-send session))))))
+
+(define start-cleartext-http2-test-server
+  (lambda ()
+    (let ([listener (open-socket 'inet 'stream)])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values
+         port
+         (fork-thread
+          (lambda ()
+            (let-values ([(socket peer) (socket-accept listener)])
+              (let ([session (http2-open 'server)]
+                    [path-table (make-eqv-hashtable)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (drain-http2-test-output! socket session)
+                    (let read-loop ([bytes (socket-recv socket 65536)])
+                      (unless (eof-object? bytes)
+                        (http2-receive session bytes 0 (bytevector-length bytes))
+                        (let event-loop ([event (http2-next-event session)])
+                          (when event
+                            (let ([type (vector-ref event 0)]
+                                  [stream-id (vector-ref event 1)])
+                              (cond
+                               [(= type 1)
+                                (let ([header (vector-ref event 3)])
+                                  (when (string=? ":path" (vector-ref header 0))
+                                    (hashtable-set!
+                                     path-table stream-id (vector-ref header 1))))]
+                               [(and (= type 3)
+                                     (not (zero?
+                                           (bitwise-and (vector-ref event 2) 1))))
+                                (let ([path (hashtable-ref path-table stream-id #f)])
+                                  (when path
+                                    (http2-submit-response
+                                     session stream-id 200 '() (string->utf8 path))
+                                    (hashtable-delete! path-table stream-id)))]))
+                            (event-loop (http2-next-event session))))
+                        (drain-http2-test-output! socket session)
+                        (read-loop (socket-recv socket 65536)))))
+                  (lambda ()
+                    (http2-close session)
+                    (close-socket socket)
+                    (guard (condition [else #f])
+                      (close-socket listener))))))))
+         (lambda ()
+           (guard (condition [else #f])
+             (close-socket listener))))))))
+
+(define check-http2-operation-results
+  (lambda (client base-uri wait-index* cancellation-index)
+    (let ([operation*
+           (map
+            (lambda (index)
+              (http-send/nonblocking
+               client
+               (make-http-request
+                'get (format "~a/stream/~a" base-uri index))))
+            (iota 10))])
+      (when cancellation-index
+        ;; Error case: cancelling one HTTP/2 stream must not close its siblings.
+        (net-operation-cancel! (list-ref operation* cancellation-index)))
+      (and
+       (or (not cancellation-index)
+           (eq? 'cancelled
+                (net-operation-state (list-ref operation* cancellation-index))))
+       (for-all
+        (lambda (index)
+          (let ([response (net-operation-wait (list-ref operation* index))])
+            (and (= 200 (http-response-status response))
+                 (eq? 'h2 (http-response-version response))
+                 (string=? (format "/stream/~a" index)
+                           (utf8->string (http-response-body response))))))
+        wait-index*)))))
+
+(define check-http2-multiplexing-order
+  (lambda (secure? wait-index* cancellation-index)
+    (if secure?
+        (let ([server-ctx (make-test-http-server-context)]
+              [client-ctx (make-test-http-client-context)])
+          (tls-context-set-alpn! server-ctx '("h2" "http/1.1"))
+          (let* ([port (reserve-loopback-port)]
+                 [server (http-listen "127.0.0.1" port server-ctx)])
+            (do ([index 0 (+ index 1)])
+                [(= index 10)]
+              (let ([path (format "/stream/~a" index)])
+                (http-register-handler!
+                 server 'get path
+                 (lambda (request)
+                   (make-http-response 200 "OK" '() path)))))
+            (let ([thread (fork-thread (lambda () (http-serve server)))]
+                  [client (http-open client-ctx)])
+              (dynamic-wind
+                (lambda () (http-client-version-set! client 'auto))
+                (lambda ()
+                  (check-http2-operation-results
+                   client (format "https://127.0.0.1:~a" port)
+                   wait-index* cancellation-index))
+                (lambda ()
+                  (http-close client)
+                  (http-server-close server)
+                  (thread-join thread)
+                  (close-tls-context client-ctx)
+                  (close-tls-context server-ctx))))))
+        (let-values ([(port thread stop) (start-cleartext-http2-test-server)])
+          (let ([client (http-open)])
+            (dynamic-wind
+              (lambda () (http-client-version-set! client 'h2))
+              (lambda ()
+                (check-http2-operation-results
+                 client (format "http://127.0.0.1:~a" port)
+                 wait-index* cancellation-index))
+              (lambda ()
+                (http-close client)
+                (stop)
+                (thread-join thread))))))))
+
 (mat net-http2-multiplexing
-     (let ([server-ctx (make-test-http-server-context)]
-           [client-ctx (make-test-http-client-context)])
-       (tls-context-set-alpn! server-ctx '("h2" "http/1.1"))
-       (let* ([port (reserve-loopback-port)]
-              [server (http-listen "127.0.0.1" port server-ctx)])
-         (do ([index 0 (+ index 1)])
-             [(= index 10)]
-           (let ([path (format "/stream/~a" index)])
-             (http-register-handler!
-              server 'get path
-              (lambda (request)
-                (make-http-response 200 "OK" '() path)))))
-         (let ([thread (fork-thread (lambda () (http-serve server)))]
-               [client (http-open client-ctx)])
-           (dynamic-wind
-             (lambda () (http-client-version-set! client 'auto))
-             (lambda ()
-               (let ([operation*
-                      (map
-                       (lambda (index)
-                         (http-send/nonblocking
-                          client
-                          (make-http-request
-                           'get
-                           (format "https://127.0.0.1:~a/stream/~a" port index))))
-                       (iota 10))])
-                 ;; Error case: cancelling one HTTP/2 stream must not close its siblings.
-                 (net-operation-cancel! (car operation*))
-                 (and
-                  (eq? 'cancelled (net-operation-state (car operation*)))
-                  (for-all
-                   (lambda (operation index)
-                     (let ([response (net-operation-wait operation)])
-                       (and (= 200 (http-response-status response))
-                            (eq? 'h2 (http-response-version response))
-                            (string=? (format "/stream/~a" index)
-                                      (utf8->string (http-response-body response))))))
-                   (cdr operation*)
-                   (cdr (iota 10))))))
-             (lambda ()
-               (http-close client)
-               (http-server-close server)
-               (thread-join thread)
-               (close-tls-context client-ctx)
-               (close-tls-context server-ctx)))))))
+     (check-http2-multiplexing-order #t (cdr (iota 10)) 0))
+
+(mat net-http2-last-stream-first
+     (check-http2-multiplexing-order #t (cons 9 (iota 9)) #f))
+
+(mat net-http2-cleartext-last-stream-first
+     (check-http2-multiplexing-order #f (cons 9 (iota 9)) #f))
 
 (mat net-https-connect-proxy
      ;; HTTPS requests through an HTTP proxy must establish CONNECT before TLS.
