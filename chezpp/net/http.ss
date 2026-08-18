@@ -1561,6 +1561,26 @@ session or socket and ports once; later I/O raises an error.
                    (http2-client-transport-stream-table transport) stream-id state))
               (loop))))))))
 
+  (define fail-http2-goaway-requests!
+    (lambda (transport last-stream-id error-code)
+      (let ([failure (vector 'goaway last-stream-id error-code)]
+            [queued (append (http2-client-transport-queue-front transport)
+                            (reverse
+                             (http2-client-transport-queue-back transport)))])
+        (http2-client-transport-queue-front-set! transport '())
+        (http2-client-transport-queue-back-set! transport '())
+        (for-each (lambda (state) (fail-http2-request! state failure)) queued)
+        (let-values ([(stream-id* state*)
+                      (hashtable-entries
+                       (http2-client-transport-stream-table transport))])
+          (vector-for-each
+           (lambda (stream-id state)
+             (when (fx> stream-id last-stream-id)
+               (hashtable-delete!
+                (http2-client-transport-stream-table transport) stream-id)
+               (fail-http2-request! state failure)))
+           stream-id* state*)))))
+
   (define process-http2-event!
     (lambda (client transport event)
       (let* ([type (vector-ref event 0)]
@@ -1598,7 +1618,9 @@ session or socket and ports once; later I/O raises an error.
                  (fail-http2-request! state (vector-ref event 2))))]
           [(5)
            (http2-client-transport-goaway-last-stream-id-set!
-            transport stream-id)]
+            transport stream-id)
+           (fail-http2-goaway-requests!
+            transport stream-id (vector-ref event 2))]
           [(6) (void)]
           [else (void)]))))
 
@@ -1695,19 +1717,21 @@ session or socket and ports once; later I/O raises an error.
 
   (define http2-transport-poll-events
     (lambda (transport)
-      (let ([write?
-             (or (http2-client-transport-output transport)
-                 (http2-want-write?
-                  (http2-client-transport-session transport))
-                 (and (not (http2-queue-empty? transport))
-                      (not (http2-client-transport-goaway-last-stream-id transport))
-                      (< (hashtable-size
-                          (http2-client-transport-stream-table transport))
-                         (http2-peer-max-concurrent-streams
-                          (http2-client-transport-session transport)))))])
-        (if write?
-            '(read write error hup invalid)
-            '(read error hup invalid)))))
+      (if (http2-client-transport-closed? transport)
+          '(read error hup invalid)
+          (let ([write?
+                 (or (http2-client-transport-output transport)
+                     (http2-want-write?
+                      (http2-client-transport-session transport))
+                     (and (not (http2-queue-empty? transport))
+                          (not (http2-client-transport-goaway-last-stream-id transport))
+                          (< (hashtable-size
+                              (http2-client-transport-stream-table transport))
+                             (http2-peer-max-concurrent-streams
+                              (http2-client-transport-session transport)))))])
+            (if write?
+                '(read write error hup invalid)
+                '(read error hup invalid))))))
 
   (define advance-http2-transport!
     (lambda (client transport)
@@ -1719,14 +1743,17 @@ session or socket and ports once; later I/O raises an error.
           (unless (http2-client-transport-closed? transport)
             (guard (failure
                     [else
-                     (fail-http2-requests! transport failure)])
+                     (fail-http2-requests! transport failure)
+                     (guard (close-failure [else #f])
+                       (close-http2-client-transport! transport))])
               (submit-http2-queued! client transport)
               (flush-http2-output! transport)
               (read-http2-input! transport)
-              (drain-http2-events! client transport)
-              (expire-http2-requests! transport)
-              (submit-http2-queued! client transport)
-              (flush-http2-output! transport)))
+              (unless (http2-client-transport-closed? transport)
+                (drain-http2-events! client transport)
+                (expire-http2-requests! transport)
+                (submit-http2-queued! client transport)
+                (flush-http2-output! transport))))
           (http2-transport-poll-events transport))
         (lambda () (http2-client-transport-advancing?-set! transport #f)))))
 

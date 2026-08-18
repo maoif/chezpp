@@ -420,7 +420,7 @@
         (loop (http2-send session))))))
 
 (define start-http2-test-server
-  (lambda (tls-context)
+  (lambda (tls-context behavior)
     (let ([listener (open-socket 'inet 'stream)])
       (socket-set-option! listener 'reuse-address #t)
       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
@@ -455,6 +455,7 @@
                           (milisleep 1)
                           (read-loop)]
                          [(eof-object? bytes) (void)]
+                         [(eq? behavior 'eof) (void)]
                          [else
                           (http2-receive session bytes 0 (bytevector-length bytes))
                           (let event-loop ([event (http2-next-event session)])
@@ -472,8 +473,23 @@
                                              (bitwise-and (vector-ref event 2) 1))))
                                   (let ([path (hashtable-ref path-table stream-id #f)])
                                     (when path
-                                      (http2-submit-response
-                                       session stream-id 200 '() (string->utf8 path))
+                                      (cond
+                                       [(eq? behavior 'goaway)
+                                        (cond
+                                         [(= stream-id 1)
+                                          (http2-submit-response
+                                           session stream-id 200 '()
+                                           (string->utf8 path))]
+                                         [(= stream-id 3)
+                                          (http2-submit-response
+                                           session stream-id 200 '()
+                                           (string->utf8 path))
+                                          (http2-goaway! session stream-id 0)])]
+                                       [(eq? behavior 'hold) (void)]
+                                       [else
+                                        (http2-submit-response
+                                         session stream-id 200 '()
+                                         (string->utf8 path))])
                                       (hashtable-delete! path-table stream-id)))]))
                               (event-loop (http2-next-event session))))
                           (drain-http2-test-output! transport-write-all session)
@@ -521,7 +537,7 @@
         (let ([server-ctx (make-test-http-server-context)]
               [client-ctx (make-test-http-client-context)])
           (tls-context-set-alpn! server-ctx '("h2" "http/1.1"))
-          (let-values ([(port thread stop) (start-http2-test-server server-ctx)])
+          (let-values ([(port thread stop) (start-http2-test-server server-ctx 'respond)])
             (let ([client (http-open client-ctx)])
               (dynamic-wind
                 (lambda () (http-client-version-set! client 'auto))
@@ -535,7 +551,7 @@
                   (thread-join thread)
                   (close-tls-context client-ctx)
                   (close-tls-context server-ctx))))))
-        (let-values ([(port thread stop) (start-http2-test-server #f)])
+        (let-values ([(port thread stop) (start-http2-test-server #f 'respond)])
           (let ([client (http-open)])
             (dynamic-wind
               (lambda ()
@@ -564,6 +580,111 @@
 (mat net-http2-cancel-last-before-wait
      ;; Error case: a cancelled final request must not prevent earlier siblings from completing.
      (check-http2-multiplexing-order #t (iota 9) 9))
+
+(mat net-http2-cancel-active-stream
+     ;; Error case: resetting one active stream must not prevent its siblings from completing.
+     (let-values ([(port thread stop) (start-http2-test-server #f 'respond)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           (lambda () (http-client-version-set! client 'h2))
+           (lambda ()
+             (let ([operation*
+                    (map
+                     (lambda (index)
+                       (http-send/nonblocking
+                        client
+                        (make-http-request
+                         'get
+                         (format "http://127.0.0.1:~a/stream/~a" port index))))
+                     (iota 10))])
+               (net-operation-step! (car operation*))
+               (net-operation-cancel! (list-ref operation* 9))
+               (and
+                (eq? 'cancelled (net-operation-state (list-ref operation* 9)))
+                (for-all
+                 (lambda (index)
+                   (let ([response
+                          (net-operation-wait (list-ref operation* index))])
+                     (string=?
+                      (format "/stream/~a" index)
+                      (utf8->string (http-response-body response)))))
+                 (iota 9)))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join thread))))))
+
+(mat net-http2-goaway-fails-queued-request
+     ;; Error case: GOAWAY must fail work queued beyond the peer's accepted stream ID.
+     (let-values ([(port thread stop) (start-http2-test-server #f 'goaway)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           (lambda ()
+             (http-client-version-set! client 'h2)
+             (http-set-timeout! client 1000))
+           (lambda ()
+             (http-get client (format "http://127.0.0.1:~a/warmup" port))
+             (let ([operation*
+                    (let loop ([index 0] [out '()])
+                      (if (= index 101)
+                          (reverse out)
+                          (loop
+                           (+ index 1)
+                           (cons
+                            (http-send/nonblocking
+                             client
+                             (make-http-request
+                              'get
+                              (format "http://127.0.0.1:~a/stream/~a" port index)))
+                            out))))])
+               (http-error-message-contains?
+                "HTTP/2 stream failed"
+                (lambda () (net-operation-wait (list-ref operation* 100))))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join thread))))))
+
+(mat net-http2-connection-eof-fails-request
+     ;; Error case: connection EOF must fail every outstanding HTTP/2 request.
+     (let-values ([(port thread stop) (start-http2-test-server #f 'eof)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           (lambda () (http-client-version-set! client 'h2))
+           (lambda ()
+             (let ([operation
+                    (http-send/nonblocking
+                     client
+                     (make-http-request
+                      'get (format "http://127.0.0.1:~a/eof" port)))])
+               (guard (failure
+                       [else
+                        (and (condition? failure)
+                             (eq? 'failed (net-operation-state operation)))])
+                 (net-operation-wait operation)
+                 #f)))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join thread))))))
+
+(mat net-http2-request-timeout
+     ;; Error case: an HTTP/2 request must fail when its individual deadline expires.
+     (let-values ([(port thread stop) (start-http2-test-server #f 'hold)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           (lambda ()
+             (http-client-version-set! client 'h2)
+             (http-set-timeout! client 50))
+           (lambda ()
+             (http-error-message-contains?
+              "HTTP/2 stream timed out"
+              (lambda ()
+                (http-get client (format "http://127.0.0.1:~a/timeout" port)))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join thread))))))
 
 (mat net-http2-cleartext-last-stream-first
      (check-http2-multiplexing-order #f (cons 9 (iota 9)) #f))
