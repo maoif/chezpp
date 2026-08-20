@@ -254,6 +254,12 @@ pool limits, and version. `http-close` cancels work and releases every owned con
                      http2-client-transport-queue-front-set!)
             (mutable queue-back http2-client-transport-queue-back
                      http2-client-transport-queue-back-set!)
+            (mutable reset-streams http2-client-transport-reset-streams
+                     http2-client-transport-reset-streams-set!)
+            (mutable read-events http2-client-transport-read-events
+                     http2-client-transport-read-events-set!)
+            (mutable cancellations http2-client-transport-cancellations
+                     http2-client-transport-cancellations-set!)
             (mutable output http2-client-transport-output
                      http2-client-transport-output-set!)
             (mutable output-offset http2-client-transport-output-offset
@@ -1492,6 +1498,47 @@ session or socket and ports once; later I/O raises an error.
               (http2-client-request-state-body-length-set!
                state (fx+ (http2-client-request-state-body-length state) count)))))))
 
+  (define queue-http2-reset!
+    (lambda (transport stream-id)
+      (http2-client-transport-reset-streams-set!
+       transport
+       (cons stream-id (http2-client-transport-reset-streams transport)))))
+
+  (define flush-http2-resets!
+    (lambda (transport)
+      (let ([stream-id* (http2-client-transport-reset-streams transport)])
+        (http2-client-transport-reset-streams-set! transport '())
+        (for-each
+         (lambda (stream-id)
+           (http2-reset-stream!
+            (http2-client-transport-session transport) stream-id 8))
+         (reverse stream-id*)))))
+
+  (define queue-http2-cancellation!
+    (lambda (transport state)
+      (http2-client-transport-cancellations-set!
+       transport
+       (cons state (http2-client-transport-cancellations transport)))))
+
+  (define flush-http2-cancellations!
+    (lambda (transport)
+      (let ([state* (http2-client-transport-cancellations transport)])
+        (http2-client-transport-cancellations-set! transport '())
+        (for-each
+         (lambda (state)
+           (case (http2-client-request-state-lifecycle state)
+             [(queued)
+              (remove-queued-http2-request! transport state)
+              (transition-http2-request! state 'cancelled)]
+             [(active)
+              (let ([stream-id (http2-client-request-state-stream-id state)])
+                (hashtable-delete!
+                 (http2-client-transport-stream-table transport) stream-id)
+                (queue-http2-reset! transport stream-id)
+                (transition-http2-request! state 'cancelled))]
+             [else (void)]))
+         (reverse state*)))))
+
   (define collect-http2-request-body
     (lambda (state)
       (let ([body (make-bytevector
@@ -1605,10 +1652,16 @@ session or socket and ports once; later I/O raises an error.
                           (http2-client-request-state-headers state))))))]
           [(2)
            (when state
-             (let ([bytes (vector-ref event 3)])
-               (append-http2-request-body! state bytes)
-               (http2-consume! (http2-client-transport-session transport)
-                               stream-id (bytevector-length bytes))))]
+             (guard (failure
+                     [else
+                      (hashtable-delete!
+                       (http2-client-transport-stream-table transport) stream-id)
+                      (fail-http2-request! state failure)
+                      (queue-http2-reset! transport stream-id)])
+               (let ([bytes (vector-ref event 3)])
+                 (append-http2-request-body! state bytes)
+                 (http2-consume! (http2-client-transport-session transport)
+                                 stream-id (bytevector-length bytes)))))]
           [(4)
            (when state
              (hashtable-delete!
@@ -1672,16 +1725,21 @@ session or socket and ports once; later I/O raises an error.
                        transport next))))))))))
 
   (define read-http2-input!
-    (lambda (transport)
+    (lambda (client transport)
       (let loop ([answer (http2-transport-read transport)])
         (cond
-         [(net-would-block? answer) (void)]
+         [(net-would-block? answer)
+          (http2-client-transport-read-events-set!
+           transport (net-would-block-events answer))]
          [(eof-object? answer)
+          (http2-client-transport-read-events-set! transport '())
           (fail-http2-requests! transport 'eof)
           (close-http2-client-transport! transport)]
          [else
+          (http2-client-transport-read-events-set! transport '())
           (http2-receive (http2-client-transport-session transport)
                          answer 0 (bytevector-length answer))
+          (drain-http2-events! client transport)
           (loop (http2-transport-read transport))]))))
 
   (define expire-http2-requests!
@@ -1708,11 +1766,10 @@ session or socket and ports once; later I/O raises an error.
              (let ([deadline-ms
                     (http2-client-request-state-deadline-ms state)])
                (when (and deadline-ms (fx>= now deadline-ms))
-                 (http2-reset-stream!
-                  (http2-client-transport-session transport) stream-id 8)
-                 (hashtable-delete!
-                  (http2-client-transport-stream-table transport) stream-id)
-                 (fail-http2-request! state 'timeout))))
+                  (hashtable-delete!
+                   (http2-client-transport-stream-table transport) stream-id)
+                  (queue-http2-reset! transport stream-id)
+                  (fail-http2-request! state 'timeout))))
            stream-id* state*)))))
 
   (define http2-transport-poll-events
@@ -1721,6 +1778,7 @@ session or socket and ports once; later I/O raises an error.
           '(read error hup invalid)
           (let ([write?
                  (or (http2-client-transport-output transport)
+                     (memq 'write (http2-client-transport-read-events transport))
                      (http2-want-write?
                       (http2-client-transport-session transport))
                      (and (not (http2-queue-empty? transport))
@@ -1746,12 +1804,16 @@ session or socket and ports once; later I/O raises an error.
                      (fail-http2-requests! transport failure)
                      (guard (close-failure [else #f])
                        (close-http2-client-transport! transport))])
+              (flush-http2-cancellations! transport)
+              (flush-http2-resets! transport)
               (submit-http2-queued! client transport)
               (flush-http2-output! transport)
-              (read-http2-input! transport)
+              (read-http2-input! client transport)
               (unless (http2-client-transport-closed? transport)
                 (drain-http2-events! client transport)
                 (expire-http2-requests! transport)
+                (flush-http2-cancellations! transport)
+                (flush-http2-resets! transport)
                 (submit-http2-queued! client transport)
                 (flush-http2-output! transport))))
           (http2-transport-poll-events transport))
@@ -1760,16 +1822,8 @@ session or socket and ports once; later I/O raises an error.
   (define cancel-http2-request!
     (lambda (transport state)
       (case (http2-client-request-state-lifecycle state)
-        [(queued)
-         (remove-queued-http2-request! transport state)
-         (transition-http2-request! state 'cancelled)]
-        [(active)
-         (let ([stream-id (http2-client-request-state-stream-id state)])
-           (http2-reset-stream!
-            (http2-client-transport-session transport) stream-id 8)
-           (hashtable-delete!
-            (http2-client-transport-stream-table transport) stream-id)
-           (transition-http2-request! state 'cancelled))]
+        [(queued active)
+         (queue-http2-cancellation! transport state)]
         [else (void)])))
 
   (define http2-request-headers
@@ -1816,7 +1870,7 @@ session or socket and ports once; later I/O raises an error.
               (let ([transport
                      (%make-http2-client-transport
                       connection (http2-open 'client) (make-eqv-hashtable)
-                      '() '() #f 0 #f #f #f)])
+                      '() '() '() '() '() #f 0 #f #f #f)])
                 (http-client-http2-origin-set! client origin)
                 (http-client-http2-transport-set! client transport)
                 transport)]
@@ -1871,7 +1925,9 @@ session or socket and ports once; later I/O raises an error.
                                   (http2-connection-socket transport) event*))
                                 deadline-ms)])))
                         (lambda () (cancel-http2-request! transport state))
-                        void))
+                        (lambda ()
+                          (when response-sink
+                            (http-body-sink-finish! response-sink)))))
                  operation))))))
 
   (define http-transfer/nonblocking
@@ -3848,19 +3904,25 @@ response.
 
   #|proc:http-send/nonblocking
 The `http-send/nonblocking` procedure constructs an HTTP request operation.
-The `client` parameter is an open HTTP client.
-The `request` parameter is the HTTP request to send.
+The `client` parameter is an open HTTP client and `request` is the HTTP request to send.
+The optional `response-sink` consumes response body slices with signature
+`(bytevector start stop) -> unspecified`; when supplied, the successful response body is `#f`.
 The return value is a `net-operation` whose successful result is an HTTP response.
 |#
   (define-who http-send/nonblocking
-    (lambda (client request)
-      (pcheck ([http-client? client] [http-request? request])
-              (http-transfer/nonblocking
-               who
-               client
-               'http-send
-               request
-               (lambda (response) response)))))
+    (case-lambda
+      [(client request)
+       (http-send/nonblocking client request #f)]
+      [(client request response-sink)
+       (pcheck ([http-client? client] [http-request? request]
+                [(lambda (value) (or (not value) (http-body-sink? value))) response-sink])
+               (http-transfer/nonblocking
+                who
+                client
+                'http-send
+                request
+                (lambda (response) response)
+                response-sink))]))
 
   #|proc:http-request
 The `http-request` procedure sends a one-shot HTTP request without manually managing a client
