@@ -1411,11 +1411,21 @@ session or socket and ports once; later I/O raises an error.
 
   (define http2-transport-read
     (lambda (transport)
-      (let ([tls-session (http2-connection-tls-session transport)]
-            [sock (http2-connection-socket transport)])
-        (if tls-session
-            (tls-read/nonblocking tls-session 65536)
-            (socket-recv/nonblocking sock 65536)))))
+      (let ([hook (%http2-transport-read-hook)])
+        (if hook
+            (hook
+             (http2-connection-socket transport)
+             (lambda ()
+               (let ([tls-session (http2-connection-tls-session transport)]
+                     [sock (http2-connection-socket transport)])
+                 (if tls-session
+                     (tls-read/nonblocking tls-session 65536)
+                     (socket-recv/nonblocking sock 65536)))))
+            (let ([tls-session (http2-connection-tls-session transport)]
+                  [sock (http2-connection-socket transport)])
+              (if tls-session
+                  (tls-read/nonblocking tls-session 65536)
+                  (socket-recv/nonblocking sock 65536)))))))
 
   (define http2-transport-write
     (lambda (transport bytes start)
@@ -1519,6 +1529,10 @@ session or socket and ports once; later I/O raises an error.
       (http2-client-transport-cancellations-set!
        transport
        (cons state (http2-client-transport-cancellations transport)))))
+
+  (define http2-request-cancellation-pending?
+    (lambda (transport state)
+      (memq state (http2-client-transport-cancellations transport))))
 
   (define flush-http2-cancellations!
     (lambda (transport)
@@ -1635,47 +1649,58 @@ session or socket and ports once; later I/O raises an error.
              [state (hashtable-ref
                      (http2-client-transport-stream-table transport)
                      stream-id #f)])
-        (case type
-          [(1)
-           (when state
-             (let* ([header (vector-ref event 3)]
-                    [name (vector-ref header 0)]
-                    [value (vector-ref header 1)])
-               (if (string=? name ":status")
-                   (let ([status (string->number value)])
-                     (if (and status (integer? status))
-                         (http2-client-request-state-status-set! state status)
-                         (fail-http2-request! state 'invalid-status)))
-                   (http2-client-request-state-headers-set!
-                    state
-                    (cons (cons name value)
-                          (http2-client-request-state-headers state))))))]
-          [(2)
-           (when state
-             (guard (failure
-                     [else
-                      (hashtable-delete!
-                       (http2-client-transport-stream-table transport) stream-id)
-                      (fail-http2-request! state failure)
-                      (queue-http2-reset! transport stream-id)])
-               (let ([bytes (vector-ref event 3)])
-                 (append-http2-request-body! state bytes)
-                 (http2-consume! (http2-client-transport-session transport)
-                                 stream-id (bytevector-length bytes)))))]
-          [(4)
-           (when state
-             (hashtable-delete!
-              (http2-client-transport-stream-table transport) stream-id)
-             (if (zero? (vector-ref event 2))
-                 (complete-http2-request! client state)
-                 (fail-http2-request! state (vector-ref event 2))))]
-          [(5)
-           (http2-client-transport-goaway-last-stream-id-set!
-            transport stream-id)
-           (fail-http2-goaway-requests!
-            transport stream-id (vector-ref event 2))]
-          [(6) (void)]
-          [else (void)]))))
+        (let ([hook (%http2-event-hook)])
+          (when hook
+            (hook 'before transport event
+                  (and state
+                       (http2-client-request-state-lifecycle state)))))
+        (unless (and state (http2-request-cancellation-pending? transport state))
+          (case type
+            [(1)
+             (when state
+               (let* ([header (vector-ref event 3)]
+                      [name (vector-ref header 0)]
+                      [value (vector-ref header 1)])
+                 (if (string=? name ":status")
+                     (let ([status (string->number value)])
+                       (if (and status (integer? status))
+                           (http2-client-request-state-status-set! state status)
+                           (fail-http2-request! state 'invalid-status)))
+                     (http2-client-request-state-headers-set!
+                      state
+                      (cons (cons name value)
+                            (http2-client-request-state-headers state))))))]
+            [(2)
+             (when state
+               (guard (failure
+                       [else
+                        (hashtable-delete!
+                         (http2-client-transport-stream-table transport) stream-id)
+                        (fail-http2-request! state failure)
+                        (queue-http2-reset! transport stream-id)])
+                 (let ([bytes (vector-ref event 3)])
+                   (append-http2-request-body! state bytes)
+                   (http2-consume! (http2-client-transport-session transport)
+                                   stream-id (bytevector-length bytes)))))]
+            [(4)
+             (when state
+               (hashtable-delete!
+                (http2-client-transport-stream-table transport) stream-id)
+               (if (zero? (vector-ref event 2))
+                   (complete-http2-request! client state)
+                   (fail-http2-request! state (vector-ref event 2))))]
+            [(5)
+             (http2-client-transport-goaway-last-stream-id-set!
+              transport stream-id)
+             (fail-http2-goaway-requests!
+              transport stream-id (vector-ref event 2))]
+            [(6) (void)]
+            [else (void)]))
+        (let ([hook (%http2-event-hook)])
+          (when hook
+            (hook 'after transport event
+                  (and state
+                       (http2-client-request-state-lifecycle state))))))))
 
   (define drain-http2-events!
     (lambda (client transport)

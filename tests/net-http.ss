@@ -1,5 +1,6 @@
 (import (chezpp)
-        (chezpp net))
+        (chezpp net)
+        (chezpp net private))
 
 (load "net-common.ss")
 
@@ -426,6 +427,8 @@
       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
       (socket-listen! listener 4)
       (let ([port (socket-address-port (socket-local-address listener))])
+        (let ([stop-requested? #f]
+              [server-failure #f])
         (values
          port
          (fork-thread
@@ -439,9 +442,16 @@
                     [completed-request-count 0])
                 (define transport-read
                   (lambda ()
-                    (if tls-session
-                        (tls-read/nonblocking tls-session 65536)
-                        (socket-recv/nonblocking socket 65536))))
+                    (guard (failure
+                            [else
+                             (if stop-requested?
+                                 (eof-object)
+                                 (begin
+                                   (set! server-failure failure)
+                                   (raise failure)))])
+                      (if tls-session
+                          (tls-read/nonblocking tls-session 65536)
+                          (socket-recv/nonblocking socket 65536)))))
                 (define transport-write-all
                   (lambda (bytes)
                     (if tls-session
@@ -449,7 +459,13 @@
                         (socket-send-all socket bytes))))
                 (define drain-output!
                   (lambda ()
-                    (guard (failure [else #f])
+                    (guard (failure
+                            [else
+                             (if stop-requested?
+                                 #f
+                                 (begin
+                                   (set! server-failure failure)
+                                   (raise failure)))])
                       (drain-http2-test-output! transport-write-all session))))
                 (dynamic-wind
                   void
@@ -528,8 +544,21 @@
                     (guard (condition [else #f])
                       (close-socket listener))))))))
          (lambda ()
+           (set! stop-requested? #t)
            (guard (condition [else #f])
-             (close-socket listener))))))))
+             (close-socket listener))
+           (when server-failure
+             (raise server-failure)))))))))
+
+(define proc-fd-targets
+  (lambda ()
+    (filter
+     string?
+     (map
+      (lambda (entry)
+        (guard (condition [else #f])
+          (readlink (string-append "/proc/self/fd/" entry))))
+      (directory-list "/proc/self/fd")))))
 
 (define check-http2-operation-results
   (lambda (client base-uri wait-index* cancellation-index)
@@ -590,6 +619,93 @@
                 (http-close client)
                 (stop)
                 (thread-join thread))))))))
+
+(mat net-http2-tls-read-want-write-poll-target
+     ;; Error case: a TLS read requiring write readiness must preserve both poll directions.
+     (let ([server-ctx (make-test-http-server-context)]
+           [client-ctx (make-test-http-client-context)]
+           [forced? #t])
+       (tls-context-set-alpn! server-ctx '("h2" "http/1.1"))
+       (let-values ([(port thread stop) (start-http2-test-server server-ctx 'respond)])
+         (let ([client (http-open client-ctx)])
+           (dynamic-wind
+             (lambda () (http-client-version-set! client 'auto))
+             (lambda ()
+               (parameterize
+                   ([%http2-transport-read-hook
+                     (lambda (resource fallback)
+                       (if forced?
+                           (begin
+                             (set! forced? #f)
+                             (make-net-would-block resource '(read write)))
+                           (fallback)))])
+                 (let ([operation
+                        (http-send/nonblocking
+                         client
+                         (make-http-request
+                          'get (format "https://127.0.0.1:~a/read-want-write" port)))])
+                   (net-operation-step! operation)
+                   (and (eq? 'pending (net-operation-state operation))
+                        (= (length (net-operation-poll-targets operation)) 1)
+                        (memq 'read
+                              (poll-target-events
+                               (car (net-operation-poll-targets operation))))
+                        (memq 'write
+                              (poll-target-events
+                               (car (net-operation-poll-targets operation))))
+                        (= 200
+                           (http-response-status
+                            (net-operation-wait operation)))))))
+             (lambda ()
+               (http-close client)
+               (stop)
+               (thread-join thread)
+               (close-tls-context client-ctx)
+               (close-tls-context server-ctx)))))))
+
+(mat net-http2-cancel-active-sibling-during-advance
+     ;; Error case: cancellation during scheduler advancement must not corrupt active siblings.
+     (let ([cancelled? #f]
+           [completed-after-cancel? #f])
+       (let-values ([(port thread stop) (start-http2-test-server #f 'respond)])
+         (let ([client (http-open)])
+           (dynamic-wind
+             (lambda () (http-client-version-set! client 'h2))
+             (lambda ()
+               (let ([operation*
+                      (map
+                       (lambda (index)
+                         (http-send/nonblocking
+                          client
+                          (make-http-request
+                           'get (format "http://127.0.0.1:~a/stream/~a" port index))))
+                       (iota 3))])
+                 (parameterize
+                     ([%http2-event-hook
+                       (lambda (phase transport event lifecycle)
+                         (cond
+                          [(and (eq? phase 'before)
+                                (not cancelled?)
+                                (= 5 (vector-ref event 1)))
+                           (set! cancelled? #t)
+                           (net-operation-cancel! (list-ref operation* 1))]
+                          [(and (eq? phase 'after)
+                                cancelled?
+                                (= 5 (vector-ref event 1))
+                                (eq? 'completed lifecycle))
+                           (set! completed-after-cancel? #t)]))])
+                   (let ([first (net-operation-wait (car operation*))]
+                         [third (net-operation-wait (list-ref operation* 2))])
+                     (and (= 200 (http-response-status first))
+                          (= 200 (http-response-status third))
+                          (eq? 'cancelled
+                               (net-operation-state (list-ref operation* 1)))
+                          (not completed-after-cancel?))))))
+             (lambda ()
+               (http-close client)
+               (stop)
+               (thread-join thread)
+               #t))))))
 
 (mat net-http2-multiplexing
      (check-http2-multiplexing-order #t (cdr (iota 10)) 0))
@@ -739,17 +855,21 @@
              (when (file-exists? temporary-path)
                (delete-file temporary-path)))
            (lambda ()
-             (let* ([before (proc-fd-count)]
-                    [operation (http-download/nonblocking
+             (let ([operation (http-download/nonblocking
                                 client
                                 (format "http://127.0.0.1:~a/hold" port)
                                 path)])
                (net-operation-cancel! operation)
-               (http-close client)
-               (stop)
-               (thread-join thread)
-               (and (eq? 'cancelled (net-operation-state operation))
-                    (<= (proc-fd-count) before))))
+               (let ([targets (proc-fd-targets)])
+                 (http-close client)
+                 (stop)
+                 (thread-join thread)
+                 (let ([cancelled? (eq? 'cancelled (net-operation-state operation))]
+                       [open? (not (for-all
+                                    (lambda (target)
+                                      (not (string-contains? target temporary-path)))
+                                    targets))])
+                   (and cancelled? (not open?))))))
            (lambda ()
              (http-close client)
              (stop)
