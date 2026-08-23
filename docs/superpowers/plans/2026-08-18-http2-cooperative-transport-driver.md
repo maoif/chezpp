@@ -13,6 +13,27 @@ adapter exposes peer concurrent-stream settings so the scheduler submits only el
 
 **Tech Stack:** Chez Scheme, Chez foreign procedures, C11, dynamically loaded nghttp2, MAT tests.
 
+## Current Status (2026-08-23)
+
+The cooperative scheduler and corrective lifecycle work are committed through `4150676`. Peer
+settings, FIFO scheduling, wait-order independence, request-local failure, cancellation/reset
+ownership, timeout, EOF, GOAWAY, sink cleanup, cleartext/TLS multiplexing, and deterministic
+TLS/cancellation regressions are implemented.
+
+| Finding | Status | Evidence or remaining proof |
+| --- | --- | --- |
+| Final-read EOF discards generated events | Fixed | `net-http2-final-response-before-eof` passes. |
+| Response sink failure fails siblings | Fixed | The failing sink operation fails while its sibling completes. |
+| Active cancellation mutates nghttp2 outside scheduler | Fixed | Cancellation queues all table, state, reset, and output work for scheduler advancement. |
+| TLS read `WANT_WRITE` readiness is lost | Fixed | Forced TLS read regression verifies the operation poll target includes both `read` and `write`. |
+| Cancellation during scheduler event processing can complete a queued request | Fixed | Deterministic event hook cancels stream 5 during processing and asserts it does not complete internally. |
+| Failed/cancelled sinks are not finalized | Fixed | Cancellation cleanup closes the owned download sink. |
+| GOAWAY accepted-stream assertion is weak | Fixed | The accepted stream completes and later queued work fails. |
+
+Fresh evidence: clean build, ten consecutive `net-http` runs, the complete net/protobuf suite,
+optional loader/linkage checks, generated-binding comparison, public documentation audit, Scheme
+balance, native linkage audit, local transfer verification, and both pinned external downloads pass.
+
 ---
 
 ## File Structure

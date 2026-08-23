@@ -15,6 +15,16 @@ protobuf messages while all transports expose the Phase 2 readiness contract.
 **Tech Stack:** ChezScheme custom ports and records, nghttp2, zlib-compatible compression,
 libwebsockets, gRPC C core, `protoc` plugin protocol, OpenSSL TLS, and SHA-256 examples.
 
+## Current Status (2026-08-23)
+
+Phase 4 protocol implementation is complete through HTTP/2 corrective commit `4150676`:
+protobuf/codegen, HTTP streaming and HTTP/2 integration, WebSocket TLS/compression, gRPC
+TLS/policy/reflection, generated `FileChunk` transfers, and deterministic HTTP/2 TLS/cancellation
+regressions are implemented. The clean build, focused suites, ten-run HTTP/2 stress loop,
+complete net/protobuf suite, generated-binding comparison, documentation and linkage audits, and
+ten-variant application transfer verification pass. The pinned external download gate also passes
+with the documented Emacs and Arch SHA-256 values.
+
 ---
 
 ### Task 1: Protobuf Wire Codec

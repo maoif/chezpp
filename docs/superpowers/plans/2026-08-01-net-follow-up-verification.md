@@ -14,6 +14,15 @@ all public contracts, and finish with local and external transfer gates.
 **Tech Stack:** ChezScheme, C/POSIX sockets and poll, c-ares, libidn2, OpenSSL 3, `mat`, temporary
 network fixtures, `readelf`, SHA-256, and shell verification drivers.
 
+## Current Status (2026-08-23)
+
+Tasks 1-10 are implemented through HTTP/2 corrective commit `4150676`. Fresh focused and complete
+suites, loader/linkage checks, generated-binding comparison, public documentation audit, Scheme
+balance, native linkage audit, all ten local transfer variants, and the deterministic HTTP/2
+TLS/cancellation regressions pass. The two pinned external downloads also pass with Emacs SHA-256
+`414d3a1a21147af257ebd98bdd15976fdcb5ed0563f6de89f76d4a4b5dad9c72` and Arch Linux SHA-256
+`e86295dc0bdf9b85a5a9256810c553239689d2ae8e80eeec81b4e2e910d8a6c0`.
+
 ---
 
 ### Task 1: Structured Net Errors And Private FFI Invariants

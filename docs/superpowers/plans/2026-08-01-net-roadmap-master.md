@@ -14,6 +14,19 @@ documentation, and compatibility gates.
 **Tech Stack:** ChezScheme 10, Chezpp libraries and `pcheck`, C11/POSIX FFI shims, OpenSSL 3,
 libcurl multi, libssh, libwebsockets, gRPC C core, nghttp2, c-ares, libidn2, `mat`, and GNU Make.
 
+## Current Status (2026-08-23)
+
+Phases 0-5 are complete through HTTP/2 corrective commit `4150676`. Response-sink isolation and
+cleanup, scheduler-owned cancellation/reset work, final-read EOF handling, TLS read-readiness
+preservation, accepted-stream GOAWAY behavior, and deterministic TLS/cancellation regressions are
+implemented. The clean build, ten-run `net-http` stress loop, complete net/protobuf suite,
+optional loader/linkage gates, generated-binding comparison, documentation audit, Scheme balance,
+native linkage audit, ten-variant local transfer verification, and external download gate pass.
+
+The pinned external artifacts match Emacs SHA-256
+`414d3a1a21147af257ebd98bdd15976fdcb5ed0563f6de89f76d4a4b5dad9c72` and Arch Linux SHA-256
+`e86295dc0bdf9b85a5a9256810c553239689d2ae8e80eeec81b4e2e910d8a6c0`.
+
 ---
 
 ## Governing Specification
