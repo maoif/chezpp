@@ -1,5 +1,25 @@
 (import (chezpp)
-        (chezpp net lws ffi))
+        (chezpp net lws ffi)
+        (chezpp net lws reactor))
+
+(define wait-until
+  (lambda (predicate)
+    (let loop ([remaining 200])
+      (cond
+       [(predicate) #t]
+       [(zero? remaining) #f]
+       [else
+        (milisleep 1)
+        (loop (- remaining 1))]))))
+
+(define poll-snapshot-find
+  (lambda (snapshot descriptor)
+    (let loop ([index 0])
+      (and (< index (vector-length snapshot))
+           (let ([entry (vector-ref snapshot index)])
+             (if (= descriptor (vector-ref entry 0))
+                 entry
+                 (loop (+ index 1))))))))
 
 (define call-with-lws-context
   (lambda (procedure)
@@ -15,7 +35,7 @@
         (and (positive? context)
              (fixnum? (lws-context-wakeup-fd context))
              (vector? (lws-context-poll-snapshot context))
-             (integer? (lws-context-timeout-ms context 1000))
+             (memv (lws-context-timeout-ms context 1000) '(0 1000))
              (begin
                (lws-context-wakeup context)
                (lws-context-service-fd context (lws-context-wakeup-fd context) 1)
@@ -166,3 +186,175 @@
           (procedure? lws-server-response-submit)
           (procedure? lws-stream-cancel)
           (procedure? lws-body-consumed)))
+
+(mat net-lws-reactor-lifecycle
+     (let ([reactor (make-lws-reactor 16 16 8)])
+       (and (lws-reactor? reactor)
+            (eq? 'created (lws-reactor-state reactor))
+            (lws-reactor-start! reactor)
+            (wait-until (lambda () (eq? 'running (lws-reactor-state reactor))))
+            (positive? (lws-reactor-owner-id reactor))
+            (fixnum? (lws-reactor-wakeup-fd reactor))
+            (eq? reactor (lws-reactor-shutdown! reactor))
+            (eq? 'stopped (lws-reactor-state reactor))
+            (eq? reactor (lws-reactor-shutdown! reactor)))))
+
+(mat net-lws-reactor-completion-fanout
+     (let* ([reactor (make-lws-reactor 16 16 8)]
+            [first (make-lws-reactor-operation reactor 'first 1 11 1 #f)]
+            [second (make-lws-reactor-operation reactor 'second 1 12 1 #f)]
+            [notifications '()])
+       (lws-reactor-register-waiter!
+        reactor first (lambda (operation) (set! notifications (cons operation notifications))))
+       (lws-reactor-register-waiter!
+        reactor second (lambda (operation) (set! notifications (cons operation notifications))))
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-event! reactor 'complete 1 12 1 0 #vu8(2))
+       (lws-reactor-inject-event! reactor 'complete 1 11 1 0 #vu8(1))
+       (let ([ready?
+              (wait-until
+               (lambda ()
+                 (and (pair? (lws-reactor-operation-events reactor first))
+                      (pair? (lws-reactor-operation-events reactor second)))))])
+         (net-operation-step! second)
+         (net-operation-step! first)
+         (lws-reactor-shutdown! reactor)
+         (and ready?
+              (eq? 'completed (net-operation-state first))
+              (eq? 'completed (net-operation-state second))
+              (equal? (vector-ref (net-operation-result first) 6) #vu8(1))
+              (equal? (vector-ref (net-operation-result second) 6) #vu8(2))
+              (= (length notifications) 2)))))
+
+(mat net-lws-reactor-cancellation
+     (let* ([reactor (make-lws-reactor 16 16 8)]
+            [operation (make-lws-reactor-operation reactor 'cancel 2 21 3 #f)]
+            [unregister (lws-reactor-register-waiter! reactor operation void)])
+       (lws-reactor-start! reactor)
+       (net-operation-cancel! operation)
+       (let ([cancelled?
+              (wait-until
+               (lambda ()
+                 (zero? (vector-ref (lws-reactor-pool-metrics reactor) 1))))])
+         (lws-reactor-shutdown! reactor)
+         (and cancelled?
+              (zero? (vector-ref (lws-reactor-pool-metrics reactor) 6))
+              (eq? 'cancelled (net-operation-state operation))))))
+
+(mat net-lws-reactor-waiter-unregister
+     (let* ([reactor (make-lws-reactor 16 16 4)]
+            [operation (make-lws-reactor-operation reactor 'waiter 4 41 1 #f)]
+            [notification-count 0]
+            [unregister
+             (lws-reactor-register-waiter!
+              reactor operation
+              (lambda (ignored) (set! notification-count (+ notification-count 1))))])
+       (unregister)
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-event! reactor 'complete 4 41 1 0 #vu8())
+       (let ([ready?
+              (wait-until
+               (lambda ()
+                 (pair? (lws-reactor-operation-events reactor operation))))])
+         (net-operation-step! operation)
+         (lws-reactor-shutdown! reactor)
+         (and ready?
+              (zero? notification-count)
+              (zero? (vector-ref (lws-reactor-pool-metrics reactor) 6))))))
+
+(mat net-lws-reactor-late-waiter
+     (let* ([reactor (make-lws-reactor 16 16 4)]
+            [operation (make-lws-reactor-operation reactor 'late-waiter 4 42 1 #f)]
+            [notification-count 0])
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-event! reactor 'complete 4 42 1 0 #vu8())
+       (let ([ready?
+              (wait-until
+               (lambda ()
+                 (pair? (lws-reactor-operation-events reactor operation))))])
+         (let ([unregister
+                (lws-reactor-register-waiter!
+                 reactor operation
+                 (lambda (ignored)
+                   (set! notification-count (+ notification-count 1))))])
+           (unregister)
+           (net-operation-step! operation)
+           (lws-reactor-shutdown! reactor)
+           (and ready?
+                (= notification-count 1)
+                (zero? (vector-ref (lws-reactor-pool-metrics reactor) 6)))))))
+
+(mat net-lws-reactor-poll-updates
+     (let ([reactor (make-lws-reactor 16 16 8)])
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-poll! reactor 'add 301 1)
+       (lws-reactor-inject-poll! reactor 'change 301 5)
+       (let ([changed?
+              (wait-until
+               (lambda ()
+                 (let ([entry (poll-snapshot-find
+                               (lws-reactor-poll-snapshot reactor) 301)])
+                   (and entry (= (vector-ref entry 1) 5)))))])
+         (lws-reactor-inject-poll! reactor 'delete 301 0)
+         (let ([deleted?
+                (wait-until
+                 (lambda ()
+                   (not (poll-snapshot-find
+                         (lws-reactor-poll-snapshot reactor) 301))))])
+           (lws-reactor-shutdown! reactor)
+           (and changed? deleted?)))))
+
+(mat net-lws-reactor-shutdown-fails-pending
+     (let* ([reactor (make-lws-reactor 16 16 4)]
+            [operation (make-lws-reactor-operation reactor 'pending 5 51 1 #f)])
+       (lws-reactor-start! reactor)
+       (lws-reactor-shutdown! reactor)
+       (net-operation-step! operation)
+       (and (eq? 'failed (net-operation-state operation))
+            (condition? (net-operation-condition operation)))))
+
+(mat net-lws-reactor-failure-event
+     (let* ([reactor (make-lws-reactor 16 16 4)]
+            [operation (make-lws-reactor-operation reactor 'failure 6 61 1 #f)])
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-event! reactor 'failed 6 61 1 111 #vu8())
+       (let ([ready?
+              (wait-until
+               (lambda ()
+                 (pair? (lws-reactor-operation-events reactor operation))))])
+         (net-operation-step! operation)
+         (lws-reactor-shutdown! reactor)
+         (and ready?
+              (eq? 'failed (net-operation-state operation))
+              (condition? (net-operation-condition operation))))))
+
+(mat net-lws-reactor-rejects-after-shutdown
+     ;; Error case: a stopped reactor must reject new commands and operations.
+     (let ([reactor (make-lws-reactor 16 16 4)])
+       (lws-reactor-shutdown! reactor)
+       (and (not (lws-reactor-inject-event! reactor 'writable 7 71 1 0 #vu8()))
+            (guard (failure [else (condition? failure)])
+              (make-lws-reactor-operation reactor 'late 7 71 1 #f)
+              #f))))
+
+(mat net-lws-reactor-command-pool
+     ;; Error case: commands beyond the configured pool fail without growing the pool.
+     (let ([reactor (make-lws-reactor 16 16 2)])
+       (and (lws-reactor-inject-event! reactor 'writable 3 31 1 0 #vu8())
+            (lws-reactor-inject-event! reactor 'writable 3 32 1 0 #vu8())
+            (not (lws-reactor-inject-event! reactor 'writable 3 33 1 0 #vu8()))
+            (let ([metrics (lws-reactor-pool-metrics reactor)])
+              (and (= (vector-ref metrics 0) 2)
+                   (= (vector-ref metrics 1) 2)
+                   (= (vector-ref metrics 2) 2)
+                   (positive? (vector-ref metrics 4))))
+            (lws-reactor-start! reactor)
+            (wait-until (lambda () (zero? (vector-ref (lws-reactor-pool-metrics reactor) 1))))
+            (lws-reactor-inject-event! reactor 'writable 3 34 1 0 #vu8())
+            (begin (lws-reactor-shutdown! reactor) #t))))
+
+(mat net-lws-reactor-command-boundary
+     (and (procedure? lws-reactor-client-start!)
+          (procedure? lws-reactor-submit-body!)
+          (procedure? lws-reactor-consume-body!)
+          (procedure? lws-reactor-close-stream!)))

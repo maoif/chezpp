@@ -16,6 +16,7 @@ typedef void (*lws_context_destroy_fn)(struct lws_context *);
 typedef struct lws *(*lws_client_connect_via_info_fn)(
     const struct lws_client_connect_info *);
 typedef int (*lws_service_fd_fn)(struct lws_context *, struct lws_pollfd *);
+typedef int (*lws_service_tsi_fn)(struct lws_context *, int, int);
 typedef int (*lws_service_adjust_timeout_fn)(struct lws_context *, int, int);
 typedef void (*lws_cancel_service_fn)(struct lws_context *);
 typedef int (*lws_callback_on_writable_fn)(struct lws *);
@@ -803,6 +804,7 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
                                        int revents) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_service_fd_fn service_fn;
+  lws_service_tsi_fn service_tsi_fn;
   struct lws_pollfd poll_descriptor;
   if (context == NULL || context->lws == NULL) return -1;
   if (fd == context->wakeup_pipe[0]) {
@@ -810,6 +812,10 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
     while (read(fd, bytes, sizeof(bytes)) > 0) {
     }
     return 0;
+  }
+  if (fd < 0) {
+    service_tsi_fn = (lws_service_tsi_fn)lws_function("lws_service_tsi");
+    return service_tsi_fn == NULL ? -1 : service_tsi_fn(context->lws, -1, 0);
   }
   service_fn = (lws_service_fd_fn)lws_function("lws_service_fd");
   if (service_fn == NULL) return -1;
@@ -873,13 +879,15 @@ int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
                                        int maximum_timeout_ms) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_service_adjust_timeout_fn timeout_fn;
+  int adjustment;
   if (context == NULL || context->lws == NULL || maximum_timeout_ms < 0)
     return -1;
   timeout_fn = (lws_service_adjust_timeout_fn)lws_function(
       "lws_service_adjust_timeout");
-  return timeout_fn == NULL
-             ? -1
-             : timeout_fn(context->lws, maximum_timeout_ms, 0);
+  if (timeout_fn == NULL) return -1;
+  adjustment = timeout_fn(context->lws, maximum_timeout_ms, 0);
+  if (adjustment < 0) return -1;
+  return adjustment == 0 ? 0 : maximum_timeout_ms;
 }
 
 int chezpp_lws_http_context_wakeup(uintptr_t context_handle) {

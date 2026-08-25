@@ -4,6 +4,7 @@
           (chezpp concurrency fiber)
           (chezpp net operation)
           (chezpp net lws ffi)
+          (chezpp net lws reactor)
           (chezpp protobuf))
 
   (export (import (chezpp chez)

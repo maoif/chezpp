@@ -20,6 +20,7 @@ static const char *const required_symbols[] = {
     "lws_context_destroy",
     "lws_client_connect_via_info",
     "lws_service_fd",
+    "lws_service_tsi",
     "lws_service_adjust_timeout",
     "lws_cancel_service",
     "lws_callback_on_writable",
