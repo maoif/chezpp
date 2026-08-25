@@ -47,14 +47,20 @@ EOF
 
   if test "$mode" != old; then
     case "$name" in
-      curl) prefixes=curl; version_symbol=curl_version_info; source=ftp.c ;;
-      ssh) prefixes='ssh|sftp'; version_symbol=ssh_version; source=ssh.c ;;
-      websockets) prefixes=lws; version_symbol=lws_get_library_version; source=websocket.c ;;
-      grpc) prefixes='grpc|gpr'; version_symbol=grpc_version_string; source=grpc.c ;;
+      curl) prefixes=curl; version_symbol=curl_version_info; sources=ftp.c ;;
+      ssh) prefixes='ssh|sftp'; version_symbol=ssh_version; sources=ssh.c ;;
+      websockets)
+        prefixes=lws
+        version_symbol=lws_get_library_version
+        sources='websocket.c lws_loader.c'
+        ;;
+      grpc) prefixes='grpc|gpr'; version_symbol=grpc_version_string; sources=grpc.c ;;
     esac
     : >"$temporary_directory/stubs.c"
-    rg -o '"('"$prefixes"')_[A-Za-z0-9_]+"' \
-      "$project_root/chezpp/c/net/$source" | tr -d '"' | sort -u | \
+    for source in $sources; do
+      rg -o '"('"$prefixes"')_[A-Za-z0-9_]+"' \
+        "$project_root/chezpp/c/net/$source"
+    done | tr -d '"' | sort -u | \
       while IFS= read -r symbol; do
         if test "$symbol" != "$version_symbol" && test "$symbol" != "$omitted" && \
            test "$symbol" != grpc_completion_queue_create_for_next && \
@@ -170,6 +176,37 @@ check_available() {
   test ! -s "$output.err"
 }
 
+check_lws_http_available() {
+  output=$1
+  printf '%s\n' \
+    '(import (chezpp net lws ffi))' \
+    '(let ([status (lws-status)])' \
+    '  (display (and (vector-ref status 0)' \
+    '                (lws-capability? (vector-ref status 1) lws-cap-http1)' \
+    '                (lws-capability? (vector-ref status 1) lws-cap-external-poll))))' | \
+    env LD_LIBRARY_PATH="$temporary_directory" "$project_root/chez++" -q \
+    >"$output" 2>"$output.err"
+  test "$(cat "$output")" = '#t'
+  test ! -s "$output.err"
+}
+
+check_lws_http_unavailable() {
+  expected=$1
+  output=$2
+  printf '%s\n' \
+    '(import (chezpp net lws ffi) (chezpp net errors))' \
+    '(guard (condition' \
+    '        [(net-error? condition)' \
+    "         (display (string-contains? (net-error-message condition) \"$expected\"))]" \
+    '        [else (display #f)])' \
+    "  (lws-require-capability! lws-cap-http1 'http1)" \
+    '  (display #f))' | \
+    env LD_LIBRARY_PATH="$temporary_directory" "$project_root/chez++" -q \
+    >"$output" 2>"$output.err"
+  test "$(cat "$output")" = '#t'
+  test ! -s "$output.err"
+}
+
 for name in curl ssh websockets grpc; do
   build_fixture "$name" "0.0.0" old
   case "$name" in
@@ -187,6 +224,10 @@ for name in curl ssh websockets grpc; do
   esac
   build_fixture "$name" "$compatible_version" missing "$missing"
   check_unavailable "$name" "missing symbol $missing" "$temporary_directory/$name-missing.out"
+  if test "$name" = websockets; then
+    check_lws_http_unavailable "missing symbol $missing" \
+      "$temporary_directory/lws-http-missing.out"
+  fi
   if test "$name" = grpc; then
     build_fixture grpc "$compatible_version" missing gpr_free
     check_unavailable grpc "gpr: missing symbol gpr_free" \
@@ -200,4 +241,12 @@ for name in curl ssh websockets grpc; do
   esac
   check_available "$name" "$compatible_version" "$expected_capabilities" \
     "$temporary_directory/$name-compatible.out"
+  if test "$name" = websockets; then
+    check_lws_http_available "$temporary_directory/lws-http-compatible.out"
+  fi
 done
+
+if ldd "$project_root/libchezpp.so" | rg -q 'libwebsockets'; then
+  echo 'libchezpp.so must not link directly to libwebsockets' >&2
+  exit 1
+fi

@@ -1,4 +1,5 @@
-(import (chezpp))
+(import (chezpp)
+        (chezpp net lws ffi))
 
 (define check-unavailable
   (lambda (name expected)
@@ -30,3 +31,32 @@
      (check-unavailable 'nghttp2 "nghttp2")
      (check-unavailable 'cares "c-ares")
      (check-unavailable 'idn2 "libidn2"))
+
+(mat net-lws-http-loader-status
+     (let ([status (lws-status)])
+       (and (vector? status)
+            (= (vector-length status) 4)
+            (boolean? (vector-ref status 0))
+            (natural? (vector-ref status 1))
+            (or (not (vector-ref status 2))
+                (string? (vector-ref status 2)))
+            (or (not (vector-ref status 3))
+                (string? (vector-ref status 3)))
+            (if (vector-ref status 0)
+                (and (lws-capability? (vector-ref status 1) lws-cap-http1)
+                     (lws-capability? (vector-ref status 1) lws-cap-external-poll))
+                (string? (vector-ref status 3))))))
+
+(mat net-lws-http-loader-required-capability
+     (let ([status (lws-status)])
+       (if (vector-ref status 0)
+           (begin
+             (lws-require-capability! lws-cap-http1 'http1)
+             (lws-require-capability! lws-cap-external-poll 'external-poll)
+             #t)
+           (guard (condition
+                   [(net-error? condition)
+                    (string-contains? (net-error-message condition) "libwebsockets")]
+                   [else #f])
+             (lws-require-capability! lws-cap-http1 'http1)
+             #f))))

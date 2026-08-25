@@ -3,6 +3,7 @@
   (import (chezscheme)
           (chezpp concurrency fiber)
           (chezpp net operation)
+          (chezpp net lws ffi)
           (chezpp protobuf))
 
   (export (import (chezpp chez)
