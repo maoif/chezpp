@@ -6,7 +6,25 @@
           lws-cap-external-poll
           lws-status
           lws-capability?
-          lws-require-capability!)
+          lws-require-capability!
+          lws-context-open
+          lws-context-close
+          lws-context-wakeup-fd
+          lws-context-poll-snapshot
+          lws-context-service-fd
+          lws-context-next-event
+          lws-context-timeout-ms
+          lws-context-wakeup
+          lws-context-pool-metrics
+          lws-client-start
+          lws-client-body-submit
+          lws-client-body-drain
+          lws-server-request-dequeue
+          lws-server-response-submit
+          lws-stream-cancel
+          lws-body-consumed
+          lws-context-inject-event!
+          lws-context-inject-poll!)
   (import (chezpp chez)
           (chezpp net errors)
           (chezpp utils))
@@ -19,6 +37,58 @@
 
   (define ffi-lws-status
     (foreign-procedure "chezpp_lws_status" () scheme-object))
+
+  (define ffi-lws-context-open
+    (foreign-procedure "chezpp_lws_http_context_open" (uptr uptr) uptr))
+  (define ffi-lws-context-close
+    (foreign-procedure "chezpp_lws_http_context_close" (uptr) void))
+  (define ffi-lws-context-wakeup-fd
+    (foreign-procedure "chezpp_lws_http_context_wakeup_fd" (uptr) int))
+  (define ffi-lws-context-poll-snapshot
+    (foreign-procedure "chezpp_lws_http_context_poll_snapshot" (uptr) scheme-object))
+  (define ffi-lws-context-service-fd
+    (foreign-procedure "chezpp_lws_http_context_service_fd" (uptr int int) int))
+  (define ffi-lws-context-next-event
+    (foreign-procedure "chezpp_lws_http_context_next_event" (uptr) scheme-object))
+  (define ffi-lws-context-timeout-ms
+    (foreign-procedure "chezpp_lws_http_context_timeout_ms" (uptr int) int))
+  (define ffi-lws-context-wakeup
+    (foreign-procedure "chezpp_lws_http_context_wakeup" (uptr) int))
+  (define ffi-lws-context-pool-metrics
+    (foreign-procedure "chezpp_lws_http_context_pool_metrics" (uptr) scheme-object))
+  (define ffi-lws-client-start
+    (foreign-procedure "chezpp_lws_http_client_start"
+                       (uptr unsigned-64 unsigned-64 unsigned-64 string int int
+                             string string string)
+                       int))
+  (define ffi-lws-client-body-submit
+    (foreign-procedure "chezpp_lws_http_client_body_submit"
+                       (uptr unsigned-64 unsigned-64 unsigned-64 scheme-object int)
+                       int))
+  (define ffi-lws-client-body-drain
+    (foreign-procedure "chezpp_lws_http_client_body_drain"
+                       (uptr unsigned-64 unsigned-64 unsigned-64)
+                       int))
+  (define ffi-lws-server-request-dequeue
+    (foreign-procedure "chezpp_lws_http_server_request_dequeue" (uptr) scheme-object))
+  (define ffi-lws-server-response-submit
+    (foreign-procedure "chezpp_lws_http_server_response_submit"
+                       (uptr unsigned-64 unsigned-64 unsigned-64 int scheme-object int)
+                       int))
+  (define ffi-lws-stream-cancel
+    (foreign-procedure "chezpp_lws_http_stream_cancel"
+                       (uptr unsigned-64 unsigned-64 unsigned-64 int)
+                       int))
+  (define ffi-lws-body-consumed
+    (foreign-procedure "chezpp_lws_http_body_consumed"
+                       (uptr unsigned-64 unsigned-64 unsigned-64 uptr)
+                       int))
+  (define ffi-lws-context-inject-event
+    (foreign-procedure "chezpp_lws_http_inject_event"
+                       (uptr int unsigned-64 unsigned-64 unsigned-64 int scheme-object)
+                       int))
+  (define ffi-lws-context-inject-poll
+    (foreign-procedure "chezpp_lws_http_inject_poll" (uptr int int int) int))
 
   (define valid-lws-status?
     (lambda (status)
@@ -55,6 +125,60 @@
     (lambda (capability-mask)
       (and (fixnum? capability-mask)
            (fx>= capability-mask 0))))
+
+  (define lws-context?
+    (lambda (context)
+      (and (natural? context) (positive? context))))
+
+  (define positive-size?
+    (lambda (size)
+      (and (fixnum? size) (fxpositive? size))))
+
+  (define file-descriptor?
+    (lambda (descriptor)
+      (and (fixnum? descriptor) (fx>= descriptor 0))))
+
+  (define event-mask?
+    (lambda (mask)
+      (and (fixnum? mask) (fx>= mask 0))))
+
+  (define port-number?
+    (lambda (port)
+      (and (fixnum? port) (fx> port 0) (fx<= port 65535))))
+
+  (define lws-event-tag?
+    (lambda (tag)
+      (and (symbol? tag)
+           (memq tag '(connected headers readable writable complete closed
+                       failed reset goaway)))))
+
+  (define lws-event-tag-value
+    (lambda (tag)
+      (case tag
+        [(connected) 4]
+        [(headers) 5]
+        [(readable) 6]
+        [(writable) 7]
+        [(complete) 8]
+        [(closed) 9]
+        [(failed) 10]
+        [(reset) 11]
+        [(goaway) 12])))
+
+  (define lws-poll-operation?
+    (lambda (operation)
+      (and (symbol? operation) (memq operation '(add change delete)))))
+
+  (define lws-poll-operation-value
+    (lambda (operation)
+      (case operation
+        [(add) 1]
+        [(change) 2]
+        [(delete) 3])))
+
+  (define ffi-true?
+    (lambda (result)
+      (not (zero? result))))
 
   #|proc:lws-status
 The `lws-status` procedure returns `#(available? capability-mask version error)` for the optional
@@ -99,4 +223,209 @@ raises a network error when libwebsockets is unavailable or lacks the capability
              (format "libwebsockets HTTP is missing capability ~a"
                      (capability-name capability))
              name))))))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Native nonblocking adapter
+  ;;;;===----------------------------------------------------------------------===
+
+  #|proc:lws-context-open
+The `lws-context-open` procedure creates a native LWS context. `event-capacity` bounds queued
+events, and `payload-capacity` bounds copied bytes per event. It returns a native context handle.
+|#
+  (define-who lws-context-open
+    (lambda (event-capacity payload-capacity)
+      (pcheck ([positive-size? event-capacity payload-capacity])
+        (lws-require-capability! lws-cap-http1 'http1)
+        (lws-require-capability! lws-cap-external-poll 'external-poll)
+        (let ([context (ffi-lws-context-open event-capacity payload-capacity)])
+          (when (zero? context)
+            (raise-net-error who 'resource "could not create libwebsockets HTTP context"
+                             (vector event-capacity payload-capacity)))
+          context))))
+
+  #|proc:lws-context-close
+The `lws-context-close` procedure closes `context`, its LWS context, and its wakeup descriptors.
+It returns an unspecified value.
+|#
+  (define-who lws-context-close
+    (lambda (context)
+      (pcheck ([lws-context? context])
+        (ffi-lws-context-close context))))
+
+  #|proc:lws-context-wakeup-fd
+The `lws-context-wakeup-fd` procedure returns the readable wakeup descriptor owned by `context`.
+|#
+  (define-who lws-context-wakeup-fd
+    (lambda (context)
+      (pcheck ([lws-context? context])
+        (ffi-lws-context-wakeup-fd context))))
+
+  #|proc:lws-context-poll-snapshot
+The `lws-context-poll-snapshot` procedure returns `#(#(descriptor events) ...)` for `context`.
+The returned vector is a copy and can be retained by the caller.
+|#
+  (define-who lws-context-poll-snapshot
+    (lambda (context)
+      (pcheck ([lws-context? context])
+        (ffi-lws-context-poll-snapshot context))))
+
+  #|proc:lws-context-service-fd
+The `lws-context-service-fd` procedure services `descriptor` in `context` using `ready-events`.
+It returns the libwebsockets service result; servicing the wakeup descriptor returns zero.
+|#
+  (define-who lws-context-service-fd
+    (lambda (context descriptor ready-events)
+      (pcheck ([lws-context? context]
+               [file-descriptor? descriptor]
+               [event-mask? ready-events])
+        (ffi-lws-context-service-fd context descriptor ready-events))))
+
+  #|proc:lws-context-next-event
+The `lws-context-next-event` procedure removes and returns the next copied event from `context`.
+It returns `#f` when the bounded native event queue is empty.
+|#
+  (define-who lws-context-next-event
+    (lambda (context)
+      (pcheck ([lws-context? context])
+        (ffi-lws-context-next-event context))))
+
+  #|proc:lws-context-timeout-ms
+The `lws-context-timeout-ms` procedure adjusts `maximum-timeout-ms` for LWS timers in `context`.
+It returns the nonnegative timeout selected by libwebsockets.
+|#
+  (define-who lws-context-timeout-ms
+    (lambda (context maximum-timeout-ms)
+      (pcheck ([lws-context? context] [natural? maximum-timeout-ms])
+        (ffi-lws-context-timeout-ms context maximum-timeout-ms))))
+
+  #|proc:lws-context-wakeup
+The `lws-context-wakeup` procedure signals the wakeup descriptor and LWS service for `context`.
+It returns `#t` when the signal was accepted and `#f` on an operating-system error.
+|#
+  (define-who lws-context-wakeup
+    (lambda (context)
+      (pcheck ([lws-context? context])
+        (ffi-true? (ffi-lws-context-wakeup context)))))
+
+  #|proc:lws-context-pool-metrics
+The `lws-context-pool-metrics` procedure returns native queue, byte, poll, and handle metrics for
+`context`. The vector is intended for internal tests and allocation diagnostics.
+|#
+  (define-who lws-context-pool-metrics
+    (lambda (context)
+      (pcheck ([lws-context? context])
+        (ffi-lws-context-pool-metrics context))))
+
+  #|proc:lws-client-start
+The `lws-client-start` procedure starts one HTTP stream in `context`. `connection-id`,
+`stream-id`, and `generation` identify its lease. `address`, `port`, and `tls?` select the peer.
+`method`, `host`, and `path` form the request. It returns whether LWS accepted the start.
+|#
+  (define-who lws-client-start
+    (lambda (context connection-id stream-id generation address port tls? method host path)
+      (pcheck ([lws-context? context]
+               [natural? connection-id stream-id generation]
+               [string? address method host path]
+               [port-number? port]
+               [boolean? tls?])
+        (ffi-true? (ffi-lws-client-start context connection-id stream-id generation address port
+                                         (if tls? 1 0) method host path)))))
+
+  #|proc:lws-client-body-submit
+The `lws-client-body-submit` procedure queues copied `payload` bytes for the identified stream.
+`final?` says that no later request bytes follow. It returns whether the bounded slot accepted it.
+|#
+  (define-who lws-client-body-submit
+    (lambda (context connection-id stream-id generation payload final?)
+      (pcheck ([lws-context? context]
+               [natural? connection-id stream-id generation]
+               [bytevector? payload]
+               [boolean? final?])
+        (ffi-true? (ffi-lws-client-body-submit context connection-id stream-id generation payload
+                                               (if final? 1 0))))))
+
+  #|proc:lws-client-body-drain
+The `lws-client-body-drain` procedure asks LWS to drain available response bytes for the identified
+stream. It returns whether draining started; copied readable events carry the resulting bytes.
+|#
+  (define-who lws-client-body-drain
+    (lambda (context connection-id stream-id generation)
+      (pcheck ([lws-context? context] [natural? connection-id stream-id generation])
+        (ffi-true? (ffi-lws-client-body-drain context connection-id stream-id generation)))))
+
+  #|proc:lws-server-request-dequeue
+The `lws-server-request-dequeue` procedure removes the next copied server headers event from
+`context`. It returns `#f` when no logical request is ready.
+|#
+  (define-who lws-server-request-dequeue
+    (lambda (context)
+      (pcheck ([lws-context? context])
+        (ffi-lws-server-request-dequeue context))))
+
+  #|proc:lws-server-response-submit
+The `lws-server-response-submit` procedure queues `payload` for an identified server stream.
+`status` is the HTTP status, and `final?` identifies the last body chunk. It returns acceptance.
+|#
+  (define-who lws-server-response-submit
+    (lambda (context connection-id stream-id generation status payload final?)
+      (pcheck ([lws-context? context]
+               [natural? connection-id stream-id generation]
+               [fixnum? status]
+               [bytevector? payload]
+               [boolean? final?])
+        (ffi-true?
+         (ffi-lws-server-response-submit context connection-id stream-id generation status
+                                         payload (if final? 1 0))))))
+
+  #|proc:lws-stream-cancel
+The `lws-stream-cancel` procedure marks the identified stream terminal and queues a reset event.
+`status` supplies its cancellation metadata. It returns whether cancellation won the stream race.
+|#
+  (define-who lws-stream-cancel
+    (lambda (context connection-id stream-id generation status)
+      (pcheck ([lws-context? context]
+               [natural? connection-id stream-id generation]
+               [fixnum? status])
+        (ffi-true?
+         (ffi-lws-stream-cancel context connection-id stream-id generation status)))))
+
+  #|proc:lws-body-consumed
+The `lws-body-consumed` procedure acknowledges `byte-count` copied bytes for the identified stream.
+It returns whether the generation and byte count matched pending body data.
+|#
+  (define-who lws-body-consumed
+    (lambda (context connection-id stream-id generation byte-count)
+      (pcheck ([lws-context? context]
+               [natural? connection-id stream-id generation byte-count])
+        (ffi-true?
+         (ffi-lws-body-consumed context connection-id stream-id generation byte-count)))))
+
+  #|proc:lws-context-inject-event!
+The `lws-context-inject-event!` procedure copies a fake callback `event-tag` into `context`.
+The identity, generation, `status`, and `payload` parameters form the event. It returns acceptance.
+|#
+  (define-who lws-context-inject-event!
+    (lambda (context event-tag connection-id stream-id generation status payload)
+      (pcheck ([lws-context? context]
+               [lws-event-tag? event-tag]
+               [natural? connection-id stream-id generation]
+               [fixnum? status]
+               [bytevector? payload])
+        (ffi-true?
+         (ffi-lws-context-inject-event context (lws-event-tag-value event-tag) connection-id
+                                       stream-id generation status payload)))))
+
+  #|proc:lws-context-inject-poll!
+The `lws-context-inject-poll!` procedure applies fake poll `operation` to `descriptor` in `context`.
+`events` is the replacement poll mask. It returns whether the bounded poll/event pools accepted it.
+|#
+  (define-who lws-context-inject-poll!
+    (lambda (context operation descriptor events)
+      (pcheck ([lws-context? context]
+               [lws-poll-operation? operation]
+               [file-descriptor? descriptor]
+               [event-mask? events])
+        (ffi-true?
+         (ffi-lws-context-inject-poll context (lws-poll-operation-value operation)
+                                      descriptor events)))))
   )
