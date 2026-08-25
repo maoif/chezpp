@@ -173,6 +173,7 @@
             (http-response? resp)
             (= (http-response-status resp) 200)
             (equal? (http-response-reason resp) "OK")
+            (eq? (http-response-version resp) 'h1)
             (equal? (http-response-body resp) "done"))))
 
 (mat net-address-dns

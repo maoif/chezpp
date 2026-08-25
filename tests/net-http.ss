@@ -1,5 +1,6 @@
 (import (chezpp)
         (chezpp net)
+        (chezpp net http2)
         (chezpp net private))
 
 (load "net-common.ss")
@@ -410,7 +411,7 @@
                (close-tls-context client-ctx)
                (close-tls-context server-ctx)
                (and (= (http-response-status resp) 200)
-                    (eq? (http-response-version resp) 'http/1.1)
+                    (eq? (http-response-version resp) 'h1)
                     (equal? (utf8->string (http-response-body resp)) "secure"))))))))
 
 (define drain-http2-test-output!

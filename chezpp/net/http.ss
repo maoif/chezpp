@@ -113,7 +113,8 @@ string, a bytevector, or an HTTP body source. A streaming body source remains ca
   #|record:http-response-record
 The `http-response-record` record is an immutable completed HTTP response.
 It contains numeric status, reason text, normalized header and trailer alists, body bytes or a sink
-result, and the negotiated HTTP version symbol.
+result, and the negotiated HTTP version symbol. The `http-response-version` accessor reports `h1`
+for HTTP/1.x or `h2` for HTTP/2; transport selection is internal to the HTTP implementation.
 |#
   (define-record-type (http-response-record %make-http-response http-response?)
     (sealed #t)
@@ -1322,7 +1323,7 @@ session or socket and ports once; later I/O raises an error.
                                    (complete-response
                                     (%make-http-response
                                      status reason response-headers #f
-                                     response-trailers 'http/1.1)))
+                                     response-trailers 'h1)))
                                  (read-pending allow-io?))
                              (let-values ([(done? parsed-body consumed trailers)
                                            (parse-buffered-chunked-body
@@ -1331,7 +1332,7 @@ session or socket and ports once; later I/O raises an error.
                                    (complete-response
                                     (%make-http-response
                                      status reason response-headers parsed-body
-                                     trailers 'http/1.1))
+                                     trailers 'h1))
                                    (read-pending allow-io?))))]
                         [content-length
                          (if response-sink
@@ -3547,7 +3548,7 @@ headers, and optional body.
                                     (normalize-http-headers who headers)
                                     (normalize-http-body who body)
                                     '()
-                                    'http/1.1))]))
+                                    'h1))]))
 
   #|proc:http-header-ref
 The `http-header-ref` procedure returns the first matching header value using case-insensitive
