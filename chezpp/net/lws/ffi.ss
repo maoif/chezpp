@@ -16,6 +16,11 @@
           lws-context-timeout-ms
           lws-context-wakeup
           lws-context-pool-metrics
+          lws-signal-open
+          lws-signal-fd
+          lws-signal-notify
+          lws-signal-drain
+          lws-signal-close
           lws-client-start
           lws-client-body-submit
           lws-client-body-drain
@@ -39,7 +44,7 @@
     (foreign-procedure "chezpp_lws_status" () scheme-object))
 
   (define ffi-lws-context-open
-    (foreign-procedure "chezpp_lws_http_context_open" (uptr uptr) uptr))
+    (foreign-procedure "chezpp_lws_http_context_open" (uptr uptr uptr string int) uptr))
   (define ffi-lws-context-close
     (foreign-procedure "chezpp_lws_http_context_close" (uptr) void))
   (define ffi-lws-context-wakeup-fd
@@ -56,10 +61,20 @@
     (foreign-procedure "chezpp_lws_http_context_wakeup" (uptr) int))
   (define ffi-lws-context-pool-metrics
     (foreign-procedure "chezpp_lws_http_context_pool_metrics" (uptr) scheme-object))
+  (define ffi-lws-signal-open
+    (foreign-procedure "chezpp_lws_http_signal_open" (uptr) uptr))
+  (define ffi-lws-signal-fd
+    (foreign-procedure "chezpp_lws_http_signal_fd" (uptr) int))
+  (define ffi-lws-signal-notify
+    (foreign-procedure "chezpp_lws_http_signal_notify" (uptr) int))
+  (define ffi-lws-signal-drain
+    (foreign-procedure "chezpp_lws_http_signal_drain" (uptr) void))
+  (define ffi-lws-signal-close
+    (foreign-procedure "chezpp_lws_http_signal_close" (uptr) void))
   (define ffi-lws-client-start
     (foreign-procedure "chezpp_lws_http_client_start"
                        (uptr unsigned-64 unsigned-64 unsigned-64 string int int
-                             string string string)
+                             string string string scheme-object scheme-object int)
                        int))
   (define ffi-lws-client-body-submit
     (foreign-procedure "chezpp_lws_http_client_body_submit"
@@ -136,7 +151,7 @@
 
   (define file-descriptor?
     (lambda (descriptor)
-      (and (fixnum? descriptor) (fx>= descriptor 0))))
+      (and (fixnum? descriptor) (fx>= descriptor -1))))
 
   (define event-mask?
     (lambda (mask)
@@ -230,18 +245,31 @@ raises a network error when libwebsockets is unavailable or lacks the capability
 
   #|proc:lws-context-open
 The `lws-context-open` procedure creates a native LWS context. `event-capacity` bounds queued
-events, and `payload-capacity` bounds copied bytes per event. It returns a native context handle.
+events, and `payload-capacity` bounds copied bytes per event. `tls-context` is zero or a native TLS
+context handle. `proxy-address` and `proxy-port` select an immutable HTTP proxy policy. It returns a
+native context handle.
 |#
   (define-who lws-context-open
-    (lambda (event-capacity payload-capacity)
-      (pcheck ([positive-size? event-capacity payload-capacity])
+    (case-lambda
+      [(event-capacity payload-capacity)
+       (lws-context-open event-capacity payload-capacity 0 "" 0)]
+      [(event-capacity payload-capacity tls-context)
+       (lws-context-open event-capacity payload-capacity tls-context "" 0)]
+      [(event-capacity payload-capacity tls-context proxy-address proxy-port)
+       (pcheck ([positive-size? event-capacity payload-capacity]
+                [natural? tls-context]
+                [string? proxy-address]
+                [natural? proxy-port])
+        (unless (or (string=? proxy-address "") (port-number? proxy-port))
+          (errorf who "expected a valid proxy port, given ~s" proxy-port))
         (lws-require-capability! lws-cap-http1 'http1)
         (lws-require-capability! lws-cap-external-poll 'external-poll)
-        (let ([context (ffi-lws-context-open event-capacity payload-capacity)])
+        (let ([context (ffi-lws-context-open event-capacity payload-capacity tls-context
+                                             proxy-address proxy-port)])
           (when (zero? context)
             (raise-net-error who 'resource "could not create libwebsockets HTTP context"
                              (vector event-capacity payload-capacity)))
-          context))))
+          context))]))
 
   #|proc:lws-context-close
 The `lws-context-close` procedure closes `context`, its LWS context, and its wakeup descriptors.
@@ -316,20 +344,70 @@ The `lws-context-pool-metrics` procedure returns native queue, byte, poll, and h
       (pcheck ([lws-context? context])
         (ffi-lws-context-pool-metrics context))))
 
+  #|proc:lws-signal-open
+The `lws-signal-open` procedure reserves a bounded per-operation wakeup signal for `context`.
+It returns an opaque signal handle or zero when the context signal pool is exhausted.
+|#
+  (define-who lws-signal-open
+    (lambda (context)
+      (pcheck ([lws-context? context])
+        (ffi-lws-signal-open context))))
+
+  #|proc:lws-signal-fd
+The `lws-signal-fd` procedure returns the readable descriptor for `signal`.
+|#
+  (define-who lws-signal-fd
+    (lambda (signal)
+      (pcheck ([natural? signal])
+        (ffi-lws-signal-fd signal))))
+
+  #|proc:lws-signal-notify
+The `lws-signal-notify` procedure wakes waiters on `signal` and returns a boolean success flag.
+|#
+  (define lws-signal-notify
+    (lambda (signal)
+      (pcheck ([natural? signal])
+        (ffi-true? (ffi-lws-signal-notify signal)))))
+
+  #|proc:lws-signal-drain
+The `lws-signal-drain` procedure consumes pending wakeup bytes from `signal`.
+|#
+  (define lws-signal-drain
+    (lambda (signal)
+      (pcheck ([natural? signal])
+        (ffi-lws-signal-drain signal))))
+
+  #|proc:lws-signal-close
+The `lws-signal-close` procedure returns `signal` to its context-owned pool.
+|#
+  (define lws-signal-close
+    (lambda (signal)
+      (pcheck ([natural? signal])
+        (ffi-lws-signal-close signal))))
+
   #|proc:lws-client-start
 The `lws-client-start` procedure starts one HTTP stream in `context`. `connection-id`,
 `stream-id`, and `generation` identify its lease. `address`, `port`, and `tls?` select the peer.
 `method`, `host`, and `path` form the request. It returns whether LWS accepted the start.
 |#
   (define-who lws-client-start
-    (lambda (context connection-id stream-id generation address port tls? method host path)
-      (pcheck ([lws-context? context]
-               [natural? connection-id stream-id generation]
-               [string? address method host path]
-               [port-number? port]
-               [boolean? tls?])
-        (ffi-true? (ffi-lws-client-start context connection-id stream-id generation address port
-                                         (if tls? 1 0) method host path)))))
+    (case-lambda
+      [(context connection-id stream-id generation address port tls? method host path)
+       (lws-client-start context connection-id stream-id generation address port tls? method host
+                         path #vu8() #vu8() #f)]
+      [(context connection-id stream-id generation address port tls? method host path headers
+                initial-body has-body?)
+       (pcheck ([lws-context? context]
+                [natural? connection-id stream-id generation]
+                [string? address method host path]
+                [port-number? port]
+                [boolean? tls?]
+                [bytevector? headers initial-body]
+                [boolean? has-body?])
+         (ffi-true?
+          (ffi-lws-client-start context connection-id stream-id generation address port
+                                (if tls? 1 0) method host path headers
+                                initial-body (if has-body? 1 0))))]))
 
   #|proc:lws-client-body-submit
 The `lws-client-body-submit` procedure queues copied `payload` bytes for the identified stream.

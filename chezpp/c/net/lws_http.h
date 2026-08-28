@@ -26,6 +26,7 @@ typedef struct lws_http_event lws_http_event;
 typedef struct lws_http_connection lws_http_connection;
 typedef struct lws_http_stream lws_http_stream;
 typedef struct lws_poll_entry lws_poll_entry;
+typedef struct lws_http_signal lws_http_signal;
 typedef struct lws_http_context lws_http_context;
 
 struct lws_http_event {
@@ -58,9 +59,12 @@ struct lws_http_stream {
   uint64_t generation;
   struct lws *wsi;
   unsigned char *outbound;
+  unsigned char *headers;
   size_t outbound_length;
+  size_t headers_length;
   size_t pending_body_bytes;
   int outbound_final;
+  int has_request_body;
   int active;
   int terminal;
   int failure_pending;
@@ -72,6 +76,13 @@ struct lws_http_stream {
   char host[256];
   char path[1024];
   char method[16];
+};
+
+struct lws_http_signal {
+  lws_http_signal *next_free;
+  lws_http_context *context;
+  int pipe[2];
+  int active;
 };
 
 struct lws_poll_entry {
@@ -116,20 +127,32 @@ struct lws_http_context {
   lws_http_stream *streams;
   lws_http_stream *stream_free;
   unsigned char *stream_payloads;
+  unsigned char *stream_headers;
   size_t stream_capacity;
   size_t stream_in_use;
   size_t stream_high_water;
+
+  lws_http_signal *signals;
+  lws_http_signal *signal_free;
+  size_t signal_capacity;
+  size_t signal_in_use;
+  size_t signal_high_water;
+  size_t signal_misses;
 
   unsigned char *drain_buffer;
   size_t queued_body_bytes;
   size_t body_byte_limit;
   size_t live_handle_count;
+  int tls_verify_peer;
   int initializing;
   int closing;
 };
 
 uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
-                                       size_t payload_capacity);
+                                       size_t payload_capacity,
+                                       uintptr_t tls_context_handle,
+                                       const char *proxy_address,
+                                       int proxy_port);
 void chezpp_lws_http_context_close(uintptr_t context_handle);
 int chezpp_lws_http_context_wakeup_fd(uintptr_t context_handle);
 ptr chezpp_lws_http_context_poll_snapshot(uintptr_t context_handle);
@@ -140,12 +163,18 @@ int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
                                        int maximum_timeout_ms);
 int chezpp_lws_http_context_wakeup(uintptr_t context_handle);
 ptr chezpp_lws_http_context_pool_metrics(uintptr_t context_handle);
+uintptr_t chezpp_lws_http_signal_open(uintptr_t context_handle);
+int chezpp_lws_http_signal_fd(uintptr_t signal_handle);
+int chezpp_lws_http_signal_notify(uintptr_t signal_handle);
+void chezpp_lws_http_signal_drain(uintptr_t signal_handle);
+void chezpp_lws_http_signal_close(uintptr_t signal_handle);
 
 int chezpp_lws_http_client_start(uintptr_t context_handle,
                                  uint64_t connection_id, uint64_t stream_id,
                                  uint64_t generation, const char *address,
                                  int port, int tls, const char *method,
-                                 const char *host, const char *path);
+                                 const char *host, const char *path,
+                                 ptr headers, ptr initial_body, int has_body);
 int chezpp_lws_http_client_body_submit(uintptr_t context_handle,
                                        uint64_t connection_id,
                                        uint64_t stream_id, uint64_t generation,

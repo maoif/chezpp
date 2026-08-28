@@ -1,6 +1,7 @@
 (import (chezpp)
         (chezpp net)
         (chezpp net http2)
+        (chezpp net lws http1)
         (chezpp net private))
 
 (load "net-common.ss")
@@ -167,9 +168,65 @@
               (close-socket listener))))
          (lambda () request-line))))))
 
+(define wake-loopback-listener
+  (lambda (port)
+    (guard (failure [else #f])
+      (let ([socket (open-socket 'inet 'stream)])
+        (dynamic-wind
+          void
+          (lambda ()
+            (socket-connect! socket (make-socket-address 'inet "127.0.0.1" port)))
+          (lambda () (close-socket socket)))))))
+
+(define start-stoppable-http-proxy-fixture
+  (lambda ()
+    (let ([listener (open-socket 'inet 'stream)]
+          [request-line #f]
+          [stopped? #f])
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values
+         port
+         (fork-thread
+          (lambda ()
+            (guard (failure [else #f])
+              (let-values ([(client peer) (socket-accept listener)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (let ([input (open-socket-input-port client)]
+                          [output (open-socket-output-port client)])
+                      (dynamic-wind
+                        void
+                        (lambda ()
+                          (set! request-line (read-crlf-line input))
+                          (let loop ()
+                            (unless (string=? (read-crlf-line input) "")
+                              (loop)))
+                          (put-bytevector
+                           output
+                           (string->utf8
+                            "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\nproxied"))
+                          (flush-output-port output))
+                        (lambda ()
+                          (close-port input)
+                          (close-port output)))))
+                  (lambda () (close-socket client)))))))
+         (lambda () request-line)
+         (lambda ()
+           (unless stopped?
+             (set! stopped? #t)
+             (wake-loopback-listener port)
+             (guard (failure [else #f])
+               (close-socket listener)))))))))
+
 (define start-http-connect-proxy
   (lambda (target-port)
-    (let ([listener (open-socket 'inet 'stream)])
+    (let ([listener (open-socket 'inet 'stream)]
+          [stopped? #f]
+          [accepted? #f])
       (socket-set-option! listener 'reuse-address #t)
       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
       (socket-listen! listener 4)
@@ -179,6 +236,7 @@
          (fork-thread
           (lambda ()
             (let-values ([(client peer) (socket-accept listener)])
+              (set! accepted? #t)
               (let wait-for-head ([matched 0])
                 (let ([byte (socket-recv client 1)])
                   (unless (eof-object? byte)
@@ -215,11 +273,18 @@
                 (close-socket target))
               (close-socket client)
               (close-socket listener))))
-         )))))
+         (lambda () accepted?)
+         (lambda ()
+           (unless stopped?
+             (set! stopped? #t)
+             (wake-loopback-listener port)
+             (guard (failure [else #f])
+               (close-socket listener)))))))))
 
 (define start-http-connect-reject-proxy
   (lambda ()
-    (let ([listener (open-socket 'inet 'stream)])
+    (let ([listener (open-socket 'inet 'stream)]
+          [stopped? #f])
       (socket-set-option! listener 'reuse-address #t)
       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
       (socket-listen! listener 4)
@@ -243,11 +308,45 @@
                 (close-port input)
                 (close-port output))
               (close-socket client)
-              (close-socket listener)))))))))
+              (close-socket listener))))
+         (lambda ()
+           (unless stopped?
+             (set! stopped? #t)
+             (wake-loopback-listener port)
+             (guard (failure [else #f])
+               (close-socket listener)))))))))
 
 (define await-http-nonblocking
   (lambda (thunk)
     (net-operation-wait (thunk))))
+
+(mat net-http-lws-http1-boundary
+     (and (procedure? make-lws-http1-client)
+          (procedure? lws-http1-client-close!)
+          (procedure? lws-http1-request/nonblocking)
+          (procedure? lws-http1-client-pool-metrics))
+     (let ([pull-count 0])
+       (let-values ([(server port thread)
+                     (start-http-connection-server
+                      (lambda (connection)
+                        (http-read-request connection)
+                        (http-write-response
+                         connection (make-http-response 200 "OK" '() #f))))])
+         (let* ([client (make-lws-http1-client 16 4096 16)]
+                [source (lambda (maximum-bytes)
+                          (set! pull-count (fx1+ pull-count))
+                          (eof-object))]
+                [operation
+                 (lws-http1-request/nonblocking
+                  client
+                  (vector "PUT" "127.0.0.1" port #f "/deferred-source"
+                          '(("Content-Length" . "0")) source #f)
+                  #f)]
+                [deferred? (fxzero? pull-count)])
+           (net-operation-wait operation)
+           (lws-http1-client-close! client)
+           (thread-join thread)
+           deferred?))))
 
 (mat net-http-stream-body
      (let ([source (make-http-body-source (lambda (maximum-bytes) (eof-object)) #f)]
@@ -402,6 +501,7 @@
                             "secure"))))
                       server-ctx)])
          (let ([client (http-open client-ctx)])
+           (http-client-version-set! client 'http/1.1)
            (let ([resp (http-get client
                                  (format "https://127.0.0.1:~a/secure" port))])
              (begin
@@ -954,7 +1054,7 @@
                             '(("Content-Type" . "text/plain"))
                             "proxied-secure"))))
                       server-ctx)])
-         (let-values ([(proxy-port proxy-th)
+         (let-values ([(proxy-port proxy-th proxy-accepted? stop-proxy)
                        (start-http-connect-proxy origin-port)])
            (let ([client (http-open client-ctx)])
            (dynamic-wind
@@ -967,10 +1067,12 @@
                                      (format "https://localhost:~a/secure"
                                              origin-port))])
                  (and (= (http-response-status resp) 200)
+                      (proxy-accepted?)
                       (equal? (utf8->string (http-response-body resp))
                               "proxied-secure"))))
              (lambda ()
                (http-close client)
+               (stop-proxy)
                (http-server-close server)
                (thread-join origin-th)
                (thread-join proxy-th)
@@ -979,7 +1081,8 @@
 
 (mat net-https-connect-proxy-rejection
      ;; Error case: an HTTPS request must fail when the proxy rejects CONNECT.
-     (let-values ([(proxy-port proxy-th) (start-http-connect-reject-proxy)])
+     (let-values ([(proxy-port proxy-th stop-proxy)
+                   (start-http-connect-reject-proxy)])
        (let ([client (http-open)])
          (dynamic-wind
            (lambda ()
@@ -993,7 +1096,130 @@
                 (http-get client "https://localhost:443/rejected"))))
            (lambda ()
              (http-close client)
+             (stop-proxy)
              (thread-join proxy-th))))))
+
+(mat net-http-proxy-policy-proxied-then-direct
+     (let ()
+       (write-test-san-cert-files)
+       (let ([server-context (make-test-http-verified-server-context)]
+             [client-context (make-test-http-verified-client-context)])
+         (let-values ([(secure-server secure-port secure-thread)
+                       (start-http-connection-server
+                        (lambda (connection)
+                          (http-read-request connection)
+                          (http-write-response
+                           connection
+                           (make-http-response 200 "OK" '() "proxied")))
+                        server-context)])
+           (let-values ([(proxy-port proxy-thread proxy-accepted? stop-proxy)
+                         (start-http-connect-proxy secure-port)])
+             (let-values ([(direct-server direct-port direct-thread)
+                           (start-http-connection-server
+                            (lambda (connection)
+                              (http-read-request connection)
+                              (http-write-response
+                               connection
+                               (make-http-response 200 "OK" '() "direct"))))])
+               (let ([client (http-open client-context)])
+                 (dynamic-wind
+                   (lambda ()
+                     (http-client-version-set! client 'http/1.1)
+                     (http-set-timeout! client 2000))
+                   (lambda ()
+                     (http-client-proxy-set!
+                      client
+                      (make-http-proxy
+                       (format "http://127.0.0.1:~a" proxy-port)))
+                     (let ([proxied
+                            (http-get
+                             client
+                             (format "https://localhost:~a/first" secure-port))])
+                       (http-client-proxy-set! client #f)
+                       (let ([direct
+                              (http-get
+                               client
+                               (format "http://127.0.0.1:~a/second" direct-port))])
+                         (and (proxy-accepted?)
+                              (equal? "proxied"
+                                      (utf8->string (http-response-body proxied)))
+                              (equal? "direct"
+                                      (utf8->string (http-response-body direct)))))))
+                   (lambda ()
+                     (http-close client)
+                     (stop-proxy)
+                     (wake-loopback-listener direct-port)
+                     (http-server-close direct-server)
+                     (http-server-close secure-server)
+                     (thread-join proxy-thread)
+                     (thread-join direct-thread)
+                     (thread-join secure-thread)
+                     (close-tls-context client-context)
+                     (close-tls-context server-context))))))))))
+
+(mat net-http-proxy-policy-direct-then-proxied
+     (let ()
+       (write-test-san-cert-files)
+       (let ([server-context (make-test-http-verified-server-context)]
+             [client-context (make-test-http-verified-client-context)])
+         (let-values ([(secure-server secure-port secure-thread)
+                       (start-http-connection-server
+                        (lambda (connection)
+                          (http-read-request connection)
+                          (http-write-response
+                           connection
+                           (make-http-response 200 "OK" '() "proxied")))
+                        server-context)])
+           (let-values ([(proxy-port proxy-thread proxy-accepted? stop-proxy)
+                         (start-http-connect-proxy secure-port)])
+             (let-values ([(direct-server direct-port direct-thread)
+                           (start-http-connection-server
+                            (lambda (connection)
+                              (http-read-request connection)
+                              (http-write-response
+                               connection
+                               (make-http-response 200 "OK" '() "direct"))))])
+               (let ([client (http-open client-context)])
+                 (dynamic-wind
+                   (lambda ()
+                     (http-client-version-set! client 'http/1.1)
+                     (http-set-timeout! client 2000))
+                   (lambda ()
+                     (let ([direct
+                            (http-get
+                             client
+                             (format "http://127.0.0.1:~a/first" direct-port))])
+                       (http-client-proxy-set!
+                        client
+                        (make-http-proxy
+                         (format "http://127.0.0.1:~a" proxy-port)))
+                       (let ([proxied
+                              (http-get
+                               client
+                               (format "https://localhost:~a/second" secure-port))])
+                         (let ([accepted? (proxy-accepted?)]
+                               [direct-body
+                                (utf8->string (http-response-body direct))]
+                               [proxied-body
+                                (utf8->string (http-response-body proxied))])
+                           (unless (and accepted?
+                                        (equal? "direct" direct-body)
+                                        (equal? "proxied" proxied-body))
+                             (errorf 'net-http-proxy-policy-direct-then-proxied
+                                     "accepted ~s, direct ~s, proxied ~s"
+                                     accepted? direct-body proxied-body))
+                           #t))))
+                   (lambda ()
+                     (http-close client)
+                     (stop-proxy)
+                     (wake-loopback-listener direct-port)
+                     (http-server-close direct-server)
+                     (http-server-close secure-server)
+                     (thread-join proxy-thread)
+                     (thread-join direct-thread)
+                     (thread-join secure-thread)
+                     (close-tls-context client-context)
+                     (close-tls-context server-context))))))))))
 
 (mat net-https-verification
      ;; Verified HTTPS succeeds when the local test certificate is trusted and
@@ -1060,6 +1286,20 @@
              (close-tls-context server-ctx)
              (thread-join th))))))
 
+(mat net-http-chunked-response-flow-control
+     ;; Each consumed response chunk must resume LWS parsing through completion.
+     (let-values ([(port th)
+                   (start-raw-http-response-server
+                    (string->utf8
+                     "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\none\r\n3\r\ntwo\r\n0\r\n\r\n"))])
+       (let ([response (http-get (format "http://127.0.0.1:~a/flow-control" port))])
+         (thread-join th)
+         (let ([body (utf8->string (http-response-body response))])
+           (unless (equal? body "onetwo")
+             (errorf 'net-http-chunked-response-flow-control
+                     "expected onetwo, received ~s" body))
+           #t))))
+
 (mat net-http-chunked-response
      (let-values ([(port th)
                    (start-raw-http-response-server
@@ -1067,10 +1307,16 @@
                      "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nX-Trailer: done\r\n\r\n"))])
        (let ([resp (http-get (format "http://127.0.0.1:~a/chunked" port))])
          (thread-join th)
-         (and (= (http-response-status resp) 200)
-              (equal? (utf8->string (http-response-body resp)) "hello world")
-              (equal? (http-header-ref (http-response-trailers resp) "X-Trailer")
-                      "done"))))
+         (let ([status (http-response-status resp)]
+               [body (utf8->string (http-response-body resp))]
+               [trailer
+                (http-header-ref (http-response-trailers resp) "X-Trailer" #f)])
+           (unless (and (= status 200)
+                        (equal? body "hello world")
+                        (equal? trailer "done"))
+             (errorf 'net-http-chunked-response
+                     "status ~s, body ~s, trailer ~s" status body trailer))
+           #t)))
 
      (let ([path "/tmp/chezpp-net-chunked-download.bin"])
        (let-values ([(port th)

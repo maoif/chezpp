@@ -5,6 +5,7 @@
           (chezpp net operation)
           (chezpp net lws ffi)
           (chezpp net lws reactor)
+          (chezpp net lws http1)
           (chezpp protobuf))
 
   (export (import (chezpp chez)

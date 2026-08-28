@@ -8,6 +8,7 @@
           lws-reactor-shutdown!
           make-lws-reactor-operation
           lws-reactor-operation-events
+          lws-reactor-release-operation!
           lws-reactor-operation-lifecycle
           lws-reactor-register-waiter!
           lws-reactor-client-start!
@@ -47,8 +48,10 @@
     (fields (immutable connection-id)
             (immutable stream-id)
             (immutable generation)
+            (immutable signal)
             (immutable poll-target)
             (immutable deadline-ms)
+            (immutable retain?)
             (mutable lifecycle)
             (mutable events)
             (mutable result)
@@ -239,6 +242,7 @@
   (define publish-event!
     (lambda (reactor event)
       (let ([operation #f]
+            [signal #f]
             [procedure* '()])
         (with-mutex (lws-reactor-mutex reactor)
           (let ([entry (find-event-operation-locked
@@ -248,6 +252,7 @@
               (set! operation (car entry))
               (let* ([state (cdr entry)]
                      [tag (vector-ref event 0)])
+                (set! signal (reactor-operation-state-signal state))
                 (reactor-operation-state-events-set!
                  state (cons event (reactor-operation-state-events state)))
                 (when (terminal-event? tag)
@@ -265,7 +270,8 @@
                                 (vector-ref event 5))))))
                   (set! procedure*
                         (release-operation-waiters-locked! reactor state)))))))
-        (for-each (lambda (procedure) (procedure operation)) procedure*))))
+        (for-each (lambda (procedure) (procedure operation)) procedure*)
+        (when signal (lws-signal-notify signal)))))
 
   (define drain-native-events!
     (lambda (reactor)
@@ -327,6 +333,12 @@
        0
        event*)))
 
+  (define requested-event-list
+    (lambda (mask)
+      (append (if (fxzero? (fxlogand mask (net-pollin))) '() '(read))
+              (if (fxzero? (fxlogand mask (net-pollout))) '() '(write))
+              (if (fxzero? (fxlogand mask (net-pollpri))) '() '(priority)))))
+
   (define service-poll-pass!
     (lambda (reactor)
       (let* ([context (lws-reactor-native-context reactor)]
@@ -341,9 +353,12 @@
                           (map (lambda (item)
                                  (make-poll-target
                                   (vector-ref item 0)
-                                  '(read write priority error hup invalid)))
+                                  (requested-event-list (vector-ref item 1))))
                                (vector->list snapshot)))]
-                   [ready* (poll target* (if (fxnegative? timeout-ms) 50 timeout-ms))])
+                   [ready*
+                    (filter (lambda (target)
+                              (pair? (poll-target-ready-events target)))
+                            (poll target* (if (fxnegative? timeout-ms) 50 timeout-ms)))])
               (if (null? ready*)
                   (lws-context-service-fd context -1 0)
                   (for-each
@@ -413,21 +428,33 @@ The `value` parameter may be any Scheme object.
   #|proc:make-lws-reactor
 The `make-lws-reactor` procedure creates an unstarted serialized LWS reactor.
 `event-capacity` bounds native events, `payload-capacity` bounds copied payloads, and
-`command-capacity` bounds queued commands and operation waiters. It returns the reactor.
+`command-capacity` bounds queued commands and operation waiters. `tls-context-handle` is zero or a
+native TLS context. `proxy-address` and `proxy-port` select the context proxy. It returns the
+reactor.
 |#
   (define make-lws-reactor
-    (lambda (event-capacity payload-capacity command-capacity)
-      (pcheck ([positive-natural? event-capacity payload-capacity command-capacity])
-        (let ([context (lws-context-open event-capacity payload-capacity)])
-          (let ([reactor
-                 (%make-lws-reactor
-                  context (make-mutex 'lws-reactor) (make-condition 'lws-reactor)
-                  command-capacity (make-vector command-capacity) #f #f #f 0 0 0 0
-                  command-capacity (make-vector command-capacity) #f 0 0 0
-                  '() '#() 'created 0 #f #f)])
-            (initialize-command-pool! reactor)
-            (initialize-waiter-pool! reactor)
-            reactor)))))
+    (case-lambda
+      [(event-capacity payload-capacity command-capacity)
+       (make-lws-reactor event-capacity payload-capacity command-capacity 0 "" 0)]
+      [(event-capacity payload-capacity command-capacity tls-context-handle)
+       (make-lws-reactor event-capacity payload-capacity command-capacity
+                         tls-context-handle "" 0)]
+      [(event-capacity payload-capacity command-capacity tls-context-handle
+                       proxy-address proxy-port)
+       (pcheck ([positive-natural? event-capacity payload-capacity command-capacity]
+                [natural? tls-context-handle proxy-port]
+                [string? proxy-address])
+         (let ([context (lws-context-open event-capacity payload-capacity tls-context-handle
+                                          proxy-address proxy-port)])
+           (let ([reactor
+                  (%make-lws-reactor
+                   context (make-mutex 'lws-reactor) (make-condition 'lws-reactor)
+                   command-capacity (make-vector command-capacity) #f #f #f 0 0 0 0
+                   command-capacity (make-vector command-capacity) #f 0 0 0
+                   '() '#() 'created 0 #f #f)])
+             (initialize-command-pool! reactor)
+             (initialize-waiter-pool! reactor)
+             reactor)))]))
 
   #|proc:lws-reactor-state
 The `lws-reactor-state` procedure returns the lifecycle symbol for `reactor`.
@@ -505,25 +532,37 @@ Repeated calls are inert. The return value is `reactor`.
   #|proc:make-lws-reactor-operation
 The `make-lws-reactor-operation` procedure registers a pending operation with `reactor`.
 `kind` identifies the operation. The three identity parameters route copied native events.
-`deadline-ms` is an absolute monotonic deadline or `#f`. It returns a network operation.
+`deadline-ms` is an absolute monotonic deadline or `#f`. The optional `retain?` keeps routing state
+until `lws-reactor-release-operation!` is called. It returns a network operation.
 |#
   (define make-lws-reactor-operation
-    (lambda (reactor kind connection-id stream-id generation deadline-ms)
-      (pcheck ([reactor? reactor] [symbol? kind]
-               [natural? connection-id stream-id generation]
-               [(lambda (value) (or (not value) (natural? value))) deadline-ms])
+    (case-lambda
+      [(reactor kind connection-id stream-id generation deadline-ms)
+       (make-lws-reactor-operation reactor kind connection-id stream-id generation
+                                   deadline-ms #f)]
+      [(reactor kind connection-id stream-id generation deadline-ms retain?)
+       (pcheck ([reactor? reactor] [symbol? kind]
+                [natural? connection-id stream-id generation]
+                [(lambda (value) (or (not value) (natural? value))) deadline-ms]
+                [boolean? retain?])
         (when (memq (lws-reactor-state reactor) '(stopping stopped))
           (errorf 'make-lws-reactor-operation "reactor is shutting down"))
-        (let ([state
-               (%make-reactor-operation-state
-                connection-id stream-id generation
-                (make-poll-target (lws-reactor-wakeup-fd reactor) '(read))
-                deadline-ms 'pending '() #f #f #f)]
+        (let* ([signal (lws-signal-open (lws-reactor-native-context reactor))]
+               [state
+                (begin
+                  (when (zero? signal)
+                    (errorf 'make-lws-reactor-operation
+                            "reactor operation signal pool is exhausted"))
+                  (%make-reactor-operation-state
+                   connection-id stream-id generation signal
+                   (make-poll-target (lws-signal-fd signal) '(read))
+                   deadline-ms retain? 'pending '() #f #f #f))]
               [operation #f])
           (set! operation
                 (make-net-operation
                  kind
                  (lambda ()
+                   (lws-signal-drain signal)
                    (with-mutex (lws-reactor-mutex reactor)
                      (case (reactor-operation-state-lifecycle state)
                        [(pending)
@@ -545,16 +584,36 @@ The `make-lws-reactor-operation` procedure registers a pending operation with `r
                     reactor 'cancel
                     (list connection-id stream-id generation 0)))
                  (lambda ()
+                   (lws-signal-close signal)
                    (with-mutex (lws-reactor-mutex reactor)
                      (release-operation-waiters-locked! reactor state)
-                     (lws-reactor-operations-set!
-                      reactor
-                      (remp (lambda (entry) (eq? operation (car entry)))
-                            (lws-reactor-operations reactor)))))))
+                     (unless (reactor-operation-state-retain? state)
+                       (lws-reactor-operations-set!
+                        reactor
+                        (remp (lambda (entry) (eq? operation (car entry)))
+                              (lws-reactor-operations reactor))))))))
           (with-mutex (lws-reactor-mutex reactor)
             (lws-reactor-operations-set!
              reactor (cons (cons operation state) (lws-reactor-operations reactor))))
-          operation))))
+          operation))]))
+
+  #|proc:lws-reactor-release-operation!
+The `lws-reactor-release-operation!` procedure removes retained `operation` routing state from
+`reactor`. The operation must be terminal. The return value is unspecified.
+|#
+  (define-who lws-reactor-release-operation!
+    (lambda (reactor operation)
+      (pcheck ([reactor? reactor] [net-operation? operation])
+        (with-mutex (lws-reactor-mutex reactor)
+          (let ([state (find-operation-state-locked reactor operation)])
+            (when state
+              (when (eq? 'pending (reactor-operation-state-lifecycle state))
+                (errorf who "cannot release a pending operation"))
+              (release-operation-waiters-locked! reactor state)
+              (lws-reactor-operations-set!
+               reactor
+               (remp (lambda (entry) (eq? operation (car entry)))
+                     (lws-reactor-operations reactor)))))))))
 
   #|proc:lws-reactor-operation-events
 The `lws-reactor-operation-events` procedure returns copied events received for `operation`.
@@ -644,12 +703,19 @@ The identity and generation parameters route events. Address, port, TLS, method,
 parameters configure the LWS request. It returns whether the bounded command pool accepted it.
 |#
   (define lws-reactor-client-start!
-    (lambda (reactor connection-id stream-id generation address port tls? method host path)
-      (pcheck ([reactor? reactor] [natural? connection-id stream-id generation]
-               [string? address method host path] [fixnum? port] [boolean? tls?])
-        (enqueue-command!
-         reactor 'start
-         (list connection-id stream-id generation address port tls? method host path)))))
+    (case-lambda
+      [(reactor connection-id stream-id generation address port tls? method host path)
+       (lws-reactor-client-start! reactor connection-id stream-id generation address port tls?
+                                   method host path #vu8() #vu8() #f)]
+      [(reactor connection-id stream-id generation address port tls? method host path headers
+                initial-body has-body?)
+       (pcheck ([reactor? reactor] [natural? connection-id stream-id generation]
+                [string? address method host path] [fixnum? port] [boolean? tls?]
+                [bytevector? headers initial-body] [boolean? has-body?])
+         (enqueue-command!
+          reactor 'start
+          (list connection-id stream-id generation address port tls? method host path headers
+                initial-body has-body?)))]))
 
   #|proc:lws-reactor-submit-body!
 The `lws-reactor-submit-body!` procedure queues one request body `payload` on `reactor`.

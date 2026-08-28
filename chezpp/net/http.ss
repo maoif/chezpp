@@ -84,6 +84,7 @@
           (chezpp net ffi)
           (chezpp net private)
           (chezpp net tls)
+          (chezpp net lws http1)
           (chezpp net http2)
           (chezpp optional-library))
 
@@ -242,6 +243,8 @@ pool limits, and version. `http-close` cancels work and releases every owned con
             (mutable http2-transport http-client-http2-transport
                      http-client-http2-transport-set!)
             (mutable pending http-client-pending http-client-pending-set!)
+            (mutable lws-http1-client http-client-lws-http1-client
+                     http-client-lws-http1-client-set!)
             (mutable closed? http-client-closed? http-client-closed?-set!)))
 
   (define-record-type (http2-client-transport %make-http2-client-transport
@@ -731,10 +734,10 @@ session or socket and ports once; later I/O raises an error.
                  (get) (http-response-trailers response) (http-response-version response))))
             response))))
 
-  (define http1-transfer/nonblocking
+  (define legacy-http1-transfer/nonblocking
     (case-lambda
       [(who client kind request finish)
-       (http1-transfer/nonblocking who client kind request finish #f)]
+       (legacy-http1-transfer/nonblocking who client kind request finish #f)]
       [(who client kind request finish response-sink)
       (ensure-client-open who client)
       (when (zero? (http-pool-policy-max-active (http-client-pool-policy client)))
@@ -1956,6 +1959,187 @@ session or socket and ports once; later I/O raises an error.
                             (http-body-sink-finish! response-sink)))))
                  operation))))))
 
+  (define ensure-lws-http1-client
+    (lambda (client)
+      (or (http-client-lws-http1-client client)
+          (let* ([proxy (http-client-proxy client)]
+                 [proxy-uri (and proxy (http-proxy-uri proxy))]
+                 [transport
+                  (make-lws-http1-client
+                   128 65536 128
+                   (if (http-client-tls-context client)
+                       (tls-context-native-handle (http-client-tls-context client))
+                       0)
+                   (if proxy-uri (uri-host proxy-uri) "")
+                   (if proxy-uri
+                       (default-port-for-uri 'ensure-lws-http1-client proxy-uri)
+                       0))])
+            (http-client-lws-http1-client-set! client transport)
+            transport))))
+
+  (define close-lws-http1-client!
+    (lambda (client)
+      (let ([transport (http-client-lws-http1-client client)])
+        (when transport
+          (lws-http1-client-close! transport)
+          (http-client-lws-http1-client-set! client #f)))))
+
+  (define make-lws-http1-request
+    (lambda (client request)
+      (let* ([uri (http-request-uri request)]
+             [tls? (string=? (uri-scheme uri) "https")]
+             [host (or (uri-host uri) "localhost")]
+             [port (default-port-for-uri 'make-lws-http1-request uri)]
+             [headers (http-request-headers request)]
+             [body (http-request-body request)]
+             [body-source
+              (cond
+               [(http-body-source? body)
+                (lambda (maximum-bytes) (http-body-source-read body maximum-bytes))]
+               [body
+                (let ([bytes (body->bytevector body)] [offset 0])
+                  (lambda (maximum-bytes)
+                    (if (= offset (bytevector-length bytes))
+                        (eof-object)
+                        (let* ([stop (min (bytevector-length bytes)
+                                          (+ offset maximum-bytes))]
+                               [part (bytevector-slice bytes offset stop)])
+                          (set! offset stop)
+                          part))))]
+               [else #f])])
+        (vector (http-request-method request)
+                host
+                port
+                tls?
+                (http-uri-target uri)
+                headers
+                body-source
+                #f))))
+
+  (define lws-http1-response
+    (lambda (request response)
+      (%make-http-response (vector-ref response 0)
+                           (vector-ref response 1)
+                           (vector-ref response 2)
+                           (normalize-response-body
+                            (vector-ref response 0)
+                            (http-request-method request)
+                            (vector-ref response 2)
+                            (vector-ref response 3))
+                           (vector-ref response 4)
+                           (vector-ref response 5))))
+
+  (define http1-transfer/nonblocking
+    (case-lambda
+      [(who client kind request finish)
+       (http1-transfer/nonblocking who client kind request finish #f)]
+      [(who client kind request finish response-sink)
+       (ensure-client-open who client)
+       (when (zero? (http-pool-policy-max-active (http-client-pool-policy client)))
+         (raise-net-error who 'http "HTTP client active connection limit is zero" client))
+       (ensure-no-pending-mismatch who client kind (request-key request))
+       (let ([pending (http-client-pending client)])
+         (if (and pending (eq? 'pending (net-operation-state pending)))
+             pending
+             (let ([current-request
+                    (request-with-compressed-body
+                     who (apply-request-auth who client request #f))]
+                   [redirects-left 5]
+                   [deadline-ms (timeout->deadline-ms (http-client-timeout-ms client))]
+                   [inner #f]
+                   [inner-released? #f]
+                   [operation #f])
+               (define release-inner!
+                 (lambda ()
+                   (when (and inner (not inner-released?)
+                              (not (eq? 'pending (net-operation-state inner))))
+                     (lws-http1-release-operation!
+                      (ensure-lws-http1-client client) inner)
+                     (set! inner-released? #t))))
+               (define start-request!
+                 (lambda ()
+                   (let* ([headers (merge-request-headers current-request client)]
+                          [prepared
+                           (make-http-request
+                            (http-request-method current-request)
+                            (http-request-uri current-request)
+                            headers
+                            (http-request-body current-request))])
+                     (set! current-request prepared)
+                     (set! inner
+                           (lws-http1-request/nonblocking
+                            (ensure-lws-http1-client client)
+                            (make-lws-http1-request client prepared)
+                            (and response-sink
+                                 (vector
+                                  (lambda (bytes start stop)
+                                    (http-body-sink-write!
+                                     response-sink bytes start stop))
+                                  (lambda ()
+                                    (http-body-sink-finish! response-sink)))))))))
+               (define advance
+                 (lambda ()
+                   (when (and deadline-ms (>= (current-time-ms) deadline-ms))
+                     (when (and inner (eq? 'pending (net-operation-state inner)))
+                       (net-operation-cancel! inner))
+                     (raise-http-timeout who "HTTP request timed out" current-request))
+                   (unless inner (start-request!))
+                   (when (eq? 'pending (net-operation-state inner))
+                     (net-operation-step! inner))
+                   (case (net-operation-state inner)
+                     [(pending)
+                     (net-operation-pending (net-operation-poll-targets inner) deadline-ms)]
+                     [(failed cancelled)
+                      (if (and (http-client-proxy client)
+                               (string=? "https"
+                                         (uri-scheme
+                                          (http-request-uri current-request))))
+                          (raise-net-error who 'http "HTTP proxy CONNECT failed"
+                                           current-request)
+                          (net-operation-failed (net-operation-condition inner)))]
+                     [(completed)
+                      (let* ([raw-response
+                              (lws-http1-response current-request
+                                                  (net-operation-result inner))]
+                             [response (decode-buffered-response who raw-response)])
+                        (store-response-cookies!
+                         client current-request (http-response-headers response))
+                        (let ([next-request
+                               (and (http-client-follow-redirects? client)
+                                    (> redirects-left 0)
+                                    (redirect-status? (http-response-status response))
+                                    (redirect-request current-request response))])
+                          (if next-request
+                              (begin
+                                (set! redirects-left (fx1- redirects-left))
+                                (set! current-request
+                                      (request-with-compressed-body
+                                       who
+                                       (apply-request-auth who client next-request response)))
+                                (release-inner!)
+                                (set! inner #f)
+                                (set! inner-released? #f)
+                                (net-operation-pending '() (current-time-ms)))
+                              (begin
+                                (release-inner!)
+                                (net-operation-completed (finish response))))))]
+                     [else (assert-unreachable)])))
+               (set! operation
+                     (make-net-operation
+                      kind
+                      (lambda ()
+                        (guard (failure [else (net-operation-failed failure)])
+                          (advance)))
+                      (lambda ()
+                        (when inner (net-operation-cancel! inner))
+                        ;; Cancellation invalidates the native stream and its reactor
+                        ;; context; force a fresh context for the next request.
+                        (close-lws-http1-client! client))
+                      (lambda ()
+                        (http-client-pending-set! client #f))))
+               (http-client-pending-set! client operation)
+               operation)))]))
+
   (define http-transfer/nonblocking
     (case-lambda
       [(who client kind request finish)
@@ -1972,11 +2156,32 @@ session or socket and ports once; later I/O raises an error.
                              (eq? 'auto (http-client-version client))
                              (optional-library-available?
                               (optional-library-info 'nghttp2)))))])
-         (or (and try-h2?
-                  (http2-transfer/nonblocking
-                   who client kind request finish response-sink))
+         (let ([http2-operation
+                (and try-h2?
+                     (http2-transfer/nonblocking
+                      who client kind request finish response-sink))])
+           (cond
+           [http2-operation http2-operation]
+            [(and (http-client-proxy client) (not secure?))
+             (legacy-http1-transfer/nonblocking
+              who client kind request finish response-sink)]
+            [(or (http-body-source? (http-request-body request))
+                 (http-header-ref (http-request-headers request)
+                                  "Content-Encoding" #f))
+             (legacy-http1-transfer/nonblocking
+              who client kind request finish response-sink)]
+            [(http-client-cached-connection client)
+             (legacy-http1-transfer/nonblocking
+              who client kind request finish response-sink)]
+            ;; Keep automatic negotiation on the established HTTP/1 path until the
+            ;; LWS transport has observed the response framing and decoding policy.
+            ;; Explicit `http/1.1` requests use the LWS implementation below.
+            [(eq? 'http/1.1 (http-client-version client))
              (http1-transfer/nonblocking
-              who client kind request finish response-sink)))]))
+              who client kind request finish response-sink)]
+            [else
+             (legacy-http1-transfer/nonblocking
+              who client kind request finish response-sink)])))]))
 
   (define request-key
     (lambda (request)
@@ -3796,6 +4001,7 @@ The return value is `client`.
             (close-http2-client-transport! transport)
             (http-client-http2-origin-set! client #f)
             (http-client-http2-transport-set! client #f)))
+        (close-lws-http1-client! client)
         (http-client-proxy-set-internal! client proxy)
         client)))
 
@@ -3806,6 +4012,7 @@ The return value is `client`.
   (define http-client-pool-policy-set!
     (lambda (client policy)
       (pcheck ([http-client? client] [http-pool-policy? policy])
+        (close-lws-http1-client! client)
         (http-client-pool-policy-set-internal! client policy)
         client)))
 
@@ -3827,6 +4034,7 @@ The return value is `client`.
             (close-http2-client-transport! transport)
             (http-client-http2-origin-set! client #f)
             (http-client-http2-transport-set! client #f)))
+        (close-lws-http1-client! client)
         (http-client-version-set-internal! client version)
         client)))
 
@@ -3839,12 +4047,12 @@ requests.
       [()
        (%make-http-client '() #f http-default-timeout-ms #f #f #f #f
                           (%make-http-pool-policy 1 1 30000) 'auto
-                          #f #f #f #f #f #f)]
+                          #f #f #f #f #f #f #f)]
       [(tls-context)
        (pcheck ([tls-context? tls-context])
          (%make-http-client '() #f http-default-timeout-ms tls-context #f #f #f
                             (%make-http-pool-policy 1 1 30000) 'auto
-                            #f #f #f #f #f #f))]))
+                            #f #f #f #f #f #f #f))]))
 
   #|proc:http-close
 The `http-close` procedure marks an HTTP client as closed.
@@ -3864,6 +4072,7 @@ The `http-close` procedure marks an HTTP client as closed.
                   (close-http2-client-transport! transport)
                   (http-client-http2-origin-set! client #f)
                   (http-client-http2-transport-set! client #f)))
+              (close-lws-http1-client! client)
               (http-client-closed?-set! client #t)
               client)))
 

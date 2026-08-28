@@ -10,6 +10,7 @@
 typedef struct {
   SSL_CTX *ctx;
   int mode;
+  int verify_peer;
   unsigned char *alpn;
   unsigned int alpn_len;
   SSL_SESSION *imported_session;
@@ -339,6 +340,11 @@ void *chezpp_net_tls_context_native(uptr handle) {
   return ctx == NULL ? NULL : ctx->ctx;
 }
 
+int chezpp_net_tls_context_verifies_peer(uptr handle) {
+  chezpp_tls_context *ctx = ctx_from_handle(handle);
+  return ctx != NULL && ctx->verify_peer;
+}
+
 int chezpp_net_tls_context_copy_credentials(uptr handle, void *destination) {
   chezpp_tls_context *source = ctx_from_handle(handle);
   SSL_CTX *target = (SSL_CTX *)destination;
@@ -379,6 +385,7 @@ uptr chezpp_net_tls_context_create(int mode) {
   }
   wrapper->ctx = ctx;
   wrapper->mode = mode;
+  wrapper->verify_peer = mode == 0;
   return (uptr)wrapper;
 }
 
@@ -531,6 +538,7 @@ ptr chezpp_net_tls_context_set_verify(uptr handle, int verify_mode) {
   chezpp_tls_context *ctx = ctx_from_handle(handle);
   if (ctx == NULL || ctx->ctx == NULL) return make_error_status_message("invalid TLS context");
   chezpp_openssl_SSL_CTX_set_verify(ctx->ctx, verify_mode ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, NULL);
+  ctx->verify_peer = verify_mode != 0;
   return Sboolean(verify_mode);
 }
 

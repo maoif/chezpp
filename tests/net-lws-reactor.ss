@@ -226,6 +226,26 @@
               (equal? (vector-ref (net-operation-result second) 6) #vu8(2))
               (= (length notifications) 2)))))
 
+(mat net-lws-reactor-completed-operation-releases-signal
+     ;; Completed operations must return their signal to the bounded native pool.
+     (let ([reactor (make-lws-reactor 2 16 4)])
+       (lws-reactor-start! reactor)
+       (let loop ([identity 1])
+         (if (> identity 4)
+             (begin
+               (lws-reactor-shutdown! reactor)
+               #t)
+             (let ([operation
+                    (make-lws-reactor-operation reactor 'signal identity identity 1 #f)])
+               (lws-reactor-inject-event! reactor 'complete identity identity 1 0 #vu8())
+               (and (wait-until
+                     (lambda ()
+                       (pair? (lws-reactor-operation-events reactor operation))))
+                    (begin
+                      (net-operation-step! operation)
+                      (eq? 'completed (net-operation-state operation)))
+                    (loop (+ identity 1))))))))
+
 (mat net-lws-reactor-cancellation
      (let* ([reactor (make-lws-reactor 16 16 8)]
             [operation (make-lws-reactor-operation reactor 'cancel 2 21 3 #f)]
