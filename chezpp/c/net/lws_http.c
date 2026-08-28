@@ -57,6 +57,7 @@ typedef int (*lws_finalize_write_http_header_fn)(struct lws *, unsigned char *,
                                                   unsigned char **,
                                                   unsigned char *);
 typedef int (*lws_http_transaction_completed_fn)(struct lws *);
+typedef void (*lws_set_timeout_fn)(struct lws *, enum pending_timeout, int);
 
 static lws_get_context_fn dynamic_get_context;
 static lws_context_user_fn dynamic_context_user;
@@ -818,6 +819,13 @@ static int lws_http_callback(struct lws *wsi,
       headers_length = copy_response_headers(context, wsi);
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_CONNECTED,
                                   status, NULL, 0);
+      if (stream->h2 && !stream->h2_ready) {
+        stream->h2_ready = 1;
+        (void)callback_queue_stream(context, stream,
+                                    LWS_HTTP_EVENT_CONNECTED,
+                                    CHEZPP_LWS_HTTP_STATUS_H2_READY,
+                                    NULL, 0);
+      }
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS,
                                   status, context->drain_buffer,
                                   headers_length);
@@ -1148,7 +1156,7 @@ uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
   information.protocols = context->protocols;
   information.user = context;
   information.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
-  information.alpn = "http/1.1";
+  information.alpn = "h2,http/1.1";
   if (proxy_address != NULL && proxy_address[0] != '\0') {
     information.http_proxy_address = proxy_address;
     information.http_proxy_port = (unsigned int)proxy_port;
@@ -1425,7 +1433,8 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
                                  uint64_t generation, const char *address,
                                  int port, int tls, const char *method,
                                  const char *host, const char *path,
-                                 ptr headers, ptr initial_body, int has_body) {
+                                 ptr headers, ptr initial_body, int has_body,
+                                 const char *alpn) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
   lws_client_connect_via_info_fn connect_fn;
@@ -1460,12 +1469,18 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   stream->outbound_final =
       initial_body_is_complete(stream, initial_body_length);
   stream->has_request_body = has_body != 0;
+  stream->h2 = alpn != NULL && strcmp(alpn, "h2") == 0;
   pthread_mutex_unlock(&context->lock);
   memset(&information, 0, sizeof(information));
   information.context = context->lws;
   information.address = stream->address;
   information.port = port;
   information.ssl_connection = LCCSCF_HTTP_NO_FOLLOW_REDIRECT | LCCSCF_PIPELINE;
+  if (alpn != NULL && strcmp(alpn, "h2") == 0) {
+    information.ssl_connection |= LCCSCF_H2_QUIRK_OVERFLOWS_TXCR |
+                                  LCCSCF_H2_QUIRK_NGHTTP2_END_STREAM;
+    if (!tls) information.ssl_connection |= LCCSCF_H2_PRIOR_KNOWLEDGE;
+  }
   if (tls) {
     information.ssl_connection |= LCCSCF_USE_SSL;
     if (!context->tls_verify_peer)
@@ -1480,7 +1495,7 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   information.method = stream->method;
   information.protocol = context->protocols[0].name;
   information.local_protocol_name = context->protocols[0].name;
-  information.alpn = "http/1.1";
+  information.alpn = alpn != NULL && alpn[0] != '\0' ? alpn : "http/1.1";
   information.opaque_user_data = stream;
   information.pwsi = &stream->wsi;
   connect_fn = (lws_client_connect_via_info_fn)lws_function(
@@ -1497,6 +1512,11 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   pthread_mutex_lock(&context->lock);
   stream->connection->wsi = stream->wsi;
   pthread_mutex_unlock(&context->lock);
+  if (stream->h2) {
+    lws_callback_on_writable_fn writable_fn =
+        (lws_callback_on_writable_fn)lws_function("lws_callback_on_writable");
+    if (writable_fn != NULL) (void)writable_fn(stream->wsi);
+  }
   return 1;
 }
 
@@ -1619,6 +1639,8 @@ int chezpp_lws_http_stream_cancel(uintptr_t context_handle,
                                   uint64_t generation, int status) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
+  lws_set_timeout_fn set_timeout_fn;
+  struct lws *wsi;
   int result;
   if (context == NULL) return 0;
   pthread_mutex_lock(&context->lock);
@@ -1630,7 +1652,13 @@ int chezpp_lws_http_stream_cancel(uintptr_t context_handle,
   result = queue_event_locked(context, LWS_HTTP_EVENT_RESET, connection_id,
                               stream_id, generation, status, NULL, 0);
   stream->terminal = 1;
+  wsi = stream->wsi;
   pthread_mutex_unlock(&context->lock);
+  /* LWS owns the H2 stream WSI and emits RST_STREAM while closing it. */
+  set_timeout_fn = (lws_set_timeout_fn)lws_function("lws_set_timeout");
+  if (wsi != NULL && set_timeout_fn != NULL)
+    set_timeout_fn(wsi, PENDING_TIMEOUT_AWAITING_SERVER_RESPONSE,
+                   LWS_TO_KILL_ASYNC);
   (void)chezpp_lws_http_context_wakeup(context_handle);
   return result;
 }

@@ -276,6 +276,7 @@ static void free_headers(nghttp2_nv *headers, size_t count) {
 
 ptr chezpp_net_http2_open(int server) {
   h2_session *state;
+  nghttp2_settings_entry setting;
   nghttp2_option *option = NULL;
   if (!load_h2_symbols()) return h2_error("nghttp2 adapter symbols are unavailable");
   state = (h2_session *)calloc(1, sizeof(*state));
@@ -297,7 +298,9 @@ ptr chezpp_net_http2_open(int server) {
   }
   p_option_del(option);
   p_set_user_data(state->session, state);
-  if (p_submit_settings(state->session, NGHTTP2_FLAG_NONE, NULL, 0) != 0) {
+  setting.settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
+  setting.value = 10;
+  if (p_submit_settings(state->session, NGHTTP2_FLAG_NONE, &setting, 1) != 0) {
     p_session_del(state->session);
     p_callbacks_del(state->callbacks);
     free(state);

@@ -26,6 +26,7 @@
             (immutable request lws-http1-state-request)
             (immutable response-sink lws-http1-state-response-sink)
             (immutable finish lws-http1-state-finish)
+            (immutable ready lws-http1-state-ready)
             (immutable connection-id lws-http1-state-connection-id)
             (immutable stream-id lws-http1-state-stream-id)
             (immutable generation lws-http1-state-generation)
@@ -165,7 +166,9 @@ The return value is an internal transport client.
                    (lws-http1-state-headers state)
                    body
                    (lws-http1-state-trailers state)
-                   'h1))
+                   (if (= (vector-length (lws-http1-state-request state)) 10)
+                       (string->symbol (vector-ref (lws-http1-state-request state) 8))
+                       'h1)))
           (lws-http1-state-response-finished?-set! state #t)))))
 
   (define process-events!
@@ -187,6 +190,9 @@ The return value is an internal transport client.
                     (begin
                       (lws-http1-state-status-set! state (vector-ref event 5))
                       (decode-event-headers state payload)))]
+               [(and (eq? tag 'connected) (= (vector-ref event 5) -2000))
+                (let ([ready (lws-http1-state-ready state)])
+                  (when ready (ready)))]
                [(eq? tag 'writable)
                 (let ([source (lws-http1-state-body-source state)])
                   (when (and source (not (lws-http1-state-body-sent? state)))
@@ -222,17 +228,22 @@ The return value is an internal transport client.
 
   #|proc:lws-http1-request/nonblocking
 The `lws-http1-request/nonblocking` procedure starts normalized request vector `request` on
-`client`. `response-sink` is `#f` or a write/finish procedure vector. The return value is a
-`net-operation` completing with a normalized response vector.
+`client`. `response-sink` is `#f` or a write/finish procedure vector. The optional `ready`
+procedure is called when an HTTP/2 connection has completed stream migration. The return value is
+a `net-operation` completing with a normalized response vector.
 |#
   (define-who lws-http1-request/nonblocking
-    (lambda (client request response-sink)
+    (case-lambda
+      [(client request response-sink)
+       (lws-http1-request/nonblocking client request response-sink #f)]
+      [(client request response-sink ready)
       (pcheck ([lws-http1-client? client] [vector? request]
-               [(lambda (value) (or (not value) (vector? value))) response-sink])
+               [(lambda (value) (or (not value) (vector? value))) response-sink]
+               [(lambda (value) (or (not value) (procedure? value))) ready])
         (when (lws-http1-client-closed? client)
           (raise-net-error who 'http "HTTP client transport is closed" client))
-        (unless (= (vector-length request) 8)
-          (errorf who "expected an eight-element normalized HTTP/1 request vector"))
+        (unless (or (= (vector-length request) 8) (= (vector-length request) 10))
+          (errorf who "expected an eight- or ten-element normalized HTTP request vector"))
         (let* ([method (vector-ref request 0)]
                [host (vector-ref request 1)]
                [port (vector-ref request 2)]
@@ -240,10 +251,15 @@ The `lws-http1-request/nonblocking` procedure starts normalized request vector `
                [path (vector-ref request 4)]
                [headers (vector-ref request 5)]
                [body-source (vector-ref request 6)]
+               [alpn (if (= (vector-length request) 10)
+                         (vector-ref request 8)
+                         "http/1.1")]
                [connection-id (fx1+ (lws-http1-client-next-id client))]
                [stream-id connection-id]
                [generation (fx1+ next-generation)]
-               [deadline-ms (+ (current-time-ms) 30000)]
+               [deadline-ms (if (= (vector-length request) 10)
+                                (vector-ref request 9)
+                                (+ (current-time-ms) 30000))]
                [reactor (lws-http1-client-reactor client)]
                [inner (make-lws-reactor-operation reactor 'http1 connection-id stream-id
                                                    generation deadline-ms #t)]
@@ -255,12 +271,13 @@ The `lws-http1-request/nonblocking` procedure starts normalized request vector `
                 (%make-lws-http1-state client inner request
                                         (and response-sink (vector-ref response-sink 0))
                                         (if response-sink (vector-ref response-sink 1) void)
+                                        ready
                                         connection-id stream-id generation deadline-ms
                                         0 '() #f "" '() 0 '() body-source #f #f #f))
           (unless (lws-reactor-client-start!
                    reactor connection-id stream-id generation host port tls?
                    method host path (header-payload headers)
-                   #vu8() (and body-source #t))
+                   #vu8() (and body-source #t) alpn)
             (raise-net-error who 'http "libwebsockets rejected HTTP request" request))
           (net-operation-step! inner)
           (set! operation
@@ -286,7 +303,7 @@ The `lws-http1-request/nonblocking` procedure starts normalized request vector `
                    (net-operation-cancel! inner))
                  (lambda ()
                    (lws-reactor-release-operation! reactor inner))))
-          operation))))
+          operation))]))
 
   #|proc:lws-http1-release-operation!
 The `lws-http1-release-operation!` procedure releases terminal operation routing state owned by

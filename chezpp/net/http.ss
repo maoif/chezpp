@@ -85,6 +85,7 @@
           (chezpp net private)
           (chezpp net tls)
           (chezpp net lws http1)
+          (chezpp net lws http2)
           (chezpp net http2)
           (chezpp optional-library))
 
@@ -245,6 +246,8 @@ pool limits, and version. `http-close` cancels work and releases every owned con
             (mutable pending http-client-pending http-client-pending-set!)
             (mutable lws-http1-client http-client-lws-http1-client
                      http-client-lws-http1-client-set!)
+            (mutable lws-http2-client http-client-lws-http2-client
+                     http-client-lws-http2-client-set!)
             (mutable closed? http-client-closed? http-client-closed?-set!)))
 
   (define-record-type (http2-client-transport %make-http2-client-transport
@@ -1984,6 +1987,25 @@ session or socket and ports once; later I/O raises an error.
           (lws-http1-client-close! transport)
           (http-client-lws-http1-client-set! client #f)))))
 
+  (define ensure-lws-http2-client
+    (lambda (client)
+      (or (http-client-lws-http2-client client)
+          (let ([transport
+                 (make-lws-http2-client
+                  128 65536 128
+                  (if (http-client-tls-context client)
+                      (tls-context-native-handle (http-client-tls-context client))
+                      0))])
+            (http-client-lws-http2-client-set! client transport)
+            transport))))
+
+  (define close-lws-http2-client!
+    (lambda (client)
+      (let ([transport (http-client-lws-http2-client client)])
+        (when transport
+          (lws-http2-client-close! transport)
+          (http-client-lws-http2-client-set! client #f)))))
+
   (define make-lws-http1-request
     (lambda (client request)
       (let* ([uri (http-request-uri request)]
@@ -2027,7 +2049,65 @@ session or socket and ports once; later I/O raises an error.
                             (vector-ref response 2)
                             (vector-ref response 3))
                            (vector-ref response 4)
-                           (vector-ref response 5))))
+                            (vector-ref response 5))))
+
+  (define lws-http2-transfer/nonblocking
+    (lambda (who client kind request finish response-sink)
+      (ensure-client-open who client)
+      (let* ([prepared
+              (make-http-request
+               (http-request-method request)
+               (http-request-uri request)
+               (merge-request-headers request client)
+               (http-request-body request))]
+             [base (make-lws-http1-request client prepared)]
+             [normalized (make-vector 10)]
+             [transport (ensure-lws-http2-client client)]
+             [inner #f])
+        (do ([index 0 (fx1+ index)])
+            ((fx= index (vector-length base)))
+          (vector-set! normalized index (vector-ref base index)))
+        (vector-set! normalized 8 "h2")
+        (vector-set! normalized 9
+                     (timeout->deadline-ms (http-client-timeout-ms client)))
+        (set! inner
+              (lws-http2-request/nonblocking
+               transport normalized
+               (and response-sink
+                    (vector
+                     (lambda (bytes start stop)
+                       (http-body-sink-write! response-sink bytes start stop))
+                     (lambda () (http-body-sink-finish! response-sink))))))
+        (make-net-operation
+         kind
+         (lambda ()
+           (when (eq? 'pending (net-operation-state inner))
+             (net-operation-step! inner))
+           (when (and (eq? 'pending (net-operation-state inner))
+                      (fxzero? (net-operation-remaining-timeout-ms inner)))
+             (net-operation-cancel! inner)
+             (raise-http-timeout who "HTTP/2 stream timed out" prepared))
+           (case (net-operation-state inner)
+             [(pending)
+              (net-operation-pending (net-operation-poll-targets inner)
+                                     (net-operation-deadline-ms inner))]
+             [(completed)
+              (let* ([response
+                      (decode-buffered-response
+                       who
+                       (lws-http1-response prepared (net-operation-result inner)))])
+                (store-response-cookies! client prepared
+                                          (http-response-headers response))
+                (net-operation-completed (finish response)))]
+             [else
+              (net-operation-failed (net-operation-condition inner))]))
+         (lambda () (net-operation-cancel! inner))
+         (lambda ()
+           (when (eq? 'pending (net-operation-state inner))
+             (net-operation-cancel! inner))
+           (when response-sink
+             (http-body-sink-finish! response-sink))
+           (lws-http2-release-operation! transport inner))))))
 
   (define http1-transfer/nonblocking
     (case-lambda
@@ -2158,8 +2238,11 @@ session or socket and ports once; later I/O raises an error.
                               (optional-library-info 'nghttp2)))))])
          (let ([http2-operation
                 (and try-h2?
-                     (http2-transfer/nonblocking
-                      who client kind request finish response-sink))])
+                     (if (eq? 'h2 (http-client-version client))
+                         (lws-http2-transfer/nonblocking
+                          who client kind request finish response-sink)
+                         (http2-transfer/nonblocking
+                          who client kind request finish response-sink)))])
            (cond
            [http2-operation http2-operation]
             [(and (http-client-proxy client) (not secure?))
@@ -4002,6 +4085,7 @@ The return value is `client`.
             (http-client-http2-origin-set! client #f)
             (http-client-http2-transport-set! client #f)))
         (close-lws-http1-client! client)
+        (close-lws-http2-client! client)
         (http-client-proxy-set-internal! client proxy)
         client)))
 
@@ -4013,6 +4097,7 @@ The return value is `client`.
     (lambda (client policy)
       (pcheck ([http-client? client] [http-pool-policy? policy])
         (close-lws-http1-client! client)
+        (close-lws-http2-client! client)
         (http-client-pool-policy-set-internal! client policy)
         client)))
 
@@ -4035,6 +4120,7 @@ The return value is `client`.
             (http-client-http2-origin-set! client #f)
             (http-client-http2-transport-set! client #f)))
         (close-lws-http1-client! client)
+        (close-lws-http2-client! client)
         (http-client-version-set-internal! client version)
         client)))
 
@@ -4047,12 +4133,12 @@ requests.
       [()
        (%make-http-client '() #f http-default-timeout-ms #f #f #f #f
                           (%make-http-pool-policy 1 1 30000) 'auto
-                          #f #f #f #f #f #f #f)]
+                          #f #f #f #f #f #f #f #f)]
       [(tls-context)
        (pcheck ([tls-context? tls-context])
          (%make-http-client '() #f http-default-timeout-ms tls-context #f #f #f
                             (%make-http-pool-policy 1 1 30000) 'auto
-                            #f #f #f #f #f #f #f))]))
+                            #f #f #f #f #f #f #f #f))]))
 
   #|proc:http-close
 The `http-close` procedure marks an HTTP client as closed.
@@ -4073,6 +4159,7 @@ The `http-close` procedure marks an HTTP client as closed.
                   (http-client-http2-origin-set! client #f)
                   (http-client-http2-transport-set! client #f)))
               (close-lws-http1-client! client)
+              (close-lws-http2-client! client)
               (http-client-closed?-set! client #t)
               client)))
 

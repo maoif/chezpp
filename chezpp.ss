@@ -6,6 +6,7 @@
           (chezpp net lws ffi)
           (chezpp net lws reactor)
           (chezpp net lws http1)
+          (chezpp net lws http2)
           (chezpp protobuf))
 
   (export (import (chezpp chez)

@@ -74,7 +74,7 @@
   (define ffi-lws-client-start
     (foreign-procedure "chezpp_lws_http_client_start"
                        (uptr unsigned-64 unsigned-64 unsigned-64 string int int
-                             string string string scheme-object scheme-object int)
+                             string string string scheme-object scheme-object int string)
                        int))
   (define ffi-lws-client-body-submit
     (foreign-procedure "chezpp_lws_http_client_body_submit"
@@ -388,26 +388,32 @@ The `lws-signal-close` procedure returns `signal` to its context-owned pool.
   #|proc:lws-client-start
 The `lws-client-start` procedure starts one HTTP stream in `context`. `connection-id`,
 `stream-id`, and `generation` identify its lease. `address`, `port`, and `tls?` select the peer.
-`method`, `host`, and `path` form the request. It returns whether LWS accepted the start.
+`method`, `host`, and `path` form the request. `alpn` selects the required HTTP protocol.
+It returns whether LWS accepted the start.
 |#
   (define-who lws-client-start
     (case-lambda
       [(context connection-id stream-id generation address port tls? method host path)
        (lws-client-start context connection-id stream-id generation address port tls? method host
-                         path #vu8() #vu8() #f)]
+                         path #vu8() #vu8() #f "http/1.1")]
       [(context connection-id stream-id generation address port tls? method host path headers
                 initial-body has-body?)
+       (lws-client-start context connection-id stream-id generation address port tls? method host
+                         path headers initial-body has-body? "http/1.1")]
+      [(context connection-id stream-id generation address port tls? method host path headers
+                initial-body has-body? alpn)
        (pcheck ([lws-context? context]
                 [natural? connection-id stream-id generation]
                 [string? address method host path]
                 [port-number? port]
                 [boolean? tls?]
                 [bytevector? headers initial-body]
-                [boolean? has-body?])
+                [boolean? has-body?]
+                [string? alpn])
          (ffi-true?
           (ffi-lws-client-start context connection-id stream-id generation address port
                                 (if tls? 1 0) method host path headers
-                                initial-body (if has-body? 1 0))))]))
+                                initial-body (if has-body? 1 0) alpn)))]))
 
   #|proc:lws-client-body-submit
 The `lws-client-body-submit` procedure queues copied `payload` bytes for the identified stream.
@@ -456,7 +462,7 @@ The `lws-server-response-submit` procedure queues `payload` for an identified se
                                          payload (if final? 1 0))))))
 
   #|proc:lws-stream-cancel
-The `lws-stream-cancel` procedure marks the identified stream terminal and queues a reset event.
+The `lws-stream-cancel` procedure resets the identified native stream and queues a reset event.
 `status` supplies its cancellation metadata. It returns whether cancellation won the stream race.
 |#
   (define-who lws-stream-cancel

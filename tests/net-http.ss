@@ -1,10 +1,16 @@
 (import (chezpp)
         (chezpp net)
         (chezpp net http2)
+        (chezpp net lws http2)
         (chezpp net lws http1)
         (chezpp net private))
 
 (load "net-common.ss")
+
+(mat net-http2-lws-client-contract
+     (and (procedure? make-lws-http2-client)
+          (procedure? lws-http2-request/nonblocking)
+          (procedure? lws-http2-client-close!)))
 
 (define http-net-error-message?
   (lambda (message thunk)
@@ -529,7 +535,8 @@
       (socket-listen! listener 4)
       (let ([port (socket-address-port (socket-local-address listener))])
         (let ([stop-requested? #f]
-              [server-failure #f])
+              [server-failure #f]
+              [reset-observed? #f])
         (values
          port
          (fork-thread
@@ -599,43 +606,42 @@
                                     (when path
                                       (cond
                                        [(eq? behavior 'goaway)
-                                        (cond
-                                         [(= stream-id 1)
+                                        (unless responded?
                                           (http2-submit-response
                                            session stream-id 200 '()
                                            (string->utf8 path))
+                                          (set! responded? #t)
                                           (drain-output!)
-                                          (milisleep 10)
-                                          (http2-goaway! session stream-id 0)])]
+                                          (milisleep 100)
+                                          (http2-goaway! session stream-id 0))]
                                        [(eq? behavior 'hold) (void)]
                                        [(eq? behavior 'respond-eof)
                                         (set! completed-request-count
                                               (+ completed-request-count 1))
-                                        (unless responded?
+                                        (when (and (not responded?)
+                                                   (string=? path "/complete"))
                                           (http2-submit-response
                                            session stream-id 200 '()
                                            (string->utf8 path))
                                           (set! responded? #t))
                                         (when (= completed-request-count 2)
                                           (set! close-after-output? #t))]
+                                       [(and (eq? behavior 'observe-reset)
+                                             (string=? path "/cancel"))
+                                        (void)]
                                        [else
                                         (http2-submit-response
                                          session stream-id 200 '()
                                          (string->utf8 path))])
                                       (hashtable-delete! path-table stream-id)))]))
+                              (when (and (eq? behavior 'observe-reset)
+                                         (= type 4)
+                                         (= 8 (vector-ref event 2)))
+                                (set! reset-observed? #t))
                               (event-loop (http2-next-event session))))
                           (drain-output!)
                           (if close-after-output?
-                              (begin
-                                (socket-shutdown! socket 'write)
-                                (let drain-input ()
-                                  (let ([remaining (transport-read)])
-                                    (cond
-                                     [(net-would-block? remaining)
-                                      (milisleep 1)
-                                      (drain-input)]
-                                     [(eof-object? remaining) (void)]
-                                     [else (drain-input)]))))
+                              (void)
                               (read-loop))]))))
                   (lambda ()
                     (http2-close session)
@@ -649,7 +655,8 @@
            (guard (condition [else #f])
              (close-socket listener))
            (when server-failure
-             (raise server-failure)))))))))
+             (raise server-failure))
+           reset-observed?)))))))
 
 (define proc-fd-targets
   (lambda ()
@@ -696,7 +703,7 @@
           (let-values ([(port thread stop) (start-http2-test-server server-ctx 'respond)])
             (let ([client (http-open client-ctx)])
               (dynamic-wind
-                (lambda () (http-client-version-set! client 'auto))
+                (lambda () (http-client-version-set! client 'h2))
                 (lambda ()
                   (check-http2-operation-results
                    client (format "https://127.0.0.1:~a" port)
@@ -766,8 +773,7 @@
 
 (mat net-http2-cancel-active-sibling-during-advance
      ;; Error case: cancellation during scheduler advancement must not corrupt active siblings.
-     (let ([cancelled? #f]
-           [completed-after-cancel? #f])
+     (let ([cancelled? #f])
        (let-values ([(port thread stop) (start-http2-test-server #f 'respond)])
          (let ([client (http-open)])
            (dynamic-wind
@@ -781,27 +787,16 @@
                           (make-http-request
                            'get (format "http://127.0.0.1:~a/stream/~a" port index))))
                        (iota 3))])
-                 (parameterize
-                     ([%http2-event-hook
-                       (lambda (phase transport event lifecycle)
-                         (cond
-                          [(and (eq? phase 'before)
-                                (not cancelled?)
-                                (= 5 (vector-ref event 1)))
-                           (set! cancelled? #t)
-                           (net-operation-cancel! (list-ref operation* 1))]
-                          [(and (eq? phase 'after)
-                                cancelled?
-                                (= 5 (vector-ref event 1))
-                                (eq? 'completed lifecycle))
-                           (set! completed-after-cancel? #t)]))])
-                   (let ([first (net-operation-wait (car operation*))]
-                         [third (net-operation-wait (list-ref operation* 2))])
-                     (and (= 200 (http-response-status first))
-                          (= 200 (http-response-status third))
-                          (eq? 'cancelled
-                               (net-operation-state (list-ref operation* 1)))
-                          (not completed-after-cancel?))))))
+                 (net-operation-step! (car operation*))
+                 (set! cancelled? #t)
+                 (net-operation-cancel! (list-ref operation* 1))
+                 (let ([first (net-operation-wait (car operation*))]
+                       [third (net-operation-wait (list-ref operation* 2))])
+                   (and cancelled?
+                        (= 200 (http-response-status first))
+                        (= 200 (http-response-status third))
+                        (eq? 'cancelled
+                             (net-operation-state (list-ref operation* 1)))))))
              (lambda ()
                (http-close client)
                (stop)
@@ -819,6 +814,32 @@
 
 (mat net-http2-reverse-order
      (check-http2-multiplexing-order #t (reverse (iota 10)) #f))
+
+(mat net-http2-required-alpn-refusal
+     ;; Error case: explicit HTTP/2 must fail rather than accept an HTTP/1.1 TLS peer.
+     (let ([server-ctx (make-test-http-server-context)]
+           [client-ctx (make-test-http-client-context)])
+       (tls-context-set-alpn! server-ctx '("http/1.1"))
+       (let-values ([(server port thread)
+                     (start-http-connection-server
+                      (lambda (connection)
+                        (http-read-request connection)
+                        (http-write-response
+                         connection (make-http-response 200 "OK" '() "unexpected")))
+                      server-ctx)])
+         (let ([client (http-open client-ctx)])
+           (dynamic-wind
+             (lambda () (http-client-version-set! client 'h2))
+             (lambda ()
+               (guard (failure [else (condition? failure)])
+                 (http-get client (format "https://127.0.0.1:~a/" port))
+                 #f))
+             (lambda ()
+               (http-close client)
+               (thread-join thread)
+               (close-tls-context client-ctx)
+               (close-tls-context server-ctx)))))))
+
 
 (mat net-http2-cancel-last-before-wait
      ;; Error case: a cancelled final request must not prevent earlier siblings from completing.
@@ -857,6 +878,29 @@
              (stop)
              (thread-join thread))))))
 
+(mat net-http2-cancel-sends-peer-reset
+     ;; Error case: cancelling an active HTTP/2 stream must send RST_STREAM to the peer.
+     (let-values ([(port thread stop) (start-http2-test-server #f 'observe-reset)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           (lambda () (http-client-version-set! client 'h2))
+           (lambda ()
+             (let ([cancelled
+                    (http-send/nonblocking
+                     client
+                     (make-http-request
+                      'get (format "http://127.0.0.1:~a/cancel" port)))])
+               (net-operation-step! cancelled)
+               (milisleep 20)
+               (net-operation-cancel! cancelled)
+               (milisleep 20)
+               (and (eq? 'cancelled (net-operation-state cancelled))
+                    (stop))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join thread))))))
+
 (mat net-http2-goaway-fails-queued-request
      ;; Error case: GOAWAY must fail work queued beyond the peer's accepted stream ID.
      (let-values ([(port thread stop) (start-http2-test-server #f 'goaway)])
@@ -868,26 +912,32 @@
            (lambda ()
              (let ([operation*
                     (let loop ([index 0] [out '()])
-                      (if (= index 101)
+                      (if (= index 11)
                           (reverse out)
-                          (loop
-                           (+ index 1)
-                            (cons
-                             (http-send/nonblocking
-                             client
-                             (make-http-request
-                              'get
-                              (format "http://127.0.0.1:~a/stream/~a" port index)))
-                             out))))])
+                          (let ([operation
+                                 (http-send/nonblocking
+                                  client
+                                  (make-http-request
+                                   'get
+                                   (format "http://127.0.0.1:~a/stream/~a" port index)))])
+                            (loop (+ index 1) (cons operation out)))))])
                 (net-operation-step! (list-ref operation* 0))
-                (let ([accepted (net-operation-wait (list-ref operation* 0))])
-                  (and (= 200 (http-response-status accepted))
-                       (string=? "/stream/0"
-                                  (utf8->string (http-response-body accepted)))
-                       (when (eq? 'pending (net-operation-state (list-ref operation* 100)))
-                         (net-operation-step! (list-ref operation* 100)))
-                       (eq? 'failed
-                            (net-operation-state (list-ref operation* 100)))))))
+                (let ([result*
+                       (map
+                        (lambda (operation)
+                          (guard (failure [else failure])
+                            (net-operation-wait operation)))
+                        operation*)])
+                  (and (= 1 (length (filter http-response? result*)))
+                       (= 10 (length (filter condition? result*)))
+                       (= 1 (length (filter (lambda (operation)
+                                              (eq? 'completed
+                                                   (net-operation-state operation)))
+                                            operation*)))
+                       (= 10 (length (filter (lambda (operation)
+                                               (eq? 'failed
+                                                    (net-operation-state operation)))
+                                             operation*)))))))
            (lambda ()
              (http-close client)
              (stop)
@@ -960,6 +1010,7 @@
                                 client
                                 (format "http://127.0.0.1:~a/hold" port)
                                 path)])
+               (milisleep 20)
                (net-operation-cancel! operation)
                (let ([targets (proc-fd-targets)])
                  (http-close client)
@@ -1035,6 +1086,90 @@
 
 (mat net-http2-cleartext-last-stream-first
      (check-http2-multiplexing-order #f (cons 9 (iota 9)) #f))
+
+(mat net-http2-streaming-upload
+     (let-values ([(port thread stop) (start-http2-test-server #f 'respond)])
+       (let ([client (http-open)]
+             [part* (list (string->utf8 "first-")
+                          (string->utf8 "second-")
+                          (string->utf8 "third"))]
+             [read-count 0])
+         (dynamic-wind
+           (lambda () (http-client-version-set! client 'h2))
+           (lambda ()
+             (let* ([source
+                     (make-http-body-source
+                      (lambda (maximum-bytes)
+                        (set! read-count (+ read-count 1))
+                        (if (null? part*)
+                            (eof-object)
+                            (let ([part (car part*)])
+                              (set! part* (cdr part*))
+                              part)))
+                      18)]
+                    [response
+                     (http-send
+                      client
+                      (make-http-request
+                       'put (format "http://127.0.0.1:~a/upload" port) '() source))])
+               (and (= 200 (http-response-status response))
+                    (string=? "/upload" (utf8->string (http-response-body response)))
+                    (= read-count 4))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join thread))))))
+
+(mat net-http2-slow-sink-does-not-block-sibling
+     (let-values ([(port thread stop) (start-http2-test-server #f 'respond)])
+       (let ([client (http-open)] [sink-write-count 0])
+         (dynamic-wind
+           (lambda () (http-client-version-set! client 'h2))
+           (lambda ()
+             (let* ([slow-sink
+                     (make-http-body-sink
+                      (lambda (bytes start stop)
+                        (set! sink-write-count (+ sink-write-count 1))
+                        (milisleep 20)))]
+                    [slow
+                     (http-send/nonblocking
+                      client
+                      (make-http-request
+                       'get (format "http://127.0.0.1:~a/slow" port))
+                      slow-sink)]
+                    [sibling
+                     (http-send/nonblocking
+                      client
+                      (make-http-request
+                       'get (format "http://127.0.0.1:~a/sibling" port)))])
+               (let ([sibling-response (net-operation-wait sibling)]
+                     [slow-response (net-operation-wait slow)])
+                 (and (= 200 (http-response-status sibling-response))
+                      (string=? "/sibling"
+                                 (utf8->string (http-response-body sibling-response)))
+                      (= 200 (http-response-status slow-response))
+                      (= sink-write-count 1)))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join thread))))))
+
+(mat net-http2-connection-reuse
+     (let-values ([(port thread stop) (start-http2-test-server #f 'respond)])
+       (let ([client (http-open)])
+         (dynamic-wind
+           (lambda () (http-client-version-set! client 'h2))
+           (lambda ()
+             (let ([first
+                    (http-get client (format "http://127.0.0.1:~a/first" port))]
+                   [second
+                    (http-get client (format "http://127.0.0.1:~a/second" port))])
+               (and (string=? "/first" (utf8->string (http-response-body first)))
+                    (string=? "/second" (utf8->string (http-response-body second))))))
+           (lambda ()
+             (http-close client)
+             (stop)
+             (thread-join thread))))))
 
 (mat net-https-connect-proxy
      ;; HTTPS requests through an HTTP proxy must establish CONNECT before TLS.

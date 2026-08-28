@@ -29,6 +29,8 @@ typedef struct lws_poll_entry lws_poll_entry;
 typedef struct lws_http_signal lws_http_signal;
 typedef struct lws_http_context lws_http_context;
 
+#define CHEZPP_LWS_HTTP_STATUS_H2_READY (-2000)
+
 struct lws_http_event {
   lws_http_event *next;
   lws_http_event_tag tag;
@@ -72,6 +74,8 @@ struct lws_http_stream {
   int server_stream;
   int response_status;
   int response_headers_sent;
+  int h2;
+  int h2_ready;
   char address[256];
   char host[256];
   char path[1024];
@@ -174,7 +178,8 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
                                  uint64_t generation, const char *address,
                                  int port, int tls, const char *method,
                                  const char *host, const char *path,
-                                 ptr headers, ptr initial_body, int has_body);
+                                 ptr headers, ptr initial_body, int has_body,
+                                 const char *alpn);
 int chezpp_lws_http_client_body_submit(uintptr_t context_handle,
                                        uint64_t connection_id,
                                        uint64_t stream_id, uint64_t generation,

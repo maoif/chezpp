@@ -252,24 +252,25 @@
               (set! operation (car entry))
               (let* ([state (cdr entry)]
                      [tag (vector-ref event 0)])
-                (set! signal (reactor-operation-state-signal state))
-                (reactor-operation-state-events-set!
-                 state (cons event (reactor-operation-state-events state)))
-                (when (terminal-event? tag)
-                  (if (eq? tag 'complete)
-                      (begin
-                        (reactor-operation-state-lifecycle-set! state 'completed)
-                        (reactor-operation-state-result-set! state event))
-                      (begin
-                        (reactor-operation-state-lifecycle-set! state 'failed)
-                        (reactor-operation-state-failure-set!
-                         state
-                         (make-network-condition
-                          'lws-reactor tag
-                          (list (vector-ref event 2) (vector-ref event 3)
-                                (vector-ref event 5))))))
-                  (set! procedure*
-                        (release-operation-waiters-locked! reactor state)))))))
+                (when (eq? 'pending (reactor-operation-state-lifecycle state))
+                  (set! signal (reactor-operation-state-signal state))
+                  (reactor-operation-state-events-set!
+                   state (cons event (reactor-operation-state-events state)))
+                  (when (terminal-event? tag)
+                    (if (eq? tag 'complete)
+                        (begin
+                          (reactor-operation-state-lifecycle-set! state 'completed)
+                          (reactor-operation-state-result-set! state event))
+                        (begin
+                          (reactor-operation-state-lifecycle-set! state 'failed)
+                          (reactor-operation-state-failure-set!
+                           state
+                           (make-network-condition
+                            'lws-reactor tag
+                            (list (vector-ref event 2) (vector-ref event 3)
+                                  (vector-ref event 5))))))
+                    (set! procedure*
+                          (release-operation-waiters-locked! reactor state))))))))
         (for-each (lambda (procedure) (procedure operation)) procedure*)
         (when signal (lws-signal-notify signal)))))
 
@@ -706,16 +707,20 @@ parameters configure the LWS request. It returns whether the bounded command poo
     (case-lambda
       [(reactor connection-id stream-id generation address port tls? method host path)
        (lws-reactor-client-start! reactor connection-id stream-id generation address port tls?
-                                   method host path #vu8() #vu8() #f)]
+                                   method host path #vu8() #vu8() #f "http/1.1")]
       [(reactor connection-id stream-id generation address port tls? method host path headers
                 initial-body has-body?)
+       (lws-reactor-client-start! reactor connection-id stream-id generation address port tls?
+                                   method host path headers initial-body has-body? "http/1.1")]
+      [(reactor connection-id stream-id generation address port tls? method host path headers
+                initial-body has-body? alpn)
        (pcheck ([reactor? reactor] [natural? connection-id stream-id generation]
                 [string? address method host path] [fixnum? port] [boolean? tls?]
-                [bytevector? headers initial-body] [boolean? has-body?])
+                [bytevector? headers initial-body] [boolean? has-body?] [string? alpn])
          (enqueue-command!
           reactor 'start
           (list connection-id stream-id generation address port tls? method host path headers
-                initial-body has-body?)))]))
+                initial-body has-body? alpn)))]))
 
   #|proc:lws-reactor-submit-body!
 The `lws-reactor-submit-body!` procedure queues one request body `payload` on `reactor`.
