@@ -248,8 +248,8 @@
 
   ;; same in list.ss, to avoid cyclic dependency
   (define make-list-builder
-    (lambda args
-      (let ([res args])
+    (lambda item*
+      (let ([res item*])
         (let ([current-cell (if (null? res)
                                 (cons #f '())
                                 (let loop ([res res])
@@ -270,8 +270,12 @@
           (rec lb
             (case-lambda
               [() res]
-              [(x) (add-item! x)]
-              [x* (for-each lb x*)]))))))
+              [(item)
+               (add-item! item)
+               lb]
+              [item*
+               (for-each add-item! item*)
+               lb]))))))
 
 
   ;; from ChezScheme cmacros.ss

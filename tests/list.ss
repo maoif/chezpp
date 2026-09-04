@@ -20,6 +20,18 @@
                (lb 1 2 3)
                (lb)))
 
+     (let ([lb (make-list-builder)])
+       (and (eq? lb (lb 1))
+            (eq? lb (lb 2 3))
+            (equal? '(1 2 3) (lb))))
+
+     (let ([lb (make-list-builder)])
+       (let loop ([builder lb] [item* '(a b c)])
+         (if (null? item*)
+             (and (eq? builder lb)
+                  (equal? '(a b c) (lb)))
+             (loop (builder (car item*)) (cdr item*)))))
+
 
      )
 
