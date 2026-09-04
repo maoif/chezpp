@@ -11,6 +11,8 @@
           lws-reactor-release-operation!
           lws-reactor-operation-lifecycle
           lws-reactor-register-waiter!
+          lws-reactor-client-acquire!
+          lws-reactor-client-release!
           lws-reactor-client-start!
           lws-reactor-submit-body!
           lws-reactor-consume-body!
@@ -91,6 +93,14 @@
       (and (symbol? value)
            (memq value '(connected headers readable writable complete closed failed
                                    reset goaway)))))
+
+  (define lws-observed-protocol?
+    (lambda (value)
+      (or (fixnum? value) (memq value '(unknown http1 http2)))))
+
+  (define lws-terminal-scope?
+    (lambda (value)
+      (or (fixnum? value) (memq value '(none stream connection)))))
 
   (define lws-poll-operation?
     (lambda (value)
@@ -295,6 +305,12 @@
                   (lws-reactor-native-context reactor) arguments)]
           [(start)
            (apply lws-client-start
+                (lws-reactor-native-context reactor) arguments)]
+          [(acquire)
+           (apply lws-client-acquire
+                  (lws-reactor-native-context reactor) arguments)]
+          [(release)
+           (apply lws-client-release
                   (lws-reactor-native-context reactor) arguments)]
           [(submit-body)
            (apply lws-client-body-submit
@@ -380,6 +396,9 @@
                (when (eq? 'pending (reactor-operation-state-lifecycle state))
                  (reactor-operation-state-lifecycle-set! state 'failed)
                  (reactor-operation-state-failure-set! state failure)
+                 ;; Close the per-operation native signal before the context is destroyed.
+                 ;; `lws-signal-close` is idempotent; terminal cleanup may call it again.
+                 (lws-signal-close (reactor-operation-state-signal state))
                  (set! notification*
                        (cons (cons (car entry)
                                    (release-operation-waiters-locked! reactor state))
@@ -698,6 +717,26 @@ It returns an unregister procedure with signature `() -> unspecified`, or `#f` o
           (when notify? (procedure operation))
           unregister))))
 
+  #|proc:lws-reactor-client-acquire!
+The `lws-reactor-client-acquire!` procedure reserves a logical stream lease on the reactor's
+serialized owner. It returns whether the bounded command was accepted.
+|#
+  (define lws-reactor-client-acquire!
+    (lambda (reactor connection-id stream-id generation)
+      (pcheck ([reactor? reactor] [natural? connection-id stream-id generation])
+        (enqueue-command! reactor 'acquire
+                          (list connection-id stream-id generation)))))
+
+  #|proc:lws-reactor-client-release!
+The `lws-reactor-client-release!` procedure queues release of a terminal stream lease. It returns
+whether the bounded command was accepted.
+|#
+  (define lws-reactor-client-release!
+    (lambda (reactor connection-id stream-id generation)
+      (pcheck ([reactor? reactor] [natural? connection-id stream-id generation])
+        (enqueue-command! reactor 'release
+                          (list connection-id stream-id generation)))))
+
   #|proc:lws-reactor-client-start!
 The `lws-reactor-client-start!` procedure queues an HTTP client start command on `reactor`.
 The identity and generation parameters route events. Address, port, TLS, method, host, and path
@@ -763,12 +802,23 @@ The identity, generation, `status`, and bytevector `payload` parameters form the
 It returns whether the bounded command pool accepted the command.
 |#
   (define lws-reactor-inject-event!
-    (lambda (reactor event-tag connection-id stream-id generation status payload)
-      (pcheck ([reactor? reactor] [lws-event-tag? event-tag]
-               [natural? connection-id stream-id generation]
-               [fixnum? status] [bytevector? payload])
-        (enqueue-command! reactor 'inject-event
-                          (list event-tag connection-id stream-id generation status payload)))))
+    (case-lambda
+      [(reactor event-tag connection-id stream-id generation status payload)
+       (lws-reactor-inject-event! reactor event-tag connection-id stream-id generation status
+                                   payload 0 #f 0 #f 0)]
+      [(reactor event-tag connection-id stream-id generation status payload protocol reusable?
+                peer-h2-capacity peer-h2-capacity-known terminal-scope)
+       (pcheck ([reactor? reactor] [lws-event-tag? event-tag]
+                [natural? connection-id stream-id generation]
+                [fixnum? status peer-h2-capacity]
+                [lws-observed-protocol? protocol]
+                [lws-terminal-scope? terminal-scope]
+                [bytevector? payload]
+                [boolean? reusable? peer-h2-capacity-known])
+         (enqueue-command! reactor 'inject-event
+                           (list event-tag connection-id stream-id generation status payload
+                                 protocol reusable? peer-h2-capacity peer-h2-capacity-known
+                                 terminal-scope)))]))
 
   #|proc:lws-reactor-inject-poll!
 The `lws-reactor-inject-poll!` procedure queues fake poll `operation` for `descriptor`.

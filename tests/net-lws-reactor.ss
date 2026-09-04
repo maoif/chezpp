@@ -49,6 +49,7 @@
         (lws-context-inject-event! context 'complete 10 11 3 0 #vu8())
         (let* ([headers (lws-context-next-event context)]
                [readable (lws-context-next-event context)]
+               [_ (lws-body-consumed context 10 11 3 3)]
                [complete (lws-context-next-event context)])
           (and (eq? (vector-ref headers 0) 'headers)
                (positive? (vector-ref headers 1))
@@ -61,6 +62,21 @@
                (equal? (vector-ref readable 6) #vu8(3 4 5))
                (eq? (vector-ref complete 0) 'complete)
                (not (lws-context-next-event context)))))))
+
+(mat net-lws-terminal-waits-for-readable-consumption
+     (call-with-lws-context
+      (lambda (context)
+        (and (lws-context-inject-event! context 'headers 12 13 4 200 #vu8(1))
+             (lws-context-inject-event! context 'readable 12 13 4 0 #vu8(2 3 4))
+             (lws-context-inject-event! context 'headers 12 13 4 -1 #vu8(5))
+             (lws-context-inject-event! context 'complete 12 13 4 0 #vu8())
+             (eq? (vector-ref (lws-context-next-event context) 0) 'headers)
+             (eq? (vector-ref (lws-context-next-event context) 0) 'readable)
+             (eq? (vector-ref (lws-context-next-event context) 0) 'headers)
+             (not (lws-context-next-event context))
+             (lws-body-consumed context 12 13 4 3)
+             (eq? (vector-ref (lws-context-next-event context) 0) 'complete)
+             (not (lws-context-next-event context))))))
 
 (mat net-lws-fake-callback-tags
      (call-with-lws-context
@@ -80,6 +96,27 @@
                        (= (vector-ref event 3) stream-id)
                        (= (vector-ref event 4) 7)
                        (loop (cdr expected) (+ stream-id 1))))))))))
+
+(mat net-lws-observed-transport-metadata
+     (guard (condition [else #f])
+       (call-with-lws-context
+        (lambda (context)
+          (and (lws-context-inject-event!
+                context 'connected 24 25 1 200 #vu8() 'http2 #f 37 #t 'none)
+               (lws-context-inject-event!
+                context 'complete 26 27 1 0 #vu8() 'http1 #t 0 #f 'stream)
+               (lws-context-inject-event!
+                context 'reset 28 29 1 8 #vu8() 'http2 #f 37 #t 'stream)
+               (lws-context-inject-event!
+                context 'goaway 30 31 1 11 #vu8() 'http2 #f 37 #t 'connection)
+               (equal? (vector-ref (lws-context-next-event context) 7)
+                       '#(http2 #f 37 none))
+               (equal? (vector-ref (lws-context-next-event context) 7)
+                       '#(http1 #t #f stream))
+               (equal? (vector-ref (lws-context-next-event context) 7)
+                       '#(http2 #f 37 stream))
+               (equal? (vector-ref (lws-context-next-event context) 7)
+                       '#(http2 #f 37 connection)))))))
 
 (mat net-lws-poll-change-seam
      (call-with-lws-context
@@ -225,6 +262,67 @@
               (equal? (vector-ref (net-operation-result first) 6) #vu8(1))
               (equal? (vector-ref (net-operation-result second) 6) #vu8(2))
               (= (length notifications) 2)))))
+
+(mat net-lws-reactor-sequential-connection-reuse
+     ;; Two terminal transactions may reuse one physical connection identity.
+     (let* ([reactor (make-lws-reactor 16 16 8)]
+            [first (make-lws-reactor-operation reactor 'first 71 1 1 #f)]
+            [second (make-lws-reactor-operation reactor 'second 71 2 2 #f)])
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-event! reactor 'complete 71 1 1 0 #vu8(1))
+       (let ([first-ready?
+              (wait-until (lambda ()
+                            (pair? (lws-reactor-operation-events reactor first))))])
+         (let* ([first-event (car (lws-reactor-operation-events reactor first))]
+                [_ (lws-reactor-inject-event! reactor 'complete 71 2 2 0 #vu8(2))]
+                [second-ready? (wait-until (lambda ()
+                                             (pair? (lws-reactor-operation-events reactor second))))]
+                [second-event (car (lws-reactor-operation-events reactor second))])
+           (net-operation-step! first)
+           (net-operation-step! second)
+           (lws-reactor-shutdown! reactor)
+           (and first-ready? second-ready?
+                (= (vector-ref first-event 2) 71)
+                (= (vector-ref second-event 2) 71))))))
+
+(mat net-lws-reactor-multiplexed-stream-identities
+     ;; Distinct logical streams route independently over one physical connection.
+     (let* ([reactor (make-lws-reactor 16 16 8)]
+            [first (make-lws-reactor-operation reactor 'h2-a 72 3 1 #f)]
+            [second (make-lws-reactor-operation reactor 'h2-b 72 5 1 #f)])
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-event! reactor 'complete 72 5 1 0 #vu8(5))
+       (lws-reactor-inject-event! reactor 'complete 72 3 1 0 #vu8(3))
+       (let ([ready?
+              (wait-until (lambda ()
+                            (and (pair? (lws-reactor-operation-events reactor first))
+                                 (pair? (lws-reactor-operation-events reactor second)))))])
+         (let* ([first-event (car (lws-reactor-operation-events reactor first))]
+                [second-event (car (lws-reactor-operation-events reactor second))])
+           (net-operation-step! first)
+           (net-operation-step! second)
+           (lws-reactor-shutdown! reactor)
+           (and ready?
+                (= (vector-ref first-event 3) 3)
+                (= (vector-ref second-event 3) 5))))))
+
+(mat net-lws-reactor-stale-generation-after-release
+     ;; Events for a released generation must not reach a later operation.
+     (let* ([reactor (make-lws-reactor 16 16 8)]
+            [old (make-lws-reactor-operation reactor 'old 73 7 1 #f #t)])
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-event! reactor 'complete 73 7 1 0 #vu8())
+       (let ([ready? (wait-until (lambda ()
+                                  (pair? (lws-reactor-operation-events reactor old))))])
+         (net-operation-step! old)
+         (lws-reactor-release-operation! reactor old)
+         (let ([new (make-lws-reactor-operation reactor 'new 73 7 2 #f)])
+           (lws-reactor-inject-event! reactor 'complete 73 7 1 0 #vu8(9))
+           (let ([stale? (wait-until (lambda ()
+                                      (pair? (lws-reactor-operation-events reactor new))))])
+             (lws-reactor-shutdown! reactor)
+             (and ready? (not stale?)
+                  (null? (lws-reactor-operation-events reactor new))))))))
 
 (mat net-lws-reactor-completed-operation-releases-signal
      ;; Completed operations must return their signal to the bounded native pool.

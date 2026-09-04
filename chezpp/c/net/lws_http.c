@@ -29,6 +29,7 @@ typedef void (*lws_client_http_body_pending_fn)(struct lws *, int);
 typedef struct lws_context *(*lws_get_context_fn)(const struct lws *);
 typedef void *(*lws_context_user_fn)(struct lws_context *);
 typedef void *(*lws_get_opaque_user_data_fn)(const struct lws *);
+typedef struct lws *(*lws_get_network_wsi_fn)(struct lws *);
 typedef int (*lws_http_client_http_response_fn)(struct lws *);
 typedef int (*lws_hdr_copy_fn)(struct lws *, char *, int,
                                enum lws_token_indexes);
@@ -58,6 +59,17 @@ typedef int (*lws_finalize_write_http_header_fn)(struct lws *, unsigned char *,
                                                   unsigned char *);
 typedef int (*lws_http_transaction_completed_fn)(struct lws *);
 typedef void (*lws_set_timeout_fn)(struct lws *, enum pending_timeout, int);
+
+/*
+ * Callback ordering audited against libwebsockets 4.5.x (the minimum runtime
+ * available to this worktree): protocol bind establishes H2 readiness, then
+ * ESTABLISHED_CLIENT_HTTP publishes status and headers; RECEIVE_CLIENT_HTTP
+ * and RECEIVE_CLIENT_HTTP_READ publish body bytes; CLIENT_HTTP_WRITEABLE is
+ * the only request-body pull point; COMPLETED_CLIENT_HTTP publishes completion;
+ * CLOSED_CLIENT_HTTP and CLIENT_CONNECTION_ERROR publish terminal failure;
+ * CLIENT_HTTP_DROP_PROTOCOL releases the native stream.  Events are copied
+ * while holding the context lock and drained FIFO by the serialized reactor.
+ */
 
 static lws_get_context_fn dynamic_get_context;
 static lws_context_user_fn dynamic_context_user;
@@ -143,6 +155,28 @@ static const char *event_tag_name(lws_http_event_tag tag) {
   }
 }
 
+static const char *protocol_name(lws_http_protocol protocol) {
+  switch (protocol) {
+    case LWS_HTTP_PROTOCOL_HTTP1:
+      return "http1";
+    case LWS_HTTP_PROTOCOL_HTTP2:
+      return "http2";
+    default:
+      return "unknown";
+  }
+}
+
+static const char *terminal_scope_name(lws_http_terminal_scope scope) {
+  switch (scope) {
+    case LWS_HTTP_TERMINAL_SCOPE_STREAM:
+      return "stream";
+    case LWS_HTTP_TERMINAL_SCOPE_CONNECTION:
+      return "connection";
+    default:
+      return "none";
+  }
+}
+
 static lws_http_event *event_acquire_locked(lws_http_context *context) {
   lws_http_event *event = context->event_free;
   if (event == NULL) {
@@ -168,11 +202,12 @@ static void event_release_locked(lws_http_context *context,
   context->event_in_use--;
 }
 
-static int queue_event_locked(lws_http_context *context,
-                              lws_http_event_tag tag, uint64_t connection_id,
-                              uint64_t stream_id, uint64_t generation,
-                              int status, const void *payload,
-                              size_t payload_length) {
+static int queue_event_metadata_locked(
+    lws_http_context *context, lws_http_event_tag tag, uint64_t connection_id,
+    uint64_t stream_id, uint64_t generation, int status, const void *payload,
+    size_t payload_length, lws_http_protocol protocol, int reusable,
+    uint32_t peer_h2_capacity, int peer_h2_capacity_known,
+    lws_http_terminal_scope terminal_scope) {
   lws_http_event *event;
   if (payload_length > context->payload_capacity) {
     context->event_misses++;
@@ -192,6 +227,11 @@ static int queue_event_locked(lws_http_context *context,
   event->stream_id = stream_id;
   event->generation = generation;
   event->status = status;
+  event->protocol = protocol;
+  event->reusable = reusable;
+  event->peer_h2_capacity = peer_h2_capacity;
+  event->peer_h2_capacity_known = peer_h2_capacity_known;
+  event->terminal_scope = terminal_scope;
   event->payload_length = payload_length;
   if (payload_length != 0) memcpy(event->payload, payload, payload_length);
   if (context->event_tail == NULL)
@@ -201,6 +241,77 @@ static int queue_event_locked(lws_http_context *context,
   context->event_tail = event;
   if (tag == LWS_HTTP_EVENT_READABLE)
     context->queued_body_bytes += payload_length;
+  return 1;
+}
+
+static int queue_event_locked(lws_http_context *context,
+                              lws_http_event_tag tag, uint64_t connection_id,
+                              uint64_t stream_id, uint64_t generation,
+                              int status, const void *payload,
+                              size_t payload_length) {
+  return queue_event_metadata_locked(
+      context, tag, connection_id, stream_id, generation, status, payload,
+      payload_length, LWS_HTTP_PROTOCOL_UNKNOWN, 0, 0, 0,
+      LWS_HTTP_TERMINAL_SCOPE_NONE);
+}
+
+static int terminal_event_tag(lws_http_event_tag tag) {
+  return tag == LWS_HTTP_EVENT_COMPLETE || tag == LWS_HTTP_EVENT_CLOSED ||
+         tag == LWS_HTTP_EVENT_FAILED || tag == LWS_HTTP_EVENT_RESET ||
+         tag == LWS_HTTP_EVENT_GOAWAY;
+}
+
+static int queue_terminal_locked(lws_http_context *context,
+                                 lws_http_stream *stream,
+                                 lws_http_event_tag tag, int status,
+                                 const void *payload, size_t payload_length,
+                                 lws_http_protocol protocol, int reusable,
+                                 uint32_t peer_h2_capacity,
+                                 int peer_h2_capacity_known,
+                                 lws_http_terminal_scope terminal_scope) {
+  int queued;
+  if (!terminal_event_tag(tag) || stream->terminal || stream->terminal_pending ||
+      payload_length > context->payload_capacity)
+    return 0;
+  if (stream->pending_body_bytes != 0) {
+    if (payload_length != 0)
+      memcpy(stream->terminal_payload, payload, payload_length);
+    stream->terminal_tag = tag;
+    stream->terminal_status = status;
+    stream->terminal_protocol = protocol;
+    stream->terminal_reusable = reusable;
+    stream->terminal_peer_h2_capacity = peer_h2_capacity;
+    stream->terminal_peer_h2_capacity_known = peer_h2_capacity_known;
+    stream->terminal_scope = terminal_scope;
+    stream->terminal_payload_length = payload_length;
+    stream->terminal_pending = 1;
+    return 1;
+  }
+  queued = queue_event_metadata_locked(
+      context, tag, stream->connection->identity, stream->identity,
+      stream->generation, status, payload, payload_length, protocol, reusable,
+      peer_h2_capacity, peer_h2_capacity_known, terminal_scope);
+  if (queued) stream->terminal = 1;
+  return queued;
+}
+
+static int flush_terminal_locked(lws_http_context *context,
+                                 lws_http_stream *stream) {
+  int queued;
+  if (!stream->terminal_pending || stream->pending_body_bytes != 0) return 0;
+  queued = queue_event_metadata_locked(
+      context, stream->terminal_tag, stream->connection->identity,
+      stream->identity, stream->generation, stream->terminal_status,
+      stream->terminal_payload, stream->terminal_payload_length,
+      stream->terminal_protocol, stream->terminal_reusable,
+      stream->terminal_peer_h2_capacity,
+      stream->terminal_peer_h2_capacity_known, stream->terminal_scope);
+  if (!queued) return 0;
+  if (stream->terminal_payload_length != 0)
+    memset(stream->terminal_payload, 0, stream->terminal_payload_length);
+  stream->terminal_payload_length = 0;
+  stream->terminal_pending = 0;
+  stream->terminal = 1;
   return 1;
 }
 
@@ -278,6 +389,7 @@ static void stream_release_locked(lws_http_context *context,
     context->queued_body_bytes = 0;
   memset(stream->outbound, 0, context->payload_capacity + LWS_PRE);
   memset(stream->headers, 0, context->payload_capacity);
+  memset(stream->terminal_payload, 0, context->payload_capacity);
   memset(stream->address, 0, sizeof(stream->address));
   memset(stream->host, 0, sizeof(stream->host));
   memset(stream->path, 0, sizeof(stream->path));
@@ -289,16 +401,29 @@ static void stream_release_locked(lws_http_context *context,
   stream->wsi = NULL;
   stream->outbound_length = 0;
   stream->headers_length = 0;
+  stream->terminal_payload_length = 0;
   stream->pending_body_bytes = 0;
   stream->outbound_final = 0;
   stream->has_request_body = 0;
   stream->active = 0;
   stream->terminal = 0;
+  stream->terminal_pending = 0;
+  stream->terminal_tag = 0;
+  stream->terminal_status = 0;
+  stream->terminal_protocol = LWS_HTTP_PROTOCOL_UNKNOWN;
+  stream->terminal_reusable = 0;
+  stream->terminal_peer_h2_capacity = 0;
+  stream->terminal_peer_h2_capacity_known = 0;
+  stream->terminal_scope = LWS_HTTP_TERMINAL_SCOPE_NONE;
   stream->failure_pending = 0;
   stream->failure_status = 0;
   stream->server_stream = 0;
   stream->response_status = 0;
   stream->response_headers_sent = 0;
+  stream->observed_protocol = LWS_HTTP_PROTOCOL_UNKNOWN;
+  stream->reusable = 0;
+  stream->peer_h2_capacity = 0;
+  stream->peer_h2_capacity_known = 0;
   stream->next_free = context->stream_free;
   context->stream_free = stream;
   context->stream_in_use--;
@@ -367,6 +492,9 @@ static lws_http_stream *stream_acquire_locked(lws_http_context *context,
   stream->headers = context->stream_headers +
                     (size_t)(stream - context->streams) *
                         context->payload_capacity;
+  stream->terminal_payload = context->stream_terminal_payloads +
+                             (size_t)(stream - context->streams) *
+                                 context->payload_capacity;
   stream->connection = connection;
   stream->connection_identity = connection_id;
   stream->identity = stream_id;
@@ -435,6 +563,33 @@ static lws_http_stream *callback_stream(struct lws *wsi, void *user) {
   return stream;
 }
 
+static lws_http_protocol observe_protocol(struct lws *wsi) {
+  lws_get_network_wsi_fn network_fn =
+      (lws_get_network_wsi_fn)lws_function("lws_get_network_wsi");
+  if (wsi == NULL || network_fn == NULL) return LWS_HTTP_PROTOCOL_UNKNOWN;
+  return network_fn(wsi) == wsi ? LWS_HTTP_PROTOCOL_HTTP1
+                                : LWS_HTTP_PROTOCOL_HTTP2;
+}
+
+static int observe_http1_reusable(struct lws *wsi) {
+  lws_hdr_copy_fn copy_fn =
+      (lws_hdr_copy_fn)lws_function("lws_hdr_copy");
+  char connection[32];
+  int copied;
+  if (copy_fn == NULL) return 0;
+  copied = copy_fn(wsi, connection, sizeof(connection), WSI_TOKEN_CONNECTION);
+  return copied <= 0 || strcasecmp(connection, "close") != 0;
+}
+
+static lws_http_terminal_scope stream_terminal_scope(
+    lws_http_stream *stream, lws_http_event_tag tag) {
+  if (stream->observed_protocol != LWS_HTTP_PROTOCOL_HTTP2)
+    return LWS_HTTP_TERMINAL_SCOPE_STREAM;
+  return tag == LWS_HTTP_EVENT_GOAWAY || tag == LWS_HTTP_EVENT_FAILED
+             ? LWS_HTTP_TERMINAL_SCOPE_CONNECTION
+             : LWS_HTTP_TERMINAL_SCOPE_STREAM;
+}
+
 static int callback_queue_stream(lws_http_context *context,
                                  lws_http_stream *stream,
                                  lws_http_event_tag tag, int status,
@@ -443,9 +598,22 @@ static int callback_queue_stream(lws_http_context *context,
   if (context == NULL || stream == NULL || !stream->active || stream->terminal)
     return 0;
   pthread_mutex_lock(&context->lock);
-  queued = queue_event_locked(context, tag, stream->connection->identity,
-                              stream->identity, stream->generation, status,
-                              payload, length);
+  queued = terminal_event_tag(tag)
+               ? queue_terminal_locked(context, stream, tag, status, payload,
+                                       length, stream->observed_protocol,
+                                       tag == LWS_HTTP_EVENT_COMPLETE
+                                           ? stream->reusable
+                                           : 0,
+                                       stream->peer_h2_capacity,
+                                       stream->peer_h2_capacity_known,
+                                       stream_terminal_scope(stream, tag))
+               : queue_event_metadata_locked(
+                     context, tag, stream->connection->identity,
+                     stream->identity, stream->generation, status, payload,
+                     length, stream->observed_protocol, 0,
+                     stream->peer_h2_capacity,
+                     stream->peer_h2_capacity_known,
+                     LWS_HTTP_TERMINAL_SCOPE_NONE);
   if (!queued && tag != LWS_HTTP_EVENT_FAILED) {
     stream->terminal = 1;
     stream->failure_pending = 1;
@@ -788,6 +956,18 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     }
     case LWS_CALLBACK_CLIENT_HTTP_BIND_PROTOCOL:
+      {
+        lws_http_protocol protocol = observe_protocol(wsi);
+        if (context != NULL && stream != NULL &&
+            protocol == LWS_HTTP_PROTOCOL_HTTP2 && !stream->h2_ready) {
+          stream->observed_protocol = protocol;
+          stream->h2_ready = 1;
+          (void)callback_queue_stream(context, stream,
+                                      LWS_HTTP_EVENT_CONNECTED,
+                                      CHEZPP_LWS_HTTP_STATUS_H2_READY,
+                                      NULL, 0);
+        }
+      }
       return 0;
     case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER: {
       unsigned char **cursor = (unsigned char **)input;
@@ -816,16 +996,14 @@ static int lws_http_callback(struct lws *wsi,
           (lws_http_client_http_response_fn)lws_function(
               "lws_http_client_http_response");
       if (response_fn != NULL) status = response_fn(wsi);
+      stream->observed_protocol = observe_protocol(wsi);
+      stream->reusable =
+          stream->observed_protocol == LWS_HTTP_PROTOCOL_HTTP1
+              ? observe_http1_reusable(wsi)
+              : 0;
       headers_length = copy_response_headers(context, wsi);
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_CONNECTED,
                                   status, NULL, 0);
-      if (stream->h2 && !stream->h2_ready) {
-        stream->h2_ready = 1;
-        (void)callback_queue_stream(context, stream,
-                                    LWS_HTTP_EVENT_CONNECTED,
-                                    CHEZPP_LWS_HTTP_STATUS_H2_READY,
-                                    NULL, 0);
-      }
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS,
                                   status, context->drain_buffer,
                                   headers_length);
@@ -856,19 +1034,24 @@ static int lws_http_callback(struct lws *wsi,
           recover_chunked_residual(context, stream,
                                    (const unsigned char *)buffer,
                                    (size_t)available)) {
-        pthread_mutex_lock(&context->lock);
-        stream->terminal = 1;
-        pthread_mutex_unlock(&context->lock);
         return 0;
       }
-      return result;
+      /* A positive lws_http_client_read result is progress metadata, not a
+       * callback failure.  Returning it from the callback makes LWS abort the
+       * stream (the raw chunked path surfaced this as native status 103).
+       * Only negative results should propagate as callback errors. */
+      return result < 0 ? result : 0;
     }
     case LWS_CALLBACK_RECEIVE_CLIENT_HTTP_READ:
       if (context == NULL || stream == NULL) return 0;
       pthread_mutex_lock(&context->lock);
-      if (!queue_event_locked(context, LWS_HTTP_EVENT_READABLE,
-                              stream->connection->identity, stream->identity,
-                              stream->generation, 0, input, length)) {
+      if (!queue_event_metadata_locked(
+              context, LWS_HTTP_EVENT_READABLE,
+              stream->connection->identity, stream->identity,
+              stream->generation, 0, input, length,
+              stream->observed_protocol, 0, stream->peer_h2_capacity,
+              stream->peer_h2_capacity_known,
+              LWS_HTTP_TERMINAL_SCOPE_NONE)) {
         pthread_mutex_unlock(&context->lock);
         return 0;
       }
@@ -878,10 +1061,20 @@ static int lws_http_callback(struct lws *wsi,
     case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE: {
       lws_write_fn write_fn;
       lws_client_http_body_pending_fn pending_fn;
+      lws_http_protocol protocol;
       size_t outbound_length;
       int final_chunk;
       int written = 0;
       if (context == NULL || stream == NULL) return 0;
+      protocol = observe_protocol(wsi);
+      if (protocol == LWS_HTTP_PROTOCOL_HTTP2 && !stream->h2_ready) {
+        stream->observed_protocol = protocol;
+        stream->h2_ready = 1;
+        (void)callback_queue_stream(context, stream,
+                                    LWS_HTTP_EVENT_CONNECTED,
+                                    CHEZPP_LWS_HTTP_STATUS_H2_READY,
+                                    NULL, 0);
+      }
       if (!stream->has_request_body) return 0;
       pthread_mutex_lock(&context->lock);
       outbound_length = stream->outbound_length;
@@ -912,6 +1105,7 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     case LWS_CALLBACK_CLOSED_CLIENT_HTTP:
     case LWS_CALLBACK_CLOSED_HTTP:
+      if (stream != NULL) stream->reusable = 0;
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_CLOSED, 0,
                                   NULL, 0);
       return 0;
@@ -919,6 +1113,7 @@ static int lws_http_callback(struct lws *wsi,
       if (input != NULL && length == 0)
         length = strnlen((const char *)input,
                          context == NULL ? 0 : context->payload_capacity);
+      if (stream != NULL) stream->reusable = 0;
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_FAILED,
                                   ECONNABORTED, input, length);
       return 0;
@@ -1030,12 +1225,15 @@ static int initialize_pools(lws_http_context *context) {
   context->stream_payloads = calloc(context->stream_capacity, stream_slot_size);
   context->stream_headers =
       calloc(context->stream_capacity, context->payload_capacity);
+  context->stream_terminal_payloads =
+      calloc(context->stream_capacity, context->payload_capacity);
   context->signals = calloc(context->signal_capacity, sizeof(*context->signals));
   context->drain_buffer = calloc(1, stream_slot_size);
   if (context->events == NULL || context->event_payloads == NULL ||
       context->poll_entries == NULL || context->connections == NULL ||
       context->streams == NULL || context->stream_payloads == NULL ||
-      context->stream_headers == NULL || context->signals == NULL ||
+      context->stream_headers == NULL ||
+      context->stream_terminal_payloads == NULL || context->signals == NULL ||
       context->drain_buffer == NULL)
     return 0;
   for (index = 0; index < context->event_capacity; index++) {
@@ -1088,6 +1286,7 @@ static void free_context_storage(lws_http_context *context) {
   }
   free(context->drain_buffer);
   free(context->signals);
+  free(context->stream_terminal_payloads);
   free(context->stream_headers);
   free(context->stream_payloads);
   free(context->streams);
@@ -1258,8 +1457,9 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
 
 static ptr event_to_scheme_locked(lws_http_context *context,
                                   lws_http_event *event) {
-  ptr result = Smake_vector(7, Sfalse);
+  ptr result = Smake_vector(8, Sfalse);
   ptr payload = Smake_bytevector((iptr)event->payload_length, 0);
+  ptr metadata = Smake_vector(4, Sfalse);
   if (event->payload_length != 0)
     memcpy(Sbytevector_data(payload), event->payload, event->payload_length);
   Svector_set(result, 0, Sstring_to_symbol(event_tag_name(event->tag)));
@@ -1269,6 +1469,14 @@ static ptr event_to_scheme_locked(lws_http_context *context,
   Svector_set(result, 4, Sunsigned64(event->generation));
   Svector_set(result, 5, Sinteger(event->status));
   Svector_set(result, 6, payload);
+  Svector_set(metadata, 0,
+              Sstring_to_symbol(protocol_name(event->protocol)));
+  Svector_set(metadata, 1, event->reusable ? Strue : Sfalse);
+  if (event->peer_h2_capacity_known)
+    Svector_set(metadata, 2, Sunsigned32(event->peer_h2_capacity));
+  Svector_set(metadata, 3,
+              Sstring_to_symbol(terminal_scope_name(event->terminal_scope)));
+  Svector_set(result, 7, metadata);
   event_release_locked(context, event);
   return result;
 }
@@ -1520,6 +1728,38 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   return 1;
 }
 
+int chezpp_lws_http_client_acquire(uintptr_t context_handle,
+                                   uint64_t connection_id, uint64_t stream_id,
+                                   uint64_t generation) {
+  lws_http_context *context = context_from_handle(context_handle);
+  lws_http_stream *stream;
+  int accepted = 0;
+  if (context == NULL || context->closing) return 0;
+  pthread_mutex_lock(&context->lock);
+  stream = stream_acquire_locked(context, connection_id, stream_id, generation);
+  if (stream != NULL && !stream->server_stream) accepted = 1;
+  pthread_mutex_unlock(&context->lock);
+  return accepted;
+}
+
+int chezpp_lws_http_client_release(uintptr_t context_handle,
+                                   uint64_t connection_id, uint64_t stream_id,
+                                   uint64_t generation) {
+  lws_http_context *context = context_from_handle(context_handle);
+  lws_http_stream *stream;
+  int released = 0;
+  if (context == NULL) return 0;
+  pthread_mutex_lock(&context->lock);
+  stream = stream_find_locked(context, connection_id, stream_id);
+  if (stream != NULL && stream->generation == generation && stream->terminal &&
+      stream->wsi == NULL) {
+    stream_release_locked(context, stream);
+    released = 1;
+  }
+  pthread_mutex_unlock(&context->lock);
+  return released;
+}
+
 int chezpp_lws_http_client_body_submit(uintptr_t context_handle,
                                        uint64_t connection_id,
                                        uint64_t stream_id, uint64_t generation,
@@ -1683,6 +1923,12 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
   else
     context->queued_body_bytes = 0;
   resume = stream->pending_body_bytes == 0;
+  if (resume && stream->terminal_pending && !flush_terminal_locked(context, stream)) {
+    stream->terminal_pending = 0;
+    stream->terminal = 1;
+    stream->failure_pending = 1;
+    stream->failure_status = ENOBUFS;
+  }
   if (resume && stream->terminal && stream->wsi == NULL)
     stream_release_locked(context, stream);
   pthread_mutex_unlock(&context->lock);
@@ -1693,7 +1939,11 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
 
 int chezpp_lws_http_inject_event(uintptr_t context_handle, int tag,
                                  uint64_t connection_id, uint64_t stream_id,
-                                 uint64_t generation, int status, ptr payload) {
+                                 uint64_t generation, int status, ptr payload,
+                                 int protocol, int reusable,
+                                 uint32_t peer_h2_capacity,
+                                 int peer_h2_capacity_known,
+                                 int terminal_scope) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
   lws_http_event_tag event_tag = (lws_http_event_tag)tag;
@@ -1712,18 +1962,31 @@ int chezpp_lws_http_inject_event(uintptr_t context_handle, int tag,
     pthread_mutex_unlock(&context->lock);
     return 0;
   }
-  result = queue_event_locked(context, event_tag, connection_id, stream_id,
-                              generation, status, Sbytevector_data(payload),
-                              length);
-  if (result && event_tag == LWS_HTTP_EVENT_READABLE)
-    stream->pending_body_bytes += length;
+  stream->observed_protocol = (lws_http_protocol)protocol;
+  stream->reusable = reusable != 0;
+  stream->peer_h2_capacity = peer_h2_capacity;
+  stream->peer_h2_capacity_known = peer_h2_capacity_known != 0;
   terminal = event_tag == LWS_HTTP_EVENT_COMPLETE ||
              event_tag == LWS_HTTP_EVENT_CLOSED ||
              event_tag == LWS_HTTP_EVENT_FAILED ||
              event_tag == LWS_HTTP_EVENT_RESET ||
              event_tag == LWS_HTTP_EVENT_GOAWAY;
-  if (result && terminal) {
-    stream->terminal = 1;
+  result = terminal
+               ? queue_terminal_locked(
+                     context, stream, event_tag, status,
+                     Sbytevector_data(payload), length,
+                     stream->observed_protocol, stream->reusable,
+                     stream->peer_h2_capacity, stream->peer_h2_capacity_known,
+                     (lws_http_terminal_scope)terminal_scope)
+               : queue_event_metadata_locked(
+                     context, event_tag, connection_id, stream_id, generation,
+                     status, Sbytevector_data(payload), length,
+                     stream->observed_protocol, stream->reusable,
+                     stream->peer_h2_capacity, stream->peer_h2_capacity_known,
+                     LWS_HTTP_TERMINAL_SCOPE_NONE);
+  if (result && event_tag == LWS_HTTP_EVENT_READABLE)
+    stream->pending_body_bytes += length;
+  if (result && terminal && !stream->terminal_pending) {
     if (stream->pending_body_bytes == 0) stream_release_locked(context, stream);
   }
   pthread_mutex_unlock(&context->lock);

@@ -22,6 +22,18 @@ typedef enum lws_http_event_tag {
   LWS_HTTP_EVENT_GOAWAY
 } lws_http_event_tag;
 
+typedef enum lws_http_protocol {
+  LWS_HTTP_PROTOCOL_UNKNOWN = 0,
+  LWS_HTTP_PROTOCOL_HTTP1,
+  LWS_HTTP_PROTOCOL_HTTP2
+} lws_http_protocol;
+
+typedef enum lws_http_terminal_scope {
+  LWS_HTTP_TERMINAL_SCOPE_NONE = 0,
+  LWS_HTTP_TERMINAL_SCOPE_STREAM,
+  LWS_HTTP_TERMINAL_SCOPE_CONNECTION
+} lws_http_terminal_scope;
+
 typedef struct lws_http_event lws_http_event;
 typedef struct lws_http_connection lws_http_connection;
 typedef struct lws_http_stream lws_http_stream;
@@ -39,6 +51,11 @@ struct lws_http_event {
   uint64_t stream_id;
   uint64_t generation;
   int status;
+  lws_http_protocol protocol;
+  int reusable;
+  uint32_t peer_h2_capacity;
+  int peer_h2_capacity_known;
+  lws_http_terminal_scope terminal_scope;
   size_t payload_length;
   unsigned char *payload;
 };
@@ -62,13 +79,23 @@ struct lws_http_stream {
   struct lws *wsi;
   unsigned char *outbound;
   unsigned char *headers;
+  unsigned char *terminal_payload;
   size_t outbound_length;
   size_t headers_length;
+  size_t terminal_payload_length;
   size_t pending_body_bytes;
   int outbound_final;
   int has_request_body;
   int active;
   int terminal;
+  int terminal_pending;
+  lws_http_event_tag terminal_tag;
+  int terminal_status;
+  lws_http_protocol terminal_protocol;
+  int terminal_reusable;
+  uint32_t terminal_peer_h2_capacity;
+  int terminal_peer_h2_capacity_known;
+  lws_http_terminal_scope terminal_scope;
   int failure_pending;
   int failure_status;
   int server_stream;
@@ -76,6 +103,10 @@ struct lws_http_stream {
   int response_headers_sent;
   int h2;
   int h2_ready;
+  lws_http_protocol observed_protocol;
+  int reusable;
+  uint32_t peer_h2_capacity;
+  int peer_h2_capacity_known;
   char address[256];
   char host[256];
   char path[1024];
@@ -132,6 +163,7 @@ struct lws_http_context {
   lws_http_stream *stream_free;
   unsigned char *stream_payloads;
   unsigned char *stream_headers;
+  unsigned char *stream_terminal_payloads;
   size_t stream_capacity;
   size_t stream_in_use;
   size_t stream_high_water;
@@ -180,6 +212,12 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
                                  const char *host, const char *path,
                                  ptr headers, ptr initial_body, int has_body,
                                  const char *alpn);
+int chezpp_lws_http_client_acquire(uintptr_t context_handle,
+                                   uint64_t connection_id, uint64_t stream_id,
+                                   uint64_t generation);
+int chezpp_lws_http_client_release(uintptr_t context_handle,
+                                   uint64_t connection_id, uint64_t stream_id,
+                                   uint64_t generation);
 int chezpp_lws_http_client_body_submit(uintptr_t context_handle,
                                        uint64_t connection_id,
                                        uint64_t stream_id, uint64_t generation,
@@ -200,7 +238,11 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
 
 int chezpp_lws_http_inject_event(uintptr_t context_handle, int tag,
                                  uint64_t connection_id, uint64_t stream_id,
-                                 uint64_t generation, int status, ptr payload);
+                                 uint64_t generation, int status, ptr payload,
+                                 int protocol, int reusable,
+                                 uint32_t peer_h2_capacity,
+                                 int peer_h2_capacity_known,
+                                 int terminal_scope);
 int chezpp_lws_http_inject_poll(uintptr_t context_handle, int operation, int fd,
                                 int events);
 

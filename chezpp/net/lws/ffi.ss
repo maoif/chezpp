@@ -22,6 +22,8 @@
           lws-signal-drain
           lws-signal-close
           lws-client-start
+          lws-client-acquire
+          lws-client-release
           lws-client-body-submit
           lws-client-body-drain
           lws-server-request-dequeue
@@ -76,6 +78,12 @@
                        (uptr unsigned-64 unsigned-64 unsigned-64 string int int
                              string string string scheme-object scheme-object int string)
                        int))
+  (define ffi-lws-client-acquire
+    (foreign-procedure "chezpp_lws_http_client_acquire"
+                       (uptr unsigned-64 unsigned-64 unsigned-64) int))
+  (define ffi-lws-client-release
+    (foreign-procedure "chezpp_lws_http_client_release"
+                       (uptr unsigned-64 unsigned-64 unsigned-64) int))
   (define ffi-lws-client-body-submit
     (foreign-procedure "chezpp_lws_http_client_body_submit"
                        (uptr unsigned-64 unsigned-64 unsigned-64 scheme-object int)
@@ -100,7 +108,8 @@
                        int))
   (define ffi-lws-context-inject-event
     (foreign-procedure "chezpp_lws_http_inject_event"
-                       (uptr int unsigned-64 unsigned-64 unsigned-64 int scheme-object)
+                       (uptr int unsigned-64 unsigned-64 unsigned-64 int scheme-object
+                             int int unsigned-32 int int)
                        int))
   (define ffi-lws-context-inject-poll
     (foreign-procedure "chezpp_lws_http_inject_poll" (uptr int int int) int))
@@ -179,6 +188,30 @@
         [(failed) 10]
         [(reset) 11]
         [(goaway) 12])))
+
+  (define lws-observed-protocol-value
+    (lambda (protocol)
+      (case protocol
+        [(http1) 1]
+        [(http2) 2]
+        [(unknown) 0]
+        [else protocol])))
+
+  (define lws-terminal-scope-value
+    (lambda (scope)
+      (case scope
+        [(none) 0]
+        [(stream) 1]
+        [(connection) 2]
+        [else scope])))
+
+  (define lws-observed-protocol?
+    (lambda (value)
+      (or (fixnum? value) (memq value '(unknown http1 http2)))))
+
+  (define lws-terminal-scope?
+    (lambda (value)
+      (or (fixnum? value) (memq value '(none stream connection)))))
 
   (define lws-poll-operation?
     (lambda (operation)
@@ -415,6 +448,26 @@ It returns whether LWS accepted the start.
                                 (if tls? 1 0) method host path headers
                                 initial-body (if has-body? 1 0) alpn)))]))
 
+  #|proc:lws-client-acquire
+The `lws-client-acquire` procedure reserves a logical stream on a physical connection identity.
+`connection-id`, `stream-id`, and `generation` identify the lease. It returns acceptance.
+|#
+  (define-who lws-client-acquire
+    (lambda (context connection-id stream-id generation)
+      (pcheck ([lws-context? context]
+               [natural? connection-id stream-id generation])
+        (ffi-true? (ffi-lws-client-acquire context connection-id stream-id generation)))))
+
+  #|proc:lws-client-release
+The `lws-client-release` procedure releases a terminal logical stream lease. It returns whether
+the matching terminal stream was released; active or stale leases are rejected.
+|#
+  (define-who lws-client-release
+    (lambda (context connection-id stream-id generation)
+      (pcheck ([lws-context? context]
+               [natural? connection-id stream-id generation])
+        (ffi-true? (ffi-lws-client-release context connection-id stream-id generation)))))
+
   #|proc:lws-client-body-submit
 The `lws-client-body-submit` procedure queues copied `payload` bytes for the identified stream.
 `final?` says that no later request bytes follow. It returns whether the bounded slot accepted it.
@@ -485,19 +538,32 @@ It returns whether the generation and byte count matched pending body data.
          (ffi-lws-body-consumed context connection-id stream-id generation byte-count)))))
 
   #|proc:lws-context-inject-event!
-The `lws-context-inject-event!` procedure copies a fake callback `event-tag` into `context`.
-The identity, generation, `status`, and `payload` parameters form the event. It returns acceptance.
+The `lws-context-inject-event!` procedure copies a fake callback event into `context`. The identity,
+generation, status, and payload parameters form the event. Optional protocol, reusability, peer H2
+capacity, and terminal scope values model observations made by LWS. It returns acceptance.
 |#
   (define-who lws-context-inject-event!
-    (lambda (context event-tag connection-id stream-id generation status payload)
-      (pcheck ([lws-context? context]
-               [lws-event-tag? event-tag]
-               [natural? connection-id stream-id generation]
-               [fixnum? status]
-               [bytevector? payload])
-        (ffi-true?
-         (ffi-lws-context-inject-event context (lws-event-tag-value event-tag) connection-id
-                                       stream-id generation status payload)))))
+    (case-lambda
+      [(context event-tag connection-id stream-id generation status payload)
+       (lws-context-inject-event! context event-tag connection-id stream-id generation status
+                                   payload 0 #f 0 #f 0)]
+      [(context event-tag connection-id stream-id generation status payload protocol reusable?
+                peer-h2-capacity peer-h2-capacity-known terminal-scope)
+       (pcheck ([lws-context? context]
+                [lws-event-tag? event-tag]
+                [natural? connection-id stream-id generation]
+                [fixnum? status peer-h2-capacity]
+                [lws-observed-protocol? protocol]
+                [lws-terminal-scope? terminal-scope]
+                [bytevector? payload]
+                [boolean? reusable? peer-h2-capacity-known])
+         (ffi-true?
+          (ffi-lws-context-inject-event context (lws-event-tag-value event-tag) connection-id
+                                        stream-id generation status payload
+                                        (lws-observed-protocol-value protocol)
+                                        (if reusable? 1 0) peer-h2-capacity
+                                        (if peer-h2-capacity-known 1 0)
+                                        (lws-terminal-scope-value terminal-scope))))]))
 
   #|proc:lws-context-inject-poll!
 The `lws-context-inject-poll!` procedure applies fake poll `operation` to `descriptor` in `context`.
