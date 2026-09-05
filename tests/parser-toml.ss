@@ -29,6 +29,12 @@
 
 (mat parse-toml-records
 
+     (string=? "#[toml-local-date year: 2026 month: 9 day: 4]"
+               (format "~s"
+                       (toml-table-ref
+                        (toml-document-root (parse-toml "day = 2026-09-04"))
+                        "day")))
+
      (let* ([document (parse-toml "answer = 42")]
             [root (toml-document-root document)])
        (and (toml-document? document)

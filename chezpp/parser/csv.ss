@@ -4,6 +4,7 @@
           csv-warning? csv-warning-record-index csv-warning-field-index csv-warning-message
           parse-csv parse-csv-file)
   (import (chezpp chez)
+          (chezpp parser private)
           (chezpp parser combinator)
           (chezpp internal)
           (chezpp string)
@@ -34,6 +35,17 @@
     (fields (immutable record)
             (immutable offset)
             (immutable warning-field-indices)))
+
+  (define-parser-record-writer csv-document csv-document
+    ([delimiter csv-document-delimiter]
+     [records csv-document-records]
+     [warnings csv-document-warnings]))
+  (define-parser-record-writer csv-record csv-record
+    ([fields csv-record-fields]))
+  (define-parser-record-writer csv-warning csv-warning
+    ([record-index csv-warning-record-index]
+     [field-index csv-warning-field-index]
+     [message csv-warning-message]))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; CSV grammar

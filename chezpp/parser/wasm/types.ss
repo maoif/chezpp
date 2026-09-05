@@ -49,6 +49,7 @@
     wasm-catch-label-index
     make-wasm-float wasm-float? wasm-float-width wasm-float-bits)
   (import (chezpp chez)
+          (chezpp parser private)
           (chezpp utils))
 
   (define vector-of?
@@ -171,12 +172,14 @@
 
   (define-syntax define-checked-record-type
     (syntax-rules ()
-      [(_ internal-name public-maker public-predicate internal-maker internal-predicate
+      [(_ internal-name public-maker public-predicate tag internal-maker internal-predicate
           relationship-predicate
           ([field public-accessor internal-accessor field-predicate] ...))
        (begin
          (define-record-type (internal-name internal-maker internal-predicate)
            (fields (immutable field internal-accessor) ...))
+         (define-parser-record-writer internal-name tag
+           ([field internal-accessor] ...))
          (define public-maker
            (lambda (field ...)
              (let ([relationship-fields (vector field ...)])
@@ -190,11 +193,13 @@
            (lambda (record)
              (pcheck ([internal-predicate record])
                      (internal-accessor record)))) ...)]
-      [(_ internal-name public-maker public-predicate internal-maker internal-predicate
+      [(_ internal-name public-maker public-predicate tag internal-maker internal-predicate
           ([field public-accessor internal-accessor field-predicate] ...))
        (begin
          (define-record-type (internal-name internal-maker internal-predicate)
            (fields (immutable field internal-accessor) ...))
+         (define-parser-record-writer internal-name tag
+           ([field internal-accessor] ...))
          (define public-maker
            (lambda (field ...)
              (pcheck ([field-predicate field] ...)
@@ -252,7 +257,7 @@
   #|proc:wasm-module-custom-sections
   Returns the custom sections of `record`. `record` is a module record.
   |#
-  (define-checked-record-type $wasm-module make-wasm-module wasm-module?
+  (define-checked-record-type $wasm-module make-wasm-module wasm-module? wasm-module
     $make-wasm-module $wasm-module?
     ([types wasm-module-types $wasm-module-types (vector-of? wasm-recursive-type?)]
      [imports wasm-module-imports $wasm-module-imports (vector-of? wasm-import?)]
@@ -285,7 +290,7 @@
   Returns the placement of `record`. `record` is a custom section.
   |#
   (define-checked-record-type $wasm-custom-section
-    make-wasm-custom-section wasm-custom-section?
+    make-wasm-custom-section wasm-custom-section? wasm-custom-section
     $make-wasm-custom-section $wasm-custom-section?
     ([name wasm-custom-section-name $wasm-custom-section-name string?]
      [bytes wasm-custom-section-bytes $wasm-custom-section-bytes bytevector?]
@@ -302,7 +307,7 @@
   Returns the subtypes of `record`. `record` is a recursive type.
   |#
   (define-checked-record-type $wasm-recursive-type
-    make-wasm-recursive-type wasm-recursive-type?
+    make-wasm-recursive-type wasm-recursive-type? wasm-recursive-type
     $make-wasm-recursive-type $wasm-recursive-type?
     ([subtypes wasm-recursive-type-subtypes $wasm-recursive-type-subtypes
                (vector-of? wasm-subtype?)]))
@@ -323,7 +328,7 @@
   #|proc:wasm-subtype-composite-type
   Returns the composite type of `record`. `record` is a subtype.
   |#
-  (define-checked-record-type $wasm-subtype make-wasm-subtype wasm-subtype?
+  (define-checked-record-type $wasm-subtype make-wasm-subtype wasm-subtype? wasm-subtype
     $make-wasm-subtype $wasm-subtype?
     ([final? wasm-subtype-final? $wasm-subtype-final? boolean?]
      [supertypes wasm-subtype-supertypes $wasm-subtype-supertypes (vector-of? natural?)]
@@ -343,7 +348,7 @@
   Returns the results of `record`. `record` is a function type.
   |#
   (define-checked-record-type $wasm-function-type
-    make-wasm-function-type wasm-function-type?
+    make-wasm-function-type wasm-function-type? wasm-function-type
     $make-wasm-function-type $wasm-function-type?
     ([parameters wasm-function-type-parameters $wasm-function-type-parameters
                  (vector-of? value-type?)]
@@ -359,7 +364,7 @@
   #|proc:wasm-struct-type-fields
   Returns the fields of `record`. `record` is a struct type.
   |#
-  (define-checked-record-type $wasm-struct-type make-wasm-struct-type wasm-struct-type?
+  (define-checked-record-type $wasm-struct-type make-wasm-struct-type wasm-struct-type? wasm-struct-type
     $make-wasm-struct-type $wasm-struct-type?
     ([fields wasm-struct-type-fields $wasm-struct-type-fields (vector-of? wasm-field-type?)]))
 
@@ -372,7 +377,7 @@
   #|proc:wasm-array-type-field
   Returns the field of `record`. `record` is an array type.
   |#
-  (define-checked-record-type $wasm-array-type make-wasm-array-type wasm-array-type?
+  (define-checked-record-type $wasm-array-type make-wasm-array-type wasm-array-type? wasm-array-type
     $make-wasm-array-type $wasm-array-type?
     ([field wasm-array-type-field $wasm-array-type-field wasm-field-type?]))
 
@@ -388,7 +393,7 @@
   #|proc:wasm-field-type-mutable?
   Returns whether `record` is mutable. `record` is a field type.
   |#
-  (define-checked-record-type $wasm-field-type make-wasm-field-type wasm-field-type?
+  (define-checked-record-type $wasm-field-type make-wasm-field-type wasm-field-type? wasm-field-type
     $make-wasm-field-type $wasm-field-type?
     ([storage-type wasm-field-type-storage-type $wasm-field-type-storage-type storage-type?]
      [mutable? wasm-field-type-mutable? $wasm-field-type-mutable? boolean?]))
@@ -407,7 +412,7 @@
   Returns the heap type of `record`. `record` is a reference type.
   |#
   (define-checked-record-type $wasm-reference-type
-    make-wasm-reference-type wasm-reference-type?
+    make-wasm-reference-type wasm-reference-type? wasm-reference-type
     $make-wasm-reference-type $wasm-reference-type?
     ([nullable? wasm-reference-type-nullable? $wasm-reference-type-nullable? boolean?]
      [heap-type wasm-reference-type-heap-type $wasm-reference-type-heap-type heap-type?]))
@@ -428,7 +433,7 @@
   #|proc:wasm-limits-maximum
   Returns the optional maximum of `record`. `record` is limits.
   |#
-  (define-checked-record-type $wasm-limits make-wasm-limits wasm-limits?
+  (define-checked-record-type $wasm-limits make-wasm-limits wasm-limits? wasm-limits
     $make-wasm-limits $wasm-limits?
     limits-fields?
     ([address-type wasm-limits-address-type $wasm-limits-address-type address-type?]
@@ -447,7 +452,7 @@
   #|proc:wasm-table-type-limits
   Returns the limits of `record`. `record` is a table type.
   |#
-  (define-checked-record-type $wasm-table-type make-wasm-table-type wasm-table-type?
+  (define-checked-record-type $wasm-table-type make-wasm-table-type wasm-table-type? wasm-table-type
     $make-wasm-table-type $wasm-table-type?
     ([reference-type wasm-table-type-reference-type $wasm-table-type-reference-type
                      wasm-reference-type?]
@@ -462,7 +467,7 @@
   #|proc:wasm-memory-type-limits
   Returns the limits of `record`. `record` is a memory type.
   |#
-  (define-checked-record-type $wasm-memory-type make-wasm-memory-type wasm-memory-type?
+  (define-checked-record-type $wasm-memory-type make-wasm-memory-type wasm-memory-type? wasm-memory-type
     $make-wasm-memory-type $wasm-memory-type?
     ([limits wasm-memory-type-limits $wasm-memory-type-limits wasm-limits?]))
 
@@ -478,7 +483,7 @@
   #|proc:wasm-global-type-mutable?
   Returns whether `record` is mutable. `record` is a global type.
   |#
-  (define-checked-record-type $wasm-global-type make-wasm-global-type wasm-global-type?
+  (define-checked-record-type $wasm-global-type make-wasm-global-type wasm-global-type? wasm-global-type
     $make-wasm-global-type $wasm-global-type?
     ([value-type wasm-global-type-value-type $wasm-global-type-value-type value-type?]
      [mutable? wasm-global-type-mutable? $wasm-global-type-mutable? boolean?]))
@@ -492,7 +497,7 @@
   #|proc:wasm-tag-type-type-index
   Returns the type index of `record`. `record` is a tag type.
   |#
-  (define-checked-record-type $wasm-tag-type make-wasm-tag-type wasm-tag-type?
+  (define-checked-record-type $wasm-tag-type make-wasm-tag-type wasm-tag-type? wasm-tag-type
     $make-wasm-tag-type $wasm-tag-type?
     ([type-index wasm-tag-type-type-index $wasm-tag-type-type-index natural?]))
 
@@ -510,7 +515,7 @@
   Returns the entity type of `record`. `record` is an external type.
   |#
   (define-checked-record-type $wasm-external-type
-    make-wasm-external-type wasm-external-type?
+    make-wasm-external-type wasm-external-type? wasm-external-type
     $make-wasm-external-type $wasm-external-type?
     external-type-fields?
     ([kind wasm-external-type-kind $wasm-external-type-kind external-kind?]
@@ -535,7 +540,7 @@
   #|proc:wasm-import-external-type
   Returns the external type of `record`. `record` is an import.
   |#
-  (define-checked-record-type $wasm-import make-wasm-import wasm-import?
+  (define-checked-record-type $wasm-import make-wasm-import wasm-import? wasm-import
     $make-wasm-import $wasm-import?
     ([module wasm-import-module $wasm-import-module string?]
      [name wasm-import-name $wasm-import-name string?]
@@ -557,7 +562,7 @@
   #|proc:wasm-function-body
   Returns the instruction body of `record`. `record` is a function.
   |#
-  (define-checked-record-type $wasm-function make-wasm-function wasm-function?
+  (define-checked-record-type $wasm-function make-wasm-function wasm-function? wasm-function
     $make-wasm-function $wasm-function?
     ([type-index wasm-function-type-index $wasm-function-type-index natural?]
      [locals wasm-function-locals $wasm-function-locals (vector-of? value-type?)]
@@ -576,7 +581,7 @@
   #|proc:wasm-table-initializer
   Returns the optional initializer of `record`. `record` is a table.
   |#
-  (define-checked-record-type $wasm-table make-wasm-table wasm-table?
+  (define-checked-record-type $wasm-table make-wasm-table wasm-table? wasm-table
     $make-wasm-table $wasm-table?
     ([type wasm-table-type $wasm-table-entity-type wasm-table-type?]
      [initializer wasm-table-initializer $wasm-table-initializer
@@ -591,7 +596,7 @@
   #|proc:wasm-memory-type
   Returns the memory type of `record`. `record` is a memory.
   |#
-  (define-checked-record-type $wasm-memory make-wasm-memory wasm-memory?
+  (define-checked-record-type $wasm-memory make-wasm-memory wasm-memory? wasm-memory
     $make-wasm-memory $wasm-memory?
     ([type wasm-memory-type $wasm-memory-entity-type wasm-memory-type?]))
 
@@ -608,7 +613,7 @@
   #|proc:wasm-global-initializer
   Returns the initializer of `record`. `record` is a global.
   |#
-  (define-checked-record-type $wasm-global make-wasm-global wasm-global?
+  (define-checked-record-type $wasm-global make-wasm-global wasm-global? wasm-global
     $make-wasm-global $wasm-global?
     ([type wasm-global-type $wasm-global-entity-type wasm-global-type?]
      [initializer wasm-global-initializer $wasm-global-initializer instruction-vector?]))
@@ -622,7 +627,7 @@
   #|proc:wasm-tag-type
   Returns the tag type of `record`. `record` is a tag.
   |#
-  (define-checked-record-type $wasm-tag make-wasm-tag wasm-tag?
+  (define-checked-record-type $wasm-tag make-wasm-tag wasm-tag? wasm-tag
     $make-wasm-tag $wasm-tag?
     ([type wasm-tag-type $wasm-tag-entity-type wasm-tag-type?]))
 
@@ -642,7 +647,7 @@
   #|proc:wasm-export-index
   Returns the entity index of `record`. `record` is an export.
   |#
-  (define-checked-record-type $wasm-export make-wasm-export wasm-export?
+  (define-checked-record-type $wasm-export make-wasm-export wasm-export? wasm-export
     $make-wasm-export $wasm-export?
     ([name wasm-export-name $wasm-export-name string?]
      [kind wasm-export-kind $wasm-export-kind external-kind?]
@@ -671,7 +676,7 @@
   #|proc:wasm-element-initializers
   Returns the initializer expressions of `record`. `record` is an element segment.
   |#
-  (define-checked-record-type $wasm-element make-wasm-element wasm-element?
+  (define-checked-record-type $wasm-element make-wasm-element wasm-element? wasm-element
     $make-wasm-element $wasm-element?
     element-fields?
     ([mode wasm-element-mode $wasm-element-mode element-mode?]
@@ -701,7 +706,7 @@
   #|proc:wasm-data-bytes
   Returns the bytes of `record`. `record` is a data segment.
   |#
-  (define-checked-record-type $wasm-data make-wasm-data wasm-data?
+  (define-checked-record-type $wasm-data make-wasm-data wasm-data? wasm-data
     $make-wasm-data $wasm-data?
     data-fields?
     ([mode wasm-data-mode $wasm-data-mode data-mode?]
@@ -729,7 +734,7 @@
   Returns the alternate body or catch clauses of `record`. `record` is an instruction.
   |#
   (define-checked-record-type $wasm-instruction
-    make-wasm-instruction wasm-instruction?
+    make-wasm-instruction wasm-instruction? wasm-instruction
     $make-wasm-instruction $wasm-instruction?
     ([mnemonic wasm-instruction-mnemonic $wasm-instruction-mnemonic symbol?]
      [immediates wasm-instruction-immediates $wasm-instruction-immediates vector?]
@@ -754,7 +759,7 @@
   Returns the memory index of `record`. `record` is a memory argument.
   |#
   (define-checked-record-type $wasm-memory-argument
-    make-wasm-memory-argument wasm-memory-argument?
+    make-wasm-memory-argument wasm-memory-argument? wasm-memory-argument
     $make-wasm-memory-argument $wasm-memory-argument?
     ([alignment wasm-memory-argument-alignment $wasm-memory-argument-alignment natural?]
      [offset wasm-memory-argument-offset $wasm-memory-argument-offset natural?]
@@ -773,7 +778,7 @@
   #|proc:wasm-block-type-value
   Returns the optional payload of `record`. `record` is a block type.
   |#
-  (define-checked-record-type $wasm-block-type make-wasm-block-type wasm-block-type?
+  (define-checked-record-type $wasm-block-type make-wasm-block-type wasm-block-type? wasm-block-type
     $make-wasm-block-type $wasm-block-type?
     block-type-fields?
     ([kind wasm-block-type-kind $wasm-block-type-kind block-kind?]
@@ -796,7 +801,7 @@
   #|proc:wasm-catch-label-index
   Returns the label index of `record`. `record` is a catch clause.
   |#
-  (define-checked-record-type $wasm-catch make-wasm-catch wasm-catch?
+  (define-checked-record-type $wasm-catch make-wasm-catch wasm-catch? wasm-catch
     $make-wasm-catch $wasm-catch?
     catch-fields?
     ([kind wasm-catch-kind $wasm-catch-kind catch-kind?]
@@ -816,7 +821,7 @@
   #|proc:wasm-float-bits
   Returns the unsigned bit pattern of `record`. `record` is a floating constant.
   |#
-  (define-checked-record-type $wasm-float make-wasm-float wasm-float?
+  (define-checked-record-type $wasm-float make-wasm-float wasm-float? wasm-float
     $make-wasm-float $wasm-float?
     float-fields?
     ([width wasm-float-width $wasm-float-width float-width?]

@@ -9,6 +9,11 @@
         (chezpp parser wasm text instructions)
         (chezpp parser wasm text))
 
+(mat parser-wasm-record-writers
+
+     (string=? "#[wasm-limits address-type: i64 minimum: 2 maximum: 9]"
+               (format "~s" (make-wasm-limits 'i64 2 9))))
+
 (define parse-binary
   (lambda (parser bytes)
     (run-binary-parser (<~0> parser <eof>) bytes)))

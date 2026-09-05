@@ -2,6 +2,14 @@
         (chezpp parser elf)
         (chezpp parser elf types))
 
+(mat parser-elf-record-writers
+
+     (string=?
+      (string-append
+       "#[elf-symbol name-index: 1 name: \"entry\" info: 2 other: 3 "
+       "section-index: 4 value: 5 size: 6]")
+      (format "~s" (make-elf-symbol 1 "entry" 2 3 4 5 6))))
+
 (define minimal-elf64le
   (lambda ()
     (let ([bytes (make-bytevector 64 0)]

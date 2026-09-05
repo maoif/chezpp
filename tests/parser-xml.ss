@@ -44,6 +44,13 @@
 
 (mat parse-xml-records
 
+     (string=? "#[xml-attribute name: \"id\" value: \"1\"]"
+               (format "~s"
+                       (vector-ref
+                        (xml-element-attributes
+                         (xml-document-root (parse-xml "<x id='1'/>")))
+                        0)))
+
      (let* ([document (parse-xml "<root a=\"1\">x<![CDATA[y]]><child/>z</root>")]
             [root (xml-document-root document)]
             [children (vector->list (xml-element-children root))])

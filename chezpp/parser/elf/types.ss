@@ -38,6 +38,7 @@
           make-elf-note-table elf-note-table? elf-note-table-notes
           make-elf-note elf-note? elf-note-name elf-note-type elf-note-descriptor)
   (import (chezpp chez)
+          (chezpp parser private)
           (chezpp utils))
 
   (define elf-value? (lambda (value) #t))
@@ -45,11 +46,13 @@
 
   (define-syntax define-checked-record-type
     (syntax-rules ()
-      [(_ internal-name public-maker public-predicate internal-maker internal-predicate
+      [(_ internal-name public-maker public-predicate tag internal-maker internal-predicate
           ([field public-accessor internal-accessor field-predicate] ...))
        (begin
          (define-record-type (internal-name internal-maker internal-predicate)
            (fields (immutable field internal-accessor) ...))
+         (define-parser-record-writer internal-name tag
+           ([field internal-accessor] ...))
          (define public-maker
            (lambda (field ...)
              (pcheck ([field-predicate field] ...)
@@ -89,7 +92,7 @@
   The `elf-file-sections` procedure returns the `sections` field of `record`.
   The `record` parameter is an ELF file record.
   |#
-  (define-checked-record-type $elf-file make-elf-file elf-file?
+  (define-checked-record-type $elf-file make-elf-file elf-file? elf-file
     $make-elf-file $elf-file?
     ([identification elf-file-identification $elf-file-identification
                      elf-identification?]
@@ -129,7 +132,7 @@
   The `record` parameter is an ELF identification record.
   |#
   (define-checked-record-type $elf-identification
-    make-elf-identification elf-identification?
+    make-elf-identification elf-identification? elf-identification
     $make-elf-identification $elf-identification?
     ([class elf-identification-class $elf-identification-class symbol?]
      [endianness elf-identification-endianness $elf-identification-endianness symbol?]
@@ -214,7 +217,7 @@
   The `elf-header-section-name-index` procedure returns the `section-name-index` field of `record`.
   The `record` parameter is an ELF header record.
   |#
-  (define-checked-record-type $elf-header make-elf-header elf-header?
+  (define-checked-record-type $elf-header make-elf-header elf-header? elf-header
     $make-elf-header $elf-header?
     ([type elf-header-type $elf-header-type natural?]
      [machine elf-header-machine $elf-header-machine natural?]
@@ -291,7 +294,7 @@
   The `record` parameter is an ELF program header record.
   |#
   (define-checked-record-type $elf-program-header
-    make-elf-program-header elf-program-header?
+    make-elf-program-header elf-program-header? elf-program-header
     $make-elf-program-header $elf-program-header?
     ([type elf-program-header-type $elf-program-header-type natural?]
      [flags elf-program-header-flags $elf-program-header-flags natural?]
@@ -321,7 +324,7 @@
   The `elf-section-content` procedure returns the `content` field of `record`.
   The `record` parameter is an ELF section record.
   |#
-  (define-checked-record-type $elf-section make-elf-section elf-section?
+  (define-checked-record-type $elf-section make-elf-section elf-section? elf-section
     $make-elf-section $elf-section?
     ([header elf-section-header $elf-section-header elf-section-header?]
      [content elf-section-content $elf-section-content elf-value?]))
@@ -389,7 +392,7 @@
   The `record` parameter is an ELF section header record.
   |#
   (define-checked-record-type $elf-section-header-record
-    make-elf-section-header elf-section-header?
+    make-elf-section-header elf-section-header? elf-section-header
     $make-elf-section-header $elf-section-header?
     ([name-index elf-section-header-name-index $elf-section-header-name-index natural?]
      [name elf-section-header-name $elf-section-header-name string?]
@@ -414,7 +417,7 @@
   The `elf-raw-section-bytes` procedure returns the bytevector stored in `record`.
   The `record` parameter is a raw section record.
   |#
-  (define-checked-record-type $elf-raw-section make-elf-raw-section elf-raw-section?
+  (define-checked-record-type $elf-raw-section make-elf-raw-section elf-raw-section? elf-raw-section
     $make-elf-raw-section $elf-raw-section?
     ([bytes elf-raw-section-bytes $elf-raw-section-bytes bytevector?]))
 
@@ -429,7 +432,7 @@
   The `elf-string-table-bytes` procedure returns the bytevector stored in `record`.
   The `record` parameter is a string table record.
   |#
-  (define-checked-record-type $elf-string-table make-elf-string-table elf-string-table?
+  (define-checked-record-type $elf-string-table make-elf-string-table elf-string-table? elf-string-table
     $make-elf-string-table $elf-string-table?
     ([bytes elf-string-table-bytes $elf-string-table-bytes bytevector?]))
 
@@ -444,7 +447,7 @@
   The `elf-symbol-table-symbols` procedure returns the symbol vector stored in `record`.
   The `record` parameter is a symbol table record.
   |#
-  (define-checked-record-type $elf-symbol-table make-elf-symbol-table elf-symbol-table?
+  (define-checked-record-type $elf-symbol-table make-elf-symbol-table elf-symbol-table? elf-symbol-table
     $make-elf-symbol-table $elf-symbol-table?
     ([symbols elf-symbol-table-symbols $elf-symbol-table-symbols vector?]))
   #|proc:make-elf-symbol
@@ -489,7 +492,7 @@
   The `elf-symbol-size` procedure returns the `size` field of `record`.
   The `record` parameter is an ELF symbol record.
   |#
-  (define-checked-record-type $elf-symbol make-elf-symbol elf-symbol?
+  (define-checked-record-type $elf-symbol make-elf-symbol elf-symbol? elf-symbol
     $make-elf-symbol $elf-symbol?
     ([name-index elf-symbol-name-index $elf-symbol-name-index natural?]
      [name elf-symbol-name $elf-symbol-name string?]
@@ -516,7 +519,7 @@
   The `record` parameter is an ELF relocation table record.
   |#
   (define-checked-record-type $elf-relocation-table
-    make-elf-relocation-table elf-relocation-table?
+    make-elf-relocation-table elf-relocation-table? elf-relocation-table
     $make-elf-relocation-table $elf-relocation-table?
     ([relocations elf-relocation-table-relocations
                   $elf-relocation-table-relocations vector?]
@@ -554,7 +557,7 @@
   The `elf-relocation-addend` procedure returns the `addend` field of `record`.
   The `record` parameter is an ELF relocation record.
   |#
-  (define-checked-record-type $elf-relocation make-elf-relocation elf-relocation?
+  (define-checked-record-type $elf-relocation make-elf-relocation elf-relocation? elf-relocation
     $make-elf-relocation $elf-relocation?
     ([offset elf-relocation-offset $elf-relocation-offset natural?]
      [info elf-relocation-info $elf-relocation-info natural?]
@@ -572,7 +575,7 @@
   The `elf-relr-table-entries` procedure returns the entry vector stored in `record`.
   The `record` parameter is a RELR table record.
   |#
-  (define-checked-record-type $elf-relr-table make-elf-relr-table elf-relr-table?
+  (define-checked-record-type $elf-relr-table make-elf-relr-table elf-relr-table? elf-relr-table
     $make-elf-relr-table $elf-relr-table?
     ([entries elf-relr-table-entries $elf-relr-table-entries vector?]))
 
@@ -593,7 +596,7 @@
   The `elf-hash-table-chains` procedure returns the chain vector stored in `record`.
   The `record` parameter is an ELF hash table record.
   |#
-  (define-checked-record-type $elf-hash-table make-elf-hash-table elf-hash-table?
+  (define-checked-record-type $elf-hash-table make-elf-hash-table elf-hash-table? elf-hash-table
     $make-elf-hash-table $elf-hash-table?
     ([buckets elf-hash-table-buckets $elf-hash-table-buckets vector?]
      [chains elf-hash-table-chains $elf-hash-table-chains vector?]))
@@ -616,7 +619,7 @@
   The `record` parameter is a section group record.
   |#
   (define-checked-record-type $elf-group-section
-    make-elf-group-section elf-group-section?
+    make-elf-group-section elf-group-section? elf-group-section
     $make-elf-group-section $elf-group-section?
     ([flags elf-group-section-flags $elf-group-section-flags natural?]
      [members elf-group-section-members $elf-group-section-members vector?]))
@@ -632,7 +635,7 @@
   The `elf-word-table-entries` procedure returns the entry vector stored in `record`.
   The `record` parameter is a word table record.
   |#
-  (define-checked-record-type $elf-word-table make-elf-word-table elf-word-table?
+  (define-checked-record-type $elf-word-table make-elf-word-table elf-word-table? elf-word-table
     $make-elf-word-table $elf-word-table?
     ([entries elf-word-table-entries $elf-word-table-entries vector?]))
 
@@ -648,7 +651,7 @@
   The `record` parameter is a dynamic table record.
   |#
   (define-checked-record-type $elf-dynamic-table
-    make-elf-dynamic-table elf-dynamic-table?
+    make-elf-dynamic-table elf-dynamic-table? elf-dynamic-table
     $make-elf-dynamic-table $elf-dynamic-table?
     ([entries elf-dynamic-table-entries $elf-dynamic-table-entries vector?]))
 
@@ -670,7 +673,7 @@
   The `record` parameter is a dynamic entry record.
   |#
   (define-checked-record-type $elf-dynamic-entry
-    make-elf-dynamic-entry elf-dynamic-entry?
+    make-elf-dynamic-entry elf-dynamic-entry? elf-dynamic-entry
     $make-elf-dynamic-entry $elf-dynamic-entry?
     ([tag elf-dynamic-entry-tag $elf-dynamic-entry-tag integer?]
      [value elf-dynamic-entry-value $elf-dynamic-entry-value natural?]))
@@ -686,7 +689,7 @@
   The `elf-note-table-notes` procedure returns the note vector stored in `record`.
   The `record` parameter is a note table record.
   |#
-  (define-checked-record-type $elf-note-table make-elf-note-table elf-note-table?
+  (define-checked-record-type $elf-note-table make-elf-note-table elf-note-table? elf-note-table
     $make-elf-note-table $elf-note-table?
     ([notes elf-note-table-notes $elf-note-table-notes vector?]))
   #|proc:make-elf-note
@@ -711,7 +714,7 @@
   The `elf-note-descriptor` procedure returns the `descriptor` field of `record`.
   The `record` parameter is an ELF note record.
   |#
-  (define-checked-record-type $elf-note make-elf-note elf-note?
+  (define-checked-record-type $elf-note make-elf-note elf-note? elf-note
     $make-elf-note $elf-note?
     ([name elf-note-name $elf-note-name string?]
      [type elf-note-type $elf-note-type natural?]

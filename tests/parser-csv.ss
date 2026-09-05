@@ -8,6 +8,10 @@
 
 (mat parse-csv-records
 
+     (string=? "#[csv-record fields: #(\"a\" \"b\")]"
+               (format "~s"
+                       (vector-ref (csv-document-records (parse-csv "a,b")) 0)))
+
      (let ([document (parse-csv "")])
        (and (csv-document? document)
             (char=? #\, (csv-document-delimiter document))

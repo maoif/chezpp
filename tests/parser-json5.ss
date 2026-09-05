@@ -7,6 +7,13 @@
 
 (mat parse-json5-records
 
+     (string=? "#[json5-member name: \"answer\" value: 42]"
+               (format "~s"
+                       (vector-ref
+                        (json5-object-members
+                         (json5-document-value (parse-json5 "{answer: 42}")))
+                        0)))
+
      (json5-null? (json5-value "null"))
 
      (let ([value (json5-value "{answer: 42}")])

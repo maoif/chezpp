@@ -12,6 +12,7 @@
           xml-processing-instruction-data
           parse-xml parse-xml-file)
   (import (chezpp chez)
+          (chezpp parser private)
           (chezpp parser combinator)
           (chezpp file)
           (chezpp list)
@@ -49,6 +50,32 @@
   (define-record-type xml-processing-instruction
     (fields (immutable target)
             (immutable data)))
+
+  (define-parser-record-writer xml-document xml-document
+    ([declaration xml-document-declaration]
+     [before-root xml-document-before-root]
+     [root xml-document-root]
+     [after-root xml-document-after-root]))
+  (define-parser-record-writer xml-declaration xml-declaration
+    ([version xml-declaration-version]
+     [encoding xml-declaration-encoding]
+     [standalone xml-declaration-standalone]))
+  (define-parser-record-writer xml-element xml-element
+    ([name xml-element-name]
+     [attributes xml-element-attributes]
+     [children xml-element-children]))
+  (define-parser-record-writer xml-attribute xml-attribute
+    ([name xml-attribute-name]
+     [value xml-attribute-value]))
+  (define-parser-record-writer xml-text xml-text
+    ([value xml-text-value]))
+  (define-parser-record-writer xml-cdata xml-cdata
+    ([value xml-cdata-value]))
+  (define-parser-record-writer xml-comment xml-comment
+    ([value xml-comment-value]))
+  (define-parser-record-writer xml-processing-instruction xml-processing-instruction
+    ([target xml-processing-instruction-target]
+     [data xml-processing-instruction-data]))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; XML character and name classes

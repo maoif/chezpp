@@ -15,6 +15,7 @@
           toml-local-time-nanosecond
           parse-toml parse-toml-file)
   (import (chezpp chez)
+          (chezpp parser private)
           (chezpp parser combinator)
           (chezpp file)
           (chezpp list)
@@ -50,6 +51,43 @@
   (define-record-type toml-local-time
     (fields (immutable hour) (immutable minute) (immutable second)
             (immutable nanosecond)))
+
+  (define-parser-record-writer toml-document toml-document
+    ([root toml-document-root]))
+  (define-parser-record-writer toml-table toml-table
+    ([entries toml-table-entries]
+     [inline? toml-table-inline?]))
+  (define-parser-record-writer toml-entry toml-entry
+    ([key toml-entry-key]
+     [value toml-entry-value]))
+  (define-parser-record-writer toml-array toml-array
+    ([elements toml-array-elements]))
+  (define-parser-record-writer toml-offset-date-time toml-offset-date-time
+    ([year toml-offset-date-time-year]
+     [month toml-offset-date-time-month]
+     [day toml-offset-date-time-day]
+     [hour toml-offset-date-time-hour]
+     [minute toml-offset-date-time-minute]
+     [second toml-offset-date-time-second]
+     [nanosecond toml-offset-date-time-nanosecond]
+     [offset-seconds toml-offset-date-time-offset-seconds]))
+  (define-parser-record-writer toml-local-date-time toml-local-date-time
+    ([year toml-local-date-time-year]
+     [month toml-local-date-time-month]
+     [day toml-local-date-time-day]
+     [hour toml-local-date-time-hour]
+     [minute toml-local-date-time-minute]
+     [second toml-local-date-time-second]
+     [nanosecond toml-local-date-time-nanosecond]))
+  (define-parser-record-writer toml-local-date toml-local-date
+    ([year toml-local-date-year]
+     [month toml-local-date-month]
+     [day toml-local-date-day]))
+  (define-parser-record-writer toml-local-time toml-local-time
+    ([hour toml-local-time-hour]
+     [minute toml-local-time-minute]
+     [second toml-local-time-second]
+     [nanosecond toml-local-time-nanosecond]))
 
   #|proc:toml-table-ref
   The `toml-table-ref` procedure looks up string `key` in `table`. It returns optional `default`

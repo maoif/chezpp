@@ -6,6 +6,7 @@
           json5-null?
           parse-json5 parse-json5-file)
   (import (chezpp chez)
+          (chezpp parser private)
           (chezpp parser combinator)
           (chezpp file)
           (chezpp list)
@@ -26,6 +27,17 @@
 
   (define-record-type json5-null
     (fields))
+
+  (define-parser-record-writer json5-document json5-document
+    ([value json5-document-value]))
+  (define-parser-record-writer json5-object json5-object
+    ([members json5-object-members]))
+  (define-parser-record-writer json5-member json5-member
+    ([name json5-member-name]
+     [value json5-member-value]))
+  (define-parser-record-writer json5-array json5-array
+    ([elements json5-array-elements]))
+  (define-parser-record-writer json5-null json5-null ())
 
   (define json5-null-value (make-json5-null))
 
