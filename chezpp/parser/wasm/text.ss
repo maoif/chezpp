@@ -7,15 +7,12 @@
           (chezpp parser wasm text types)
           (chezpp parser wasm text instructions)
           (chezpp parser wasm normalize)
+          (chezpp parser wasm private)
           (chezpp parser wasm validate))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Module grammar helpers and instruction placeholders
 ;;;;===----------------------------------------------------------------------===
-
-  (define list->immutable-vector
-    (lambda (value*)
-      (vector->immutable-vector (list->vector value*))))
 
   (define make-immutable-vector
     (lambda value*

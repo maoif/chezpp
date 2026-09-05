@@ -9,6 +9,7 @@
           (chezpp parser wasm types)
           (chezpp parser wasm text lexical)
           (chezpp parser wasm text types)
+          (chezpp parser wasm private)
           (chezpp utils))
 
 ;;;;===----------------------------------------------------------------------===
@@ -16,10 +17,6 @@
 ;;;;===----------------------------------------------------------------------===
 
   (define empty-vector '#())
-
-  (define list->immutable-vector
-    (lambda (value*)
-      (vector->immutable-vector (list->vector value*))))
 
   (define make-immutable-vector
     (lambda value*

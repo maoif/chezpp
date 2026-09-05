@@ -6,26 +6,6 @@
           (chezpp parser wasm types)
           (chezpp utils))
 
-  (define bytes->bytevector
-    (lambda (byte*)
-      (let* ([length (length byte*)]
-             [bytes (make-bytevector length)])
-        (let loop ([index 0] [byte* byte*])
-          (unless (null? byte*)
-            (bytevector-u8-set! bytes index (car byte*))
-            (loop (fx1+ index) (cdr byte*))))
-        bytes)))
-
-  (define list->preallocated-vector
-    (lambda (value*)
-      (let* ([length (length value*)]
-             [values (make-vector length)])
-        (let loop ([index 0] [value* value*])
-          (unless (null? value*)
-            (vector-set! values index (car value*))
-            (loop (fx1+ index) (cdr value*))))
-        values)))
-
   (define wasm-unsigned-parser
     (lambda (width)
       (let ([maximum-bytes (quotient (+ width 6) 7)])
@@ -87,7 +67,7 @@
       (<map> (lambda (byte*)
                (make-wasm-float
                 width
-                (ref (bytes->bytevector byte*) 0 (endianness little))))
+                (ref (u8-list->bytevector byte*) 0 (endianness little))))
              (<rep> <u8> size))))
 
   (define strict-utf8->string
@@ -139,7 +119,7 @@
   (define <wasm-byte-vector>
     (<bind> <wasm-u32>
             (lambda (length)
-              (<map> bytes->bytevector (<rep> <u8> length)))))
+              (<map> u8-list->bytevector (<rep> <u8> length)))))
 
   #|proc:<wasm-name>
   The `<wasm-name>` parser reads a length-prefixed, strictly valid UTF-8 string.
@@ -158,6 +138,6 @@
     (pcheck ([parser? element-parser])
             (<bind> <wasm-u32>
                     (lambda (count)
-                      (<map> list->preallocated-vector
+                      (<map> list->vector
                              (<rep> element-parser count))))))
   )

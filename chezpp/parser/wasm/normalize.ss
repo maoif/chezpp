@@ -7,6 +7,7 @@
           (chezpp parser wasm validate)
           (chezpp parser wasm text types)
           (chezpp parser wasm text instructions)
+          (chezpp parser wasm private)
           (chezpp utils))
 
 ;;;;===----------------------------------------------------------------------===
@@ -16,10 +17,6 @@
   (define-record-type normalization-state
     (fields fields namespaces field-indices field-namespaces
             (mutable type-groups) (mutable type-catalog)))
-
-  (define list->immutable-vector
-    (lambda (value*)
-      (vector->immutable-vector (list->vector value*))))
 
   (define vector-map*
     (lambda (procedure vector)

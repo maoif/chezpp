@@ -5,19 +5,10 @@
           (chezpp parser wasm binary types)
           (chezpp parser wasm binary values)
           (chezpp parser wasm opcodes)
+          (chezpp parser wasm private)
           (chezpp parser wasm types))
 
   (define empty-vector '#())
-
-  (define list->immutable-vector
-    (lambda (value*)
-      (let* ([length (length value*)]
-             [values (make-vector length)])
-        (let loop ([index 0] [value* value*])
-          (unless (null? value*)
-            (vector-set! values index (car value*))
-            (loop (fx1+ index) (cdr value*))))
-        (vector->immutable-vector values))))
 
   (define make-immutable-vector
     (lambda value*
@@ -124,16 +115,6 @@
   (define vector-bytes-immediates
     (one-immediate (<u8vec> 16)))
 
-  (define shuffle-lanes->bytevector
-    (lambda (lane*)
-      (let* ([length (length lane*)]
-             [bytes (make-bytevector length)])
-        (let loop ([index 0] [lane* lane*])
-          (unless (null? lane*)
-            (bytevector-u8-set! bytes index (car lane*))
-            (loop (fx1+ index) (cdr lane*))))
-        bytes)))
-
   (define shuffle-lane-parser
     (<bind>
      <u8>
@@ -144,7 +125,7 @@
 
   (define shuffle-bytes-immediates
     (<map> (lambda (lane*)
-             (make-immutable-vector (shuffle-lanes->bytevector lane*)))
+             (make-immutable-vector (u8-list->bytevector lane*)))
            (<rep> shuffle-lane-parser 16)))
 
   ;; Core 3.0 binary grammar, `Bcastop` and `Binstr/cast`, uses flags before all fields.

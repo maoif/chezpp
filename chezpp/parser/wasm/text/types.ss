@@ -66,6 +66,7 @@
   (import (chezpp chez)
           (chezpp parser combinator)
           (chezpp parser wasm types)
+          (chezpp parser wasm private)
           (chezpp parser wasm text lexical))
 
 ;;;;===----------------------------------------------------------------------===
@@ -218,10 +219,6 @@
 ;;;;===----------------------------------------------------------------------===
 ;;;; Type parser helpers
 ;;;;===----------------------------------------------------------------------===
-
-  (define list->immutable-vector
-    (lambda (value*)
-      (vector->immutable-vector (list->vector value*))))
 
   (define optional-value
     (lambda (value)

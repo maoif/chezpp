@@ -1006,6 +1006,17 @@
             (= 2 (wasm-limits-minimum limits))
             (= 9 (wasm-limits-maximum limits))))
 
+     (equal? '#(1 2 3)
+             (parse-binary (<wasm-vector> <wasm-u32>) #vu8(3 1 2 3)))
+
+     (let ([instruction
+            (parse-binary <wasm-instruction>
+                          #vu8(#xfd #x0d 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15))])
+       (let ([immediates (wasm-instruction-immediates instruction)])
+         (and (immutable-vector? immediates)
+              (equal? #vu8(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                      (vector-ref immediates 0)))))
+
      )
 
 (define instruction-has-fields?
