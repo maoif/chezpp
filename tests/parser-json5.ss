@@ -1,9 +1,21 @@
 (import (chezpp)
         (chezpp parser json5))
 
+(include "parser-external-tools.ss")
+
 (define json5-value
   (lambda (text)
     (json5-document-value (parse-json5 text))))
+
+(define json5-object-ref
+  (lambda (object name)
+    (let loop ([index 0] [members (json5-object-members object)])
+      (if (fx= index (vector-length members))
+          #f
+          (let ([member (vector-ref members index)])
+            (if (string=? name (json5-member-name member))
+                (json5-member-value member)
+                (loop (fx1+ index) members)))))))
 
 (mat parse-json5-records
 
@@ -144,8 +156,52 @@
 
 (mat parse-json5-files
 
-     (json5-document? (parse-json5-file "data/json5-example.json5"))
+     (let* ([object (json5-document-value
+                     (parse-json5-file "data/json5-example.json5"))]
+            [nested (json5-object-ref object "nested")]
+            [values (json5-array-elements (json5-object-ref nested "values"))])
+       (and (string=? "parser suite" (json5-object-ref object "title"))
+            (= #xdecaf (json5-object-ref object "color"))
+            (string=? "line continuation" (json5-object-ref object "message"))
+            (= 3 (vector-length values))
+            (= 1 (vector-ref values 0))
+            (eq? #t (vector-ref values 1))
+            (json5-null? (vector-ref values 2))))
 
-     (json5-document? (parse-json5-file "data/uiua-primitives.json"))
+     (let* ([object (json5-document-value
+                     (parse-json5-file "data/uiua-primitives.json"))]
+            [apply (json5-object-ref object "&ap")]
+            [arguments (json5-object-ref object "&args")]
+            [breakpoint (json5-object-ref object "&b")])
+       (and (= 208 (vector-length (json5-object-members object)))
+            (= 1 (json5-object-ref apply "args"))
+            (= 0 (json5-object-ref apply "outputs"))
+            (string=? "Env" (json5-object-ref arguments "class"))
+            (eq? #t (json5-object-ref breakpoint "experimental"))))
+
+     (or (not (external-tool-available? "jq"))
+         (let* ([path "data/uiua-primitives.json"]
+                [object (json5-document-value (parse-json5-file path))]
+                [apply (json5-object-ref object "&ap")]
+                [arguments (json5-object-ref object "&args")]
+                [breakpoint (json5-object-ref object "&b")]
+                [summary
+                 (format "[~a,~a,~a,~s,~a]\n"
+                         (vector-length (json5-object-members object))
+                         (json5-object-ref apply "args")
+                         (json5-object-ref apply "outputs")
+                         (json5-object-ref arguments "class")
+                         (if (json5-object-ref breakpoint "experimental") "true" "false"))]
+                [result
+                 (capture-process
+                  "jq" "-c"
+                  (string-append
+                   "[length, .[\"&ap\"].args, .[\"&ap\"].outputs, "
+                   ".[\"&args\"].class, .[\"&b\"].experimental]")
+                  (begin path)
+                  :stdout capture
+                  :stderr capture
+                  :timeout 10000)])
+           (equal? summary (successful-process-output result))))
 
      )
