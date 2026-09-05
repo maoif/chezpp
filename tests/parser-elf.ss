@@ -416,7 +416,9 @@
      (or (not (external-tool-available? "readelf"))
          (let* ([file (parse-elf-file "../libchezpp.so")]
                 [result
-                 (capture-process "readelf" "-h" "-W" "../libchezpp.so"
+                 (capture-process "/bin/sh" "-c"
+                                  "LC_ALL=C exec readelf -h -W \"$1\""
+                                  "sh" "../libchezpp.so"
                    :stdout capture
                    :stderr capture
                    :timeout 10000)]
