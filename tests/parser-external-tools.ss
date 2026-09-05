@@ -3,7 +3,8 @@
     (let ([result
            (capture-process "/bin/sh" "-c" "command -v -- \"$1\" >/dev/null" "sh" (begin name)
              :stdout capture
-             :stderr capture)])
+             :stderr capture
+             :timeout 10000)])
       (process-exit-success? (process-result-status result)))))
 
 (define successful-process-output
