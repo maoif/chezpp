@@ -2,9 +2,20 @@
         (chezpp file)
         (chezpp list)
         (chezpp string)
+        (chezpp system process)
         (chezpp utils)
         (chezpp parser combinator)
         (chezpp parser wasm))
+
+(include "parser-external-tools.ss")
+
+(mat parser-external-tools
+
+     (external-tool-available? "sh")
+
+     (not (external-tool-available? "chezpp-intentionally-missing-command"))
+
+     )
 
 (define runT
   (case-lambda

@@ -3,6 +3,7 @@ NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss ne
 PARSER_TESTS := parser-csv.ss parser-json5.ss parser-xml.ss parser-toml.ss \
                 parser-elf.ss parser-wasm.ss
 PARSER_OBJS := $(PARSER_TESTS:.ss=.so)
+PARSER_TEST_SUPPORT := parser-external-tools.ss
 
 SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss navigator.ss \
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
@@ -27,6 +28,8 @@ mat.so: mat.sls
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
+
+parser.so $(PARSER_OBJS): $(PARSER_TEST_SUPPORT)
 
 $(OBJS_TEST) $(PARSER_OBJS): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
