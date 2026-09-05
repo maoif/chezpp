@@ -1,6 +1,8 @@
 (import (chezpp)
         (chezpp parser toml))
 
+(include "parser-external-tools.ss")
+
 (define toml-root
   (lambda (text)
     (toml-document-root (parse-toml text))))
@@ -235,7 +237,62 @@
 
 (mat parse-toml-files
 
-     (toml-document? (parse-toml-file "data/pyproj.toml"))
+     (let* ([document (parse-toml-file "data/pyproj.toml")]
+            [root (toml-document-root document)]
+            [build-system (toml-table-ref root "build-system")]
+            [project (toml-table-ref root "project")]
+            [dependencies (toml-table-ref project "dependencies")]
+            [urls (toml-table-ref project "urls")]
+            [tool (toml-table-ref root "tool")]
+            [scikit-build (toml-table-ref tool "scikit-build")]
+            [cmake (toml-table-ref scikit-build "cmake")]
+            [define (toml-table-ref cmake "define")]
+            [overrides (toml-table-ref scikit-build "overrides")]
+            [override (vector-ref (toml-array-elements overrides) 0)]
+            [condition (toml-table-ref override "if")])
+       (and (toml-document? document)
+            (string=? "scikit_build_core.build"
+                      (toml-table-ref build-system "build-backend"))
+            (string=? "halide" (toml-table-ref project "name"))
+            (string=? ">=3.8" (toml-table-ref project "requires-python"))
+            (= 2 (vector-length (toml-array-elements dependencies)))
+            (string=? "numpy" (vector-ref (toml-array-elements dependencies) 0))
+            (string=? "imageio" (vector-ref (toml-array-elements dependencies) 1))
+            (string=? "https://halide-lang.org" (toml-table-ref urls "Homepage"))
+            (string=? ">=3.28" (toml-table-ref cmake "version"))
+            (string=? "wabt" (toml-table-ref define "Halide_WASM_BACKEND"))
+            (string=? "^win32" (toml-table-ref condition "platform-system"))))
+
+     (or (not (external-tool-available? "tomlq"))
+         (let* ([path "data/pyproj.toml"]
+                [root (toml-document-root (parse-toml-file path))]
+                [build-system (toml-table-ref root "build-system")]
+                [project (toml-table-ref root "project")]
+                [dependencies (toml-table-ref project "dependencies")]
+                [tool (toml-table-ref root "tool")]
+                [scikit-build (toml-table-ref tool "scikit-build")]
+                [cmake (toml-table-ref scikit-build "cmake")]
+                [define (toml-table-ref cmake "define")]
+                [summary
+                 (format "~a\n~a\n~a\n~a\n~a\n"
+                         (toml-table-ref project "name")
+                         (toml-table-ref project "requires-python")
+                         (vector-length (toml-array-elements dependencies))
+                         (toml-table-ref build-system "build-backend")
+                         (toml-table-ref define "Halide_WASM_BACKEND"))]
+                [result
+                 (capture-process
+                  "tomlq" "-r"
+                  (string-append
+                   ".project.name, .project[\"requires-python\"], "
+                   "(.project.dependencies | length), "
+                   ".[\"build-system\"][\"build-backend\"], "
+                   ".tool[\"scikit-build\"].cmake.define.Halide_WASM_BACKEND")
+                  (begin path)
+                  :stdout capture
+                  :stderr capture
+                  :timeout 10000)])
+           (equal? summary (successful-process-output result))))
 
      ;; error: malformed UTF-8 must not be replaced while reading TOML files.
      (error?

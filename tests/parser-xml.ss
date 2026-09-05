@@ -1,6 +1,25 @@
 (import (chezpp)
         (chezpp parser xml))
 
+(include "parser-external-tools.ss")
+
+(define xml-child-elements
+  (lambda (element)
+    (filter xml-element? (vector->list (xml-element-children element)))))
+
+(define xml-child-element-ref
+  (lambda (element name)
+    (let loop ([children (xml-child-elements element)])
+      (and (pair? children)
+           (let ([child (car children)])
+             (if (string=? name (xml-element-name child))
+                 child
+                 (loop (cdr children))))))))
+
+(define xml-element-text
+  (lambda (element)
+    (xml-text-value (vector-ref (xml-element-children element) 0))))
+
 (define bytevector-concatenate
   (lambda bytevectors
     (let* ([length (fold-left
@@ -137,9 +156,60 @@
 
 (mat parse-xml-files
 
-     (xml-document? (parse-xml-file "data/xml-basic.xml"))
+     (let* ([document (parse-xml-file "data/xml-basic.xml")]
+            [declaration (xml-document-declaration document)]
+            [root (xml-document-root document)]
+            [item (car (xml-child-elements root))]
+            [attribute (vector-ref (xml-element-attributes item) 0)])
+       (and (xml-document? document)
+            (xml-declaration? declaration)
+            (string=? "1.0" (xml-declaration-version declaration))
+            (string-ci=? "UTF-8" (xml-declaration-encoding declaration))
+            (string=? "root" (xml-element-name root))
+            (string=? "item" (xml-element-name item))
+            (string=? "id" (xml-attribute-name attribute))
+            (string=? "1" (xml-attribute-value attribute))
+            (string=? "alpha" (xml-element-text item))))
 
-     (xml-document? (parse-xml-file "data/large-dataset.xml"))
+     (let* ([root (xml-document-root (parse-xml-file "data/large-dataset.xml"))]
+            [employees (xml-child-elements root)]
+            [first (car employees)]
+            [last (list-ref employees 12499)])
+       (and (string=? "employees" (xml-element-name root))
+            (= 12500 (length employees))
+            (string=? "employee" (xml-element-name first))
+            (string=? "1" (xml-element-text (xml-child-element-ref first "id")))
+            (string=? "FirstName1"
+                      (xml-element-text (xml-child-element-ref first "firstName")))
+            (string=? "12500"
+                      (xml-element-text (xml-child-element-ref last "id")))))
+
+     (or (not (external-tool-available? "xmllint"))
+         (let* ([path "data/large-dataset.xml"]
+                [root (xml-document-root (parse-xml-file path))]
+                [employees (xml-child-elements root)]
+                [first (car employees)]
+                [last (list-ref employees (fx1- (length employees)))]
+                [summary
+                 (format "~a|~a|~a|~a|~a\n"
+                         (xml-element-name root)
+                         (length employees)
+                         (xml-element-text (xml-child-element-ref first "id"))
+                         (xml-element-text (xml-child-element-ref first "firstName"))
+                         (xml-element-text (xml-child-element-ref last "id")))]
+                [result
+                 (capture-process
+                  "xmllint" "--xpath"
+                  (string-append
+                   "concat(name(/*),'|',count(/*/*),'|',"
+                   "string(/*/employee[1]/id),'|',"
+                   "string(/*/employee[1]/firstName),'|',"
+                   "string(/*/employee[last()]/id))")
+                  (begin path)
+                  :stdout capture
+                  :stderr capture
+                  :timeout 10000)])
+           (equal? summary (successful-process-output result))))
 
      (xml-document?
       (with-temporary-xml-bytes
