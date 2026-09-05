@@ -9,6 +9,8 @@
         (chezpp parser wasm text instructions)
         (chezpp parser wasm text))
 
+(include "parser-external-tools.ss")
+
 (mat parser-wasm-record-writers
 
      (string=? "#[wasm-limits address-type: i64 minimum: 2 maximum: 9]"
@@ -4654,6 +4656,35 @@
                         (wasm-module-custom-sections right)
                         wasm-value=?))))
 
+(define wasm-section-count-matches?
+  (lambda (output label values)
+    (or (fxzero? (vector-length values))
+        (string-contains? output
+                          (format "~a[~a]:" label (vector-length values))))))
+
+(define wasm-objdump-counts-match?
+  (lambda (module output)
+    (and (wasm-section-count-matches? output "Type" (wasm-module-types module))
+         (wasm-section-count-matches? output "Function" (wasm-module-functions module))
+         (wasm-section-count-matches? output "Table" (wasm-module-tables module))
+         (wasm-section-count-matches? output "Memory" (wasm-module-memories module))
+         (wasm-section-count-matches? output "Global" (wasm-module-globals module))
+         (wasm-section-count-matches? output "Export" (wasm-module-exports module))
+         (wasm-section-count-matches? output "Elem" (wasm-module-elements module))
+         (wasm-section-count-matches? output "Data" (wasm-module-data module))
+         (wasm-section-count-matches? output "Code" (wasm-module-functions module)))))
+
+(define wasm-file-counts-match?
+  (lambda (path)
+    (let* ([module (parse-wasm-binary-module-file path)]
+           [result
+            (capture-process "wasm-objdump" "-x" (begin path)
+              :stdout capture
+              :stderr capture
+              :timeout 10000)]
+           [output (successful-process-output result)])
+      (and output (wasm-objdump-counts-match? module output)))))
+
 (mat wasm-fixtures
 
      (let* ([module (parse-wasm-binary-module-file "data/example.wasm")]
@@ -4661,7 +4692,12 @@
             [export (vector-ref (wasm-module-exports module) 0)])
        (and (= 1 (vector-length (wasm-module-types module)))
             (= 1 (vector-length (wasm-module-functions module)))
+            (fxzero? (vector-length (wasm-module-tables module)))
+            (fxzero? (vector-length (wasm-module-memories module)))
+            (fxzero? (vector-length (wasm-module-globals module)))
             (= 1 (vector-length (wasm-module-exports module)))
+            (fxzero? (vector-length (wasm-module-elements module)))
+            (fxzero? (vector-length (wasm-module-data module)))
             (equal? '#(i32 i32)
                     (wasm-function-type-parameters
                      (wasm-subtype-composite-type
@@ -4707,6 +4743,12 @@
             (eq? 'active (wasm-data-mode data))
             (= 916 (bytevector-length (wasm-data-bytes data)))
             (wasm-vector-any? (lambda (name) (string=? "name" name)) custom-name*)))
+
+     (or (not (external-tool-available? "wasm-objdump"))
+         (wasm-file-counts-match? "data/example.wasm"))
+
+     (or (not (external-tool-available? "wasm-objdump"))
+         (wasm-file-counts-match? "data/fibonacci.wasm"))
 
      (let ([text-module (parse-wasm-text-module-file "data/wasm-core3.wat")]
            [binary-module (parse-wasm-binary-module-file "data/wasm-core3.wasm")])

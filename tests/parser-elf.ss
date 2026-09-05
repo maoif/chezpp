@@ -2,6 +2,8 @@
         (chezpp parser elf)
         (chezpp parser elf types))
 
+(include "parser-external-tools.ss")
+
 (mat parser-elf-record-writers
 
      (string=?
@@ -353,9 +355,73 @@
 
      )
 
-(mat parse-elf-file-smoke
+(define elf-find-section
+  (lambda (sections name)
+    (let loop ([index 0])
+      (and (fx<? index (vector-length sections))
+           (let ([section (vector-ref sections index)])
+             (if (string=? name (elf-section-header-name (elf-section-header section)))
+                 section
+                 (loop (fx1+ index))))))))
 
-     (elf-file? (parse-elf-file "../libchezpp.so"))
+(define readelf-header-matches?
+  (lambda (file output)
+    (let* ([identification (elf-file-identification file)]
+           [header (elf-file-header file)]
+           [class (elf-identification-class identification)]
+           [endianness (elf-identification-endianness identification)])
+      (and (string-contains?
+            output
+            (format "Class:                             ~a"
+                    (if (eq? class 'elf64) "ELF64" "ELF32")))
+           (string-contains?
+            output
+            (format "Data:                              2's complement, ~a endian"
+                    (if (eq? endianness 'little) "little" "big")))
+           (string-contains?
+            output
+            (format "Number of program headers:         ~a"
+                    (elf-header-program-header-count header)))
+           (string-contains?
+            output
+            (format "Number of section headers:         ~a"
+                    (elf-header-section-header-count header)))
+           (string-contains?
+            output
+            (format "Section header string table index: ~a"
+                    (elf-header-section-name-index header)))))))
+
+(mat parse-elf-file
+
+     (let* ([file (parse-elf-file "../libchezpp.so")]
+            [identification (elf-file-identification file)]
+            [header (elf-file-header file)]
+            [program-headers (elf-file-program-headers file)]
+            [sections (elf-file-sections file)]
+            [text-section (elf-find-section sections ".text")])
+       (and (memq (elf-identification-class identification) '(elf32 elf64))
+            (memq (elf-identification-endianness identification) '(little big))
+            (= (elf-header-program-header-count header) (vector-length program-headers))
+            (= (elf-header-section-header-count header) (vector-length sections))
+            (fxpositive? (vector-length program-headers))
+            (fxpositive? (vector-length sections))
+            (fxpositive? (elf-header-section-name-index header))
+            text-section
+            (positive? (elf-section-header-size (elf-section-header text-section)))
+            (elf-raw-section? (elf-section-content text-section))
+            (positive?
+             (bytevector-length
+              (elf-raw-section-bytes (elf-section-content text-section))))))
+
+     (or (not (external-tool-available? "readelf"))
+         (let* ([file (parse-elf-file "../libchezpp.so")]
+                [result
+                 (capture-process "readelf" "-h" "-W" "../libchezpp.so"
+                   :stdout capture
+                   :stderr capture
+                   :timeout 10000)]
+                [output (successful-process-output result)])
+           (and output (readelf-header-matches? file output))))
 
      )
 
