@@ -12,7 +12,7 @@
           bindigits->num octdigits->num digits->num hexdigits->num
 
           <fail> <fail-with> <eof> <result> <satisfy>
-          <pos> <pos-at> <msg-t> <msg-f>
+          <pos> <pos-at> <bounded> <msg-t> <msg-f>
 
           <satisfy-char>
           <item> <char> <string> <whitespace>
@@ -49,7 +49,7 @@
           <u8*> <bytes> <u8vec>
           <uleb128> <sleb128>
 
-          <many> <some> <optional>
+          <many> <many-until> <some> <optional>
           <rep> <skip> <sep-by> <sep-by1>
           <~> <~n> <~ ~> <~0> <~1> <~2> <~3> <~4> <~5>
           </>
@@ -934,6 +934,44 @@ For simplicity, "PC" in the following documentation means "parser combinator".
             pos-at-parser))
 
 
+  #|proc:<bounded>
+  The `<bounded>` procedure takes natural `count` and binary `parser`. It returns a parser that
+  runs `parser` over exactly the next `count` bytes. The returned parser fails if the range
+  exceeds the input, if `parser` fails, or if `parser` does not consume the complete range.
+  |#
+  (define-who (<bounded> count parser)
+    (pcheck ([natural? count] [parser? parser])
+            (define-parser bounded-parser
+              (if (not (binary-input? inp))
+                  (values #f #f
+                          (parser-failure-custom inp "<bounded> requires binary input"))
+                  (let* ([start (input-pos inp)]
+                         [end (+ start count)])
+                    (if (> end (input-len inp))
+                        (values #f #f
+                                (parser-failure-eof inp '(bounded-range)
+                                                    "bounded range exceeds input"))
+                        (let ([limited (make-binary-input
+                                        end
+                                        (input-source inp)
+                                        start
+                                        (binary-input-data inp))])
+                          (let-values ([(status value next-input)
+                                        (parser-call parser limited state (fx1+ lvl))])
+                            (cond
+                             [(not status) (values #f #f next-input)]
+                             [(not (= end (input-pos next-input)))
+                              (values #f #f
+                                      (parser-failure-custom
+                                       next-input
+                                       (format "bounded parser left ~a byte(s)"
+                                               (- end (input-pos next-input)))))]
+                             [else
+                              (input-pos-set! inp end)
+                              (values #t value inp)])))))))
+            bounded-parser))
+
+
   #|proc:<msg-t>
   `msg` should be a printable value; `who`, if present, should also be a
   printable value that can be use to identify the message generator.
@@ -1421,6 +1459,40 @@ For simplicity, "PC" in the following documentation means "parser combinator".
                                  (loop inp1 (save-input inp1)))
                           (values #t (lb) old-inp))))))
               many-parser)))
+
+
+  #|proc:<many-until>
+  The `<many-until>` procedure returns a parser that repeatedly runs `item-parser`, whose
+  behavior is `(Input -> Any)`. At each position, `terminator-parser` is checked with lookahead
+  behavior `(Input -> Any)` and is not consumed. The result is the list of item values. When the
+  terminator does not match, an item failure is propagated. An item success that consumes no input
+  raises a progress error.
+  |#
+  (define-who (<many-until> item-parser terminator-parser)
+    (pcheck ([parser? item-parser terminator-parser])
+            (let ([item-body (parser-body item-parser)]
+                  [terminator-body (parser-body terminator-parser)])
+              (define-parser many-until-parser
+                (let ([lb (make-list-builder)])
+                  (let loop ([inp1 inp])
+                    (let ([current-input (save-input inp1)])
+                      (let-values ([(terminator-status terminator-value terminator-input)
+                                    (terminator-body (save-input current-input)
+                                                     state
+                                                     (fx1+ lvl))])
+                        (if terminator-status
+                            (values #t (lb) current-input)
+                            (let-values ([(item-status item-value item-input)
+                                          (item-body inp1 state (fx1+ lvl))])
+                              (if item-status
+                                  (begin
+                                    (ensure-progress who current-input item-input)
+                                    (lb item-value)
+                                    (loop item-input))
+                                  (values #f #f
+                                          (ensure-parser-failure
+                                           item-input current-input))))))))))
+              many-until-parser)))
 
 
   #|proc:<some>

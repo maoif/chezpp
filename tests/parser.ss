@@ -2,9 +2,20 @@
         (chezpp file)
         (chezpp list)
         (chezpp string)
+        (chezpp system process)
         (chezpp utils)
         (chezpp parser combinator)
         (chezpp parser wasm))
+
+(include "parser-external-tools.ss")
+
+(mat parser-external-tools
+
+     (external-tool-available? "sh")
+
+     (not (external-tool-available? "chezpp-intentionally-missing-command"))
+
+     )
 
 (define runT
   (case-lambda
@@ -112,7 +123,7 @@
          (lambda ()
            (write-u8vec path (u8vec #x00 #x61 #x73 #x6d 1 0 0 0)))
          (lambda ()
-           (list? (parse-wasm-binary-module path)))
+           (wasm-module? (parse-wasm-binary-module path)))
          (lambda ()
            (when (file-exists? path)
              (delete-file path)))))
@@ -686,6 +697,33 @@
      )
 
 
+(mat parser-bounded-binary
+
+     (equal? '(1 2)
+             (runB (<~1> (<uimm8> 9)
+                          (<bounded> 2 (<~> <u8> <u8>))
+                          (<uimm8> 8)
+                          <eof>)
+                   (u8vec 9 1 2 8)))
+
+     ;; error: the bounded parser must consume every declared byte.
+     (error? (runB (<bounded> 2 <u8>) (u8vec 1 2)))
+
+     ;; error: the declared range cannot extend beyond the binary input.
+     (error? (runB (<bounded> 3 (<rep> <u8> 3)) (u8vec 1 2)))
+
+     ;; error: failures inside a bounded parser retain the absolute byte offset.
+     (let ([err (capture-parser-error
+                 (lambda ()
+                   (runB (<~> (<uimm8> 9)
+                              (<bounded> 2 (<~> (<uimm8> 1) (<uimm8> 2))))
+                         (u8vec 9 1 3))))])
+       (and (parser-error? err)
+            (= 2 (parser-error-offset err))))
+
+     )
+
+
 (mat parser-combinators
 
      (equal? '()
@@ -699,6 +737,73 @@
              (runT (<many> <item>) ""))
      (equal? '(#\a #\b #\c)
              (runT (<many> <item>) "abc"))
+
+     (equal? '(#\a #\x)
+             (runT (<~0> (<many-until> <item>
+                                       (<~> (<char> #\a) (<char> #\b)))
+                          (<char> #\a)
+                          (<char> #\b)
+                          <eof>)
+                   "axab"))
+
+     (equal? '()
+             (runT (<~0> (<many-until> (<char> #\a) (<char> #\x3b))
+                          (<char> #\x3b)
+                          <eof>)
+                   ";"))
+
+     (equal? '(#\a #\a #\a)
+             (runT (<~0> (<many-until> (<char> #\a) (<char> #\x3b))
+                          (<char> #\x3b)
+                          <eof>)
+                   "aaa;"))
+
+     (equal? '()
+             (runB (<~0> (<many-until> <u8> (<uimm8> #xff))
+                          (<uimm8> #xff)
+                          <eof>)
+                   (u8vec #xff)))
+
+     (equal? '(1 2)
+             (runB (<~0> (<many-until> <u8> (<uimm8> #xff))
+                          (<uimm8> #xff)
+                          <eof>)
+                   (u8vec 1 2 #xff)))
+
+     ;; error: a partially consumed item reports its own exact failure.
+     (let ([err
+            (capture-parser-error
+             (lambda ()
+               (runT (<many-until> (<~> (<char> #\a) (<char> #\b))
+                                   (<char> #\x3b))
+                     "ax;")))])
+       (and (parser-error? err)
+            (eq? 'expected (parser-error-kind err))
+            (= 1 (parser-error-offset err))
+            (equal? '(#\b) (parser-error-expected err))
+            (string=? "expected #\\b, got #\\x" (parser-error-message err))
+            (char=? #\x (parser-error-found err))))
+
+     ;; error: EOF without a terminator propagates the item parser's EOF failure.
+     (let ([err
+            (capture-parser-error
+             (lambda ()
+               (runT (<many-until> (<char> #\a) (<char> #\x3b)) "aa")))])
+       (and (parser-error? err)
+            (eq? 'expected (parser-error-kind err))
+            (= 2 (parser-error-offset err))
+            (equal? '(#\a) (parser-error-expected err))
+            (string=? "unexpected EOF, expected #\\a" (parser-error-message err))
+            (eq? 'eof (parser-error-found err))))
+
+     ;; error: a successful item parser must consume input.
+     (error? (runT (<many-until> (<result> 'item) (<char> #\x3b)) "a"))
+
+     ;; error: the repeated item must be a parser.
+     (error? (<many-until> 'not-a-parser (<char> #\x3b)))
+
+     ;; error: the terminator lookahead must be a parser.
+     (error? (<many-until> (<char> #\a) 'not-a-parser))
 
      ;; error
      (error? (runT (<some> (<char> #\a)) ""))

@@ -618,36 +618,41 @@
                      (lb))))]))
 
 
-  #|doc
-  Build a list from left to right so you don't have to use cons and reverse.
-  Return a procedure `p` such that `(p x ...)` adds the items to the list
-  and `(p)` returns the list built.
+  #|proc:make-list-builder
+  The `make-list-builder` procedure returns a builder initialized with the values in `item*`.
+  Calling the builder with values appends them and returns the builder itself. Calling it without
+  values returns the list built so far.
   |#
   (define make-list-builder
-    (lambda args
-      (let ([res args])
-        (let ([current-cell (if (null? res)
-                                (cons #f '())
-                                (let loop ([res res])
-                                  (if (null? (cdr res))
-                                      res
-                                      (loop (cdr res)))))]
-              [next-cell (cons #f '())])
-          (define add-item!
-            (lambda (item)
-              (if (null? res)
-                  (begin (set-car! current-cell item)
-                         (set! res current-cell))
-                  (begin
-                    (set-car! next-cell item)
-                    (set-cdr! current-cell next-cell)
-                    (set! current-cell next-cell)
-                    (set! next-cell (cons #f '()))))))
-          (rec lb
-            (case-lambda
-              [() res]
-              [(x) (add-item! x)]
-              [x* (for-each lb x*)]))))))
+    (lambda item*
+      (pcheck ()
+              (let ([res item*])
+                (let ([current-cell (if (null? res)
+                                        (cons #f '())
+                                        (let loop ([res res])
+                                          (if (null? (cdr res))
+                                              res
+                                              (loop (cdr res)))))]
+                      [next-cell (cons #f '())])
+                  (define add-item!
+                    (lambda (item)
+                      (if (null? res)
+                          (begin (set-car! current-cell item)
+                                 (set! res current-cell))
+                          (begin
+                            (set-car! next-cell item)
+                            (set-cdr! current-cell next-cell)
+                            (set! current-cell next-cell)
+                            (set! next-cell (cons #f '()))))))
+                  (rec lb
+                    (case-lambda
+                      [() res]
+                      [(item)
+                       (add-item! item)
+                       lb]
+                      [item*
+                       (for-each add-item! item*)
+                       lb])))))))
 
 
   #|doc

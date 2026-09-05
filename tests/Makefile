@@ -1,5 +1,9 @@
 NET_TESTS := net-core.ss net-http.ss net-ftp.ss net-ssh.ss net-sftp.ss net-scp.ss net-websocket.ss net-grpc.ss
 NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss
+PARSER_TESTS := parser-csv.ss parser-json5.ss parser-xml.ss parser-toml.ss \
+                parser-elf.ss parser-wasm.ss
+PARSER_OBJS := $(PARSER_TESTS:.ss=.so)
+PARSER_TEST_SUPPORT := parser-external-tools.ss
 
 SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss navigator.ss \
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
@@ -25,7 +29,9 @@ mat.so: mat.sls
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
-$(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
+parser.so $(PARSER_OBJS): $(PARSER_TEST_SUPPORT)
+
+$(OBJS_TEST) $(PARSER_OBJS): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \

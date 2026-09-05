@@ -20,6 +20,18 @@
                (lb 1 2 3)
                (lb)))
 
+     (let ([lb (make-list-builder)])
+       (and (eq? lb (lb 1))
+            (eq? lb (lb 2 3))
+            (equal? '(1 2 3) (lb))))
+
+     (let ([lb (make-list-builder)])
+       (let loop ([builder lb] [item* '(a b c)])
+         (if (null? item*)
+             (and (eq? builder lb)
+                  (equal? '(a b c) (lb)))
+             (loop (builder (car item*)) (cdr item*)))))
+
 
      )
 
@@ -400,13 +412,11 @@
 
      (let ([ls (iota 5)])
        (list-set! ls 4 55)
-       (displayln ls)
        (equal? ls '(0 1 2 3 55)))
 
      (let ([ls (list 1 2 3)])
        (list-set! ls 0 11)
        (list-set! ls 2 33)
-       (displayln ls)
        (equal? ls '(11 2 33)))
 
      ;; literal list not equal
@@ -545,7 +555,6 @@
            [ls2 (list 4 5 6 7 8 9)]
            [ls3 (list 7 8 9 10 11 12 4 5 6)]
            [ls4 (list 4 6 7 8 2 5)])
-       (displayln (list=? (append ls1 ls2 ls3 ls4) (list+ ls1 ls2 ls3 ls4)))
        (list=? (list^ ls1 ls2 ls3 ls4)
                (list- (list+ ls1 ls2 ls3 ls4) (list& ls1 ls2 ls3 ls4))))
 

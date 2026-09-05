@@ -1,176 +1,558 @@
 (library (chezpp parser xml)
-  (export parse-xml parse-xml-file)
+  (export xml-document? xml-document-declaration xml-document-before-root
+          xml-document-root xml-document-after-root
+          xml-declaration? xml-declaration-version xml-declaration-encoding
+          xml-declaration-standalone
+          xml-element? xml-element-name xml-element-attributes xml-element-children
+          xml-attribute? xml-attribute-name xml-attribute-value
+          xml-text? xml-text-value
+          xml-cdata? xml-cdata-value
+          xml-comment? xml-comment-value
+          xml-processing-instruction? xml-processing-instruction-target
+          xml-processing-instruction-data
+          parse-xml parse-xml-file)
   (import (chezpp chez)
+          (chezpp parser private)
           (chezpp parser combinator)
-          (chezpp internal)
+          (chezpp file)
           (chezpp list)
-          (chezpp io)
-          (chezpp vector)
           (chezpp utils))
 
-  ;; This xml parser only parses simple xml documents without document type declarations (DTD).
+  (define-record-type xml-document
+    (fields (immutable declaration)
+            (immutable before-root)
+            (immutable root)
+            (immutable after-root)))
 
-  ;; https://www.w3.org/TR/xml/
+  (define-record-type xml-declaration
+    (fields (immutable version)
+            (immutable encoding)
+            (immutable standalone)))
+
+  (define-record-type xml-element
+    (fields (immutable name)
+            (immutable attributes)
+            (immutable children)))
+
+  (define-record-type xml-attribute
+    (fields (immutable name)
+            (immutable value)))
+
+  (define-record-type xml-text
+    (fields (immutable value)))
+
+  (define-record-type xml-cdata
+    (fields (immutable value)))
+
+  (define-record-type xml-comment
+    (fields (immutable value)))
+
+  (define-record-type xml-processing-instruction
+    (fields (immutable target)
+            (immutable data)))
+
+  (define-parser-record-writer xml-document xml-document
+    ([declaration xml-document-declaration]
+     [before-root xml-document-before-root]
+     [root xml-document-root]
+     [after-root xml-document-after-root]))
+  (define-parser-record-writer xml-declaration xml-declaration
+    ([version xml-declaration-version]
+     [encoding xml-declaration-encoding]
+     [standalone xml-declaration-standalone]))
+  (define-parser-record-writer xml-element xml-element
+    ([name xml-element-name]
+     [attributes xml-element-attributes]
+     [children xml-element-children]))
+  (define-parser-record-writer xml-attribute xml-attribute
+    ([name xml-attribute-name]
+     [value xml-attribute-value]))
+  (define-parser-record-writer xml-text xml-text
+    ([value xml-text-value]))
+  (define-parser-record-writer xml-cdata xml-cdata
+    ([value xml-cdata-value]))
+  (define-parser-record-writer xml-comment xml-comment
+    ([value xml-comment-value]))
+  (define-parser-record-writer xml-processing-instruction xml-processing-instruction
+    ([target xml-processing-instruction-target]
+     [data xml-processing-instruction-data]))
+
+;;;;===----------------------------------------------------------------------===
+;;;; XML character and name classes
+;;;;===----------------------------------------------------------------------===
+
+  (define xml-character?
+    (lambda (character)
+      (let ([value (char->integer character)])
+        (or (= value #x9)
+            (= value #xa)
+            (= value #xd)
+            (<= #x20 value #xd7ff)
+            (<= #xe000 value #xfffd)
+            (<= #x10000 value #x10ffff)))))
+
+  (define xml-name-start-character?
+    (lambda (character)
+      (let ([value (char->integer character)])
+        (or (char=? character #\:)
+            (char<=? #\A character #\Z)
+            (char=? character #\_)
+            (char<=? #\a character #\z)
+            (<= #xc0 value #xd6)
+            (<= #xd8 value #xf6)
+            (<= #xf8 value #x2ff)
+            (<= #x370 value #x37d)
+            (<= #x37f value #x1fff)
+            (<= #x200c value #x200d)
+            (<= #x2070 value #x218f)
+            (<= #x2c00 value #x2fef)
+            (<= #x3001 value #xd7ff)
+            (<= #xf900 value #xfdcf)
+            (<= #xfdf0 value #xfffd)
+            (<= #x10000 value #xeffff)))))
+
+  (define xml-name-character?
+    (lambda (character)
+      (let ([value (char->integer character)])
+        (or (xml-name-start-character? character)
+            (char=? character #\-)
+            (char=? character #\.)
+            (char<=? #\0 character #\9)
+            (= value #xb7)
+            (<= #x300 value #x36f)
+            (<= #x203f value #x2040)))))
+
+  (define <xml-character>
+    (<satisfy-char> xml-character? "not an XML character"))
+
+  (define <name-start-character>
+    (<satisfy-char> xml-name-start-character? "invalid XML name start"))
+
+  (define <name-character>
+    (<satisfy-char> xml-name-character? "invalid XML name character"))
+
+  (define <name>
+    (<map> (lambda (value)
+             (apply string (cons (car value) (cadr value))))
+           (<~> <name-start-character> (<many> <name-character>))))
+
+  (define <whitespace-character>
+    (<one-of> "\x20;\x9;\xA;"))
+
+  (define <S> (<some> <whitespace-character>))
+  (define <S?> (<many> <whitespace-character>))
+
+;;;;===----------------------------------------------------------------------===
+;;;; References and quoted values
+;;;;===----------------------------------------------------------------------===
+
+  (define (<validated-character-reference> parser radix)
+    (<bind> parser
+            (lambda (digits)
+              (let ([value (string->number (apply string digits) radix)])
+                (if (and value
+                         (<= value #x10ffff)
+                         (not (<= #xd800 value #xdfff))
+                         (xml-character? (integer->char value)))
+                    (<result> (integer->char value))
+                    (<fail-with> "numeric reference is not an XML character"))))))
+
+  (define <decimal-character-reference>
+    (<~1> (<string> "&#")
+          (<validated-character-reference> (<some> <digit>) 10)
+          (<char> #\;)))
+
+  (define <hexadecimal-character-reference>
+    (<~1> (<string> "&#x")
+          (<validated-character-reference> (<some> <hexdigit>) 16)
+          (<char> #\;)))
+
+  (define <predefined-reference>
+    (</> (<as> #\< (<string> "&lt;"))
+         (<as> #\> (<string> "&gt;"))
+         (<as> #\& (<string> "&amp;"))
+         (<as> #\' (<string> "&apos;"))
+         (<as> #\" (<string> "&quot;"))))
+
+  (define <reference>
+    (</> <hexadecimal-character-reference>
+         <decimal-character-reference>
+         <predefined-reference>))
+
+  (define (attribute-value-parser quote)
+    (<map> (lambda (characters) (apply string characters))
+           (<~1> (<char> quote)
+                 (<many>
+                  (</> <reference>
+                       (<satisfy-char>
+                        (lambda (character)
+                          (and (xml-character? character)
+                               (not (char=? character #\<))
+                               (not (char=? character #\&))
+                               (not (char=? character quote))))
+                        "invalid XML attribute character")))
+                 (<char> quote))))
+
+  (define <attribute-value>
+    (</> (attribute-value-parser #\")
+         (attribute-value-parser #\')))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Comments, CDATA, and processing instructions
+;;;;===----------------------------------------------------------------------===
+
+  (define <not-comment-hyphen>
+    (<satisfy-char>
+     (lambda (character)
+       (and (xml-character? character)
+            (not (char=? character #\-))))
+     "invalid XML comment character"))
+
+  (define <comment-piece>
+    (</> (<map> list <not-comment-hyphen>)
+         (<map> (lambda (value) (list #\- (cadr value)))
+                (<~> (<char> #\-) <not-comment-hyphen>))))
+
+  (define <comment>
+    (<map> (lambda (pieces)
+             (make-xml-comment (apply string (apply append pieces))))
+           (<~1> (<string> "<!--")
+                 (<many> <comment-piece>)
+                 (<string> "-->"))))
+
+  (define <not-cdata-end>
+    (<~1> (<not-followed-by> (<result> #t) (<string> "]]>") )
+          <xml-character>))
+
+  (define <cdata>
+    (<map> (lambda (characters)
+             (make-xml-cdata (apply string characters)))
+           (<~1> (<string> "<![CDATA[")
+                 (<many> <not-cdata-end>)
+                 (<string> "]]>"))))
+
+  (define <not-processing-instruction-end>
+    (<~1> (<not-followed-by> (<result> #t) (<string> "?>"))
+          <xml-character>))
+
+  (define <processing-instruction>
+    (<~1> (<string> "<?")
+          (<bind> <name>
+                  (lambda (target)
+                    (if (string-ci=? target "xml")
+                        (<fail-with> "processing-instruction target cannot be XML")
+                        (<map> (lambda (value)
+                                 (make-xml-processing-instruction
+                                  target
+                                  (if (string? (car value)) (car value) #f)))
+                               (<~> (<optional>
+                                     (~> <S>
+                                         (<as-string>
+                                          (<many>
+                                           <not-processing-instruction-end>))))
+                                    (<string> "?>"))))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; XML declaration
+;;;;===----------------------------------------------------------------------===
+
+  (define <equals>
+    (<~1> <S?> (<char> #\=) <S?>))
+
+  (define (<quoted-text> parser)
+    (</> (<~1> (<char> #\") parser (<char> #\"))
+         (<~1> (<char> #\') parser (<char> #\'))))
+
+  (define <version-value>
+    (<bind> (<quoted-text>
+             (<map> (lambda (value)
+                      (string-append "1." (cadr value)))
+                    (<~> (<string> "1.") (<as-string> (<some> <digit>)))))
+            (lambda (version)
+              (if (string=? version "1.0")
+                  (<result> version)
+                  (<fail-with> "only XML version 1.0 is supported")))))
+
+  (define <encoding-name>
+    (<map> (lambda (value)
+             (apply string (cons (car value) (cadr value))))
+           (<~> <letter>
+                (<many> (</> <letter> <digit> (<one-of> "._-"))))))
+
+  (define <encoding-info>
+    (<~2> (<string> "encoding") <equals> (<quoted-text> <encoding-name>)))
+
+  (define <standalone-info>
+    (<map> string->symbol
+           (<~2> (<string> "standalone")
+                 <equals>
+                 (<quoted-text> (</> (<string> "yes") (<string> "no"))))))
+
+  (define <xml-declaration>
+    (<map> (lambda (value)
+             (make-xml-declaration
+              (caddr value)
+              (let ([encoding (list-ref value 3)])
+                (if (string? encoding) encoding #f))
+              (let ([standalone (list-ref value 4)])
+                (if (symbol? standalone) standalone #f))))
+           (<~> (<string> "<?xml")
+                <S>
+                (<~2> (<string> "version") <equals> <version-value>)
+                (<optional> (~> <S> <encoding-info>))
+                (<optional> (~> <S> <standalone-info>))
+                <S?>
+                (<string> "?>"))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Elements and documents
+;;;;===----------------------------------------------------------------------===
+
+  (define <attribute>
+    (<map> (lambda (value)
+             (make-xml-attribute (car value) (caddr value)))
+           (<~> <name> <equals> <attribute-value>)))
+
+  (define duplicate-attribute?
+    (lambda (attributes)
+      (let loop ([attributes attributes] [name* '()])
+        (cond [(null? attributes) #f]
+              [(exists (lambda (name)
+                         (string=? name
+                                   (xml-attribute-name (car attributes))))
+                       name*)
+               #t]
+              [else
+               (loop (cdr attributes)
+                     (cons (xml-attribute-name (car attributes)) name*))]))))
+
+  (define merge-adjacent-text
+    (lambda (nodes)
+      (let loop ([nodes nodes] [result '()])
+        (cond [(null? nodes) (reverse result)]
+              [(and (xml-text? (car nodes))
+                    (pair? result)
+                    (xml-text? (car result)))
+               (loop (cdr nodes)
+                     (cons (make-xml-text
+                            (string-append (xml-text-value (car result))
+                                           (xml-text-value (car nodes))))
+                           (cdr result)))]
+              [else (loop (cdr nodes) (cons (car nodes) result))]))))
+
+  (define <reference-text>
+    (<map> (lambda (character)
+             (make-xml-text (string character)))
+           <reference>))
+
+  (define <character-data-character>
+    (<~1> (<not-followed-by> (<result> #t) (<string> "]]>") )
+          (<satisfy-char>
+           (lambda (character)
+             (and (xml-character? character)
+                  (not (char=? character #\<))
+                  (not (char=? character #\&))))
+           "invalid XML character data")))
+
+  (define <character-data>
+    (<map> (lambda (characters)
+             (make-xml-text (apply string characters)))
+           (<some> <character-data-character>)))
+
+  (declare-lazy-parser <element>)
+
+  (define <content-node>
+    (</> <cdata>
+         <comment>
+         <processing-instruction>
+         <element>
+         <reference-text>
+         <character-data>))
+
+  (define <end-tag>
+    (<~1> (<string> "</") <name> <S?> (<char> #\>)))
+
+  (define <element-parser>
+    (<bind> (<~1> (<char> #\<) <name>)
+            (lambda (name)
+              (<bind> (<~> (<many> (~> <S> <attribute>)) <S?>)
+                      (lambda (value)
+                        (let ([attributes (car value)])
+                          (if (duplicate-attribute? attributes)
+                              (<fail-with> "duplicate XML attribute")
+                              (</> (<as> (make-xml-element
+                                          name
+                                          (list->vector attributes)
+                                          '#())
+                                        (<string> "/>"))
+                                   (~> (<char> #\>)
+                                       (<bind> (<many> <content-node>)
+                                               (lambda (children)
+                                                 (<bind> <end-tag>
+                                                         (lambda (end-name)
+                                                           (if (string=? name end-name)
+                                                               (<result>
+                                                                (make-xml-element
+                                                                 name
+                                                                 (list->vector attributes)
+                                                                 (list->vector
+                                                                  (merge-adjacent-text
+                                                                   children))))
+                                                               (<fail-with>
+                                                                (string-append
+                                                                 "end tag does not match "
+                                                                 "open tag"))))))
+                                                         ))))))))))
+
+  (define <misc-node>
+    (</> <comment>
+         <processing-instruction>
+         (<as> #f <S>)))
+
+  (define xml-misc-node?
+    (lambda (value)
+      (or (xml-comment? value)
+          (xml-processing-instruction? value))))
+
   (define parser-xml
-    (let ()
-      (define <ws> (<one-of> "\t\r\n "))
-      (define <S> (<some> <ws>))
-      (define <S?> (<optional> <S>))
-      (define (<token> p)  (<~ p (<many> <ws>)))
-      (define (<token1> p) (<~ p (<some> <ws>)))
-      (define <xml-char> (<satisfy-char> (lambda (c)
-                                           (or (char=? c #\x9) (char=? c #\xA) (char<=? #\x20 #\xD7FF)
-                                               (char<=? #\xE000 #\xFFFD) (char<=? #\x10000 #\x10FFFF)))))
-      (define <name-start-char> (</> <letter> (<one-of> ":_")
-                                     (<satisfy-char> (lambda (c)
-                                                       (or (char<=? #\xC0 c #\xD6)     (char<=? #\xD8 c #\xF6)
-                                                           (char<=? #\xF8 c #\x2FF)    (char<=? #\x370 c #\x37D)
-                                                           (char<=? #\x37F c #\x1FFF)  (char<=? #\x200C c #\x200D)
-                                                           (char<=? #\x2070 c #\x218F) (char<=? #\x2C00 c #\x2FEF)
-                                                           (char<=? #\x3001 c #\xD7FF) (char<=? #\xF900 c #\xFDCF)
-                                                           (char<=? #\xFDF0 c #\xFFFD) (char<=? #\x10000 c #\xEFFFF))))))
-      (define <name-char> (</> <name-start-char> <digit> (<one-of> "-.\xB7;")
-                               (<satisfy-char> (lambda (c) (or (char<=? #\x0300 c #\x036F) (char<=? #\x203F c #\x2040))))))
-      (define <name> (<map> (lambda (val) (apply string (cons (car val) (cadr val))))
-                            (<~> <name-start-char> (<many> <name-char>))))
+    (begin
+      (install-lazy-parser! <element> <element-parser>)
+      (<map> (lambda (value)
+               (make-xml-document
+                (let ([declaration (car value)])
+                  (if (xml-declaration? declaration) declaration #f))
+                (list->vector (filter xml-misc-node? (cadr value)))
+                (caddr value)
+                (list->vector (filter xml-misc-node? (list-ref value 3)))))
+             (<~> (<optional> <xml-declaration>)
+                  (<many> <misc-node>)
+                  <element>
+                  (<many> <misc-node>)
+                  <eof>))))
 
-      ;; TODO refine
-      (define <comment> (<map> (lambda (val) `(comment ,(cadr val)))
-                               (<~> (<string> "<!--")
-                                    (<many> (</> (<none-of> "-") (<~> (<char> #\-) (<none-of> "-"))))
-                                    (<string> "-->"))))
-      (define <misc> (</> <comment> <S>))
+  (define normalize-xml-newlines
+    (lambda (text)
+      (let* ([length (string-length text)]
+             [normalized (make-string length)])
+        (let loop ([source-index 0] [target-index 0])
+          (if (= source-index length)
+              (substring normalized 0 target-index)
+              (let ([character (string-ref text source-index)])
+                (if (char=? character #\return)
+                    (begin
+                      (string-set! normalized target-index #\newline)
+                      (loop (if (and (< (fx1+ source-index) length)
+                                     (char=? (string-ref text (fx1+ source-index))
+                                             #\newline))
+                                (fx+ source-index 2)
+                                (fx1+ source-index))
+                            (fx1+ target-index)))
+                    (begin
+                      (string-set! normalized target-index character)
+                      (loop (fx1+ source-index) (fx1+ target-index))))))))))
 
-      (define <predefined-char-ref> (</> (<as> #\< (<string> "&lt;"))   (<as> #\> (<string> "&gt;"))
-                                         (<as> #\' (<string> "&apos;")) (<as> #\" (<string> "&quot;"))
-                                         (<as> #\& (<string> "&amp;"))))
-      (define <char-ref> (</> (<~1> (<string> "&#")
-                                    (<map> (lambda (d*) (integer->char (hexdigits->num d*))) (<some> <digit10>))
-                                    (<char> #\;))
-                              (<~1> (<string> "&#x")
-                                    (<map> (lambda (d*) (integer->char (digits->num d*))) (<some> <digit16>))
-                                    (<char> #\;))
-                              <predefined-char-ref>))
+;;;;===----------------------------------------------------------------------===
+;;;; File decoding
+;;;;===----------------------------------------------------------------------===
 
-      (define <attr-value> (<token> (</> (<~1> (<char> #\")
-                                               (<as-string> (<many> (</> (<none-of> "<&\"") <char-ref>)))
-                                               (<char> #\"))
-                                         (<~1> (<char> #\')
-                                               (<as-string> (<many> (</> (<none-of> "<&'") <char-ref>)))
-                                               (<char> #\')))))
+  (define bytevector-slice
+    (lambda (bytevector start)
+      (let* ([length (- (bytevector-length bytevector) start)]
+             [result (make-bytevector length 0)])
+        (bytevector-copy! bytevector start result 0 length)
+        result)))
 
-      (define <doctype-decl> (<~> (<token> (<string> "<!DOCTYPE"))
-                                  (<fail-with> "XML with DOCTYPE not supported")))
+  (define detect-xml-encoding
+    (lambda (bytevector)
+      (let ([length (bytevector-length bytevector)])
+        (cond [(and (>= length 3)
+                    (= #xef (bytevector-u8-ref bytevector 0))
+                    (= #xbb (bytevector-u8-ref bytevector 1))
+                    (= #xbf (bytevector-u8-ref bytevector 2)))
+               (values 'utf-8 3)]
+              [(and (>= length 2)
+                    (= #xfe (bytevector-u8-ref bytevector 0))
+                    (= #xff (bytevector-u8-ref bytevector 1)))
+               (values 'utf-16be 2)]
+              [(and (>= length 2)
+                    (= #xff (bytevector-u8-ref bytevector 0))
+                    (= #xfe (bytevector-u8-ref bytevector 1)))
+               (values 'utf-16le 2)]
+              [(and (>= length 4)
+                    (= 0 (bytevector-u8-ref bytevector 0))
+                    (= #x3c (bytevector-u8-ref bytevector 1))
+                    (= 0 (bytevector-u8-ref bytevector 2)))
+               (values 'utf-16be 0)]
+              [(and (>= length 4)
+                    (= #x3c (bytevector-u8-ref bytevector 0))
+                    (= 0 (bytevector-u8-ref bytevector 1))
+                    (= 0 (bytevector-u8-ref bytevector 3)))
+               (values 'utf-16le 0)]
+              [else (values 'utf-8 0)]))))
 
-      (define <version-num> (<map> (lambda (val) (string-append (car val) (cadr val)))
-                                   (<~> (<string> "1.") (<as-string> (<some> <digit>)))))
-      (define <version-info> (<map> (lambda (val) (cons (car val) (caddr val)))
-                                    (<~> (<token> (<string> "version"))
-                                         (<token> (<string> "="))
-                                         (<token> (</> (<~n> 1 (<char> #\") <version-num> (<char> #\"))
-                                                       (<~n> 1 (<char> #\') <version-num> (<char> #\')))))))
-      ;; utf-8 only
-      (define <enc-name> (</> (<string> "UTF-8") (<string> "utf-8")
-                              (<fail-with> "XML with encodings other than utf-8 not supported")))
-      (define <encoding-decl> (<map> (lambda (val) (cons (car val) (caddr val)))
-                                     (<~> (<token> (<string> "encoding"))
-                                          (<token> (<string> "="))
-                                          (<token> (</> (<~n> 1 (<char> #\") <enc-name> (<char> #\"))
-                                                        (<~n> 1 (<char> #\') <enc-name> (<char> #\')))))))
-      (define <yes/no> (</> (<string> "yes") (<string> "no")))
-      (define <standalone-decl> (<map> (lambda (val) (cons (car val) (caddr val)))
-                                       (<~> (<token> (<string> "standalone"))
-                                            (<token> (<string> "="))
-                                            (<token> (</> (<~n> 1 (<char> #\") <yes/no> (<char> #\"))
-                                                          (<~n> 1 (<char> #\') <yes/no> (<char> #\')))))))
-      (define <xml-decl> (<map> (lambda (val)
-                                  `(xml-declaration ,(list-ref val 1) ,(list-ref val 2) ,(list-ref val 3)))
-                                (<~> (<token> (<string> "<?xml"))
-                                     <version-info>
-                                     (<optional> <encoding-decl>)
-                                     (<optional> <standalone-decl>)
-                                     (<token> (<string> "?>")))))
-      (define <prolog> (<~0> (<optional> <xml-decl>)
-                             (<many> <misc>)
-                             (<optional> (<~> <doctype-decl> (<many> <misc>)))))
+  (define xml-transcoder
+    (lambda (encoding)
+      (make-transcoder
+       (case encoding
+         [(utf-8) (utf-8-codec)]
+         [(utf-16le) (utf-16-codec (endianness little))]
+         [(utf-16be) (utf-16-codec (endianness big))]
+         [else (assert-unreachable)])
+       (eol-style none)
+       (error-handling-mode raise))))
 
-      (define <attr> (<map> (lambda (val) (cons (car val) (list-ref val 2)))
-                            (<~> (<token> <name>) (<token> (<char> #\=)) <attr-value>)))
+  (define decode-xml-bytevector
+    (lambda (bytevector)
+      (let-values ([(encoding signature-length)
+                    (detect-xml-encoding bytevector)])
+        (values
+         (bytevector->string (bytevector-slice bytevector signature-length)
+                             (xml-transcoder encoding))
+         encoding))))
 
-      (define <CDATA> (<map> (lambda (val)
-                               `(CDATA ,(apply string `(,@(list-ref val 0) ,(list-ref val 1)))))
-                             (<~1> (<string> "<![CDATA[")
-                                   ;; TODO refine, exclude ]]>, maybe use a new PC
-                                   (<~> (<many> (<not-followed-by> <xml-char> (<string> "]]>")))
-                                        ;; the last char before ]]>
-                                        <item>)
-                                   (<string> "]]>"))))
-      ;; TODO refine, exclude ]]>
-      (define <char-data> (<many> (</> (<none-of> "<&") <char-ref>)))
-      (define all-ws? (lambda (val) (andmap char-whitespace? val)))
+  (define encoding-declaration-compatible?
+    (lambda (detected declared)
+      (or (not declared)
+          (case detected
+            [(utf-8) (string-ci=? declared "UTF-8")]
+            [(utf-16le)
+             (or (string-ci=? declared "UTF-16")
+                 (string-ci=? declared "UTF-16LE"))]
+            [(utf-16be)
+             (or (string-ci=? declared "UTF-16")
+                 (string-ci=? declared "UTF-16BE"))]
+            [else #f]))))
 
-      (define <element>
-        (<bind> (~> (<char> #\<) (<token> <name>))
-                (lambda (tag)
-                  ;;(printf "read tag: ~a~n" tag)
-                  (<map> (lambda (val) `(element ,tag ,(list-ref val 0) ,(list-ref val 1)))
-                         (<~> (<map> (lambda (val) (cons 'attr val)) (<many> <attr>))
-                              (<map> (lambda (val) (cons 'content val))
-                                     (</> (<~1> (<token> (<string> ">"))
-                                                (<map> (lambda (val)
-                                                         ;; merge CDATA, char-data
-                                                         (let* ([char-data (car val)] [rest (cadr val)]
-                                                                [char-data* (map (lambda (x) (cadr x)) rest)]
-                                                                [other*     (map (lambda (x) (car x))  rest)]
-                                                                [cdata* (filter (lambda (x) (eq? (car x) 'CDATA))   other*)]
-                                                                [elem*  (filter (lambda (x) (eq? (car x) 'element)) other*)]
-                                                                [text (let ([t (apply append char-data char-data*)])
-                                                                        (if (all-ws? t) '() (list (apply string t))))])
-                                                           `((text ,@text)
-                                                             (CDATA ,@(map (lambda (x) (cadr x)) cdata*))
-                                                             ,@elem*)))
-                                                       (<~> ;; content
-                                                        (<optional> <char-data>)
-                                                        ;; char-ref not needed below
-                                                        (<many> (<~> (</> <CDATA>    (<msg-f> "2")  ;; <![CDATA[
-                                                                          <comment>  (<msg-f> "3")  ;; <!--
-                                                                          <element>  (<msg-f> "4")) ;; <
-                                                                     ;; serves as tokenizer
-                                                                     (<optional> <char-data>)))))
-                                                (<string> (format "</~a>" tag)))
-                                          (<as> '() (<string> "/>")))))))))
-      (define <document> (<fully> (<~ (<~> <prolog> <element>) (<many> <misc>))))
+;;;;===----------------------------------------------------------------------===
+;;;; Public API
+;;;;===----------------------------------------------------------------------===
 
-      <document>))
-
-
-  #|doc
-  `str` must be a string representing a valid xml document.
-
-  `parse-xml` tries to parse the xml document represented as `str`.
-  If successful, the parsed xml document is returned;
-  otherwise, an error with condition type &parser-error is raised.
-
-  Note: this parser does not support parsing DTDs.
+  #|proc:parse-xml
+  The `parse-xml` procedure parses XML 1.0 string `text` and returns an `xml-document`.
+  Document type declarations and declared general entities are not supported.
   |#
   (define parse-xml
-    (lambda (str)
-      (pcheck ([string? str])
-              (run-textual-parser parser-xml str))))
+    (lambda (text)
+      (pcheck ([string? text])
+              (run-textual-parser parser-xml (normalize-xml-newlines text)))))
 
-
-  #|doc
-  `path` must be a path string that points to a valid xml document file.
-
-  `parse-xml-file` tries to parse the xml file at `path`.
-  If successful, the parsed xml document is returned;
-  otherwise, an error with condition type &parser-error is raised.
-
-  Note: this parser does not support parsing DTDs.
+  #|proc:parse-xml-file
+  The `parse-xml-file` procedure parses the regular XML file at string `path` and returns an
+  `xml-document`. Document type declarations and declared general entities are not supported.
   |#
   (define parse-xml-file
     (lambda (path)
-      (pcheck ([string? path])
-              (parse-textual-file parser-xml path))))
+      (pcheck ([file-regular? path])
+              (let-values ([(text encoding)
+                            (decode-xml-bytevector (read-u8vec path))])
+                (let* ([document (parse-xml text)]
+                       [declaration (xml-document-declaration document)]
+                       [declared (and declaration
+                                      (xml-declaration-encoding declaration))])
+                  (if (encoding-declaration-compatible? encoding declared)
+                      document
+                      (errorf 'parse-xml-file
+                              "declared encoding ~a conflicts with detected ~a"
+                              declared encoding)))))))
 
   )
