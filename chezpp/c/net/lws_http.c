@@ -2007,6 +2007,9 @@ int chezpp_lws_http_inject_event(uintptr_t context_handle, int tag,
                      LWS_HTTP_TERMINAL_SCOPE_NONE);
   if (result && event_tag == LWS_HTTP_EVENT_READABLE)
     stream->pending_body_bytes += length;
+  if (result && terminal && !stream->terminal_pending &&
+      stream->pending_body_bytes == 0)
+    stream_release_locked(context, stream);
   pthread_mutex_unlock(&context->lock);
   return result;
 }

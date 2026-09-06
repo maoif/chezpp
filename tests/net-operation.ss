@@ -286,3 +286,25 @@
               (fx= 0 (poll-target-fd operation-target))
               (equal? '(read) (poll-target-events operation-target)))))
      )
+
+(mat net-operation-step-cancel-race-is-serialized
+     ;; Cancellation must not run its callback while the advance callback owns the operation.
+     (let ([advancing? #f] [cancel-overlapped? #f] [cleanup-count 0])
+       (let* ([operation
+               (make-net-operation
+                'race
+                (lambda ()
+                  (set! advancing? #t)
+                  (milisleep 100)
+                  (set! advancing? #f)
+                  (net-operation-completed 'done))
+                (lambda ()
+                  (when advancing? (set! cancel-overlapped? #t)))
+                (lambda () (set! cleanup-count (fx1+ cleanup-count))))]
+              [thread (fork-thread (lambda () (net-operation-step! operation)))])
+         (milisleep 20)
+         (net-operation-cancel! operation)
+         (thread-join thread)
+         (and (not cancel-overlapped?)
+              (eq? 'completed (net-operation-state operation))
+              (= cleanup-count 1)))))

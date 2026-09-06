@@ -5,6 +5,7 @@
           %net-operation-advance
           %net-operation-cancel
           %net-operation-cleanup
+          %net-operation-mutex
           %net-operation-state
           %net-operation-state-set!
           %net-operation-poll-targets
@@ -37,6 +38,7 @@
             (immutable advance %net-operation-advance)
             (immutable cancel %net-operation-cancel)
             (immutable cleanup %net-operation-cleanup)
+            (immutable mutex %net-operation-mutex)
             (mutable state %net-operation-state %net-operation-state-set!)
             (mutable poll-targets %net-operation-poll-targets
                      %net-operation-poll-targets-set!)

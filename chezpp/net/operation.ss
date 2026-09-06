@@ -48,6 +48,7 @@ The return value is a new pending network operation. Omitting `cleanup` uses `vo
       [(kind advance cancel cleanup)
        (pcheck ([symbol? kind] [procedure? advance cancel cleanup])
                (%make-net-operation kind advance cancel cleanup
+                                    (make-mutex 'net-operation)
                                     'pending '() #f #f #f))]))
 
   #|proc:net-operation-kind
@@ -67,7 +68,8 @@ The return value is `pending`, `completed`, `failed`, or `cancelled`.
   (define net-operation-state
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (%net-operation-state operation))))
+              (with-mutex (%net-operation-mutex operation)
+                (%net-operation-state operation)))))
 
   #|proc:net-operation-poll-targets
 The `net-operation-poll-targets` procedure returns the current poll targets of `operation`.
@@ -77,7 +79,8 @@ The return value is a list of poll targets, empty when no descriptor readiness i
   (define net-operation-poll-targets
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (%net-operation-poll-targets operation))))
+              (with-mutex (%net-operation-mutex operation)
+                (%net-operation-poll-targets operation)))))
 
   #|proc:net-operation-deadline-ms
 The `net-operation-deadline-ms` procedure returns the absolute deadline of `operation`.
@@ -87,7 +90,8 @@ The return value is monotonic milliseconds or `#f` when there is no deadline.
   (define net-operation-deadline-ms
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (%net-operation-deadline-ms operation))))
+              (with-mutex (%net-operation-mutex operation)
+                (%net-operation-deadline-ms operation)))))
 
   (define current-monotonic-ms
     (lambda ()
@@ -103,7 +107,7 @@ The return value is `-1` without a deadline, or a nonnegative fixnum of millisec
   (define net-operation-remaining-timeout-ms
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (let ([deadline-ms (%net-operation-deadline-ms operation)])
+              (let ([deadline-ms (net-operation-deadline-ms operation)])
                 (if deadline-ms
                     (min (most-positive-fixnum)
                          (max 0 (- deadline-ms (current-monotonic-ms))))
@@ -201,13 +205,14 @@ Conditions from advancement or cleanup are stored as a failed result.
   (define-who net-operation-step!
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (unless (eq? 'pending (%net-operation-state operation))
-                (errorf who "cannot step an operation in state ~s"
-                        (%net-operation-state operation)))
-              (apply-update! operation (advance-operation who operation))
-              (when (operation-terminal? operation)
-                (cleanup-terminal-operation! operation))
-              operation)))
+              (with-mutex (%net-operation-mutex operation)
+                (unless (eq? 'pending (%net-operation-state operation))
+                  (errorf who "cannot step an operation in state ~s"
+                          (%net-operation-state operation)))
+                (apply-update! operation (advance-operation who operation))
+                (when (operation-terminal? operation)
+                  (cleanup-terminal-operation! operation))
+                operation))))
 
   #|proc:net-operation-cancel!
 The `net-operation-cancel!` procedure cancels pending `operation` and cleans it up once.
@@ -218,17 +223,18 @@ If cancellation or cleanup fails, the first callback condition becomes a failed 
   (define net-operation-cancel!
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (when (eq? 'pending (%net-operation-state operation))
-                (%net-operation-state-set! operation 'cancelled)
-                (%net-operation-poll-targets-set! operation '())
-                (%net-operation-deadline-ms-set! operation #f)
-                (%net-operation-value-set! operation (make-cancel-condition operation))
-                (let ([cancel-failure
-                       (capture-callback-failure (%net-operation-cancel operation))])
-                  (when cancel-failure
-                    (apply-update! operation (net-operation-failed cancel-failure)))
-                  (cleanup-terminal-operation! operation)))
-              operation)))
+              (with-mutex (%net-operation-mutex operation)
+                (when (eq? 'pending (%net-operation-state operation))
+                  (%net-operation-state-set! operation 'cancelled)
+                  (%net-operation-poll-targets-set! operation '())
+                  (%net-operation-deadline-ms-set! operation #f)
+                  (%net-operation-value-set! operation (make-cancel-condition operation))
+                  (let ([cancel-failure
+                         (capture-callback-failure (%net-operation-cancel operation))])
+                    (when cancel-failure
+                      (apply-update! operation (net-operation-failed cancel-failure)))
+                    (cleanup-terminal-operation! operation)))
+                operation))))
 
   #|proc:net-operation-result
 The `net-operation-result` procedure returns the successful value of `operation`.
@@ -238,10 +244,11 @@ It is an error to read a result from a pending, failed, or cancelled operation.
   (define-who net-operation-result
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (if (eq? 'completed (%net-operation-state operation))
-                  (%net-operation-value operation)
-                  (errorf who "operation has no successful result in state ~s"
-                          (%net-operation-state operation))))))
+              (with-mutex (%net-operation-mutex operation)
+                (if (eq? 'completed (%net-operation-state operation))
+                    (%net-operation-value operation)
+                    (errorf who "operation has no successful result in state ~s"
+                            (%net-operation-state operation)))))))
 
   #|proc:net-operation-condition
 The `net-operation-condition` procedure returns the terminal condition of `operation`.
@@ -251,10 +258,11 @@ It is an error to read a condition from a pending or completed operation.
   (define-who net-operation-condition
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (if (memq (%net-operation-state operation) '(failed cancelled))
-                  (%net-operation-value operation)
-                  (errorf who "operation has no terminal condition in state ~s"
-                          (%net-operation-state operation))))))
+              (with-mutex (%net-operation-mutex operation)
+                (if (memq (%net-operation-state operation) '(failed cancelled))
+                    (%net-operation-value operation)
+                    (errorf who "operation has no terminal condition in state ~s"
+                            (%net-operation-state operation)))))))
 
   #|proc:net-operation-wait
 The `net-operation-wait` procedure drives `operation` to a terminal state using blocking poll.
@@ -267,13 +275,13 @@ It is an error to wait on a cancelled operation.
     (lambda (operation)
       (pcheck ([net-operation? operation])
               (let loop ()
-                (case (%net-operation-state operation)
+                (case (net-operation-state operation)
                   [(pending)
                    (net-operation-step! operation)
-                   (when (eq? 'pending (%net-operation-state operation))
+                   (when (eq? 'pending (net-operation-state operation))
                      (guard (failure
                              [else (fail-operation! operation failure)])
-                       (poll (%net-operation-poll-targets operation)
+                       (poll (net-operation-poll-targets operation)
                              (net-operation-remaining-timeout-ms operation))))
                    (loop)]
                   [(completed) (net-operation-result operation)]
