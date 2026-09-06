@@ -33,7 +33,8 @@ Returns a shared transport boundary used by both HTTP reducers.
         (%make-lws-client-transport
          version
          (if (eq? version 'h2)
-             (make-lws-http2-client event-capacity payload-capacity command-capacity tls-context)
+             (make-lws-http2-client event-capacity payload-capacity command-capacity tls-context
+                                    max-active)
              (make-lws-http1-client event-capacity payload-capacity command-capacity tls-context
                                      proxy-address proxy-port max-active max-idle idle-timeout-ms))))))
 

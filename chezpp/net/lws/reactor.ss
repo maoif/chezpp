@@ -326,11 +326,24 @@
           [else #t]))
         ;; Command acceptance only means the command entered the queue. A rejected native
         ;; command must become a deterministic terminal failure for its owning operation.
-        (when (and (eq? result #f) (>= (length arguments) 3))
-          (publish-event!
-           reactor
-           (vector 'failed 0 (car arguments) (cadr arguments) (caddr arguments)
-                   -1 (make-bytevector 0) (vector 'unknown #f #f 'stream))))
+        (when (eq? result #f)
+          (let ([identity*
+                 (case tag
+                   [(inject-event)
+                    (and (>= (length arguments) 4)
+                         (list (cadr arguments) (caddr arguments)
+                               (cadddr arguments)))]
+                   [(start acquire release submit-body consume-body cancel)
+                    (and (>= (length arguments) 3)
+                         (list (car arguments) (cadr arguments)
+                               (caddr arguments)))]
+                   [else #f])])
+            (when identity*
+              (publish-event!
+               reactor
+               (vector 'failed 0 (car identity*) (cadr identity*) (caddr identity*)
+                       -1 (make-bytevector 0)
+                       (vector 'unknown #f #f 'stream))))))
         (with-mutex (lws-reactor-mutex reactor)
           (command-release-locked! reactor command))
         (drain-native-events! reactor))))

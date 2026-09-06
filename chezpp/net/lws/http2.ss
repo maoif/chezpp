@@ -1,255 +1,525 @@
 (library (chezpp net lws http2)
   (export make-lws-http2-client
+          lws-http2-client-reactor
           lws-http2-client-close!
           lws-http2-request/nonblocking
           lws-http2-release-operation!
           lws-http2-client-pool-metrics)
   (import (chezpp chez)
           (chezpp utils)
+          (chezpp net errors)
           (chezpp net operation)
-          (chezpp net poll)
           (chezpp net http private)
-          (chezpp net lws http1))
+          (chezpp net lws reactor))
 
   (define-record-type (lws-http2-client %make-lws-http2-client lws-http2-client?)
     (sealed #t)
     (opaque #t)
-    (fields (immutable transport lws-http2-client-transport)
-            (mutable origin* lws-http2-client-origin* lws-http2-client-origin*-set!)
+    (fields (immutable reactor %lws-http2-client-reactor)
+            (immutable local-stream-limit lws-http2-client-local-stream-limit)
+            (immutable native-start? lws-http2-client-native-start?)
+            (mutable next-connection-id lws-http2-client-next-connection-id
+                     lws-http2-client-next-connection-id-set!)
+            (mutable next-stream-id lws-http2-client-next-stream-id
+                     lws-http2-client-next-stream-id-set!)
+            (mutable next-generation lws-http2-client-next-generation
+                     lws-http2-client-next-generation-set!)
+            (mutable origins lws-http2-client-origins lws-http2-client-origins-set!)
+            (mutable operations lws-http2-client-operations
+                     lws-http2-client-operations-set!)
             (mutable closed? lws-http2-client-closed? lws-http2-client-closed?-set!)))
 
   (define-record-type (h2-origin %make-h2-origin h2-origin?)
     (sealed #t)
     (opaque #t)
     (fields (immutable key h2-origin-key)
+            (immutable connection-id h2-origin-connection-id)
+            (immutable mutex h2-origin-mutex)
             (mutable ready? h2-origin-ready? h2-origin-ready?-set!)
-            (mutable failed h2-origin-failed h2-origin-failed-set!)
+            (mutable closing? h2-origin-closing? h2-origin-closing?-set!)
+            (mutable failure h2-origin-failure h2-origin-failure-set!)
             (mutable queued h2-origin-queued h2-origin-queued-set!)
-            (mutable active h2-origin-active h2-origin-active-set!)
-            (immutable mutex h2-origin-mutex)))
+            (mutable active h2-origin-active h2-origin-active-set!)))
 
   (define-record-type (h2-stream %make-h2-stream h2-stream?)
     (sealed #t)
     (opaque #t)
-    (fields (immutable origin h2-stream-origin)
+    (fields (immutable client h2-stream-client)
+            (immutable origin h2-stream-origin)
+            (immutable connection-id h2-stream-connection-id)
+            (immutable stream-id h2-stream-stream-id)
+            (immutable generation h2-stream-generation)
+            (immutable deadline-ms h2-stream-deadline-ms)
             (mutable request h2-stream-request h2-stream-request-set!)
-            (mutable sink h2-stream-sink h2-stream-sink-set!)
+            (mutable response-sink h2-stream-response-sink h2-stream-response-sink-set!)
+            (mutable response-finish h2-stream-response-finish
+                     h2-stream-response-finish-set!)
+            (mutable body-source h2-stream-body-source h2-stream-body-source-set!)
             (mutable inner h2-stream-inner h2-stream-inner-set!)
             (mutable outer h2-stream-outer h2-stream-outer-set!)
-            (mutable cancelled? h2-stream-cancelled? h2-stream-cancelled?-set!)))
+            (mutable headers h2-stream-headers h2-stream-headers-set!)
+            (mutable status h2-stream-status h2-stream-status-set!)
+            (mutable body-parts h2-stream-body-parts h2-stream-body-parts-set!)
+            (mutable body-length h2-stream-body-length h2-stream-body-length-set!)
+            (mutable trailers h2-stream-trailers h2-stream-trailers-set!)
+            (mutable observed-h2? h2-stream-observed-h2? h2-stream-observed-h2?-set!)
+            (mutable body-finished? h2-stream-body-finished? h2-stream-body-finished?-set!)
+            (mutable response-finished? h2-stream-response-finished?
+                     h2-stream-response-finished?-set!)
+            (mutable response h2-stream-response h2-stream-response-set!)
+            (mutable failure h2-stream-failure h2-stream-failure-set!)
+            (mutable terminal? h2-stream-terminal? h2-stream-terminal?-set!)
+            (mutable released? h2-stream-released? h2-stream-released?-set!)))
 
-  (define h2-peer-capacity 10)
-
-  (define make-failure
-    (lambda (who message irritants)
-      (condition (make-error) (make-who-condition who)
-                 (make-message-condition message)
-                 (make-irritants-condition irritants))))
-
-  (define request-origin
-    (lambda (request)
-      (list (normalized-http-request-host request)
-            (normalized-http-request-port request)
-            (normalized-http-request-tls? request))))
-
-  (define request-version
-    (lambda (request)
-      (http-request-policy-version (normalized-http-request-policy request))))
+  (define remove-eq
+    (lambda (value value*)
+      (remp (lambda (item) (eq? value item)) value*)))
 
   (define request-deadline
     (lambda (request)
       (http-request-policy-deadline-ms (normalized-http-request-policy request))))
 
+  (define request-origin-key
+    (lambda (request)
+      (vector (normalized-http-request-host request)
+              (normalized-http-request-port request)
+              (normalized-http-request-tls? request))))
+
+  (define same-origin-key?
+    (lambda (left right)
+      (and (string=? (vector-ref left 0) (vector-ref right 0))
+           (= (vector-ref left 1) (vector-ref right 1))
+           (eqv? (vector-ref left 2) (vector-ref right 2)))))
+
+  (define header-payload
+    (lambda (headers)
+      (let-values ([(port get) (open-bytevector-output-port)])
+        (for-each
+         (lambda (entry)
+           (put-bytevector port (string->utf8 (car entry)))
+           (put-u8 port 0)
+           (put-bytevector port (string->utf8 (cdr entry)))
+           (put-u8 port 0))
+         headers)
+        (get))))
+
+  (define split-zero-headers
+    (lambda (bytes)
+      (let ([length (bytevector-length bytes)])
+        (let loop ([offset 0] [answer '()])
+          (if (fx>= offset length)
+              (reverse answer)
+              (let find-name ([name-end offset])
+                (cond
+                 [(fx>= name-end length) (reverse answer)]
+                 [(not (fxzero? (bytevector-u8-ref bytes name-end)))
+                  (find-name (fx1+ name-end))]
+                 [else
+                  (let ([value-start (fx1+ name-end)])
+                    (let find-value ([value-end value-start])
+                      (cond
+                       [(fx>= value-end length) (reverse answer)]
+                       [(not (fxzero? (bytevector-u8-ref bytes value-end)))
+                        (find-value (fx1+ value-end))]
+                       [else
+                        (let ([name (make-bytevector (fx- name-end offset) 0)]
+                              [value (make-bytevector (fx- value-end value-start) 0)])
+                          (bytevector-copy! bytes offset name 0 (bytevector-length name))
+                          (bytevector-copy! bytes value-start value 0
+                                            (bytevector-length value))
+                          (loop (fx1+ value-end)
+                                (cons (cons (utf8->string name) (utf8->string value))
+                                      answer)))])))])))))))
+
   (define find-origin
     (lambda (client key)
-      (find (lambda (origin) (equal? key (h2-origin-key origin)))
-            (lws-http2-client-origin* client))))
+      (find (lambda (origin) (same-origin-key? key (h2-origin-key origin)))
+            (lws-http2-client-origins client))))
 
   (define ensure-origin!
     (lambda (client request)
-      (let ([key (request-origin request)])
+      (let ([key (request-origin-key request)])
         (or (find-origin client key)
-            (let ([origin (%make-h2-origin key #f #f '() '()
-                                            (make-mutex 'lws-http2-origin))])
-              (lws-http2-client-origin*-set!
-               client (cons origin (lws-http2-client-origin* client)))
+            (let* ([connection-id (fx1+ (lws-http2-client-next-connection-id client))]
+                   [origin (%make-h2-origin key connection-id
+                                            (make-mutex 'lws-http2-origin)
+                                            #f #f #f '() '())])
+              (lws-http2-client-next-connection-id-set! client connection-id)
+              (lws-http2-client-origins-set!
+               client (cons origin (lws-http2-client-origins client)))
               origin)))))
 
-  (define remove-eq
-    (lambda (value value*)
-      (remp (lambda (item) (eq? item value)) value*)))
+  (define next-stream-id!
+    (lambda (client)
+      (let ([identity (fx1+ (lws-http2-client-next-stream-id client))])
+        (lws-http2-client-next-stream-id-set! client identity)
+        identity)))
 
-  (define start-stream!
-    (lambda (client stream)
-      (let ([origin (h2-stream-origin stream)])
-        (h2-stream-inner-set!
-         stream
-         (lws-http1-request/nonblocking
-          (lws-http2-client-transport client) (h2-stream-request stream)
-          (h2-stream-sink stream)
-          (lambda ()
-            (with-mutex (h2-origin-mutex origin)
-              (h2-origin-ready?-set! origin #t)))))
-        (h2-origin-active-set! origin
-                               (append (h2-origin-active origin) (list stream))))))
+  (define next-generation!
+    (lambda (client)
+      (let ([generation (fx1+ (lws-http2-client-next-generation client))])
+        (lws-http2-client-next-generation-set! client generation)
+        generation)))
 
-  (define promote-streams!
-    (lambda (client origin)
-      (when (and (h2-origin-ready? origin)
-                 (not (h2-origin-failed origin)))
-        (let loop ()
-          (when (and (pair? (h2-origin-queued origin))
-                     (< (length (h2-origin-active origin)) h2-peer-capacity))
-            (let ([stream (car (h2-origin-queued origin))])
-              (h2-origin-queued-set! origin (cdr (h2-origin-queued origin)))
-              (unless (h2-stream-cancelled? stream) (start-stream! client stream))
-              (loop)))))))
+  (define stream-condition
+    (lambda (stream message)
+      (make-net-error 'lws-http2 'http message (h2-stream-request stream))))
 
-  (define advance-origin!
-    (lambda (client origin focus)
-      ;; Shared bookkeeping is protected, but user sinks run outside this lock.
-      (let ([inner
-             (with-mutex (h2-origin-mutex origin)
-               (h2-stream-inner focus))])
-        (when (and inner (eq? 'pending (net-operation-state inner)))
-          (net-operation-step! inner)))
-      ;; A queued sibling must be able to drive the leader through ALPN
-      ;; negotiation.  Once ready, only the operation being waited is stepped,
-      ;; so a slow sink cannot serialize unrelated streams.
-      (let ([leader
-             (with-mutex (h2-origin-mutex origin)
-               (and (not (h2-origin-ready? origin))
-                    (pair? (h2-origin-active origin))
-                    (car (h2-origin-active origin))))])
-        (when (and leader (not (eq? leader focus)))
-          (let ([leader-inner
-                 (with-mutex (h2-origin-mutex origin)
-                   (h2-stream-inner leader))])
-            (when (and leader-inner
-                       (eq? 'pending (net-operation-state leader-inner)))
-              (net-operation-step! leader-inner)))))
-      (with-mutex (h2-origin-mutex origin)
-        (let ([active (h2-origin-active origin)])
-          (for-each
-           (lambda (stream)
-             (let ([stream-inner (h2-stream-inner stream)])
-               (when (and stream-inner
-                          (eq? 'failed (net-operation-state stream-inner))
-                          (not (h2-stream-cancelled? stream))
-                          (not (h2-origin-failed origin)))
-                 (h2-origin-failed-set!
-                  origin (net-operation-condition stream-inner)))))
-           active)
-          (let ([terminal*
-                 (filter (lambda (stream)
-                           (let ([stream-inner (h2-stream-inner stream)])
-                             (and stream-inner
-                                  (not (eq? 'pending
-                                            (net-operation-state stream-inner))))))
-                         active)])
-            (when (pair? terminal*)
-              (h2-origin-active-set!
-               origin
-               (fold-left (lambda (remaining stream)
-                            (remove-eq stream remaining))
-                          active terminal*)))))
-        (promote-streams! client origin))))
-
-  (define origin-targets
+  (define origin-poll-targets
     (lambda (origin)
       (with-mutex (h2-origin-mutex origin)
         (fold-left
-         (lambda (target* stream)
+         (lambda (targets stream)
            (let ([inner (h2-stream-inner stream)])
-             (if inner
-                 (append target* (net-operation-poll-targets inner))
-                 target*)))
+             (if (and inner (eq? 'pending (net-operation-state inner)))
+                 (append targets (net-operation-poll-targets inner))
+                 targets)))
          '()
          (h2-origin-active origin)))))
 
+  (define start-stream!
+    (lambda (stream)
+      (let* ([client (h2-stream-client stream)]
+             [reactor (%lws-http2-client-reactor client)]
+             [request (h2-stream-request stream)]
+             [inner
+              (make-lws-reactor-operation
+               reactor 'http2 (h2-stream-connection-id stream)
+               (h2-stream-stream-id stream) (h2-stream-generation stream)
+               (h2-stream-deadline-ms stream) #t)])
+        (h2-stream-inner-set! stream inner)
+        (unless (if (lws-http2-client-native-start? client)
+                    (lws-reactor-client-start!
+                     reactor (h2-stream-connection-id stream)
+                     (h2-stream-stream-id stream) (h2-stream-generation stream)
+                     (normalized-http-request-host request)
+                     (normalized-http-request-port request)
+                     (normalized-http-request-tls? request)
+                     (normalized-http-request-method request)
+                     (normalized-http-request-host request)
+                     (normalized-http-request-path request)
+                     (header-payload (normalized-http-request-headers request))
+                     #vu8() (and (h2-stream-body-source stream) #t) "h2")
+                    (lws-reactor-client-acquire!
+                     reactor (h2-stream-connection-id stream)
+                     (h2-stream-stream-id stream) (h2-stream-generation stream)))
+          (h2-stream-failure-set!
+           stream (stream-condition stream "libwebsockets rejected HTTP/2 stream")))
+        (net-operation-step! inner))))
+
+  (define promote-streams-locked!
+    (lambda (origin client)
+      (when (and (h2-origin-ready? origin) (not (h2-origin-closing? origin)))
+        (let loop ()
+          (when (and (pair? (h2-origin-queued origin))
+                     (fx< (length (h2-origin-active origin))
+                          (lws-http2-client-local-stream-limit client)))
+            (let ([stream (car (h2-origin-queued origin))])
+              (h2-origin-queued-set! origin (cdr (h2-origin-queued origin)))
+              (h2-origin-active-set!
+               origin (append (h2-origin-active origin) (list stream)))
+              (start-stream! stream)
+              (loop)))))))
+
+  (define append-response-body!
+    (lambda (stream payload)
+      (let ([sink (h2-stream-response-sink stream)]
+            [count (bytevector-length payload)])
+        (if sink
+            (sink payload 0 count)
+            (begin
+              (h2-stream-body-parts-set!
+               stream (cons payload (h2-stream-body-parts stream)))
+              (h2-stream-body-length-set!
+               stream (fx+ count (h2-stream-body-length stream))))))))
+
+  (define collected-body
+    (lambda (stream)
+      (let ([body (make-bytevector (h2-stream-body-length stream) 0)])
+        (let loop ([part* (reverse (h2-stream-body-parts stream))] [offset 0])
+          (unless (null? part*)
+            (let ([part (car part*)])
+              (bytevector-copy! part 0 body offset (bytevector-length part))
+              (loop (cdr part*) (fx+ offset (bytevector-length part))))))
+        body)))
+
+  (define finish-response!
+    (lambda (stream)
+      (unless (h2-stream-response-finished? stream)
+        (if (not (h2-stream-observed-h2? stream))
+            (h2-stream-failure-set!
+             stream (stream-condition stream "HTTP/2 ALPN negotiation failed"))
+            (begin
+              (when (h2-stream-response-sink stream)
+                ((h2-stream-response-finish stream)))
+              (h2-stream-response-set!
+               stream
+               (make-transport-response
+                (or (h2-stream-status stream) 0) "" (h2-stream-headers stream)
+                (and (not (h2-stream-response-sink stream))
+                     (collected-body stream))
+                (h2-stream-trailers stream) 'h2 (h2-stream-connection-id stream)))
+              (h2-stream-response-finished?-set! stream #t))))))
+
+  (define mark-connection-failed!
+    (lambda (stream condition)
+      (let ([origin (h2-stream-origin stream)])
+        (with-mutex (h2-origin-mutex origin)
+          (unless (h2-origin-failure origin)
+            (h2-origin-failure-set! origin condition))
+          (h2-origin-closing?-set! origin #t)))))
+
+  (define process-writable!
+    (lambda (stream)
+      (let ([source (h2-stream-body-source stream)])
+        (when (and source (not (h2-stream-body-finished? stream)))
+          ;; The source runs only for this stream and outside the origin mutex.
+          (let ([chunk (source 65536)]
+                [reactor (%lws-http2-client-reactor (h2-stream-client stream))])
+            (cond
+             [(eof-object? chunk)
+              (unless (lws-reactor-submit-body!
+                       reactor (h2-stream-connection-id stream)
+                       (h2-stream-stream-id stream) (h2-stream-generation stream)
+                       #vu8() #t)
+                (errorf 'lws-http2 "request body command pool is exhausted"))
+              (h2-stream-body-finished?-set! stream #t)]
+             [(bytevector? chunk)
+              (unless (lws-reactor-submit-body!
+                       reactor (h2-stream-connection-id stream)
+                       (h2-stream-stream-id stream) (h2-stream-generation stream)
+                       chunk #f)
+                (errorf 'lws-http2 "request body command pool is exhausted"))]
+             [else
+              (errorf 'lws-http2 "request body source returned invalid value ~s" chunk)]))))))
+
+  (define process-events!
+    (lambda (stream)
+      (let* ([reactor (%lws-http2-client-reactor (h2-stream-client stream))]
+             [inner (h2-stream-inner stream)]
+             [events (if inner (lws-reactor-drain-operation-events! reactor inner) '())])
+        (let loop ([event* events])
+          (unless (null? event*)
+            (let* ([event (car event*)]
+                   [tag (vector-ref event 0)]
+                   [status (vector-ref event 5)]
+                   [payload (vector-ref event 6)]
+                   [metadata (vector-ref event 7)]
+                   [protocol (vector-ref metadata 0)]
+                   [scope (vector-ref metadata 3)])
+              (guard (condition
+                      [else
+                       (h2-stream-failure-set! stream condition)
+                       (lws-reactor-close-stream!
+                        reactor (h2-stream-connection-id stream)
+                        (h2-stream-stream-id stream) (h2-stream-generation stream) 1)])
+                (when (eq? protocol 'http2)
+                  (h2-stream-observed-h2?-set! stream #t))
+                (cond
+                 [(and (eq? tag 'connected) (fx= status -2000))
+                  (let ([origin (h2-stream-origin stream)])
+                    (with-mutex (h2-origin-mutex origin)
+                      (h2-origin-ready?-set! origin #t)
+                      (promote-streams-locked! origin (h2-stream-client stream))))]
+                 [(eq? tag 'headers)
+                  (if (negative? status)
+                      (h2-stream-trailers-set! stream (split-zero-headers payload))
+                      (begin
+                        (h2-stream-status-set! stream status)
+                        (h2-stream-headers-set! stream (split-zero-headers payload))))]
+                 [(eq? tag 'writable) (process-writable! stream)]
+                 [(eq? tag 'readable)
+                  ;; The sink runs outside the origin mutex; consumption is per stream.
+                  (append-response-body! stream payload)
+                  (unless (lws-reactor-consume-body!
+                           reactor (h2-stream-connection-id stream)
+                           (h2-stream-stream-id stream) (h2-stream-generation stream)
+                           (bytevector-length payload))
+                    (errorf 'lws-http2 "response consumption command pool is exhausted"))]
+                 [(eq? tag 'complete) (finish-response! stream)]
+                 [(memq tag '(failed closed reset goaway))
+                  (let ([condition
+                         (stream-condition
+                          stream (format "HTTP/2 stream ended with ~a (~a)" tag status))])
+                    (h2-stream-failure-set! stream condition)
+                    (when (eq? scope 'connection)
+                      (mark-connection-failed! stream condition)))]
+                 [else (void)]))
+              (loop (cdr event*))))))))
+
+  (define advance-one-stream!
+    (lambda (stream)
+      (let ([inner (h2-stream-inner stream)])
+        (when (and inner (eq? 'pending (net-operation-state inner)))
+          (net-operation-step! inner))
+        (when inner (process-events! stream)))))
+
+  (define advance-stream!
+    (lambda (stream)
+      (let* ([origin (h2-stream-origin stream)]
+             [leader
+              (with-mutex (h2-origin-mutex origin)
+                (and (not (h2-origin-ready? origin))
+                     (pair? (h2-origin-active origin))
+                     (car (h2-origin-active origin))))])
+        (when (and leader (not (eq? leader stream)))
+          (advance-one-stream! leader))
+        (advance-one-stream! stream)
+        (cond
+         [(h2-stream-response-finished? stream)
+          (h2-stream-terminal?-set! stream #t)
+          (net-operation-completed (h2-stream-response stream))]
+         [(h2-stream-failure stream)
+          (h2-stream-terminal?-set! stream #t)
+          (net-operation-failed (h2-stream-failure stream))]
+         [(h2-origin-failure origin)
+          (h2-stream-terminal?-set! stream #t)
+          (net-operation-failed (h2-origin-failure origin))]
+         [(not (h2-stream-inner stream))
+          (net-operation-pending (origin-poll-targets origin)
+                                 (h2-stream-deadline-ms stream))]
+         [(memq (net-operation-state (h2-stream-inner stream)) '(failed cancelled))
+          (h2-stream-terminal?-set! stream #t)
+          (net-operation-failed (net-operation-condition (h2-stream-inner stream)))]
+         [else
+          (net-operation-pending (net-operation-poll-targets (h2-stream-inner stream))
+                                 (h2-stream-deadline-ms stream))]))))
+
+  (define cancel-stream!
+    (lambda (stream)
+      (let* ([reactor (%lws-http2-client-reactor (h2-stream-client stream))]
+             [origin (h2-stream-origin stream)]
+             [inner (h2-stream-inner stream)])
+        (if inner
+            (begin
+              (lws-reactor-close-stream!
+               reactor (h2-stream-connection-id stream) (h2-stream-stream-id stream)
+               (h2-stream-generation stream) 8)
+              (when (eq? 'pending (net-operation-state inner))
+                (net-operation-cancel! inner)))
+            (with-mutex (h2-origin-mutex origin)
+              (h2-origin-queued-set!
+               origin (remove-eq stream (h2-origin-queued origin))))))))
+
+  (define release-stream!
+    (lambda (stream)
+      (unless (h2-stream-released? stream)
+        (let* ([client (h2-stream-client stream)]
+               [reactor (%lws-http2-client-reactor client)]
+               [origin (h2-stream-origin stream)]
+               [inner (h2-stream-inner stream)])
+          (when (and inner (eq? 'pending (net-operation-state inner)))
+            (lws-reactor-close-stream!
+             reactor (h2-stream-connection-id stream) (h2-stream-stream-id stream)
+             (h2-stream-generation stream) 1)
+            (net-operation-cancel! inner))
+          (when inner
+            (lws-reactor-release-operation! reactor inner)
+            (lws-reactor-client-release!
+             reactor (h2-stream-connection-id stream) (h2-stream-stream-id stream)
+             (h2-stream-generation stream)))
+          (with-mutex (h2-origin-mutex origin)
+            (h2-origin-active-set!
+             origin (remove-eq stream (h2-origin-active origin)))
+            (h2-origin-queued-set!
+             origin (remove-eq stream (h2-origin-queued origin)))
+            (promote-streams-locked! origin client))
+          (h2-stream-inner-set! stream #f)
+          (h2-stream-request-set! stream #f)
+          (h2-stream-response-sink-set! stream #f)
+          (h2-stream-response-finish-set! stream #f)
+          (h2-stream-body-source-set! stream #f)
+          (h2-stream-body-parts-set! stream '())
+          (h2-stream-released?-set! stream #t)))))
+
   #|proc:make-lws-http2-client
-The `make-lws-http2-client` procedure creates a multiplexed HTTP/2 client transport.
-The capacity parameters bound native event, payload, and reactor command pools.
-`tls-context-handle` is zero or a native TLS context handle. The return value is a client.
+The `make-lws-http2-client` procedure creates a direct reactor-backed HTTP/2 transport.
+The first three parameters bound native event, payload, and reactor command pools.
+`tls-context-handle` is zero or a native TLS context handle. `local-stream-limit` bounds active
+logical streams on each origin connection. The optional `native-start?` flag is `#f` only for
+deterministic injected-event tests. The return value is an HTTP/2 client.
 |#
   (define make-lws-http2-client
     (case-lambda
       [(event-capacity payload-capacity command-capacity)
-       (make-lws-http2-client event-capacity payload-capacity command-capacity 0)]
+       (make-lws-http2-client event-capacity payload-capacity command-capacity 0 10 #t)]
       [(event-capacity payload-capacity command-capacity tls-context-handle)
-       (pcheck ([positive-natural? event-capacity payload-capacity command-capacity]
-                [natural? tls-context-handle])
-         (%make-lws-http2-client
-          (make-lws-http1-client event-capacity payload-capacity command-capacity
-                                 tls-context-handle)
-          '() #f))]))
+       (make-lws-http2-client event-capacity payload-capacity command-capacity
+                              tls-context-handle 10 #t)]
+      [(event-capacity payload-capacity command-capacity tls-context-handle local-stream-limit)
+       (make-lws-http2-client event-capacity payload-capacity command-capacity
+                              tls-context-handle local-stream-limit #t)]
+      [(event-capacity payload-capacity command-capacity tls-context-handle local-stream-limit
+                       native-start?)
+       (pcheck ([positive-natural? event-capacity payload-capacity command-capacity
+                                   local-stream-limit]
+                [natural? tls-context-handle] [boolean? native-start?])
+         (let ([reactor (make-lws-reactor event-capacity payload-capacity command-capacity
+                                          tls-context-handle)])
+           (lws-reactor-start! reactor)
+           (%make-lws-http2-client
+            reactor local-stream-limit native-start? 0 0 0 '() '() #f)))]))
+
+  #|proc:lws-http2-client-reactor
+The `lws-http2-client-reactor` procedure returns the direct reactor owned by `client`.
+The returned reactor is the transport used for all of the client's logical streams.
+|#
+  (define lws-http2-client-reactor
+    (lambda (client)
+      (pcheck ([lws-http2-client? client])
+        (%lws-http2-client-reactor client))))
 
   #|proc:lws-http2-request/nonblocking
-The `lws-http2-request/nonblocking` procedure enqueues normalized `request` on `client`.
-The request vector contains HTTP request fields, `h2` ALPN policy, and an absolute deadline.
-`response-sink` is `#f` or a write/finish procedure vector. It returns a network operation.
+The `lws-http2-request/nonblocking` procedure enqueues normalized request record `request` on
+`client`. `response-sink` is `#f` or a vector containing a write procedure with signature
+`(bytevector start count) -> unspecified` and a finish procedure with signature
+`() -> unspecified`. The return value is a network operation completing with a transport response
+record after LWS observes HTTP/2.
 |#
   (define-who lws-http2-request/nonblocking
     (lambda (client request response-sink)
       (pcheck ([lws-http2-client? client] [normalized-http-request? request]
                [(lambda (value) (or (not value) (vector? value))) response-sink])
         (when (lws-http2-client-closed? client)
-          (errorf who "HTTP/2 client transport is closed"))
-        (unless (eq? (request-version request) 'h2)
-          (errorf who "expected a normalized HTTP/2 request"))
+          (raise-net-error who 'http "HTTP/2 client transport is closed" client))
+        (unless (eq? 'h2
+                     (http-request-policy-version
+                      (normalized-http-request-policy request)))
+          (raise-net-error who 'http "expected a normalized HTTP/2 request" request))
         (let* ([origin (ensure-origin! client request)]
-               [stream (%make-h2-stream origin request response-sink #f #f #f)]
-               [deadline-ms (request-deadline request)])
+               [stream-id (next-stream-id! client)]
+               [generation (next-generation! client)]
+               [stream
+                (%make-h2-stream
+                 client origin (h2-origin-connection-id origin) stream-id generation
+                 (request-deadline request) request
+                 (and response-sink (vector-ref response-sink 0))
+                 (if response-sink (vector-ref response-sink 1) void)
+                 (normalized-http-request-body-factory request)
+                 #f #f '() #f '() 0 '() #f #f #f #f #f #f #f)]
+               [operation #f])
+          (set! operation
+                (make-net-operation
+                 'http2
+                 (lambda () (advance-stream! stream))
+                 (lambda () (cancel-stream! stream))
+                 (lambda () (release-stream! stream))))
+          (h2-stream-outer-set! stream operation)
+          (lws-http2-client-operations-set!
+           client (cons (cons operation stream) (lws-http2-client-operations client)))
           (with-mutex (h2-origin-mutex origin)
-            (if (or (null? (h2-origin-active origin))
-                    (and (h2-origin-ready? origin)
-                         (< (length (h2-origin-active origin)) h2-peer-capacity)))
-                (start-stream! client stream)
-                (h2-origin-queued-set! origin
-                                       (append (h2-origin-queued origin)
-                                               (list stream)))))
-          (let ([outer #f])
-            (set! outer
-                  (make-net-operation
-                   'http2
-                   (lambda ()
-                     (advance-origin! client origin stream)
-                     (let ([inner (h2-stream-inner stream)])
-                       (cond
-                        [(h2-stream-cancelled? stream)
-                         (net-operation-failed
-                          (make-failure who "HTTP/2 stream was cancelled" request))]
-                        [(h2-origin-failed origin)
-                         (net-operation-failed (h2-origin-failed origin))]
-                        [(not inner)
-                         (net-operation-pending (origin-targets origin) deadline-ms)]
-                        [(eq? 'completed (net-operation-state inner))
-                         (net-operation-completed (net-operation-result inner))]
-                        [(memq (net-operation-state inner) '(failed cancelled))
-                         (net-operation-failed (net-operation-condition inner))]
-                        [else
-                         (net-operation-pending (net-operation-poll-targets inner)
-                                                deadline-ms)])))
-                   (lambda ()
-                     (with-mutex (h2-origin-mutex origin)
-                       (h2-stream-cancelled?-set! stream #t)
-                       (let ([inner (h2-stream-inner stream)])
-                         (if inner
-                             (net-operation-cancel! inner)
-                             (h2-origin-queued-set! origin
-                                                    (remove-eq stream
-                                                               (h2-origin-queued origin)))))
-                       (promote-streams! client origin)))
-                   (lambda ()
-                     (let ([inner (h2-stream-inner stream)])
-                       (when inner
-                         (lws-http1-release-operation!
-                          (lws-http2-client-transport client) inner))
-                       (h2-stream-inner-set! stream #f)
-                       (h2-stream-request-set! stream #f)
-                       (h2-stream-sink-set! stream #f)))))
-            (h2-stream-outer-set! stream outer)
-            outer)))))
+            (if (and (not (h2-origin-closing? origin))
+                     (or (null? (h2-origin-active origin))
+                         (and (h2-origin-ready? origin)
+                              (fx< (length (h2-origin-active origin))
+                                   (lws-http2-client-local-stream-limit client)))))
+                (begin
+                  (h2-origin-active-set!
+                   origin (append (h2-origin-active origin) (list stream)))
+                  (start-stream! stream))
+                (h2-origin-queued-set!
+                 origin (append (h2-origin-queued origin) (list stream)))))
+          operation))))
 
   #|proc:lws-http2-release-operation!
 The `lws-http2-release-operation!` procedure releases terminal `operation` owned by `client`.
@@ -258,41 +528,40 @@ The return value is unspecified.
   (define lws-http2-release-operation!
     (lambda (client operation)
       (pcheck ([lws-http2-client? client] [net-operation? operation])
-        (for-each
-         (lambda (origin)
-           (with-mutex (h2-origin-mutex origin)
-             (for-each
-              (lambda (stream)
-                (when (eq? operation (h2-stream-outer stream))
-                  (let ([inner (h2-stream-inner stream)])
-                    (when inner
-                      (lws-http1-release-operation!
-                       (lws-http2-client-transport client) inner))
-                    (h2-stream-inner-set! stream #f)
-                    (h2-stream-request-set! stream #f)
-                    (h2-stream-sink-set! stream #f)
-                    (h2-stream-outer-set! stream #f))))
-              (append (h2-origin-active origin) (h2-origin-queued origin)))))
-         (lws-http2-client-origin* client))
+        (let ([entry (assq operation (lws-http2-client-operations client))])
+          (when entry
+            (release-stream! (cdr entry))
+            (lws-http2-client-operations-set!
+             client
+             (remp (lambda (item) (eq? operation (car item)))
+                   (lws-http2-client-operations client)))))
         (void))))
 
   #|proc:lws-http2-client-close!
-The `lws-http2-client-close!` procedure closes `client` and returns the same client.
+The `lws-http2-client-close!` procedure cancels pending streams and closes `client`.
+The return value is the same client. Repeated calls are inert.
 |#
   (define lws-http2-client-close!
     (lambda (client)
       (pcheck ([lws-http2-client? client])
         (unless (lws-http2-client-closed? client)
           (lws-http2-client-closed?-set! client #t)
-          (lws-http1-client-close! (lws-http2-client-transport client))
-          (lws-http2-client-origin*-set! client '()))
+          (for-each
+           (lambda (entry)
+             (let ([operation (car entry)])
+               (when (eq? 'pending (net-operation-state operation))
+                 (net-operation-cancel! operation))))
+           (lws-http2-client-operations client))
+          (lws-reactor-shutdown! (%lws-http2-client-reactor client))
+          (lws-http2-client-operations-set! client '())
+          (lws-http2-client-origins-set! client '()))
         client)))
 
   #|proc:lws-http2-client-pool-metrics
-The `lws-http2-client-pool-metrics` procedure returns transport pool metrics for `client`.
+The `lws-http2-client-pool-metrics` procedure returns reactor pool metrics for `client`.
 |#
   (define lws-http2-client-pool-metrics
     (lambda (client)
       (pcheck ([lws-http2-client? client])
-        (lws-http1-client-pool-metrics (lws-http2-client-transport client)))))
+        (lws-reactor-pool-metrics (%lws-http2-client-reactor client)))))
   )

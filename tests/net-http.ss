@@ -1,6 +1,9 @@
 (import (chezpp)
         (chezpp net)
         (chezpp net lws http1)
+        (chezpp net lws http2)
+        (chezpp net lws reactor)
+        (chezpp net http private)
         (chezpp net lws ffi))
 
 (load "net-common.ss")
@@ -78,6 +81,45 @@
               fragment)])
       (thunk)
       #f)))
+
+(define make-h2-test-request
+  (lambda (path)
+    (make-normalized-http-request
+     "GET" #f 'http "h2.test" 80 #f path '() #f #f
+     (make-http-request-policy '() #f #f #f 0 'h2 #f #f 0 #f))))
+
+(define wait-for-reactor-commands
+  (lambda (reactor)
+    (let loop ([remaining 200])
+      (cond
+       [(zero? (vector-ref (lws-reactor-pool-metrics reactor) 1)) #t]
+       [(zero? remaining) #f]
+       [else
+        (milisleep 1)
+        (loop (fx1- remaining))]))))
+
+(define inject-h2-event!
+  (lambda (reactor tag connection-id stream-id generation status payload scope)
+    (and (lws-reactor-inject-event!
+          reactor tag connection-id stream-id generation status payload
+          'http2 #f 0 #f scope)
+         (wait-for-reactor-commands reactor))))
+
+(define finish-h2-stream!
+  (lambda (reactor operation connection-id stream-id generation status body)
+    (and (inject-h2-event! reactor 'headers connection-id stream-id generation
+                           status #vu8() 'none)
+         (or (zero? (bytevector-length body))
+             (inject-h2-event! reactor 'readable connection-id stream-id generation
+                               0 body 'none))
+         (begin
+           (net-operation-step! operation)
+           #t)
+         (inject-h2-event! reactor 'complete connection-id stream-id generation
+                           0 #vu8() 'stream)
+         (begin
+           (net-operation-step! operation)
+           (eq? 'completed (net-operation-state operation))))))
 
 (mat net-http-lws-http1-boundary
      (and (procedure? make-lws-http1-client)
@@ -258,3 +300,140 @@
                         (begin (thread-join thread) #t)
                         (= accept-count 2)))
                  (lambda () (http-close client))))))))
+
+(mat net-http2-direct-transport-identity
+     (let* ([client (make-lws-http2-client 32 65536 32 0 10 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [operation (lws-http2-request/nonblocking
+                        client (make-h2-test-request "/identity") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'connected 1 1 1 -2000 #vu8() 'none)
+                (begin (net-operation-step! operation) #t)
+                (finish-h2-stream! reactor operation 1 1 1 200 #vu8(111 107))
+                (let ([response (net-operation-result operation)])
+                  (and (transport-response? response)
+                       (= 1 (transport-response-connection-id response))
+                       (eq? 'h2 (transport-response-version response))
+                       (equal? #vu8(111 107) (transport-response-body response))))))
+         (lambda () (lws-http2-client-close! client)))))
+
+(mat net-http2-independent-streams-all-wait-orders
+     (let* ([client (make-lws-http2-client 64 65536 64 0 10 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [first (lws-http2-request/nonblocking client (make-h2-test-request "/one") #f)]
+            [second (lws-http2-request/nonblocking client (make-h2-test-request "/two") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'connected 1 1 1 -2000 #vu8() 'none)
+                (begin (net-operation-step! first) #t)
+                (wait-for-reactor-commands reactor)
+                (finish-h2-stream! reactor second 1 2 2 202 #vu8(2))
+                (finish-h2-stream! reactor first 1 1 1 201 #vu8(1))
+                (= 201 (transport-response-status (net-operation-result first)))
+                (= 202 (transport-response-status (net-operation-result second)))
+                (= (transport-response-connection-id (net-operation-result first))
+                   (transport-response-connection-id (net-operation-result second)))))
+         (lambda () (lws-http2-client-close! client)))))
+
+(mat net-http2-local-stream-bound-fifo
+     (let* ([client (make-lws-http2-client 64 65536 64 0 1 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [first (lws-http2-request/nonblocking client (make-h2-test-request "/first") #f)]
+            [second (lws-http2-request/nonblocking client (make-h2-test-request "/second") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'connected 1 1 1 -2000 #vu8() 'none)
+                (begin (net-operation-step! first) #t)
+                (eq? 'pending (net-operation-state second))
+                (finish-h2-stream! reactor first 1 1 1 200 #vu8())
+                (begin (net-operation-step! second) #t)
+                (wait-for-reactor-commands reactor)
+                (finish-h2-stream! reactor second 1 2 2 200 #vu8())
+                (= 1 (transport-response-connection-id
+                      (net-operation-result second)))))
+         (lambda () (lws-http2-client-close! client)))))
+
+(mat net-http2-required-protocol-refusal
+     ;; Error case: an H2 request must fail when LWS observes HTTP/1.
+     (let* ([client (make-lws-http2-client 32 65536 32 0 10 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [operation (lws-http2-request/nonblocking
+                        client (make-h2-test-request "/refuse") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (lws-reactor-inject-event!
+                 reactor 'connected 1 1 1 200 #vu8() 'http1 #f 0 #f 'none)
+                (wait-for-reactor-commands reactor)
+                (lws-reactor-inject-event!
+                 reactor 'complete 1 1 1 0 #vu8() 'http1 #f 0 #f 'stream)
+                (wait-for-reactor-commands reactor)
+                (begin (net-operation-step! operation) #t)
+                (eq? 'failed (net-operation-state operation))))
+         (lambda () (lws-http2-client-close! client)))))
+
+(mat net-http2-stream-and-connection-failure-scope
+     (let* ([client (make-lws-http2-client 64 65536 64 0 10 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [first (lws-http2-request/nonblocking client (make-h2-test-request "/reset") #f)]
+            [second (lws-http2-request/nonblocking client (make-h2-test-request "/ok") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'connected 1 1 1 -2000 #vu8() 'none)
+                (begin (net-operation-step! first) #t)
+                (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'reset 1 1 1 8 #vu8() 'stream)
+                (begin (net-operation-step! first) #t)
+                (eq? 'failed (net-operation-state first))
+                (finish-h2-stream! reactor second 1 2 2 200 #vu8(2))))
+         (lambda () (lws-http2-client-close! client))))
+     (let* ([client (make-lws-http2-client 64 65536 64 0 10 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [first (lws-http2-request/nonblocking client (make-h2-test-request "/failed") #f)]
+            [second (lws-http2-request/nonblocking client (make-h2-test-request "/sibling") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'connected 1 1 1 -2000 #vu8() 'none)
+                (begin (net-operation-step! first) #t)
+                (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'failed 1 1 1 111 #vu8() 'connection)
+                (begin (net-operation-step! first) #t)
+                (begin (net-operation-step! second) #t)
+                (eq? 'failed (net-operation-state first))
+                (eq? 'failed (net-operation-state second))))
+         (lambda () (lws-http2-client-close! client)))))
+
+(mat net-http2-cancellation-and-stale-generation
+     (let* ([client (make-lws-http2-client 64 65536 64 0 1 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [first (lws-http2-request/nonblocking client (make-h2-test-request "/cancel") #f)]
+            [second (lws-http2-request/nonblocking client (make-h2-test-request "/next") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'connected 1 1 1 -2000 #vu8() 'none)
+                (begin (net-operation-step! first) #t)
+                (begin (net-operation-cancel! first) #t)
+                (eq? 'cancelled (net-operation-state first))
+                (wait-for-reactor-commands reactor)
+                (begin (net-operation-step! second) #t)
+                (wait-for-reactor-commands reactor)
+                (lws-reactor-inject-event!
+                 reactor 'complete 1 1 1 0 #vu8(9) 'http2 #f 0 #f 'stream)
+                (wait-for-reactor-commands reactor)
+                (eq? 'pending (net-operation-state second))
+                (finish-h2-stream! reactor second 1 2 2 200 #vu8(2))))
+         (lambda () (lws-http2-client-close! client)))))
