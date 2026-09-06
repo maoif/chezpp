@@ -25,7 +25,7 @@ dependency-specific data, and error is a diagnostic string or `#f`.
             (immutable error optional-library-error)))
 
   (define supported-optional-libraries
-    '(openssl xxhash blake3 curl ssh websockets grpc zlib nghttp2 cares idn2))
+    '(openssl xxhash blake3 curl ssh websockets grpc zlib cares idn2))
 
   #|proc:optional-library-info
 The `optional-library-info` procedure probes the supported native library named by `name`.

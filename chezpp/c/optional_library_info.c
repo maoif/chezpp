@@ -9,7 +9,6 @@ extern const chezpp_optional_library *chezpp_net_ssh_library(void);
 extern const chezpp_optional_library *chezpp_net_websocket_library(void);
 extern const chezpp_optional_library *chezpp_net_grpc_library(void);
 extern const chezpp_optional_library *chezpp_zlib_library(void);
-extern const chezpp_optional_library *chezpp_nghttp2_library(void);
 extern const chezpp_optional_library *chezpp_cares_library(void);
 extern const chezpp_optional_library *chezpp_idn2_library(void);
 extern unsigned chezpp_net_curl_capabilities(void);
@@ -50,7 +49,6 @@ static const chezpp_optional_library *find_library(const char *name,
   if (strcmp(name, "xxhash") == 0) return chezpp_xxhash_library();
   if (strcmp(name, "blake3") == 0) return chezpp_blake3_library();
   if (strcmp(name, "zlib") == 0) return chezpp_zlib_library();
-  if (strcmp(name, "nghttp2") == 0) return chezpp_nghttp2_library();
   if (strcmp(name, "cares") == 0) return chezpp_cares_library();
   if (strcmp(name, "idn2") == 0) return chezpp_idn2_library();
   if (strcmp(name, "curl") == 0) {

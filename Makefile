@@ -6,7 +6,7 @@ PREFIX := /usr
 
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
 SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
-SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c')
+SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c')
 
 CC := gcc
 CFLAGS := -fPIC -Wall -Wextra -O2 -shared -pthread

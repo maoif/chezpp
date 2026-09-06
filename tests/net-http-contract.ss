@@ -4,6 +4,9 @@
 (define net-environment
   (environment '(chezpp net)))
 
+(define net-ffi-environment
+  (environment '(chezpp net ffi)))
+
 (define retained-http-exports
   '(http-request? make-http-request http-request-method http-request-uri http-request-headers
     http-request-body http-response? make-http-response http-response-status http-response-reason
@@ -100,6 +103,12 @@
      ;; Error case: the low-level HTTP/2 session API is not exported by `(chezpp net)`.
      (guard (condition [else #t])
        (eval 'http2-open net-environment)
+       #f))
+
+(mat net-http2-ffi-private-api-contract
+     ;; Error case: the obsolete direct nghttp2 session FFI is not exported.
+     (guard (condition [else #t])
+       (eval 'ffi-net-http2-open net-ffi-environment)
        #f))
 
 (mat net-http-version-policy-contract

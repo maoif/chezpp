@@ -28,9 +28,14 @@
      (check-unavailable 'websockets "websockets")
      (check-unavailable 'grpc "grpc")
      (check-unavailable 'zlib "zlib")
-     (check-unavailable 'nghttp2 "nghttp2")
      (check-unavailable 'cares "c-ares")
      (check-unavailable 'idn2 "libidn2"))
+
+(mat net-loader-does-not-expose-nghttp2
+     ;; Error case: nghttp2 is an implementation detail of the optional LWS runtime.
+     (guard (condition [else #t])
+       (optional-library-info 'nghttp2)
+       #f))
 
 (mat net-lws-http-loader-status
      (let ([status (lws-status)])

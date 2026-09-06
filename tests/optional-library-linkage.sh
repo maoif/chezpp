@@ -246,7 +246,7 @@ for name in curl ssh websockets grpc; do
   fi
 done
 
-if ldd "$project_root/libchezpp.so" | rg -q 'libwebsockets'; then
-  echo 'libchezpp.so must not link directly to libwebsockets' >&2
+if ldd "$project_root/libchezpp.so" | rg -q 'lib(websockets|nghttp2)'; then
+  echo 'libchezpp.so must not link directly to libwebsockets or libnghttp2' >&2
   exit 1
 fi
