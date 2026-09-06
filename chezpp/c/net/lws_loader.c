@@ -27,6 +27,7 @@ static const char *const required_symbols[] = {
     "lws_get_socket_fd",
     "lws_http_client_read",
     "lws_client_http_body_pending",
+    "lws_http_transaction_completed",
     "lws_hdr_copy",
     "lws_hdr_total_length",
     "lws_hdr_custom_copy",

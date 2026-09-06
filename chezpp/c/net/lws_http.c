@@ -627,6 +627,7 @@ typedef struct custom_header_copy_state {
   lws_http_context *context;
   struct lws *wsi;
   size_t used;
+  int overflow;
 } custom_header_copy_state;
 
 static void copy_custom_header_name(const char *name, int name_length,
@@ -641,8 +642,10 @@ static void copy_custom_header_name(const char *name, int name_length,
     return;
   clean_length = (size_t)name_length;
   if (clean_length != 0 && name[clean_length - 1] == ':') clean_length--;
-  if (state->used + clean_length + 2 > state->context->payload_capacity)
+  if (state->used + clean_length + 2 > state->context->payload_capacity) {
+    state->overflow = 1;
     return;
+  }
   remaining = state->context->payload_capacity - state->used - clean_length - 1;
   copied = copy_fn(state->wsi,
                    (char *)state->context->drain_buffer + state->used +
@@ -677,6 +680,7 @@ static size_t copy_response_headers(lws_http_context *context,
           "lws_hdr_custom_name_foreach");
   size_t index;
   size_t used = 0;
+  int overflow = 0;
   if (copy_fn == NULL) return 0;
   for (index = 0; index < sizeof(headers) / sizeof(headers[0]); index++) {
     size_t name_length = strlen(headers[index].name);
@@ -684,7 +688,10 @@ static size_t copy_response_headers(lws_http_context *context,
     for (;;) {
       size_t remaining;
       int copied;
-      if (used + name_length + 2 > context->payload_capacity) break;
+      if (used + name_length + 2 > context->payload_capacity) {
+        overflow = 1;
+        break;
+      }
       remaining = context->payload_capacity - used - name_length - 1;
       copied = fragment_fn == NULL
                    ? (fragment == 0
@@ -706,11 +713,12 @@ static size_t copy_response_headers(lws_http_context *context,
     }
   }
   if (foreach_fn != NULL) {
-    custom_header_copy_state state = {context, wsi, used};
+    custom_header_copy_state state = {context, wsi, used, 0};
     (void)foreach_fn(wsi, copy_custom_header_name, &state);
     used = state.used;
+    overflow = state.overflow;
   }
-  return used;
+  return overflow ? SIZE_MAX : used;
 }
 
 static const unsigned char *find_crlf(const unsigned char *bytes,
@@ -1002,6 +1010,11 @@ static int lws_http_callback(struct lws *wsi,
               ? observe_http1_reusable(wsi)
               : 0;
       headers_length = copy_response_headers(context, wsi);
+      if (headers_length == SIZE_MAX) {
+        (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_FAILED,
+                                    ENOBUFS, NULL, 0);
+        return -1;
+      }
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_CONNECTED,
                                   status, NULL, 0);
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS,
@@ -1102,6 +1115,15 @@ static int lws_http_callback(struct lws *wsi,
     case LWS_CALLBACK_HTTP_BODY_COMPLETION:
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_COMPLETE, 0,
                                   NULL, 0);
+      /* Hand the completed WSI back to LWS so its HTTP keep-alive / pipeline
+       * state machine may accept a subsequent transaction on the connection. */
+      {
+        lws_http_transaction_completed_fn completed_fn =
+            (lws_http_transaction_completed_fn)lws_function(
+                "lws_http_transaction_completed");
+        if (completed_fn != NULL && wsi != NULL && completed_fn(wsi) != 0)
+          return -1;
+      }
       return 0;
     case LWS_CALLBACK_CLOSED_CLIENT_HTTP:
     case LWS_CALLBACK_CLOSED_HTTP:

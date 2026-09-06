@@ -8,6 +8,7 @@
           lws-reactor-shutdown!
           make-lws-reactor-operation
           lws-reactor-operation-events
+          lws-reactor-drain-operation-events!
           lws-reactor-release-operation!
           lws-reactor-operation-lifecycle
           lws-reactor-register-waiter!
@@ -295,8 +296,9 @@
   (define process-command!
     (lambda (reactor command)
       (let ([tag (reactor-command-tag command)]
-            [arguments (reactor-command-arguments command)])
-        (case tag
+            [arguments (reactor-command-arguments command)]
+            [result #t])
+        (set! result (case tag
           [(inject-event)
            (apply lws-context-inject-event!
                   (lws-reactor-native-context reactor) arguments)]
@@ -321,7 +323,14 @@
           [(cancel)
            (apply lws-stream-cancel
                   (lws-reactor-native-context reactor) arguments)]
-          [else (void)])
+          [else #t]))
+        ;; Command acceptance only means the command entered the queue. A rejected native
+        ;; command must become a deterministic terminal failure for its owning operation.
+        (when (and (eq? result #f) (>= (length arguments) 3))
+          (publish-event!
+           reactor
+           (vector 'failed 0 (car arguments) (cadr arguments) (caddr arguments)
+                   -1 (make-bytevector 0) (vector 'unknown #f #f 'stream))))
         (with-mutex (lws-reactor-mutex reactor)
           (command-release-locked! reactor command))
         (drain-native-events! reactor))))
@@ -646,6 +655,20 @@ The `reactor` parameter owns `operation`. Events are returned in callback order.
           (let ([state (find-operation-state-locked reactor operation)])
             (unless state (errorf who "operation is not owned by reactor"))
             (reverse (reactor-operation-state-events state)))))))
+
+  #|proc:lws-reactor-drain-operation-events!
+The `lws-reactor-drain-operation-events!` procedure destructively removes and returns all copied
+events currently queued for `operation`. The reactor retains no payload after this call.
+|#
+  (define-who lws-reactor-drain-operation-events!
+    (lambda (reactor operation)
+      (pcheck ([reactor? reactor] [net-operation? operation])
+        (with-mutex (lws-reactor-mutex reactor)
+          (let ([state (find-operation-state-locked reactor operation)])
+            (unless state (errorf who "operation is not owned by reactor"))
+            (let ([events (reverse (reactor-operation-state-events state))])
+              (reactor-operation-state-events-set! state '())
+              events))))))
 
   #|proc:lws-reactor-operation-lifecycle
 The `lws-reactor-operation-lifecycle` procedure returns the internal lifecycle of `operation`.

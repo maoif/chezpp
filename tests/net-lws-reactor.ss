@@ -272,11 +272,11 @@
        (lws-reactor-inject-event! reactor 'complete 71 1 1 0 #vu8(1))
        (let ([first-ready?
               (wait-until (lambda ()
-                            (pair? (lws-reactor-operation-events reactor first))))])
+                            (eq? 'completed (lws-reactor-operation-lifecycle reactor first))))])
          (let* ([first-event (car (lws-reactor-operation-events reactor first))]
                 [_ (lws-reactor-inject-event! reactor 'complete 71 2 2 0 #vu8(2))]
                 [second-ready? (wait-until (lambda ()
-                                             (pair? (lws-reactor-operation-events reactor second))))]
+                                             (eq? 'completed (lws-reactor-operation-lifecycle reactor second))))]
                 [second-event (car (lws-reactor-operation-events reactor second))])
            (net-operation-step! first)
            (net-operation-step! second)
@@ -295,8 +295,8 @@
        (lws-reactor-inject-event! reactor 'complete 72 3 1 0 #vu8(3))
        (let ([ready?
               (wait-until (lambda ()
-                            (and (pair? (lws-reactor-operation-events reactor first))
-                                 (pair? (lws-reactor-operation-events reactor second)))))])
+                            (and (eq? 'completed (lws-reactor-operation-lifecycle reactor first))
+                                 (eq? 'completed (lws-reactor-operation-lifecycle reactor second)))))])
          (let* ([first-event (car (lws-reactor-operation-events reactor first))]
                 [second-event (car (lws-reactor-operation-events reactor second))])
            (net-operation-step! first)
@@ -476,3 +476,44 @@
           (procedure? lws-reactor-submit-body!)
           (procedure? lws-reactor-consume-body!)
           (procedure? lws-reactor-close-stream!)))
+
+(mat net-lws-reactor-drain-operation-events-is-destructive
+     ;; Draining copied events must remove them so retained payloads do not grow unbounded.
+     (let* ([reactor (make-lws-reactor 8 8 4)]
+            [operation (make-lws-reactor-operation reactor 'drain 81 82 1 #f)])
+       (lws-reactor-start! reactor)
+       (lws-reactor-inject-event! reactor 'complete 81 82 1 0 #vu8(7))
+       (let ([ready? (wait-until
+                      (lambda ()
+                        (eq? 'completed
+                             (lws-reactor-operation-lifecycle reactor operation))))]
+             [events (begin
+                       (wait-until
+                        (lambda ()
+                          (pair? (lws-reactor-operation-events reactor operation))))
+                       (lws-reactor-drain-operation-events! reactor operation))])
+         (lws-reactor-shutdown! reactor)
+         (and ready?
+              (= (length events) 1)
+              (null? (lws-reactor-drain-operation-events! reactor operation))))))
+
+(mat net-lws-reactor-command-rejection-publishes-terminal
+     ;; A native command rejected after enqueue must still terminate its owning operation.
+     (let* ([reactor (make-lws-reactor 8 8 4)]
+            [operation (make-lws-reactor-operation reactor 'reject 91 92 1 #f)])
+       (lws-reactor-start! reactor)
+       ;; No native stream exists, so release is deterministically rejected.
+       (lws-reactor-client-release! reactor 91 92 1)
+       (let ([failed? (wait-until
+                       (lambda ()
+                         (eq? 'failed
+                              (lws-reactor-operation-lifecycle reactor operation))))]
+             [events (begin
+                       (wait-until
+                        (lambda ()
+                          (pair? (lws-reactor-operation-events reactor operation))))
+                       (lws-reactor-drain-operation-events! reactor operation))])
+         (lws-reactor-shutdown! reactor)
+         (and failed?
+              (= (length events) 1)
+              (eq? 'failed (vector-ref (car events) 0))))))
