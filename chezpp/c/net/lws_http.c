@@ -67,7 +67,7 @@ typedef void (*lws_set_timeout_fn)(struct lws *, enum pending_timeout, int);
  * and RECEIVE_CLIENT_HTTP_READ publish body bytes; CLIENT_HTTP_WRITEABLE is
  * the only request-body pull point; COMPLETED_CLIENT_HTTP publishes completion;
  * CLOSED_CLIENT_HTTP and CLIENT_CONNECTION_ERROR publish terminal failure;
- * CLIENT_HTTP_DROP_PROTOCOL releases the native stream.  Events are copied
+ * CLIENT_HTTP_DROP_PROTOCOL detaches the WSI; explicit release frees the stream. Events are copied
  * while holding the context lock and drained FIFO by the serialized reactor.
  */
 
@@ -1219,7 +1219,8 @@ static int lws_http_callback(struct lws *wsi,
     case LWS_CALLBACK_HTTP_DROP_PROTOCOL:
       if (context != NULL && stream != NULL) {
         pthread_mutex_lock(&context->lock);
-        stream_release_locked(context, stream);
+        stream->wsi = NULL;
+        stream->terminal = 1;
         if (user != NULL) *(lws_http_stream **)user = NULL;
         pthread_mutex_unlock(&context->lock);
       }
@@ -1774,7 +1775,7 @@ int chezpp_lws_http_client_release(uintptr_t context_handle,
   pthread_mutex_lock(&context->lock);
   stream = stream_find_locked(context, connection_id, stream_id);
   if (stream != NULL && stream->generation == generation && stream->terminal &&
-      stream->wsi == NULL) {
+      stream->wsi == NULL && stream->pending_body_bytes == 0) {
     stream_release_locked(context, stream);
     released = 1;
   }
@@ -1951,8 +1952,6 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
     stream->failure_pending = 1;
     stream->failure_status = ENOBUFS;
   }
-  if (resume && stream->terminal && stream->wsi == NULL)
-    stream_release_locked(context, stream);
   pthread_mutex_unlock(&context->lock);
   if (resume)
     (void)chezpp_lws_http_context_wakeup(context_handle);
@@ -2008,9 +2007,6 @@ int chezpp_lws_http_inject_event(uintptr_t context_handle, int tag,
                      LWS_HTTP_TERMINAL_SCOPE_NONE);
   if (result && event_tag == LWS_HTTP_EVENT_READABLE)
     stream->pending_body_bytes += length;
-  if (result && terminal && !stream->terminal_pending) {
-    if (stream->pending_body_bytes == 0) stream_release_locked(context, stream);
-  }
   pthread_mutex_unlock(&context->lock);
   return result;
 }

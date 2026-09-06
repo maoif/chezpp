@@ -68,25 +68,26 @@
 
   (define request-field
     (lambda (request index)
-      (if (normalized-http-request? request)
-          (case index
-            [(0) (normalized-http-request-method request)]
-            [(1) (normalized-http-request-host request)]
-            [(2) (normalized-http-request-port request)]
-            [(3) (normalized-http-request-tls? request)]
-            [(4) (normalized-http-request-path request)]
-            [(5) (normalized-http-request-headers request)]
-            [(6) (normalized-http-request-body-factory request)]
-            [(8) (http-request-policy-version (normalized-http-request-policy request))]
-            [(9) (http-request-policy-deadline-ms (normalized-http-request-policy request))])
-          (vector-ref request index))))
-  (define request-size
+      (case index
+        [(0) (normalized-http-request-method request)]
+        [(1) (normalized-http-request-host request)]
+        [(2) (normalized-http-request-port request)]
+        [(3) (normalized-http-request-tls? request)]
+        [(4) (normalized-http-request-path request)]
+        [(5) (normalized-http-request-headers request)]
+        [(6) (normalized-http-request-body-factory request)]
+        [(8) (if (eq? 'h2
+                       (http-request-policy-version
+                        (normalized-http-request-policy request)))
+                 "h2" "http/1.1")]
+        [(9) (http-request-policy-deadline-ms (normalized-http-request-policy request))])))
+  (define request-requires-h2?
     (lambda (request)
-      (if (normalized-http-request? request) 10 (vector-length request))))
+      (eq? 'h2 (http-request-policy-version (normalized-http-request-policy request)))))
   (define origin-key
     (lambda (request)
       (vector (request-field request 1) (request-field request 2) (request-field request 3)
-              (if (= (request-size request) 10) (request-field request 8) "http/1.1"))))
+              (request-field request 8))))
 
   (define same-origin-key?
     (lambda (left right)
@@ -328,8 +329,7 @@ The return value is an internal transport client.
                 (let ([metadata (vector-ref event 7)])
                   (when (and (vector? metadata) (= (vector-length metadata) 4))
                     (lws-http1-state-reusable?-set! state (vector-ref metadata 1))))
-                (if (and (= (vector-length (lws-http1-state-request state)) 10)
-                         (string=? (vector-ref (lws-http1-state-request state) 8) "h2")
+                (if (and (request-requires-h2? (lws-http1-state-request state))
                          (not (eq? 'h2 (lws-http1-state-observed-version state))))
                     (lws-http1-state-protocol-failure-set!
                      state
@@ -338,8 +338,7 @@ The return value is an internal transport client.
                                      (lws-http1-state-request state)))
                     (finish-response! state))]
                [(memq tag '(failed closed reset goaway))
-                (when (and (= (vector-length (lws-http1-state-request state)) 10)
-                           (string=? (vector-ref (lws-http1-state-request state) 8) "h2")
+                (when (and (request-requires-h2? (lws-http1-state-request state))
                            (not (eq? 'h2 (lws-http1-state-observed-version state))))
                   (lws-http1-state-protocol-failure-set!
                    state
@@ -360,15 +359,11 @@ a `net-operation` completing with a transport response record.
       [(client request response-sink)
        (lws-http1-request/nonblocking client request response-sink #f)]
       [(client request response-sink ready)
-      (pcheck ([lws-http1-client? client]
-               [(lambda (value) (or (normalized-http-request? value) (vector? value))) request]
+      (pcheck ([lws-http1-client? client] [normalized-http-request? request]
                [(lambda (value) (or (not value) (vector? value))) response-sink]
                [(lambda (value) (or (not value) (procedure? value))) ready])
         (when (lws-http1-client-closed? client)
           (raise-net-error who 'http "HTTP client transport is closed" client))
-        (unless (or (normalized-http-request? request)
-                    (= (vector-length request) 8) (= (vector-length request) 10))
-          (errorf who "expected a normalized HTTP request"))
         (remove-idle-expired client (current-time-ms)
                              (lws-http1-client-idle-timeout-ms client))
         (when (and (not (pair? (lws-http1-client-pool client)))
@@ -382,18 +377,16 @@ a `net-operation` completing with a transport response record.
                [path (request-field request 4)]
                [headers (request-field request 5)]
                [body-source (request-field request 6)]
-               [alpn (if (= (request-size request) 10)
-                         (request-field request 8)
-                         "http/1.1")]
+               [alpn (request-field request 8)]
                [key (origin-key request)]
-               [reused-id (take-idle! client key)]
-               [selected-id (or reused-id (fx1+ (lws-http1-client-next-id client)))]
+               ;; LWS 4.5.8 closes completed client HTTP transactions; no supported API restarts
+               ;; a transaction on an idle WSI, so every HTTP/1 request gets a new connection.
+               [reused-id #f]
+               [selected-id (fx1+ (lws-http1-client-next-id client))]
                [connection-id selected-id]
                [stream-id selected-id]
                [generation (fx1+ next-generation)]
-               [deadline-ms (if (= (request-size request) 10)
-                                (request-field request 9)
-                                (+ (current-time-ms) 30000))]
+               [deadline-ms (request-field request 9)]
                [reactor (lws-http1-client-reactor client)]
                [inner (make-lws-reactor-operation reactor 'http1 connection-id stream-id
                                                    generation deadline-ms #t)]

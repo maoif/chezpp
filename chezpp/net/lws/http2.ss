@@ -48,24 +48,17 @@
 
   (define request-origin
     (lambda (request)
-      (list (if (normalized-http-request? request)
-                (normalized-http-request-host request) (vector-ref request 1))
-            (if (normalized-http-request? request)
-                (normalized-http-request-port request) (vector-ref request 2))
-            (if (normalized-http-request? request)
-                (normalized-http-request-tls? request) (vector-ref request 3)))))
+      (list (normalized-http-request-host request)
+            (normalized-http-request-port request)
+            (normalized-http-request-tls? request))))
 
   (define request-version
     (lambda (request)
-      (if (normalized-http-request? request)
-          (http-request-policy-version (normalized-http-request-policy request))
-          (vector-ref request 8))))
+      (http-request-policy-version (normalized-http-request-policy request))))
 
   (define request-deadline
     (lambda (request)
-      (if (normalized-http-request? request)
-          (http-request-policy-deadline-ms (normalized-http-request-policy request))
-          (vector-ref request 9))))
+      (http-request-policy-deadline-ms (normalized-http-request-policy request))))
 
   (define find-origin
     (lambda (client key)
@@ -198,12 +191,11 @@ The request vector contains HTTP request fields, `h2` ALPN policy, and an absolu
 |#
   (define-who lws-http2-request/nonblocking
     (lambda (client request response-sink)
-      (pcheck ([lws-http2-client? client] [vector? request]
+      (pcheck ([lws-http2-client? client] [normalized-http-request? request]
                [(lambda (value) (or (not value) (vector? value))) response-sink])
         (when (lws-http2-client-closed? client)
           (errorf who "HTTP/2 client transport is closed"))
-        (unless (and (or (normalized-http-request? request) (= (vector-length request) 10))
-                     (eq? (request-version request) 'h2))
+        (unless (eq? (request-version request) 'h2)
           (errorf who "expected a normalized HTTP/2 request"))
         (let* ([origin (ensure-origin! client request)]
                [stream (%make-h2-stream origin request response-sink #f #f #f)]

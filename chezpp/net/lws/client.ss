@@ -43,8 +43,7 @@ Returns the protocol reducer's network operation.
 |#
   (define lws-client-request/nonblocking
     (lambda (transport request sink)
-      (pcheck ([lws-client-transport? transport]
-               [(lambda (value) (or (normalized-http-request? value) (vector? value))) request]
+      (pcheck ([lws-client-transport? transport] [normalized-http-request? request]
                [(lambda (value) (or (not value) (vector? value))) sink])
         (if (eq? (lws-client-transport-version transport) 'h2)
             (lws-http2-request/nonblocking
