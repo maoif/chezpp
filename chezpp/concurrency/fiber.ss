@@ -4,6 +4,7 @@
 
           event-never event-always
           event-wrap event-select event-sync
+          net-operation-event
           wrap-operation choice-operation perform-operation
 
           make-channel
@@ -22,7 +23,9 @@
           (chezpp concurrency)
           (chezpp system)
           (chezpp io)
-          (chezpp internal))
+          (chezpp internal)
+          (chezpp net operation)
+          (chezpp net operation private))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -344,9 +347,7 @@
                                     (scheduler-thread-set! s t)
                                     t))
                                 scheds)])
-              (println "---------------------------- all scheds up")
               (for-each thread-join threads)
-              (println "---------------------------- all scheds down")
               (set! *scheds* #f)
               init-res)))))
 
@@ -501,6 +502,7 @@
                   ;; Return to scheduler and do blocking there, since timer is turned off there.
                   ;; This is a function call that usually calls the `thunk` below.
                   (set-timer 0)
+                  (let ([suspended-scheduler current-scheduler])
                   ((call/cc
                     (lambda (k)
                       ;; This is called in things like channel code when doing rendez-vous
@@ -509,10 +511,10 @@
                       (define resume
                         (lambda (thunk)
                           (assert (= 0 (set-timer 0)))
-                          (put-task! (random-sched) (lambda () (k thunk)))))
+                          (put-task! suspended-scheduler (lambda () (k thunk)))))
                       (assert (scheduler-running? current-scheduler))
                       ;; RET
-                      ((scheduler-k current-scheduler) 'callback (lambda () (block resume))))))))
+                      ((scheduler-k current-scheduler) 'callback (lambda () (block resume)))))))))
               (if (select-event? evt)
                   ;; Start from a random base event, and try all of them.
                   ;; If no one works, block on all of them.
@@ -545,6 +547,98 @@
   (define wrap-operation event-wrap)
   (define choice-operation event-select)
   (define perform-operation event-sync)
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Network operation events
+  ;;;;===----------------------------------------------------------------------===
+
+  (define net-driver-lock (make-spinlock 'fiber-net-driver))
+  (define net-driver-operation* '())
+  (define net-driver-thread #f)
+
+  (define drive-net-operations
+    (lambda ()
+      (let loop ()
+        (let ([operation*
+               (with-timer-off
+                (spinlock-acquire net-driver-lock)
+                (let ([snapshot net-driver-operation*])
+                  (spinlock-release net-driver-lock)
+                  snapshot))])
+          (for-each
+           (lambda (operation)
+             (when (eq? 'pending (net-operation-state operation))
+               (guard (ignored [else (net-operation-cancel! operation)])
+                 (net-operation-step! operation))))
+           operation*))
+        (let ([continue?
+               (with-timer-off
+                (spinlock-acquire net-driver-lock)
+                (set! net-driver-operation*
+                      (filter (lambda (operation)
+                                (eq? 'pending (net-operation-state operation)))
+                              net-driver-operation*))
+                (let ([continue?
+                       (if (null? net-driver-operation*)
+                           (begin (set! net-driver-thread #f) #f)
+                           #t)])
+                  (spinlock-release net-driver-lock)
+                  continue?))])
+          (when continue?
+            (milisleep 1)
+            (loop))))))
+
+  (define enqueue-net-operation!
+    (lambda (operation)
+      (with-timer-off
+        (spinlock-acquire net-driver-lock)
+        (unless (memq operation net-driver-operation*)
+          (set! net-driver-operation* (cons operation net-driver-operation*)))
+        (unless net-driver-thread
+          (set! net-driver-thread (fork-thread drive-net-operations)))
+        (spinlock-release net-driver-lock))))
+
+  (define net-operation-result-thunk
+    (lambda (operation)
+      (lambda ()
+        (case (net-operation-state operation)
+          [(completed) (net-operation-result operation)]
+          [(failed cancelled) (raise (net-operation-condition operation))]
+          [else (errorf 'net-operation-event "operation is still pending")]))))
+
+  #|proc:net-operation-event
+The `net-operation-event` procedure creates a fiber event for network `operation`.
+Synchronization drives the operation through one shared waiter and returns its result.
+The operation's original failure or cancellation condition is raised when synchronization resumes.
+|#
+  (define net-operation-event
+    (lambda (operation)
+      (pcheck ([net-operation? operation])
+        (define try
+          (lambda ()
+            (when (eq? 'pending (net-operation-state operation))
+              (net-operation-step! operation))
+            (if (eq? 'pending (net-operation-state operation))
+                (begin
+                  (enqueue-net-operation! operation)
+                  #f)
+                (net-operation-result-thunk operation))))
+        (define block
+          (lambda (flag resume)
+            (let ([unregister #f])
+              (set! unregister
+                    (net-operation-register-listener!
+                     operation
+                     (lambda (completed-operation)
+                       (let spin ()
+                         (case (abox-cas! flag 'W 'S)
+                           [(W)
+                            (when unregister (unregister))
+                            (resume (net-operation-result-thunk completed-operation))]
+                           [(C) (spin)]
+                           [(S) (when unregister (unregister))]
+                           [else (assert-unreachable)]))))))))
+        (make-base-event #f try block))))
 
 
   (define-record-type channel
@@ -1057,5 +1151,10 @@
                    (wr (fiber-mutex-name r) p)
                    (display ">" p)))
 
+  (%net-operation-wait-hook
+   (lambda (operation blocking-wait)
+     (if current-scheduler
+         (event-sync (net-operation-event operation))
+         (blocking-wait operation))))
 
   )

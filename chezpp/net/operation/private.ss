@@ -16,6 +16,9 @@
           %net-operation-value-set!
           %net-operation-cleaned?
           %net-operation-cleaned?-set!
+          %net-operation-listeners
+          %net-operation-listeners-set!
+          %net-operation-wait-hook
           net-operation-update?
           net-operation-update-state
           net-operation-update-poll-targets
@@ -45,7 +48,14 @@
             (mutable deadline-ms %net-operation-deadline-ms
                      %net-operation-deadline-ms-set!)
             (mutable value %net-operation-value %net-operation-value-set!)
-            (mutable cleaned? %net-operation-cleaned? %net-operation-cleaned?-set!)))
+            (mutable cleaned? %net-operation-cleaned? %net-operation-cleaned?-set!)
+            (mutable listeners %net-operation-listeners %net-operation-listeners-set!)))
+
+  (define net-operation-wait-hook #f)
+  (define %net-operation-wait-hook
+    (case-lambda
+      [() net-operation-wait-hook]
+      [(procedure) (set! net-operation-wait-hook procedure)]))
 
   ;;;;===----------------------------------------------------------------------===
   ;;;; Operation updates

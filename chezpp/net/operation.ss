@@ -13,6 +13,7 @@
           net-operation-cancel!
           net-operation-result
           net-operation-condition
+          net-operation-register-listener!
           net-operation-wait
           net-would-block?
           make-net-would-block
@@ -49,7 +50,7 @@ The return value is a new pending network operation. Omitting `cleanup` uses `vo
        (pcheck ([symbol? kind] [procedure? advance cancel cleanup])
                (%make-net-operation kind advance cancel cleanup
                                     (make-mutex 'net-operation)
-                                    'pending '() #f #f #f))]))
+                                    'pending '() #f #f #f '()))]))
 
   #|proc:net-operation-kind
 The `net-operation-kind` procedure returns the kind symbol of `operation`.
@@ -196,6 +197,22 @@ The return value is `-1` without a deadline, or a nonnegative fixnum of millisec
       (apply-update! operation (net-operation-failed (conditionize failure)))
       (cleanup-terminal-operation! operation)))
 
+  (define take-listeners!
+    (lambda (operation)
+      (let ([listener* (%net-operation-listeners operation)])
+        (%net-operation-listeners-set! operation '())
+        listener*)))
+
+  (define notify-listeners!
+    (lambda (operation listener*)
+      (for-each
+       (lambda (entry)
+         (when (cdr entry)
+           (set-cdr! entry #f)
+           (guard (ignored [else (void)])
+             ((car entry) operation))))
+       listener*)))
+
   #|proc:net-operation-step!
 The `net-operation-step!` procedure advances pending `operation` once without waiting.
 The `operation` parameter is a pending network operation.
@@ -205,13 +222,16 @@ Conditions from advancement or cleanup are stored as a failed result.
   (define-who net-operation-step!
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (with-mutex (%net-operation-mutex operation)
-                (unless (eq? 'pending (%net-operation-state operation))
-                  (errorf who "cannot step an operation in state ~s"
-                          (%net-operation-state operation)))
-                (apply-update! operation (advance-operation who operation))
-                (when (operation-terminal? operation)
-                  (cleanup-terminal-operation! operation))
+              (let ([listener* '()])
+                (with-mutex (%net-operation-mutex operation)
+                  (unless (eq? 'pending (%net-operation-state operation))
+                    (errorf who "cannot step an operation in state ~s"
+                            (%net-operation-state operation)))
+                  (apply-update! operation (advance-operation who operation))
+                  (when (operation-terminal? operation)
+                    (cleanup-terminal-operation! operation)
+                    (set! listener* (take-listeners! operation))))
+                (notify-listeners! operation listener*)
                 operation))))
 
   #|proc:net-operation-cancel!
@@ -223,17 +243,20 @@ If cancellation or cleanup fails, the first callback condition becomes a failed 
   (define net-operation-cancel!
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (with-mutex (%net-operation-mutex operation)
-                (when (eq? 'pending (%net-operation-state operation))
-                  (%net-operation-state-set! operation 'cancelled)
-                  (%net-operation-poll-targets-set! operation '())
-                  (%net-operation-deadline-ms-set! operation #f)
-                  (%net-operation-value-set! operation (make-cancel-condition operation))
-                  (let ([cancel-failure
-                         (capture-callback-failure (%net-operation-cancel operation))])
-                    (when cancel-failure
-                      (apply-update! operation (net-operation-failed cancel-failure)))
-                    (cleanup-terminal-operation! operation)))
+              (let ([listener* '()])
+                (with-mutex (%net-operation-mutex operation)
+                  (when (eq? 'pending (%net-operation-state operation))
+                    (%net-operation-state-set! operation 'cancelled)
+                    (%net-operation-poll-targets-set! operation '())
+                    (%net-operation-deadline-ms-set! operation #f)
+                    (%net-operation-value-set! operation (make-cancel-condition operation))
+                    (let ([cancel-failure
+                           (capture-callback-failure (%net-operation-cancel operation))])
+                      (when cancel-failure
+                        (apply-update! operation (net-operation-failed cancel-failure)))
+                      (cleanup-terminal-operation! operation)
+                      (set! listener* (take-listeners! operation)))))
+                (notify-listeners! operation listener*)
                 operation))))
 
   #|proc:net-operation-result
@@ -264,6 +287,30 @@ It is an error to read a condition from a pending or completed operation.
                     (errorf who "operation has no terminal condition in state ~s"
                             (%net-operation-state operation)))))))
 
+  #|proc:net-operation-register-listener!
+The `net-operation-register-listener!` procedure registers `listener` on `operation`.
+The listener has signature `(net-operation) -> unspecified` and runs once after termination.
+The return value is an idempotent zero-argument procedure that unregisters the listener.
+|#
+  (define net-operation-register-listener!
+    (lambda (operation listener)
+      (pcheck ([net-operation? operation] [procedure? listener])
+        (let ([entry (cons listener #t)] [notify? #f])
+          (with-mutex (%net-operation-mutex operation)
+            (if (operation-terminal? operation)
+                (set! notify? #t)
+                (%net-operation-listeners-set!
+                 operation (cons entry (%net-operation-listeners operation)))))
+          (when notify?
+            (set-cdr! entry #f)
+            (listener operation))
+          (lambda ()
+            (with-mutex (%net-operation-mutex operation)
+              (when (cdr entry)
+                (set-cdr! entry #f)
+                (%net-operation-listeners-set!
+                 operation (remq entry (%net-operation-listeners operation))))))))))
+
   #|proc:net-operation-wait
 The `net-operation-wait` procedure drives `operation` to a terminal state using blocking poll.
 The `operation` parameter is a network operation to advance and wait for.
@@ -271,23 +318,32 @@ The return value is the successful operation result; failure conditions are rais
 Poll conditions fail the operation and run cleanup once before the same condition is raised.
 It is an error to wait on a cancelled operation.
 |#
+  (define net-operation-wait/blocking
+    (lambda (operation)
+      (let loop ()
+        (case (net-operation-state operation)
+          [(pending)
+           (net-operation-step! operation)
+           (when (eq? 'pending (net-operation-state operation))
+             (guard (failure
+                     [else
+                      (with-mutex (%net-operation-mutex operation)
+                        (when (eq? 'pending (%net-operation-state operation))
+                          (fail-operation! operation failure)))])
+               (poll (net-operation-poll-targets operation)
+                     (net-operation-remaining-timeout-ms operation))))
+           (loop)]
+          [(completed) (net-operation-result operation)]
+          [(failed cancelled) (raise (net-operation-condition operation))]
+          [else (assert-unreachable)]))))
+
   (define-who net-operation-wait
     (lambda (operation)
       (pcheck ([net-operation? operation])
-              (let loop ()
-                (case (net-operation-state operation)
-                  [(pending)
-                   (net-operation-step! operation)
-                   (when (eq? 'pending (net-operation-state operation))
-                     (guard (failure
-                             [else (fail-operation! operation failure)])
-                       (poll (net-operation-poll-targets operation)
-                             (net-operation-remaining-timeout-ms operation))))
-                   (loop)]
-                  [(completed) (net-operation-result operation)]
-                  [(failed) (raise (net-operation-condition operation))]
-                  [(cancelled) (raise (net-operation-condition operation))]
-                  [else (assert-unreachable)])))))
+        (let ([hook (%net-operation-wait-hook)])
+          (if hook
+              (hook operation net-operation-wait/blocking)
+              (net-operation-wait/blocking operation))))))
 
   (define valid-poll-events?
     (lambda (event*)

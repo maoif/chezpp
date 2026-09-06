@@ -1,4 +1,5 @@
 NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss net-lws-reactor.ss \
+             net-http-fiber.ss \
              net-http.ss net-ftp.ss \
              net-ssh.ss net-sftp.ss \
              net-scp.ss net-websocket.ss net-grpc.ss net-examples.ss

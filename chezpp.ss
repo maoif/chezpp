@@ -7,6 +7,8 @@
           (chezpp net lws reactor)
           (chezpp net lws http1)
           (chezpp net lws http2)
+          (chezpp concurrency fiber)
+          (chezpp concurrency fiber-net)
           (chezpp protobuf))
 
   (export (import (chezpp chez)
