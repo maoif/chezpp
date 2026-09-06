@@ -189,6 +189,11 @@ uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
                                        uintptr_t tls_context_handle,
                                        const char *proxy_address,
                                        int proxy_port);
+uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
+                                              size_t payload_capacity,
+                                              const char *interface_name,
+                                              int port,
+                                              uintptr_t tls_context_handle);
 void chezpp_lws_http_context_close(uintptr_t context_handle);
 int chezpp_lws_http_context_wakeup_fd(uintptr_t context_handle);
 ptr chezpp_lws_http_context_poll_snapshot(uintptr_t context_handle);

@@ -33,6 +33,7 @@ typedef struct lws *(*lws_get_network_wsi_fn)(struct lws *);
 typedef int (*lws_http_client_http_response_fn)(struct lws *);
 typedef int (*lws_hdr_copy_fn)(struct lws *, char *, int,
                                enum lws_token_indexes);
+typedef int (*lws_hdr_total_length_fn)(struct lws *, enum lws_token_indexes);
 typedef int (*lws_hdr_copy_fragment_fn)(struct lws *, char *, int,
                                         enum lws_token_indexes, int);
 typedef int (*lws_hdr_custom_copy_fn)(struct lws *, char *, int,
@@ -721,6 +722,37 @@ static size_t copy_response_headers(lws_http_context *context,
   return overflow ? SIZE_MAX : used;
 }
 
+static size_t copy_server_request(lws_http_context *context, struct lws *wsi,
+                                  const void *path, size_t path_length) {
+  lws_hdr_copy_fn copy_fn =
+      (lws_hdr_copy_fn)lws_function("lws_hdr_copy");
+  int method_length;
+  size_t used;
+  if (copy_fn == NULL || path == NULL || path_length + 3 > context->payload_capacity)
+    return SIZE_MAX;
+  method_length = copy_fn(wsi, (char *)context->drain_buffer,
+                          (int)context->payload_capacity,
+                          WSI_TOKEN_HTTP_COLON_METHOD);
+  if (method_length <= 0) {
+    lws_hdr_total_length_fn total_length_fn =
+        (lws_hdr_total_length_fn)lws_function("lws_hdr_total_length");
+    if (total_length_fn != NULL && total_length_fn(wsi, WSI_TOKEN_POST_URI) > 0) {
+      method_length = 4;
+      memcpy(context->drain_buffer, "POST", 4);
+    } else {
+      method_length = 3;
+      memcpy(context->drain_buffer, "GET", 3);
+    }
+  }
+  used = (size_t)method_length;
+  if (used + path_length + 2 > context->payload_capacity) return SIZE_MAX;
+  context->drain_buffer[used++] = 0;
+  memcpy(context->drain_buffer + used, path, path_length);
+  used += path_length;
+  context->drain_buffer[used++] = 0;
+  return used;
+}
+
 static const unsigned char *find_crlf(const unsigned char *bytes,
                                       const unsigned char *end) {
   while (bytes + 1 < end) {
@@ -1112,7 +1144,6 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     }
     case LWS_CALLBACK_COMPLETED_CLIENT_HTTP:
-    case LWS_CALLBACK_HTTP_BODY_COMPLETION:
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_COMPLETE, 0,
                                   NULL, 0);
       /* Hand the completed WSI back to LWS so its HTTP keep-alive / pipeline
@@ -1141,7 +1172,7 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     case LWS_CALLBACK_HTTP:
       if (context == NULL) return 0;
-      if (stream == NULL) {
+      if (stream == NULL || stream->terminal) {
         uint64_t identity = fresh_identity(&next_server_identity);
         pthread_mutex_lock(&context->lock);
         stream = stream_acquire_locked(context, identity, identity, 1);
@@ -1153,8 +1184,18 @@ static int lws_http_callback(struct lws *wsi,
         }
         pthread_mutex_unlock(&context->lock);
       }
-      (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS, 0,
-                                  input, length);
+      {
+        lws_hdr_total_length_fn total_length_fn =
+            (lws_hdr_total_length_fn)lws_function("lws_hdr_total_length");
+        int has_body = total_length_fn != NULL &&
+                       (total_length_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0 ||
+                        total_length_fn(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0);
+        size_t request_length = copy_server_request(context, wsi, input, length);
+        if (request_length == SIZE_MAX ||
+            !callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS, has_body,
+                                   context->drain_buffer, request_length))
+          return -1;
+      }
       return 0;
     case LWS_CALLBACK_HTTP_BODY:
       if (context == NULL || stream == NULL) return 0;
@@ -1165,6 +1206,11 @@ static int lws_http_callback(struct lws *wsi,
                              stream->generation, 0, input, length))
         stream->pending_body_bytes += length;
       pthread_mutex_unlock(&context->lock);
+      return 0;
+    case LWS_CALLBACK_HTTP_BODY_COMPLETION:
+      if (context != NULL && stream != NULL && stream->server_stream)
+        (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS, -1,
+                                    NULL, 0);
       return 0;
     case LWS_CALLBACK_HTTP_WRITEABLE:
       if (context != NULL && stream != NULL && stream->outbound_length <=
@@ -1207,6 +1253,12 @@ static int lws_http_callback(struct lws *wsi,
                                       LWS_HTTP_EVENT_COMPLETE, written, NULL,
                                       0);
           if (completed_fn != NULL && completed_fn(wsi) != 0) return -1;
+          pthread_mutex_lock(&context->lock);
+          stream->wsi = NULL;
+          if (user != NULL) *(lws_http_stream **)user = NULL;
+          stream_release_locked(context, stream);
+          pthread_mutex_unlock(&context->lock);
+          return 0;
         }
         (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_WRITABLE,
                                     written, NULL, 0);
@@ -1320,11 +1372,10 @@ static void free_context_storage(lws_http_context *context) {
   free(context);
 }
 
-uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
-                                       size_t payload_capacity,
-                                       uintptr_t tls_context_handle,
-                                       const char *proxy_address,
-                                       int proxy_port) {
+static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
+                              uintptr_t tls_context_handle,
+                              const char *proxy_address, int proxy_port,
+                              const char *interface_name, int listen_port) {
   lws_http_context *context;
   struct lws_context_creation_info information;
   lws_create_context_fn create_fn;
@@ -1374,7 +1425,8 @@ uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
   context->protocols[0].per_session_data_size = sizeof(lws_http_stream *);
   context->protocols[0].rx_buffer_size = payload_capacity;
   memset(&information, 0, sizeof(information));
-  information.port = CONTEXT_PORT_NO_LISTEN;
+  information.port = listen_port;
+  information.iface = interface_name;
   information.protocols = context->protocols;
   information.user = context;
   information.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
@@ -1405,6 +1457,25 @@ uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
     return 0;
   }
   return (uintptr_t)context;
+}
+
+uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
+                                       size_t payload_capacity,
+                                       uintptr_t tls_context_handle,
+                                       const char *proxy_address,
+                                       int proxy_port) {
+  return context_open(event_capacity, payload_capacity, tls_context_handle,
+                      proxy_address, proxy_port, NULL, CONTEXT_PORT_NO_LISTEN);
+}
+
+uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
+                                              size_t payload_capacity,
+                                              const char *interface_name,
+                                              int port,
+                                              uintptr_t tls_context_handle) {
+  if (interface_name == NULL || port <= 0 || port > 65535) return 0;
+  return context_open(event_capacity, payload_capacity, tls_context_handle,
+                      NULL, 0, interface_name, port);
 }
 
 void chezpp_lws_http_context_close(uintptr_t context_handle) {
@@ -1894,6 +1965,12 @@ int chezpp_lws_http_server_response_submit(
   result = chezpp_lws_http_client_body_submit(
       context_handle, connection_id, stream_id, generation, payload,
       final_chunk);
+  if (result && final_chunk && Sbytevector_length(payload) == 0) {
+    lws_callback_on_writable_fn writable_fn =
+        (lws_callback_on_writable_fn)lws_function("lws_callback_on_writable");
+    if (writable_fn == NULL || stream->wsi == NULL || writable_fn(stream->wsi) < 0)
+      return 0;
+  }
   return result;
 }
 

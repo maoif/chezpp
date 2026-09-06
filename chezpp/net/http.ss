@@ -11,7 +11,7 @@
           http-follow-redirects! http-set-header! http-set-timeout! http-cancel-pending! http-send/nonblocking http-request/nonblocking http-download/nonblocking http-upload/nonblocking
           http-server? http-listen http-server-close http-accept http-accept/nonblocking http-serve http-serve-loop http-register-handler! http-handler-ref http-unregister-handler!
           http-connection? http-connection-close http-read-request http-read-request/nonblocking http-write-response http-write-response/nonblocking)
-  (import (chezpp chez) (chezpp utils) (chezpp file) (chezpp net uri) (chezpp net errors) (chezpp net operation) (chezpp net ffi) (chezpp net http private) (chezpp net lws client))
+  (import (chezpp chez) (chezpp utils) (chezpp file) (chezpp net uri) (chezpp net errors) (chezpp net operation) (chezpp net ffi) (chezpp net tls) (chezpp net http private) (chezpp net lws client) (chezpp net lws server))
   #|record:http-request-record
 An immutable HTTP request containing a method, URI, header alist, and optional body.
 |#
@@ -58,13 +58,20 @@ Mutable HTTP client configuration and transport state.
   (define-record-type (http-client-record %make-http-client http-client?) (sealed #t) (opaque #f)
     (fields (mutable closed? http-client-closed? http-client-closed?-set!) (mutable headers http-client-headers http-client-headers-set!) (mutable timeout-ms http-client-timeout-ms http-client-timeout-ms-set!) (mutable follow-redirects? http-client-follow-redirects? http-client-follow-redirects?-set!) (mutable cookie-jar http-client-cookie-jar %http-client-cookie-jar-set!) (mutable auth http-client-auth %http-client-auth-set!) (mutable proxy http-client-proxy %http-client-proxy-set!) (mutable pool-policy http-client-pool-policy %http-client-pool-policy-set!) (mutable version http-client-version %http-client-version-set!) (mutable transport http-client-transport http-client-transport-set!) (mutable active http-client-active http-client-active-set!)))
   #|record:http-server-record
-An HTTP server handle, closed when its unavailable LWS server transport is closed.
+An HTTP server handle containing its LWS transport and synchronized handler table.
 |#
-  (define-record-type (http-server-record %make-http-server http-server?) (sealed #t) (opaque #f) (fields (mutable closed? http-server-closed? http-server-closed?-set!)))
+  (define-record-type (http-server-record %make-http-server http-server?) (sealed #t) (opaque #f)
+    (fields (immutable transport http-server-transport)
+            (immutable handlers http-server-handlers)
+            (immutable mutex http-server-mutex)
+            (mutable closed? http-server-closed? http-server-closed?-set!)))
   #|record:http-connection-record
 An accepted HTTP connection handle managed by the server API.
 |#
-  (define-record-type (http-connection-record %make-http-connection http-connection?) (sealed #t) (opaque #f) (fields (mutable closed? http-connection-closed? http-connection-closed?-set!)))
+  (define-record-type (http-connection-record %make-http-connection http-connection?) (sealed #t) (opaque #f)
+    (fields (immutable request-handle http-connection-request-handle)
+            (mutable request http-connection-request http-connection-request-set!)
+            (mutable closed? http-connection-closed? http-connection-closed?-set!)))
   (define normalize-headers (lambda (headers) (unless (list? headers) (errorf 'normalize-headers "expected a header list")) (map (lambda (e) (unless (and (pair? e) (string? (car e)) (string? (cdr e))) (errorf 'normalize-headers "invalid header ~s" e)) e) headers)))
   (define monotonic-ms (lambda () (let ([t (current-time 'time-monotonic)]) (+ (* (time-second t) 1000) (quotient (time-nanosecond t) 1000000)))))
   (define slice-bv (lambda (b i e) (let ([x (make-bytevector (- e i))]) (bytevector-copy! b i x 0 (- e i)) x)))
@@ -709,6 +716,215 @@ Encodes multipart parts `parts`. Returns a body source and its multipart content
                  [body (bytevector-concatenate pieces)])
             (values (make-http-body-source (body-producer body) (bytevector-length body))
                     (string-append "multipart/form-data; boundary=" boundary)))))))
-  (define unsupported (lambda args (raise-net-error 'http 'unsupported "LWS HTTP server transport unavailable" #f)))
-  (define http-listen unsupported) (define http-server-close unsupported) (define http-accept unsupported) (define http-accept/nonblocking unsupported) (define http-serve unsupported) (define http-serve-loop unsupported) (define http-register-handler! unsupported) (define http-handler-ref unsupported) (define http-unregister-handler! unsupported) (define http-connection-close unsupported) (define http-read-request unsupported) (define http-read-request/nonblocking unsupported) (define http-write-response unsupported) (define http-write-response/nonblocking unsupported)
+  (define ensure-http-server-open
+    (lambda (who server)
+      (when (http-server-closed? server) (errorf who "HTTP server is closed"))))
+
+  (define handler-key
+    (case-lambda
+      [(path) path]
+      [(method path)
+       (cons (if (symbol? method) (string-upcase (symbol->string method))
+                 (string-upcase method)) path)]))
+
+  #|proc:http-listen
+The `http-listen` procedure opens an LWS HTTP server on `host` and `port`. `tls-context` is `#f`
+or a server TLS context, and `backlog` is retained for API compatibility. It returns the server.
+|#
+  (define-who http-listen
+    (case-lambda
+      [(host port) (http-listen host port #f 128)]
+      [(host port tls-context) (http-listen host port tls-context 128)]
+      [(host port tls-context backlog)
+       (pcheck ([string? host] [fixnum? port backlog])
+         (unless (and (fxpositive? port) (fx<= port 65535))
+           (errorf who "invalid port ~s" port))
+         (unless (fxpositive? backlog) (errorf who "invalid backlog ~s" backlog))
+         (unless (or (not tls-context) (tls-context? tls-context))
+           (errorf who "expected #f or a TLS context"))
+         (%make-http-server
+          (make-lws-http-server host port (if tls-context
+                                              (tls-context-native-handle tls-context) 0))
+          (make-hashtable equal-hash equal?) (make-mutex 'http-server) #f))]))
+
+  #|proc:http-server-close
+The `http-server-close` procedure closes `server` and active logical requests. It returns `server`.
+|#
+  (define http-server-close
+    (lambda (server)
+      (pcheck ([http-server? server])
+        (unless (http-server-closed? server)
+          (http-server-closed?-set! server #t)
+          (lws-http-server-close! (http-server-transport server)))
+        server)))
+
+  #|proc:http-register-handler!
+The `http-register-handler!` procedure registers `handler` for `path` and optional `method` on
+`server`. A handler has signature `(http-request) -> http-response`. It returns the old handler.
+|#
+  (define http-register-handler!
+    (case-lambda
+      [(server path handler)
+       (http-register-handler! server #f path handler)]
+      [(server method path handler)
+       (pcheck ([http-server? server] [string? path] [procedure? handler])
+         (ensure-http-server-open 'http-register-handler! server)
+         (with-mutex (http-server-mutex server)
+           (let* ([key (if method (handler-key method path) path)]
+                  [old (hashtable-ref (http-server-handlers server) key #f)])
+             (hashtable-set! (http-server-handlers server) key handler)
+             old)))]))
+
+  #|proc:http-handler-ref
+The `http-handler-ref` procedure returns the handler for `method` and `path` on `server`, or
+`default` when no method-specific or path handler exists.
+|#
+  (define http-handler-ref
+    (lambda (server method path default)
+      (pcheck ([http-server? server] [string? path])
+        (with-mutex (http-server-mutex server)
+          (or (hashtable-ref (http-server-handlers server) (handler-key method path) #f)
+              (hashtable-ref (http-server-handlers server) path default))))))
+
+  #|proc:http-unregister-handler!
+The `http-unregister-handler!` procedure removes the handler for `path` and optional `method` from
+`server`. It returns the removed handler or `#f`.
+|#
+  (define http-unregister-handler!
+    (case-lambda
+      [(server path) (http-unregister-handler! server #f path)]
+      [(server method path)
+       (pcheck ([http-server? server] [string? path])
+         (with-mutex (http-server-mutex server)
+           (let* ([key (if method (handler-key method path) path)]
+                  [old (hashtable-ref (http-server-handlers server) key #f)])
+             (hashtable-delete! (http-server-handlers server) key)
+             old)))]))
+
+  (define wrap-server-request
+    (lambda (handle) (and handle (%make-http-connection handle #f #f))))
+
+  #|proc:http-accept/nonblocking
+The `http-accept/nonblocking` procedure returns the next logical request connection from `server`,
+or `#f` when no complete request headers are ready.
+|#
+  (define http-accept/nonblocking
+    (lambda (server)
+      (pcheck ([http-server? server])
+        (ensure-http-server-open 'http-accept/nonblocking server)
+        (wrap-server-request
+         (lws-http-server-accept/nonblocking (http-server-transport server))))))
+
+  #|proc:http-accept
+The `http-accept` procedure waits for the next logical request on `server` and returns its
+connection handle.
+|#
+  (define http-accept
+    (lambda (server)
+      (pcheck ([http-server? server])
+        (ensure-http-server-open 'http-accept server)
+        (wrap-server-request (lws-http-server-accept (http-server-transport server))))))
+
+  #|proc:http-connection-close
+The `http-connection-close` procedure cancels logical `connection` without closing HTTP/2 siblings.
+It returns `connection` and is idempotent.
+|#
+  (define http-connection-close
+    (lambda (connection)
+      (pcheck ([http-connection? connection])
+        (unless (http-connection-closed? connection)
+          (http-connection-closed?-set! connection #t)
+          (lws-http-request-close! (http-connection-request-handle connection)))
+        connection)))
+
+  #|proc:http-read-request
+The `http-read-request` procedure materializes and returns the request represented by `connection`.
+|#
+  (define http-read-request
+    (lambda (connection)
+      (pcheck ([http-connection? connection])
+        (when (http-connection-closed? connection)
+          (errorf 'http-read-request "HTTP connection is closed"))
+        (or (http-connection-request connection)
+            (let* ([handle (http-connection-request-handle connection)]
+                   [request (make-http-request
+                             (lws-http-request-method handle)
+                             (lws-http-request-path handle) '()
+                             (and (lws-http-request-has-body? handle)
+                                  (lws-http-request-read-body handle)))])
+              (http-connection-request-set! connection request)
+              request)))))
+
+  #|proc:http-read-request/nonblocking
+The `http-read-request/nonblocking` procedure returns the already accepted request from
+`connection`; accepted LWS requests always have complete headers.
+|#
+  (define http-read-request/nonblocking http-read-request)
+
+  (define response-bytes
+    (lambda (body)
+      (cond [(not body) #vu8()]
+            [(bytevector? body) body]
+            [(string? body) (string->utf8 body)]
+            [else (errorf 'http-write-response "unsupported response body ~s" body)])))
+
+  #|proc:http-write-response/nonblocking
+The `http-write-response/nonblocking` procedure queues `response` for logical `connection`. It
+returns `response` when accepted and `#f` when reactor backpressure rejects the command.
+|#
+  (define http-write-response/nonblocking
+    (lambda (connection response)
+      (pcheck ([http-connection? connection] [http-response? response])
+        (and (not (http-connection-closed? connection))
+             (lws-http-request-write-response!
+              (http-connection-request-handle connection) (http-response-status response)
+              (response-bytes (http-response-body response)) #t)
+             response))))
+
+  #|proc:http-write-response
+The `http-write-response` procedure queues `response` for logical `connection` and returns it.
+It raises an error if the bounded reactor command queue is full.
+|#
+  (define http-write-response
+    (lambda (connection response)
+      (pcheck ([http-connection? connection] [http-response? response])
+        (or (http-write-response/nonblocking connection response)
+            (errorf 'http-write-response "server response queue is full")))))
+
+  (define serve-one
+    (lambda (server connection)
+      (let* ([request (http-read-request connection)]
+             [path (or (uri-raw-path (http-request-uri request)) "/")]
+             [handler (http-handler-ref server (http-request-method request) path #f)]
+             [response
+              (guard (condition [else (make-http-response 500 "Internal Server Error" '()
+                                                         #vu8() '() 'h1)])
+                (if handler (handler request)
+                    (make-http-response 404 "Not Found" '() #vu8() '() 'h1)))])
+        (unless (http-response? response)
+          (set! response (make-http-response 500 "Internal Server Error" '() #vu8() '() 'h1)))
+        (http-write-response connection response)
+        response)))
+
+  #|proc:http-serve
+The `http-serve` procedure accepts and dispatches one logical request on `server`. Handlers run
+outside reactor and native locks. It returns the handler response.
+|#
+  (define http-serve
+    (lambda (server)
+      (pcheck ([http-server? server]) (serve-one server (http-accept server)))))
+
+  #|proc:http-serve-loop
+The `http-serve-loop` procedure dispatches requests until `server` closes and then returns it.
+|#
+  (define http-serve-loop
+    (lambda (server)
+      (pcheck ([http-server? server])
+        (let loop ()
+          (unless (http-server-closed? server)
+            (let ([connection (http-accept/nonblocking server)])
+              (if connection (serve-one server connection)
+                  ($sleep (make-time 'time-duration 1000000 0))))
+            (loop)))
+        server)))
   )

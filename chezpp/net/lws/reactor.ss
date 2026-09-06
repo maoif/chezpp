@@ -1,6 +1,7 @@
 (library (chezpp net lws reactor)
   (export lws-reactor?
           make-lws-reactor
+          make-lws-server-reactor
           lws-reactor-state
           lws-reactor-owner-id
           lws-reactor-wakeup-fd
@@ -18,6 +19,8 @@
           lws-reactor-submit-body!
           lws-reactor-consume-body!
           lws-reactor-close-stream!
+          lws-reactor-server-request-dequeue!
+          lws-reactor-server-submit-response!
           lws-reactor-inject-event!
           lws-reactor-inject-poll!
           lws-reactor-poll-snapshot
@@ -83,6 +86,7 @@
             (mutable waiter-high-water)
             (mutable waiter-misses)
             (mutable operations)
+            (mutable server-events)
             (mutable current-poll-snapshot)
             (mutable lifecycle)
             (mutable owner-thread-id)
@@ -259,8 +263,11 @@
           (let ([entry (find-event-operation-locked
                         reactor (vector-ref event 2) (vector-ref event 3)
                         (vector-ref event 4))])
-            (when entry
+            (if entry
               (set! operation (car entry))
+              (lws-reactor-server-events-set!
+               reactor (append (lws-reactor-server-events reactor) (list event))))
+            (when entry
               (let* ([state (cdr entry)]
                      [tag (vector-ref event 0)])
                 (when (eq? 'pending (reactor-operation-state-lifecycle state))
@@ -320,6 +327,9 @@
           [(consume-body)
            (apply lws-body-consumed
                   (lws-reactor-native-context reactor) arguments)]
+          [(server-response)
+           (apply lws-server-response-submit
+                  (lws-reactor-native-context reactor) arguments)]
           [(cancel)
            (apply lws-stream-cancel
                   (lws-reactor-native-context reactor) arguments)]
@@ -333,7 +343,7 @@
                     (and (>= (length arguments) 4)
                          (list (cadr arguments) (caddr arguments)
                                (cadddr arguments)))]
-                   [(start acquire release submit-body consume-body cancel)
+                   [(start acquire release submit-body consume-body cancel server-response)
                     (and (>= (length arguments) 3)
                          (list (car arguments) (cadr arguments)
                                (caddr arguments)))]
@@ -467,6 +477,18 @@ The `value` parameter may be any Scheme object.
     (lambda (value)
       (pcheck () (reactor? value))))
 
+  (define make-reactor-from-context
+    (lambda (context command-capacity)
+      (let ([reactor
+             (%make-lws-reactor
+              context (make-mutex 'lws-reactor) (make-condition 'lws-reactor)
+              command-capacity (make-vector command-capacity) #f #f #f 0 0 0 0
+              command-capacity (make-vector command-capacity) #f 0 0 0
+              '() '() '#() 'created 0 #f #f)])
+        (initialize-command-pool! reactor)
+        (initialize-waiter-pool! reactor)
+        reactor)))
+
   #|proc:make-lws-reactor
 The `make-lws-reactor` procedure creates an unstarted serialized LWS reactor.
 `event-capacity` bounds native events, `payload-capacity` bounds copied payloads, and
@@ -486,17 +508,28 @@ reactor.
        (pcheck ([positive-natural? event-capacity payload-capacity command-capacity]
                 [natural? tls-context-handle proxy-port]
                 [string? proxy-address])
-         (let ([context (lws-context-open event-capacity payload-capacity tls-context-handle
-                                          proxy-address proxy-port)])
-           (let ([reactor
-                  (%make-lws-reactor
-                   context (make-mutex 'lws-reactor) (make-condition 'lws-reactor)
-                   command-capacity (make-vector command-capacity) #f #f #f 0 0 0 0
-                   command-capacity (make-vector command-capacity) #f 0 0 0
-                   '() '#() 'created 0 #f #f)])
-             (initialize-command-pool! reactor)
-             (initialize-waiter-pool! reactor)
-             reactor)))]))
+         (make-reactor-from-context
+          (lws-context-open event-capacity payload-capacity tls-context-handle
+                            proxy-address proxy-port)
+          command-capacity))]))
+
+  #|proc:make-lws-server-reactor
+The `make-lws-server-reactor` procedure creates an unstarted listening reactor. `event-capacity`,
+`payload-capacity`, and `command-capacity` bound native and Scheme queues. `interface-name` and
+`port` select the listener, while `tls-context-handle` is zero or a native TLS context. It returns
+the reactor.
+|#
+  (define make-lws-server-reactor
+    (lambda (event-capacity payload-capacity command-capacity interface-name port
+                            tls-context-handle)
+      (pcheck ([positive-natural? event-capacity payload-capacity command-capacity]
+               [string? interface-name]
+               [fixnum? port]
+               [natural? tls-context-handle])
+        (make-reactor-from-context
+         (lws-server-context-open event-capacity payload-capacity interface-name port
+                                  tls-context-handle)
+         command-capacity))))
 
   #|proc:lws-reactor-state
 The `lws-reactor-state` procedure returns the lifecycle symbol for `reactor`.
@@ -831,6 +864,35 @@ It returns whether the bounded command pool accepted the command.
                [fixnum? status])
         (enqueue-command! reactor 'cancel
                           (list connection-id stream-id generation status)))))
+
+  #|proc:lws-reactor-server-request-dequeue!
+The `lws-reactor-server-request-dequeue!` procedure removes the oldest copied server event from
+`reactor`. It returns `#f` when no logical request event is ready.
+|#
+  (define lws-reactor-server-request-dequeue!
+    (lambda (reactor)
+      (pcheck ([reactor? reactor])
+        (with-mutex (lws-reactor-mutex reactor)
+          (let ([event* (lws-reactor-server-events reactor)])
+            (if (null? event*)
+                #f
+                (begin
+                  (lws-reactor-server-events-set! reactor (cdr event*))
+                  (car event*))))))))
+
+  #|proc:lws-reactor-server-submit-response!
+The `lws-reactor-server-submit-response!` procedure queues response `payload` and `status` for the
+identified logical request. `final?` marks the final body chunk. It returns command acceptance.
+|#
+  (define lws-reactor-server-submit-response!
+    (lambda (reactor connection-id stream-id generation status payload final?)
+      (pcheck ([reactor? reactor]
+               [natural? connection-id stream-id generation]
+               [fixnum? status]
+               [bytevector? payload]
+               [boolean? final?])
+        (enqueue-command! reactor 'server-response
+                          (list connection-id stream-id generation status payload final?)))))
 
   #|proc:lws-reactor-inject-event!
 The `lws-reactor-inject-event!` procedure queues a copied fake native event on `reactor`.

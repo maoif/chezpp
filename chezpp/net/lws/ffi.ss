@@ -8,6 +8,7 @@
           lws-capability?
           lws-require-capability!
           lws-context-open
+          lws-server-context-open
           lws-context-close
           lws-context-wakeup-fd
           lws-context-poll-snapshot
@@ -47,6 +48,9 @@
 
   (define ffi-lws-context-open
     (foreign-procedure "chezpp_lws_http_context_open" (uptr uptr uptr string int) uptr))
+  (define ffi-lws-server-context-open
+    (foreign-procedure "chezpp_lws_http_server_context_open"
+                       (uptr uptr string int uptr) uptr))
   (define ffi-lws-context-close
     (foreign-procedure "chezpp_lws_http_context_close" (uptr) void))
   (define ffi-lws-context-wakeup-fd
@@ -303,6 +307,27 @@ native context handle.
             (raise-net-error who 'resource "could not create libwebsockets HTTP context"
                              (vector event-capacity payload-capacity)))
           context))]))
+
+  #|proc:lws-server-context-open
+The `lws-server-context-open` procedure creates a listening LWS context. `event-capacity` bounds
+events, `payload-capacity` bounds copied bytes, `interface-name` selects the local interface,
+`port` is the listening port, and `tls-context` is zero or a native TLS context handle. It returns
+a native context handle.
+|#
+  (define-who lws-server-context-open
+    (lambda (event-capacity payload-capacity interface-name port tls-context)
+      (pcheck ([positive-size? event-capacity payload-capacity]
+               [string? interface-name]
+               [port-number? port]
+               [natural? tls-context])
+        (lws-require-capability! lws-cap-http1 'http1)
+        (lws-require-capability! lws-cap-external-poll 'external-poll)
+        (let ([context (ffi-lws-server-context-open event-capacity payload-capacity
+                                                    interface-name port tls-context)])
+          (when (zero? context)
+            (raise-net-error who 'resource "could not create LWS HTTP server context"
+                             (vector interface-name port)))
+          context))))
 
   #|proc:lws-context-close
 The `lws-context-close` procedure closes `context`, its LWS context, and its wakeup descriptors.
