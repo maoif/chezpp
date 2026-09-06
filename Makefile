@@ -71,6 +71,7 @@ ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
 	      '(compile-imported-libraries #t) (generate-inspector-information #t) (generate-procedure-source-information #t)'\
 	      '(generate-wpo-files #t)' \
 	      '(time (compile-file "chezpp.ss"))' \
+	      '(time (compile-file "chezpp/concurrency/fiber.ss"))' \
 	      '(unless (null? (compile-whole-library "chezpp.wpo" "chezpp.lib"))' \
 	      '  (errorf "chezpp.lib" "dependency has to be null"))' \
 	      '(unless (null? (compile-whole-library "chezpp/concurrency/fiber.wpo" "chezpp/concurrency/fiber.lib"))' \

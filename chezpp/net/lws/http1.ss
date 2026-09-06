@@ -9,6 +9,7 @@
           (chezpp net errors)
           (chezpp net operation)
           (chezpp net poll)
+          (chezpp net http private)
           (chezpp net lws reactor))
 
   (define-record-type (lws-http1-client %make-lws-http1-client lws-http1-client?)
@@ -16,6 +17,13 @@
     (opaque #t)
     (fields (immutable reactor lws-http1-client-reactor)
             (mutable next-id lws-http1-client-next-id lws-http1-client-next-id-set!)
+            (mutable pool lws-http1-client-pool lws-http1-client-pool-set!)
+            (mutable active lws-http1-client-active lws-http1-client-active-set!)
+            (mutable max-active lws-http1-client-max-active lws-http1-client-max-active-set!)
+            (mutable max-idle lws-http1-client-max-idle lws-http1-client-max-idle-set!)
+            (mutable idle-timeout-ms lws-http1-client-idle-timeout-ms
+                     lws-http1-client-idle-timeout-ms-set!)
+            (mutable operations lws-http1-client-operations lws-http1-client-operations-set!)
             (mutable closed? lws-http1-client-closed? lws-http1-client-closed?-set!)))
 
   (define-record-type (lws-http1-state %make-lws-http1-state lws-http1-state?)
@@ -42,7 +50,78 @@
             (mutable body-sent? lws-http1-state-body-sent? lws-http1-state-body-sent?-set!)
             (mutable response-finished? lws-http1-state-response-finished?
                      lws-http1-state-response-finished?-set!)
-            (mutable response lws-http1-state-response lws-http1-state-response-set!)))
+            (mutable response lws-http1-state-response lws-http1-state-response-set!)
+            (mutable observed-version lws-http1-state-observed-version
+                     lws-http1-state-observed-version-set!)
+            (mutable protocol-failure lws-http1-state-protocol-failure
+                     lws-http1-state-protocol-failure-set!)
+            (mutable reusable? lws-http1-state-reusable? lws-http1-state-reusable?-set!)
+            (mutable pool-key lws-http1-state-pool-key lws-http1-state-pool-key-set!)))
+
+  (define pool-entry
+    (lambda (key connection-id idle-at)
+      (vector key connection-id idle-at)))
+
+  (define pool-entry-key (lambda (entry) (vector-ref entry 0)))
+  (define pool-entry-connection-id (lambda (entry) (vector-ref entry 1)))
+  (define pool-entry-idle-at (lambda (entry) (vector-ref entry 2)))
+
+  (define request-field
+    (lambda (request index)
+      (if (normalized-http-request? request)
+          (case index
+            [(0) (normalized-http-request-method request)]
+            [(1) (normalized-http-request-host request)]
+            [(2) (normalized-http-request-port request)]
+            [(3) (normalized-http-request-tls? request)]
+            [(4) (normalized-http-request-path request)]
+            [(5) (normalized-http-request-headers request)]
+            [(6) (normalized-http-request-body-factory request)]
+            [(8) (http-request-policy-version (normalized-http-request-policy request))]
+            [(9) (http-request-policy-deadline-ms (normalized-http-request-policy request))])
+          (vector-ref request index))))
+  (define request-size
+    (lambda (request)
+      (if (normalized-http-request? request) 10 (vector-length request))))
+  (define origin-key
+    (lambda (request)
+      (vector (request-field request 1) (request-field request 2) (request-field request 3)
+              (if (= (request-size request) 10) (request-field request 8) "http/1.1"))))
+
+  (define same-origin-key?
+    (lambda (left right)
+      (and (equal? (vector-ref left 0) (vector-ref right 0))
+           (= (vector-ref left 1) (vector-ref right 1))
+           (eqv? (vector-ref left 2) (vector-ref right 2))
+           (string=? (vector-ref left 3) (vector-ref right 3)))))
+
+  (define remove-idle-expired
+    (lambda (client now timeout)
+      (lws-http1-client-pool-set!
+       client
+       (filter (lambda (entry) (< (- now (pool-entry-idle-at entry)) timeout))
+               (lws-http1-client-pool client)))))
+
+  (define take-idle!
+    (lambda (client key)
+      (let loop ([rest (lws-http1-client-pool client)] [kept '()])
+        (cond
+         [(null? rest)
+          (lws-http1-client-pool-set! client (reverse kept))
+          #f]
+         [(same-origin-key? key (pool-entry-key (car rest)))
+          (lws-http1-client-pool-set! client
+                                      (append (reverse kept) (cdr rest)))
+          (pool-entry-connection-id (car rest))]
+         [else (loop (cdr rest) (cons (car rest) kept))]))))
+
+  (define trim-idle!
+    (lambda (client)
+      (let loop ([rest (lws-http1-client-pool client)] [count 0] [kept '()])
+        (if (or (null? rest)
+                (fx>= count (lws-http1-client-max-idle client)))
+            (lws-http1-client-pool-set! client (reverse kept))
+            (loop (cdr rest) (fx1+ count) (cons (car rest) kept))))))
 
   (define next-generation 0)
 
@@ -111,19 +190,28 @@ The return value is an internal transport client.
   (define make-lws-http1-client
     (case-lambda
       [(event-capacity payload-capacity command-capacity)
-       (make-lws-http1-client event-capacity payload-capacity command-capacity 0 "" 0)]
+       (make-lws-http1-client event-capacity payload-capacity command-capacity 0 "" 0 64 8 30000)]
       [(event-capacity payload-capacity command-capacity tls-context-handle)
        (make-lws-http1-client event-capacity payload-capacity command-capacity
-                              tls-context-handle "" 0)]
+                              tls-context-handle "" 0 64 8 30000)]
       [(event-capacity payload-capacity command-capacity tls-context-handle
                        proxy-address proxy-port)
+       (make-lws-http1-client event-capacity payload-capacity command-capacity
+                              tls-context-handle proxy-address proxy-port 64 8 30000)]
+      [(event-capacity payload-capacity command-capacity tls-context-handle
+                       proxy-address proxy-port max-active)
+       (make-lws-http1-client event-capacity payload-capacity command-capacity
+                              tls-context-handle proxy-address proxy-port max-active 8 30000)]
+      [(event-capacity payload-capacity command-capacity tls-context-handle
+                       proxy-address proxy-port max-active max-idle idle-timeout-ms)
        (pcheck ([positive-natural? event-capacity payload-capacity command-capacity]
                 [natural? tls-context-handle proxy-port]
+                [positive-natural? max-active] [natural? max-idle idle-timeout-ms]
                 [string? proxy-address])
          (let ([reactor (make-lws-reactor event-capacity payload-capacity command-capacity
                                           tls-context-handle proxy-address proxy-port)])
            (lws-reactor-start! reactor)
-           (%make-lws-http1-client reactor 0 #f)))]))
+           (%make-lws-http1-client reactor 0 '() 0 max-active max-idle idle-timeout-ms '() #f)))]))
 
   (define decode-event-headers
     (lambda (state bytes)
@@ -140,6 +228,13 @@ The return value is an internal transport client.
                state (cons bytes (lws-http1-state-body-parts state)))
               (lws-http1-state-body-length-set!
                state (+ count (lws-http1-state-body-length state))))))))
+
+  (define fail-operation!
+    (lambda (state condition)
+      (unless (lws-http1-state-protocol-failure state)
+        (lws-http1-state-protocol-failure-set! state condition)
+        (guard (ignored [else (void)])
+          (net-operation-cancel! (lws-http1-state-operation state))))))
 
   (define finish-response!
     (lambda (state)
@@ -161,23 +256,22 @@ The return value is an internal transport client.
           (when sink ((lws-http1-state-finish state)))
           (lws-http1-state-response-set!
            state
-           (vector (lws-http1-state-status state)
-                   (lws-http1-state-reason state)
-                   (lws-http1-state-headers state)
-                   body
-                   (lws-http1-state-trailers state)
-                   (if (= (vector-length (lws-http1-state-request state)) 10)
-                       (string->symbol (vector-ref (lws-http1-state-request state) 8))
-                       'h1)))
+           (make-transport-response
+            (lws-http1-state-status state)
+            (lws-http1-state-reason state)
+            (lws-http1-state-headers state)
+            body
+            (lws-http1-state-trailers state)
+            (or (lws-http1-state-observed-version state) 'h1)
+            (lws-http1-state-connection-id state)))
           (lws-http1-state-response-finished?-set! state #t)))))
 
   (define process-events!
     (lambda (state)
       (let* ([reactor (lws-http1-client-reactor (lws-http1-state-client state))]
              [operation (lws-http1-state-operation state)]
-             [events (lws-reactor-operation-events reactor operation)])
-        (let loop ([rest (list-tail events (lws-http1-state-event-index state))]
-                   [index (lws-http1-state-event-index state)])
+             [events (lws-reactor-drain-operation-events! reactor operation)])
+        (let loop ([rest events])
           (unless (null? rest)
             (let* ([event (car rest)]
                    [tag (vector-ref event 0)]
@@ -191,13 +285,21 @@ The return value is an internal transport client.
                       (lws-http1-state-status-set! state (vector-ref event 5))
                       (decode-event-headers state payload)))]
                [(and (eq? tag 'connected) (= (vector-ref event 5) -2000))
+                (lws-http1-state-observed-version-set! state 'h2)
                 (let ([ready (lws-http1-state-ready state)])
                   (when ready (ready)))]
+               [(eq? tag 'connected)
+                (let* ([metadata (vector-ref event 7)]
+                       [protocol (and (vector? metadata) (vector-ref metadata 0))])
+                  (when (eq? protocol 'http1)
+                    (lws-http1-state-observed-version-set! state 'h1)))]
                [(eq? tag 'writable)
                 (let ([source (lws-http1-state-body-source state)])
                   (when (and source (not (lws-http1-state-body-sent? state)))
-                    (let ([chunk (source 65536)])
-                      (if (eof-object? chunk)
+                    (guard (condition
+                            [else (fail-operation! state condition)])
+                      (let ([chunk (source 65536)])
+                        (if (eof-object? chunk)
                           (begin
                             (lws-reactor-submit-body!
                              reactor
@@ -211,54 +313,86 @@ The return value is an internal transport client.
                            (lws-http1-state-connection-id state)
                            (lws-http1-state-stream-id state)
                            (lws-http1-state-generation state)
-                           chunk #f)))))]
+                           chunk #f))))))]
                [(eq? tag 'readable)
-                (append-response-body! state payload)
-                (lws-reactor-consume-body!
-                 reactor
-                 (lws-http1-state-connection-id state)
-                 (lws-http1-state-stream-id state)
-                 (lws-http1-state-generation state)
-                 (bytevector-length payload))]
+                (guard (condition
+                        [else (fail-operation! state condition)])
+                  (append-response-body! state payload)
+                  (lws-reactor-consume-body!
+                   reactor
+                   (lws-http1-state-connection-id state)
+                   (lws-http1-state-stream-id state)
+                   (lws-http1-state-generation state)
+                   (bytevector-length payload)))]
                [(eq? tag 'complete)
-                (finish-response! state)]
+                (let ([metadata (vector-ref event 7)])
+                  (when (and (vector? metadata) (= (vector-length metadata) 4))
+                    (lws-http1-state-reusable?-set! state (vector-ref metadata 1))))
+                (if (and (= (vector-length (lws-http1-state-request state)) 10)
+                         (string=? (vector-ref (lws-http1-state-request state) 8) "h2")
+                         (not (eq? 'h2 (lws-http1-state-observed-version state))))
+                    (lws-http1-state-protocol-failure-set!
+                     state
+                     (make-net-error 'lws-http1 'http
+                                     "HTTP/2 ALPN negotiation failed"
+                                     (lws-http1-state-request state)))
+                    (finish-response! state))]
+               [(memq tag '(failed closed reset goaway))
+                (when (and (= (vector-length (lws-http1-state-request state)) 10)
+                           (string=? (vector-ref (lws-http1-state-request state) 8) "h2")
+                           (not (eq? 'h2 (lws-http1-state-observed-version state))))
+                  (lws-http1-state-protocol-failure-set!
+                   state
+                   (make-net-error 'lws-http1 'http
+                                   "HTTP/2 ALPN negotiation failed"
+                                   (lws-http1-state-request state))))]
                [else (void)])
-              (loop (cdr rest) (+ index 1))))
-        (lws-http1-state-event-index-set! state (length events))))))
+              (loop (cdr rest))))))))
 
   #|proc:lws-http1-request/nonblocking
-The `lws-http1-request/nonblocking` procedure starts normalized request vector `request` on
+The `lws-http1-request/nonblocking` procedure starts normalized request record `request` on
 `client`. `response-sink` is `#f` or a write/finish procedure vector. The optional `ready`
 procedure is called when an HTTP/2 connection has completed stream migration. The return value is
-a `net-operation` completing with a normalized response vector.
+a `net-operation` completing with a transport response record.
 |#
   (define-who lws-http1-request/nonblocking
     (case-lambda
       [(client request response-sink)
        (lws-http1-request/nonblocking client request response-sink #f)]
       [(client request response-sink ready)
-      (pcheck ([lws-http1-client? client] [vector? request]
+      (pcheck ([lws-http1-client? client]
+               [(lambda (value) (or (normalized-http-request? value) (vector? value))) request]
                [(lambda (value) (or (not value) (vector? value))) response-sink]
                [(lambda (value) (or (not value) (procedure? value))) ready])
         (when (lws-http1-client-closed? client)
           (raise-net-error who 'http "HTTP client transport is closed" client))
-        (unless (or (= (vector-length request) 8) (= (vector-length request) 10))
-          (errorf who "expected an eight- or ten-element normalized HTTP request vector"))
-        (let* ([method (vector-ref request 0)]
-               [host (vector-ref request 1)]
-               [port (vector-ref request 2)]
-               [tls? (vector-ref request 3)]
-               [path (vector-ref request 4)]
-               [headers (vector-ref request 5)]
-               [body-source (vector-ref request 6)]
-               [alpn (if (= (vector-length request) 10)
-                         (vector-ref request 8)
+        (unless (or (normalized-http-request? request)
+                    (= (vector-length request) 8) (= (vector-length request) 10))
+          (errorf who "expected a normalized HTTP request"))
+        (remove-idle-expired client (current-time-ms)
+                             (lws-http1-client-idle-timeout-ms client))
+        (when (and (not (pair? (lws-http1-client-pool client)))
+                   (fx>= (lws-http1-client-active client)
+                         (lws-http1-client-max-active client)))
+          (raise-net-error who 'pool "HTTP/1 connection pool is exhausted" request))
+        (let* ([method (request-field request 0)]
+               [host (request-field request 1)]
+               [port (request-field request 2)]
+               [tls? (request-field request 3)]
+               [path (request-field request 4)]
+               [headers (request-field request 5)]
+               [body-source (request-field request 6)]
+               [alpn (if (= (request-size request) 10)
+                         (request-field request 8)
                          "http/1.1")]
-               [connection-id (fx1+ (lws-http1-client-next-id client))]
-               [stream-id connection-id]
+               [key (origin-key request)]
+               [reused-id (take-idle! client key)]
+               [selected-id (or reused-id (fx1+ (lws-http1-client-next-id client)))]
+               [connection-id selected-id]
+               [stream-id selected-id]
                [generation (fx1+ next-generation)]
-               [deadline-ms (if (= (vector-length request) 10)
-                                (vector-ref request 9)
+               [deadline-ms (if (= (request-size request) 10)
+                                (request-field request 9)
                                 (+ (current-time-ms) 30000))]
                [reactor (lws-http1-client-reactor client)]
                [inner (make-lws-reactor-operation reactor 'http1 connection-id stream-id
@@ -266,19 +400,21 @@ a `net-operation` completing with a normalized response vector.
                [state #f]
                [operation #f])
           (set! next-generation generation)
-          (lws-http1-client-next-id-set! client connection-id)
+          (unless reused-id (lws-http1-client-next-id-set! client connection-id))
           (set! state
                 (%make-lws-http1-state client inner request
                                         (and response-sink (vector-ref response-sink 0))
                                         (if response-sink (vector-ref response-sink 1) void)
                                         ready
                                         connection-id stream-id generation deadline-ms
-                                        0 '() #f "" '() 0 '() body-source #f #f #f))
+                                        0 '() #f "" '() 0 '() body-source #f #f #f #f #f #f key))
           (unless (lws-reactor-client-start!
                    reactor connection-id stream-id generation host port tls?
                    method host path (header-payload headers)
                    #vu8() (and body-source #t) alpn)
             (raise-net-error who 'http "libwebsockets rejected HTTP request" request))
+          (lws-http1-client-active-set!
+           client (fx1+ (lws-http1-client-active client)))
           (net-operation-step! inner)
           (set! operation
                 (make-net-operation
@@ -289,13 +425,18 @@ a `net-operation` completing with a normalized response vector.
                    (process-events! state)
                    (case (net-operation-state inner)
                      [(completed)
-                      (unless (lws-http1-state-response-finished? state)
-                        (finish-response! state))
-                      (net-operation-completed
-                       (lws-http1-state-response state))]
+                      (if (lws-http1-state-protocol-failure state)
+                          (net-operation-failed
+                           (lws-http1-state-protocol-failure state))
+                          (begin
+                            (unless (lws-http1-state-response-finished? state)
+                              (finish-response! state))
+                            (net-operation-completed
+                             (lws-http1-state-response state))))]
                      [(failed cancelled)
                       (net-operation-failed
-                       (net-operation-condition inner))]
+                       (or (lws-http1-state-protocol-failure state)
+                           (net-operation-condition inner)))]
                      [else
                       (net-operation-pending
                        (list (make-poll-target inner '(read))) deadline-ms)]))
@@ -303,6 +444,8 @@ a `net-operation` completing with a normalized response vector.
                    (net-operation-cancel! inner))
                  (lambda ()
                    (lws-reactor-release-operation! reactor inner))))
+          (lws-http1-client-operations-set!
+           client (cons (cons operation state) (lws-http1-client-operations client)))
           operation))]))
 
   #|proc:lws-http1-release-operation!
@@ -312,7 +455,39 @@ The `lws-http1-release-operation!` procedure releases terminal operation routing
   (define lws-http1-release-operation!
     (lambda (client operation)
       (pcheck ([lws-http1-client? client] [net-operation? operation])
-        (lws-reactor-release-operation! (lws-http1-client-reactor client) operation))))
+        (let ([entry (find (lambda (item) (eq? (car item) operation))
+                           (lws-http1-client-operations client))])
+          (when entry
+            (let ([state (cdr entry)]
+                  [now (current-time-ms)]
+                  [key (lws-http1-state-pool-key (cdr entry))])
+              (lws-http1-client-operations-set!
+               client (remp (lambda (item) (eq? (car item) operation))
+                            (lws-http1-client-operations client)))
+              (lws-reactor-release-operation! (lws-http1-client-reactor client) operation)
+              ;; Clear all transaction-owned mutable state before dropping the lease.
+              (lws-http1-state-event-index-set! state 0)
+              (lws-http1-state-headers-set! state '())
+              (lws-http1-state-body-parts-set! state '())
+              (lws-http1-state-body-length-set! state 0)
+              (lws-http1-state-trailers-set! state '())
+              (lws-http1-state-body-source-set! state #f)
+              (lws-http1-state-response-set! state #f)
+              (lws-http1-state-pool-key-set! state #f)
+              (lws-http1-client-active-set!
+               client (max 0 (fx1- (lws-http1-client-active client))))
+              (when (and (lws-http1-state-reusable? state)
+                         (not (lws-http1-state-protocol-failure state))
+                         (eq? 'completed (net-operation-state operation)))
+                (remove-idle-expired client now
+                                     (lws-http1-client-idle-timeout-ms client))
+                (trim-idle! client)
+                (lws-http1-client-pool-set!
+                 client
+                 (cons (pool-entry key
+                                   (lws-http1-state-connection-id state)
+                                   now)
+                       (lws-http1-client-pool client))))))))))
 
   #|proc:lws-http1-client-close!
 The `lws-http1-client-close!` procedure stops `client` and releases its reactor resources.
