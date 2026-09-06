@@ -9,7 +9,7 @@
   (let ([status (lws-status)])
     (and (vector? status) (vector-ref status 0))))
 
-;; Live HTTP tests stay opt-in until the fixture can run against every supported LWS build.
+;; These bounded loopback fixtures run against the supported LWS runtime on this host.
 (define run-live-http1-tests? #t)
 
 (define read-http-request-head
