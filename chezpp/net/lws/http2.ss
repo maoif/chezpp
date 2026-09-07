@@ -10,7 +10,8 @@
           (chezpp net errors)
           (chezpp net operation)
           (chezpp net http private)
-          (chezpp net lws reactor))
+          (chezpp net lws reactor)
+          (chezpp net lws transport))
 
   (define-record-type (lws-http2-client %make-lws-http2-client lws-http2-client?)
     (sealed #t)
@@ -91,45 +92,6 @@
            (= (vector-ref left 1) (vector-ref right 1))
            (eqv? (vector-ref left 2) (vector-ref right 2)))))
 
-  (define header-payload
-    (lambda (headers)
-      (let-values ([(port get) (open-bytevector-output-port)])
-        (for-each
-         (lambda (entry)
-           (put-bytevector port (string->utf8 (car entry)))
-           (put-u8 port 0)
-           (put-bytevector port (string->utf8 (cdr entry)))
-           (put-u8 port 0))
-         headers)
-        (get))))
-
-  (define split-zero-headers
-    (lambda (bytes)
-      (let ([length (bytevector-length bytes)])
-        (let loop ([offset 0] [answer '()])
-          (if (fx>= offset length)
-              (reverse answer)
-              (let find-name ([name-end offset])
-                (cond
-                 [(fx>= name-end length) (reverse answer)]
-                 [(not (fxzero? (bytevector-u8-ref bytes name-end)))
-                  (find-name (fx1+ name-end))]
-                 [else
-                  (let ([value-start (fx1+ name-end)])
-                    (let find-value ([value-end value-start])
-                      (cond
-                       [(fx>= value-end length) (reverse answer)]
-                       [(not (fxzero? (bytevector-u8-ref bytes value-end)))
-                        (find-value (fx1+ value-end))]
-                       [else
-                        (let ([name (make-bytevector (fx- name-end offset) 0)]
-                              [value (make-bytevector (fx- value-end value-start) 0)])
-                          (bytevector-copy! bytes offset name 0 (bytevector-length name))
-                          (bytevector-copy! bytes value-start value 0
-                                            (bytevector-length value))
-                          (loop (fx1+ value-end)
-                                (cons (cons (utf8->string name) (utf8->string value))
-                                      answer)))])))])))))))
 
   (define find-origin
     (lambda (client key)
@@ -189,17 +151,10 @@
                (h2-stream-deadline-ms stream) #t)])
         (h2-stream-inner-set! stream inner)
         (unless (if (lws-http2-client-native-start? client)
-                    (lws-reactor-client-start!
+                    (lws-transport-start!
                      reactor (h2-stream-connection-id stream)
                      (h2-stream-stream-id stream) (h2-stream-generation stream)
-                     (normalized-http-request-host request)
-                     (normalized-http-request-port request)
-                     (normalized-http-request-tls? request)
-                     (normalized-http-request-method request)
-                     (normalized-http-request-host request)
-                     (normalized-http-request-path request)
-                     (header-payload (normalized-http-request-headers request))
-                     #vu8() (and (h2-stream-body-source stream) #t) "h2")
+                     request "h2")
                     (lws-reactor-client-acquire!
                      reactor (h2-stream-connection-id stream)
                      (h2-stream-stream-id stream) (h2-stream-generation stream)))
@@ -278,18 +233,16 @@
                 [reactor (%lws-http2-client-reactor (h2-stream-client stream))])
             (cond
              [(eof-object? chunk)
-              (unless (lws-reactor-submit-body!
-                       reactor (h2-stream-connection-id stream)
-                       (h2-stream-stream-id stream) (h2-stream-generation stream)
-                       #vu8() #t)
-                (errorf 'lws-http2 "request body command pool is exhausted"))
+              (lws-transport-submit-body!
+               reactor (h2-stream-connection-id stream)
+               (h2-stream-stream-id stream) (h2-stream-generation stream)
+               #vu8() #t)
               (h2-stream-body-finished?-set! stream #t)]
              [(bytevector? chunk)
-              (unless (lws-reactor-submit-body!
-                       reactor (h2-stream-connection-id stream)
-                       (h2-stream-stream-id stream) (h2-stream-generation stream)
-                       chunk #f)
-                (errorf 'lws-http2 "request body command pool is exhausted"))]
+              (lws-transport-submit-body!
+               reactor (h2-stream-connection-id stream)
+               (h2-stream-stream-id stream) (h2-stream-generation stream)
+               chunk #f)]
              [else
               (errorf 'lws-http2 "request body source returned invalid value ~s" chunk)]))))))
 
@@ -299,7 +252,7 @@
              [inner (h2-stream-inner stream)]
              [events (if inner (lws-reactor-drain-operation-events! reactor inner) '())])
         (let loop ([event* events])
-          (unless (null? event*)
+          (unless (or (null? event*) (h2-stream-failure stream))
             (let* ([event (car event*)]
                    [tag (vector-ref event 0)]
                    [status (vector-ref event 5)]
@@ -323,19 +276,18 @@
                       (promote-streams-locked! origin (h2-stream-client stream))))]
                  [(eq? tag 'headers)
                   (if (negative? status)
-                      (h2-stream-trailers-set! stream (split-zero-headers payload))
+                      (h2-stream-trailers-set! stream (lws-transport-decode-headers payload))
                       (begin
                         (h2-stream-status-set! stream status)
-                        (h2-stream-headers-set! stream (split-zero-headers payload))))]
+                        (h2-stream-headers-set! stream (lws-transport-decode-headers payload))))]
                  [(eq? tag 'writable) (process-writable! stream)]
                  [(eq? tag 'readable)
                   ;; The sink runs outside the origin mutex; consumption is per stream.
                   (append-response-body! stream payload)
-                  (unless (lws-reactor-consume-body!
-                           reactor (h2-stream-connection-id stream)
-                           (h2-stream-stream-id stream) (h2-stream-generation stream)
-                           (bytevector-length payload))
-                    (errorf 'lws-http2 "response consumption command pool is exhausted"))]
+                  (lws-transport-consume-body!
+                   reactor (h2-stream-connection-id stream)
+                   (h2-stream-stream-id stream) (h2-stream-generation stream)
+                   (bytevector-length payload))]
                  [(eq? tag 'complete) (finish-response! stream)]
                  [(memq tag '(failed closed reset goaway))
                   (let ([condition

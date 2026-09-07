@@ -10,7 +10,8 @@
           (chezpp net operation)
           (chezpp net poll)
           (chezpp net http private)
-          (chezpp net lws reactor))
+          (chezpp net lws reactor)
+          (chezpp net lws transport))
 
   (define-record-type (lws-http1-client %make-lws-http1-client lws-http1-client?)
     (sealed #t)
@@ -131,56 +132,6 @@
       (let ([time (current-time 'time-monotonic)])
         (+ (* (time-second time) 1000)
            (quotient (time-nanosecond time) 1000000)))))
-
-  (define header-payload
-    (lambda (headers)
-      (let-values ([(port get) (open-bytevector-output-port)])
-        (for-each
-         (lambda (entry)
-           (put-bytevector port (string->utf8 (car entry)))
-           (put-u8 port 0)
-           (put-bytevector port (string->utf8 (cdr entry)))
-           (put-u8 port 0))
-         headers)
-        (get))))
-
-  (define split-zero-headers
-    (lambda (bytes)
-      (let ([length (bytevector-length bytes)])
-        (let loop ([offset 0] [out '()])
-          (if (>= offset length)
-              (reverse out)
-              (let ([name-end
-                     (let find ([i offset])
-                       (cond
-                        [(>= i length) #f]
-                        [(zero? (bytevector-u8-ref bytes i)) i]
-                        [else (find (+ i 1))]))])
-                (if (not name-end)
-                    (reverse out)
-                    (let ([value-start (+ name-end 1)]
-                          [value-end
-                           (let find ([i (+ name-end 1)])
-                             (cond
-                              [(>= i length) #f]
-                              [(zero? (bytevector-u8-ref bytes i)) i]
-                              [else (find (+ i 1))]))])
-                      (if (not value-end)
-                          (reverse out)
-                          (loop (+ value-end 1)
-                                (cons (cons (utf8->string
-                                             (let ([part (make-bytevector (- name-end offset) 0)])
-                                               (bytevector-copy! bytes offset part 0
-                                                                 (- name-end offset))
-                                               part))
-                                            (utf8->string
-                                             (let ([part (make-bytevector
-                                                          (- value-end value-start) 0)])
-                                               (bytevector-copy! bytes value-start part 0
-                                                                 (- value-end value-start))
-                                               part)))
-                                      out)))))))))))
-
   #|proc:make-lws-http1-client
 The `make-lws-http1-client` procedure creates a reactor-backed HTTP/1 client transport.
 `event-capacity`, `payload-capacity`, and `command-capacity` bound native and reactor pools.
@@ -216,7 +167,7 @@ The return value is an internal transport client.
 
   (define decode-event-headers
     (lambda (state bytes)
-      (lws-http1-state-headers-set! state (split-zero-headers bytes))))
+      (lws-http1-state-headers-set! state (lws-transport-decode-headers bytes))))
 
   (define append-response-body!
     (lambda (state bytes)
@@ -273,15 +224,16 @@ The return value is an internal transport client.
              [operation (lws-http1-state-operation state)]
              [events (lws-reactor-drain-operation-events! reactor operation)])
         (let loop ([rest events])
-          (unless (null? rest)
+          (unless (or (null? rest) (lws-http1-state-protocol-failure state))
             (let* ([event (car rest)]
                    [tag (vector-ref event 0)]
                    [payload (vector-ref event 6)])
-              (cond
+              (guard (condition [else (fail-operation! state condition)])
+               (cond
                [(eq? tag 'headers)
                 (if (negative? (vector-ref event 5))
                     (lws-http1-state-trailers-set!
-                     state (split-zero-headers payload))
+                     state (lws-transport-decode-headers payload))
                     (begin
                       (lws-http1-state-status-set! state (vector-ref event 5))
                       (decode-event-headers state payload)))]
@@ -302,14 +254,14 @@ The return value is an internal transport client.
                       (let ([chunk (source 65536)])
                         (if (eof-object? chunk)
                           (begin
-                            (lws-reactor-submit-body!
+                            (lws-transport-submit-body!
                              reactor
                              (lws-http1-state-connection-id state)
                              (lws-http1-state-stream-id state)
                              (lws-http1-state-generation state)
                              #vu8() #t)
                             (lws-http1-state-body-sent?-set! state #t))
-                          (lws-reactor-submit-body!
+                          (lws-transport-submit-body!
                            reactor
                            (lws-http1-state-connection-id state)
                            (lws-http1-state-stream-id state)
@@ -319,7 +271,7 @@ The return value is an internal transport client.
                 (guard (condition
                         [else (fail-operation! state condition)])
                   (append-response-body! state payload)
-                  (lws-reactor-consume-body!
+                  (lws-transport-consume-body!
                    reactor
                    (lws-http1-state-connection-id state)
                    (lws-http1-state-stream-id state)
@@ -345,7 +297,7 @@ The return value is an internal transport client.
                    (make-net-error 'lws-http1 'http
                                    "HTTP/2 ALPN negotiation failed"
                                    (lws-http1-state-request state))))]
-               [else (void)])
+               [else (void)]))
               (loop (cdr rest))))))))
 
   #|proc:lws-http1-request/nonblocking
@@ -370,13 +322,7 @@ a `net-operation` completing with a transport response record.
                    (fx>= (lws-http1-client-active client)
                          (lws-http1-client-max-active client)))
           (raise-net-error who 'pool "HTTP/1 connection pool is exhausted" request))
-        (let* ([method (request-field request 0)]
-               [host (request-field request 1)]
-               [port (request-field request 2)]
-               [tls? (request-field request 3)]
-               [path (request-field request 4)]
-               [headers (request-field request 5)]
-               [body-source (request-field request 6)]
+        (let* ([body-source (request-field request 6)]
                [alpn (request-field request 8)]
                [key (origin-key request)]
                ;; LWS 4.5.8 closes completed client HTTP transactions; no supported API restarts
@@ -401,10 +347,8 @@ a `net-operation` completing with a transport response record.
                                         ready
                                         connection-id stream-id generation deadline-ms
                                         0 '() #f "" '() 0 '() body-source #f #f #f #f #f #f key))
-          (unless (lws-reactor-client-start!
-                   reactor connection-id stream-id generation host port tls?
-                   method host path (header-payload headers)
-                   #vu8() (and body-source #t) alpn)
+          (unless (lws-transport-start!
+                   reactor connection-id stream-id generation request alpn)
             (raise-net-error who 'http "libwebsockets rejected HTTP request" request))
           (lws-http1-client-active-set!
            client (fx1+ (lws-http1-client-active client)))

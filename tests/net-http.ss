@@ -3,6 +3,7 @@
         (chezpp net lws http1)
         (chezpp net lws http2)
         (chezpp net lws reactor)
+        (chezpp net lws transport)
         (chezpp net http private)
         (chezpp net lws ffi))
 
@@ -301,6 +302,69 @@
                         (= accept-count 2)))
                  (lambda () (http-close client))))))))
 
+(mat net-http-transport-header-roundtrip
+     (let ([headers '(("set-cookie" . "one=1") ("set-cookie" . "two=2") ("x-empty" . ""))])
+       (and (equal? headers
+                    (lws-transport-decode-headers (lws-transport-encode-headers headers)))
+            (null? (lws-transport-decode-headers #vu8())))))
+
+(mat net-http-transport-rejects-incomplete-headers
+     ;; Error cases: unterminated name/value, an incomplete suffix, and an empty name.
+     (for-all
+      (lambda (bytes)
+        (guard (condition [(net-error? condition) #t] [else #f])
+          (lws-transport-decode-headers bytes)
+          #f))
+      (list #vu8(120) #vu8(120 0) #vu8(120 0 121)
+            #vu8(120 0 121 0 122) #vu8(0 121 0))))
+
+(mat net-http-transport-rejects-ambiguous-headers
+     ;; Error cases: empty names and embedded NULs cannot roundtrip through native metadata.
+     (for-all
+      (lambda (headers)
+        (guard (condition [(net-error? condition) #t] [else #f])
+          (lws-transport-encode-headers headers)
+          #f))
+      (list '(("" . "value"))
+            (list (cons "x" (string #\nul)))
+            (list (cons (string #\nul) "value")))))
+
+(mat net-http-transport-command-rejection
+     ;; Error case: an unserviced full command queue must reject upload and consumption.
+     (let ([reactor (make-lws-reactor 8 64 1)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (lws-reactor-client-acquire! reactor 1 1 1)
+                (guard (condition [(net-error? condition) #t] [else #f])
+                  (lws-transport-submit-body! reactor 1 1 1 #vu8(1) #f)
+                  #f)
+                (guard (condition [(net-error? condition) #t] [else #f])
+                  (lws-transport-submit-body! reactor 1 1 1 #vu8() #t)
+                  #f)
+                (guard (condition [(net-error? condition) #t] [else #f])
+                  (lws-transport-consume-body! reactor 1 1 1 1)
+                  #f)))
+         (lambda () (lws-reactor-shutdown! reactor)))))
+
+(mat net-http2-rejects-truncated-metadata
+     ;; Error case: a missing header terminator must fail, even with completion already queued.
+     (let* ([client (make-lws-http2-client 32 65536 32 0 10 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [operation (lws-http2-request/nonblocking
+                        client (make-h2-test-request "/truncated") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'headers 1 1 1 200 #vu8(120 0 121) 'none)
+                (inject-h2-event! reactor 'complete 1 1 1 0 #vu8() 'stream)
+                (begin
+                  (net-operation-step! operation)
+                  (and (eq? 'failed (net-operation-state operation))
+                       (net-error? (net-operation-condition operation))))))
+         (lambda () (lws-http2-client-close! client)))))
+
 (mat net-http2-direct-transport-identity
      (let* ([client (make-lws-http2-client 32 65536 32 0 10 #f)]
             [reactor (lws-http2-client-reactor client)]
@@ -318,6 +382,53 @@
                        (= 1 (transport-response-connection-id response))
                        (eq? 'h2 (transport-response-version response))
                        (equal? #vu8(111 107) (transport-response-body response))))))
+         (lambda () (lws-http2-client-close! client)))))
+
+(mat net-http2-preserves-headers-and-trailers
+     (let* ([client (make-lws-http2-client 32 65536 32 0 10 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [headers '(("set-cookie" . "one=1") ("set-cookie" . "two=2"))]
+            [trailers '(("x-checksum" . "verified"))]
+            [operation (lws-http2-request/nonblocking
+                        client (make-h2-test-request "/metadata") #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'headers 1 1 1 200
+                                  (lws-transport-encode-headers headers) 'none)
+                (inject-h2-event! reactor 'headers 1 1 1 -1
+                                  (lws-transport-encode-headers trailers) 'none)
+                (inject-h2-event! reactor 'complete 1 1 1 0 #vu8() 'stream)
+                (begin
+                  (net-operation-step! operation)
+                  (and (eq? 'completed (net-operation-state operation))
+                       (let ([response (net-operation-result operation)])
+                         (and (equal? headers (transport-response-headers response))
+                              (equal? trailers (transport-response-trailers response))))))))
+         (lambda () (lws-http2-client-close! client)))))
+
+(mat net-http2-rejects-truncated-trailers-before-finishing-sink
+     ;; Error case: malformed trailers prevent completion and suppress the sink finish callback.
+     (let* ([client (make-lws-http2-client 32 65536 32 0 10 #f)]
+            [reactor (lws-http2-client-reactor client)]
+            [finished 0]
+            [operation (lws-http2-request/nonblocking
+                        client (make-h2-test-request "/bad-trailers")
+                        (vector (lambda (bytes start count) (void))
+                                (lambda () (set! finished (fx1+ finished)))))])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (wait-for-reactor-commands reactor)
+                (inject-h2-event! reactor 'headers 1 1 1 200 #vu8() 'none)
+                (inject-h2-event! reactor 'headers 1 1 1 -1 #vu8(120 0 121) 'none)
+                (inject-h2-event! reactor 'complete 1 1 1 0 #vu8() 'stream)
+                (begin
+                  (net-operation-step! operation)
+                  (and (eq? 'failed (net-operation-state operation))
+                       (net-error? (net-operation-condition operation))
+                       (fxzero? finished)))))
          (lambda () (lws-http2-client-close! client)))))
 
 (mat net-http2-independent-streams-all-wait-orders

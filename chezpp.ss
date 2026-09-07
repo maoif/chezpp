@@ -5,6 +5,7 @@
           (chezpp net http private)
           (chezpp net lws ffi)
           (chezpp net lws reactor)
+          (chezpp net lws transport)
           (chezpp net lws server)
           (chezpp net lws http1)
           (chezpp net lws http2)
