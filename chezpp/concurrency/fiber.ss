@@ -5,6 +5,7 @@
           event-never event-always
           event-wrap event-select event-sync
           net-operation-event
+          net-operation-event-pool-metrics
           wrap-operation choice-operation perform-operation
 
           make-channel
@@ -553,92 +554,176 @@
   ;;;;===----------------------------------------------------------------------===
 
   (define net-driver-lock (make-spinlock 'fiber-net-driver))
-  (define net-driver-operation* '())
-  (define net-driver-thread #f)
+  (define net-driver-job* '())
+  (define net-driver-workers 0)
+  (define net-driver-job-free (map (lambda (_) (vector #f '() #f)) (iota 64)))
+  (define net-driver-waiter-free (map (lambda (_) (make-vector 5 #f)) (iota 256)))
+  (define net-driver-waiters-in-use 0)
+  (define net-driver-waiter-high-water 0)
+
+  (define release-net-waiter-locked!
+    (lambda (waiter)
+      (vector-fill! waiter #f)
+      (set! net-driver-waiter-free (cons waiter net-driver-waiter-free))
+      (set! net-driver-waiters-in-use (fx1- net-driver-waiters-in-use))))
+
+  (define net-waiter-live?
+    (lambda (waiter)
+      (and (eq? *scheds* (vector-ref waiter 3))
+           (scheduler-running? (vector-ref waiter 4))
+           (not (eq? 'S (unabox (vector-ref waiter 0)))))))
+
+  (define detach-net-job-locked!
+    (lambda (job)
+      (let ([waiter* (vector-ref job 1)])
+        (set! net-driver-job* (remq job net-driver-job*))
+        (vector-set! job 0 #f)
+        (vector-set! job 1 '())
+        (vector-set! job 2 #f)
+        (set! net-driver-job-free (cons job net-driver-job-free))
+        waiter*)))
+
+  (define snapshot-net-result
+    (lambda (operation)
+      (case (net-operation-state operation)
+        [(completed)
+         (let ([result (net-operation-result operation)]) (lambda () result))]
+        [(failed cancelled)
+         (let ([failure (net-operation-condition operation)]) (lambda () (raise failure)))]
+        [else #f])))
+
+  (define deliver-net-waiter!
+    (lambda (waiter result)
+      (with-timer-off
+       (let ([flag (vector-ref waiter 0)]
+             [resume (vector-ref waiter 1)]
+             [result-box (vector-ref waiter 2)]
+             [schedulers (vector-ref waiter 3)]
+             [scheduler (vector-ref waiter 4)])
+        (with-spinlock net-driver-lock (release-net-waiter-locked! waiter))
+        (guard (ignored [else (void)])
+          (when (and (eq? *scheds* schedulers) (scheduler-running? scheduler))
+            (abox-set! result-box result)
+            (let spin ()
+              (case (abox-cas! flag 'W 'S)
+                [(W) (resume result)]
+                [(C) (spin)]
+                [(S) (void)]
+                [else (assert-unreachable)]))))))))
+
+  (define drive-net-job!
+    (lambda (job)
+      (let ([operation
+             (with-timer-off
+               (with-spinlock net-driver-lock
+                 (let ([live* '()])
+                   (for-each
+                    (lambda (waiter)
+                      (if (net-waiter-live? waiter)
+                          (set! live* (cons waiter live*))
+                          (release-net-waiter-locked! waiter)))
+                    (vector-ref job 1))
+                   (vector-set! job 1 (reverse live*))
+                   (if (null? live*)
+                       (begin (detach-net-job-locked! job) #f)
+                       (vector-ref job 0)))))])
+        (when operation
+          ;; Only the OS driver thread enters the operation's ordinary mutexes and callbacks.
+          (guard (ignored [else (void)])
+            (when (eq? 'pending (net-operation-state operation))
+              (net-operation-step! operation)))
+          (let ([result (snapshot-net-result operation)])
+            (if result
+              (let ([waiter*
+                     (with-timer-off
+                       (with-spinlock net-driver-lock (detach-net-job-locked! job)))])
+                (for-each (lambda (waiter) (deliver-net-waiter! waiter result)) waiter*))
+              (with-timer-off
+                (with-spinlock net-driver-lock (vector-set! job 2 #f)))))))))
 
   (define drive-net-operations
     (lambda ()
+      (set! current-scheduler #f)
       (let loop ()
-        (let ([operation*
+        (let ([job
                (with-timer-off
-                (spinlock-acquire net-driver-lock)
-                (let ([snapshot net-driver-operation*])
-                  (spinlock-release net-driver-lock)
-                  snapshot))])
-          (for-each
-           (lambda (operation)
-             (when (eq? 'pending (net-operation-state operation))
-               (guard (ignored [else (net-operation-cancel! operation)])
-                 (net-operation-step! operation))))
-           operation*))
-        (let ([continue?
-               (with-timer-off
-                (spinlock-acquire net-driver-lock)
-                (set! net-driver-operation*
-                      (filter (lambda (operation)
-                                (eq? 'pending (net-operation-state operation)))
-                              net-driver-operation*))
-                (let ([continue?
-                       (if (null? net-driver-operation*)
-                           (begin (set! net-driver-thread #f) #f)
-                           #t)])
-                  (spinlock-release net-driver-lock)
-                  continue?))])
-          (when continue?
+                 (with-spinlock net-driver-lock
+                   (if (null? net-driver-job*)
+                       (begin (set! net-driver-workers (fx1- net-driver-workers)) 'stop)
+                       (let ([job (find (lambda (job) (not (vector-ref job 2)))
+                                        net-driver-job*)])
+                         (when job
+                           (vector-set! job 2 #t)
+                           ;; Rotate claims so a pending operation cannot starve later jobs.
+                           (set! net-driver-job* (append (remq job net-driver-job*) (list job))))
+                         job))))])
+          (unless (eq? job 'stop)
+            (when job (drive-net-job! job))
             (milisleep 1)
             (loop))))))
 
-  (define enqueue-net-operation!
-    (lambda (operation)
-      (with-timer-off
-        (spinlock-acquire net-driver-lock)
-        (unless (memq operation net-driver-operation*)
-          (set! net-driver-operation* (cons operation net-driver-operation*)))
-        (unless net-driver-thread
-          (set! net-driver-thread (fork-thread drive-net-operations)))
-        (spinlock-release net-driver-lock))))
-
-  (define net-operation-result-thunk
-    (lambda (operation)
-      (lambda ()
-        (case (net-operation-state operation)
-          [(completed) (net-operation-result operation)]
-          [(failed cancelled) (raise (net-operation-condition operation))]
-          [else (errorf 'net-operation-event "operation is still pending")]))))
+  #|proc:net-operation-event-pool-metrics
+  The `net-operation-event-pool-metrics` procedure returns a fresh vector of driver job count,
+  active waiter count, and waiter high-water count. Four workers serve up to 64 jobs and 256 waiters.
+  |#
+  (define net-operation-event-pool-metrics
+    (lambda ()
+      (pcheck ()
+        (with-timer-off
+          (with-spinlock net-driver-lock
+            (vector (length net-driver-job*) net-driver-waiters-in-use
+                    net-driver-waiter-high-water))))))
 
   #|proc:net-operation-event
-The `net-operation-event` procedure creates a fiber event for network `operation`.
-Synchronization drives the operation through one shared waiter and returns its result.
-The operation's original failure or cancellation condition is raised when synchronization resumes.
-|#
+  The `net-operation-event` procedure creates a fiber event for network `operation`.
+  Synchronization drives the operation on a bounded OS worker pool and returns its result.
+  The original failure or cancellation condition is raised when the fiber resumes.
+  Losing event choices and stopped schedulers release their bounded waiters without advancing work.
+  |#
   (define net-operation-event
     (lambda (operation)
       (pcheck ([net-operation? operation])
-        (define try
-          (lambda ()
-            (when (eq? 'pending (net-operation-state operation))
-              (net-operation-step! operation))
-            (if (eq? 'pending (net-operation-state operation))
-                (begin
-                  (enqueue-net-operation! operation)
-                  #f)
-                (net-operation-result-thunk operation))))
-        (define block
-          (lambda (flag resume)
-            (let ([unregister #f])
-              (set! unregister
-                    (net-operation-register-listener!
-                     operation
-                     (lambda (completed-operation)
-                       (let spin ()
-                         (case (abox-cas! flag 'W 'S)
-                           [(W)
-                            (when unregister (unregister))
-                            (resume (net-operation-result-thunk completed-operation))]
-                           [(C) (spin)]
-                           [(S) (when unregister (unregister))]
-                           [else (assert-unreachable)]))))))))
-        (make-base-event #f try block))))
+        (let ([result (abox #f)])
+          (define try (lambda () (unabox result)))
+          (define block
+            (lambda (flag resume)
+              (let ([accepted?
+                     (with-timer-off
+                       (with-spinlock net-driver-lock
+                         (let ([job (find (lambda (job) (eq? operation (vector-ref job 0)))
+                                          net-driver-job*)])
+                           (and (pair? net-driver-waiter-free)
+                                (or job (pair? net-driver-job-free))
+                                (begin
+                                  (unless job
+                                    (set! job (car net-driver-job-free))
+                                    (set! net-driver-job-free (cdr net-driver-job-free))
+                                    (vector-set! job 0 operation)
+                                    (set! net-driver-job* (cons job net-driver-job*)))
+                                  (let ([waiter (car net-driver-waiter-free)])
+                                    (set! net-driver-waiter-free (cdr net-driver-waiter-free))
+                                    (vector-set! waiter 0 flag)
+                                    (vector-set! waiter 1 resume)
+                                    (vector-set! waiter 2 result)
+                                    (vector-set! waiter 3 *scheds*)
+                                    (vector-set! waiter 4 current-scheduler)
+                                    (vector-set! job 1 (cons waiter (vector-ref job 1)))
+                                    (set! net-driver-waiters-in-use
+                                          (fx1+ net-driver-waiters-in-use))
+                                    (set! net-driver-waiter-high-water
+                                          (fxmax net-driver-waiter-high-water
+                                                 net-driver-waiters-in-use)))
+                                  (let start-workers ()
+                                    (when (fx< net-driver-workers 4)
+                                      (set! net-driver-workers (fx1+ net-driver-workers))
+                                      (fork-thread drive-net-operations)
+                                      (start-workers)))
+                                  #t)))))])
+                (unless accepted?
+                  (when (eq? 'W (abox-cas! flag 'W 'S))
+                    (resume (lambda () (errorf 'net-operation-event
+                                               "network event waiter pool exhausted"))))))))
+          (make-base-event #f try block)))))
 
 
   (define-record-type channel
