@@ -28,6 +28,7 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp net ffi)
+          (chezpp net errors)
           (chezpp net operation)
           (chezpp net poll)
           (chezpp net lws ffi))
@@ -638,6 +639,25 @@ until `lws-reactor-release-operation!` is called. It returns a network operation
                  kind
                  (lambda ()
                    (lws-signal-drain signal)
+                   (when deadline-ms
+                     (let* ([time (current-time 'time-monotonic)]
+                            [now (+ (* (time-second time) 1000)
+                                    (quotient (time-nanosecond time) 1000000))]
+                            [expired?
+                             (with-mutex (lws-reactor-mutex reactor)
+                               (and (eq? 'pending (reactor-operation-state-lifecycle state))
+                                    (>= now deadline-ms)
+                                    (begin
+                                      (reactor-operation-state-lifecycle-set! state 'failed)
+                                      (reactor-operation-state-failure-set!
+                                       state (make-net-error 'lws-reactor 'timeout
+                                                             "HTTP operation deadline expired"
+                                                             (list connection-id stream-id
+                                                                   generation)))
+                                      #t)))])
+                       (when expired?
+                         (enqueue-command! reactor 'cancel
+                                           (list connection-id stream-id generation 0)))))
                    (with-mutex (lws-reactor-mutex reactor)
                      (case (reactor-operation-state-lifecycle state)
                        [(pending)

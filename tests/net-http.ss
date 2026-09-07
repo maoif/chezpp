@@ -84,10 +84,12 @@
       #f)))
 
 (define make-h2-test-request
-  (lambda (path)
-    (make-normalized-http-request
-     "GET" #f 'http "h2.test" 80 #f path '() #f #f
-     (make-http-request-policy '() #f #f #f 0 'h2 #f #f 0 #f))))
+  (case-lambda
+    [(path) (make-h2-test-request path #f)]
+    [(path deadline)
+     (make-normalized-http-request
+      "GET" #f 'http "h2.test" 80 #f path '() #f #f
+      (make-http-request-policy '() #f #f #f 0 'h2 #f #f 0 deadline))]))
 
 (define wait-for-reactor-commands
   (lambda (reactor)
@@ -469,6 +471,21 @@
                 (finish-h2-stream! reactor second 1 2 2 200 #vu8())
                 (= 1 (transport-response-connection-id
                       (net-operation-result second)))))
+         (lambda () (lws-http2-client-close! client)))))
+
+(mat net-http2-queued-deadline
+     ;; Error case: a request waiting for H2 admission must time out without cancelling its leader.
+     (let* ([client (make-lws-http2-client 32 65536 32 0 1 #f)]
+            [first (lws-http2-request/nonblocking client (make-h2-test-request "/leader") #f)]
+            [second (lws-http2-request/nonblocking client (make-h2-test-request "/queued" 0) #f)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (net-operation-step! second)
+           (and (eq? 'failed (net-operation-state second))
+                (net-error? (net-operation-condition second))
+                (eq? 'timeout (net-error-kind (net-operation-condition second)))
+                (eq? 'pending (net-operation-state first))))
          (lambda () (lws-http2-client-close! client)))))
 
 (mat net-http2-required-protocol-refusal

@@ -80,6 +80,15 @@
     (lambda (request)
       (http-request-policy-deadline-ms (normalized-http-request-policy request))))
 
+  (define stream-deadline-expired?
+    (lambda (stream)
+      (let ([deadline (h2-stream-deadline-ms stream)]
+            [time (current-time 'time-monotonic)])
+        (and deadline
+             (>= (+ (* (time-second time) 1000)
+                    (quotient (time-nanosecond time) 1000000))
+                 deadline)))))
+
   (define request-origin-key
     (lambda (request)
       (vector (normalized-http-request-host request)
@@ -328,8 +337,14 @@
           (h2-stream-terminal?-set! stream #t)
           (net-operation-failed (h2-origin-failure origin))]
          [(not (h2-stream-inner stream))
-          (net-operation-pending (origin-poll-targets origin)
-                                 (h2-stream-deadline-ms stream))]
+          (if (stream-deadline-expired? stream)
+              (begin
+                (h2-stream-terminal?-set! stream #t)
+                (net-operation-failed
+                 (make-net-error 'lws-http2 'timeout "HTTP/2 admission deadline expired"
+                                 (h2-stream-stream-id stream))))
+              (net-operation-pending (origin-poll-targets origin)
+                                     (h2-stream-deadline-ms stream)))]
          [(memq (net-operation-state (h2-stream-inner stream)) '(failed cancelled))
           (h2-stream-terminal?-set! stream #t)
           (net-operation-failed (net-operation-condition (h2-stream-inner stream)))]

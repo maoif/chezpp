@@ -236,6 +236,19 @@
             (eq? 'stopped (lws-reactor-state reactor))
             (eq? reactor (lws-reactor-shutdown! reactor)))))
 
+(mat net-lws-reactor-enforces-deadline
+     ;; Error case: a pending native operation must fail once its absolute deadline expires.
+     (let* ([reactor (make-lws-reactor 8 64 8)]
+            [operation (make-lws-reactor-operation reactor 'http2 1 1 1 0)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (net-operation-step! operation)
+           (and (eq? 'failed (net-operation-state operation))
+                (net-error? (net-operation-condition operation))
+                (eq? 'timeout (net-error-kind (net-operation-condition operation)))))
+         (lambda () (lws-reactor-shutdown! reactor)))))
+
 (mat net-lws-reactor-completion-fanout
      (let* ([reactor (make-lws-reactor 16 16 8)]
             [first (make-lws-reactor-operation reactor 'first 1 11 1 #f)]

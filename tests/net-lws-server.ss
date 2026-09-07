@@ -4,6 +4,23 @@
 (define server-test-port
   (+ 19000 (modulo (get-process-id) 20000)))
 
+(mat net-lws-server-refuses-h2-on-http1-listener
+     ;; Error case: explicit H2 must fail against an HTTP/1 listener without hanging or downgrading.
+     (let* ([port (+ server-test-port 4)]
+            [server (http-listen "127.0.0.1" port)]
+            [client (http-open)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (http-client-version-set! client 'h2)
+           (http-set-timeout! client 200)
+           (guard (condition [(condition? condition) #t] [else #f])
+             (http-send client
+                        (make-http-request 'get
+                                           (format "http://127.0.0.1:~a/h2" port)))
+             #f))
+         (lambda () (http-close client) (http-server-close server)))))
+
 (mat net-lws-server-handler-registry
      (let ([server (http-listen "127.0.0.1" server-test-port)])
        (dynamic-wind
