@@ -27,7 +27,7 @@ mat.so: mat.sls
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' "== compiling mat.sls =="; \
-	echo '(optimize-level 3)(compile-file "mat.sls")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	echo '(optimize-level 3)(compile-file "mat.sls")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -36,7 +36,7 @@ mat.so: mat.sls
 $(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
-	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -50,7 +50,7 @@ test-all: mat.so $(OBJS_TEST)
 	  stdout="$$item.stdout"; stderr="$$item.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$item =="; \
-	  echo '(load "mat.so")(load "'"$$item"'")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	  echo '(load "mat.so")(load "'"$$item"'")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	  if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -72,7 +72,7 @@ test-some: mat.so $(TEST_OBJS)
 	  stdout="$$base.stdout"; stderr="$$base.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$base.so =="; \
-	  echo '(load "mat.so")(load "'"$$base"'.so")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	  echo '(load "mat.so")(load "'"$$base"'.so")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	  if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
