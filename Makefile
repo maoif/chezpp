@@ -71,7 +71,7 @@ ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
 	      '(time (compile-file "chezpp.ss"))' \
 	      '(unless (null? (compile-whole-library "chezpp.wpo" "chezpp.lib"))' \
 	      '  (errorf "chezpp.lib" "dependency has to be null"))' \
-	      | ${SCHEME} -q
+	      | ${SCHEME} --script /dev/stdin
 	@rm -f chezpp.so
 
 chez++: ${chezppdeps} chez++.in Makefile
