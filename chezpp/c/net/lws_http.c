@@ -1796,9 +1796,9 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   information.context = context->lws;
   information.address = stream->address;
   information.port = port;
-  information.ssl_connection = LCCSCF_HTTP_NO_FOLLOW_REDIRECT | LCCSCF_PIPELINE;
+  information.ssl_connection = LCCSCF_HTTP_NO_FOLLOW_REDIRECT;
   if (alpn != NULL && strcmp(alpn, "h2") == 0) {
-    information.ssl_connection |= LCCSCF_H2_QUIRK_OVERFLOWS_TXCR |
+    information.ssl_connection |= LCCSCF_PIPELINE | LCCSCF_H2_QUIRK_OVERFLOWS_TXCR |
                                   LCCSCF_H2_QUIRK_NGHTTP2_END_STREAM;
     if (!tls) information.ssl_connection |= LCCSCF_H2_PRIOR_KNOWLEDGE;
   }

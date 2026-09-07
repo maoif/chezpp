@@ -59,18 +59,34 @@
       (socket-set-option! listener 'reuse-address #t)
       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
       (socket-listen! listener 4)
+      (socket-set-blocking! listener #f)
       (let ([port (socket-address-port (socket-local-address listener))])
         (values port
                 (fork-thread
                  (lambda ()
-                   (let-values ([(client peer) (socket-accept listener)])
-                     (let ([input (open-socket-input-port client)]
-                           [output (open-socket-output-port client)])
-                       (dynamic-wind void
-                         (lambda () (handler input output))
-                         (lambda () (close-port input) (close-port output))))
-                     (close-socket client)
-                     (close-socket listener)))))))))
+                   (dynamic-wind
+                     void
+                     (lambda ()
+                       (let-values ([(client peer) (accept-http-fixture listener)])
+                         (dynamic-wind
+                           void
+                           (lambda () (call-with-socket-ports client handler))
+                           (lambda () (close-socket client)))))
+                     (lambda () (close-socket listener))))))))))
+
+(define accept-http-fixture
+  (lambda (listener)
+    (let loop ([remaining 2000])
+      (call-with-values
+        (lambda () (socket-accept/nonblocking listener))
+        (case-lambda
+          [(client peer)
+           (socket-set-blocking! client #t)
+           (values client peer)]
+          [(pending)
+           (when (fxzero? remaining) (errorf 'accept-http-fixture "accept deadline expired"))
+           (milisleep 1)
+           (loop (fx1- remaining))])))))
 
 (define http-condition-message-contains?
   (lambda (fragment thunk)
@@ -174,6 +190,10 @@
          (let ([client (http-open)])
          (dynamic-wind void
            (lambda ()
+             ;; Allocation pressure while the fixture awaits accept must not stall GC progress.
+             (do ([index 0 (fx1+ index)]) ((fx= index 32))
+               (unless (fx= 17 (bytevector-u8-ref (make-bytevector 1048576 17) 0))
+                 (errorf 'net-http-fixed-response "invalid allocation result")))
              (let ([response (http-get client
                                         (format "http://127.0.0.1:~a/fixed" port))])
                (and (= (http-response-status response) 200)
@@ -297,13 +317,14 @@
            (socket-set-option! listener 'reuse-address #t)
            (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
            (socket-listen! listener 4)
+           (socket-set-blocking! listener #f)
            (let* ([port (socket-address-port (socket-local-address listener))]
                   [thread
                    (fork-thread
                     (lambda ()
                       (let loop ([remaining 2])
                         (unless (fxzero? remaining)
-                          (let-values ([(socket peer) (socket-accept listener)])
+                          (let-values ([(socket peer) (accept-http-fixture listener)])
                             (set! accept-count (fx1+ accept-count))
                             (let ([input (open-socket-input-port socket)]
                                   [output (open-socket-output-port socket)])
@@ -322,6 +343,7 @@
                       (close-socket listener)))])
              (let ([client (http-open)]
                    [uri (format "http://127.0.0.1:~a/nonreuse" port)])
+               (http-set-timeout! client 1000)
                (dynamic-wind
                  void
                  (lambda ()
