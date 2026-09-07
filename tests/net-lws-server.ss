@@ -1,7 +1,8 @@
 (import (chezpp chez)
         (chezpp net))
 
-(define server-test-port 19387)
+(define server-test-port
+  (+ 19000 (modulo (get-process-id) 20000)))
 
 (mat net-lws-server-handler-registry
      (let ([server (http-listen "127.0.0.1" server-test-port)])
