@@ -100,7 +100,7 @@
     (foreign-procedure "chezpp_lws_http_server_request_dequeue" (uptr) scheme-object))
   (define ffi-lws-server-response-submit
     (foreign-procedure "chezpp_lws_http_server_response_submit"
-                       (uptr unsigned-64 unsigned-64 unsigned-64 int scheme-object int)
+                       (uptr unsigned-64 unsigned-64 unsigned-64 int scheme-object scheme-object int)
                        int))
   (define ffi-lws-stream-cancel
     (foreign-procedure "chezpp_lws_http_stream_cancel"
@@ -527,17 +527,22 @@ The `lws-server-request-dequeue` procedure removes the next copied server header
   #|proc:lws-server-response-submit
 The `lws-server-response-submit` procedure queues `payload` for an identified server stream.
 `status` is the HTTP status, and `final?` identifies the last body chunk. It returns acceptance.
+Optional `headers` contains encoded response header metadata.
 |#
   (define-who lws-server-response-submit
-    (lambda (context connection-id stream-id generation status payload final?)
+    (case-lambda
+      [(context connection-id stream-id generation status payload final?)
+       (lws-server-response-submit context connection-id stream-id generation status
+                                   #vu8() payload final?)]
+      [(context connection-id stream-id generation status headers payload final?)
       (pcheck ([lws-context? context]
                [natural? connection-id stream-id generation]
                [fixnum? status]
-               [bytevector? payload]
+               [bytevector? headers payload]
                [boolean? final?])
         (ffi-true?
          (ffi-lws-server-response-submit context connection-id stream-id generation status
-                                         payload (if final? 1 0))))))
+                                         headers payload (if final? 1 0))))]))
 
   #|proc:lws-stream-cancel
 The `lws-stream-cancel` procedure resets the identified native stream and queues a reset event.

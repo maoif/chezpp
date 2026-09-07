@@ -7,13 +7,15 @@
           lws-http-request?
           lws-http-request-method
           lws-http-request-path
+          lws-http-request-headers
           lws-http-request-has-body?
           lws-http-request-read-body
           lws-http-request-write-response!
           lws-http-request-close!)
   (import (chezpp chez)
           (chezpp utils)
-          (chezpp net lws reactor))
+          (chezpp net lws reactor)
+          (chezpp net lws transport))
 
   #|record:lws-http-server
 An internal LWS listening server with synchronized pending events and lifecycle state.
@@ -38,35 +40,22 @@ An accepted logical HTTP request identified by connection, stream, and generatio
             (immutable generation)
             (immutable method)
             (immutable path)
+            (immutable headers)
             (immutable has-body?)
             (mutable closed?)))
 
-  (define split-request-payload
-    (lambda (payload)
-      (let ([length (bytevector-length payload)])
-        (let find ([index 0])
-          (if (or (fx= index length) (fxzero? (bytevector-u8-ref payload index)))
-              (let* ([method-bytes (make-bytevector index)]
-                     [path-start (fx1+ index)]
-                     [path-length (max 0 (fx- length path-start 1))]
-                     [path-bytes (make-bytevector path-length)])
-                (bytevector-copy! payload 0 method-bytes 0 index)
-                (when (fxpositive? path-length)
-                  (bytevector-copy! payload path-start path-bytes 0 path-length))
-                (values (utf8->string method-bytes) (utf8->string path-bytes)))
-              (find (fx1+ index)))))))
 
   (define event->request
     (lambda (server event)
       (and event
            (eq? (vector-ref event 0) 'headers)
            (fx>= (vector-ref event 5) 0)
-           (let-values ([(method path) (split-request-payload (vector-ref event 6))])
+           (let* ([metadata (lws-transport-decode-headers (vector-ref event 6))]
+                  [method (caar metadata)]
+                  [path (cdar metadata)])
              (%make-lws-http-request server (vector-ref event 2) (vector-ref event 3)
-                                     (vector-ref event 4) method path
-                                     (or (fxpositive? (vector-ref event 5))
-                                         (member (string-upcase method)
-                                                 '("POST" "PUT" "PATCH")))
+                                     (vector-ref event 4) method path (cdr metadata)
+                                     (fxpositive? (vector-ref event 5))
                                      #f)))))
 
   #|proc:make-lws-http-server
@@ -130,17 +119,22 @@ It raises an error when the server closes before a request arrives.
   #|proc:lws-http-request-write-response!
 The `lws-http-request-write-response!` procedure queues `payload` with HTTP `status` for `request`.
 `final?` marks the final response chunk. It returns whether the reactor accepted the command.
+The optional `headers` alist carries response header string pairs on the first chunk.
 |#
   (define lws-http-request-write-response!
-    (lambda (request status payload final?)
+    (case-lambda
+      [(request status payload final?)
+       (lws-http-request-write-response! request status '() payload final?)]
+      [(request status headers payload final?)
       (pcheck ([lws-http-request? request] [fixnum? status] [bytevector? payload]
-               [boolean? final?])
+               [list? headers] [boolean? final?])
         (and (not (lws-http-request-closed? request))
              (lws-reactor-server-submit-response!
               (lws-http-server-reactor (lws-http-request-server request))
               (lws-http-request-connection-id request)
               (lws-http-request-stream-id request)
-              (lws-http-request-generation request) status payload final?)))))
+              (lws-http-request-generation request) status
+              (lws-transport-encode-headers headers) payload final?)))]))
 
   (define matching-event?
     (lambda (request event)

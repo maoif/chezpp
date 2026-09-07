@@ -233,7 +233,7 @@ int chezpp_lws_http_client_body_drain(uintptr_t context_handle,
 ptr chezpp_lws_http_server_request_dequeue(uintptr_t context_handle);
 int chezpp_lws_http_server_response_submit(
     uintptr_t context_handle, uint64_t connection_id, uint64_t stream_id,
-    uint64_t generation, int status, ptr payload, int final_chunk);
+    uint64_t generation, int status, ptr headers, ptr payload, int final_chunk);
 int chezpp_lws_http_stream_cancel(uintptr_t context_handle,
                                   uint64_t connection_id, uint64_t stream_id,
                                   uint64_t generation, int status);

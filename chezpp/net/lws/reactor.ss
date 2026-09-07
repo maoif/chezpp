@@ -903,16 +903,22 @@ The `lws-reactor-server-request-dequeue!` procedure removes the oldest copied se
   #|proc:lws-reactor-server-submit-response!
 The `lws-reactor-server-submit-response!` procedure queues response `payload` and `status` for the
 identified logical request. `final?` marks the final body chunk. It returns command acceptance.
+Optional `headers` contains encoded metadata to send before the first chunk.
 |#
   (define lws-reactor-server-submit-response!
-    (lambda (reactor connection-id stream-id generation status payload final?)
+    (case-lambda
+      [(reactor connection-id stream-id generation status payload final?)
+       (lws-reactor-server-submit-response! reactor connection-id stream-id generation status
+                                           #vu8() payload final?)]
+      [(reactor connection-id stream-id generation status headers payload final?)
       (pcheck ([reactor? reactor]
                [natural? connection-id stream-id generation]
                [fixnum? status]
-               [bytevector? payload]
+               [bytevector? headers payload]
                [boolean? final?])
         (enqueue-command! reactor 'server-response
-                          (list connection-id stream-id generation status payload final?)))))
+                          (list connection-id stream-id generation status headers payload
+                                final?)))]))
 
   #|proc:lws-reactor-inject-event!
 The `lws-reactor-inject-event!` procedure queues a copied fake native event on `reactor`.

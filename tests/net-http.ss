@@ -204,6 +204,33 @@
                     (equal? (utf8->string (http-response-body response)) "Wikipedia"))))
              (lambda () (http-close client) (thread-join thread)))))))
 
+(mat net-http-complete-response-metadata
+     (let-values ([(port thread)
+                   (start-http1-fixture
+                    (lambda (input output)
+                      (read-http-request-head input)
+                      (put-bytevector output
+                        (string->utf8
+                          (string-append
+                            "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n"
+                            "ETag: abc\r\nCache-Control: no-store\r\nX-Empty:\r\n"
+                            "Set-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\nx")))
+                      (flush-output-port output)))])
+       (let ([client (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (let* ([response (http-get client (format "http://127.0.0.1:~a/headers" port))]
+                    [headers (http-response-headers response)])
+               (and (equal? "abc" (http-header-ref headers "etag" #f))
+                    (equal? "no-store" (http-header-ref headers "cache-control" #f))
+                    (equal? "" (http-header-ref headers "x-empty" #f))
+                    (equal? '("a=1" "b=2")
+                            (map cdr (filter (lambda (entry)
+                                               (string-ci=? (car entry) "set-cookie"))
+                                             headers))))))
+           (lambda () (http-close client) (thread-join thread))))))
+
 (mat net-http-streaming-upload
      (or (not run-live-http1-tests?) (not lws-http-available?)
          (let ([received #f])

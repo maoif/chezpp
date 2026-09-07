@@ -849,7 +849,7 @@ The `http-read-request` procedure materializes and returns the request represent
             (let* ([handle (http-connection-request-handle connection)]
                    [request (make-http-request
                              (lws-http-request-method handle)
-                             (lws-http-request-path handle) '()
+                             (lws-http-request-path handle) (lws-http-request-headers handle)
                              (and (lws-http-request-has-body? handle)
                                   (lws-http-request-read-body handle)))])
               (http-connection-request-set! connection request)
@@ -878,6 +878,7 @@ returns `response` when accepted and `#f` when reactor backpressure rejects the 
         (and (not (http-connection-closed? connection))
              (lws-http-request-write-response!
               (http-connection-request-handle connection) (http-response-status response)
+              (http-response-headers response)
               (response-bytes (http-response-body response)) #t)
              response))))
 

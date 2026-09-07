@@ -78,3 +78,33 @@
                   (equal? (utf8->string (http-response-body response))
                           "#vu8(97 98 99)"))))
          (lambda () (http-server-close server)))))
+
+(mat net-lws-server-live-header-roundtrip
+     (let* ([port (+ server-test-port 5)]
+            [server (http-listen "127.0.0.1" port)]
+            [client (http-open)]
+            [received #f]
+            [server-thread #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (http-set-timeout! client 1000)
+           (http-register-handler!
+            server 'get "/headers"
+            (lambda (request)
+              (set! received (http-header-ref (http-request-headers request) "x-input" #f))
+              (make-http-response 200 "OK" '(("X-Result" . "kept")
+                                             ("Cache-Control" . "no-store"))
+                                  "headers-ok" '() 'h1)))
+           (set! server-thread (fork-thread (lambda () (http-serve server))))
+           (let ([response (http-send client
+                            (make-http-request 'get
+                              (format "http://127.0.0.1:~a/headers" port)
+                              '(("X-Input" . "received")) #f))])
+             (thread-join server-thread)
+             (and (equal? "received" received)
+                  (equal? "kept" (http-header-ref (http-response-headers response)
+                                                "x-result" #f))
+                  (equal? "no-store" (http-header-ref (http-response-headers response)
+                                                    "cache-control" #f)))))
+         (lambda () (http-close client) (http-server-close server)))))

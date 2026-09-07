@@ -34,6 +34,7 @@ typedef int (*lws_http_client_http_response_fn)(struct lws *);
 typedef int (*lws_hdr_copy_fn)(struct lws *, char *, int,
                                enum lws_token_indexes);
 typedef int (*lws_hdr_total_length_fn)(struct lws *, enum lws_token_indexes);
+typedef const unsigned char *(*lws_token_to_string_fn)(enum lws_token_indexes);
 typedef int (*lws_hdr_copy_fragment_fn)(struct lws *, char *, int,
                                         enum lws_token_indexes, int);
 typedef int (*lws_hdr_custom_copy_fn)(struct lws *, char *, int,
@@ -652,62 +653,58 @@ static void copy_custom_header_name(const char *name, int name_length,
                    (char *)state->context->drain_buffer + state->used +
                        clean_length + 1,
                    (int)remaining, name, name_length);
-  if (copied <= 0) return;
+  if (copied < 0) {
+    state->overflow = 1;
+    return;
+  }
   memcpy(state->context->drain_buffer + state->used, name, clean_length);
   state->context->drain_buffer[state->used + clean_length] = 0;
   state->used += clean_length + 1 + (size_t)copied + 1;
 }
 
-static size_t copy_response_headers(lws_http_context *context,
-                                    struct lws *wsi) {
-  static const struct {
-    enum lws_token_indexes token;
-    const char *name;
-  } headers[] = {{WSI_TOKEN_CONNECTION, "connection"},
-                 {WSI_TOKEN_HTTP_CONTENT_LENGTH, "content-length"},
-                 {WSI_TOKEN_HTTP_CONTENT_TYPE, "content-type"},
-                 {WSI_TOKEN_HTTP_DATE, "date"},
-                 {WSI_TOKEN_HTTP_CONTENT_ENCODING, "content-encoding"},
-                 {WSI_TOKEN_HTTP_LOCATION, "location"},
-                 {WSI_TOKEN_HTTP_SERVER, "server"},
-                 {WSI_TOKEN_HTTP_SET_COOKIE, "set-cookie"},
-                 {WSI_TOKEN_HTTP_TRANSFER_ENCODING, "transfer-encoding"}};
-  lws_hdr_copy_fn copy_fn =
-      (lws_hdr_copy_fn)lws_function("lws_hdr_copy");
+static size_t copy_http_headers(lws_http_context *context,
+                                struct lws *wsi, size_t used) {
+  lws_token_to_string_fn name_fn =
+      (lws_token_to_string_fn)lws_function("lws_token_to_string");
   lws_hdr_copy_fragment_fn fragment_fn =
       (lws_hdr_copy_fragment_fn)lws_function("lws_hdr_copy_fragment");
   lws_hdr_custom_name_foreach_fn foreach_fn =
       (lws_hdr_custom_name_foreach_fn)lws_function(
           "lws_hdr_custom_name_foreach");
   size_t index;
-  size_t used = 0;
-  int overflow = 0;
-  if (copy_fn == NULL) return 0;
-  for (index = 0; index < sizeof(headers) / sizeof(headers[0]); index++) {
-    size_t name_length = strlen(headers[index].name);
+  if (name_fn == NULL || fragment_fn == NULL || foreach_fn == NULL) return SIZE_MAX;
+  for (index = 0; index < WSI_TOKEN_COUNT; index++) {
+    const unsigned char *name = name_fn((enum lws_token_indexes)index);
+    size_t name_length;
     int fragment = 0;
+    if (name == NULL || name[0] == ':') continue;
+    name_length = strlen((const char *)name);
+    if (name_length == 0 || name[name_length - 1] != ':') continue;
+    name_length--;
     for (;;) {
       size_t remaining;
       int copied;
       if (used + name_length + 2 > context->payload_capacity) {
-        overflow = 1;
-        break;
+        return SIZE_MAX;
       }
       remaining = context->payload_capacity - used - name_length - 1;
-      copied = fragment_fn == NULL
-                   ? (fragment == 0
-                          ? copy_fn(wsi,
-                                    (char *)context->drain_buffer + used +
-                                        name_length + 1,
-                                    (int)remaining, headers[index].token)
-                          : -1)
-                   : fragment_fn(wsi,
-                                   (char *)context->drain_buffer + used +
-                                       name_length + 1,
-                                   (int)remaining, headers[index].token,
-                                   fragment);
-      if (copied <= 0) break;
-      memcpy(context->drain_buffer + used, headers[index].name, name_length);
+      copied = fragment_fn(wsi, (char *)context->drain_buffer + used + name_length + 1,
+                           (int)remaining, (enum lws_token_indexes)index, fragment);
+      if (copied == -1) break;
+      if (copied < -1) return SIZE_MAX;
+      {
+        unsigned char *value = context->drain_buffer + used + name_length + 1;
+        size_t begin = 0;
+        size_t finish = (size_t)copied;
+        /* LWS may include separator whitespace in repeated field fragments. */
+        while (begin < finish && (value[begin] == ' ' || value[begin] == '\t')) begin++;
+        while (finish > begin && (value[finish - 1] == ' ' || value[finish - 1] == '\t'))
+          finish--;
+        copied = (int)(finish - begin);
+        memmove(value, value + begin, (size_t)copied);
+        value[copied] = 0;
+      }
+      memcpy(context->drain_buffer + used, name, name_length);
       context->drain_buffer[used + name_length] = 0;
       used += name_length + 1 + (size_t)copied + 1;
       fragment++;
@@ -717,9 +714,9 @@ static size_t copy_response_headers(lws_http_context *context,
     custom_header_copy_state state = {context, wsi, used, 0};
     (void)foreach_fn(wsi, copy_custom_header_name, &state);
     used = state.used;
-    overflow = state.overflow;
+    if (state.overflow) return SIZE_MAX;
   }
-  return overflow ? SIZE_MAX : used;
+  return used;
 }
 
 static size_t copy_server_request(lws_http_context *context, struct lws *wsi,
@@ -750,7 +747,7 @@ static size_t copy_server_request(lws_http_context *context, struct lws *wsi,
   memcpy(context->drain_buffer + used, path, path_length);
   used += path_length;
   context->drain_buffer[used++] = 0;
-  return used;
+  return copy_http_headers(context, wsi, used);
 }
 
 static const unsigned char *find_crlf(const unsigned char *bytes,
@@ -903,7 +900,7 @@ static int recover_chunked_residual(lws_http_context *context,
 
 static int append_request_headers(lws_http_stream *stream, struct lws *wsi,
                                   unsigned char **cursor,
-                                  unsigned char *end) {
+                                  unsigned char *end, int *length_present) {
   lws_add_http_header_by_name_fn add_fn =
       (lws_add_http_header_by_name_fn)lws_function(
           "lws_add_http_header_by_name");
@@ -924,23 +921,33 @@ static int append_request_headers(lws_http_stream *stream, struct lws *wsi,
     value_length = strnlen((const char *)value,
                            stream->headers_length - offset);
     if (offset + value_length >= stream->headers_length) return -1;
-    if (strcasecmp((const char *)name, "host") == 0 ||
+    if (!stream->server_stream && (strcasecmp((const char *)name, "host") == 0 ||
         strcasecmp((const char *)name, "connection") == 0 ||
         (!stream->has_request_body &&
-         strcasecmp((const char *)name, "content-length") == 0)) {
+         strcasecmp((const char *)name, "content-length") == 0))) {
       offset += value_length + 1;
       continue;
     }
     if (strcasecmp((const char *)name, "content-length") == 0 &&
         add_token_fn != NULL) {
+      if (length_present != NULL) *length_present = 1;
       if (add_token_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH, value,
                        (int)value_length, cursor, end) != 0)
         return -1;
       offset += value_length + 1;
       continue;
     }
-    if (add_fn(wsi, name, value, (int)value_length, cursor, end) != 0)
-      return -1;
+    {
+      /* Header construction precedes terminal delivery; reuse its bounded scratch buffer. */
+      unsigned char *colon_name = stream->terminal_payload;
+      int result;
+      memcpy(colon_name, name, name_length);
+      colon_name[name_length] = ':';
+      colon_name[name_length + 1] = 0;
+      result = add_fn(wsi, colon_name, value, (int)value_length, cursor, end);
+      memset(colon_name, 0, name_length + 2);
+      if (result != 0) return -1;
+    }
     offset += value_length + 1;
   }
   return 0;
@@ -1014,7 +1021,7 @@ static int lws_http_callback(struct lws *wsi,
       lws_client_http_body_pending_fn pending_fn;
       lws_callback_on_writable_fn writable_fn;
       if (stream == NULL || cursor == NULL || *cursor == NULL) return -1;
-      if (append_request_headers(stream, wsi, cursor, *cursor + length) != 0)
+      if (append_request_headers(stream, wsi, cursor, *cursor + length, NULL) != 0)
         return -1;
       if (!stream->has_request_body) return 0;
       pending_fn = (lws_client_http_body_pending_fn)lws_function(
@@ -1041,7 +1048,7 @@ static int lws_http_callback(struct lws *wsi,
           stream->observed_protocol == LWS_HTTP_PROTOCOL_HTTP1
               ? observe_http1_reusable(wsi)
               : 0;
-      headers_length = copy_response_headers(context, wsi);
+      headers_length = copy_http_headers(context, wsi, 0);
       if (headers_length == SIZE_MAX) {
         (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_FAILED,
                                     ENOBUFS, NULL, 0);
@@ -1231,11 +1238,23 @@ static int lws_http_callback(struct lws *wsi,
           unsigned char *cursor = start;
           unsigned char *end = context->drain_buffer + LWS_PRE +
                                context->payload_capacity;
+          int length_present = 0;
+          lws_add_http_header_by_token_fn add_token_fn =
+              (lws_add_http_header_by_token_fn)lws_function("lws_add_http_header_by_token");
           if (status_fn == NULL || finish_headers_fn == NULL ||
               status_fn(wsi, (unsigned int)stream->response_status, &cursor,
                         end) != 0 ||
-              finish_headers_fn(wsi, start, &cursor, end) != 0)
+              append_request_headers(stream, wsi, &cursor, end, &length_present) != 0)
             return -1;
+          if (!length_present && stream->outbound_final) {
+            char body_length[32];
+            int digits = snprintf(body_length, sizeof(body_length), "%zu", stream->outbound_length);
+            if (add_token_fn == NULL ||
+                add_token_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH,
+                             (unsigned char *)body_length, digits, &cursor, end) != 0)
+              return -1;
+          }
+          if (finish_headers_fn(wsi, start, &cursor, end) != 0) return -1;
           stream->response_headers_sent = 1;
         }
         if (stream->outbound_length != 0) {
@@ -1947,11 +1966,12 @@ ptr chezpp_lws_http_server_request_dequeue(uintptr_t context_handle) {
 
 int chezpp_lws_http_server_response_submit(
     uintptr_t context_handle, uint64_t connection_id, uint64_t stream_id,
-    uint64_t generation, int status, ptr payload, int final_chunk) {
+    uint64_t generation, int status, ptr headers, ptr payload, int final_chunk) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
   int result;
-  if (context == NULL || status < 100 || status > 999) return 0;
+  if (context == NULL || status < 100 || status > 999 ||
+      (size_t)Sbytevector_length(headers) > context->payload_capacity) return 0;
   pthread_mutex_lock(&context->lock);
   stream = stream_find_locked(context, connection_id, stream_id);
   if (stream == NULL || stream->generation != generation ||
@@ -1961,6 +1981,10 @@ int chezpp_lws_http_server_response_submit(
     return 0;
   }
   stream->response_status = status;
+  if (!stream->response_headers_sent) {
+    stream->headers_length = (size_t)Sbytevector_length(headers);
+    memcpy(stream->headers, Sbytevector_data(headers), stream->headers_length);
+  }
   pthread_mutex_unlock(&context->lock);
   result = chezpp_lws_http_client_body_submit(
       context_handle, connection_id, stream_id, generation, payload,
