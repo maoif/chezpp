@@ -109,3 +109,26 @@
                                   responses)
                          (= 1 (cadr started)))))))
             (lambda () (http-close client)))))))
+
+(mat net-lws-http2-live-flow-control
+     ;; A large response must cross repeated writable/acknowledgement boundaries intact.
+     (call-with-h2-fixture
+      4
+      (lambda (port command)
+        (let ([client (http-open)] [received 0])
+          (dynamic-wind
+            void
+            (lambda ()
+              (http-client-version-set! client 'h2)
+              (http-set-timeout! client 4000)
+              (let ([response
+                     (net-operation-wait
+                      (http-send/nonblocking
+                       client (make-http-request 'get
+                         (format "http://127.0.0.1:~a/large" port))
+                       (make-http-body-sink
+                        (lambda (bytes start count)
+                          (set! received (+ received count))))))])
+                (and (= 200 (http-response-status response))
+                     (= 262144 received))))
+            (lambda () (http-close client)))))))
