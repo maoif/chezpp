@@ -82,3 +82,30 @@
                           (set! received (+ received count))))))])
                 (and (= received 10) (= 200 (http-response-status response)))))
             (lambda () (http-close client)))))))
+
+(mat net-lws-http2-live-concurrent-streams
+     (call-with-h2-fixture
+      2
+      (lambda (port command)
+        (let ([client (http-open)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (http-client-version-set! client 'h2)
+              (http-set-timeout! client 3000)
+              (let* ([first (http-send/nonblocking
+                             client (make-http-request 'get
+                                                       (format "http://127.0.0.1:~a/hold" port)) #f)]
+                     [second (http-send/nonblocking
+                              client (make-http-request 'get
+                                                        (format "http://127.0.0.1:~a/hold" port)) #f)])
+                (let ([started (await-h2-streams (list first second) command 2)])
+                  (command 'release)
+                  (let ([responses (map net-operation-wait (list first second))])
+                    (and started
+                         (= 2 (length responses))
+                         (for-all (lambda (response)
+                                   (= 200 (http-response-status response)))
+                                  responses)
+                         (= 1 (cadr started)))))))
+            (lambda () (http-close client)))))))
