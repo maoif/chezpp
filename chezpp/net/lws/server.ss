@@ -175,7 +175,12 @@ acknowledges each chunk to resume LWS receive flow, and returns their concatenat
   (define lws-http-request-read-body
     (lambda (request)
       (pcheck ([lws-http-request? request])
+        (when (lws-http-request-closed? request)
+          (errorf 'lws-http-request-read-body "request is closed"))
         (let loop ([chunk* '()] [length 0])
+          (when (or (lws-http-request-closed? request)
+                    (lws-http-server-closed? (lws-http-request-server request)))
+            (errorf 'lws-http-request-read-body "request or server is closed"))
           (let ([event (next-request-event request)])
             (cond
              [(not event)
