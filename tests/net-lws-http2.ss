@@ -1,4 +1,11 @@
-(import (chezpp))
+(import (chezpp)
+        (chezpp net lws http2)
+        (chezpp net http private))
+
+(load "net-common.ss")
+
+;; TLS fixture coverage is opt-in because LWS builds differ in client trust/SNI behavior.
+(define run-live-h2-tls-tests? #f)
 
 (define call-with-h2-fixture
   (lambda (maximum-streams procedure)
@@ -12,25 +19,46 @@
           (let ([ready (read output)])
             (unless (and (list? ready) (= 2 (length ready)) (eq? 'ready (car ready)))
               (errorf 'call-with-h2-fixture "fixture did not become ready: ~s" ready))
-            (procedure
-             (cadr ready)
-             (lambda (command)
-               (display command input)
-               (newline input)
-               (flush-output-port input)
-               (if (eq? command 'stats) (read output) (void))))))
+            (procedure (cadr ready)
+                       (lambda (command)
+                         (display command input) (newline input)
+                         (flush-output-port input)
+                         (if (eq? command 'stats) (read output) (void))))))
         (lambda ()
           (guard (ignored [else (void)])
-            (display "stop\n" input)
-            (flush-output-port input))
+            (display "stop\n" input) (flush-output-port input))
           (close-port input)
           (let* ([remaining (read output)] [diagnostic (get-string-all errors)])
-            (close-port output)
-            (close-port errors)
+            (close-port output) (close-port errors)
             (unless (and (eof-object? remaining)
                          (or (eof-object? diagnostic) (string=? "" diagnostic)))
               (errorf 'call-with-h2-fixture "unexpected fixture output: ~s ~s"
                       remaining diagnostic))))))))
+
+(define call-with-h2-tls-fixture
+  (lambda (maximum-streams procedure)
+    (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
+    (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)
+    (let-values ([(input output errors pid)
+                  (open-process-ports
+                   (format "timeout 15s ./lws-http2-fixture 0 ~a /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem"
+                           maximum-streams)
+                   (buffer-mode block) (native-transcoder))])
+      (dynamic-wind
+        void
+        (lambda ()
+          (let ([ready (read output)])
+            (unless (and (list? ready) (= 2 (length ready)) (eq? 'ready (car ready)))
+              (errorf 'call-with-h2-tls-fixture "fixture did not become ready: ~s" ready))
+            (procedure (cadr ready)
+                       (lambda (command)
+                         (display command input) (newline input)
+                         (flush-output-port input)
+                         (if (eq? command 'stats) (read output) (void))))))
+        (lambda ()
+          (guard (ignored [else (void)])
+            (display "stop\n" input) (flush-output-port input))
+          (close-port input) (close-port output) (close-port errors))))))
 
 (define await-h2-streams
   (lambda (operations command count)
@@ -43,7 +71,13 @@
         (cond
          [(and (list? stats) (= (list-ref stats 4) count)) stats]
          [(fxzero? remaining) #f]
-         [else (milisleep 1) (loop (fx1- remaining))])))))
+       [else (milisleep 1) (loop (fx1- remaining))])))))
+
+(define make-h2-tls-test-request
+  (lambda (path port)
+    (make-normalized-http-request
+     "GET" #f 'https "localhost" port #t path '() #f #f
+     (make-http-request-policy '() #f #f #f 0 'h2 #f #f 0 #f))))
 
 (mat net-lws-http2-live-prior-knowledge
      (call-with-h2-fixture
@@ -132,3 +166,29 @@
                 (and (= 200 (http-response-status response))
                      (= 262144 received))))
             (lambda () (http-close client)))))))
+
+(mat net-lws-http2-live-tls-alpn
+     ;; A trusted localhost certificate must negotiate H2 through the LWS ALPN path.
+     (if (not run-live-h2-tls-tests?)
+         #t
+         (call-with-h2-tls-fixture
+          4
+          (lambda (port command)
+            (let ([tls (make-tls-context 'client)] [client #f])
+              (dynamic-wind
+                void
+                (lambda ()
+                  (tls-context-load-ca-file! tls "/tmp/chezpp-net-test-cert.pem")
+                  (tls-context-set-verify! tls #t)
+                  (set! client (make-lws-http2-client 64 65536 64
+                                                        (tls-context-native-handle tls)
+                                                        4))
+                  (let ([response
+                         (net-operation-wait
+                          (lws-http2-request/nonblocking
+                           client (make-h2-tls-test-request "/" port) #f))])
+                    (and (= 200 (transport-response-status response))
+                         (eq? 'h2 (transport-response-version response)))))
+                (lambda ()
+                  (when client (lws-http2-client-close! client))
+                  (close-tls-context tls))))))))
