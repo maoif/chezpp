@@ -600,6 +600,11 @@ static int callback_queue_stream(lws_http_context *context,
   if (context == NULL || stream == NULL || !stream->active || stream->terminal)
     return 0;
   pthread_mutex_lock(&context->lock);
+  /* A close callback may follow completion before Scheme acknowledges its final body chunk. */
+  if (terminal_event_tag(tag) && stream->terminal_pending) {
+    pthread_mutex_unlock(&context->lock);
+    return 1;
+  }
   queued = terminal_event_tag(tag)
                ? queue_terminal_locked(context, stream, tag, status, payload,
                                        length, stream->observed_protocol,
@@ -1153,15 +1158,7 @@ static int lws_http_callback(struct lws *wsi,
     case LWS_CALLBACK_COMPLETED_CLIENT_HTTP:
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_COMPLETE, 0,
                                   NULL, 0);
-      /* Hand the completed WSI back to LWS so its HTTP keep-alive / pipeline
-       * state machine may accept a subsequent transaction on the connection. */
-      {
-        lws_http_transaction_completed_fn completed_fn =
-            (lws_http_transaction_completed_fn)lws_function(
-                "lws_http_transaction_completed");
-        if (completed_fn != NULL && wsi != NULL && completed_fn(wsi) != 0)
-          return -1;
-      }
+      /* Client completion is owned by LWS; the server completion helper can close its network WSI. */
       return 0;
     case LWS_CALLBACK_CLOSED_CLIENT_HTTP:
     case LWS_CALLBACK_CLOSED_HTTP:

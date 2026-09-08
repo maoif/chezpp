@@ -1,4 +1,5 @@
 NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss net-lws-reactor.ss \
+             net-lws-http2.ss \
              net-lws-server.ss \
              net-http-fiber.ss \
              net-http.ss net-ftp.ss \
@@ -19,6 +20,11 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      ?= $(SRCS_TEST)
 TEST_OBJS := $(addsuffix .so,$(basename $(TEST)))
+
+lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
+	$(CC) -Wall -Wextra -O2 $< -o $@ -ldl
+
+net-lws-http2.so: lws-http2-fixture
 
 .PHONY: test
 test: test-all
@@ -99,4 +105,4 @@ test-optional-library-linkage:
 
 .PHONY: clean
 clean:
-	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr
+	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr lws-http2-fixture

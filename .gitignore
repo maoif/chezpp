@@ -9,3 +9,4 @@ chez++
 chez++.ss
 libchezpp.so
 test_*
+tests/lws-http2-fixture
