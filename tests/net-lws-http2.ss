@@ -1,11 +1,17 @@
 (import (chezpp)
         (chezpp net lws http2)
+        (chezpp net lws ffi)
         (chezpp net http private))
 
 (load "net-common.ss")
 
 ;; TLS fixture coverage is opt-in because LWS builds differ in client trust/SNI behavior.
-(define run-live-h2-tls-tests? #f)
+(define run-live-h2-tls-tests?
+  (guard (condition [else #f])
+    (let ([status (lws-status)])
+      (and (vector-ref status 0)
+           (lws-capability? (vector-ref status 1) lws-cap-http2)
+           (lws-capability? (vector-ref status 1) lws-cap-tls)))))
 
 (define call-with-h2-fixture
   (lambda (maximum-streams procedure)
@@ -37,8 +43,8 @@
 
 (define call-with-h2-tls-fixture
   (lambda (maximum-streams procedure)
-    (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
-    (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)
+    (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-san-certificate)
+    (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-san-private-key)
     (let-values ([(input output errors pid)
                   (open-process-ports
                    (format "timeout 15s ./lws-http2-fixture 0 ~a /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem"
@@ -76,8 +82,11 @@
 (define make-h2-tls-test-request
   (lambda (path port)
     (make-normalized-http-request
-     "GET" #f 'https "localhost" port #t path '() #f #f
-     (make-http-request-policy '() #f #f #f 0 'h2 #f #f 0 #f))))
+     "GET" #f 'https "127.0.0.1" port #t path '() #f #f
+     (make-http-request-policy '() #f #f #f 0 'h2 #f #f 0
+       (let ([now (current-time 'time-monotonic)])
+         (+ 3000 (* 1000 (time-second now))
+            (quotient (time-nanosecond now) 1000000)))))))
 
 (mat net-lws-http2-live-prior-knowledge
      (call-with-h2-fixture
