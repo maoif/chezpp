@@ -530,3 +530,34 @@
          (and failed?
               (= (length events) 1)
               (eq? 'failed (vector-ref (car events) 0))))))
+
+(mat net-lws-native-rejects-oversized-request-metadata
+     ;; Error case: headers and initial body larger than native payload storage are rejected.
+     (call-with-lws-context
+      (lambda (context)
+        (let ([metrics-before (lws-context-pool-metrics context)]
+              [oversized (make-bytevector 17 1)])
+          (and (not (lws-client-start context 101 102 1 "127.0.0.1" 1 #f
+                                      "GET" "example.test" "/"
+                                      oversized #vu8() #f))
+               (not (lws-client-start context 103 104 1 "127.0.0.1" 1 #f
+                                      "POST" "example.test" "/"
+                                      #vu8() oversized #t))
+               (= (vector-ref (lws-context-pool-metrics context) 8)
+                  (vector-ref metrics-before 8))
+               (not (lws-context-next-event context)))))))
+
+(mat net-lws-reactor-timeout-cancellation-ordering
+     ;; Error case: an expired operation reports timeout before a later cancellation is inert.
+     (let* ([reactor (make-lws-reactor 8 8 8)]
+            [operation (make-lws-reactor-operation reactor 'timeout-order 201 202 1 0)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (net-operation-step! operation)
+           (let ([condition-before (net-operation-condition operation)])
+             (net-operation-cancel! operation)
+             (and (eq? 'failed (net-operation-state operation))
+                  (eq? 'timeout (net-error-kind condition-before))
+                  (eq? condition-before (net-operation-condition operation)))))
+         (lambda () (lws-reactor-shutdown! reactor)))))
