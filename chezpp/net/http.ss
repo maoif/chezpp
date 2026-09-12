@@ -56,7 +56,10 @@ Connection pool limits: maximum idle and active connections and idle timeout in 
 Mutable HTTP client configuration and transport state.
 |#
   (define-record-type (http-client-record %make-http-client http-client?) (sealed #t) (opaque #f)
-    (fields (mutable closed? http-client-closed? http-client-closed?-set!) (mutable headers http-client-headers http-client-headers-set!) (mutable timeout-ms http-client-timeout-ms http-client-timeout-ms-set!) (mutable follow-redirects? http-client-follow-redirects? http-client-follow-redirects?-set!) (mutable cookie-jar http-client-cookie-jar %http-client-cookie-jar-set!) (mutable auth http-client-auth %http-client-auth-set!) (mutable proxy http-client-proxy %http-client-proxy-set!) (mutable pool-policy http-client-pool-policy %http-client-pool-policy-set!) (mutable version http-client-version %http-client-version-set!) (mutable transport http-client-transport http-client-transport-set!) (mutable active http-client-active http-client-active-set!)))
+    (fields (mutable closed? http-client-closed? http-client-closed?-set!) (mutable headers http-client-headers http-client-headers-set!) (mutable timeout-ms http-client-timeout-ms http-client-timeout-ms-set!) (mutable follow-redirects? http-client-follow-redirects? http-client-follow-redirects?-set!) (mutable cookie-jar http-client-cookie-jar %http-client-cookie-jar-set!) (mutable auth http-client-auth %http-client-auth-set!) (mutable proxy http-client-proxy %http-client-proxy-set!) (mutable pool-policy http-client-pool-policy %http-client-pool-policy-set!) (mutable version http-client-version %http-client-version-set!) (mutable transport http-client-transport http-client-transport-set!) (mutable active http-client-active http-client-active-set!)
+            (immutable tls-context http-client-tls-context)
+            (mutable retired http-client-retired http-client-retired-set!)
+            (immutable mutex http-client-mutex)))
   #|record:http-server-record
 An HTTP server handle containing its LWS transport and synchronized handler table.
 |#
@@ -124,7 +127,7 @@ Writes `count` bytes from `body` at `start` to sink `sink`; returns an unspecifi
   #|proc:http-body-sink-finish!
 Finishes sink `sink` once and returns an unspecified value. Later calls do not finish it again.
 |#
-  (define http-body-sink-finish! (lambda (s) (pcheck ([http-body-sink? s]) (unless (http-body-sink-finished? s) ((http-body-sink-finisher s)) (http-body-sink-finished?-set! s #t)))))
+  (define http-body-sink-finish! (lambda (s) (pcheck ([http-body-sink? s]) (unless (http-body-sink-finished? s) (http-body-sink-finished?-set! s #t) ((http-body-sink-finisher s))))))
   #|proc:make-http-port-body-source
 Creates a body source that reads from input port `port` with optional byte length `length`.
 Returns the body source and leaves `port` open when the source finishes.
@@ -182,26 +185,34 @@ Returns `headers` with string `value` appended for header `name`, preserving exi
 |#
   (define http-header-add (lambda (h n v) (pcheck ([list? h] [(lambda (x) (or (string? x) (symbol? x))) n] [string? v]) (append h (list (cons (header-name-string n) v))))))
   #|proc:http-open
-Opens and returns a new HTTP client. The optional argument is reserved configuration.
+Opens and returns a new HTTP client. Optional `tls-context` is a caller-owned client TLS context
+retained for the client's lifetime, or `#f` for the default TLS policy.
 |#
-  (define http-open (case-lambda [() (%make-http-client #f '() 30000 #t #f #f #f #f 'auto #f '())] [(x) (pcheck ([boolean? x]) (%make-http-client #f '() 30000 #t #f #f #f #f 'auto #f '()))]))
+  (define http-open
+    (case-lambda
+      [() (http-open #f)]
+      [(tls-context)
+       (pcheck ([(lambda (value) (or (not value) (tls-context? value))) tls-context])
+         (%make-http-client #f '() 30000 #t #f #f #f #f 'auto #f '() tls-context '()
+                            (make-mutex 'http-client)))]))
   (define ensure-open (lambda (c) (when (http-client-closed? c) (raise-net-error 'http 'closed "HTTP client is closed" c))))
+  (define close-body-source!
+    (lambda (source)
+      (when (and (http-body-source? source) (not (http-body-source-closed? source)))
+        (http-body-source-closed?-set! source #t)
+        ((http-body-source-closer source)))))
   (define body-producer
     (lambda (b)
       (cond
        [(http-body-source? b)
-       (let ([closed? #f])
-          (letrec ([close!
-                    (lambda ()
-                      (unless closed?
-                        (set! closed? #t)
-                        ((http-body-source-closer b))))])
-            (lambda (n)
-              (guard (condition
-                      [else (close!) (raise condition)])
-                (let ([chunk ((http-body-source-producer b) n)])
-                  (when (eof-object? chunk) (close!))
-                  chunk)))))]
+        (lambda (n)
+          (guard (condition
+                  [else
+                   (guard (ignored [else (void)]) (close-body-source! b))
+                   (raise condition)])
+            (let ([chunk ((http-body-source-producer b) n)])
+              (when (eof-object? chunk) (close-body-source! b))
+              chunk)))]
        [(string? b)
         (let ([v (string->utf8 b)] [i 0])
           (lambda (n)
@@ -395,27 +406,22 @@ Opens and returns a new HTTP client. The optional argument is reserved configura
              [policy-snapshot
               (make-http-request-policy
                headers (http-client-auth c) (http-client-cookie-jar c)
-               (http-client-proxy c) #f (http-client-version c)
+               (http-client-proxy c) (http-client-tls-context c) (http-client-version c)
                policy follow-redirects? 10 deadline)]
              [vec (make-normalized-http-request
                    (http-request-method req) u (or (uri-scheme u) "http") host port tls?
                    (request-path u) headers source (body-length (http-request-body req))
                    policy-snapshot)]
              [sv (and sink
-                      (vector (lambda (b i n) (http-body-sink-write! sink b i (+ i n)))
-                              (lambda () (http-body-sink-finish! sink))))]
-             [transport (or (http-client-transport c)
-                            (let ([new (if (eq? (http-client-version c) 'h2)
-                                           (make-lws-client-transport 'h2 64 65536 64 0
-                                                                       (or proxy-host "")
-                                                                       (or proxy-port 0) max-active
-                                                                       max-idle idle-timeout-ms)
-                                           (make-lws-client-transport 'http1 64 65536 64 0
-                                                                       (or proxy-host "")
-                                                                       (or proxy-port 0) max-active
-                                                                       max-idle idle-timeout-ms))])
-                              (http-client-transport-set! c new)
-                              new))]
+                      (vector (lambda (b i n) (http-body-sink-write! sink b i n))
+                              void
+                              (lambda (status response-headers)
+                                (and follow-redirects?
+                                     (redirect-status? status)
+                                     (exists (lambda (entry)
+                                               (string-ci=? "location" (car entry)))
+                                             response-headers)))))]
+             [transport (http-client-transport c)]
              [inner (lws-client-request/nonblocking transport vec sv)]
              [outer #f])
         (set! outer
@@ -438,9 +444,6 @@ Opens and returns a new HTTP client. The optional argument is reserved configura
                       (http-client-active-set! c (remq outer (http-client-active c)))
                       (net-operation-completed (decode-response-body response)))]
                    [(failed cancelled)
-                    (when sink
-                      (guard (ignored [else (void)])
-                        (http-body-sink-finish! sink)))
                     (http-client-active-set! c (remq outer (http-client-active c)))
                     (net-operation-failed (net-operation-condition inner))]
                    [else
@@ -448,7 +451,9 @@ Opens and returns a new HTTP client. The optional argument is reserved configura
                                            (net-operation-deadline-ms inner))]))
                (lambda () (net-operation-cancel! inner))
                (lambda ()
-                 (lws-client-release-operation! transport inner))))
+                 (lws-client-release-operation! transport inner)
+                 (http-client-active-set! c (remq outer (http-client-active c)))
+                 (guard (ignored [else (void)]) (close-body-source! (http-request-body req))))))
         (http-client-active-set! c (cons outer (http-client-active c)))
         outer)]))
   #|proc:http-send/nonblocking
@@ -484,44 +489,127 @@ has signature `(bytevector start count) -> unspecified` and its finisher has sig
                          (not (string-ci=? method "HEAD")))
                     "GET"
                     method)
-                (uri-resolve (http-request-uri request) location)
+                (uri-resolve (http-request-uri request) (string->uri location))
                 (http-request-headers request)
                 (if (memv (http-response-status response) '(301 302 303)) #f
                     (http-request-body request))))))))
   (define dispatch-with-redirects
-    (lambda (c request sink deadline)
+    (lambda (owner request sink deadline)
       (let ([current request] [remaining 10] [child #f] [outer #f]
-            [follow-redirects? (http-client-follow-redirects? c)])
+            [c (snapshot-http-client owner)]
+            [follow-redirects? (http-client-follow-redirects? owner)])
         (set! child (dispatch c current sink deadline))
         (set! outer
               (make-net-operation
                'http
                (lambda ()
+                (let advance ()
                  (net-operation-step! child)
                  (case (net-operation-state child)
                    [(completed)
                     (let* ([response (net-operation-result child)]
                            [next (and follow-redirects?
-                                      (positive? remaining)
                                       (redirect-status? (http-response-status response))
                                       (redirected-request current response))])
                       (if next
                           (begin
+                            (when (zero? remaining)
+                              (raise-net-error 'http 'redirect-limit
+                                               "maximum redirect count exceeded" current))
+                            (unless (equal? (request-origin current) (request-origin next))
+                              (set! next (make-http-request
+                                          (http-request-method next) (http-request-uri next)
+                                          (strip-origin-headers (http-request-headers next))
+                                          (http-request-body next)))
+                              (http-client-headers-set! c (strip-origin-headers (http-client-headers c)))
+                              (%http-client-auth-set! c #f))
                             (set! current next)
                             (set! remaining (fx1- remaining))
                             (set! child (dispatch c current sink deadline))
-                            (net-operation-pending
-                             (net-operation-poll-targets child) deadline))
-                          (net-operation-completed response)))]
+                            (advance))
+                          (begin
+                            (when sink (http-body-sink-finish! sink))
+                            (net-operation-completed response))))]
                    [(failed cancelled) (net-operation-failed (net-operation-condition child))]
                    [else (net-operation-pending (net-operation-poll-targets child)
-                                                (net-operation-deadline-ms child))]))
+                                                (net-operation-deadline-ms child))])))
                (lambda () (net-operation-cancel! child))
                (lambda ()
                  ;; Removal is idempotent so completion, cancellation, and close race safely.
-                 (http-client-active-set! c (remq outer (http-client-active c))))))
-        (http-client-active-set! c (cons outer (http-client-active c)))
+                 (with-interrupts-disabled
+                   (with-mutex (http-client-mutex owner)
+                     (http-client-active-set! owner (remq outer (http-client-active owner)))))
+                 (close-retired-transports! owner)
+                 (when sink
+                   (guard (ignored [else (void)]) (http-body-sink-finish! sink))))))
+        (unless (with-interrupts-disabled
+                  (with-mutex (http-client-mutex owner)
+                    (and (not (http-client-closed? owner))
+                         (begin
+                           (http-client-active-set! owner (cons outer (http-client-active owner)))
+                           #t))))
+          (net-operation-cancel! outer)
+          (ensure-open owner))
         outer)))
+
+  (define snapshot-http-client
+    (lambda (client)
+      ;; A timer must not suspend a fiber while it owns the ordinary client mutex.
+      (with-interrupts-disabled
+        (with-mutex (http-client-mutex client)
+          (ensure-open client)
+          (unless (http-client-transport client)
+            (let* ([proxy (http-client-proxy client)]
+                   [uri (and proxy (http-proxy-uri proxy))]
+                   [policy (http-client-pool-policy client)]
+                   [tls (http-client-tls-context client)])
+              (http-client-transport-set!
+               client
+               (make-lws-client-transport
+                (if (eq? 'h2 (http-client-version client)) 'h2 'http1) 64 65536 64
+                (if tls (tls-context-native-handle tls) 0)
+                (if uri (or (uri-host uri) "") "") (if uri (or (uri-port uri) 8080) 0)
+                (if policy (http-pool-policy-max-active policy) 64)
+                (if policy (http-pool-policy-max-idle policy) 8)
+                (if policy (http-pool-policy-idle-timeout-ms policy) 30000)))))
+          (%make-http-client #f (http-client-headers client) (http-client-timeout-ms client)
+                            (http-client-follow-redirects? client) (http-client-cookie-jar client)
+                            (http-client-auth client) (http-client-proxy client)
+                            (http-client-pool-policy client) (http-client-version client)
+                            (http-client-transport client) '() (http-client-tls-context client) '()
+                            (make-mutex 'http-policy-snapshot))))))
+
+  (define close-retired-transports!
+    (lambda (client)
+      (let ([retired
+             (with-interrupts-disabled
+               (with-mutex (http-client-mutex client)
+                 (if (null? (http-client-active client))
+                     (let ([retired (http-client-retired client)])
+                       (http-client-retired-set! client '()) retired)
+                     '())))])
+        (for-each lws-client-close! retired))))
+
+  (define retire-transport!
+    (lambda (client)
+      (when (http-client-transport client)
+        (http-client-retired-set!
+         client (cons (http-client-transport client) (http-client-retired client)))
+        (http-client-transport-set! client #f)
+        (close-retired-transports! client))))
+
+  (define request-origin
+    (lambda (request)
+      (let* ([uri (http-request-uri request)] [scheme (or (uri-scheme uri) "http")])
+        (list (string-downcase scheme) (string-downcase (or (uri-host uri) ""))
+              (or (uri-port uri) (if (string-ci=? scheme "https") 443 80))))))
+
+  (define strip-origin-headers
+    (lambda (headers)
+      (filter (lambda (entry)
+                (not (or (string-ci=? (car entry) "authorization")
+                         (string-ci=? (car entry) "cookie")
+                         (string-ci=? (car entry) "host")))) headers)))
   #|proc:http-send
 Sends `request` through client `client`, waits for completion, and returns the HTTP response.
 |#
@@ -591,7 +679,8 @@ Closes client `client`, cancels its active operations, and returns `client`. Clo
             (http-client-active-set! c '())
             (for-each net-operation-cancel! active))
           (when (http-client-transport c)
-            (lws-client-close! (http-client-transport c))))
+            (lws-client-close! (http-client-transport c)))
+          (close-retired-transports! c))
         c)))
   #|proc:http-follow-redirects!
 Sets whether client `client` follows redirects to boolean `follow?` and returns `client`.
@@ -648,9 +737,7 @@ Sets client `client`'s proxy to `proxy` or `#f`, retires incompatible transport,
   (define http-client-proxy-set!
     (lambda (c x) (pcheck ([http-client? c] [(lambda (v) (or (not v) (http-proxy? v))) x])
                     (unless (eq? x (http-client-proxy c))
-                      (when (http-client-transport c)
-                        (lws-client-close! (http-client-transport c))
-                        (http-client-transport-set! c #f)))
+                      (retire-transport! c))
                     (%http-client-proxy-set! c x) c)))
   #|proc:http-client-pool-policy-set!
 Sets `pool-policy` for future operations on client `client` and returns `client`.
@@ -668,9 +755,7 @@ Sets client `client`'s protocol policy to `version` and returns `client`. `versi
                       (errorf 'http-client-version-set!
                               "expected auto, http/1.1, or h2"))
                     (unless (eq? x (http-client-version c))
-                      (when (http-client-transport c)
-                        (lws-client-close! (http-client-transport c))
-                        (http-client-transport-set! c #f)))
+                      (retire-transport! c))
                     (%http-client-version-set! c x) c)))
   #|proc:make-http-multipart-body
 Encodes multipart parts `parts`. Returns a body source and its multipart content-type string.
@@ -883,14 +968,54 @@ returns `response` when accepted and `#f` when reactor backpressure rejects the 
              response))))
 
   #|proc:http-write-response
-The `http-write-response` procedure queues `response` for logical `connection` and returns it.
-It raises an error if the bounded reactor command queue is full.
+The `http-write-response` procedure writes `response` to logical `connection` and returns it.
+Materialized bodies and body sources with a known length are sent in bounded chunks, waiting for
+each native write before producing the next chunk. A body source is closed after success or failure.
+It raises an error if the stream closes, the source length is invalid, or the command queue is full.
 |#
   (define http-write-response
     (lambda (connection response)
       (pcheck ([http-connection? connection] [http-response? response])
-        (or (http-write-response/nonblocking connection response)
-            (errorf 'http-write-response "server response queue is full")))))
+        (let* ([body (http-response-body response)]
+               [producer (body-producer body)]
+               [length (if body (body-length body) 0)]
+               [handle (http-connection-request-handle connection)]
+               [failure #f])
+          (dynamic-wind
+            void
+            (lambda ()
+             (guard (condition [else (set! failure condition) (raise condition)])
+              (when (http-connection-closed? connection)
+                (errorf 'http-write-response "HTTP connection is closed"))
+              (unless (and (integer? length) (exact? length) (>= length 0))
+                (errorf 'http-write-response "response body source requires a known length"))
+              (let ([headers (http-header-set (http-response-headers response)
+                                             "Content-Length" (number->string length))])
+                (let loop ([sent 0])
+                  (let* ([chunk (if producer (producer 65536) (eof-object))]
+                         [final? (eof-object? chunk)]
+                         [bytes (if final? #vu8() chunk)])
+                    (unless (and (bytevector? bytes) (<= (bytevector-length bytes) 65536))
+                      (errorf 'http-write-response "body producer returned an invalid chunk"))
+                    (let ([next (+ sent (bytevector-length bytes))])
+                      (when (or (> next length) (and final? (not (= next length))))
+                        (errorf 'http-write-response "response body does not match its length"))
+                      (unless (lws-http-request-write-response!
+                               handle (http-response-status response) headers bytes
+                               (or final? (= next length)))
+                        (errorf 'http-write-response "server response queue is full"))
+                      (lws-http-request-wait-response! handle)
+                      (cond
+                       [final? (void)]
+                       [(= next length)
+                        (unless (eof-object? (producer 65536))
+                          (errorf 'http-write-response "response body exceeds its length"))]
+                       [else (loop next)])))))
+              response))
+            (lambda ()
+              (if failure
+                  (guard (ignored [else (void)]) (close-body-source! body))
+                  (close-body-source! body))))))))
 
   (define serve-one
     (lambda (server connection)
