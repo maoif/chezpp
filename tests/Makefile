@@ -1,11 +1,12 @@
 NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss net-lws-reactor.ss \
              net-lws-http2.ss \
              net-lws-server.ss \
-             net-http-fiber.ss \
+             net-http-fiber.ss net-lws-stress.ss \
              net-http.ss net-ftp.ss \
              net-ssh.ss net-sftp.ss \
              net-scp.ss net-websocket.ss net-grpc.ss net-examples.ss
-NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss
+NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss \
+                    net-lws-fixture.ss
 
 SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss navigator.ss \
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
@@ -24,7 +25,7 @@ TEST_OBJS := $(addsuffix .so,$(basename $(TEST)))
 lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
 	$(CC) -Wall -Wextra -O2 $< -o $@ -ldl
 
-net-lws-http2.so: lws-http2-fixture
+net-lws-http2.so net-http-fiber.so: lws-http2-fixture
 
 .PHONY: test
 test: test-all
