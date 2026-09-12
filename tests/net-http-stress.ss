@@ -76,3 +76,19 @@
                             operations)))
               (= passed 8))
             (lambda () (http-close client)))))))
+
+(mat net-http-nonfiber-cancel-failure-stress
+     ;; Error case: repeated refused nonblocking requests are cancelled and finish deterministically.
+     (let ([client (http-open)] [passed 0])
+       (dynamic-wind
+         void
+         (lambda ()
+           (http-set-timeout! client 250)
+           (do ([i 0 (fx1+ i)]) ((fx= i 16))
+             (let ([operation (http-send/nonblocking client
+                              (make-http-request 'get "http://127.0.0.1:1/unavailable") #f)])
+               (net-operation-cancel! operation)
+               (when (eq? 'cancelled (net-operation-state operation))
+                 (set! passed (fx1+ passed)))))
+           (= passed 16))
+         (lambda () (http-close client)))))
