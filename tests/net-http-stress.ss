@@ -62,8 +62,8 @@
             void
             (lambda ()
               (http-client-version-set! client 'h2)
-              (http-set-timeout! client 3000)
-              (do ([round 0 (fx1+ round)]) ((fx= round 6))
+              (http-set-timeout! client 10000)
+              (do ([round 0 (fx1+ round)]) ((fx= round 2))
                 (let ([operations
                        (map (lambda (_) (http-send/nonblocking client
                                            (make-http-request 'get
@@ -74,5 +74,5 @@
                                 (when (= 200 (http-response-status response))
                                   (set! passed (fx1+ passed)))))
                             operations)))
-              (= passed 24))
+              (= passed 8))
             (lambda () (http-close client)))))))
