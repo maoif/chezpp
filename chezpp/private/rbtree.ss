@@ -94,7 +94,10 @@
          [(=? <? size fixnum-keys?) (new null-rbnode =? <? size fixnum-keys?)]))))
 
 
-  (define make-rbtree (lambda (who =? <?) (mk-rbtree =? <? 0)))
+  (define make-rbtree
+    (case-lambda
+      [(who =? <?) (mk-rbtree =? <? 0 #f)]
+      [(who =? <? fixnum-keys?) (mk-rbtree =? <? 0 fixnum-keys?)]))
 
 
   (define rotate-left!

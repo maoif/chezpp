@@ -17,7 +17,7 @@
           treemap-fold-left treemap-fold-left/i
           treemap-fold-right treemap-fold-right/i
 
-          treemap->list hashtable->treemap
+          treemap->list hashtable->treemap hashtable->fixnum-treemap
 
           $rbtree-verify)
   (import (chezpp chez)
@@ -699,7 +699,21 @@
                 tm))))
 
 
-  (record-writer (type-descriptor $treemap)
+  #|proc:hashtable->fixnum-treemap
+  Return a new fixnum-key treemap containing the entries of hashtable `table`.
+  Equality predicate `equal?` and ordering predicate `less?` each take two fixnum keys.
+  All keys must be fixnums; values may be any objects.
+  |#
+  (define hashtable->fixnum-treemap
+    (lambda (equal? less? table)
+      (pcheck ([procedure? equal? less?] [hashtable? table])
+              (let ([result (make-fixnum-treemap equal? less?)])
+                (vector-for-each
+                  (lambda (cell) (treemap-set! result (car cell) (cdr cell)))
+                  (hashtable-cells table))
+                result))))
+
+  (define write-treemap
                  (lambda (r p wr)
                    (display "#[treemap (" p)
                    (if (treemap-empty? r)
@@ -716,4 +730,7 @@
                                            (set! i (fx1+ i)))
                                          r)
                            (display ")]" p))))))
+  (record-writer (type-descriptor $treemap) write-treemap)
+  (record-writer (type-descriptor $fixnum-treemap) write-treemap)
+
   )

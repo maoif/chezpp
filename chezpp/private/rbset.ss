@@ -96,7 +96,10 @@
          [(=? <? size fixnum-keys?) (new null-rbnode =? <? size fixnum-keys?)]))))
 
 
-  (define make-rbset (lambda (who =? <?) (mk-rbset =? <? 0)))
+  (define make-rbset
+    (case-lambda
+      [(who =? <?) (mk-rbset =? <? 0 #f)]
+      [(who =? <? fixnum-keys?) (mk-rbset =? <? 0 fixnum-keys?)]))
 
 
   (define rotate-left!

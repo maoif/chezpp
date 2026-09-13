@@ -19,7 +19,8 @@
           treeset+! treeset-! treeset&! treeset^!
 
           treeset->list list->treeset
-          treeset->vector vector->treeset)
+          treeset->vector vector->treeset
+          list->fixnum-treeset vector->fixnum-treeset)
   (import (chezpp chez)
           (chezpp list)
           (chezpp internal)
@@ -774,7 +775,31 @@
 
 
 
-  (record-writer (type-descriptor $treeset)
+  #|proc:list->fixnum-treeset
+  Return a new fixnum treeset containing the fixnums in list `items`.
+  Equality predicate `equal?` and ordering predicate `less?` each take two fixnum items.
+  Duplicate items are stored once.
+  |#
+  (define list->fixnum-treeset
+    (lambda (equal? less? items)
+      (pcheck ([procedure? equal? less?] [list? items])
+              (let ([result (make-fixnum-treeset equal? less?)])
+                (for-each (lambda (item) (treeset-add! result item)) items)
+                result))))
+
+  #|proc:vector->fixnum-treeset
+  Return a new fixnum treeset containing the fixnums in vector `items`.
+  Equality predicate `equal?` and ordering predicate `less?` each take two fixnum items.
+  Duplicate items are stored once.
+  |#
+  (define vector->fixnum-treeset
+    (lambda (equal? less? items)
+      (pcheck ([procedure? equal? less?] [vector? items])
+              (let ([result (make-fixnum-treeset equal? less?)])
+                (vector-for-each (lambda (item) (treeset-add! result item)) items)
+                result))))
+
+  (define write-treeset
                  (lambda (r p wr)
                    (display "#[treeset (" p)
                    (if (treeset-empty? r)
@@ -791,5 +816,8 @@
                                            (set! i (fx1+ i)))
                                          r)
                            (display ")]" p))))))
+
+  (record-writer (type-descriptor $treeset) write-treeset)
+  (record-writer (type-descriptor $fixnum-treeset) write-treeset)
 
   )

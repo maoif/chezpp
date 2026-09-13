@@ -71,3 +71,15 @@
             (= 21 (treeset-fold-left + 0 one two three))
             (= 21 (treeset-fold-right + 0 one two three))
             (fixnum-treeset? (treeset+ one two three)))))
+
+(mat fixnum-conversions-and-writers
+     (let ([table (make-eqv-hashtable)])
+       (hashtable-set! table 1 'one)
+       (let ([map (hashtable->fixnum-treemap fx= fx< table)]
+             [set (vector->fixnum-treeset fx= fx< '#(3 1 2 2))])
+         (and (fixnum-treemap? map)
+              (fixnum-treeset? set)
+              (equal? set (list->fixnum-treeset fx= fx< '(1 2 3)))
+              (equal? '#(1 2 3) (treeset->vector set))
+              (equal? (format "~s" map) (format "~s" (treemap fx= fx< '(1 . one))))
+              (equal? (format "~s" set) (format "~s" (treeset fx= fx< 1 2 3)))))))
