@@ -1,0 +1,147 @@
+(library (chezpp system signal values)
+  (export signal? signal signal-name signal-number signal->string string->signal signal-list
+          hup int quit kill usr1 usr2 alrm term chld pipe
+          $positive-integer? $signal-input? $signal-ref)
+  (import (chezpp chez) (chezpp utils) (chezpp system common))
+
+;;;;===----------------------------------------------------------------------===
+;;;; signal values
+;;;;===----------------------------------------------------------------------===
+
+  #|proc:signal?
+The `signal?` procedure returns `#t` when its argument is a signal record, otherwise `#f`.
+The `object` parameter is the object to test.
+|#
+  #|proc:signal-name
+The `signal-name` procedure returns the canonical symbolic name of `sig`.
+The `sig` parameter is a signal record returned by `signal`, `string->signal`, or `signal-list`.
+|#
+  #|proc:signal-number
+The `signal-number` procedure returns the operating-system signal number of `sig`.
+The `sig` parameter is a signal record returned by `signal`, `string->signal`, or `signal-list`.
+|#
+  (define-record-type ($signal make-signal signal?)
+    (nongenerative)
+    (fields (immutable name signal-name)
+            (immutable number signal-number)))
+
+  (define $signal-table
+    (list (make-signal 'hup 1)
+          (make-signal 'int 2)
+          (make-signal 'quit 3)
+          (make-signal 'kill 9)
+          (make-signal 'usr1 10)
+          (make-signal 'usr2 12)
+          (make-signal 'alrm 14)
+          (make-signal 'term 15)
+          (make-signal 'chld 17)
+          (make-signal 'pipe 13)))
+
+  (define hup 'hup)
+  (define int 'int)
+  (define quit 'quit)
+  (define kill 'kill)
+  (define usr1 'usr1)
+  (define usr2 'usr2)
+  (define alrm 'alrm)
+  (define term 'term)
+  (define chld 'chld)
+  (define pipe 'pipe)
+
+  (define $signal-input?
+    (lambda (x)
+      (or (signal? x) (symbol? x) (string? x) (integer? x))))
+
+  (define $positive-integer?
+    (lambda (x)
+      (and (integer? x) (> x 0))))
+
+  (define $string-prefix?
+    (lambda (prefix str)
+      (let ([prefix-len (string-length prefix)]
+            [str-len (string-length str)])
+        (and (fx<= prefix-len str-len)
+             (let loop ([i 0])
+               (or (fx= i prefix-len)
+                   (and (char=? (string-ref prefix i) (string-ref str i))
+                        (loop (fx+ i 1)))))))))
+
+  (define $normalize-signal-string
+    (lambda (str)
+      (let* ([up (string-upcase str)]
+             [name (if ($string-prefix? "SIG" up)
+                       (substring up 3 (string-length up))
+                       up)])
+        (string->symbol (string-downcase name)))))
+
+  (define $find-signal
+    (lambda (pred)
+      (let loop ([signals $signal-table])
+        (cond [(null? signals) #f]
+              [(pred (car signals)) (car signals)]
+              [else (loop (cdr signals))]))))
+
+  (define $symbol->signal
+    (lambda (who name)
+      (let ([sig ($find-signal (lambda (sig) (eq? name (signal-name sig))))])
+        (or sig (errorf who "unknown signal name: ~a" name)))))
+
+  (define $number->signal
+    (lambda (who number)
+      (let ([sig ($find-signal (lambda (sig) (= number (signal-number sig))))])
+        (or sig (errorf who "unknown signal number: ~a" number)))))
+
+  (define $signal-ref
+    (lambda (who spec)
+      (cond [(signal? spec) spec]
+            [(symbol? spec) ($symbol->signal who spec)]
+            [(string? spec) ($symbol->signal who ($normalize-signal-string spec))]
+            [(integer? spec) ($number->signal who spec)]
+            [else (errorf who "invalid signal: ~a" spec)])))
+
+  #|proc:%signal
+The `%signal` procedure returns the signal record named or numbered by `spec`.
+The `spec` parameter is a signal record, symbol, string such as `"TERM"` or `"SIGTERM"`, or integer signal number.
+|#
+  (define-who %signal
+    (lambda (spec)
+      (pcheck ([$signal-input? spec])
+              ($signal-ref who spec))))
+
+  #|macro:signal
+The `signal` macro returns the signal record named or numbered by `spec`.
+The `spec` form may be a bare identifier such as `term`, a quoted symbol such as `'term`, a string such as `"TERM"` or `"SIGTERM"`, an integer signal number, or an existing signal record.
+|#
+  (define-syntax signal
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ spec)
+         #'(%signal spec)])))
+
+  #|proc:string->signal
+The `string->signal` procedure returns the signal record named by `string`.
+The `string` parameter is a signal name with or without a leading `"SIG"` prefix, such as `"TERM"` or `"SIGTERM"`.
+|#
+  (define-who string->signal
+    (lambda (string)
+      (pcheck ([string? string])
+              ($signal-ref who string))))
+
+  #|proc:signal->string
+The `signal->string` procedure returns the conventional `"SIG..."` name for `sig`.
+The `sig` parameter is a signal record.
+|#
+  (define signal->string
+    (lambda (sig)
+      (pcheck ([signal? sig])
+              (string-append "SIG" (string-upcase (symbol->string (signal-name sig)))))))
+
+  #|proc:signal-list
+The `signal-list` procedure returns the list of known signal records.
+|#
+  (define signal-list
+    (lambda ()
+      (list-copy $signal-table)))
+
+
+)

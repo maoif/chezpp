@@ -5,4 +5,4 @@
           system-permission-error? make-system-permission-error system-timeout-error?
           make-system-timeout-error system-exit-error? make-system-exit-error
           raise-system-error raise-system-unsupported ffi-result-ref)
-  (import (chezpp system errors)))
+  (import (chezpp system errors) (chezpp system ffi)))
