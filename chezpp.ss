@@ -9,6 +9,7 @@
                   (chezpp string)
                   (chezpp vector)
                   (chezpp irregex)
+                  (chezpp regex)
                   (chezpp list)
                   (chezpp utils)
                   (chezpp control)
