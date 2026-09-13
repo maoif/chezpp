@@ -79,17 +79,12 @@
                   [else (loop (vector-ref n 3) n)])))))
   (define rbset-delete!
     (lambda (rbt k)
-      (let loop ([n (rbset-root rbt)])
-        (when n
-          (cond [((rbset-=? rbt) k (rbset-node-key n))
-                 (let ([l (vector-ref n 2)] [r (vector-ref n 3)] [p (vector-ref n 1)])
-                   (cond [l (vector-set! n 0 (rbset-node-key l))]
-                         [r (vector-set! n 0 (rbset-node-key r))]
-                         [p (if (eq? n (vector-ref p 2)) (vector-set! p 2 #f) (vector-set! p 3 #f))]
-                         [else (rbset-root-set! rbt #f)]))
-                 (rbset-size-set! rbt (fx1- (rbset-size rbt)))]
-                [((rbset-<? rbt) k (rbset-node-key n)) (loop (vector-ref n 2))]
-                [else (loop (vector-ref n 3))])))))
+      (when (rbset-contains? rbt k)
+        (let ([remaining (filter (lambda (x) (not ((rbset-=? rbt) x k)))
+                                 (rbset->list rbt))])
+          (rbset-root-set! rbt #f)
+          (rbset-size-set! rbt 0)
+          (for-each (lambda (x) (rbset-set! rbt x)) remaining)))))
   (define rbset-contains?
     (lambda (rbt k)
       (let loop ([n (rbset-root rbt)])
