@@ -8,45 +8,46 @@
 ;;;;===----------------------------------------------------------------------===
 
   #|proc:linux?
-The `linux?` procedure returns `#t` when the current platform is treated as Unix by Chezpp, otherwise `#f`.
-|#
+  The `linux?` procedure returns `#t` when the current platform is treated as Unix by Chezpp,
+  otherwise `#f`.
+  |#
   (define linux?
     (lambda ()
       (unix?)))
 
   #|proc:hostname
-The `hostname` procedure returns the hostname of the current operating system.
-|#
+  The `hostname` procedure returns the hostname of the current operating system.
+  |#
   (define hostname
     (foreign-procedure "chezpp_hostname" () ptr))
 
   #|proc:system-hostname
-The `system-hostname` procedure returns the hostname of the current operating system.
-|#
+  The `system-hostname` procedure returns the hostname of the current operating system.
+  |#
   (define system-hostname hostname)
 
   #|proc:cpu-arch
-The `cpu-arch` procedure returns the instruction set architecture name of the current processor.
-|#
+  The `cpu-arch` procedure returns the instruction set architecture name of the current processor.
+  |#
   (define cpu-arch
     (foreign-procedure "chezpp_cpu_arch" () ptr))
 
   #|proc:cpu-count
-The `cpu-count` procedure returns the number of available logical processors.
-|#
+  The `cpu-count` procedure returns the number of available logical processors.
+  |#
   (define cpu-count
     (foreign-procedure "chezpp_cpu_count" () int))
 
   #|proc:system-machine
-The `system-machine` procedure returns the machine type symbol reported by Chez Scheme.
-|#
+  The `system-machine` procedure returns the machine type symbol reported by Chez Scheme.
+  |#
   (define system-machine
     (lambda ()
       (machine-type)))
 
   #|proc:system-platform
-The `system-platform` procedure returns a symbol naming the current platform family.
-|#
+  The `system-platform` procedure returns a symbol naming the current platform family.
+  |#
   (define system-platform
     (lambda ()
       (cond [(windows?) 'windows]

@@ -19,10 +19,10 @@
           (raise (make-system-error operation code message context)))))
 
   #|proc:ffi-result-ref
-The `ffi-result-ref` procedure decodes a tagged C FFI result vector.
-The `result` parameter is a vector tagged with a symbol from a C helper.
-The `ok` tag returns a value; error tags raise system conditions.
-|#
+  The `ffi-result-ref` procedure decodes a tagged C FFI result vector.
+  The `result` parameter is a vector tagged with a symbol from a C helper.
+  The `ok` tag returns a value; error tags raise system conditions.
+  |#
   (define ffi-result-ref
     (lambda (result)
       (pcheck ([vector? result])

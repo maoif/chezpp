@@ -12,25 +12,30 @@
 ;;;;===----------------------------------------------------------------------===
 
   #|proc:mounted-filesystem?
-The `mounted-filesystem?` procedure returns `#t` when its argument is a mounted filesystem record, otherwise `#f`.
-The `object` parameter is the object to test.
-|#
+  The `mounted-filesystem?` procedure returns `#t` when its argument is a mounted filesystem
+  record, otherwise `#f`.
+  The `object` parameter is the object to test.
+  |#
   #|proc:mounted-filesystem-source
-The `mounted-filesystem-source` procedure returns the source device or pseudo-device of a mounted filesystem record.
-The `mount` parameter is a mounted filesystem record returned by `mounted-filesystems`.
-|#
+  The `mounted-filesystem-source` procedure returns the source device or pseudo-device of a
+  mounted filesystem record.
+  The `mount` parameter is a mounted filesystem record returned by `mounted-filesystems`.
+  |#
   #|proc:mounted-filesystem-target
-The `mounted-filesystem-target` procedure returns the mount target path of a mounted filesystem record.
-The `mount` parameter is a mounted filesystem record returned by `mounted-filesystems`.
-|#
+  The `mounted-filesystem-target` procedure returns the mount target path of a mounted filesystem
+  record.
+  The `mount` parameter is a mounted filesystem record returned by `mounted-filesystems`.
+  |#
   #|proc:mounted-filesystem-type
-The `mounted-filesystem-type` procedure returns the filesystem type string of a mounted filesystem record.
-The `mount` parameter is a mounted filesystem record returned by `mounted-filesystems`.
-|#
+  The `mounted-filesystem-type` procedure returns the filesystem type string of a mounted
+  filesystem record.
+  The `mount` parameter is a mounted filesystem record returned by `mounted-filesystems`.
+  |#
   #|proc:mounted-filesystem-options
-The `mounted-filesystem-options` procedure returns the raw mount options string of a mounted filesystem record.
-The `mount` parameter is a mounted filesystem record returned by `mounted-filesystems`.
-|#
+  The `mounted-filesystem-options` procedure returns the raw mount options string of a mounted
+  filesystem record.
+  The `mount` parameter is a mounted filesystem record returned by `mounted-filesystems`.
+  |#
   (define-record-type ($mounted-filesystem make-mounted-filesystem mounted-filesystem?)
     (nongenerative)
     (fields (immutable source mounted-filesystem-source)
@@ -102,8 +107,9 @@ The `mount` parameter is a mounted filesystem record returned by `mounted-filesy
                     (loop (if mount (cons mount mounts) mounts))))))))))
 
   #|proc:mounted-filesystems
-The `mounted-filesystems` procedure returns a list of mounted filesystem records for the current process mount namespace.
-|#
+  The `mounted-filesystems` procedure returns a list of mounted filesystem records for the current
+  process mount namespace.
+  |#
   (define mounted-filesystems
     (lambda ()
       (let ([mountinfo "/proc/self/mountinfo"])

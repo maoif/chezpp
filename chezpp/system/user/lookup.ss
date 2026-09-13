@@ -85,9 +85,9 @@
         (make-unix-group name passwd gid mems))))
 
   #|proc:user-ref
-The `user-ref` procedure returns a Unix user record for `id`.
-The `id` parameter is either a natural numeric user ID or a user name string.
-|#
+  The `user-ref` procedure returns a Unix user record for `id`.
+  The `id` parameter is either a natural numeric user ID or a user name string.
+  |#
   (define-who user-ref
     (lambda (id)
       (cond [(natural? id)
@@ -97,15 +97,15 @@ The `id` parameter is either a natural numeric user ID or a user name string.
             [else (errorf who "invalid user id: ~a" id)])))
 
   #|proc:getuser
-The `getuser` procedure returns a Unix user record for `id`.
-The `id` parameter is either a natural numeric user ID or a user name string.
-|#
+  The `getuser` procedure returns a Unix user record for `id`.
+  The `id` parameter is either a natural numeric user ID or a user name string.
+  |#
   (define getuser user-ref)
 
   #|proc:group-ref
-The `group-ref` procedure returns a Unix group record for `id`.
-The `id` parameter is either a natural numeric group ID or a group name string.
-|#
+  The `group-ref` procedure returns a Unix group record for `id`.
+  The `id` parameter is either a natural numeric group ID or a group name string.
+  |#
   (define-who group-ref
     (lambda (id)
       (cond [(natural? id)
@@ -115,95 +115,97 @@ The `id` parameter is either a natural numeric group ID or a group name string.
             [else (errorf who "invalid group id: ~a" id)])))
 
   #|proc:getgroup
-The `getgroup` procedure returns a Unix group record for `id`.
-The `id` parameter is either a natural numeric group ID or a group name string.
-|#
+  The `getgroup` procedure returns a Unix group record for `id`.
+  The `id` parameter is either a natural numeric group ID or a group name string.
+  |#
   (define getgroup group-ref)
 
   #|proc:user-ref/default
-The `user-ref/default` procedure returns a Unix user record for `id`, or `default` when `id` is not found.
-The `id` parameter is either a natural numeric user ID or a user name string.
-The `default` parameter is the value returned when `id` does not identify an existing user.
-|#
+  The `user-ref/default` procedure returns a Unix user record for `id`, or `default` when `id` is
+  not found.
+  The `id` parameter is either a natural numeric user ID or a user name string.
+  The `default` parameter is the value returned when `id` does not identify an existing user.
+  |#
   (define user-ref/default
     (lambda (id default)
       (guard (c [(system-not-found-error? c) default])
         (user-ref id))))
 
   #|proc:group-ref/default
-The `group-ref/default` procedure returns a Unix group record for `id`, or `default` when `id` is not found.
-The `id` parameter is either a natural numeric group ID or a group name string.
-The `default` parameter is the value returned when `id` does not identify an existing group.
-|#
+  The `group-ref/default` procedure returns a Unix group record for `id`, or `default` when `id`
+  is not found.
+  The `id` parameter is either a natural numeric group ID or a group name string.
+  The `default` parameter is the value returned when `id` does not identify an existing group.
+  |#
   (define group-ref/default
     (lambda (id default)
       (guard (c [(system-not-found-error? c) default])
         (group-ref id))))
 
   #|proc:uid->user
-The `uid->user` procedure returns the user name for `id`.
-The `id` parameter is a natural numeric user ID.
-|#
+  The `uid->user` procedure returns the user name for `id`.
+  The `id` parameter is a natural numeric user ID.
+  |#
   (define-who uid->user
     (lambda (id)
       (pcheck-natural (id)
                       ($getpw-name ($getpwuid who id)))))
 
   #|proc:uid->user-name
-The `uid->user-name` procedure returns the user name for `uid`.
-The `uid` parameter is a natural numeric user ID.
-|#
+  The `uid->user-name` procedure returns the user name for `uid`.
+  The `uid` parameter is a natural numeric user ID.
+  |#
   (define uid->user-name uid->user)
 
   #|proc:user->uid
-The `user->uid` procedure returns the numeric user ID for `name`.
-The `name` parameter is a user name string.
-|#
+  The `user->uid` procedure returns the numeric user ID for `name`.
+  The `name` parameter is a user name string.
+  |#
   (define-who user->uid
     (lambda (name)
       (pcheck-string (name)
                      ($getpw-uid ($getpwnam who name)))))
 
   #|proc:user-name->uid
-The `user-name->uid` procedure returns the numeric user ID for `name`.
-The `name` parameter is a user name string.
-|#
+  The `user-name->uid` procedure returns the numeric user ID for `name`.
+  The `name` parameter is a user name string.
+  |#
   (define user-name->uid user->uid)
 
   #|proc:gid->group
-The `gid->group` procedure returns the group name for `id`.
-The `id` parameter is a natural numeric group ID.
-|#
+  The `gid->group` procedure returns the group name for `id`.
+  The `id` parameter is a natural numeric group ID.
+  |#
   (define-who gid->group
     (lambda (id)
       (pcheck-natural (id)
                       ($getgr-name ($getgrgid who id)))))
 
   #|proc:gid->group-name
-The `gid->group-name` procedure returns the group name for `gid`.
-The `gid` parameter is a natural numeric group ID.
-|#
+  The `gid->group-name` procedure returns the group name for `gid`.
+  The `gid` parameter is a natural numeric group ID.
+  |#
   (define gid->group-name gid->group)
 
   #|proc:group->gid
-The `group->gid` procedure returns the numeric group ID for `name`.
-The `name` parameter is a group name string.
-|#
+  The `group->gid` procedure returns the numeric group ID for `name`.
+  The `name` parameter is a group name string.
+  |#
   (define-who group->gid
     (lambda (name)
       (pcheck-string (name)
                      ($getgr-gid ($getgrnam who name)))))
 
   #|proc:group-name->gid
-The `group-name->gid` procedure returns the numeric group ID for `name`.
-The `name` parameter is a group name string.
-|#
+  The `group-name->gid` procedure returns the numeric group ID for `name`.
+  The `name` parameter is a group name string.
+  |#
   (define group-name->gid group->gid)
 
   #|proc:get-user-dir
-The `get-user-dir` procedure returns the home directory for `id`.
-The `id` parameter is either a natural numeric user ID or a user name string.
-|#
+  The `get-user-dir` procedure returns the home directory for `id`.
+  The `id` parameter is either a natural numeric user ID or a user name string.
+  |#
   (define-who get-user-dir
     (lambda (id)
       (cond [(string? id)  ($getpw-dir ($getpwnam who id))]
@@ -211,9 +213,9 @@ The `id` parameter is either a natural numeric user ID or a user name string.
             [else (errorf who "invalid user id: ~a" id)])))
 
   #|proc:get-user-shell
-The `get-user-shell` procedure returns the login shell for `id`.
-The `id` parameter is either a natural numeric user ID or a user name string.
-|#
+  The `get-user-shell` procedure returns the login shell for `id`.
+  The `id` parameter is either a natural numeric user ID or a user name string.
+  |#
   (define-who get-user-shell
     (lambda (id)
       (cond [(string? id)  ($getpw-shell ($getpwnam who id))]
@@ -221,9 +223,9 @@ The `id` parameter is either a natural numeric user ID or a user name string.
             [else (errorf who "invalid user id: ~a" id)])))
 
   #|proc:get-user-group
-The `get-user-group` procedure returns the primary numeric group ID for `id`.
-The `id` parameter is either a natural numeric user ID or a user name string.
-|#
+  The `get-user-group` procedure returns the primary numeric group ID for `id`.
+  The `id` parameter is either a natural numeric user ID or a user name string.
+  |#
   (define-who get-user-group
     (lambda (id)
       (cond [(string? id)  ($getpw-gid ($getpwnam who id))]
@@ -231,33 +233,36 @@ The `id` parameter is either a natural numeric user ID or a user name string.
             [else (errorf who "invalid user id: ~a" id)])))
 
   #|proc:user-exists?
-The `user-exists?` procedure returns `#t` when `id` identifies an existing user, otherwise `#f`.
-The `id` parameter is either a natural numeric user ID or a user name string.
-|#
+  The `user-exists?` procedure returns `#t` when `id` identifies an existing user, otherwise `#f`.
+  The `id` parameter is either a natural numeric user ID or a user name string.
+  |#
   (define-who user-exists?
     (lambda (id)
       (guard (c [(system-not-found-error? c) #f])
         (if (user-ref id) #t #f))))
 
   #|proc:group-exists?
-The `group-exists?` procedure returns `#t` when `id` identifies an existing group, otherwise `#f`.
-The `id` parameter is either a natural numeric group ID or a group name string.
-|#
+  The `group-exists?` procedure returns `#t` when `id` identifies an existing group, otherwise
+  `#f`.
+  The `id` parameter is either a natural numeric group ID or a group name string.
+  |#
   (define-who group-exists?
     (lambda (id)
       (guard (c [(system-not-found-error? c) #f])
         (if (group-ref id) #t #f))))
 
   #|proc:current-user
-The `current-user` procedure returns the Unix user record for the real user ID of the calling process.
-|#
+  The `current-user` procedure returns the Unix user record for the real user ID of the calling
+  process.
+  |#
   (define current-user
     (lambda ()
       (user-ref (current-uid))))
 
   #|proc:current-group
-The `current-group` procedure returns the Unix group record for the real group ID of the calling process.
-|#
+  The `current-group` procedure returns the Unix group record for the real group ID of the calling
+  process.
+  |#
   (define current-group
     (lambda ()
       (group-ref (current-gid))))

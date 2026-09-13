@@ -8,29 +8,33 @@
 ;;;;===----------------------------------------------------------------------===
 
   #|proc:process-result?
-The `process-result?` procedure returns `#t` when its argument is a process result record, otherwise `#f`.
-The `object` parameter is the object to test.
-|#
+  The `process-result?` procedure returns `#t` when its argument is a process result record,
+  otherwise `#f`.
+  The `object` parameter is the object to test.
+  |#
   #|proc:process-result-status
-The `process-result-status` procedure returns the process exit-status record stored in `result`.
-The `result` parameter is a process result record.
-|#
+  The `process-result-status` procedure returns the process exit-status record stored in `result`.
+  The `result` parameter is a process result record.
+  |#
   #|proc:process-result-stdout
-The `process-result-stdout` procedure returns the captured standard output string stored in `result`, or `#f` when output was not requested.
-The `result` parameter is a process result record.
-|#
+  The `process-result-stdout` procedure returns the captured standard output string stored in
+  `result`, or `#f` when output was not requested.
+  The `result` parameter is a process result record.
+  |#
   #|proc:process-result-stderr
-The `process-result-stderr` procedure returns the captured standard error string stored in `result`, or `#f` when error output was not requested.
-The `result` parameter is a process result record.
-|#
+  The `process-result-stderr` procedure returns the captured standard error string stored in
+  `result`, or `#f` when error output was not requested.
+  The `result` parameter is a process result record.
+  |#
   #|proc:process-result-pid
-The `process-result-pid` procedure returns the process id stored in `result`, or `#f` when no process id is available.
-The `result` parameter is a process result record.
-|#
+  The `process-result-pid` procedure returns the process id stored in `result`, or `#f` when no
+  process id is available.
+  The `result` parameter is a process result record.
+  |#
   #|proc:process-result-command
-The `process-result-command` procedure returns the shell command string stored in `result`.
-The `result` parameter is a process result record.
-|#
+  The `process-result-command` procedure returns the shell command string stored in `result`.
+  The `result` parameter is a process result record.
+  |#
   (define-record-type ($process-result make-process-result process-result?)
     (nongenerative)
     (fields (immutable status process-result-status)
@@ -214,9 +218,9 @@ The `result` parameter is a process result record.
                                       who))))
 
   #|proc:capture-pipeline
-The `capture-pipeline` procedure runs string-list process specs as a pipeline.
-The `process-specs` parameter is a list of nonempty string lists.
-|#
+  The `capture-pipeline` procedure runs string-list process specs as a pipeline.
+  The `process-specs` parameter is a list of nonempty string lists.
+  |#
   (define capture-pipeline
     (lambda (process-specs)
       (pcheck ([list? process-specs])

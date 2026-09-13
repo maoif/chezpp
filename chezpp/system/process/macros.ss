@@ -109,109 +109,109 @@
                       (syntax-error #'kind "unknown process macro kind")])))))]))))
 
   #|macro:run-process
-The `run-process` macro runs `program` with arguments and returns an exit status.
-The `program` form and argument forms are expressions before any option keyword.
-The `:cwd` option accepts a string working directory or `#f`.
-The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
-The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
-The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
-The `:stdout` option accepts `inherit`, `null`, or `capture`; captured output is ignored.
-The `:stderr` option accepts `inherit`, `null`, `capture`, or `stdout`.
-The `:encoding` option is parsed for future use and is currently ignored.
-The `:timeout` option accepts `#f` or an exact millisecond timeout.
-The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
-Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
-|#
+  The `run-process` macro runs `program` with arguments and returns an exit status.
+  The `program` form and argument forms are expressions before any option keyword.
+  The `:cwd` option accepts a string working directory or `#f`.
+  The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
+  The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
+  The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
+  The `:stdout` option accepts `inherit`, `null`, or `capture`; captured output is ignored.
+  The `:stderr` option accepts `inherit`, `null`, `capture`, or `stdout`.
+  The `:encoding` option is parsed for future use and is currently ignored.
+  The `:timeout` option accepts `#f` or an exact millisecond timeout.
+  The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
+  Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
+  |#
   (define-syntax run-process
     (syntax-rules ()
       [(_ form ...) ($process-form run-process #f form ...)]))
 
   #|macro:run-process/check
-The `run-process/check` macro runs `program` and raises on an unacceptable exit.
-The `program` form and argument forms are expressions before any option keyword.
-The `:cwd` option accepts a string working directory or `#f`.
-The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
-The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
-The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
-The `:stdout` option accepts `inherit`, `null`, or `capture`; captured output is ignored.
-The `:stderr` option accepts `inherit`, `null`, `capture`, or `stdout`.
-The `:encoding` option is parsed for future use and is currently ignored.
-The `:timeout` option accepts `#f` or an exact millisecond timeout.
-The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
-Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
-|#
+  The `run-process/check` macro runs `program` and raises on an unacceptable exit.
+  The `program` form and argument forms are expressions before any option keyword.
+  The `:cwd` option accepts a string working directory or `#f`.
+  The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
+  The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
+  The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
+  The `:stdout` option accepts `inherit`, `null`, or `capture`; captured output is ignored.
+  The `:stderr` option accepts `inherit`, `null`, `capture`, or `stdout`.
+  The `:encoding` option is parsed for future use and is currently ignored.
+  The `:timeout` option accepts `#f` or an exact millisecond timeout.
+  The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
+  Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
+  |#
   (define-syntax run-process/check
     (syntax-rules ()
       [(_ form ...) ($process-form run-process #t form ...)]))
 
   #|macro:capture-process
-The `capture-process` macro runs `program` with arguments and returns a result.
-The `program` form and argument forms are expressions before any option keyword.
-The `:cwd` option accepts a string working directory or `#f`.
-The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
-The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
-The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
-The `:stdout` option accepts `capture`, `inherit`, or `null`.
-The `:stderr` option accepts `capture`, `inherit`, `null`, or `stdout`.
-The `:encoding` option is parsed for future use and is currently ignored.
-The `:timeout` option accepts `#f` or an exact millisecond timeout.
-The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
-Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
-|#
+  The `capture-process` macro runs `program` with arguments and returns a result.
+  The `program` form and argument forms are expressions before any option keyword.
+  The `:cwd` option accepts a string working directory or `#f`.
+  The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
+  The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
+  The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
+  The `:stdout` option accepts `capture`, `inherit`, or `null`.
+  The `:stderr` option accepts `capture`, `inherit`, `null`, or `stdout`.
+  The `:encoding` option is parsed for future use and is currently ignored.
+  The `:timeout` option accepts `#f` or an exact millisecond timeout.
+  The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
+  Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
+  |#
   (define-syntax capture-process
     (syntax-rules ()
       [(_ form ...) ($process-form capture-process #f form ...)]))
 
   #|macro:capture-process/check
-The `capture-process/check` macro runs `program` and raises on an unacceptable exit.
-The `program` form and argument forms are expressions before any option keyword.
-The `:cwd` option accepts a string working directory or `#f`.
-The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
-The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
-The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
-The `:stdout` option accepts `capture`, `inherit`, or `null`.
-The `:stderr` option accepts `capture`, `inherit`, `null`, or `stdout`.
-The `:encoding` option is parsed for future use and is currently ignored.
-The `:timeout` option accepts `#f` or an exact millisecond timeout.
-The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
-Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
-|#
+  The `capture-process/check` macro runs `program` and raises on an unacceptable exit.
+  The `program` form and argument forms are expressions before any option keyword.
+  The `:cwd` option accepts a string working directory or `#f`.
+  The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
+  The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
+  The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
+  The `:stdout` option accepts `capture`, `inherit`, or `null`.
+  The `:stderr` option accepts `capture`, `inherit`, `null`, or `stdout`.
+  The `:encoding` option is parsed for future use and is currently ignored.
+  The `:timeout` option accepts `#f` or an exact millisecond timeout.
+  The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
+  Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
+  |#
   (define-syntax capture-process/check
     (syntax-rules ()
       [(_ form ...) ($process-form capture-process #t form ...)]))
 
   #|macro:shell-command
-The `shell-command` macro runs `command` through the host shell.
-The `command` form is an expression followed by optional keyword clauses.
-The `:cwd` option accepts a string working directory or `#f`.
-The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
-The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
-The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
-The `:stdout` option accepts `inherit`, `null`, or `capture`; captured output is ignored.
-The `:stderr` option accepts `inherit`, `null`, `capture`, or `stdout`.
-The `:encoding` option is parsed for future use and is currently ignored.
-The `:timeout` option accepts `#f` or an exact millisecond timeout.
-The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
-Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
-|#
+  The `shell-command` macro runs `command` through the host shell.
+  The `command` form is an expression followed by optional keyword clauses.
+  The `:cwd` option accepts a string working directory or `#f`.
+  The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
+  The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
+  The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
+  The `:stdout` option accepts `inherit`, `null`, or `capture`; captured output is ignored.
+  The `:stderr` option accepts `inherit`, `null`, `capture`, or `stdout`.
+  The `:encoding` option is parsed for future use and is currently ignored.
+  The `:timeout` option accepts `#f` or an exact millisecond timeout.
+  The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
+  Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
+  |#
   (define-syntax shell-command
     (syntax-rules ()
       [(_ form ...) ($process-form shell-command #f form ...)]))
 
   #|macro:capture-shell-command
-The `capture-shell-command` macro runs `command` through the host shell.
-The `command` form is an expression followed by optional keyword clauses.
-The `:cwd` option accepts a string working directory or `#f`.
-The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
-The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
-The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
-The `:stdout` option accepts `capture`, `inherit`, or `null`.
-The `:stderr` option accepts `capture`, `inherit`, `null`, or `stdout`.
-The `:encoding` option is parsed for future use and is currently ignored.
-The `:timeout` option accepts `#f` or an exact millisecond timeout.
-The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
-Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
-|#
+  The `capture-shell-command` macro runs `command` through the host shell.
+  The `command` form is an expression followed by optional keyword clauses.
+  The `:cwd` option accepts a string working directory or `#f`.
+  The `:env` option accepts an alist of string pairs or `#f` to inherit the environment.
+  The `:env-mode` option accepts `replace`; replacement is implied when `:env` is set.
+  The `:stdin` option accepts a string, bytevector, `null`, `inherit`, or `#f`.
+  The `:stdout` option accepts `capture`, `inherit`, or `null`.
+  The `:stderr` option accepts `capture`, `inherit`, `null`, or `stdout`.
+  The `:encoding` option is parsed for future use and is currently ignored.
+  The `:timeout` option accepts `#f` or an exact millisecond timeout.
+  The `:success` option accepts `#f`, a list of exit codes, or a status predicate.
+  Bare `capture`, `inherit`, `null`, `stdout`, and `replace` are treated as symbols.
+  |#
   (define-syntax capture-shell-command
     (syntax-rules ()
       [(_ form ...) ($process-form capture-shell-command #f form ...)]))

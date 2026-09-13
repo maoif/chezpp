@@ -19,49 +19,56 @@
 ;;;;===----------------------------------------------------------------------===
 
   #|proc:filesystem-info?
-The `filesystem-info?` procedure returns `#t` when its argument is a filesystem information record, otherwise `#f`.
-The `object` parameter is the object to test.
-|#
+  The `filesystem-info?` procedure returns `#t` when its argument is a filesystem information
+  record, otherwise `#f`.
+  The `object` parameter is the object to test.
+  |#
   #|proc:filesystem-info-path
-The `filesystem-info-path` procedure returns the queried path stored in a filesystem information record.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-path` procedure returns the queried path stored in a filesystem information
+  record.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-device
-The `filesystem-info-device` procedure returns the device number for the queried path, or `#f` when unavailable.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-device` procedure returns the device number for the queried path, or `#f`
+  when unavailable.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-type
-The `filesystem-info-type` procedure returns the filesystem type symbol for the queried path, or `#f` when unavailable.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-type` procedure returns the filesystem type symbol for the queried path, or
+  `#f` when unavailable.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-block-size
-The `filesystem-info-block-size` procedure returns the filesystem block size in bytes.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-block-size` procedure returns the filesystem block size in bytes.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-blocks
-The `filesystem-info-blocks` procedure returns the total number of filesystem blocks.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-blocks` procedure returns the total number of filesystem blocks.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-blocks-free
-The `filesystem-info-blocks-free` procedure returns the number of free filesystem blocks.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-blocks-free` procedure returns the number of free filesystem blocks.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-blocks-available
-The `filesystem-info-blocks-available` procedure returns the number of filesystem blocks available to unprivileged users.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-blocks-available` procedure returns the number of filesystem blocks
+  available to unprivileged users.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-files
-The `filesystem-info-files` procedure returns the total number of file nodes in the filesystem.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-files` procedure returns the total number of file nodes in the filesystem.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-files-free
-The `filesystem-info-files-free` procedure returns the number of free file nodes in the filesystem.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-files-free` procedure returns the number of free file nodes in the
+  filesystem.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   #|proc:filesystem-info-read-only?
-The `filesystem-info-read-only?` procedure returns `#t` when the filesystem is mounted read-only, otherwise `#f`.
-The `info` parameter is a filesystem information record returned by `filesystem-info`.
-|#
+  The `filesystem-info-read-only?` procedure returns `#t` when the filesystem is mounted
+  read-only, otherwise `#f`.
+  The `info` parameter is a filesystem information record returned by `filesystem-info`.
+  |#
   (define-record-type ($filesystem-info make-filesystem-info filesystem-info?)
     (nongenerative)
     (fields (immutable path filesystem-info-path)
@@ -92,9 +99,9 @@ The `info` parameter is a filesystem information record returned by `filesystem-
                             (vector-ref v 9))))
 
   #|proc:filesystem-info
-The `filesystem-info` procedure returns filesystem capacity and identity information for `path`.
-The `path` parameter is a string naming a path on the filesystem to query.
-|#
+  The `filesystem-info` procedure returns filesystem capacity and identity information for `path`.
+  The `path` parameter is a string naming a path on the filesystem to query.
+  |#
   (define filesystem-info
     (lambda (path)
       (pcheck ([string? path])
@@ -106,27 +113,28 @@ The `path` parameter is a string naming a path on the filesystem to query.
         (* (filesystem-info-block-size info) (block-selector info)))))
 
   #|proc:filesystem-total-bytes
-The `filesystem-total-bytes` procedure returns the total filesystem size in bytes for `path`.
-The `path` parameter is a string naming a path on the filesystem to query.
-|#
+  The `filesystem-total-bytes` procedure returns the total filesystem size in bytes for `path`.
+  The `path` parameter is a string naming a path on the filesystem to query.
+  |#
   (define filesystem-total-bytes
     (lambda (path)
       (pcheck ([string? path])
               ($filesystem-bytes path filesystem-info-blocks))))
 
   #|proc:filesystem-free-bytes
-The `filesystem-free-bytes` procedure returns the free filesystem size in bytes for `path`.
-The `path` parameter is a string naming a path on the filesystem to query.
-|#
+  The `filesystem-free-bytes` procedure returns the free filesystem size in bytes for `path`.
+  The `path` parameter is a string naming a path on the filesystem to query.
+  |#
   (define filesystem-free-bytes
     (lambda (path)
       (pcheck ([string? path])
               ($filesystem-bytes path filesystem-info-blocks-free))))
 
   #|proc:filesystem-available-bytes
-The `filesystem-available-bytes` procedure returns the filesystem size in bytes available to unprivileged users for `path`.
-The `path` parameter is a string naming a path on the filesystem to query.
-|#
+  The `filesystem-available-bytes` procedure returns the filesystem size in bytes available to
+  unprivileged users for `path`.
+  The `path` parameter is a string naming a path on the filesystem to query.
+  |#
   (define filesystem-available-bytes
     (lambda (path)
       (pcheck ([string? path])

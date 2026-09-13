@@ -9,17 +9,17 @@
 ;;;;===----------------------------------------------------------------------===
 
   #|proc:signal?
-The `signal?` procedure returns `#t` when its argument is a signal record, otherwise `#f`.
-The `object` parameter is the object to test.
-|#
+  The `signal?` procedure returns `#t` when its argument is a signal record, otherwise `#f`.
+  The `object` parameter is the object to test.
+  |#
   #|proc:signal-name
-The `signal-name` procedure returns the canonical symbolic name of `sig`.
-The `sig` parameter is a signal record returned by `signal`, `string->signal`, or `signal-list`.
-|#
+  The `signal-name` procedure returns the canonical symbolic name of `sig`.
+  The `sig` parameter is a signal record returned by `signal`, `string->signal`, or `signal-list`.
+  |#
   #|proc:signal-number
-The `signal-number` procedure returns the operating-system signal number of `sig`.
-The `sig` parameter is a signal record returned by `signal`, `string->signal`, or `signal-list`.
-|#
+  The `signal-number` procedure returns the operating-system signal number of `sig`.
+  The `sig` parameter is a signal record returned by `signal`, `string->signal`, or `signal-list`.
+  |#
   (define-record-type ($signal make-signal signal?)
     (nongenerative)
     (fields (immutable name signal-name)
@@ -100,18 +100,20 @@ The `sig` parameter is a signal record returned by `signal`, `string->signal`, o
             [else (errorf who "invalid signal: ~a" spec)])))
 
   #|proc:%signal
-The `%signal` procedure returns the signal record named or numbered by `spec`.
-The `spec` parameter is a signal record, symbol, string such as `"TERM"` or `"SIGTERM"`, or integer signal number.
-|#
+  The `%signal` procedure returns the signal record named or numbered by `spec`.
+  The `spec` parameter is a signal record, symbol, string such as `"TERM"` or `"SIGTERM"`, or
+  integer signal number.
+  |#
   (define-who %signal
     (lambda (spec)
       (pcheck ([$signal-input? spec])
               ($signal-ref who spec))))
 
   #|macro:signal
-The `signal` macro returns the signal record named or numbered by `spec`.
-The `spec` form may be a bare identifier such as `term`, a quoted symbol such as `'term`, a string such as `"TERM"` or `"SIGTERM"`, an integer signal number, or an existing signal record.
-|#
+  The `signal` macro returns the signal record named or numbered by `spec`.
+  The `spec` form may be a bare identifier such as `term`, a quoted symbol such as `'term`, a
+  string such as `"TERM"` or `"SIGTERM"`, an integer signal number, or an existing signal record.
+  |#
   (define-syntax signal
     (lambda (stx)
       (syntax-case stx ()
@@ -119,26 +121,27 @@ The `spec` form may be a bare identifier such as `term`, a quoted symbol such as
          #'(%signal spec)])))
 
   #|proc:string->signal
-The `string->signal` procedure returns the signal record named by `string`.
-The `string` parameter is a signal name with or without a leading `"SIG"` prefix, such as `"TERM"` or `"SIGTERM"`.
-|#
+  The `string->signal` procedure returns the signal record named by `string`.
+  The `string` parameter is a signal name with or without a leading `"SIG"` prefix, such as
+  `"TERM"` or `"SIGTERM"`.
+  |#
   (define-who string->signal
     (lambda (string)
       (pcheck ([string? string])
               ($signal-ref who string))))
 
   #|proc:signal->string
-The `signal->string` procedure returns the conventional `"SIG..."` name for `sig`.
-The `sig` parameter is a signal record.
-|#
+  The `signal->string` procedure returns the conventional `"SIG..."` name for `sig`.
+  The `sig` parameter is a signal record.
+  |#
   (define signal->string
     (lambda (sig)
       (pcheck ([signal? sig])
               (string-append "SIG" (string-upcase (symbol->string (signal-name sig)))))))
 
   #|proc:signal-list
-The `signal-list` procedure returns the list of known signal records.
-|#
+  The `signal-list` procedure returns the list of known signal records.
+  |#
   (define signal-list
     (lambda ()
       (list-copy $signal-table)))
