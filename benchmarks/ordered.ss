@@ -29,3 +29,19 @@
 (measure 'fixnum-treemap-100000
          (lambda () (make-fixnum-treemap fx= fx<))
          (lambda (tm i) (treemap-set! tm i i)) 100000)
+
+(define mixed
+  (lambda (name maker)
+    (let ([tm (maker)] [start (current-time 'time-monotonic)])
+      (let loop ([i 0])
+        (unless (= i 10000) (treemap-set! tm i i) (loop (+ i 1))))
+      (let loop ([i 0])
+        (unless (= i 10000) (treemap-ref tm i) (loop (+ i 1))))
+      (let loop ([i 0])
+        (unless (= i 10000) (treemap-delete! tm i) (loop (+ i 1))))
+      (let ([stop (current-time 'time-monotonic)])
+        (printf "~a-mixed-10000 ~a ns\n" name
+                (+ (* (- (time-second stop) (time-second start)) 1000000000)
+                   (- (time-nanosecond stop) (time-nanosecond start))))))))
+(mixed 'generic-treemap (lambda () (make-treemap fx= fx<)))
+(mixed 'fixnum-treemap (lambda () (make-fixnum-treemap fx= fx<)))
