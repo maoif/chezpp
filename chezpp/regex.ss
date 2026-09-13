@@ -2,7 +2,9 @@
   (export regex? make-regex string->regex sre->regex regex->irregex
           regex-search regex-match regex-match?
           regex-match-substring regex-match-start-index regex-match-end-index
-          regex-match-num-submatches regex-match-names)
+          regex-match-num-submatches regex-match-names
+          regex-extract regex-split regex-replace regex-replace/all
+          regex-quote regex-opt regex-sre->string)
   (import (chezpp chez) (chezpp irregex) (chezpp utils))
 
   (define-record-type (regex %make-regex regex?)
@@ -77,4 +79,22 @@
   Returns the named captures in match.
   |#
   (define (regex-match-names match)
-    (pcheck ([regex-match? match]) (irregex-match-names (match-data match)))))
+    (pcheck ([regex-match? match]) (irregex-match-names (match-data match))))
+  (define (regex-extract regex string)
+    (pcheck ([regex? regex] [string? string])
+            (irregex-extract (regex-irregex regex) string)))
+  (define (regex-split regex string)
+    (pcheck ([regex? regex] [string? string])
+            (irregex-split (regex-irregex regex) string)))
+  (define (regex-replace regex string . replacement)
+    (pcheck ([regex? regex] [string? string])
+            (apply irregex-replace (regex-irregex regex) string replacement)))
+  (define (regex-replace/all regex string . replacement)
+    (pcheck ([regex? regex] [string? string])
+            (apply irregex-replace/all (regex-irregex regex) string replacement)))
+  (define (regex-quote string)
+    (pcheck ([string? string]) (irregex-quote string)))
+  (define (regex-opt strings)
+    (pcheck ([list? strings]) (irregex-opt strings)))
+  (define (regex-sre->string sre)
+    (sre->string sre)))
