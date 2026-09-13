@@ -37,12 +37,13 @@ libchezpp.so:
 	$(CC) $(CFLAGS) -o $@ $(SRCS_C) $(LDLIBS)
 
 ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
-	@echo '(optimize-level 1)' \
+	@echo '(guard (condition [else (display-condition condition (current-error-port)) (newline (current-error-port)) (exit 1)])' \
+	      '(optimize-level 1)' \
 	      '(compile-imported-libraries #t) (generate-inspector-information #t) (generate-procedure-source-information #t)'\
 	      '(generate-wpo-files #t)' \
 	      '(time (compile-file "chezpp.ss"))' \
 	      '(unless (null? (compile-whole-library "chezpp.wpo" "chezpp.lib"))' \
-	      '  (errorf "chezpp.lib" "dependency has to be null"))' \
+	      '  (errorf "chezpp.lib" "dependency has to be null")))' \
 	      | ${SCHEME} -q
 	@rm -f chezpp.so
 
@@ -61,7 +62,7 @@ installdeps: ${chezppdeps}
 .PHONY: install
 install: chez++ installdeps
 	rm -f $(PREFIX)/bin/chez++ $(PREFIX)/lib/chez++.ss
-	$(call generate_chezpp_launcher,$(PREFIX)/bin/chez++,$(abspath $(PREFIX)/lib/libchezpp.so),$(abspath $(PREFIX)/lib/chezpp.lib),$(abspath $(PREFIX)/lib/fiber.lib),$(abspath $(PREFIX)/lib/combinator.lib))
+	$(call generate_chezpp_launcher,$(PREFIX)/bin/chez++,$(abspath $(PREFIX)/lib/libchezpp.so),$(abspath $(PREFIX)/lib/chezpp.lib))
 
 .PHONY: clean
 clean:
