@@ -14,6 +14,19 @@
 
 (define tm10 (apply treemap = < (map cons (iota 10) (iota 10))))
 
+(mat fixnum-treemap-constructor
+     (let ([tm (make-fixnum-treemap fx= fx<)])
+       (treemap-set! tm 1 'one)
+       (and (fixnum-treemap? tm)
+            (treemap? tm)
+            (eq? 'one (treemap-ref tm 1)))))
+
+;; Error case: fixnum treemaps reject non-fixnum keys.
+(mat fixnum-treemap-key-validation
+     (guard (c [(error? c) #t] [else #f])
+       (treemap-set! (make-fixnum-treemap fx= fx<) 'x 1)
+       #f))
+
 
 
 (mat $rbtree-verify

@@ -5,6 +5,19 @@
 (define v10000  (fxvshuffle! (fxviota 10000)))
 (define v100000 (fxvshuffle! (fxviota 100000)))
 
+(mat fixnum-treeset-constructor
+     (let ([ts (make-fixnum-treeset fx= fx<)])
+       (treeset-add! ts 1)
+       (and (fixnum-treeset? ts)
+            (treeset? ts)
+            (treeset-contains? ts 1))))
+
+;; Error case: fixnum treesets reject non-fixnum items.
+(mat fixnum-treeset-key-validation
+     (guard (c [(error? c) #t] [else #f])
+       (treeset-add! (make-fixnum-treeset fx= fx<) 'x)
+       #f))
+
 
 (mat treeset-equal?
 
