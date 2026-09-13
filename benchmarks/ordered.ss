@@ -23,3 +23,9 @@
 (measure 'fixnum-treemap-10000
          (lambda () (make-fixnum-treemap fx= fx<))
          (lambda (tm i) (treemap-set! tm i i)) 10000)
+(measure 'generic-treemap-100000
+         (lambda () (make-treemap fx= fx<))
+         (lambda (tm i) (treemap-set! tm i i)) 100000)
+(measure 'fixnum-treemap-100000
+         (lambda () (make-fixnum-treemap fx= fx<))
+         (lambda (tm i) (treemap-set! tm i i)) 100000)
