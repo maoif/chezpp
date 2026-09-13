@@ -1,3 +1,5 @@
+.ONESHELL:
+
 NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss net-lws-reactor.ss \
              net-lws-http2.ss \
              net-lws-server.ss \
@@ -51,7 +53,18 @@ $(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
 
 .PHONY: test-all
 test-all: mat.so $(OBJS_TEST)
-	@rm -f *.out *.stdout *.stderr
+	@cleanup() { \
+	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
+	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
+	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
+	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
+	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
+	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
+	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
+	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
+	    /tmp/upload-root; \
+	}; \
+	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
 	@status=0; \
 	for item in $(OBJS_TEST); do \
 	  stdout="$$item.stdout"; stderr="$$item.stderr"; \
@@ -68,7 +81,18 @@ test-all: mat.so $(OBJS_TEST)
 
 .PHONY: test-some
 test-some: mat.so $(TEST_OBJS)
-	@rm -f *.out *.stdout *.stderr
+	@cleanup() { \
+	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
+	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
+	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
+	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
+	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
+	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
+	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
+	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
+	    /tmp/upload-root; \
+	}; \
+	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
 	@status=0; \
 	for item in $(TEST); do \
 	  case "$$item" in \
