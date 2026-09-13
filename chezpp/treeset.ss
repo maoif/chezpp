@@ -24,17 +24,17 @@
           (chezpp list)
           (chezpp internal)
           (chezpp utils)
-          (chezpp private rbtree))
+          (chezpp private rbset))
 
 
   (define-record-type ($treeset mk-treeset treeset-record?)
-    (parent rbtree) (nongenerative) (opaque #t)
+    (parent rbset) (nongenerative) (opaque #t)
     (protocol (lambda (pnew)
                 (lambda (=? <? size)
                   ((pnew =? <? size))))))
 
   (define-record-type ($fixnum-treeset mk-fixnum-treeset fixnum-treeset?)
-    (parent rbtree) (nongenerative) (opaque #t)
+    (parent rbset) (nongenerative) (opaque #t)
     (protocol (lambda (pnew) (lambda (=? <? size) ((pnew =? <? size))))))
   (define treeset? (lambda (x) (or (treeset-record? x) (fixnum-treeset? x))))
 
@@ -70,7 +70,7 @@
     (lambda (=? <? . args)
       (pcheck ([procedure? =? <?])
               (let ([ts (make-treeset =? <?)])
-                (for-each (lambda (x) (rbtree-set! who ts x V)) args)
+                (for-each (lambda (x) (rbset-set! who ts x V)) args)
                 ts))))
 
   #|proc:fixnum-treeset
@@ -95,7 +95,7 @@
   (define-who treeset-empty?
     (lambda (ts)
       (pcheck ([treeset? ts])
-              (fx= 0 (rbtree-size ts)))))
+              (fx= 0 (rbset-size ts)))))
 
 
   #|doc
@@ -106,7 +106,7 @@
       (pcheck ([treeset? ts])
               (when (and (fixnum-treeset? ts) (not (fixnum? v)))
                 (errorf who "fixnum treeset item is not a fixnum: ~a" v))
-              (rbtree-set! who ts v V))))
+              (rbset-set! who ts v V))))
 
 
   #|doc
@@ -117,7 +117,7 @@
   (define-who treeset-delete!
     (lambda (ts v)
       (pcheck ([treeset? ts])
-              (rbtree-delete! who ts v))))
+              (rbset-delete! who ts v))))
 
 
   #|doc
@@ -126,7 +126,7 @@
   (define-who treeset-clear!
     (lambda (ts)
       (pcheck ([treeset? ts])
-              (rbtree-clear! who ts))))
+              (rbset-clear! who ts))))
 
 
   #|doc
@@ -135,7 +135,7 @@
   (define-who treeset-size
     (lambda (ts)
       (pcheck ([treeset? ts])
-              (rbtree-size ts))))
+              (rbset-size ts))))
 
 
   #|doc
@@ -144,7 +144,7 @@
   (define-who treeset-contains?
     (lambda (ts v)
       (pcheck ([treeset? ts])
-              (rbtree-contains? who ts v))))
+              (rbset-contains? who ts v))))
 
 
   #|doc
@@ -154,7 +154,7 @@
   (define-who treeset-contains/p?
     (lambda (ts pred)
       (pcheck ([treeset? ts] [procedure? pred])
-              (rbtree-contains/p? who ts (lambda (k v) (pred k))))))
+              (rbset-contains/p? who ts (lambda (k v) (pred k))))))
 
 
   (define K? (lambda (n) (if (pair? n) (car n) n)))
@@ -167,7 +167,7 @@
   (define-who treeset-search
     (lambda (ts pred)
       (pcheck ([treeset? ts] [procedure? pred])
-              (K? (rbtree-search who ts (lambda (k v) (pred k)))))))
+              (K? (rbset-search who ts (lambda (k v) (pred k)))))))
 
 
   #|doc
@@ -184,11 +184,11 @@
       [(ts pred)
        (pcheck ([treeset? ts] [procedure? pred])
                (let ([lb (make-list-builder)])
-                 (rbtree-visit who (lambda (k v) (when (pred k) (lb k))) ts)
+                 (rbset-visit who (lambda (k v) (when (pred k) (lb k))) ts)
                  (lb)))]
       [(ts pred collect)
        (pcheck ([treeset? ts] [procedure? pred collect])
-               (rbtree-visit who (lambda (k v) (when (pred k) (collect k))) ts))]))
+               (rbset-visit who (lambda (k v) (when (pred k) (collect k))) ts))]))
 
 
   #|doc
@@ -199,7 +199,7 @@
   (define-who treeset-successor
     (lambda (ts v)
       (pcheck ([treeset? ts])
-              (K? (rbtree-successor who ts v)))))
+              (K? (rbset-successor who ts v)))))
 
 
   #|doc
@@ -210,7 +210,7 @@
   (define-who treeset-predecessor
     (lambda (ts v)
       (pcheck ([treeset? ts])
-              (K? (rbtree-predecessor who ts v)))))
+              (K? (rbset-predecessor who ts v)))))
 
 
   #|doc
@@ -221,7 +221,7 @@
   (define-who treeset-min
     (lambda (ts)
       (pcheck ([treeset? ts])
-              (K? (rbtree-min who ts)))))
+              (K? (rbset-min who ts)))))
 
 
   #|doc
@@ -232,7 +232,7 @@
   (define-who treeset-max
     (lambda (ts)
       (pcheck ([treeset? ts])
-              (K? (rbtree-max who ts)))))
+              (K? (rbset-max who ts)))))
 
 
   #|doc
@@ -242,8 +242,8 @@
   (define-who treeset-filter
     (lambda (pred ts)
       (pcheck ([procedure? pred] [treeset? ts])
-              (let ([newts (make-treeset (rbtree-=? ts) (rbtree-<? ts))])
-                (rbtree-visit who (lambda (k v) (when (pred k) (rbtree-set! who newts k V))) ts)
+              (let ([newts (make-treeset (rbset-=? ts) (rbset-<? ts))])
+                (rbset-visit who (lambda (k v) (when (pred k) (rbset-set! who newts k V))) ts)
                 newts))))
 
 
@@ -255,10 +255,10 @@
     (lambda (pred ts)
       (pcheck ([procedure? pred] [treeset? ts])
               (let ([lb (make-list-builder)])
-                (rbtree-visit who (lambda (k v) (lb k)) ts)
+                (rbset-visit who (lambda (k v) (lb k)) ts)
                 (for-each (lambda (v)
                             (unless (pred v)
-                              (rbtree-delete! who ts v)))
+                              (rbset-delete! who ts v)))
                           (lb))
                 ts))))
 
@@ -271,11 +271,11 @@
   (define-who treeset-partition
     (lambda (pred ts)
       (pcheck ([procedure? pred] [treeset? ts])
-              (let ([T (make-treeset (rbtree-=? ts) (rbtree-<? ts))]
-                    [F (make-treeset (rbtree-=? ts) (rbtree-<? ts))])
-                (rbtree-visit who (lambda (k v) (if (pred k)
-                                                    (rbtree-set! who T k V)
-                                                    (rbtree-set! who F k V)))
+              (let ([T (make-treeset (rbset-=? ts) (rbset-<? ts))]
+                    [F (make-treeset (rbset-=? ts) (rbset-<? ts))])
+                (rbset-visit who (lambda (k v) (if (pred k)
+                                                    (rbset-set! who T k V)
+                                                    (rbset-set! who F k V)))
                               ts)
                 (values T F)))))
 
@@ -300,11 +300,11 @@
               (if (null? ts*)
                   ts
                   (pcheck ([all-treesets? ts*])
-                          (let ([newts (make-treeset (rbtree-=? ts) (rbtree-<? ts))])
+                          (let ([newts (make-treeset (rbset-=? ts) (rbset-<? ts))])
                             (for-each (lambda (ts)
-                                        (rbtree-visit who
+                                        (rbset-visit who
                                                       (lambda (k v)
-                                                        (rbtree-set! who newts k V))
+                                                        (rbset-set! who newts k V))
                                                       ts))
                                       (cons ts ts*))
                             newts))))))
@@ -323,13 +323,13 @@
               (if (null? ts*)
                   ts
                   (pcheck ([all-treesets? ts*])
-                          (let ([newts (make-treeset (rbtree-=? ts) (rbtree-<? ts))])
-                            (rbtree-visit who (lambda (k v) (rbtree-set! who newts k V)) ts)
+                          (let ([newts (make-treeset (rbset-=? ts) (rbset-<? ts))])
+                            (rbset-visit who (lambda (k v) (rbset-set! who newts k V)) ts)
                             (for-each (lambda (ts)
-                                        (rbtree-visit who
+                                        (rbset-visit who
                                                       (lambda (k v)
-                                                        (when (rbtree-contains? who newts k)
-                                                          (rbtree-delete! who newts k)))
+                                                        (when (rbset-contains? who newts k)
+                                                          (rbset-delete! who newts k)))
                                                       ts))
                                       ts*)
                             newts))))))
@@ -349,13 +349,13 @@
                   ts
                   (pcheck ([all-treesets? ts*])
                           (let ([newts (apply treeset+ ts ts*)] [lb (make-list-builder)])
-                            (rbtree-visit who
+                            (rbset-visit who
                                           (lambda (k v)
-                                            (unless (andmap (lambda (ts) (rbtree-contains? who ts k))
+                                            (unless (andmap (lambda (ts) (rbset-contains? who ts k))
                                                             (cons ts ts*))
                                               (lb k)))
                                           newts)
-                            (for-each (lambda (k) (rbtree-delete! who newts k)) (lb))
+                            (for-each (lambda (k) (rbset-delete! who newts k)) (lb))
                             newts))))))
 
 
@@ -371,24 +371,24 @@
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (let ([newts (make-treeset (rbtree-=? ts) (rbtree-<? ts))]
+                  (let ([newts (make-treeset (rbset-=? ts) (rbset-<? ts))]
                         [lb (make-list-builder)])
                     ;; union
                     (for-each (lambda (ts)
-                                (rbtree-visit who
+                                (rbset-visit who
                                               (lambda (k v)
-                                                (rbtree-set! who newts k V))
+                                                (rbset-set! who newts k V))
                                               ts))
                               (cons ts ts*))
                     ;; intersect
-                    (rbtree-visit who
+                    (rbset-visit who
                                   (lambda (k v)
-                                    (when (andmap (lambda (ts) (rbtree-contains? who ts k))
+                                    (when (andmap (lambda (ts) (rbset-contains? who ts k))
                                                   (cons ts ts*))
                                       (lb k)))
                                   newts)
                     ;; diff
-                    (for-each (lambda (k) (rbtree-delete! who newts k)) (lb))
+                    (for-each (lambda (k) (rbset-delete! who newts k)) (lb))
                     newts)))))
 
 
@@ -491,90 +491,90 @@
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-andmap1 who proc ts0))]
+               (rbset-andmap1 who proc ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-andmap1 who proc ts0 ts1))]
+               (rbset-andmap1 who proc ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-andmap1 who proc ts0 ts*))]))
+               (apply rbset-andmap1 who proc ts0 ts*))]))
 
 
   (define-who treeset-ormap
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-ormap1 who proc ts0))]
+               (rbset-ormap1 who proc ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-ormap1 who proc ts0 ts1))]
+               (rbset-ormap1 who proc ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-ormap1 who proc ts0 ts*))]))
+               (apply rbset-ormap1 who proc ts0 ts*))]))
 
 
   (define-who treeset-map
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-map1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0))]
+               (rbset-map1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-map1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0 ts1))]
+               (rbset-map1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-map1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0 ts*))]))
+               (apply rbset-map1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0 ts*))]))
 
 
   (define-who treeset-map/i
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-map/i1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0))]
+               (rbset-map/i1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-map/i1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0 ts1))]
+               (rbset-map/i1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-map/i1 who proc (make-treeset (rbtree-=? ts0) (rbtree-<? ts0)) ts0 ts*))]))
+               (apply rbset-map/i1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0 ts*))]))
 
 
   (define-who treeset-for-each
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-for-each1 who proc ts0))]
+               (rbset-for-each1 who proc ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-for-each1 who proc ts0 ts1))]
+               (rbset-for-each1 who proc ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-for-each1 who proc ts0 ts*))]))
+               (apply rbset-for-each1 who proc ts0 ts*))]))
 
 
   (define-who treeset-for-each/i
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-for-each/i1 who proc ts0))]
+               (rbset-for-each/i1 who proc ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-for-each/i1 who proc ts0 ts1))]
+               (rbset-for-each/i1 who proc ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-for-each/i1 who proc ts0 ts*))]))
+               (apply rbset-for-each/i1 who proc ts0 ts*))]))
 
 
 ;;;; folds
@@ -584,60 +584,60 @@
     (case-lambda
       [(proc acc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-fold-left1 who proc acc ts0))]
+               (rbset-fold-left1 who proc acc ts0))]
       [(proc acc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-fold-left1 who proc acc ts0 ts1))]
+               (rbset-fold-left1 who proc acc ts0 ts1))]
       [(proc acc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-fold-left1 who proc acc ts0 ts*))]))
+               (apply rbset-fold-left1 who proc acc ts0 ts*))]))
 
 
   (define-who treeset-fold-left/i
     (case-lambda
       [(proc acc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-fold-left/i1 who proc acc ts0))]
+               (rbset-fold-left/i1 who proc acc ts0))]
       [(proc acc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-fold-left/i1 who proc acc ts0 ts1))]
+               (rbset-fold-left/i1 who proc acc ts0 ts1))]
       [(proc acc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-fold-left/i1 who proc acc ts0 ts*))]))
+               (apply rbset-fold-left/i1 who proc acc ts0 ts*))]))
 
 
   (define-who treeset-fold-right
     (case-lambda
       [(proc acc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-fold-right1 who proc acc ts0))]
+               (rbset-fold-right1 who proc acc ts0))]
       [(proc acc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-fold-right1 who proc acc ts0 ts1))]
+               (rbset-fold-right1 who proc acc ts0 ts1))]
       [(proc acc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-fold-right1 who proc acc ts0 ts*))]))
+               (apply rbset-fold-right1 who proc acc ts0 ts*))]))
 
 
   (define-who treeset-fold-right/i
     (case-lambda
       [(proc acc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbtree-fold-right/i1 who proc acc ts0))]
+               (rbset-fold-right/i1 who proc acc ts0))]
       [(proc acc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbtree-fold-right/i1 who proc acc ts0 ts1))]
+               (rbset-fold-right/i1 who proc acc ts0 ts1))]
       [(proc acc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbtree-fold-right/i1 who proc acc ts0 ts*))]))
+               (apply rbset-fold-right/i1 who proc acc ts0 ts*))]))
 
 
 
@@ -662,9 +662,9 @@
        (pcheck ([treeset? ts])
                (let ([lb (make-list-builder)])
                  (case order
-                   [in   (rbtree-visit-inorder   who (lambda (k v) (lb k)) ts)]
-                   [pre  (rbtree-visit-preorder  who (lambda (k v) (lb k)) ts)]
-                   [post (rbtree-visit-postorder who (lambda (k v) (lb k)) ts)]
+                   [in   (rbset-visit-inorder   who (lambda (k v) (lb k)) ts)]
+                   [pre  (rbset-visit-preorder  who (lambda (k v) (lb k)) ts)]
+                   [post (rbset-visit-postorder who (lambda (k v) (lb k)) ts)]
                    [else (errorf who "invalid traversal order: ~a, should be one of 'in, 'pre and 'post" order)])
                  (lb)))]))
 
@@ -685,9 +685,9 @@
                (let* ([vec (make-vector (treeset-size ts) #f)] [i 0]
                       [add! (lambda (k v) (vector-set! vec i k) (set! i (fx1+ i)))])
                  (case order
-                   [in   (rbtree-visit-inorder   who add! ts)]
-                   [pre  (rbtree-visit-preorder  who add! ts)]
-                   [post (rbtree-visit-postorder who add! ts)]
+                   [in   (rbset-visit-inorder   who add! ts)]
+                   [pre  (rbset-visit-preorder  who add! ts)]
+                   [post (rbset-visit-postorder who add! ts)]
                    [else (errorf who "invalid traversal order: ~a, should be one of 'in, 'pre and 'post" order)])
                  vec))]))
 
@@ -722,7 +722,7 @@
                        (display ")]" p)
                        (begin
                          (let ([n (treeset-size r)] [i 0])
-                           (rbtree-visit 'treeset-writer
+                           (rbset-visit 'treeset-writer
                                          (lambda (k v)
                                            (if (fx= i (fx1- n))
                                                (wr k p)

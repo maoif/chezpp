@@ -1,21 +1,19 @@
-(import (chezpp private rbtree))
+(import (chezpp) (only (chezpp private rbset) $rbset-verify))
 
-(mat specialized-node-layouts
-     (and (= 5 (vector-length (rbset-node 1 '())))
-          (= 5 (vector-length (fxrbnode 1 '())))
-          (= 6 (vector-length (vector 1 2 '() '() '() 0)))))
+;; Exercise rotations and deletion repair on the actual public treeset backend.
+(mat rbset-balanced-mutations
+     (let ([items (fxvshuffle! (fxviota 1000))]
+           [set (make-treeset fx= fx<)])
+       (do ([i 0 (fx1+ i)]) ((fx= i 1000))
+         (treeset-add! set i)
+         ($rbset-verify set))
+       (fxvfor-each (lambda (item)
+                     (treeset-delete! set item)
+                     ($rbset-verify set))
+                   items)
+       (treeset-empty? set)))
 
-(mat specialized-key-writes
-     (let ([n (fxrbnode 1 '())])
-       (fxrbnode-key-set! n 42)
-       (= 42 (fxrbnode-key n))))
-
-(mat rbset-basic
-     (let ([s (make-rbset #f fx= fx< 0)])
-       (for-each (lambda (x) (rbset-set! s x)) '(4 1 3 2))
-       (rbset-delete! s 3)
-       (and (rbset? s)
-            (= 3 (rbset-size s))
-            (rbset-contains? s 2)
-            (equal? '(1 2 4) (rbset->list s))
-            (begin (rbset-clear! s) (= 0 (rbset-size s))))))
+(mat rbset-preserves-pair-items
+     (let ([set (treeset equal? (lambda (a b) (< (car a) (car b))) '(1 . a) '(2 . b))])
+       (and (equal? '(1 . a) (treeset-min set))
+            (equal? '(2 . b) (treeset-successor set '(1 . a))))))

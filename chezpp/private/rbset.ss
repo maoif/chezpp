@@ -1,28 +1,28 @@
-(library (chezpp private rbtree)
-  (export rbtree make-rbtree rbtree-=? rbtree-<?
-          rbtree-ref rbtree-set! rbtree-delete!
-          rbtree-clear! rbtree-size
-          rbtree-contains? rbtree-contains/p?
-          rbtree-search
+(library (chezpp private rbset)
+  (export rbset make-rbset rbset-=? rbset-<?
+          rbset-ref rbset-set! rbset-delete!
+          rbset-clear! rbset-size
+          rbset-contains? rbset-contains/p?
+          rbset-search
 
-          rbtree-successor rbtree-predecessor
-          rbtree-min rbtree-max
+          rbset-successor rbset-predecessor
+          rbset-min rbset-max
 
-          rbtree-andmap rbtree-ormap
-          rbtree-map rbtree-map/i rbtree-map! rbtree-map/i!
-          rbtree-for-each rbtree-for-each/i
-          rbtree-fold-left rbtree-fold-left/i
-          rbtree-fold-right rbtree-fold-right/i
+          rbset-andmap rbset-ormap
+          rbset-map rbset-map/i rbset-map! rbset-map/i!
+          rbset-for-each rbset-for-each/i
+          rbset-fold-left rbset-fold-left/i
+          rbset-fold-right rbset-fold-right/i
 
-          rbtree-andmap1 rbtree-ormap1
-          rbtree-map1 rbtree-map/i1
-          rbtree-for-each1 rbtree-for-each/i1
-          rbtree-fold-left1 rbtree-fold-left/i1
-          rbtree-fold-right1 rbtree-fold-right/i1
+          rbset-andmap1 rbset-ormap1
+          rbset-map1 rbset-map/i1
+          rbset-for-each1 rbset-for-each/i1
+          rbset-fold-left1 rbset-fold-left/i1
+          rbset-fold-right1 rbset-fold-right/i1
 
-          rbtree-visit rbtree-visit-preorder rbtree-visit-postorder rbtree-visit-inorder
+          rbset-visit rbset-visit-preorder rbset-visit-postorder rbset-visit-inorder
 
-          $rbtree-verify rbtree->dot)
+          $rbset-verify rbset->dot)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils))
@@ -33,36 +33,38 @@
   ;; with the difference that in the textbook, nil nodes are defined per tree,
   ;; here however, the nil node is global.
 
+  ;; Nodes contain key, parent, left, right and color; no value slot is allocated.
+  ;; Private compatibility visitors supply #f to their unused value argument.
   ;; No type checking is performed here.
   ;; It is performed in treemap and treeset code.
 
   (define RED   0)
   (define BLACK 1)
 
-  (define mk-rbnode (lambda (k v p) (vector k v p null-rbnode null-rbnode RED)))
+  (define mk-rbnode (lambda (k v p) (vector k p null-rbnode null-rbnode RED)))
 
   ;; used as parent of root and children of leaves
   (define null-rbnode  '())
   (define null-rbnode? null?)
 
   (define rbnode-key    (lambda (n) (vector-ref n 0)))
-  (define rbnode-value  (lambda (n) (vector-ref n 1)))
-  (define rbnode-parent (lambda (n) (if (null-rbnode? n) n     (vector-ref n 2))))
-  (define rbnode-left   (lambda (n) (if (null-rbnode? n) n     (vector-ref n 3))))
-  (define rbnode-right  (lambda (n) (if (null-rbnode? n) n     (vector-ref n 4))))
-  (define rbnode-color  (lambda (n) (if (null-rbnode? n) BLACK (vector-ref n 5))))
+  (define rbnode-value  (lambda (n) #f))
+  (define rbnode-parent (lambda (n) (if (null-rbnode? n) n     (vector-ref n 1))))
+  (define rbnode-left   (lambda (n) (if (null-rbnode? n) n     (vector-ref n 2))))
+  (define rbnode-right  (lambda (n) (if (null-rbnode? n) n     (vector-ref n 3))))
+  (define rbnode-color  (lambda (n) (if (null-rbnode? n) BLACK (vector-ref n 4))))
 
   (define rbnode-key-set!    (lambda (n v) (vector-set! n 0 v)))
-  (define rbnode-value-set!  (lambda (n v) (vector-set! n 1 v)))
-  (define rbnode-parent-set! (lambda (n v) (unless (null-rbnode? n) (vector-set! n 2 v))))
-  (define rbnode-left-set!   (lambda (n v) (unless (null-rbnode? n) (vector-set! n 3 v))))
-  (define rbnode-right-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set! n 4 v))))
-  (define rbnode-color-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set-fixnum! n 5 v))))
+  (define rbnode-value-set!  (lambda (n v) (void)))
+  (define rbnode-parent-set! (lambda (n v) (unless (null-rbnode? n) (vector-set! n 1 v))))
+  (define rbnode-left-set!   (lambda (n v) (unless (null-rbnode? n) (vector-set! n 2 v))))
+  (define rbnode-right-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set! n 3 v))))
+  (define rbnode-color-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set-fixnum! n 4 v))))
 
-  (define rbnode-set-red!    (lambda (n) (unless (null-rbnode? n) (vector-set-fixnum! n 5 RED))))
-  (define rbnode-set-black!  (lambda (n) (unless (null-rbnode? n) (vector-set-fixnum! n 5 BLACK))))
-  (define rbnode-red?   (lambda (n) (if (null-rbnode? n) #f (fx= (vector-ref n 5) RED))))
-  (define rbnode-black? (lambda (n) (if (null-rbnode? n) #t (fx= (vector-ref n 5) BLACK))))
+  (define rbnode-set-red!    (lambda (n) (unless (null-rbnode? n) (vector-set-fixnum! n 4 RED))))
+  (define rbnode-set-black!  (lambda (n) (unless (null-rbnode? n) (vector-set-fixnum! n 4 BLACK))))
+  (define rbnode-red?   (lambda (n) (if (null-rbnode? n) #f (fx= (vector-ref n 4) RED))))
+  (define rbnode-black? (lambda (n) (if (null-rbnode? n) #t (fx= (vector-ref n 4) BLACK))))
 
   (define K rbnode-key)
   (define V rbnode-value)
@@ -84,7 +86,7 @@
   (define BLACK! rbnode-set-black!)
 
 
-  (define-record-type (rbtree mk-rbtree rbtree?)
+  (define-record-type (rbset mk-rbset rbset?)
     (nongenerative) (opaque #t)
     (fields (mutable root) (immutable =?) (immutable <?) (mutable size))
     (protocol
@@ -93,7 +95,7 @@
          (new null-rbnode =? <? size)))))
 
 
-  (define make-rbtree (lambda (who =? <?) (mk-rbtree =? <? 0)))
+  (define make-rbset (lambda (who =? <?) (mk-rbset =? <? 0)))
 
 
   (define rotate-left!
@@ -104,7 +106,7 @@
           (unless (null-rbnode? rL) (P! rL p))
           (let ([pP (P p)])
             (P! r pP)
-            (cond [(null-rbnode? pP) (rbtree-root-set! rbt r)]
+            (cond [(null-rbnode? pP) (rbset-root-set! rbt r)]
                   [(eq? p (L pP))    (L! pP r)]
                   [else              (R! pP r)])
             (L! r p)
@@ -117,7 +119,7 @@
           (unless (null-rbnode? lR) (P! lR p))
           (let ([pP (P p)])
             (P! l pP)
-            (cond [(null-rbnode? pP) (rbtree-root-set! rbt l)]
+            (cond [(null-rbnode? pP) (rbset-root-set! rbt l)]
                   [(eq? p (R pP))    (R! pP l)]
                   [else              (L! pP l)])
             (R! l p)
@@ -138,19 +140,19 @@
               (loop r))))))
 
 
-  (define rbtree-ref
+  (define rbset-ref
     (case-lambda
       [(who rbt k)
-       (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
-         (let loop ([n (rbtree-root rbt)])
+       (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+         (let loop ([n (rbset-root rbt)])
            (if (null-rbnode? n)
                (errorf who "key not found: ~a" k)
                (cond [(=? k (K n)) (V n)]
                      [(<? k (K n)) (loop (L n))]
                      [else  (loop (R n))]))))]
       [(who rbt k default)
-       (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
-         (let loop ([n (rbtree-root rbt)])
+       (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+         (let loop ([n (rbset-root rbt)])
            (if (null-rbnode? n)
                default
                (cond [(=? k (K n)) (V n)]
@@ -158,7 +160,7 @@
                      [else  (loop (R n))]))))]))
 
 
-  (define rbtree-set!
+  (define rbset-set!
     (lambda (who rbt k v)
       (define fix!
         (lambda (n)
@@ -196,31 +198,31 @@
                           (RED!   (P (P z)))
                           (rotate-left! rbt (P (P z)))
                           (loop z))))))
-            (BLACK! (rbtree-root rbt)))))
+            (BLACK! (rbset-root rbt)))))
 
-      (let ([root (rbtree-root rbt)] [=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
+      (let ([root (rbset-root rbt)] [=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
         ;; x: current node, y: parent of x
         (let loop ([x root] [y null-rbnode])
           (if (null-rbnode? x)
               ;; z is by default RED
               (let ([z (mk-rbnode k v y)])
-                (cond [(null-rbnode? y) (rbtree-root-set! rbt z)]
+                (cond [(null-rbnode? y) (rbset-root-set! rbt z)]
                       [(<? k (K y))     (L! y z)]
                       [else             (R! y z)])
                 (fix! z)
-                (rbtree-size-set! rbt (fx1+ (rbtree-size rbt))))
+                (rbset-size-set! rbt (fx1+ (rbset-size rbt))))
               (let ([kk (K x)])
                 (cond [(=? k kk) (V! x v)]
                       [(<? k kk) (loop (L x) x)]
                       [else      (loop (R x) x)])))))))
 
 
-  (define rbtree-delete!
+  (define rbset-delete!
     (lambda (who rbt k)
       (define fix!
         (lambda (x)
           (let loop ([x x])
-            (if (and (not (eq? x (rbtree-root rbt))) (BLACK? x))
+            (if (and (not (eq? x (rbset-root rbt))) (BLACK? x))
                 (if (eq? x (L (P x)))
                     (let ([w (let ([w (R (P x))])
                                (if (RED? w)
@@ -242,7 +244,7 @@
                             (BLACK! (P x))
                             (BLACK! (R w))
                             (rotate-left! rbt (P x))
-                            (loop (rbtree-root rbt)))))
+                            (loop (rbset-root rbt)))))
                     ;; symmetric case
                     (let ([w (let ([w (L (P x))])
                                (if (RED? w)
@@ -264,7 +266,7 @@
                             (BLACK! (P x))
                             (BLACK! (L w))
                             (rotate-right! rbt (P x))
-                            (loop (rbtree-root rbt))))))
+                            (loop (rbset-root rbt))))))
                 ;; must do this inside the loop
                 (BLACK! x)))))
       ;; from Java
@@ -286,7 +288,7 @@
               ;; transplant
               (P! replacement (P p))
               (cond
-               [(null-rbnode? (P p)) (rbtree-root-set! rbt replacement)]
+               [(null-rbnode? (P p)) (rbset-root-set! rbt replacement)]
                [(eq? p (L (P p)))    (L! (P p) replacement)]
                [else                 (R! (P p) replacement)])
               (L! p null-rbnode)
@@ -294,7 +296,7 @@
               (P! p null-rbnode)
               (when (BLACK? p) (fix! replacement))]
              [(null-rbnode? (P p))
-              (rbtree-root-set! rbt null-rbnode)]
+              (rbset-root-set! rbt null-rbnode)]
              [else (when (BLACK? p) (fix! p))
                    (unless (null-rbnode? (P p))
                      (cond [(eq? p (L (P p)))
@@ -304,28 +306,28 @@
                            [else (assert-unreachable)])
                      (P! p null-rbnode))]))))
 
-      (let ([root (rbtree-root rbt)] [=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
+      (let ([root (rbset-root rbt)] [=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
         (let loop ([x root])
           (if (null-rbnode? x)
               (errorf who "key not found: ~a" k)
               (let ([kk (K x)])
                 (cond [(=? k kk)
                        (delete! x)
-                       (rbtree-size-set! rbt (fx1- (rbtree-size rbt)))]
+                       (rbset-size-set! rbt (fx1- (rbset-size rbt)))]
                       [(<? k kk) (loop (L x))]
                       [else      (loop (R x))])))))))
 
 
-  (define rbtree-clear!
+  (define rbset-clear!
     (lambda (who rbt)
-      (rbtree-root-set! rbt null-rbnode)
-      (rbtree-size-set! rbt 0)))
+      (rbset-root-set! rbt null-rbnode)
+      (rbset-size-set! rbt 0)))
 
 
-  (define rbtree-contains?
+  (define rbset-contains?
     (lambda (who rbt k)
-      (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
-        (let loop ([n (rbtree-root rbt)])
+      (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+        (let loop ([n (rbset-root rbt)])
           (if (null-rbnode? n)
               #f
               (cond [(=? k (K n)) #t]
@@ -333,10 +335,10 @@
                     [else  (loop (R n))]))))))
 
 
-  (define rbtree-contains/p?
+  (define rbset-contains/p?
     (lambda (who rbt pred)
-      (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
-        (let loop ([n (rbtree-root rbt)])
+      (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+        (let loop ([n (rbset-root rbt)])
           (if (null-rbnode? n)
               #f
               (or (bool (pred (K n) (V n)))
@@ -344,9 +346,9 @@
                   (loop (R n))))))))
 
 
-  (define rbtree-search
+  (define rbset-search
     (lambda (who rbt pred)
-      (let loop ([n (rbtree-root rbt)])
+      (let loop ([n (rbset-root rbt)])
         (if (null-rbnode? n)
             #f
             (or (let ([k (K n)] [v (V n)])
@@ -355,7 +357,7 @@
                 (loop (R n)))))))
 
 
-  (define rbtree-successor
+  (define rbset-successor
     (lambda (who rbt k)
       (define successor
         (lambda (n)
@@ -368,8 +370,8 @@
                         [(eq? x (R xP))    (loop xP (P xP))]
                         [else              xP]))
                 (minimum r)))))
-      (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
-        (let loop ([n (rbtree-root rbt)])
+      (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+        (let loop ([n (rbset-root rbt)])
           (if (null-rbnode? n)
               (errorf who "key not found: ~a" k)
               (cond [(=? k (K n)) (let ([n (successor n)])
@@ -378,7 +380,7 @@
                     [else  (loop (R n))]))))))
 
 
-  (define rbtree-predecessor
+  (define rbset-predecessor
     (lambda (who rbt k)
       (define predecessor
         (lambda (n)
@@ -391,8 +393,8 @@
                         [(eq? x (L xP))    (loop xP (P xP))]
                         [else              xP]))
                 (maximum l)))))
-      (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
-        (let loop ([n (rbtree-root rbt)])
+      (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+        (let loop ([n (rbset-root rbt)])
           (if (null-rbnode? n)
               (errorf who "key not found: ~a" k)
               (cond [(=? k (K n)) (let ([n (predecessor n)])
@@ -401,18 +403,18 @@
                     [else  (loop (R n))]))))))
 
 
-  (define rbtree-min
+  (define rbset-min
     (lambda (who rbt)
-      (let ([root (rbtree-root rbt)])
+      (let ([root (rbset-root rbt)])
         (if (null-rbnode? root)
             #f
             (let ([n (minimum root)])
               (cons (K n) (V n)))))))
 
 
-  (define rbtree-max
+  (define rbset-max
     (lambda (who rbt)
-      (let ([root (rbtree-root rbt)])
+      (let ([root (rbset-root rbt)])
         (if (null-rbnode? root)
             #f
             (let ([n (maximum root)])
@@ -427,44 +429,44 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  (define rbtree-visit-preorder
+  (define rbset-visit-preorder
     (lambda (who proc rbt)
-      (let loop ([n (rbtree-root rbt)])
+      (let loop ([n (rbset-root rbt)])
         (unless (null-rbnode? n)
           (proc (K n) (V n))
           (loop (L n))
           (loop (R n))))))
 
 
-  (define rbtree-visit-postorder
+  (define rbset-visit-postorder
     (lambda (who proc rbt)
-      (let loop ([n (rbtree-root rbt)])
+      (let loop ([n (rbset-root rbt)])
         (unless (null-rbnode? n)
           (loop (L n))
           (loop (R n))
           (proc (K n) (V n))))))
 
 
-  (define rbtree-visit-inorder
+  (define rbset-visit-inorder
     (lambda (who proc rbt)
-      (let loop ([n (rbtree-root rbt)])
+      (let loop ([n (rbset-root rbt)])
         (unless (null-rbnode? n)
           (loop (L n))
           (proc (K n) (V n))
           (loop (R n))))))
 
-  (define rbtree-visit rbtree-visit-inorder)
+  (define rbset-visit rbset-visit-inorder)
 
 
   ;; return a procedure that when called, either return a node in order,
   ;; or #f if all nodes are visited
-  (define single-step-rbtree-left
+  (define single-step-rbset-left
     (lambda (rbt)
       ;; stack: '((n1 L) (n2 R) ...),
       ;; records the remainder of the tree to be visited
       (let ([stack '()])
         ;; locate the first node
-        (let ([n (rbtree-root rbt)])
+        (let ([n (rbset-root rbt)])
           (unless (null-rbnode? n)
             (let loop ([n n] [stk stack])
               (if (null-rbnode? n)
@@ -505,10 +507,10 @@
                           (loop (L n) (cons (cons n 'L) stk)))))))))))
 
   ;; symmetric case: walk the tree from the rightmost node
-  (define single-step-rbtree-right
+  (define single-step-rbset-right
     (lambda (rbt)
       (let ([stack '()])
-        (let ([n (rbtree-root rbt)])
+        (let ([n (rbset-root rbt)])
           (unless (null-rbnode? n)
             (let loop ([n n] [stk stack])
               (if (null-rbnode? n)
@@ -586,24 +588,24 @@
 
 ;;;; for treemap
 
-  (define rbtree-andmap
+  (define rbset-andmap
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (if (null-rbnode? n)
              #t
              (and (loop (L n))
                   (proc (K n) (V n))
                   (loop (R n)))))]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                #t
                (and (proc (K n0) (V n0) (K n1) (V n1))
                     (loop (iter0) (iter1))))))]
       [(who proc  rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                #t
@@ -611,24 +613,24 @@
                     (loop (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-ormap
+  (define rbset-ormap
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (if (null-rbnode? n)
              #f
              (or (loop (L n))
                  (proc (K n) (V n))
                  (loop (R n)))))]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                #f
                (or (proc (K n0) (V n0) (K n1) (V n1))
                    (loop (iter0) (iter1))))))]
       [(who proc  rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                #f
@@ -637,74 +639,74 @@
 
 
   ;; newrbt: the new tree to be returned
-  (define rbtree-map
+  (define rbset-map
     (case-lambda
       [(who proc newrbt rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (unless (null-rbnode? n)
            (loop (L n))
            (let-values ([(k v) (proc (K n) (V n))])
-             (rbtree-set! who newrbt k v))
+             (rbset-set! who newrbt k v))
            (loop (R n))))
        newrbt]
       [(who proc newrbt rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                newrbt
                (let-values ([(k v) (proc (K n0) (V n0) (K n1) (V n1))])
-                 (rbtree-set! who newrbt k v)
+                 (rbset-set! who newrbt k v)
                  (loop (iter0) (iter1))))))]
       [(who proc newrbt rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                newrbt
                (let-values ([(k v) (apply proc (K n0) (V n0) (kv* n*))])
-                 (rbtree-set! who newrbt k v)
+                 (rbset-set! who newrbt k v)
                  (loop (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-map/i
+  (define rbset-map/i
     (case-lambda
       [(who proc newrbt rbt0)
-       (let loop ([n (rbtree-root rbt0)] [i 0])
+       (let loop ([n (rbset-root rbt0)] [i 0])
          (if (null-rbnode? n)
              i
              (let ([i (loop (L n) i)])
                (let-values ([(k v) (proc i (K n) (V n))])
-                 (rbtree-set! who newrbt k v))
+                 (rbset-set! who newrbt k v))
                (loop (R n) (fx1+ i)))))
        newrbt]
       [(who proc newrbt rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([i 0] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                newrbt
                (let-values ([(k v) (proc i (K n0) (V n0) (K n1) (V n1))])
-                 (rbtree-set! who newrbt k v)
+                 (rbset-set! who newrbt k v)
                  (loop (fx1+ i) (iter0) (iter1))))))]
       [(who proc newrbt rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([i 0] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                newrbt
                (let-values ([(k v) (apply proc i (K n0) (V n0) (kv* n*))])
-                 (rbtree-set! who newrbt k v)
+                 (rbset-set! who newrbt k v)
                  (loop (fx1+ i) (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-map!
+  (define rbset-map!
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (unless (null-rbnode? n)
            (loop (L n))
            (V! n (proc (K n) (V n)))
            (loop (R n))))
        rbt0]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (let ([v (proc (K n0) (V n0) (K n1) (V n1))])
@@ -712,7 +714,7 @@
                (loop (iter0) (iter1))))))
        rbt0]
       [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (let ([v (apply proc (K n0) (V n0) (kv* n*))])
@@ -721,10 +723,10 @@
        rbt0]))
 
 
-  (define rbtree-map/i!
+  (define rbset-map/i!
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [i 0])
+       (let loop ([n (rbset-root rbt0)] [i 0])
          (if (null-rbnode? n)
              i
              (let ([i (loop (L n) i)])
@@ -732,7 +734,7 @@
                (loop (R n) (fx1+ i)))))
        rbt0]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([i 0] [n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (let ([v (proc i (K n0) (V n0) (K n1) (V n1))])
@@ -740,7 +742,7 @@
                (loop (fx1+ i) (iter0) (iter1))))))
        rbt0]
       [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([i 0] [n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (let ([v (apply proc i (K n0) (V n0) (kv* n*))])
@@ -749,68 +751,68 @@
        rbt0]))
 
 
-  (define rbtree-for-each
+  (define rbset-for-each
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (unless (null-rbnode? n)
            (loop (L n))
            (proc (K n) (V n))
            (loop (R n))))]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (proc (K n0) (V n0) (K n1) (V n1))
              (loop (iter0) (iter1)))))]
       [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (apply proc (K n0) (V n0) (kv* n*))
              (loop (iter0) (map exe iter*)))))]))
 
 
-  (define rbtree-for-each/i
+  (define rbset-for-each/i
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [i 0])
+       (let loop ([n (rbset-root rbt0)] [i 0])
          (if (null-rbnode? n)
              i
              (let ([i (loop (L n) i)])
                (proc i (K n) (V n))
                (loop (R n) (fx1+ i)))))]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([i 0] [n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (proc i (K n0) (V n0) (K n1) (V n1))
              (loop (fx1+ i) (iter0) (iter1)))))]
       [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([i 0] [n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (apply proc i (K n0) (V n0) (kv* n*))
              (loop (fx1+ i) (iter0) (map exe iter*)))))]))
 
 
-  (define rbtree-fold-left
+  (define rbset-fold-left
     (case-lambda
       [(who proc acc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [acc acc])
+       (let loop ([n (rbset-root rbt0)] [acc acc])
          (if (null-rbnode? n)
              acc
              (let ([acc (loop (L n) acc)])
                (loop (R n) (proc acc (K n) (V n))))))]
       [(who proc acc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([acc acc] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                acc
                (let ([acc (proc acc (K n0) (V n0) (K n1) (V n1))])
                  (loop acc (iter0) (iter1))))))]
       [(who proc acc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([acc acc] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                acc
@@ -818,25 +820,25 @@
                  (loop acc (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-fold-left/i
+  (define rbset-fold-left/i
     (case-lambda
       [(who proc acc rbt0)
        (let-values ([(acc i)
-                     (let loop ([n (rbtree-root rbt0)] [acc acc] [i 0])
+                     (let loop ([n (rbset-root rbt0)] [acc acc] [i 0])
                        (if (null-rbnode? n)
                            (values acc i)
                            (let-values ([(acc i) (loop (L n) acc i)])
                              (loop (R n) (proc i acc (K n) (V n)) (fx1+ i)))))])
          acc)]
       [(who proc acc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([i 0] [acc acc] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                acc
                (let ([acc (proc i acc (K n0) (V n0) (K n1) (V n1))])
                  (loop (fx1+ i) acc (iter0) (iter1))))))]
       [(who proc acc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([i 0] [acc acc] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                acc
@@ -844,23 +846,23 @@
                  (loop (fx1+ i) acc (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-fold-right
+  (define rbset-fold-right
     (case-lambda
       [(who proc acc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [acc acc])
+       (let loop ([n (rbset-root rbt0)] [acc acc])
          (if (null-rbnode? n)
              acc
              (let ([acc (loop (R n) acc)])
                (loop (L n) (proc (K n) (V n) acc)))))]
       [(who proc acc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-right rbt0)] [iter1 (single-step-rbtree-right rbt1)])
+       (let ([iter0 (single-step-rbset-right rbt0)] [iter1 (single-step-rbset-right rbt1)])
          (let loop ([acc acc] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                acc
                (let ([acc (proc (K n0) (V n0) (K n1) (V n1) acc)])
                  (loop acc (iter0) (iter1))))))]
       [(who proc acc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-right rbt0)] [iter* (map single-step-rbtree-right rbt*)])
+       (let ([iter0 (single-step-rbset-right rbt0)] [iter* (map single-step-rbset-right rbt*)])
          (let loop ([acc acc] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                acc
@@ -868,25 +870,25 @@
                  (loop acc (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-fold-right/i
+  (define rbset-fold-right/i
     (case-lambda
       [(who proc acc rbt0)
        (let-values ([(acc i)
-                     (let loop ([n (rbtree-root rbt0)] [acc acc] [i (fx1- (rbtree-size rbt0))])
+                     (let loop ([n (rbset-root rbt0)] [acc acc] [i (fx1- (rbset-size rbt0))])
                        (if (null-rbnode? n)
                            (values acc i)
                            (let-values ([(acc i) (loop (R n) acc i)])
                              (loop (L n) (proc i (K n) (V n) acc) (fx1- i)))))])
          acc)]
       [(who proc acc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-right rbt0)] [iter1 (single-step-rbtree-right rbt1)])
+       (let ([iter0 (single-step-rbset-right rbt0)] [iter1 (single-step-rbset-right rbt1)])
          (let loop ([i 0] [acc acc] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                acc
                (let ([acc (proc i (K n0) (V n0) (K n1) (V n1) acc)])
                  (loop (fx1+ i) acc (iter0) (iter1))))))]
       [(who proc acc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-right rbt0)] [iter* (map single-step-rbtree-right rbt*)])
+       (let ([iter0 (single-step-rbset-right rbt0)] [iter* (map single-step-rbset-right rbt*)])
          (let loop ([i 0] [acc acc] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                acc
@@ -900,24 +902,24 @@
   (define SV #f)
 
 
-  (define rbtree-andmap1
+  (define rbset-andmap1
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (if (null-rbnode? n)
              #t
              (and (loop (L n))
                   (proc (K n))
                   (loop (R n)))))]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                #t
                (and (proc (K n0) (K n1))
                     (loop (iter0) (iter1))))))]
       [(who proc  rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                #t
@@ -925,24 +927,24 @@
                     (loop (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-ormap1
+  (define rbset-ormap1
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (if (null-rbnode? n)
              #f
              (or (loop (L n))
                  (proc (K n))
                  (loop (R n)))))]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                #f
                (or (proc (K n0) (K n1))
                    (loop (iter0) (iter1))))))]
       [(who proc  rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                #f
@@ -950,125 +952,125 @@
                    (loop (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-map1
+  (define rbset-map1
     (case-lambda
       [(who proc newrbt rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (unless (null-rbnode? n)
            (loop (L n))
            (let ([v (proc (K n))])
-             (rbtree-set! who newrbt v SV))
+             (rbset-set! who newrbt v SV))
            (loop (R n))))
        newrbt]
       [(who proc newrbt rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                newrbt
                (let ([v (proc (K n0) (K n1))])
-                 (rbtree-set! who newrbt v SV)
+                 (rbset-set! who newrbt v SV)
                  (loop (iter0) (iter1))))))]
       [(who proc newrbt rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                newrbt
                (let ([v (apply proc (K n0) (k* n*))])
-                 (rbtree-set! who newrbt v SV)
+                 (rbset-set! who newrbt v SV)
                  (loop (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-map/i1
+  (define rbset-map/i1
     (case-lambda
       [(who proc newrbt rbt0)
-       (let loop ([n (rbtree-root rbt0)] [i 0])
+       (let loop ([n (rbset-root rbt0)] [i 0])
          (if (null-rbnode? n)
              i
              (let ([i (loop (L n) i)])
                (let ([v (proc i (K n))])
-                 (rbtree-set! who newrbt v SV))
+                 (rbset-set! who newrbt v SV))
                (loop (R n) (fx1+ i)))))
        newrbt]
       [(who proc newrbt rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([i 0] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                newrbt
                (let ([v (proc i (K n0) (K n1))])
-                 (rbtree-set! who newrbt v SV)
+                 (rbset-set! who newrbt v SV)
                  (loop (fx1+ i) (iter0) (iter1))))))]
       [(who proc newrbt rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([i 0] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                newrbt
                (let ([v (apply proc i (K n0) (k* n*))])
-                 (rbtree-set! who newrbt v SV)
+                 (rbset-set! who newrbt v SV)
                  (loop (fx1+ i) (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-for-each1
+  (define rbset-for-each1
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
+       (let loop ([n (rbset-root rbt0)])
          (unless (null-rbnode? n)
            (loop (L n))
            (proc (K n))
            (loop (R n))))]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (proc (K n0) (K n1))
              (loop (iter0) (iter1)))))]
       [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (apply proc (K n0) (k* n*))
              (loop (iter0) (map exe iter*)))))]))
 
 
-  (define rbtree-for-each/i1
+  (define rbset-for-each/i1
     (case-lambda
       [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [i 0])
+       (let loop ([n (rbset-root rbt0)] [i 0])
          (if (null-rbnode? n)
              i
              (let ([i (loop (L n) i)])
                (proc i (K n))
                (loop (R n) (fx1+ i)))))]
       [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([i 0] [n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (proc i (K n0) (K n1))
              (loop (fx1+ i) (iter0) (iter1)))))]
       [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([i 0] [n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (apply proc i (K n0) (k* n*))
              (loop (fx1+ i) (iter0) (map exe iter*)))))]))
 
 
-  (define rbtree-fold-left1
+  (define rbset-fold-left1
     (case-lambda
       [(who proc acc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [acc acc])
+       (let loop ([n (rbset-root rbt0)] [acc acc])
          (if (null-rbnode? n)
              acc
              (let ([acc (loop (L n) acc)])
                (loop (R n) (proc acc (K n))))))]
       [(who proc acc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([acc acc] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                acc
                (let ([acc (proc acc (K n0) (K n1))])
                  (loop acc (iter0) (iter1))))))]
       [(who proc acc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([acc acc] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                acc
@@ -1076,25 +1078,25 @@
                  (loop acc (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-fold-left/i1
+  (define rbset-fold-left/i1
     (case-lambda
       [(who proc acc rbt0)
        (let-values ([(acc i)
-                     (let loop ([n (rbtree-root rbt0)] [acc acc] [i 0])
+                     (let loop ([n (rbset-root rbt0)] [acc acc] [i 0])
                        (if (null-rbnode? n)
                            (values acc i)
                            (let-values ([(acc i) (loop (L n) acc i)])
                              (loop (R n) (proc i acc (K n)) (fx1+ i)))))])
          acc)]
       [(who proc acc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter1 (single-step-rbset-left rbt1)])
          (let loop ([i 0] [acc acc] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                acc
                (let ([acc (proc i acc (K n0) (K n1))])
                  (loop (fx1+ i) acc (iter0) (iter1))))))]
       [(who proc acc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+       (let ([iter0 (single-step-rbset-left rbt0)] [iter* (map single-step-rbset-left rbt*)])
          (let loop ([i 0] [acc acc] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                acc
@@ -1102,23 +1104,23 @@
                  (loop (fx1+ i) acc (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-fold-right1
+  (define rbset-fold-right1
     (case-lambda
       [(who proc acc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [acc acc])
+       (let loop ([n (rbset-root rbt0)] [acc acc])
          (if (null-rbnode? n)
              acc
              (let ([acc (loop (R n) acc)])
                (loop (L n) (proc (K n) acc)))))]
       [(who proc acc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-right rbt0)] [iter1 (single-step-rbtree-right rbt1)])
+       (let ([iter0 (single-step-rbset-right rbt0)] [iter1 (single-step-rbset-right rbt1)])
          (let loop ([acc acc] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                acc
                (let ([acc (proc (K n0) (K n1) acc)])
                  (loop acc (iter0) (iter1))))))]
       [(who proc acc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-right rbt0)] [iter* (map single-step-rbtree-right rbt*)])
+       (let ([iter0 (single-step-rbset-right rbt0)] [iter* (map single-step-rbset-right rbt*)])
          (let loop ([acc acc] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                acc
@@ -1126,25 +1128,25 @@
                  (loop acc (iter0) (map exe iter*))))))]))
 
 
-  (define rbtree-fold-right/i1
+  (define rbset-fold-right/i1
     (case-lambda
       [(who proc acc rbt0)
        (let-values ([(acc i)
-                     (let loop ([n (rbtree-root rbt0)] [acc acc] [i (fx1- (rbtree-size rbt0))])
+                     (let loop ([n (rbset-root rbt0)] [acc acc] [i (fx1- (rbset-size rbt0))])
                        (if (null-rbnode? n)
                            (values acc i)
                            (let-values ([(acc i) (loop (R n) acc i)])
                              (loop (L n) (proc i (K n) acc) (fx1- i)))))])
          acc)]
       [(who proc acc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-right rbt0)] [iter1 (single-step-rbtree-right rbt1)])
+       (let ([iter0 (single-step-rbset-right rbt0)] [iter1 (single-step-rbset-right rbt1)])
          (let loop ([i 0] [acc acc] [n0 (iter0)] [n1 (iter1)])
            (if (not (or n0 n1))
                acc
                (let ([acc (proc i (K n0) (K n1) acc)])
                  (loop (fx1+ i) acc (iter0) (iter1))))))]
       [(who proc acc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-right rbt0)] [iter* (map single-step-rbtree-right rbt*)])
+       (let ([iter0 (single-step-rbset-right rbt0)] [iter* (map single-step-rbset-right rbt*)])
          (let loop ([i 0] [acc acc] [n0 (iter0)] [n* (map exe iter*)])
            (if (not (or n0 (ormap id n*)))
                acc
@@ -1159,7 +1161,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  (define rbtree->dot
+  (define rbset->dot
     (lambda (T path)
       ;; if file exists, error
       (call-with-output-file path
@@ -1170,7 +1172,7 @@
           (put-string p "node [style=filled,color=black,fontcolor=white,fontname=monospace];")
           (fresh-line p)
           (let ([nodes '()])
-            (let ([tree (rbtree-root T)])
+            (let ([tree (rbset-root T)])
               (unless (null-rbnode? tree)
                 (let loop ([tree tree])
                   (let ([left (L tree)]
@@ -1203,9 +1205,9 @@
   4. If a node is red, then both its children are black.
   5. For each node, all simple paths from the node to descendant leaves contain the same number of black nodes.
   |#
-  (define-who $rbtree-verify
+  (define-who $rbset-verify
     (lambda (rbt)
-      (let ([root (rbtree-root rbt)] [=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)] [bhs '()])
+      (let ([root (rbset-root rbt)] [=? (rbset-=? rbt)] [<? (rbset-<? rbt)] [bhs '()])
         (unless (null-rbnode? root)
           (unless (BLACK? root) (errorf who "root is not black"))
           (let loop ([n root] [h 0] [bh 0])
@@ -1224,15 +1226,15 @@
 
 
   (record-type-equal-procedure
-   (type-descriptor rbtree)
+   (type-descriptor rbset)
    (lambda (rbt1 rbt2 =?)
-     (let ([=?1 (rbtree-=? rbt1)] [=?2 (rbtree-=? rbt2)]
-           [<?1 (rbtree-<? rbt1)] [<?2 (rbtree-<? rbt2)])
+     (let ([=?1 (rbset-=? rbt1)] [=?2 (rbset-=? rbt2)]
+           [<?1 (rbset-<? rbt1)] [<?2 (rbset-<? rbt2)])
        (and (eq? =?1 =?2)
             (eq? <?1 <?2)
-            (fx= (rbtree-size rbt1) (rbtree-size rbt2))
+            (fx= (rbset-size rbt1) (rbset-size rbt2))
             ;; trees are equal if they contain the same kvs in order
-            (let ([iter1 (single-step-rbtree-left rbt1)] [iter2 (single-step-rbtree-left rbt2)])
+            (let ([iter1 (single-step-rbset-left rbt1)] [iter2 (single-step-rbset-left rbt2)])
               (let loop ([n1 (iter1)] [n2 (iter2)])
                 (if (not (or n1 n2))
                     #t
@@ -1242,3 +1244,4 @@
                          (loop (iter1) (iter2))))))))))
 
   )
+
