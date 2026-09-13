@@ -22,7 +22,9 @@
 
           rbtree-visit rbtree-visit-preorder rbtree-visit-postorder rbtree-visit-inorder
 
-          $rbtree-verify rbtree->dot)
+          $rbtree-verify rbtree->dot
+          fxrbnode fxrbnode-key fxrbnode-key-set!
+          rbset-node rbset-node-key rbset-node-key-set!)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils))
@@ -38,6 +40,21 @@
 
   (define RED   0)
   (define BLACK 1)
+
+  ;; Specialized node layouts used by fixnum maps and value-free sets.
+  ;; These constructors keep fixnum keys unboxed in vector slots.
+  (define fxrbnode
+    (lambda (k p)
+      (vector k p null-rbnode null-rbnode RED)))
+  (define fxrbnode-key (lambda (n) (vector-ref n 0)))
+  (define fxrbnode-key-set!
+    (lambda (n k) (vector-set-fixnum! n 0 k)))
+  (define rbset-node
+    (lambda (k p)
+      (vector k p null-rbnode null-rbnode RED)))
+  (define rbset-node-key (lambda (n) (vector-ref n 0)))
+  (define rbset-node-key-set!
+    (lambda (n k) (vector-set! n 0 k)))
 
   (define mk-rbnode (lambda (k v p) (vector k v p null-rbnode null-rbnode RED)))
 
