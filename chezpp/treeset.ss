@@ -35,7 +35,7 @@
 
   (define-record-type ($fixnum-treeset mk-fixnum-treeset fixnum-treeset?)
     (parent rbset) (nongenerative) (opaque #t)
-    (protocol (lambda (pnew) (lambda (=? <? size) ((pnew =? <? size))))))
+    (protocol (lambda (pnew) (lambda (=? <? size) ((pnew =? <? size #t))))))
   (define treeset? (lambda (x) (or (treeset-record? x) (fixnum-treeset? x))))
 
   #|proc:make-fixnum-treeset
@@ -50,6 +50,11 @@
   (define V #f)
 
 
+
+  (define make-treeset-like
+    (lambda (source)
+      ((if (fixnum-treeset? source) make-fixnum-treeset make-treeset)
+       (rbset-=? source) (rbset-<? source))))
 
   #|doc
   Construct a treeset object.
@@ -242,7 +247,7 @@
   (define-who treeset-filter
     (lambda (pred ts)
       (pcheck ([procedure? pred] [treeset? ts])
-              (let ([newts (make-treeset (rbset-=? ts) (rbset-<? ts))])
+              (let ([newts (make-treeset-like ts)])
                 (rbset-visit who (lambda (k v) (when (pred k) (rbset-set! who newts k V))) ts)
                 newts))))
 
@@ -271,8 +276,8 @@
   (define-who treeset-partition
     (lambda (pred ts)
       (pcheck ([procedure? pred] [treeset? ts])
-              (let ([T (make-treeset (rbset-=? ts) (rbset-<? ts))]
-                    [F (make-treeset (rbset-=? ts) (rbset-<? ts))])
+              (let ([T (make-treeset-like ts)]
+                    [F (make-treeset-like ts)])
                 (rbset-visit who (lambda (k v) (if (pred k)
                                                     (rbset-set! who T k V)
                                                     (rbset-set! who F k V)))
@@ -300,7 +305,7 @@
               (if (null? ts*)
                   ts
                   (pcheck ([all-treesets? ts*])
-                          (let ([newts (make-treeset (rbset-=? ts) (rbset-<? ts))])
+                          (let ([newts (make-treeset-like ts)])
                             (for-each (lambda (ts)
                                         (rbset-visit who
                                                       (lambda (k v)
@@ -323,7 +328,7 @@
               (if (null? ts*)
                   ts
                   (pcheck ([all-treesets? ts*])
-                          (let ([newts (make-treeset (rbset-=? ts) (rbset-<? ts))])
+                          (let ([newts (make-treeset-like ts)])
                             (rbset-visit who (lambda (k v) (rbset-set! who newts k V)) ts)
                             (for-each (lambda (ts)
                                         (rbset-visit who
@@ -371,7 +376,7 @@
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (let ([newts (make-treeset (rbset-=? ts) (rbset-<? ts))]
+                  (let ([newts (make-treeset-like ts)]
                         [lb (make-list-builder)])
                     ;; union
                     (for-each (lambda (ts)
@@ -521,30 +526,30 @@
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbset-map1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0))]
+               (rbset-map1 who proc (make-treeset-like ts0) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbset-map1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0 ts1))]
+               (rbset-map1 who proc (make-treeset-like ts0) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbset-map1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0 ts*))]))
+               (apply rbset-map1 who proc (make-treeset-like ts0) ts0 ts*))]))
 
 
   (define-who treeset-map/i
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [treeset? ts0])
-               (rbset-map/i1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0))]
+               (rbset-map/i1 who proc (make-treeset-like ts0) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [treeset? ts0 ts1])
                (check-size who ts0 ts1)
-               (rbset-map/i1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0 ts1))]
+               (rbset-map/i1 who proc (make-treeset-like ts0) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [treeset? ts0] [all-treesets? ts*])
                (apply check-size who ts0 ts*)
-               (apply rbset-map/i1 who proc (make-treeset (rbset-=? ts0) (rbset-<? ts0)) ts0 ts*))]))
+               (apply rbset-map/i1 who proc (make-treeset-like ts0) ts0 ts*))]))
 
 
   (define-who treeset-for-each

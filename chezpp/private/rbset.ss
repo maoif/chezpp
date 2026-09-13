@@ -88,11 +88,12 @@
 
   (define-record-type (rbset mk-rbset rbset?)
     (nongenerative) (opaque #t)
-    (fields (mutable root) (immutable =?) (immutable <?) (mutable size))
+    (fields (mutable root) (immutable =?) (immutable <?) (mutable size) (immutable fixnum-keys?))
     (protocol
      (lambda (new)
-       (lambda (=? <? size)
-         (new null-rbnode =? <? size)))))
+       (case-lambda
+         [(=? <? size) (new null-rbnode =? <? size #f)]
+         [(=? <? size fixnum-keys?) (new null-rbnode =? <? size fixnum-keys?)]))))
 
 
   (define make-rbset (lambda (who =? <?) (mk-rbset =? <? 0)))
@@ -143,6 +144,7 @@
   (define rbset-ref
     (case-lambda
       [(who rbt k)
+       (rbset-check-key who rbt k)
        (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
          (let loop ([n (rbset-root rbt)])
            (if (null-rbnode? n)
@@ -151,6 +153,7 @@
                      [(<? k (K n)) (loop (L n))]
                      [else  (loop (R n))]))))]
       [(who rbt k default)
+       (rbset-check-key who rbt k)
        (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
          (let loop ([n (rbset-root rbt)])
            (if (null-rbnode? n)
@@ -160,7 +163,18 @@
                      [else  (loop (R n))]))))]))
 
 
+  (define rbset-check-key
+    (lambda (who tree key)
+      (when (rbset-fixnum-keys? tree)
+        (pcheck ([fixnum? key]) (void)))))
+
   (define rbset-set!
+    (lambda (who tree key value)
+      (if (rbset-fixnum-keys? tree)
+          (pcheck ([fixnum? key]) (rbset-set/fixnum! who tree key value))
+          (rbset-set/generic! who tree key value))))
+
+  (define rbset-set/generic!
     (lambda (who rbt k v)
       (define fix!
         (lambda (n)
@@ -217,7 +231,72 @@
                       [else      (loop (R x) x)])))))))
 
 
+  (define rbset-set/fixnum!
+    (lambda (who rbt k v)
+      (define fix!
+        (lambda (n)
+          (let loop ([z n])
+            (when (and (not (null-rbnode? z)) (RED? (P z)))
+              (if (eq? (P z) (L (P (P z))))
+                  (let ([y (R (P (P z)))])
+                    (if (RED? y)
+                        (begin (BLACK! (P z))
+                               (BLACK! y)
+                               (RED! (P (P z)))
+                               (loop (P (P z))))
+                        (let ([z (if (eq? z (R (P z)))
+                                     (let ([zP (P z)])
+                                       (rotate-left! rbt zP)
+                                       zP)
+                                     z)])
+                          (BLACK! (P z))
+                          (RED!   (P (P z)))
+                          (rotate-right! rbt (P (P z)))
+                          (loop z))))
+                  ;; symmetric case
+                  (let ([y (L (P (P z)))])
+                    (if (RED? y)
+                        (begin (BLACK! (P z))
+                               (BLACK! y)
+                               (RED! (P (P z)))
+                               (loop (P (P z))))
+                        (let ([z (if (eq? z (L (P z)))
+                                     (let ([zP (P z)])
+                                       (rotate-right! rbt zP)
+                                       zP)
+                                     z)])
+                          (BLACK! (P z))
+                          (RED!   (P (P z)))
+                          (rotate-left! rbt (P (P z)))
+                          (loop z))))))
+            (BLACK! (rbset-root rbt)))))
+
+      (let ([root (rbset-root rbt)] [=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+        ;; x: current node, y: parent of x
+        (let loop ([x root] [y null-rbnode])
+          (if (null-rbnode? x)
+              ;; z is by default RED
+              (let ([z (let ([node (vector 0 y null-rbnode null-rbnode RED)])
+                         (vector-set-fixnum! node 0 k)
+                         node)])
+                (cond [(null-rbnode? y) (rbset-root-set! rbt z)]
+                      [(<? k (K y))     (L! y z)]
+                      [else             (R! y z)])
+                (fix! z)
+                (rbset-size-set! rbt (fx1+ (rbset-size rbt))))
+              (let ([kk (K x)])
+                (cond [(=? k kk) (V! x v)]
+                      [(<? k kk) (loop (L x) x)]
+                      [else      (loop (R x) x)])))))))
+
+
   (define rbset-delete!
+    (lambda (who tree key)
+      (if (rbset-fixnum-keys? tree)
+          (pcheck ([fixnum? key]) (rbset-delete/fixnum! who tree key))
+          (rbset-delete/generic! who tree key))))
+
+  (define rbset-delete/generic!
     (lambda (who rbt k)
       (define fix!
         (lambda (x)
@@ -318,6 +397,107 @@
                       [else      (loop (R x))])))))))
 
 
+  (define rbset-delete/fixnum!
+    (lambda (who rbt k)
+      (define fix!
+        (lambda (x)
+          (let loop ([x x])
+            (if (and (not (eq? x (rbset-root rbt))) (BLACK? x))
+                (if (eq? x (L (P x)))
+                    (let ([w (let ([w (R (P x))])
+                               (if (RED? w)
+                                   (begin (BLACK! w)
+                                          (RED!   (P x))
+                                          (rotate-left! rbt (P x))
+                                          (R (P x)))
+                                   w))])
+                      (if (and (BLACK? (L w)) (BLACK? (R w)))
+                          (begin (RED! w)
+                                 (loop (P x)))
+                          (let ([w (if (BLACK? (R w))
+                                       (begin (BLACK! (L w))
+                                              (RED!   w)
+                                              (rotate-right! rbt w)
+                                              (R (P x)))
+                                       w)])
+                            (C! w (C (P x)))
+                            (BLACK! (P x))
+                            (BLACK! (R w))
+                            (rotate-left! rbt (P x))
+                            (loop (rbset-root rbt)))))
+                    ;; symmetric case
+                    (let ([w (let ([w (L (P x))])
+                               (if (RED? w)
+                                   (begin (BLACK! w)
+                                          (RED!   (P x))
+                                          (rotate-right! rbt (P x))
+                                          (L (P x)))
+                                   w))])
+                      (if (and (BLACK? (R w)) (BLACK? (L w)))
+                          (begin (RED! w)
+                                 (loop (P x)))
+                          (let ([w (if (BLACK? (L w))
+                                       (begin (BLACK! (R w))
+                                              (RED!   w)
+                                              (rotate-left! rbt w)
+                                              (L (P x)))
+                                       w)])
+                            (C! w (C (P x)))
+                            (BLACK! (P x))
+                            (BLACK! (L w))
+                            (rotate-right! rbt (P x))
+                            (loop (rbset-root rbt))))))
+                ;; must do this inside the loop
+                (BLACK! x)))))
+      ;; from Java
+      (define delete!
+        (lambda (p)
+          (let* ([p (if (and (not (null-rbnode? (L p)))
+                             (not (null-rbnode? (R p))))
+                        (let ([s (minimum (R p))])
+                          (vector-set-fixnum! p 0 (K s))
+                          (V! p (V s))
+                          s)
+                        p)]
+                 [replacement (if (not (null-rbnode? (L p)))
+                                  (L p)
+                                  ;; (R p) could also be null
+                                  (R p))])
+            (cond
+             [(not (null-rbnode? replacement))
+              ;; transplant
+              (P! replacement (P p))
+              (cond
+               [(null-rbnode? (P p)) (rbset-root-set! rbt replacement)]
+               [(eq? p (L (P p)))    (L! (P p) replacement)]
+               [else                 (R! (P p) replacement)])
+              (L! p null-rbnode)
+              (R! p null-rbnode)
+              (P! p null-rbnode)
+              (when (BLACK? p) (fix! replacement))]
+             [(null-rbnode? (P p))
+              (rbset-root-set! rbt null-rbnode)]
+             [else (when (BLACK? p) (fix! p))
+                   (unless (null-rbnode? (P p))
+                     (cond [(eq? p (L (P p)))
+                            (L! (P p) null-rbnode)]
+                           [(eq? p (R (P p)))
+                            (R! (P p) null-rbnode)]
+                           [else (assert-unreachable)])
+                     (P! p null-rbnode))]))))
+
+      (let ([root (rbset-root rbt)] [=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+        (let loop ([x root])
+          (if (null-rbnode? x)
+              (errorf who "key not found: ~a" k)
+              (let ([kk (K x)])
+                (cond [(=? k kk)
+                       (delete! x)
+                       (rbset-size-set! rbt (fx1- (rbset-size rbt)))]
+                      [(<? k kk) (loop (L x))]
+                      [else      (loop (R x))])))))))
+
+
   (define rbset-clear!
     (lambda (who rbt)
       (rbset-root-set! rbt null-rbnode)
@@ -326,6 +506,7 @@
 
   (define rbset-contains?
     (lambda (who rbt k)
+      (rbset-check-key who rbt k)
       (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
         (let loop ([n (rbset-root rbt)])
           (if (null-rbnode? n)
@@ -370,6 +551,7 @@
                         [(eq? x (R xP))    (loop xP (P xP))]
                         [else              xP]))
                 (minimum r)))))
+      (rbset-check-key who rbt k)
       (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
         (let loop ([n (rbset-root rbt)])
           (if (null-rbnode? n)
@@ -393,6 +575,7 @@
                         [(eq? x (L xP))    (loop xP (P xP))]
                         [else              xP]))
                 (maximum l)))))
+      (rbset-check-key who rbt k)
       (let ([=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
         (let loop ([n (rbset-root rbt)])
           (if (null-rbnode? n)
@@ -1244,4 +1427,3 @@
                          (loop (iter1) (iter2))))))))))
 
   )
-

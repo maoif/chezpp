@@ -39,7 +39,7 @@
   (define-record-type ($fixnum-treemap mk-fixnum-treemap fixnum-treemap?)
     (parent rbtree) (nongenerative) (opaque #t)
     (protocol (lambda (pnew)
-                (lambda (=? <? size) ((pnew =? <? size))))))
+                (lambda (=? <? size) ((pnew =? <? size #t))))))
 
   #|proc:make-fixnum-treemap
   Construct a treemap whose keys are exact fixnums.
@@ -49,6 +49,11 @@
     (lambda (=? <?)
       (pcheck ([procedure? =? <?]) (mk-fixnum-treemap =? <? 0))))
 
+
+  (define make-treemap-like
+    (lambda (source)
+      ((if (fixnum-treemap? source) make-fixnum-treemap make-treemap)
+       (rbtree-=? source) (rbtree-<? source))))
 
   #|doc
   Construct a treemap object.
@@ -318,7 +323,7 @@
   (define-who treemap-filter
     (lambda (pred tm)
       (pcheck ([procedure? pred] [treemap? tm])
-              (let ([newtm (make-treemap (rbtree-=? tm) (rbtree-<? tm))])
+              (let ([newtm (make-treemap-like tm)])
                 (rbtree-visit who (lambda (k v) (when (pred k v) (rbtree-set! who newtm k v))) tm)
                 newtm))))
 
@@ -348,8 +353,8 @@
   (define-who treemap-partition
     (lambda (pred tm)
       (pcheck ([procedure? pred] [treemap? tm])
-              (let ([T (make-treemap (rbtree-=? tm) (rbtree-<? tm))]
-                    [F (make-treemap (rbtree-=? tm) (rbtree-<? tm))])
+              (let ([T (make-treemap-like tm)]
+                    [F (make-treemap-like tm)])
                 (rbtree-visit who (lambda (k v) (if (pred k v)
                                                     (rbtree-set! who T k v)
                                                     (rbtree-set! who F k v)))
@@ -415,30 +420,30 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
-               (rbtree-map who proc (make-treemap (rbtree-=? tm0) (rbtree-<? tm0)) tm0))]
+               (rbtree-map who proc (make-treemap-like tm0) tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [treemap? tm0 tm1])
                (check-size who tm0 tm1)
-               (rbtree-map who proc (make-treemap (rbtree-=? tm0) (rbtree-<? tm0)) tm0 tm1))]
+               (rbtree-map who proc (make-treemap-like tm0) tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
                (apply check-size who tm0 tm*)
-               (apply rbtree-map who proc (make-treemap (rbtree-=? tm0) (rbtree-<? tm0)) tm0 tm*))]))
+               (apply rbtree-map who proc (make-treemap-like tm0) tm0 tm*))]))
 
 
   (define-who treemap-map/i
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
-               (rbtree-map/i who proc (make-treemap (rbtree-=? tm0) (rbtree-<? tm0)) tm0))]
+               (rbtree-map/i who proc (make-treemap-like tm0) tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [treemap? tm0 tm1])
                (check-size who tm0 tm1)
-               (rbtree-map/i who proc (make-treemap (rbtree-=? tm0) (rbtree-<? tm0)) tm0 tm1))]
+               (rbtree-map/i who proc (make-treemap-like tm0) tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
                (apply check-size who tm0 tm*)
-               (apply rbtree-map/i who proc (make-treemap (rbtree-=? tm0) (rbtree-<? tm0)) tm0 tm*))]))
+               (apply rbtree-map/i who proc (make-treemap-like tm0) tm0 tm*))]))
 
 
   ;; `proc` in in-place maps should return only one value
@@ -520,7 +525,7 @@
       [(proc acc tm0 . tm*)
        (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
                (apply check-size who tm0 tm*)
-               (rbtree-fold-left who proc acc tm0 tm*))]))
+               (apply rbtree-fold-left who proc acc tm0 tm*))]))
 
 
   (define-who treemap-fold-left/i
@@ -535,7 +540,7 @@
       [(proc acc tm0 . tm*)
        (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
                (apply check-size who tm0 tm*)
-               (rbtree-fold-left/i who proc acc tm0 tm*))]))
+               (apply rbtree-fold-left/i who proc acc tm0 tm*))]))
 
 
   (define-who treemap-fold-right
@@ -550,7 +555,7 @@
       [(proc acc tm0 . tm*)
        (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
                (apply check-size who tm0 tm*)
-               (rbtree-fold-right who proc acc tm0 tm*))]))
+               (apply rbtree-fold-right who proc acc tm0 tm*))]))
 
 
   (define-who treemap-fold-right/i
@@ -565,7 +570,7 @@
       [(proc acc tm0 . tm*)
        (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
                (apply check-size who tm0 tm*)
-               (rbtree-fold-right/i who proc acc tm0 tm*))]))
+               (apply rbtree-fold-right/i who proc acc tm0 tm*))]))
 
 
 
