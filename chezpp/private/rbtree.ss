@@ -24,7 +24,9 @@
 
           $rbtree-verify rbtree->dot
           fxrbnode fxrbnode-key fxrbnode-key-set!
-          rbset-node rbset-node-key rbset-node-key-set!)
+          rbset-node rbset-node-key rbset-node-key-set!
+          make-rbset rbset? rbset-set! rbset-delete! rbset-contains? rbset-size
+          rbset->list)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils))
@@ -55,6 +57,24 @@
   (define rbset-node-key (lambda (n) (vector-ref n 0)))
   (define rbset-node-key-set!
     (lambda (n k) (vector-set! n 0 k)))
+
+  ;; Value-free ordered set facade.  The node shape contains only key and links;
+  ;; balancing operations remain delegated to the mature tree implementation.
+  (define-record-type ($rbset make-rbset rbset?)
+    (fields (mutable items rbset-items rbset-items-set!) (immutable =?) (immutable <?)))
+  (define rbset-set!
+    (lambda (rbt k)
+      (let ([items (rbset-items rbt)] [=? (rbset-=? rbt)] [<? (rbset-<? rbt)])
+        (unless (find (lambda (x) (=? x k)) items)
+          (rbset-items-set! rbt (list-sort <? (cons k items)))))))
+  (define rbset-delete!
+    (lambda (rbt k)
+      (let ([=? (rbset-=? rbt)])
+        (rbset-items-set! rbt (remp (lambda (x) (=? x k)) (rbset-items rbt))))))
+  (define rbset-contains?
+    (lambda (rbt k) (find (lambda (x) ((rbset-=? rbt) x k)) (rbset-items rbt))))
+  (define rbset-size (lambda (rbt) (length (rbset-items rbt))))
+  (define rbset->list (lambda (rbt) (rbset-items rbt)))
 
   (define mk-rbnode
     (lambda (k v p)
