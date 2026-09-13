@@ -1,5 +1,5 @@
 (library (chezpp treeset)
-  (export make-treeset make-fixnum-treeset fixnum-treeset? treeset treeset? treeset-empty? treeset-size
+  (export make-treeset make-fixnum-treeset fixnum-treeset fixnum-treeset? treeset treeset? treeset-empty? treeset-size
           treeset-add! treeset-delete! treeset-clear!
 
           treeset-contains? treeset-contains/p?
@@ -71,6 +71,21 @@
       (pcheck ([procedure? =? <?])
               (let ([ts (make-treeset =? <?)])
                 (for-each (lambda (x) (rbtree-set! who ts x V)) args)
+                ts))))
+
+  #|proc:fixnum-treeset
+  Create a fixnum-key treeset initialized with the supplied fixnums.
+  `=?` compares items and `<?` orders items. Returns the populated treeset.
+  |#
+  (define-who fixnum-treeset
+    (lambda (=? <? . args)
+      (pcheck ([procedure? =? <?])
+              (let ([ts (make-fixnum-treeset =? <?)])
+                (for-each (lambda (x)
+                            (unless (fixnum? x)
+                              (errorf who "not a fixnum treeset item: ~a" x))
+                            (treeset-add! ts x))
+                          args)
                 ts))))
 
 

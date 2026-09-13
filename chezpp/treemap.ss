@@ -1,5 +1,5 @@
 (library (chezpp treemap)
-  (export make-treemap make-fixnum-treemap fixnum-treemap? treemap treemap? treemap-empty?
+  (export make-treemap make-fixnum-treemap fixnum-treemap fixnum-treemap? treemap treemap? treemap-empty?
           treemap-set! treemap-ref treemap-size
           treemap-delete! treemap-clear!
 
@@ -76,6 +76,22 @@
         (for-each (lambda (x) (unless (pair? x) (errorf who "not a pair: ~a" x))) args)
         (for-each (lambda (x) (rbtree-set! who tm (car x) (cdr x))) args)
         tm)))
+
+  #|proc:fixnum-treemap
+  Create a fixnum-key treemap and initialize it from key/value pairs.
+  `=?` and `<?` compare and order fixnum keys; each argument is a pair.
+  Returns the populated treemap.
+  |#
+  (define-who fixnum-treemap
+    (lambda (=? <? . args)
+      (pcheck ([procedure? =? <?])
+              (let ([tm (make-fixnum-treemap =? <?)])
+                (for-each (lambda (x)
+                            (unless (and (pair? x) (fixnum? (car x)))
+                              (errorf who "not a fixnum key/value pair: ~a" x))
+                            (treemap-set! tm (car x) (cdr x)))
+                          args)
+                tm))))
 
 
   #|doc
