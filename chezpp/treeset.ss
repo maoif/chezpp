@@ -33,10 +33,16 @@
                 (lambda (=? <? size)
                   ((pnew =? <? size))))))
 
+  #|proc:fixnum-treeset?
+  Return whether `object` is a fixnum treeset. Any object may be tested.
+  |#
   (define-record-type ($fixnum-treeset mk-fixnum-treeset fixnum-treeset?)
     (parent rbset) (nongenerative) (opaque #t)
     (protocol (lambda (pnew) (lambda (=? <? size) ((pnew =? <? size #t))))))
-  (define treeset? (lambda (x) (or (treeset-record? x) (fixnum-treeset? x))))
+  #|proc:treeset?
+  Return whether `object` is a generic or fixnum treeset. Any object may be tested.
+  |#
+  (define treeset? (lambda (object) (or (treeset-record? object) (fixnum-treeset? object))))
 
   #|proc:make-fixnum-treeset
   Construct a treeset whose items are exact fixnums.
@@ -56,17 +62,18 @@
       ((if (fixnum-treeset? source) make-fixnum-treeset make-treeset)
        (rbset-=? source) (rbset-<? source))))
 
-  #|doc
+  #|proc:make-treeset
   Construct a treeset object.
   `=?` is used by the treeset internally to do equality comparison of items;
   `<?` is used by the treeset internally to do order comparison.
   |#
   (define make-treeset
     (lambda (=? <?)
-      (mk-treeset =? <? 0)))
+      (pcheck ([procedure? =? <?])
+              (mk-treeset =? <? 0))))
 
 
-  #|doc
+  #|proc:treeset
   Create a new treeset, and add the arguments to the treeset.
   `=?` is used by the treeset internally to do equality comparison of items;
   `<?` is used by the treeset internally to do order comparison.
@@ -94,7 +101,7 @@
                 ts))))
 
 
-  #|doc
+  #|proc:treeset-empty?
   Return whether the treeset is empty.
   |#
   (define-who treeset-empty?
@@ -103,7 +110,7 @@
               (fx= 0 (rbset-size ts)))))
 
 
-  #|doc
+  #|proc:treeset-add!
   Add the new value `v` to the treeset `ts`.
   |#
   (define-who treeset-add!
@@ -114,7 +121,7 @@
               (rbset-set! who ts v V))))
 
 
-  #|doc
+  #|proc:treeset-delete!
   Remove the value `v` from the treeset `ts`.
 
   An error is raised if `v` does not exist.
@@ -125,7 +132,7 @@
               (rbset-delete! who ts v))))
 
 
-  #|doc
+  #|proc:treeset-clear!
   Remove all items from the treeset `ts`.
   |#
   (define-who treeset-clear!
@@ -134,7 +141,7 @@
               (rbset-clear! who ts))))
 
 
-  #|doc
+  #|proc:treeset-size
   Return the number of items in the treeset `ts`.
   |#
   (define-who treeset-size
@@ -143,7 +150,7 @@
               (rbset-size ts))))
 
 
-  #|doc
+  #|proc:treeset-contains?
   Return whether the treeset `ts` contains the value `v`.
   |#
   (define-who treeset-contains?
@@ -152,7 +159,7 @@
               (rbset-contains? who ts v))))
 
 
-  #|doc
+  #|proc:treeset-contains/p?
   Return whether the treeset `ts` contains the item `v`
   such that `(pred v)` returns #t.
   |#
@@ -165,7 +172,7 @@
   (define K? (lambda (n) (if (pair? n) (car n) n)))
 
 
-  #|doc
+  #|proc:treeset-search
   Return the 1st item in the treeset `ts` that satisfies the predicate `pred`.
   If no such item exists, #f is returned.
   |#
@@ -175,7 +182,7 @@
               (K? (rbset-search who ts (lambda (k v) (pred k)))))))
 
 
-  #|doc
+  #|proc:treeset-search*
   Return the the list of items in the treeset `ts` that satify the predicate `pred`.
 
   By default the items satisfying `pred` are returned in a list.
@@ -196,7 +203,7 @@
                (rbset-visit who (lambda (k v) (when (pred k) (collect k))) ts))]))
 
 
-  #|doc
+  #|proc:treeset-successor
   Return the successor of `v` in the treeset `ts`.
 
   If the successor of `v` does not exist, #f is returned.
@@ -207,7 +214,7 @@
               (K? (rbset-successor who ts v)))))
 
 
-  #|doc
+  #|proc:treeset-predecessor
   Return the predecessor of `v` in the treeset `ts`.
 
   If the predecessor of `v` does not exist, #f is returned.
@@ -218,7 +225,7 @@
               (K? (rbset-predecessor who ts v)))))
 
 
-  #|doc
+  #|proc:treeset-min
   Return the minimum value in the treeset `ts`.
 
   If the treeset is empty, #f is returned.
@@ -229,7 +236,7 @@
               (K? (rbset-min who ts)))))
 
 
-  #|doc
+  #|proc:treeset-max
   Return the maximum value in the treeset `ts`.
 
   If the treeset is empty, #f is returned.
@@ -240,7 +247,7 @@
               (K? (rbset-max who ts)))))
 
 
-  #|doc
+  #|proc:treeset-filter
   Return a new treeset whose items are those in `ts`
   such that `(pred x)` returns #t, where `x` is an item in `ts`.
   |#
@@ -252,7 +259,7 @@
                 newts))))
 
 
-  #|doc
+  #|proc:treeset-filter!
   Filter the treeset so that after the operation, `ts` only contains
   items `x` such that `(pred x)` returns #t.
   |#
@@ -268,10 +275,10 @@
                 ts))))
 
 
-  #|doc
+  #|proc:treeset-partition
   Apply `pred` to every item in treeset `ts` and return two values,
-  the first one a treemap of the keys/values of `ts` for which `(pred k v)` returns #t,
-  the second one a treemap of the keys/values of `ts` for which `(pred k v)` returns #f.
+  the first one a treeset of items for which `(pred item)` is true,
+  the second one a treeset of the remaining items. Both preserve the input backend.
   |#
   (define-who treeset-partition
     (lambda (pred ts)
@@ -292,7 +299,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  #|doc
+  #|proc:treeset+
   Compute the union of the treesets, i.e., the treeset that contains all items
   in all the given treesets.
   If only one treeset is given, it is returned immediately.
@@ -315,7 +322,7 @@
                             newts))))))
 
 
-  #|doc
+  #|proc:treeset-
   Compute the difference of the treesets, i.e., the treeset that contains those items
   that are in the first treeset, but are not in the rest of the treesets.
   If only one treeset is given, it is returned immediately.
@@ -340,7 +347,7 @@
                             newts))))))
 
 
-  #|doc
+  #|proc:treeset&
   Compute the intersection of the treesets, i.e., the treeset whose items are contained
   in all given treesets.
   If only one treeset is given, it is returned immediately.
@@ -364,7 +371,7 @@
                             newts))))))
 
 
-  #|doc
+  #|proc:treeset^
   Compute the symmetric difference of the treesets, i.e., the difference of the union
   and the intersection of the treesets.
   If only one treeset is given, it is returned immediately.
@@ -399,76 +406,61 @@
 
 ;;;; imperative versions
 
-  #|doc
-  Union.
-  |#
-  (define-who treeset+!
+  #|proc:treeset+!
+  Replace treeset `ts` with the union of `ts` and the additional treesets `ts*`.
+  Return `ts`; without additional sets it is unchanged. Aliased operands are supported.
+  Compute using the first set's comparators and preserve its generic or fixnum backend.
+  |#  (define-who treeset+!
     (lambda (ts . ts*)
-      (pcheck ([treeset? ts])
-              (if (null? ts*)
-                  ts
-                  (begin
-                    (for-each (lambda (other)
-                                (pcheck ([treeset? other])
-                                        (for-each (lambda (x) (treeset-add! ts x))
-                                                  (treeset->list other))))
-                              ts*)
-                    ts)))))
+      (pcheck ([treeset? ts] [all-treesets? ts*])
+              (unless (null? ts*)
+                (let ([result (apply treeset+ ts ts*)])
+                  (treeset-clear! ts)
+                  (for-each (lambda (item) (treeset-add! ts item)) (treeset->list result))))
+              ts)))
 
 
-  #|doc
-  Difference.
-  |#
-  (define-who treeset-!
+  #|proc:treeset-!
+  Replace treeset `ts` with the difference of `ts` and the additional treesets `ts*`.
+  Return `ts`; without additional sets it is unchanged. Aliased operands are supported.
+  Compute using the first set's comparators and preserve its generic or fixnum backend.
+  |#  (define-who treeset-!
     (lambda (ts . ts*)
-      (pcheck ([treeset? ts])
-              (if (null? ts*)
-                  ts
-                  (begin
-                    (for-each (lambda (other)
-                                (pcheck ([treeset? other])
-                                        (for-each (lambda (x)
-                                                    (when (treeset-contains? other x)
-                                                      (treeset-delete! ts x)))
-                                                  (treeset->list ts))))
-                              ts*)
-                    ts)))))
+      (pcheck ([treeset? ts] [all-treesets? ts*])
+              (unless (null? ts*)
+                (let ([result (apply treeset- ts ts*)])
+                  (treeset-clear! ts)
+                  (for-each (lambda (item) (treeset-add! ts item)) (treeset->list result))))
+              ts)))
 
 
-  #|doc
-  Intersection.
-  |#
-  (define-who treeset&!
+  #|proc:treeset&!
+  Replace treeset `ts` with the intersection of `ts` and the additional treesets `ts*`.
+  Return `ts`; without additional sets it is unchanged. Aliased operands are supported.
+  Compute using the first set's comparators and preserve its generic or fixnum backend.
+  |#  (define-who treeset&!
     (lambda (ts . ts*)
-      (pcheck ([treeset? ts])
-              (if (null? ts*)
-                  ts
-                  (begin
-                    (for-each (lambda (x)
-                                (unless (andmap (lambda (other) (treeset-contains? other x)) ts*)
-                                  (treeset-delete! ts x)))
-                              (treeset->list ts))
-                    ts)))))
+      (pcheck ([treeset? ts] [all-treesets? ts*])
+              (unless (null? ts*)
+                (let ([result (apply treeset& ts ts*)])
+                  (treeset-clear! ts)
+                  (for-each (lambda (item) (treeset-add! ts item)) (treeset->list result))))
+              ts)))
 
 
-  #|doc
-  symmetric difference
-  |#
-  (define-who treeset^!
+  #|proc:treeset^!
+  Replace treeset `ts` with the union minus intersection of `ts` and the additional treesets
+  `ts*`.
+  Return `ts`; without additional sets it is unchanged. Aliased operands are supported.
+  Compute using the first set's comparators and preserve its generic or fixnum backend.
+  |#  (define-who treeset^!
     (lambda (ts . ts*)
-      (pcheck ([treeset? ts])
-              (if (null? ts*)
-                  ts
-                  (begin
-                    (for-each (lambda (other)
-                                (pcheck ([treeset? other])
-                                        (for-each (lambda (x)
-                                                    (if (treeset-contains? ts x)
-                                                        (treeset-delete! ts x)
-                                                        (treeset-add! ts x)))
-                                                  (treeset->list other))))
-                              ts*)
-                    ts)))))
+      (pcheck ([treeset? ts] [all-treesets? ts*])
+              (unless (null? ts*)
+                (let ([result (apply treeset^ ts ts*)])
+                  (treeset-clear! ts)
+                  (for-each (lambda (item) (treeset-add! ts item)) (treeset->list result))))
+              ts)))
 
 
 
@@ -492,6 +484,12 @@
            (errorf who "treesets are not of the same size")))]))
 
 
+  #|proc:treeset-andmap
+  Traverse the input treesets in ascending comparator order.
+  `proc` has signature (item0 item1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return #f at the first false callback result; otherwise return #t.
+  |#
   (define-who treeset-andmap
     (case-lambda
       [(proc ts0)
@@ -507,6 +505,12 @@
                (apply rbset-andmap1 who proc ts0 ts*))]))
 
 
+  #|proc:treeset-ormap
+  Traverse the input treesets in ascending comparator order.
+  `proc` has signature (item0 item1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return the first true callback result, or #f if no result is true.
+  |#
   (define-who treeset-ormap
     (case-lambda
       [(proc ts0)
@@ -522,6 +526,13 @@
                (apply rbset-ormap1 who proc ts0 ts*))]))
 
 
+  #|proc:treeset-map
+  Traverse the input treesets in ascending comparator order.
+  `proc` has signature (item0 item1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return a new treeset using the first input's comparators and backend.
+  The callback returns the new item.
+  |#
   (define-who treeset-map
     (case-lambda
       [(proc ts0)
@@ -537,6 +548,13 @@
                (apply rbset-map1 who proc (make-treeset-like ts0) ts0 ts*))]))
 
 
+  #|proc:treeset-map/i
+  Traverse the input treesets in ascending comparator order.
+  `proc` has signature (index item0 item1 ...); collections supply ordered positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Return a new treeset using the first input's comparators and backend.
+  The callback returns the new item.
+  |#
   (define-who treeset-map/i
     (case-lambda
       [(proc ts0)
@@ -552,6 +570,12 @@
                (apply rbset-map/i1 who proc (make-treeset-like ts0) ts0 ts*))]))
 
 
+  #|proc:treeset-for-each
+  Traverse the input treesets in ascending comparator order.
+  `proc` has signature (item0 item1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return an unspecified value.
+  |#
   (define-who treeset-for-each
     (case-lambda
       [(proc ts0)
@@ -567,6 +591,12 @@
                (apply rbset-for-each1 who proc ts0 ts*))]))
 
 
+  #|proc:treeset-for-each/i
+  Traverse the input treesets in ascending comparator order.
+  `proc` has signature (index item0 item1 ...); collections supply ordered positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Return an unspecified value.
+  |#
   (define-who treeset-for-each/i
     (case-lambda
       [(proc ts0)
@@ -585,6 +615,12 @@
 ;;;; folds
 
 
+  #|proc:treeset-fold-left
+  Traverse the input treesets in ascending comparator order.
+  `proc` has signature (acc item0 item1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return the accumulated value; `acc` is its initial value.
+  |#
   (define-who treeset-fold-left
     (case-lambda
       [(proc acc ts0)
@@ -600,6 +636,12 @@
                (apply rbset-fold-left1 who proc acc ts0 ts*))]))
 
 
+  #|proc:treeset-fold-left/i
+  Traverse the input treesets in ascending comparator order.
+  `proc` has signature (index acc item0 item1 ...); collections supply ordered positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Return the accumulated value; `acc` is its initial value.
+  |#
   (define-who treeset-fold-left/i
     (case-lambda
       [(proc acc ts0)
@@ -615,6 +657,12 @@
                (apply rbset-fold-left/i1 who proc acc ts0 ts*))]))
 
 
+  #|proc:treeset-fold-right
+  Traverse the input treesets in descending comparator order.
+  `proc` has signature (item0 item1 ... acc); collections supply ordered positions.
+  Input collections must have equal size.
+  Return the accumulated value; `acc` is its initial value.
+  |#
   (define-who treeset-fold-right
     (case-lambda
       [(proc acc ts0)
@@ -630,6 +678,12 @@
                (apply rbset-fold-right1 who proc acc ts0 ts*))]))
 
 
+  #|proc:treeset-fold-right/i
+  Traverse the input treesets in descending comparator order.
+  `proc` has signature (index item0 item1 ... acc); collections supply ordered positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Return the accumulated value; `acc` is its initial value.
+  |#
   (define-who treeset-fold-right/i
     (case-lambda
       [(proc acc ts0)
@@ -652,7 +706,7 @@
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  #|doc
+  #|proc:treeset->list
   Convert a treeset into a list.
   By default, the treeset is converted in order.
 
@@ -674,7 +728,7 @@
                  (lb)))]))
 
 
-  #|doc
+  #|proc:treeset->vector
   Convert a treeset into a vector.
   By default, the treeset is converted in order.
 
@@ -697,7 +751,7 @@
                  vec))]))
 
 
-  #|doc
+  #|proc:list->treeset
   Convert a list `ls` to a treeset.
   `=?` and `<?` are the same as in `treeset`.
   |#
@@ -707,7 +761,7 @@
               (apply treeset =? <? ls))))
 
 
-  #|doc
+  #|proc:vector->treeset
   Convert a vector `vec` to a treeset.
   `=?` and `<?` are the same as in `treeset`.
   |#

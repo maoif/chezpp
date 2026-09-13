@@ -40,3 +40,34 @@
 
      (error? (treemap-map (lambda (key value) (values 'bad value))
                           (fixnum-treemap fx= fx< '(1 . a)))))
+
+(mat fixnum-backend-balanced-mutations
+     (let ([items (fxvshuffle! (fxviota 500))]
+           [set (make-fixnum-treeset fx= fx<)]
+           [map (make-fixnum-treemap fx= fx<)])
+       (fxvfor-each
+         (lambda (item)
+           (treeset-add! set item)
+           (treemap-set! map item (vector item))
+           ($rbset-verify set)
+           ($rbtree-verify map))
+         items)
+       (fxvfor-each
+         (lambda (item)
+           (treeset-delete! set item)
+           (treemap-delete! map item)
+           ($rbset-verify set)
+           ($rbtree-verify map))
+         items)
+       (and (treeset-empty? set) (treemap-empty? map))))
+
+(mat fixnum-boundaries-and-mixed-folds
+     (let ([set (fixnum-treeset fx= fx> (most-negative-fixnum) 0 (most-positive-fixnum))]
+           [one (fixnum-treeset fx= fx< 1 2)]
+           [two (treeset fx= fx< 3 4)]
+           [three (fixnum-treeset fx= fx< 5 6)])
+       (and ($rbset-verify set)
+            (= (most-positive-fixnum) (treeset-min set))
+            (= 21 (treeset-fold-left + 0 one two three))
+            (= 21 (treeset-fold-right + 0 one two three))
+            (fixnum-treeset? (treeset+ one two three)))))

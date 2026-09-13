@@ -15,6 +15,24 @@
 (mat fixnum-treeset-populate
      (= 2 (treeset-size (fixnum-treeset fx= fx< 1 2))))
 
+(mat treeset-mutating-algebra
+     (let ([set (treeset = < 1 2 3)])
+       (and (eq? set (treeset+! set set))
+            (equal? '(1 2 3) (treeset->list set))
+            (eq? set (treeset-! set set))
+            (treeset-empty? set)))
+
+     (let ([set (treeset = < 1 2 3)])
+       (and (eq? set (treeset&! set (treeset = < 2 3 4)))
+            (equal? '(2 3) (treeset->list set))))
+
+     (let* ([set (treeset = < 1 2)]
+            [second (treeset = < 2 3)]
+            [third (treeset = < 2 4)]
+            [expected (treeset^ set second third)])
+       (and (eq? set (treeset^! set second third))
+            (equal? set expected))))
+
 ;; Error case: fixnum treesets reject non-fixnum items.
 (mat fixnum-treeset-key-validation
      (guard (c [(error? c) #t] [else #f])

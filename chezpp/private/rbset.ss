@@ -1389,24 +1389,37 @@
   5. For each node, all simple paths from the node to descendant leaves contain the same number of black nodes.
   |#
   (define-who $rbset-verify
-    (lambda (rbt)
-      (let ([root (rbset-root rbt)] [=? (rbset-=? rbt)] [<? (rbset-<? rbt)] [bhs '()])
-        (unless (null-rbnode? root)
-          (unless (BLACK? root) (errorf who "root is not black"))
-          (let loop ([n root] [h 0] [bh 0])
-            (if (null-rbnode? n)
-                (set! bhs (cons bh bhs))
+    (lambda (tree)
+      (let ([seen (make-eq-hashtable)] [count 0] [less? (rbset-<? tree)])
+        (define walk
+          (lambda (node parent lower? lower upper? upper)
+            (if (null-rbnode? node)
+                1
                 (begin
-                  (unless (or (RED? n) (BLACK? n))
-                    (errorf who "invalid node color: ~a~n" (C n)))
-                  (when (RED? n)
-                    (when (RED? (L n)) (errorf who "red node has left red child~n"))
-                    (when (RED? (R n)) (errorf who "red node has right red child~n")))
-                  (loop (L n) (fx1+ h) (if (BLACK? n) (fx1+ bh) bh))
-                  (loop (R n) (fx1+ h) (if (BLACK? n) (fx1+ bh) bh)))))
-          (unless (apply fx= bhs) (errorf who "black heights aren't equal: ~a" bhs)))
+                  (unless (and (vector? node) (fx= (vector-length node) 5))
+                    (errorf who "invalid node layout"))
+                  (when (hashtable-contains? seen node) (errorf who "cycle or shared child"))
+                  (hashtable-set! seen node #t)
+                  (unless (eq? (P node) parent) (errorf who "invalid parent link"))
+                  (when (and lower? (not (less? lower (K node))))
+                    (errorf who "key violates lower bound"))
+                  (when (and upper? (not (less? (K node) upper)))
+                    (errorf who "key violates upper bound"))
+                  (when (rbset-fixnum-keys? tree)
+                    (unless (fixnum? (K node)) (errorf who "non-fixnum key")))
+                  (unless (or (RED? node) (BLACK? node)) (errorf who "invalid color"))
+                  (when (and (RED? node) (or (RED? (L node)) (RED? (R node))))
+                    (errorf who "red parent has red child"))
+                  (set! count (fx1+ count))
+                  (let ([left-height (walk (L node) node lower? lower #t (K node))]
+                        [right-height (walk (R node) node #t (K node) upper? upper)])
+                    (unless (fx= left-height right-height)
+                      (errorf who "unequal black heights"))
+                    (if (BLACK? node) (fx1+ left-height) left-height))))))
+        (unless (BLACK? (rbset-root tree)) (errorf who "root is not black"))
+        (walk (rbset-root tree) null-rbnode #f #f #f #f)
+        (unless (fx= count (rbset-size tree)) (errorf who "incorrect size"))
         #t)))
-
 
   (record-type-equal-procedure
    (type-descriptor rbset)

@@ -33,9 +33,15 @@
                 (lambda (=? <? size)
                   ((pnew =? <? size))))))
 
+  #|proc:treemap?
+  Return whether `object` is a generic or fixnum treemap. Any object may be tested.
+  |#
   (define treemap?
     (lambda (x) (or (treemap-record? x) (fixnum-treemap? x))))
 
+  #|proc:fixnum-treemap?
+  Return whether `object` is a fixnum-key treemap. Any object may be tested.
+  |#
   (define-record-type ($fixnum-treemap mk-fixnum-treemap fixnum-treemap?)
     (parent rbtree) (nongenerative) (opaque #t)
     (protocol (lambda (pnew)
@@ -55,7 +61,7 @@
       ((if (fixnum-treemap? source) make-fixnum-treemap make-treemap)
        (rbtree-=? source) (rbtree-<? source))))
 
-  #|doc
+  #|proc:make-treemap
   Construct a treemap object.
   `=?` is used by the treemap internally to do equality comparison of keys;
   `<?` is used by the treemap internally to do order comparison.
@@ -66,7 +72,7 @@
               (mk-treemap =? <? 0))))
 
 
-  #|doc
+  #|proc:treemap
   Create a new treemap, and add the arguments to the treemap.
 
   `args` must be a list of pairs in which each pair's car field will be the key,
@@ -99,7 +105,7 @@
                 tm))))
 
 
-  #|doc
+  #|proc:treemap-empty?
   Return whether the treemap is empty.
   |#
   (define-who treemap-empty?
@@ -108,7 +114,7 @@
               (fx= 0 (rbtree-size tm)))))
 
 
-  #|doc
+  #|proc:treemap-set!
   Associate key `k` with value `v` in the treemap `tm`.
   If `k` already exists, its original value is replaced by `v`.
   |#
@@ -120,7 +126,7 @@
               (rbtree-set! who tm k v))))
 
 
-  #|doc
+  #|proc:treemap-ref
   Return the value keyed by `k` in the treemap `tm`.
 
   If `default` is given and `k` does not exist in the treemap, `default` is returned.
@@ -140,7 +146,7 @@
                (rbtree-ref who tm k default))]))
 
 
-  #|doc
+  #|proc:treemap-delete!
   Remove the key `k` along with its value from the treemap `tm`.
   An error is raised if `k` does not exist.
   |#
@@ -150,7 +156,7 @@
               (rbtree-delete! who tm k))))
 
 
-  #|doc
+  #|proc:treemap-clear!
   Remove all keys and values from the treemap `tm`.
   |#
   (define-who treemap-clear!
@@ -159,7 +165,7 @@
               (rbtree-clear! who tm))))
 
 
-  #|doc
+  #|proc:treemap-size
   Return the number of keys in the treemap `tm`.
   |#
   (define-who treemap-size
@@ -168,7 +174,7 @@
               (rbtree-size tm))))
 
 
-  #|doc
+  #|proc:treemap-contains?
   Return whether the treemap `tm` contains the key `k`.
   Comparison is performed using `=` pass to `make-treemap`.
   |#
@@ -178,7 +184,7 @@
               (rbtree-contains? who tm k))))
 
 
-  #|doc
+  #|proc:treemap-contains/p?
   Return whether treemap `tm` contains at least one key/value pair such that
   (pred key value) returns true.
   |#
@@ -188,8 +194,9 @@
               (rbtree-contains/p? who tm pred))))
 
 
-  #|doc
-  Return a pair consisting of the 1st key and value in the treemap such that (pred key value) returns #t.
+  #|proc:treemap-search
+  Return a pair consisting of the 1st key and value in the treemap such that (pred key value)
+  returns #t.
   |#
   (define-who treemap-search
     (lambda (tm pred)
@@ -197,7 +204,7 @@
               (rbtree-search who tm pred))))
 
 
-  #|doc
+  #|proc:treemap-search*
   Return the the list of all key/value pairs in the treemap such that
   for each pair of key and value, (pred key value) returns #t.
 
@@ -219,7 +226,7 @@
                (rbtree-visit who (lambda (k v) (when (pred k v) (collect k v))) tm))]))
 
 
-  #|doc
+  #|proc:treemap-keys
   Return all keys in the treemap in a vector.
   |#
   (define-who treemap-keys
@@ -233,7 +240,7 @@
        (pcheck ([treemap? tm] [procedure? collect])
                (rbtree-visit who (lambda (k v) (collect k)) tm))]))
 
-  #|doc
+  #|proc:treemap-values
   Return all values in the treemap in a vector,
   or the values are collected using a custom collector procedure.
   |#
@@ -249,7 +256,7 @@
                (rbtree-visit who (lambda (k v) (collect v)) tm))]))
 
 
-  #|doc
+  #|proc:treemap-cells
   Return all key-value pairs in the treemap in a vector,
   or the key-value pairs are collected using a custom collector procedure.
 
@@ -267,7 +274,7 @@
                (rbtree-visit who collect tm))]))
 
 
-  #|doc
+  #|proc:treemap-successor
   Return a pair consisting of a key and its value,
   where the key is the successor of `k` in the treemap `tm`.
 
@@ -279,7 +286,7 @@
               (rbtree-successor who tm k))))
 
 
-  #|doc
+  #|proc:treemap-predecessor
   Return a pair consisting of a key and its value,
   where the key is the predecessor of `k` in the treemap `tm`.
 
@@ -291,10 +298,9 @@
               (rbtree-predecessor who tm k))))
 
 
-  #|doc
+  #|proc:treemap-min
   Return a pair consisting of the minimum (leftmost) key and its value in the treemap `tm`.
 
-  An error is raised if the treemap is empty.
   If the treemap is empty, #f is returned.
   |#
   (define-who treemap-min
@@ -303,7 +309,7 @@
               (rbtree-min who tm))))
 
 
-  #|doc
+  #|proc:treemap-max
   Return a pair consisting of the maximum (rightmost) key and its value in the treemap `tm`.
 
   An error is raised if the treemap is empty.
@@ -315,7 +321,7 @@
               (rbtree-max who tm))))
 
 
-  #|doc
+  #|proc:treemap-filter
   Apply `pred` to each pair of keys and values in the treemap `tm`,
   if the result is #t, the respective key and value are added to a new
   treemap. Then the new treemap is returned.
@@ -328,7 +334,7 @@
                 newtm))))
 
 
-  #|doc
+  #|proc:treemap-filter!
   Apply `pred` to each pair of keys and values in the treemap `tm`,
   if the result is #f, the respective key and value are removed from the treemap.
   |#
@@ -345,7 +351,7 @@
                 tm))))
 
 
-  #|doc
+  #|proc:treemap-partition
   Apply `pred` to every pair of keys and values in `tm` and return two values,
   the first one a treemap of the keys/values of `tm` for which `(pred k v)` returns #t,
   the second one a treemap of the keys/values of `tm` for which `(pred k v)` returns #f.
@@ -386,6 +392,12 @@
   ;; All do inorder traversal.
 
 
+  #|proc:treemap-andmap
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return #f at the first false callback result; otherwise return #t.
+  |#
   (define-who treemap-andmap
     (case-lambda
       [(proc tm0)
@@ -401,6 +413,12 @@
                (apply rbtree-andmap who proc tm0 tm*))]))
 
 
+  #|proc:treemap-ormap
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return the first true callback result, or #f if no result is true.
+  |#
   (define-who treemap-ormap
     (case-lambda
       [(proc tm0)
@@ -416,6 +434,13 @@
                (apply rbtree-ormap who proc tm0 tm*))]))
 
 
+  #|proc:treemap-map
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return a new treemap using the first input's comparators and backend.
+  The callback returns two values: the new key and value.
+  |#
   (define-who treemap-map
     (case-lambda
       [(proc tm0)
@@ -431,6 +456,13 @@
                (apply rbtree-map who proc (make-treemap-like tm0) tm0 tm*))]))
 
 
+  #|proc:treemap-map/i
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (index key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Return a new treemap using the first input's comparators and backend.
+  The callback returns two values: the new key and value.
+  |#
   (define-who treemap-map/i
     (case-lambda
       [(proc tm0)
@@ -447,6 +479,12 @@
 
 
   ;; `proc` in in-place maps should return only one value
+  #|proc:treemap-map!
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Update values only; `proc` returns one replacement value. Return an unspecified value.
+  |#
   (define-who treemap-map!
     (case-lambda
       [(proc tm0)
@@ -462,6 +500,12 @@
                (apply rbtree-map! who proc tm0 tm*))]))
 
 
+  #|proc:treemap-map/i!
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (index key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Update values only; `proc` returns one replacement value. Return an unspecified value.
+  |#
   (define-who treemap-map/i!
     (case-lambda
       [(proc tm0)
@@ -477,6 +521,12 @@
                (apply rbtree-map/i! who proc tm0 tm*))]))
 
 
+  #|proc:treemap-for-each
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return an unspecified value.
+  |#
   (define-who treemap-for-each
     (case-lambda
       [(proc tm0)
@@ -492,6 +542,12 @@
                (apply rbtree-for-each who proc tm0 tm*))]))
 
 
+  #|proc:treemap-for-each/i
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (index key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Return an unspecified value.
+  |#
   (define-who treemap-for-each/i
     (case-lambda
       [(proc tm0)
@@ -513,6 +569,12 @@
   ;; fold-left folds from the leftmost key-value as defined by <?,
   ;; fold-right folds from the rightmost one.
 
+  #|proc:treemap-fold-left
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (acc key0 value0 key1 value1 ...); collections supply ordered positions.
+  Input collections must have equal size.
+  Return the accumulated value; `acc` is its initial value.
+  |#
   (define-who treemap-fold-left
     (case-lambda
       [(proc acc tm0)
@@ -528,6 +590,13 @@
                (apply rbtree-fold-left who proc acc tm0 tm*))]))
 
 
+  #|proc:treemap-fold-left/i
+  Traverse the input treemaps in ascending comparator order.
+  `proc` has signature (index acc key0 value0 key1 value1 ...); collections supply ordered
+  positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Return the accumulated value; `acc` is its initial value.
+  |#
   (define-who treemap-fold-left/i
     (case-lambda
       [(proc acc tm0)
@@ -543,6 +612,12 @@
                (apply rbtree-fold-left/i who proc acc tm0 tm*))]))
 
 
+  #|proc:treemap-fold-right
+  Traverse the input treemaps in descending comparator order.
+  `proc` has signature (key0 value0 key1 value1 ... acc); collections supply ordered positions.
+  Input collections must have equal size.
+  Return the accumulated value; `acc` is its initial value.
+  |#
   (define-who treemap-fold-right
     (case-lambda
       [(proc acc tm0)
@@ -558,6 +633,13 @@
                (apply rbtree-fold-right who proc acc tm0 tm*))]))
 
 
+  #|proc:treemap-fold-right/i
+  Traverse the input treemaps in descending comparator order.
+  `proc` has signature (index key0 value0 key1 value1 ... acc); collections supply ordered
+  positions.
+  Input collections must have equal size. Indices are zero-based inorder positions.
+  Return the accumulated value; `acc` is its initial value.
+  |#
   (define-who treemap-fold-right/i
     (case-lambda
       [(proc acc tm0)
@@ -583,7 +665,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  #|doc
+  #|proc:treemap->list
   Convert a treemap to an association list, in in-order by default.
 
   `order` can be 'in, 'pre or 'post, so the items are collected in
@@ -604,7 +686,7 @@
                  (lb)))]))
 
 
-  #|doc
+  #|proc:hashtable->treemap
   Convert a hashtable to a treemap.
   `=?` and `<?` are as in `treeemap`.
   |#
