@@ -79,7 +79,8 @@
 
   #|proc:string->regex
   Compile `pattern` (a pattern string) and return a regex record.
-  Optional `flags` is a list of Irregex flags: i, m, s, x, u, utf8 and their long aliases; default is empty.
+  Optional `flags` is a list of Irregex flags: i, m, s, x, u, utf8 and their long aliases; default
+  is empty.
   Compilation happens when this procedure runs, not during Scheme expansion.
   |#
   (define string->regex
@@ -92,7 +93,8 @@
 
   #|proc:sre->regex
   Compile `pattern` (an S-expression pattern) and return a regex record.
-  Optional `flags` is a list of Irregex flags: i, m, s, x, u, utf8 and their long aliases; default is empty.
+  Optional `flags` is a list of Irregex flags: i, m, s, x, u, utf8 and their long aliases; default
+  is empty.
   Compilation happens when this procedure runs, not during Scheme expansion.
   |#
   (define sre->regex
@@ -277,7 +279,8 @@
   )
 
   #|proc:regex-match-subchunk
-  Return the subchunk returned by the chunker's extraction callback for capture `index` in `match`.
+  Return the subchunk returned by the chunker's extraction callback for capture `index` in
+  `match`.
   The optional index is a nonnegative integer or group-name symbol; default is zero.
   Return #f for an unmatched capture; raise for an unknown name or out-of-range index.
   |#
@@ -356,8 +359,10 @@
   #|proc:regex-fold
   Fold matches of regex `pattern` in string `text`, starting from `seed`.
   `proc` has signature (previous-end match accumulator) -> accumulator.
-  Optional `finish` has signature (previous-end accumulator) -> result; default returns accumulator.
-  Optional `start` and `end` delimit the string. Match records retained by callbacks remain usable.
+  Optional `finish` has signature (previous-end accumulator) -> result; default returns
+  accumulator.
+  Optional `start` and `end` delimit the string. Match records retained by callbacks remain
+  usable.
   Empty-match advancement follows Irregex. Return the finalizer result.
   |#
   (define regex-fold
@@ -401,7 +406,8 @@
   )
 
   #|proc:regex-split
-  Return a list of nonempty pieces between matches (Irregex splitting semantics) of regex `pattern` in string `text`.
+  Return a list of nonempty pieces between matches (Irregex splitting semantics) of regex
+  `pattern` in string `text`.
   Optional `start` and `end` are character offsets, defaulting to the entire string.
   |#
   (define regex-split
@@ -478,7 +484,8 @@
 
   #|proc:regex-sre->cset
   Return Irregex's character-set vector for S-expression character-set `sre`.
-  Optional boolean `ignore-case?` defaults to #f. This conversion returns engine data, not a regex.
+  Optional boolean `ignore-case?` defaults to #f. This conversion returns engine data, not a
+  regex.
   |#
   (define regex-sre->cset
     (case-lambda
