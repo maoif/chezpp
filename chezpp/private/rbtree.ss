@@ -56,7 +56,13 @@
   (define rbset-node-key-set!
     (lambda (n k) (vector-set! n 0 k)))
 
-  (define mk-rbnode (lambda (k v p) (vector k v p null-rbnode null-rbnode RED)))
+  (define mk-rbnode
+    (lambda (k v p)
+      (let ([n (vector #f v p null-rbnode null-rbnode RED)])
+        (if (fixnum? k)
+            (vector-set-fixnum! n 0 k)
+            (vector-set! n 0 k))
+        n)))
 
   ;; used as parent of root and children of leaves
   (define null-rbnode  '())
@@ -69,7 +75,11 @@
   (define rbnode-right  (lambda (n) (if (null-rbnode? n) n     (vector-ref n 4))))
   (define rbnode-color  (lambda (n) (if (null-rbnode? n) BLACK (vector-ref n 5))))
 
-  (define rbnode-key-set!    (lambda (n v) (vector-set! n 0 v)))
+  (define rbnode-key-set!
+    (lambda (n v)
+      (if (fixnum? v)
+          (vector-set-fixnum! n 0 v)
+          (vector-set! n 0 v))))
   (define rbnode-value-set!  (lambda (n v) (vector-set! n 1 v)))
   (define rbnode-parent-set! (lambda (n v) (unless (null-rbnode? n) (vector-set! n 2 v))))
   (define rbnode-left-set!   (lambda (n v) (unless (null-rbnode? n) (vector-set! n 3 v))))
