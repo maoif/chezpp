@@ -7,7 +7,7 @@
 
   (define-record-type (regex %make-regex regex?)
     (fields (immutable irregex regex-irregex)))
-  (define-record-type (regex-match %make-regex-match regex-match?)
+  (define-record-type ($regex-match %make-regex-match regex-match?)
     (fields (immutable regex match-regex) (immutable data match-data)))
 
   #|proc:make-regex
@@ -54,19 +54,19 @@
   Returns the substring for capture index in match.
   |#
   (define (regex-match-substring match index)
-    (pcheck ([regex-match? match] [exact-integer? index])
+    (pcheck ([regex-match? match] [(lambda (x) (and (integer? x) (exact? x))) index])
             (irregex-match-substring (match-data match) index)))
   #|proc:regex-match-start-index
   Returns the start character index for capture index in match.
   |#
   (define (regex-match-start-index match index)
-    (pcheck ([regex-match? match] [exact-integer? index])
+    (pcheck ([regex-match? match] [(lambda (x) (and (integer? x) (exact? x))) index])
             (irregex-match-start-index (match-data match) index)))
   #|proc:regex-match-end-index
   Returns the end character index for capture index in match.
   |#
   (define (regex-match-end-index match index)
-    (pcheck ([regex-match? match] [exact-integer? index])
+    (pcheck ([regex-match? match] [(lambda (x) (and (integer? x) (exact? x))) index])
             (irregex-match-end-index (match-data match) index)))
   #|proc:regex-match-num-submatches
   Returns the number of submatches in match.
