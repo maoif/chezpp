@@ -43,6 +43,7 @@
 
   #|proc:make-fixnum-treemap
   Construct a treemap whose keys are exact fixnums.
+  `=?` compares keys for equality and `<?` orders keys. Returns an empty treemap.
   |#
   (define make-fixnum-treemap
     (lambda (=? <?)

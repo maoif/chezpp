@@ -13,25 +13,26 @@
     (fields (immutable regex match-regex) (immutable data match-data)))
 
   #|proc:make-regex
-  Creates a regular expression wrapper from an Irregex value. Returns a regex.
+  Creates a regular expression wrapper from an Irregex value. `irx` is the compiled
+  Irregex object. Returns a regex wrapper.
   |#
   (define (make-regex irx)
     (pcheck ([irregex? irx]) (%make-regex irx)))
 
   #|proc:string->regex
-  Parses pattern, a string regular expression, and returns a regex.
+  Parses `pattern`, a string regular expression, and returns a regex wrapper.
   |#
   (define (string->regex pattern)
     (pcheck ([string? pattern]) (make-regex (string->irregex pattern))))
 
   #|proc:sre->regex
-  Compiles S-expression regular expression sre and returns a regex.
+  Compiles S-expression regular expression `sre` and returns a regex wrapper.
   |#
   (define (sre->regex sre)
     (make-regex (sre->irregex sre)))
 
   #|proc:regex->irregex
-  Returns the underlying Irregex value held by regex.
+  Returns the underlying Irregex value held by `regex`.
   |#
   (define (regex->irregex regex)
     (pcheck ([regex? regex]) (regex-irregex regex)))

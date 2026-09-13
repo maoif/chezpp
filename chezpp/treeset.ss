@@ -40,6 +40,7 @@
 
   #|proc:make-fixnum-treeset
   Construct a treeset whose items are exact fixnums.
+  `=?` compares items for equality and `<?` orders items. Returns an empty treeset.
   |#
   (define make-fixnum-treeset
     (lambda (=? <?)
