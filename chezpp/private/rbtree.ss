@@ -53,7 +53,7 @@
     (lambda (n k) (vector-set-fixnum! n 0 k)))
   (define rbset-node
     (lambda (k p)
-      (vector k p null-rbnode null-rbnode RED)))
+      (vector k p #f #f RED)))
   (define rbset-node-key (lambda (n) (vector-ref n 0)))
   (define rbset-node-key-set!
     (lambda (n k) (vector-set! n 0 k)))
