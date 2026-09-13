@@ -93,6 +93,8 @@
   (define-who treemap-set!
     (lambda (tm k v)
       (pcheck ([treemap? tm])
+              (when (and (fixnum-treemap? tm) (not (fixnum? k)))
+                (errorf who "fixnum treemap key is not a fixnum: ~a" k))
               (rbtree-set! who tm k v))))
 
 
@@ -106,9 +108,13 @@
     (case-lambda
       [(tm k)
        (pcheck ([treemap? tm])
+               (when (and (fixnum-treemap? tm) (not (fixnum? k)))
+                 (errorf who "fixnum treemap key is not a fixnum: ~a" k))
                (rbtree-ref who tm k))]
       [(tm k default)
        (pcheck ([treemap? tm])
+               (when (and (fixnum-treemap? tm) (not (fixnum? k)))
+                 (errorf who "fixnum treemap key is not a fixnum: ~a" k))
                (rbtree-ref who tm k default))]))
 
 

@@ -86,6 +86,8 @@
   (define-who treeset-add!
     (lambda (ts v)
       (pcheck ([treeset? ts])
+              (when (and (fixnum-treeset? ts) (not (fixnum? v)))
+                (errorf who "fixnum treeset item is not a fixnum: ~a" v))
               (rbtree-set! who ts v V))))
 
 
