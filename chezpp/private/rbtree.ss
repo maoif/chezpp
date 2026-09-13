@@ -25,7 +25,7 @@
           $rbtree-verify rbtree->dot
           fxrbnode fxrbnode-key fxrbnode-key-set!
           rbset-node rbset-node-key rbset-node-key-set!
-          make-rbset rbset? rbset-set! rbset-delete! rbset-contains? rbset-size
+          make-rbset rbset? rbset-set! rbset-delete! rbset-clear! rbset-contains? rbset-size
           rbset->list)
   (import (chezpp chez)
           (chezpp internal)
@@ -91,6 +91,10 @@
         (and n (cond [((rbset-=? rbt) k (rbset-node-key n)) #t]
                      [((rbset-<? rbt) k (rbset-node-key n)) (loop (vector-ref n 2))]
                      [else (loop (vector-ref n 3))])))))
+  (define rbset-clear!
+    (lambda (rbt)
+      (rbset-root-set! rbt #f)
+      (rbset-size-set! rbt 0)))
   (define rbset->list
     (lambda (rbt)
       (let walk ([n (rbset-root rbt)])
