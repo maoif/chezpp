@@ -16,6 +16,7 @@
           treeset-fold-right treeset-fold-right/i
 
           treeset+ treeset- treeset& treeset^
+          treeset+! treeset-! treeset&! treeset^!
 
           treeset->list list->treeset
           treeset->vector vector->treeset)
@@ -46,6 +47,7 @@
 
   ;; dummy value for all keys
   (define V #f)
+
 
 
   #|doc
@@ -384,7 +386,13 @@
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (todo)))))
+                  (begin
+                    (for-each (lambda (other)
+                                (pcheck ([treeset? other])
+                                        (for-each (lambda (x) (treeset-add! ts x))
+                                                  (treeset->list other))))
+                              ts*)
+                    ts)))))
 
 
   #|doc
@@ -395,7 +403,15 @@
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (todo)))))
+                  (begin
+                    (for-each (lambda (other)
+                                (pcheck ([treeset? other])
+                                        (for-each (lambda (x)
+                                                    (when (treeset-contains? other x)
+                                                      (treeset-delete! ts x)))
+                                                  (treeset->list ts))))
+                              ts*)
+                    ts)))))
 
 
   #|doc
@@ -406,7 +422,12 @@
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (todo)))))
+                  (begin
+                    (for-each (lambda (x)
+                                (unless (andmap (lambda (other) (treeset-contains? other x)) ts*)
+                                  (treeset-delete! ts x)))
+                              (treeset->list ts))
+                    ts)))))
 
 
   #|doc
@@ -417,7 +438,16 @@
       (pcheck ([treeset? ts])
               (if (null? ts*)
                   ts
-                  (todo)))))
+                  (begin
+                    (for-each (lambda (other)
+                                (pcheck ([treeset? other])
+                                        (for-each (lambda (x)
+                                                    (if (treeset-contains? ts x)
+                                                        (treeset-delete! ts x)
+                                                        (treeset-add! ts x)))
+                                                  (treeset->list other))))
+                              ts*)
+                    ts)))))
 
 
 
