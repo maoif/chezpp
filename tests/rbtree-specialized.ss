@@ -17,4 +17,5 @@
        (and (rbset? s)
             (= 3 (rbset-size s))
             (rbset-contains? s 2)
-            (equal? '(1 2 4) (rbset->list s)))))
+            (equal? '(1 2 4) (rbset->list s))
+            (begin (rbset-clear! s) (= 0 (rbset-size s))))))
