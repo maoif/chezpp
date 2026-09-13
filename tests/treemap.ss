@@ -21,6 +21,9 @@
             (treemap? tm)
             (eq? 'one (treemap-ref tm 1)))))
 
+(mat fixnum-treemap-populate
+     (= 2 (treemap-size (fixnum-treemap fx= fx< (cons 1 'a) (cons 2 'b)))))
+
 ;; Error case: fixnum treemaps reject non-fixnum keys.
 (mat fixnum-treemap-key-validation
      (guard (c [(error? c) #t] [else #f])

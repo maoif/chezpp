@@ -12,6 +12,9 @@
             (treeset? ts)
             (treeset-contains? ts 1))))
 
+(mat fixnum-treeset-populate
+     (= 2 (treeset-size (fixnum-treeset fx= fx< 1 2))))
+
 ;; Error case: fixnum treesets reject non-fixnum items.
 (mat fixnum-treeset-key-validation
      (guard (c [(error? c) #t] [else #f])
