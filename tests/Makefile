@@ -131,3 +131,10 @@ test-optional-library-linkage:
 .PHONY: clean
 clean:
 	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr lws-http2-fixture
+	@rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
+	  /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
+	  /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
+	  /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt
+	@rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
+	  /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
+	  /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state /tmp/upload-root
