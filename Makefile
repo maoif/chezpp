@@ -12,10 +12,8 @@ CC := gcc
 CFLAGS := -fPIC -Wall -Wextra -O2 -shared
 LDLIBS := -luuid -lssl -lcrypto -ldl
 
-chezpplibs = chezpp.lib \
-             chezpp/concurrency/fiber.lib
-chezppwpos = chezpp.wpo \
-             chezpp/concurrency/fiber.wpo
+chezpplibs = chezpp.lib
+chezppwpos = chezpp.wpo
 chezppdeps = ${chezpplibs} ${chezppwpos}
 
 define generate_chezpp_launcher
@@ -24,7 +22,6 @@ define generate_chezpp_launcher
 	      -e 's|@SCHEME_SCRIPT@|$(SCHEME_SCRIPT)|g' \
 	      -e 's|@LIBCHEZPP@|$(2)|g' \
 	      -e 's|@CHEZPP_LIB@|$(3)|g' \
-	      -e 's|@FIBER_LIB@|$(4)|g' \
 	      chez++.in > $(1)
 	@chmod +x $(1)
 endef
@@ -46,13 +43,11 @@ ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
 	      '(time (compile-file "chezpp.ss"))' \
 	      '(unless (null? (compile-whole-library "chezpp.wpo" "chezpp.lib"))' \
 	      '  (errorf "chezpp.lib" "dependency has to be null"))' \
-	      '(unless (null? (compile-whole-library "chezpp/concurrency/fiber.wpo" "chezpp/concurrency/fiber.lib"))' \
-	      '  (errorf "fiber.lib" "dependency has to be null"))' \
 	      | ${SCHEME} -q
 	@rm -f chezpp.so
 
 chez++: ${chezppdeps} chez++.in Makefile
-	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib),$(abspath chezpp/concurrency/fiber.lib))
+	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib))
 
 .PHONY: chez++.exe
 chez++.exe: chez++
