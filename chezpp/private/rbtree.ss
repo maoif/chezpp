@@ -61,20 +61,46 @@
   ;; Value-free ordered set facade.  The node shape contains only key and links;
   ;; balancing operations remain delegated to the mature tree implementation.
   (define-record-type ($rbset make-rbset rbset?)
-    (fields (mutable items rbset-items rbset-items-set!) (immutable =?) (immutable <?)))
+    (fields (mutable root rbset-root rbset-root-set!)
+            (immutable =? rbset-=? ) (immutable <? rbset-<?)
+            (mutable size rbset-size rbset-size-set!)))
   (define rbset-set!
     (lambda (rbt k)
-      (let ([items (rbset-items rbt)] [=? ($rbset-=? rbt)] [<? ($rbset-<? rbt)])
-        (unless (find (lambda (x) (=? x k)) items)
-          (rbset-items-set! rbt (list-sort <? (cons k items)))))))
+      (let loop ([n (rbset-root rbt)] [p #f])
+        (if (not n)
+            (let ([z (rbset-node k p)])
+              (if p
+                  (if ((rbset-<? rbt) k (rbset-node-key p))
+                      (vector-set! p 2 z) (vector-set! p 3 z))
+                  (rbset-root-set! rbt z))
+              (rbset-size-set! rbt (fx1+ (rbset-size rbt))))
+            (cond [((rbset-=? rbt) k (rbset-node-key n)) (void)]
+                  [((rbset-<? rbt) k (rbset-node-key n)) (loop (vector-ref n 2) n)]
+                  [else (loop (vector-ref n 3) n)])))))
   (define rbset-delete!
     (lambda (rbt k)
-      (let ([=? ($rbset-=? rbt)])
-        (rbset-items-set! rbt (remp (lambda (x) (=? x k)) (rbset-items rbt))))))
+      (let loop ([n (rbset-root rbt)])
+        (when n
+          (cond [((rbset-=? rbt) k (rbset-node-key n))
+                 (let ([l (vector-ref n 2)] [r (vector-ref n 3)] [p (vector-ref n 1)])
+                   (cond [l (vector-set! n 0 (rbset-node-key l))]
+                         [r (vector-set! n 0 (rbset-node-key r))]
+                         [p (if (eq? n (vector-ref p 2)) (vector-set! p 2 #f) (vector-set! p 3 #f))]
+                         [else (rbset-root-set! rbt #f)]))
+                 (rbset-size-set! rbt (fx1- (rbset-size rbt)))]
+                [((rbset-<? rbt) k (rbset-node-key n)) (loop (vector-ref n 2))]
+                [else (loop (vector-ref n 3))])))))
   (define rbset-contains?
-    (lambda (rbt k) (find (lambda (x) (($rbset-=? rbt) x k)) (rbset-items rbt))))
-  (define rbset-size (lambda (rbt) (length (rbset-items rbt))))
-  (define rbset->list (lambda (rbt) (rbset-items rbt)))
+    (lambda (rbt k)
+      (let loop ([n (rbset-root rbt)])
+        (and n (cond [((rbset-=? rbt) k (rbset-node-key n)) #t]
+                     [((rbset-<? rbt) k (rbset-node-key n)) (loop (vector-ref n 2))]
+                     [else (loop (vector-ref n 3))])))))
+  (define rbset->list
+    (lambda (rbt)
+      (let walk ([n (rbset-root rbt)])
+        (if n (append (walk (vector-ref n 2))
+                      (cons (rbset-node-key n) (walk (vector-ref n 3)))) '()))))
 
   (define mk-rbnode
     (lambda (k v p)
