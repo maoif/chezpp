@@ -1,5 +1,5 @@
 (library (chezpp treeset)
-  (export make-treeset treeset treeset? treeset-empty? treeset-size
+  (export make-treeset make-fixnum-treeset fixnum-treeset? treeset treeset? treeset-empty? treeset-size
           treeset-add! treeset-delete! treeset-clear!
 
           treeset-contains? treeset-contains/p?
@@ -26,11 +26,23 @@
           (chezpp private rbtree))
 
 
-  (define-record-type ($treeset mk-treeset treeset?)
+  (define-record-type ($treeset mk-treeset treeset-record?)
     (parent rbtree) (nongenerative) (opaque #t)
     (protocol (lambda (pnew)
                 (lambda (=? <? size)
                   ((pnew =? <? size))))))
+
+  (define-record-type ($fixnum-treeset mk-fixnum-treeset fixnum-treeset?)
+    (parent rbtree) (nongenerative) (opaque #t)
+    (protocol (lambda (pnew) (lambda (=? <? size) ((pnew =? <? size))))))
+  (define treeset? (lambda (x) (or (treeset-record? x) (fixnum-treeset? x))))
+
+  #|proc:make-fixnum-treeset
+  Construct a treeset whose items are exact fixnums.
+  |#
+  (define make-fixnum-treeset
+    (lambda (=? <?)
+      (pcheck ([procedure? =? <?]) (mk-fixnum-treeset =? <? 0))))
 
   ;; dummy value for all keys
   (define V #f)

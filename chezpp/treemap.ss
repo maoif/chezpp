@@ -1,5 +1,5 @@
 (library (chezpp treemap)
-  (export make-treemap treemap treemap? treemap-empty?
+  (export make-treemap make-fixnum-treemap fixnum-treemap? treemap treemap? treemap-empty?
           treemap-set! treemap-ref treemap-size
           treemap-delete! treemap-clear!
 
@@ -27,11 +27,26 @@
           (chezpp private rbtree))
 
 
-  (define-record-type ($treemap mk-treemap treemap?)
+  (define-record-type ($treemap mk-treemap treemap-record?)
     (parent rbtree) (nongenerative) (opaque #t)
     (protocol (lambda (pnew)
                 (lambda (=? <? size)
                   ((pnew =? <? size))))))
+
+  (define treemap?
+    (lambda (x) (or (treemap-record? x) (fixnum-treemap? x))))
+
+  (define-record-type ($fixnum-treemap mk-fixnum-treemap fixnum-treemap?)
+    (parent rbtree) (nongenerative) (opaque #t)
+    (protocol (lambda (pnew)
+                (lambda (=? <? size) ((pnew =? <? size))))))
+
+  #|proc:make-fixnum-treemap
+  Construct a treemap whose keys are exact fixnums.
+  |#
+  (define make-fixnum-treemap
+    (lambda (=? <?)
+      (pcheck ([procedure? =? <?]) (mk-fixnum-treemap =? <? 0))))
 
 
   #|doc
