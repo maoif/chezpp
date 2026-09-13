@@ -1,24 +1,23 @@
 (import (chezpp))
 
-(collect)
-(define n 10000)
-(define before (sstats-bytes (statistics)))
-(define ts (make-treeset fx= fx<))
-(let loop ([i 0])
-  (unless (= i n)
-    (treeset-add! ts i)
-    (loop (+ i 1))))
-(printf "treeset bytes total=~a per-element=~a\n"
-        (- (sstats-bytes (statistics)) before)
-        (/ (- (sstats-bytes (statistics)) before) n))
+;; Run this same script against the baseline and optimized libraries.
+;; Compile the procedures before the measurement; use retained graph size as the primary metric.
+;; Subtract an empty set's graph so shared comparator code is not charged per entry.
+(define measure-set
+  (lambda (count)
+    (let* ([empty (make-treeset fx= fx<)]
+           [set (make-treeset fx= fx<)]
+           [empty-size (compute-size empty)])
+      (collect)
+      (let ([before (statistics)])
+        (do ([item 0 (fx1+ item)]) ((fx= item count))
+          (treeset-add! set item))
+        (let ([allocated (sstats-bytes (sstats-difference (statistics) before))])
+          (collect)
+          (let ([retained (- (compute-size set) empty-size)])
+            (unless (= count (treeset-size set)) (error 'memory "incorrect set size"))
+            (printf "~a retained=~a bytes/item=~a allocated=~a\n"
+                    count retained (/ retained count) allocated)))))))
 
-(collect)
-(define fx-before (sstats-bytes (statistics)))
-(define fx-ts (make-fixnum-treeset fx= fx<))
-(let loop ([i 0])
-  (unless (= i n)
-    (treeset-add! fx-ts i)
-    (loop (+ i 1))))
-(printf "fixnum-treeset bytes total=~a per-element=~a\n"
-        (- (sstats-bytes (statistics)) fx-before)
-        (/ (- (sstats-bytes (statistics)) fx-before) n))
+(printf "~a ~a\n" (scheme-version) (machine-type))
+(for-each measure-set '(1000 10000 100000))
