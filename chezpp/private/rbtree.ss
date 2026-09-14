@@ -1,7 +1,7 @@
 (library (chezpp private rbtree)
   (export rbtree make-rbtree rbtree-=? rbtree-<?
           rbtree-ref rbtree-set! rbtree-delete!
-          rbtree-clear! rbtree-size
+          rbtree-clear! rbtree-size rbtree-stores-values? rbtree-root
           rbtree-contains? rbtree-contains/p?
           rbtree-search
 
@@ -46,14 +46,14 @@
   (define null-rbnode? null?)
 
   (define rbnode-key    (lambda (n) (vector-ref n 0)))
-  (define rbnode-value  (lambda (n) (vector-ref n 5)))
+  (define rbnode-value  (lambda (n) (if (fx= (vector-length n) 5) #f (vector-ref n 5))))
   (define rbnode-parent (lambda (n) (if (null-rbnode? n) n     (vector-ref n 3))))
   (define rbnode-left   (lambda (n) (if (null-rbnode? n) n     (vector-ref n 1))))
   (define rbnode-right  (lambda (n) (if (null-rbnode? n) n     (vector-ref n 2))))
   (define rbnode-color  (lambda (n) (if (null-rbnode? n) BLACK (vector-ref n 4))))
 
   (define rbnode-key-set!    (lambda (n v) (vector-set! n 0 v)))
-  (define rbnode-value-set!  (lambda (n v) (vector-set! n 5 v)))
+  (define rbnode-value-set!  (lambda (n v) (unless (fx= (vector-length n) 5) (vector-set! n 5 v))))
   (define rbnode-parent-set! (lambda (n v) (unless (null-rbnode? n) (vector-set! n 3 v))))
   (define rbnode-left-set!   (lambda (n v) (unless (null-rbnode? n) (vector-set! n 1 v))))
   (define rbnode-right-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set! n 2 v))))
@@ -86,18 +86,23 @@
 
   (define-record-type (rbtree mk-rbtree rbtree?)
     (nongenerative) (opaque #t)
-    (fields (mutable root) (immutable =?) (immutable <?) (mutable size) (immutable fixnum-keys?))
+    (fields (mutable root) (immutable =?) (immutable <?) (mutable size)
+            (immutable fixnum-keys?) (immutable stores-values?))
     (protocol
      (lambda (new)
        (case-lambda
-         [(=? <? size) (new null-rbnode =? <? size #f)]
-         [(=? <? size fixnum-keys?) (new null-rbnode =? <? size fixnum-keys?)]))))
+         [(=? <? size) (new null-rbnode =? <? size #f #t)]
+         [(=? <? size fixnum-keys?) (new null-rbnode =? <? size fixnum-keys? #t)]
+         [(=? <? size fixnum-keys? stores-values?)
+          (new null-rbnode =? <? size fixnum-keys? stores-values?)]))))
 
 
   (define make-rbtree
     (case-lambda
-      [(who =? <?) (mk-rbtree =? <? 0 #f)]
-      [(who =? <? fixnum-keys?) (mk-rbtree =? <? 0 fixnum-keys?)]))
+      [(who =? <?) (mk-rbtree =? <? 0 #f #t)]
+      [(who =? <? fixnum-keys?) (mk-rbtree =? <? 0 fixnum-keys? #t)]
+      [(who =? <? fixnum-keys? stores-values?)
+       (mk-rbtree =? <? 0 fixnum-keys? stores-values?)]))
 
 
   (define rotate-left!
@@ -171,13 +176,15 @@
 
   (define rbtree-check-value
     (lambda (who tree value)
-      (when (rbtree-fixnum-keys? tree)
+      (when (and (rbtree-fixnum-keys? tree) (rbtree-stores-values? tree))
         (pcheck ([fixnum? value]) (void)))))
 
   (define rbtree-set!
     (lambda (who tree key value)
       (if (rbtree-fixnum-keys? tree)
-          (pcheck ([fixnum? key value]) (rbtree-set/fixnum! who tree key value))
+          (if (rbtree-stores-values? tree)
+              (pcheck ([fixnum? key value]) (rbtree-set/fixnum! who tree key value))
+              (pcheck ([fixnum? key]) (rbtree-set/fixnum! who tree key value)))
           (rbtree-set/generic! who tree key value))))
 
   (define rbtree-set/generic!
@@ -225,7 +232,9 @@
         (let loop ([x root] [y null-rbnode])
           (if (null-rbnode? x)
               ;; z is by default RED
-              (let ([z (mk-rbnode k v y)])
+              (let ([z (if (rbtree-stores-values? rbt)
+                           (mk-rbnode k v y)
+                           (vector k null-rbnode null-rbnode y RED))])
                 (cond [(null-rbnode? y) (rbtree-root-set! rbt z)]
                       [(<? k (K y))     (L! y z)]
                       [else             (R! y z)])
@@ -282,7 +291,9 @@
         (let loop ([x root] [y null-rbnode])
           (if (null-rbnode? x)
               ;; z is by default RED
-              (let ([z (let ([node (vector 0 null-rbnode null-rbnode y RED v)])
+              (let ([z (let ([node (if (rbtree-stores-values? rbt)
+                                      (vector 0 null-rbnode null-rbnode y RED v)
+                                      (vector 0 null-rbnode null-rbnode y RED))])
                          (vector-set-fixnum! node 0 k)
                          node)])
                 (cond [(null-rbnode? y) (rbtree-root-set! rbt z)]
@@ -1411,7 +1422,9 @@
             (if (null-rbnode? node)
                 1
                 (begin
-                  (unless (and (vector? node) (fx= (vector-length node) 6))
+                  (unless (and (vector? node)
+                               (fx= (vector-length node)
+                                    (if (rbtree-stores-values? tree) 6 5)))
                     (errorf who "invalid node layout"))
                   (when (hashtable-contains? seen node) (errorf who "cycle or shared child"))
                   (hashtable-set! seen node #t)

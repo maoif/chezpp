@@ -1,19 +1,19 @@
-(import (chezpp) (only (chezpp private rbtree1) $rbtree1-verify))
+(import (chezpp) (only (chezpp private rbtree) $rbtree-verify))
 
 ;; Exercise rotations and deletion repair on the actual public treeset backend.
-(mat rbtree1-balanced-mutations
+(mat rbtree-balanced-mutations
      (let ([items (fxvshuffle! (fxviota 1000))]
            [set (make-treeset fx= fx<)])
        (do ([i 0 (fx1+ i)]) ((fx= i 1000))
          (treeset-add! set i)
-         ($rbtree1-verify set))
+         ($rbtree-verify set))
        (fxvfor-each (lambda (item)
                      (treeset-delete! set item)
-                     ($rbtree1-verify set))
+                     ($rbtree-verify set))
                    items)
        (treeset-empty? set)))
 
-(mat rbtree1-preserves-pair-items
+(mat rbtree-preserves-pair-items
      (let ([set (treeset equal? (lambda (a b) (< (car a) (car b))) '(1 . a) '(2 . b))])
        (and (equal? '(1 . a) (treeset-min set))
             (equal? '(2 . b) (treeset-successor set '(1 . a))))))
@@ -28,7 +28,7 @@
             (begin
               (treeset-delete! set 2)
               (treemap-delete! map 2)
-              (and ($rbtree1-verify set) ($rbtree-verify map))))))
+              (and ($rbtree-verify set) ($rbtree-verify map))))))
 
 ;; Error cases: empty specialized trees and callback-generated keys must be checked.
 (mat fixnum-backend-validation
@@ -49,14 +49,14 @@
          (lambda (item)
            (treeset-add! set item)
            (treemap-set! map item item)
-           ($rbtree1-verify set)
+           ($rbtree-verify set)
            ($rbtree-verify map))
          items)
        (fxvfor-each
          (lambda (item)
            (treeset-delete! set item)
            (treemap-delete! map item)
-           ($rbtree1-verify set)
+           ($rbtree-verify set)
            ($rbtree-verify map))
          items)
        (and (treeset-empty? set) (treemap-empty? map))))
@@ -66,7 +66,7 @@
            [one (fixnum-treeset fx= fx< 1 2)]
            [two (treeset fx= fx< 3 4)]
            [three (fixnum-treeset fx= fx< 5 6)])
-       (and ($rbtree1-verify set)
+       (and ($rbtree-verify set)
             (= (most-positive-fixnum) (treeset-min set))
             (= 21 (treeset-fold-left + 0 one two three))
             (= 21 (treeset-fold-right + 0 one two three))
