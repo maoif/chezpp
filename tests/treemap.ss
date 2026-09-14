@@ -16,19 +16,55 @@
 
 (mat fixnum-treemap-constructor
      (let ([tm (make-fixnum-treemap fx= fx<)])
-       (treemap-set! tm 1 'one)
+       (treemap-set! tm 1 10)
        (and (fixnum-treemap? tm)
             (treemap? tm)
-            (eq? 'one (treemap-ref tm 1)))))
+            (fx= 10 (treemap-ref tm 1)))))
 
 (mat fixnum-treemap-populate
-     (= 2 (treemap-size (fixnum-treemap fx= fx< (cons 1 'a) (cons 2 'b)))))
+     (= 2 (treemap-size (fixnum-treemap fx= fx< (cons 1 10) (cons 2 20)))))
 
 ;; Error case: fixnum treemaps reject non-fixnum keys.
 (mat fixnum-treemap-key-validation
      (guard (c [(error? c) #t] [else #f])
        (treemap-set! (make-fixnum-treemap fx= fx<) 'x 1)
        #f))
+
+;; Error case: fixnum treemaps reject non-fixnum values passed to treemap-set!.
+(mat fixnum-treemap-set-value-validation
+     (error? (treemap-set! (make-fixnum-treemap fx= fx<) 1 'bad)))
+
+;; Error case: the fixnum-treemap constructor rejects non-fixnum values.
+(mat fixnum-treemap-constructor-value-validation
+     (error? (fixnum-treemap fx= fx< '(1 . bad))))
+
+;; Error case: treemap-map rejects a non-fixnum value produced for a fixnum treemap.
+(mat fixnum-treemap-map-value-validation
+     (error? (treemap-map (lambda (key value) (values key 'bad))
+                          (fixnum-treemap fx= fx< '(1 . 10)))))
+
+;; Error case: treemap-map/i rejects a non-fixnum value produced for a fixnum treemap.
+(mat fixnum-treemap-map/i-value-validation
+     (error? (treemap-map/i (lambda (index key value) (values key 'bad))
+                            (fixnum-treemap fx= fx< '(1 . 10)))))
+
+;; Error case: treemap-map! rejects a non-fixnum value produced for a fixnum treemap.
+(mat fixnum-treemap-map!-value-validation
+     (error? (treemap-map! (lambda (key value) 'bad)
+                           (fixnum-treemap fx= fx< '(1 . 10)))))
+
+;; Error case: treemap-map/i! rejects a non-fixnum value produced for a fixnum treemap.
+(mat fixnum-treemap-map/i!-value-validation
+     (error? (treemap-map/i! (lambda (index key value) 'bad)
+                             (fixnum-treemap fx= fx< '(1 . 10)))))
+
+;; Error case: hashtable conversion rejects non-fixnum values for a fixnum treemap.
+(mat hashtable->fixnum-treemap-value-validation
+     (let ([table (make-eqv-hashtable)])
+       (hashtable-set! table 1 'bad)
+       (guard (c [(error? c) #t] [else #f])
+         (hashtable->fixnum-treemap fx= fx< table)
+         #f)))
 
 
 

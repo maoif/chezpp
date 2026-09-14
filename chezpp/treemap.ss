@@ -40,7 +40,8 @@
     (lambda (x) (or (treemap-record? x) (fixnum-treemap? x))))
 
   #|proc:fixnum-treemap?
-  Return whether `object` is a fixnum-key treemap. Any object may be tested.
+  Return whether `object` is a treemap restricted to fixnum keys and values.
+  Any object may be tested.
   |#
   (define-record-type ($fixnum-treemap mk-fixnum-treemap fixnum-treemap?)
     (parent rbtree) (nongenerative) (opaque #t)
@@ -48,7 +49,7 @@
                 (lambda (=? <? size) ((pnew =? <? size #t))))))
 
   #|proc:make-fixnum-treemap
-  Construct a treemap whose keys are exact fixnums.
+  Construct a treemap whose keys and values must be exact fixnums.
   `=?` compares keys for equality and `<?` orders keys. Returns an empty treemap.
   |#
   (define make-fixnum-treemap
@@ -89,8 +90,8 @@
         tm)))
 
   #|proc:fixnum-treemap
-  Create a fixnum-key treemap and initialize it from key/value pairs.
-  `=?` and `<?` compare and order fixnum keys; each argument is a pair.
+  Create a fixnum treemap and initialize it from fixnum key/value pairs.
+  `=?` and `<?` compare and order fixnum keys; each argument is a pair of fixnums.
   Returns the populated treemap.
   |#
   (define-who fixnum-treemap
@@ -98,7 +99,7 @@
       (pcheck ([procedure? =? <?])
               (let ([tm (make-fixnum-treemap =? <?)])
                 (for-each (lambda (x)
-                            (unless (and (pair? x) (fixnum? (car x)))
+                            (unless (and (pair? x) (fixnum? (car x)) (fixnum? (cdr x)))
                               (errorf who "not a fixnum key/value pair: ~a" x))
                             (treemap-set! tm (car x) (cdr x)))
                           args)
@@ -116,6 +117,7 @@
 
   #|proc:treemap-set!
   Associate key `k` with value `v` in the treemap `tm`.
+  Both `k` and `v` must be fixnums when `tm` is a fixnum treemap.
   If `k` already exists, its original value is replaced by `v`.
   |#
   (define-who treemap-set!
@@ -700,9 +702,9 @@
 
 
   #|proc:hashtable->fixnum-treemap
-  Return a new fixnum-key treemap containing the entries of hashtable `table`.
+  Return a new fixnum treemap containing the entries of hashtable `table`.
   Equality predicate `equal?` and ordering predicate `less?` each take two fixnum keys.
-  All keys must be fixnums; values may be any objects.
+  All keys and values in `table` must be fixnums.
   |#
   (define hashtable->fixnum-treemap
     (lambda (equal? less? table)

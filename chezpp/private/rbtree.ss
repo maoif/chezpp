@@ -39,30 +39,30 @@
   (define RED   0)
   (define BLACK 1)
 
-  (define mk-rbnode (lambda (k v p) (vector k v p null-rbnode null-rbnode RED)))
+  (define mk-rbnode (lambda (k v p) (vector k null-rbnode null-rbnode p RED v)))
 
   ;; used as parent of root and children of leaves
   (define null-rbnode  '())
   (define null-rbnode? null?)
 
   (define rbnode-key    (lambda (n) (vector-ref n 0)))
-  (define rbnode-value  (lambda (n) (vector-ref n 1)))
-  (define rbnode-parent (lambda (n) (if (null-rbnode? n) n     (vector-ref n 2))))
-  (define rbnode-left   (lambda (n) (if (null-rbnode? n) n     (vector-ref n 3))))
-  (define rbnode-right  (lambda (n) (if (null-rbnode? n) n     (vector-ref n 4))))
-  (define rbnode-color  (lambda (n) (if (null-rbnode? n) BLACK (vector-ref n 5))))
+  (define rbnode-value  (lambda (n) (vector-ref n 5)))
+  (define rbnode-parent (lambda (n) (if (null-rbnode? n) n     (vector-ref n 3))))
+  (define rbnode-left   (lambda (n) (if (null-rbnode? n) n     (vector-ref n 1))))
+  (define rbnode-right  (lambda (n) (if (null-rbnode? n) n     (vector-ref n 2))))
+  (define rbnode-color  (lambda (n) (if (null-rbnode? n) BLACK (vector-ref n 4))))
 
   (define rbnode-key-set!    (lambda (n v) (vector-set! n 0 v)))
-  (define rbnode-value-set!  (lambda (n v) (vector-set! n 1 v)))
-  (define rbnode-parent-set! (lambda (n v) (unless (null-rbnode? n) (vector-set! n 2 v))))
-  (define rbnode-left-set!   (lambda (n v) (unless (null-rbnode? n) (vector-set! n 3 v))))
-  (define rbnode-right-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set! n 4 v))))
-  (define rbnode-color-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set-fixnum! n 5 v))))
+  (define rbnode-value-set!  (lambda (n v) (vector-set! n 5 v)))
+  (define rbnode-parent-set! (lambda (n v) (unless (null-rbnode? n) (vector-set! n 3 v))))
+  (define rbnode-left-set!   (lambda (n v) (unless (null-rbnode? n) (vector-set! n 1 v))))
+  (define rbnode-right-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set! n 2 v))))
+  (define rbnode-color-set!  (lambda (n v) (unless (null-rbnode? n) (vector-set-fixnum! n 4 v))))
 
-  (define rbnode-set-red!    (lambda (n) (unless (null-rbnode? n) (vector-set-fixnum! n 5 RED))))
-  (define rbnode-set-black!  (lambda (n) (unless (null-rbnode? n) (vector-set-fixnum! n 5 BLACK))))
-  (define rbnode-red?   (lambda (n) (if (null-rbnode? n) #f (fx= (vector-ref n 5) RED))))
-  (define rbnode-black? (lambda (n) (if (null-rbnode? n) #t (fx= (vector-ref n 5) BLACK))))
+  (define rbnode-set-red!    (lambda (n) (unless (null-rbnode? n) (vector-set-fixnum! n 4 RED))))
+  (define rbnode-set-black!  (lambda (n) (unless (null-rbnode? n) (vector-set-fixnum! n 4 BLACK))))
+  (define rbnode-red?   (lambda (n) (if (null-rbnode? n) #f (fx= (vector-ref n 4) RED))))
+  (define rbnode-black? (lambda (n) (if (null-rbnode? n) #t (fx= (vector-ref n 4) BLACK))))
 
   (define K rbnode-key)
   (define V rbnode-value)
@@ -169,10 +169,15 @@
       (when (rbtree-fixnum-keys? tree)
         (pcheck ([fixnum? key]) (void)))))
 
+  (define rbtree-check-value
+    (lambda (who tree value)
+      (when (rbtree-fixnum-keys? tree)
+        (pcheck ([fixnum? value]) (void)))))
+
   (define rbtree-set!
     (lambda (who tree key value)
       (if (rbtree-fixnum-keys? tree)
-          (pcheck ([fixnum? key]) (rbtree-set/fixnum! who tree key value))
+          (pcheck ([fixnum? key value]) (rbtree-set/fixnum! who tree key value))
           (rbtree-set/generic! who tree key value))))
 
   (define rbtree-set/generic!
@@ -277,7 +282,7 @@
         (let loop ([x root] [y null-rbnode])
           (if (null-rbnode? x)
               ;; z is by default RED
-              (let ([z (let ([node (vector 0 v y null-rbnode null-rbnode RED)])
+              (let ([z (let ([node (vector 0 null-rbnode null-rbnode y RED v)])
                          (vector-set-fixnum! node 0 k)
                          node)])
                 (cond [(null-rbnode? y) (rbtree-root-set! rbt z)]
@@ -457,6 +462,7 @@
                              (not (null-rbnode? (R p))))
                         (let ([s (minimum (R p))])
                           (vector-set-fixnum! p 0 (K s))
+                          (rbtree-check-value who rbt (V s))
                           (V! p (V s))
                           s)
                         p)]
@@ -886,7 +892,9 @@
        (let loop ([n (rbtree-root rbt0)])
          (unless (null-rbnode? n)
            (loop (L n))
-           (V! n (proc (K n) (V n)))
+           (let ([value (proc (K n) (V n))])
+             (rbtree-check-value who rbt0 value)
+             (V! n value))
            (loop (R n))))
        rbt0]
       [(who proc rbt0 rbt1)
@@ -894,6 +902,7 @@
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (let ([v (proc (K n0) (V n0) (K n1) (V n1))])
+               (rbtree-check-value who rbt0 v)
                (V! n0 v)
                (loop (iter0) (iter1))))))
        rbt0]
@@ -902,6 +911,7 @@
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (let ([v (apply proc (K n0) (V n0) (kv* n*))])
+               (rbtree-check-value who rbt0 v)
                (V! n0 v)
                (loop (iter0) (map exe iter*))))))
        rbt0]))
@@ -914,7 +924,9 @@
          (if (null-rbnode? n)
              i
              (let ([i (loop (L n) i)])
-               (V! n (proc i (K n) (V n)))
+               (let ([value (proc i (K n) (V n))])
+                 (rbtree-check-value who rbt0 value)
+                 (V! n value))
                (loop (R n) (fx1+ i)))))
        rbt0]
       [(who proc rbt0 rbt1)
@@ -922,6 +934,7 @@
          (let loop ([i 0] [n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (let ([v (proc i (K n0) (V n0) (K n1) (V n1))])
+               (rbtree-check-value who rbt0 v)
                (V! n0 v)
                (loop (fx1+ i) (iter0) (iter1))))))
        rbt0]
@@ -930,6 +943,7 @@
          (let loop ([i 0] [n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (let ([v (apply proc i (K n0) (V n0) (kv* n*))])
+               (rbtree-check-value who rbt0 v)
                (V! n0 v)
                (loop (fx1+ i) (iter0) (map exe iter*))))))
        rbt0]))
