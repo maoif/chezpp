@@ -40,10 +40,11 @@
   (define BLACK 1)
 
   (define mk-rbnode
-    (lambda (k v p has-value?)
-      (if has-value?
-          (vector k null-rbnode null-rbnode p RED v)
-          (vector k null-rbnode null-rbnode p RED))))
+    (case-lambda
+      [(k v p has-value?)
+       (if has-value?
+           (vector k null-rbnode null-rbnode p RED v)
+           (vector k null-rbnode null-rbnode p RED))]))
 
   ;; used as parent of root and children of leaves
   (define null-rbnode  '())
