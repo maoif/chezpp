@@ -41,10 +41,10 @@
 
   (define mk-rbnode
     (case-lambda
-      [(k v p has-value?)
-       (if has-value?
-           (vector k null-rbnode null-rbnode p RED v)
-           (vector k null-rbnode null-rbnode p RED))]))
+      [(k p)
+       (vector k null-rbnode null-rbnode p RED)]
+      [(k v p)
+       (vector k null-rbnode null-rbnode p RED v)]))
 
   ;; used as parent of root and children of leaves
   (define null-rbnode  '())
@@ -237,7 +237,9 @@
         (let loop ([x root] [y null-rbnode])
           (if (null-rbnode? x)
               ;; z is by default RED
-              (let ([z (mk-rbnode k v y (rbtree-stores-values? rbt))])
+              (let ([z (if (rbtree-stores-values? rbt)
+                           (mk-rbnode k v y)
+                           (mk-rbnode k y))])
                 (cond [(null-rbnode? y) (rbtree-root-set! rbt z)]
                       [(<? k (K y))     (L! y z)]
                       [else             (R! y z)])
@@ -294,7 +296,9 @@
         (let loop ([x root] [y null-rbnode])
           (if (null-rbnode? x)
               ;; z is by default RED
-              (let ([z (let ([node (mk-rbnode 0 v y (rbtree-stores-values? rbt))])
+              (let ([z (let ([node (if (rbtree-stores-values? rbt)
+                                      (mk-rbnode 0 v y)
+                                      (mk-rbnode 0 y))])
                          (vector-set-fixnum! node 0 k)
                          node)])
                 (cond [(null-rbnode? y) (rbtree-root-set! rbt z)]
