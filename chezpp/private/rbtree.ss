@@ -1435,6 +1435,8 @@
                     (errorf who "key violates upper bound"))
                   (when (rbtree-fixnum-keys? tree)
                     (unless (fixnum? (K node)) (errorf who "non-fixnum key")))
+                  (when (and (rbtree-fixnum-keys? tree) (rbtree-stores-values? tree))
+                    (unless (fixnum? (V node)) (errorf who "non-fixnum value")))
                   (unless (or (RED? node) (BLACK? node)) (errorf who "invalid color"))
                   (when (and (RED? node) (or (RED? (L node)) (RED? (R node))))
                     (errorf who "red parent has red child"))
