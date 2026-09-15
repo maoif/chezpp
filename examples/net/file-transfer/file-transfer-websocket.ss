@@ -96,7 +96,6 @@ The `websocket-file-client` procedure sends FileChunk uploads for `path*`. If
                                       (bytevector->file-chunk
                                        (websocket-message-data message)))])
                            (unless next
-                             (collect)
                              (loop (or next complete?) (+ chunk-count 1)))))))
                    (lambda () (close-writer!))))))
             (write-transfer-rss-growth-value!

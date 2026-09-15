@@ -5,11 +5,16 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
 state_dir=$(mktemp -d /tmp/chezpp-application-transfer.XXXXXX)
 server_pids=""
+run_count=0
 cleanup() {
   for pid in $server_pids; do
     kill "$pid" 2>/dev/null || true
   done
-  rm -rf "$state_dir"
+  if [ "${CHEZPP_TRANSFER_KEEP_STATE:-0}" != 1 ]; then
+    rm -rf "$state_dir"
+  else
+    printf 'transfer verification state preserved at %s\n' "$state_dir" >&2
+  fi
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -27,7 +32,17 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
 
 wait_port() {
   port=$1
-  sleep 1
+  attempt=0
+  while ! ss -ltn "sport = :$port" | tail -n +2 | grep -q LISTEN; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 100 ]; then
+      printf 'timed out waiting for transfer server on port %s\n' "$port" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  # Let the listener finish its protocol setup before the first client handshake.
+  sleep 0.5
 }
 
 run_variant() {
@@ -39,6 +54,7 @@ run_variant() {
   if [ -n "${CHEZPP_TRANSFER_ONLY:-}" ] && [ "$CHEZPP_TRANSFER_ONLY" != "$name" ]; then
     return 0
   fi
+  run_count=$((run_count + 1))
   destination=$state_dir/$name
   download=$state_dir/$name.download
   mkdir -p "$destination"
@@ -72,6 +88,8 @@ run_variant() {
     cat "$state_dir/$name.server.err" >&2
     return 1
   fi
+  # Allow libwebsockets and the kernel to finish releasing the listener before the next variant.
+  sleep 0.5
   server_pids=$(printf '%s' "$server_pids" | sed "s/ $server_pid//")
   actual_file=$destination/$(basename "$source_file")
   test -f "$actual_file"
@@ -113,4 +131,5 @@ run_variant wss \
   examples/net/file-transfer/file-transfer-wss.ss \
   examples/net/file-transfer/file-transfer-wss.ss 41009 1
 
-printf 'application transfer verification passed for six variants; SHA-256 %s\n' "$expected"
+printf 'application transfer verification passed for %s variant(s); SHA-256 %s\n' \
+  "$run_count" "$expected"

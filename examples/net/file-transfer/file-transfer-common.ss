@@ -424,7 +424,6 @@
             (let ([data (get-bytevector-n port file-transfer-chunk-size)])
               (unless (eof-object? data)
                 (send-chunk (make-file-chunk name offset data #vu8() #f))
-                (collect)
                 (loop (+ offset (bytevector-length data)) (+ chunk-count 1)))))))
        (send-chunk (make-file-chunk name size #vu8() (sha256-file path) #t))
        size)]))

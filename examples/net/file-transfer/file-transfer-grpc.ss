@@ -134,7 +134,6 @@ The request count defaults to one and may be set through `CHEZPP_TRANSFER_REQUES
                        (errorf 'grpc-file-client
                                "download ended before a final FileChunk"))
                      (let ([next (write-chunk! (bytevector->file-chunk payload))])
-                       (collect)
                        (loop (or next complete?) (+ chunk-count 1)))))))
            (lambda ()
              (close-writer!)

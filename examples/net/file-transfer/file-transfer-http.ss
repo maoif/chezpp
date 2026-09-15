@@ -29,12 +29,19 @@ streaming GET route for each completed file. It remains active until the optiona
                       (http-register-handler!
                        server 'get (string-append "/download/" name)
                        (lambda (download-request)
-                         (set! downloaded? #t)
+                         ;; Mark completion only after the response source is fully consumed.
+                         ;; Closing the server as soon as headers arrive truncates slower TLS clients.
                          (make-http-response
                           200 "OK"
                           '(("content-type" . "application/octet-stream"))
-                          (make-http-file-body-source
-                           (validated-upload-path 'http-file-server dir name))))))))
+                          (let* ([path (validated-upload-path 'http-file-server dir name)]
+                                 [port (open-file-input-port path)])
+                            (make-http-body-source
+                             (lambda (maximum) (get-bytevector-n port maximum))
+                             (file-size path)
+                             (lambda ()
+                               (close-port port)
+                               (set! downloaded? #t))))))))))
                 (make-http-response 200 "OK" '() "ok"))))
            (dynamic-wind
              void
@@ -81,6 +88,11 @@ The `http-file-client` procedure streams each `path*` through POST FileChunk req
           (let ([after-upload (current-peak-rss-kib)]
                 [destination (getenv "CHEZPP_TRANSFER_DOWNLOAD")])
             (when (and destination (not (string=? destination "")))
+              ;; Use a fresh TLS client for the download: LWS closes each HTTPS transaction,
+              ;; and retaining the completed upload transport can leave the next handshake idle.
+              (when http-file-transfer-client-tls-context
+                (http-close client)
+                (set! client (http-open http-file-transfer-client-tls-context)))
               (http-download client
                              (string-append base "/download/" (path-basename (car path*)))
                              destination))
