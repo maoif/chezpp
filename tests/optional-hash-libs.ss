@@ -9,15 +9,22 @@
 
 (define expect-loader-error
   (lambda (dependency expected-fragment thunk)
-    ;; The selected optional dependency is intentionally incompatible or incomplete.
-    (guard (condition
-            [else
-             (let ([message (condition-message condition)])
-               (unless (and (string-contains? message dependency)
-                            (string-contains? message expected-fragment))
-                 (fail (format "unexpected loader error: ~a" message))))])
-      (thunk)
-      (fail (format "~a API unexpectedly succeeded" dependency)))))
+    (define error-message
+      (lambda ()
+        ;; The selected optional dependency is intentionally incompatible or incomplete.
+        (guard (condition [else (condition-message condition)])
+          (thunk)
+          (fail (format "~a API unexpectedly succeeded" dependency)))))
+    (let* ([result* (apply run-threads 8 (make-list 8 error-message))]
+           [message (vector-ref result* 0)])
+      (unless (and (string? message)
+                   (string-contains? message dependency)
+                   (string-contains? message expected-fragment)
+                   (for-all (lambda (other)
+                              (and (string? other)
+                                   (string=? message other)))
+                            (vector->list result*)))
+        (fail (format "unexpected concurrent loader errors: ~s" result*))))))
 
 (define expect-loader-success
   (lambda (dependency thunk result?)

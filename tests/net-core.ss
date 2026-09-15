@@ -33,6 +33,12 @@
       (thunk)
       #f)))
 
+(define current-monotonic-ms
+  (lambda ()
+    (let ([time (current-time 'time-monotonic)])
+      (+ (* (time-second time) 1000)
+         (quotient (time-nanosecond time) 1000000)))))
+
 (define start-stalled-tls-handshake-server
   (lambda (delay-ms)
     (let ([listener (open-socket 'inet 'stream)])
@@ -48,6 +54,40 @@
                      (milisleep delay-ms)
                      (close-socket client)
                      (close-socket listener)))))))))
+
+(define start-stalled-tls-reader
+  (lambda (delay-ms)
+    (let ([release? #f]
+          [listener (open-socket 'inet 'stream)]
+          [ctx (make-tls-context 'server)]
+          [cert-path "/tmp/chezpp-net-test-cert.pem"]
+          [key-path "/tmp/chezpp-net-test-key.pem"])
+      (write-bytevector-file cert-path tls-test-certificate)
+      (write-bytevector-file key-path tls-test-private-key)
+      (tls-context-load-cert! ctx cert-path)
+      (tls-context-load-private-key! ctx key-path)
+      (socket-set-option! listener 'reuse-address #t)
+      (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+      (socket-listen! listener 4)
+      (let ([port (socket-address-port (socket-local-address listener))])
+        (values listener
+                ctx
+                port
+                (fork-thread
+                 (lambda ()
+                   (let-values ([(client peer) (socket-accept listener)])
+                     (socket-set-option! client 'recv-buffer 1024)
+                     (guard (c [else #f])
+                       (let ([session (tls-accept ctx client)])
+                         (let loop ()
+                           (unless release?
+                             (milisleep delay-ms)
+                             (loop)))
+                         (close-tls-session session)))
+                     (close-socket client)
+                     (close-socket listener)
+                     (close-tls-context ctx))))
+                (lambda () (set! release? #t)))))))
 
 (mat net-errors
      (let ([err (make-net-error 'net-test 'parse "bad address" '(1 2 3))])
@@ -133,6 +173,7 @@
             (http-response? resp)
             (= (http-response-status resp) 200)
             (equal? (http-response-reason resp) "OK")
+            (eq? (http-response-version resp) 'h1)
             (equal? (http-response-body resp) "done"))))
 
 (mat net-address-dns
@@ -221,8 +262,137 @@
        (let ([no-client (socket-accept/nonblocking server)]
              [reuse? (socket-get-option server 'reuse-address)])
          (close-socket server)
-         (and (not no-client)
+         (and (net-would-block? no-client)
+              (equal? '(read) (net-would-block-events no-client))
               reuse?))))
+
+(mat net-socket-readiness
+     (let ([listener (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+           (socket-listen! listener 1)
+           (let ([answer (socket-accept/nonblocking listener)])
+             (and (net-would-block? answer)
+                  (eq? listener (net-would-block-resource answer))
+                  (equal? '(read) (net-would-block-events answer)))))
+         (lambda () (close-socket listener))))
+
+     (let-values ([(server port th)
+                   (start-echo-server
+                    (lambda (client peer)
+                      (milisleep 100)))])
+       (let ([client (open-socket 'inet 'stream)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([answer (socket-recv/nonblocking client 1)]
+                   [buffer (make-bytevector 1)])
+               (and (net-would-block? answer)
+                    (eq? client (net-would-block-resource answer))
+                    (equal? '(read) (net-would-block-events answer))
+                    (let ([into-answer (socket-recv!/nonblocking client buffer)])
+                      (and (net-would-block? into-answer)
+                           (eq? client (net-would-block-resource into-answer))
+                           (equal? '(read) (net-would-block-events into-answer)))))))
+           (lambda ()
+             (close-socket client)
+             (thread-join th)))))
+
+     (let-values ([(server port th)
+                   (start-echo-server
+                    (lambda (client peer)
+                      (milisleep 500)))])
+       (let ([client (open-socket 'inet 'stream)]
+             [payload (make-bytevector 65536 0)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (socket-set-option! client 'send-buffer 4096)
+             (let loop ([attempts 10000])
+               (if (fx= attempts 0)
+                   #f
+                   (let ([answer (socket-send/nonblocking client payload)])
+                     (if (net-would-block? answer)
+                         (and (eq? client (net-would-block-resource answer))
+                              (equal? '(write) (net-would-block-events answer)))
+                         (loop (fx1- attempts)))))))
+           (lambda ()
+             (close-socket client)
+             (thread-join th)))))
+
+     (let ([listener (open-socket 'inet 'stream)]
+           [client (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+           (socket-listen! listener 1)
+           (let* ([port (socket-address-port (socket-local-address listener))]
+                  [operation
+                   (socket-connect/nonblocking
+                    client (make-socket-address 'inet "127.0.0.1" port) 1000)])
+             (net-operation-step! operation)
+             (and (net-operation? operation)
+                  (case (net-operation-state operation)
+                    [(completed) #t]
+                    [(pending)
+                     (let ([target (car (net-operation-poll-targets operation))])
+                       (and (equal? '(write) (poll-target-events target))
+                            (memq 'write
+                                  (poll-target-ready-events
+                                   (car (poll (list target) 1000))))
+                            (begin (net-operation-step! operation) #t)))]
+                    [else #f])
+                  (eq? 'completed (net-operation-state operation))
+                  (eq? #t (net-operation-result operation))
+                  (socket-address? (socket-peer-address client)))))
+         (lambda ()
+           (close-socket client)
+           (close-socket listener))))
+
+     (let ([client (open-socket 'inet 'stream)])
+       (let ([operation
+              (socket-connect/nonblocking
+               client (make-socket-address 'inet "127.0.0.1" 9) 100)])
+         (and (net-operation? operation)
+              (eq? 'pending (net-operation-state operation))
+              (begin (net-operation-cancel! operation) #t)
+              (eq? 'cancelled (net-operation-state operation))
+              (socket-closed? client))))
+
+     ;; Error case: SO_ERROR reports a refused nonblocking connection as a failed operation.
+     (let ([listener (open-socket 'inet 'stream)])
+       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+       (let ([port (socket-address-port (socket-local-address listener))])
+         (close-socket listener)
+         (let ([client (open-socket 'inet 'stream)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (let ([operation
+                      (socket-connect/nonblocking
+                       client (make-socket-address 'inet "127.0.0.1" port) 1000)])
+                 (net-operation-step! operation)
+                 (case (net-operation-state operation)
+                   [(pending)
+                    (let* ([target (car (net-operation-poll-targets operation))]
+                           [ready-events
+                            (poll-target-ready-events
+                             (car (poll (list target) 1000)))])
+                      (net-operation-step! operation)
+                      (and (memq 'write ready-events)
+                           (or (memq 'error ready-events) (memq 'hup ready-events))
+                           (eq? 'failed (net-operation-state operation))
+                           (net-error? (net-operation-condition operation))))]
+                   [(failed) (net-error? (net-operation-condition operation))]
+                   [else #f])))
+             (lambda ()
+               (unless (socket-closed? client)
+                 (close-socket client))))))))
 
 (mat net-socket-listen-validation
      (let ([sock (open-socket 'inet 'stream)])
@@ -251,6 +421,49 @@
            (close-socket server)
            (and (null? (poll-target-ready-events (car before)))
                 (not (not (memq 'read (poll-target-ready-events (car after))))))))))
+
+(mat net-poll-resources
+     (let ([listener (open-socket 'inet 'stream)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([descriptor-target (make-poll-target (socket-fd listener) '(read))]
+                 [port (open-socket-input-port listener)])
+             (dynamic-wind
+               void
+               (lambda ()
+                 (let ([port-target (make-poll-target port '(read))])
+                   (and (fx= (socket-fd listener) (poll-target-fd descriptor-target))
+                        (eq? port (poll-target-resource port-target))
+                        (fx= (port-file-descriptor port) (poll-target-fd port-target)))))
+               (lambda () (close-port port)))))
+         (lambda () (close-socket listener))))
+
+     (let* ([started-ms (current-monotonic-ms)]
+            [deadline-ms (+ started-ms 30)])
+       (and (null? (poll-until '() deadline-ms))
+            (let ([elapsed-ms (- (current-monotonic-ms) started-ms)])
+              (and (>= elapsed-ms 20) (< elapsed-ms 2000)))))
+
+     (let ([socket (open-socket 'inet 'stream)])
+       (let ([descriptor (socket-fd socket)])
+         (close-socket socket)
+         (let ([answer (poll/nonblocking
+                        (list (make-poll-target descriptor '(read write))))])
+           (not (not (memq 'invalid (poll-target-ready-events (car answer))))))))
+
+     ;; Error case: a transparent record with socket-shaped fields is not a socket resource.
+     (let* ([record-type
+             (make-record-type-descriptor
+              'socket #f #f #f #f '#((immutable fd)))]
+            [constructor
+             (record-constructor
+              (make-record-constructor-descriptor record-type #f #f))]
+            [lookalike (constructor 0)])
+       (guard (failure [else #t])
+         (make-poll-target lookalike '(read))
+         #f))
+     )
 
 (mat net-poll-validation
      (and
@@ -298,6 +511,7 @@
                 (certificate? (tls-peer-certificate session))
                 (list? (tls-peer-certificate-chain session))
                 (string? (tls-protocol-version session))
+                (not (tls-negotiated-alpn session))
                 (string? (tls-cipher-name session))
                 (tls-write-all session payload)
                 (equal? (tls-read session 32) payload)
@@ -342,7 +556,7 @@
                    [read-target (make-poll-target client '(read))])
                (let loop ([attempt 8])
                  (let ([n (tls-read!/nonblocking session buf 0 2)])
-                   (if (eq? n #f)
+                   (if (net-would-block? n)
                        (if (fx= attempt 0)
                            (begin
                              (close-tls-session session)
@@ -358,11 +572,83 @@
                          (close-tls-context ctx)
                          (close-socket client)
                          (thread-join th)
-                         (and (not idle)
+                         (and (net-would-block? idle)
+                              (equal? '(read) (net-would-block-events idle))
+                              (eq? client (net-would-block-resource idle))
                               (memq 'write (poll-target-ready-events (car write-ready)))
                               sent
                               (= n 2)
                               (equal? (slice-bytevector buf 0 2) (string->utf8 "nb")))))))))))))
+
+(mat net-tls-handshake-readiness
+     (let-values ([(listener port th)
+                   (start-stalled-tls-handshake-server 200)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)]
+             [operation #f])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (set! operation (tls-connect/nonblocking ctx client #f 100))
+             (net-operation-step! operation)
+             (and (eq? 'pending (net-operation-state operation))
+                  (let ([target* (net-operation-poll-targets operation)])
+                    (and (= (length target*) 1)
+                         (eq? client (poll-target-resource (car target*)))
+                         (not (not
+                               (memq 'read
+                                     (poll-target-events (car target*)))))))
+                  (begin (net-operation-cancel! operation) #t)
+                  (eq? 'cancelled (net-operation-state operation))))
+           (lambda ()
+             (when (and operation
+                        (eq? 'pending (net-operation-state operation)))
+               (net-operation-cancel! operation))
+             (close-tls-context ctx)
+             (guard (c [else #f])
+               (close-socket client))
+             (thread-join th)
+             (guard (c [else #f])
+               (close-socket listener)))))))
+
+(mat net-tls-write-all-readiness
+     (let-values ([(listener server-ctx port th release-server)
+                   (start-stalled-tls-reader 10)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)]
+             [session #f]
+             [payload (make-bytevector 65536 65)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-set-option! client 'send-buffer 1024)
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (set! session (tls-connect ctx client "localhost"))
+             (let loop ([attempt 500])
+               (when (fx= attempt 0)
+                 (error 'net-tls-write-all-readiness
+                        "TLS writes did not reach backpressure"))
+               (let ([answer (tls-write/nonblocking session payload)])
+                 (if (net-would-block? answer)
+                     (let ([all-answer
+                            (tls-write-all/nonblocking session payload)])
+                       (and (net-would-block? all-answer)
+                            (eq? client
+                                 (net-would-block-resource all-answer))
+                            (not (not
+                                  (memq
+                                   'write
+                                   (net-would-block-events all-answer))))))
+                     (loop (fx1- attempt))))))
+           (lambda ()
+             (release-server)
+             (when session (close-tls-session session))
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
 
 (mat net-tls-timeout
      (let-values ([(listener port th)
@@ -477,6 +763,143 @@
                  (lambda ()
                    (close-tls-session session)))))
            (lambda ()
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
+
+(mat net-tls-policy
+     (let ([ctx (make-tls-context 'client)]
+           [policy (make-tls-policy 'tls1.2 'tls1.3
+                                    "ECDHE+AESGCM" #f
+                                    '("h2" "http/1.1") 'disabled)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (eq? (tls-context-policy-set! ctx policy) policy)
+                (eq? (tls-policy-minimum-version policy) 'tls1.2)
+                (eq? (tls-policy-maximum-version policy) 'tls1.3)
+                (equal? (tls-policy-alpn-protocols policy) '("h2" "http/1.1"))
+                (and (assq 'session-serialization (tls-capabilities)) #t)))
+         (lambda () (close-tls-context ctx)))))
+
+(mat net-tls-chain-records
+     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([session (tls-connect ctx client "localhost")])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (let ([record* (tls-peer-certificate-chain-records session)])
+                     (tls-write-all session (string->utf8 "chain"))
+                     (and (equal? (tls-read session 32) (string->utf8 "chain"))
+                          (pair? record*)
+                          (tls-certificate? (car record*))
+                          (zero? (tls-certificate-chain-position (car record*)))
+                          (tls-certificate-verified? (car record*))
+                          (bytevector? (tls-certificate-der (car record*)))
+                          (string? (tls-certificate-subject (car record*)))
+                          (pair? (tls-certificate-public-key-summary (car record*))))))
+                 (lambda () (close-tls-session session)))))
+           (lambda ()
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
+
+(mat net-tls-required-ocsp
+     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+       (let ([client (open-socket 'inet 'stream)]
+             [ctx (make-tls-context 'client)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (tls-context-policy-set!
+              ctx (make-tls-policy 'tls1.2 #f #f #f '() 'required))
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             ;; A required OCSP policy rejects a server that sends no staple.
+             (tls-error-message-contains?
+              "required stapled OCSP response is missing"
+              (lambda () (tls-connect ctx client "localhost" 3000))))
+           (lambda ()
+             (close-tls-context ctx)
+             (close-socket client)
+             (thread-join th))))))
+
+(mat net-tls-session-resumption
+     (let-values ([(server port th) (start-tls-resumption-server)])
+       (let ([ctx (make-tls-context 'client)]
+             [ticket #f]
+             [reused? #f])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (do ([i 0 (fx1+ i)])
+                 ((fx= i 2))
+               (let ([client (open-socket 'inet 'stream)])
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (socket-connect!
+                      client (make-socket-address 'inet "127.0.0.1" port))
+                     (let ([session (tls-connect ctx client "localhost" 3000)])
+                       (dynamic-wind
+                         void
+                         (lambda ()
+                           (tls-write-all session (string->utf8 "resume"))
+                           (unless (equal? (tls-read session 32 3000)
+                                           (string->utf8 "resume"))
+                             (error 'net-tls-session-resumption "echo mismatch"))
+                           (if (fx= i 0)
+                               (begin
+                                 (set! ticket (tls-session-export-ticket session))
+                                 (tls-context-session-ticket-set! ctx ticket))
+                               (set! reused? (tls-session-reused? session))))
+                         (lambda () (close-tls-session session)))))
+                   (lambda () (close-socket client)))))
+             (and (tls-session-ticket? ticket)
+                  (positive? (bytevector-length (tls-session-ticket-data ticket)))
+                  reused?))
+           (lambda ()
+             (close-tls-context ctx)
+             (thread-join th))))))
+
+(mat net-tls-sni-selection
+     (let-values ([(server port th selected-name) (start-tls-sni-echo-server)])
+       (let ([ctx (make-tls-context 'client)]
+             [client (open-socket 'inet 'stream)]
+             [expected (load-certificate tls-test-san-certificate 'pem)]
+             [peer-cert #f])
+         (dynamic-wind
+           void
+           (lambda ()
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-san-cert.pem")
+             (tls-context-set-verify! ctx #t)
+             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+             (let ([session (tls-connect ctx client "localhost" 3000)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (set! peer-cert (tls-peer-certificate session))
+                   (tls-write-all session (string->utf8 "sni"))
+                   (and (equal? (tls-read session 32 3000) (string->utf8 "sni"))
+                        (string=? (selected-name) "localhost")
+                        (equal? (certificate-fingerprint peer-cert)
+                                (certificate-fingerprint expected))))
+                 (lambda () (close-tls-session session)))))
+           (lambda ()
+             (when peer-cert (destroy-certificate! peer-cert))
+             (destroy-certificate! expected)
              (close-tls-context ctx)
              (close-socket client)
              (thread-join th))))))

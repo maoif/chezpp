@@ -1,5 +1,6 @@
 (library (chezpp crypto private)
   (export check-slice
+          ensure-openssl
           bytevector-append
           subbytevector
           string/bytevector->utf8
@@ -44,7 +45,18 @@
           crypto-envelope-ciphertext
           crypto-envelope-tag)
   (import (chezpp chez)
-          (chezpp utils))
+          (chezpp utils)
+          (chezpp crypto ffi))
+
+  #|proc:ensure-openssl
+The `ensure-openssl` procedure raises an error attributed to `who` when OpenSSL is unavailable.
+It returns an unspecified value when the runtime is available.
+|#
+  (define ensure-openssl
+    (lambda (who)
+      (let ([message (ffi-openssl-load-error)])
+        (when message
+          (error who message)))))
 
   #|proc:bytevector-empty
 The `bytevector-empty` procedure returns an empty bytevector.

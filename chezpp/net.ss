@@ -5,6 +5,8 @@
           (chezpp internal))
 
   (export (import (chezpp net errors)
+                  (chezpp net operation)
+                  (chezpp net transfer)
                   (chezpp net ip)
                   (chezpp net uri)
                   (chezpp net ftp)
@@ -12,6 +14,7 @@
                   (chezpp net sftp)
                   (chezpp net scp)
                   (chezpp net grpc)
+                  (chezpp net grpc reflection)
                   (chezpp net websocket)
                   (chezpp net http)
                   (chezpp net poll)

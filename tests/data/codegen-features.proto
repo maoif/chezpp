@@ -1,0 +1,32 @@
+syntax = "proto2";
+
+package chezpp.tests.codegen;
+
+message Envelope {
+  enum State {
+    STATE_UNKNOWN = 0;
+    STATE_READY = 1;
+  }
+
+  message Payload {
+    required sint64 delta = 1;
+  }
+
+  optional int32 id = 1;
+  repeated string tags = 2;
+  optional State state = 3;
+  optional Payload payload = 4;
+  map<string, uint64> counters = 5;
+
+  oneof content {
+    string text = 6;
+    bytes raw = 7;
+  }
+}
+
+service Shapes {
+  rpc Unary(Envelope) returns (Envelope);
+  rpc Server(Envelope) returns (stream Envelope);
+  rpc Client(stream Envelope) returns (Envelope);
+  rpc Bidi(stream Envelope) returns (stream Envelope);
+}

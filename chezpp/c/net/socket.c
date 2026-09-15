@@ -26,6 +26,13 @@ static ptr make_status(const char *tag, ptr value) {
 
 static ptr make_errno_status(const char *tag) { return make_status(tag, errno_str()); }
 
+static ptr would_block_status(const char *event) {
+  ptr value = Smake_vector(2, Sfalse);
+  Svector_set(value, 0, Sstring_to_symbol("would-block"));
+  Svector_set(value, 1, Sstring_to_symbol(event));
+  return value;
+}
+
 static ptr make_addr(int family, const char *host, int port, const char *path) {
   ptr v = Smake_vector(4, Sfalse);
   switch (family) {
@@ -197,7 +204,19 @@ ptr chezpp_net_socket_connect(int fd, int family, const char *host, int port, co
   if (fill_sockaddr(family, host, port, path, 0, &storage, &len) != 0)
     return make_errno_status("error");
   if (connect(fd, (struct sockaddr *)&storage, len) < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("write");
+    return make_errno_status("error");
+  }
+  return Strue;
+}
+
+ptr chezpp_net_socket_connect_status(int fd) {
+  int socket_error = 0;
+  socklen_t length = sizeof(socket_error);
+  if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error, &length) < 0)
+    return make_errno_status("error");
+  if (socket_error != 0) {
+    errno = socket_error;
     return make_errno_status("error");
   }
   return Strue;
@@ -216,12 +235,12 @@ ptr chezpp_net_socket_accept(int fd, int nonblocking) {
     pfd.events = POLLIN;
     client_fd = poll(&pfd, 1, 0);
     if (client_fd < 0) return make_errno_status("error");
-    if (client_fd == 0) return make_status("would-block", Sfalse);
+    if (client_fd == 0) return would_block_status("read");
   }
 
   client_fd = accept(fd, (struct sockaddr *)&storage, &len);
   if (client_fd < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("read");
     return make_errno_status("error");
   }
 
@@ -245,7 +264,7 @@ ptr chezpp_net_socket_send(int fd, ptr bv, int start, int stop, int nonblocking)
   int flags = MSG_NOSIGNAL | (nonblocking ? MSG_DONTWAIT : 0);
   ssize_t n = send(fd, Sbytevector_data(bv) + start, (size_t)(stop - start), flags);
   if (n < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("write");
     return make_errno_status("error");
   }
   return Sfixnum((iptr)n);
@@ -261,7 +280,7 @@ ptr chezpp_net_socket_recv(int fd, int size, int nonblocking) {
   bv = Smake_bytevector(size, 0);
   n = recv(fd, Sbytevector_data(bv), (size_t)size, nonblocking ? MSG_DONTWAIT : 0);
   if (n < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("read");
     return make_errno_status("error");
   }
   if (n == 0) return Seof_object;
@@ -278,11 +297,72 @@ ptr chezpp_net_socket_recv_into(int fd, ptr bv, int start, int stop, int nonbloc
   ssize_t n = recv(fd, Sbytevector_data(bv) + start, (size_t)(stop - start),
                    nonblocking ? MSG_DONTWAIT : 0);
   if (n < 0) {
-    if (would_block_errno(errno)) return make_status("would-block", Sfalse);
+    if (would_block_errno(errno)) return would_block_status("read");
     return make_errno_status("error");
   }
   if (n == 0) return Seof_object;
   return Sfixnum((iptr)n);
+}
+
+ptr chezpp_net_socket_send_to(int fd, ptr bv, int start, int stop, int family,
+                              const char *host, int port, const char *path, int nonblocking) {
+  struct sockaddr_storage storage;
+  socklen_t len;
+  int flags = MSG_NOSIGNAL | (nonblocking ? MSG_DONTWAIT : 0);
+  ssize_t n;
+  if (fill_sockaddr(family, host, port, path, 0, &storage, &len) != 0)
+    return make_errno_status("error");
+  n = sendto(fd, Sbytevector_data(bv) + start, (size_t)(stop - start), flags,
+             (struct sockaddr *)&storage, len);
+  if (n < 0) {
+    if (would_block_errno(errno)) return would_block_status("write");
+    return make_errno_status("error");
+  }
+  return Sfixnum((iptr)n);
+}
+
+ptr chezpp_net_socket_recv_from(int fd, int size, int nonblocking) {
+  ptr bv;
+  struct sockaddr_storage storage;
+  socklen_t len = sizeof(storage);
+  ssize_t n;
+  if (size < 0) {
+    errno = EINVAL;
+    return make_errno_status("error");
+  }
+  bv = Smake_bytevector(size, 0);
+  n = recvfrom(fd, Sbytevector_data(bv), (size_t)size,
+               nonblocking ? MSG_DONTWAIT : 0, (struct sockaddr *)&storage, &len);
+  if (n < 0) {
+    if (would_block_errno(errno)) return would_block_status("read");
+    return make_errno_status("error");
+  }
+  {
+    ptr out = Smake_vector(2, Sfalse);
+    ptr payload = n == size ? bv : Smake_bytevector((iptr)n, 0);
+    if (n != size) memcpy(Sbytevector_data(payload), Sbytevector_data(bv), (size_t)n);
+    Svector_set(out, 0, payload);
+    Svector_set(out, 1, make_addr_from_sockaddr((struct sockaddr *)&storage, len));
+    return out;
+  }
+}
+
+ptr chezpp_net_socket_recv_from_into(int fd, ptr bv, int start, int stop, int nonblocking) {
+  struct sockaddr_storage storage;
+  socklen_t len = sizeof(storage);
+  ssize_t n = recvfrom(fd, Sbytevector_data(bv) + start, (size_t)(stop - start),
+                       nonblocking ? MSG_DONTWAIT : 0,
+                       (struct sockaddr *)&storage, &len);
+  if (n < 0) {
+    if (would_block_errno(errno)) return would_block_status("read");
+    return make_errno_status("error");
+  }
+  {
+    ptr out = Smake_vector(2, Sfalse);
+    Svector_set(out, 0, Sfixnum((iptr)n));
+    Svector_set(out, 1, make_addr_from_sockaddr((struct sockaddr *)&storage, len));
+    return out;
+  }
 }
 
 ptr chezpp_net_socket_local_address(int fd) {
@@ -337,6 +417,11 @@ ptr chezpp_net_socket_set_option(int fd, const char *name, ptr value) {
   if (strcmp(name, "reuse-address") == 0) {
     optname = SO_REUSEADDR;
     ivalue = Sboolean_value(value) ? 1 : 0;
+#ifdef SO_REUSEPORT
+  } else if (strcmp(name, "reuse-port") == 0) {
+    optname = SO_REUSEPORT;
+    ivalue = Sboolean_value(value) ? 1 : 0;
+#endif
   } else if (strcmp(name, "keepalive") == 0) {
     optname = SO_KEEPALIVE;
     ivalue = Sboolean_value(value) ? 1 : 0;
@@ -347,6 +432,32 @@ ptr chezpp_net_socket_set_option(int fd, const char *name, ptr value) {
     level = IPPROTO_TCP;
     optname = TCP_NODELAY;
     ivalue = Sboolean_value(value) ? 1 : 0;
+  } else if (strcmp(name, "ipv6-only") == 0) {
+    level = IPPROTO_IPV6;
+    optname = IPV6_V6ONLY;
+    ivalue = Sboolean_value(value) ? 1 : 0;
+#ifdef TCP_KEEPIDLE
+  } else if (strcmp(name, "keepalive-idle") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPIDLE;
+    ivalue = Sfixnum_value(value);
+#endif
+#ifdef TCP_KEEPINTVL
+  } else if (strcmp(name, "keepalive-interval") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPINTVL;
+    ivalue = Sfixnum_value(value);
+#endif
+#ifdef TCP_KEEPCNT
+  } else if (strcmp(name, "keepalive-count") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPCNT;
+    ivalue = Sfixnum_value(value);
+#endif
+  } else if (strcmp(name, "multicast-ttl") == 0) {
+    level = IPPROTO_IP;
+    optname = IP_MULTICAST_TTL;
+    ivalue = Sfixnum_value(value);
   } else if (strcmp(name, "recv-buffer") == 0) {
     optname = SO_RCVBUF;
     ivalue = Sfixnum_value(value);
@@ -370,6 +481,10 @@ ptr chezpp_net_socket_get_option(int fd, const char *name) {
 
   if (strcmp(name, "reuse-address") == 0) {
     optname = SO_REUSEADDR;
+#ifdef SO_REUSEPORT
+  } else if (strcmp(name, "reuse-port") == 0) {
+    optname = SO_REUSEPORT;
+#endif
   } else if (strcmp(name, "keepalive") == 0) {
     optname = SO_KEEPALIVE;
   } else if (strcmp(name, "broadcast") == 0) {
@@ -377,6 +492,27 @@ ptr chezpp_net_socket_get_option(int fd, const char *name) {
   } else if (strcmp(name, "tcp-nodelay") == 0) {
     level = IPPROTO_TCP;
     optname = TCP_NODELAY;
+  } else if (strcmp(name, "ipv6-only") == 0) {
+    level = IPPROTO_IPV6;
+    optname = IPV6_V6ONLY;
+#ifdef TCP_KEEPIDLE
+  } else if (strcmp(name, "keepalive-idle") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPIDLE;
+#endif
+#ifdef TCP_KEEPINTVL
+  } else if (strcmp(name, "keepalive-interval") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPINTVL;
+#endif
+#ifdef TCP_KEEPCNT
+  } else if (strcmp(name, "keepalive-count") == 0) {
+    level = IPPROTO_TCP;
+    optname = TCP_KEEPCNT;
+#endif
+  } else if (strcmp(name, "multicast-ttl") == 0) {
+    level = IPPROTO_IP;
+    optname = IP_MULTICAST_TTL;
   } else if (strcmp(name, "recv-buffer") == 0) {
     optname = SO_RCVBUF;
   } else if (strcmp(name, "send-buffer") == 0) {
@@ -388,7 +524,9 @@ ptr chezpp_net_socket_get_option(int fd, const char *name) {
 
   if (getsockopt(fd, level, optname, &ivalue, &len) < 0) return make_errno_status("error");
 
-  if (strcmp(name, "recv-buffer") == 0 || strcmp(name, "send-buffer") == 0)
+  if (strcmp(name, "recv-buffer") == 0 || strcmp(name, "send-buffer") == 0 ||
+      strcmp(name, "keepalive-idle") == 0 || strcmp(name, "keepalive-interval") == 0 ||
+      strcmp(name, "keepalive-count") == 0 || strcmp(name, "multicast-ttl") == 0)
     return Sfixnum(ivalue);
   return Sboolean(ivalue != 0);
 }
@@ -430,6 +568,16 @@ ptr chezpp_net_resolve_addresses(const char *host, int port, int family, int typ
   Svector_set(out, 1, head);
   freeaddrinfo(result);
   return out;
+}
+
+ptr chezpp_net_service_to_port(const char *service, int type) {
+  const char *protocol = type == SOCK_DGRAM ? "udp" : "tcp";
+  struct servent *entry = getservbyname(service, protocol);
+  if (entry == NULL) {
+    errno = EINVAL;
+    return make_errno_status("error");
+  }
+  return Sfixnum(ntohs((unsigned short)entry->s_port));
 }
 
 ptr chezpp_net_address_to_name(int family, const char *host, int port, const char *path) {

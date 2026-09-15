@@ -1,1713 +1,1056 @@
 (library (chezpp net http)
-  (export http-request?
-          make-http-request
-          http-request-method
-          http-request-uri
-          http-request-headers
-          http-request-body
-          http-response?
-          make-http-response
-          http-response-status
-          http-response-reason
-          http-response-headers
-          http-response-body
-          http-header-ref
-          http-header-set
-          http-header-add
-          http-client?
-          http-open
-          http-close
-          http-send
-          http-get
-          http-head
-          http-post
-          http-put
-          http-delete
-          http-request
-          http-download
-          http-upload
-          http-follow-redirects!
-          http-set-header!
-          http-set-timeout!
-          http-cancel-pending!
-          http-send/nonblocking
-          http-request/nonblocking
-          http-download/nonblocking
-          http-upload/nonblocking
-          http-server?
-          http-listen
-          http-server-close
-          http-accept
-          http-accept/nonblocking
-          http-serve
-          http-serve-loop
-          http-register-handler!
-          http-connection?
-          http-connection-close
-          http-read-request
-          http-read-request/nonblocking
-          http-write-response
-          http-write-response/nonblocking)
-  (import (chezpp chez)
-          (chezpp utils)
-          (chezpp string)
-          (chezpp file)
-          (chezpp net uri)
-          (chezpp net errors)
-          (chezpp net address)
-          (chezpp net socket)
-          (chezpp net poll)
-          (chezpp net private)
-          (chezpp net tls))
-
-  ;;===----------------------------------------------------------------------===
-  ;; Data Types
-  ;;===----------------------------------------------------------------------===
-
-  (define check-backlog
-    (lambda (who backlog)
-      (when (fx< backlog 0)
-        (errorf who "backlog must be non-negative, given ~s" backlog))
-      backlog))
-
-  (define-record-type (http-request-record %make-http-request http-request?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable method http-request-method)
-            (immutable uri http-request-uri)
-            (immutable headers http-request-headers)
-            (immutable body http-request-body)))
-
-  (define-record-type (http-response-record %make-http-response http-response?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable status http-response-status)
-            (immutable reason http-response-reason)
-            (immutable headers http-response-headers)
-            (immutable body http-response-body)))
-
-  (define-record-type (http-client %make-http-client http-client?)
-    (sealed #t)
-    (opaque #f)
-    (fields (mutable default-headers http-client-default-headers http-client-default-headers-set!)
-            (mutable follow-redirects? http-client-follow-redirects? http-client-follow-redirects?-set!)
-            (mutable timeout-ms http-client-timeout-ms http-client-timeout-ms-set!)
+  (export http-request? make-http-request http-request-method http-request-uri http-request-headers http-request-body
+          http-response? make-http-response http-response-status http-response-reason http-response-headers http-response-body http-response-trailers http-response-version
+          http-body-source? make-http-body-source http-body-source-length http-body-source-read http-body-sink? make-http-body-sink http-body-sink-write! http-body-sink-finish!
+          make-http-port-body-source make-http-file-body-source make-http-port-body-sink make-http-file-body-sink
+          http-cookie? make-http-cookie http-cookie-name http-cookie-value http-cookie-domain http-cookie-path http-cookie-secure? http-cookie-jar? make-http-cookie-jar
+          http-proxy? make-http-proxy http-proxy-uri http-multipart-part? make-http-multipart-part http-multipart-part-name http-multipart-part-value http-multipart-part-filename http-multipart-part-content-type
+          http-pool-policy? make-http-pool-policy http-pool-policy-max-idle http-pool-policy-max-active http-pool-policy-idle-timeout-ms
+          http-client-cookie-jar-set! http-client-auth-set! http-client-proxy-set! http-client-pool-policy-set! http-client-version-set! make-http-multipart-body
+          http-header-ref http-header-set http-header-add http-client? http-open http-close http-send http-get http-head http-post http-put http-delete http-request http-download http-upload
+          http-follow-redirects! http-set-header! http-set-timeout! http-cancel-pending! http-send/nonblocking http-request/nonblocking http-download/nonblocking http-upload/nonblocking
+          http-server? http-listen http-server-close http-accept http-accept/nonblocking http-serve http-serve-loop http-register-handler! http-handler-ref http-unregister-handler!
+          http-connection? http-connection-close http-read-request http-read-request/nonblocking http-write-response http-write-response/nonblocking)
+  (import (chezpp chez) (chezpp utils) (chezpp file) (chezpp net uri) (chezpp net errors) (chezpp net operation) (chezpp net ffi) (chezpp net tls) (chezpp net http private) (chezpp net lws client) (chezpp net lws server))
+  #|record:http-request-record
+An immutable HTTP request containing a method, URI, header alist, and optional body.
+|#
+  (define-record-type (http-request-record %make-http-request http-request?) (sealed #t) (opaque #f)
+    (fields (immutable method http-request-method) (immutable uri http-request-uri) (immutable headers http-request-headers) (immutable body http-request-body)))
+  #|record:http-response-record
+An immutable HTTP response containing status, reason, headers, body, trailers, and protocol version.
+|#
+  (define-record-type (http-response-record %make-http-response http-response?) (sealed #t) (opaque #f)
+    (fields (immutable status http-response-status) (immutable reason http-response-reason) (immutable headers http-response-headers) (immutable body http-response-body) (immutable trailers http-response-trailers) (immutable version http-response-version)))
+  #|record:http-body-source
+A pull-based request body source with a producer, optional length, and one-shot closer.
+|#
+  (define-record-type (http-body-source %make-http-body-source http-body-source?) (sealed #t) (opaque #f)
+    (fields (immutable producer http-body-source-producer) (immutable length http-body-source-length) (immutable closer http-body-source-closer) (mutable closed? http-body-source-closed? http-body-source-closed?-set!)))
+  #|record:http-body-sink
+A push-based response body sink with a consumer and one-shot finisher.
+|#
+  (define-record-type (http-body-sink %make-http-body-sink http-body-sink?) (sealed #t) (opaque #f)
+    (fields (immutable consumer http-body-sink-consumer) (immutable finisher http-body-sink-finisher) (mutable finished? http-body-sink-finished? http-body-sink-finished?-set!)))
+  #|record:http-cookie
+An immutable cookie with name, value, domain, path, and secure transport flag.
+|#
+  (define-record-type (http-cookie %make-http-cookie http-cookie?) (sealed #t) (opaque #f) (fields (immutable name http-cookie-name) (immutable value http-cookie-value) (immutable domain http-cookie-domain) (immutable path http-cookie-path) (immutable secure? http-cookie-secure?)))
+  #|record:http-cookie-jar
+A mutable collection of cookies used by an HTTP client.
+|#
+  (define-record-type (http-cookie-jar %make-http-cookie-jar http-cookie-jar?) (sealed #t) (opaque #f) (fields (mutable cookies http-cookie-jar-cookies http-cookie-jar-cookies-set!)))
+  #|record:http-proxy
+An HTTP proxy configuration containing its proxy URI.
+|#
+  (define-record-type (http-proxy %make-http-proxy http-proxy?) (sealed #t) (opaque #f) (fields (immutable uri http-proxy-uri)))
+  #|record:http-multipart-part
+A multipart field with name, value, optional filename, and content type.
+|#
+  (define-record-type (http-multipart-part %make-http-multipart-part http-multipart-part?) (sealed #t) (opaque #f) (fields (immutable name http-multipart-part-name) (immutable value http-multipart-part-value) (immutable filename http-multipart-part-filename) (immutable content-type http-multipart-part-content-type)))
+  #|record:http-pool-policy
+Connection pool limits: maximum idle and active connections and idle timeout in milliseconds.
+|#
+  (define-record-type (http-pool-policy %make-http-pool-policy http-pool-policy?) (sealed #t) (opaque #f) (fields (immutable max-idle http-pool-policy-max-idle) (immutable max-active http-pool-policy-max-active) (immutable idle-timeout-ms http-pool-policy-idle-timeout-ms)))
+  #|record:http-client-record
+Mutable HTTP client configuration and transport state.
+|#
+  (define-record-type (http-client-record %make-http-client http-client?) (sealed #t) (opaque #f)
+    (fields (mutable closed? http-client-closed? http-client-closed?-set!) (mutable headers http-client-headers http-client-headers-set!) (mutable timeout-ms http-client-timeout-ms http-client-timeout-ms-set!) (mutable follow-redirects? http-client-follow-redirects? http-client-follow-redirects?-set!) (mutable cookie-jar http-client-cookie-jar %http-client-cookie-jar-set!) (mutable auth http-client-auth %http-client-auth-set!) (mutable proxy http-client-proxy %http-client-proxy-set!) (mutable pool-policy http-client-pool-policy %http-client-pool-policy-set!) (mutable version http-client-version %http-client-version-set!) (mutable transport http-client-transport http-client-transport-set!) (mutable active http-client-active http-client-active-set!)
             (immutable tls-context http-client-tls-context)
-            (mutable cached-origin http-client-cached-origin http-client-cached-origin-set!)
-            (mutable cached-connection http-client-cached-connection http-client-cached-connection-set!)
-            (mutable pending http-client-pending http-client-pending-set!)
-            (mutable closed? http-client-closed? http-client-closed?-set!)))
-
-  (define-record-type (http-pending-op %make-http-pending-op http-pending-op?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable kind http-pending-kind)
-            (immutable args http-pending-args)
-            (immutable reader http-pending-reader)
-            (immutable writer http-pending-writer)
-            (immutable thread http-pending-thread)
-            (mutable done? http-pending-done? http-pending-done?-set!)
-            (mutable result http-pending-result http-pending-result-set!)
-            (mutable cancelled? http-pending-cancelled? http-pending-cancelled?-set!)
-            (mutable connection http-pending-connection http-pending-connection-set!)))
-
-  (define-record-type (http-server %make-http-server http-server?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable socket http-server-socket)
-            (immutable host http-server-host)
-            (immutable port http-server-port)
-            (immutable tls-context http-server-tls-context)
-            (mutable handlers http-server-handlers http-server-handlers-set!)
+            (mutable retired http-client-retired http-client-retired-set!)
+            (immutable mutex http-client-mutex)))
+  #|record:http-server-record
+An HTTP server handle containing its LWS transport and synchronized handler table.
+|#
+  (define-record-type (http-server-record %make-http-server http-server?) (sealed #t) (opaque #f)
+    (fields (immutable transport http-server-transport)
+            (immutable handlers http-server-handlers)
+            (immutable mutex http-server-mutex)
             (mutable closed? http-server-closed? http-server-closed?-set!)))
-
-  (define-record-type (http-connection %make-http-connection http-connection?)
-    (sealed #t)
-    (opaque #f)
-    (fields (immutable socket http-connection-socket)
-            (immutable tls-session http-connection-tls-session)
-            (immutable deadline-cell http-connection-deadline-cell)
-            (immutable input-port http-connection-input-port)
-            (immutable output-port http-connection-output-port)
-            (immutable secure? http-connection-secure?)
+  #|record:http-connection-record
+An accepted HTTP connection handle managed by the server API.
+|#
+  (define-record-type (http-connection-record %make-http-connection http-connection?) (sealed #t) (opaque #f)
+    (fields (immutable request-handle http-connection-request-handle)
+            (mutable request http-connection-request http-connection-request-set!)
             (mutable closed? http-connection-closed? http-connection-closed?-set!)))
-
-  ;;===----------------------------------------------------------------------===
-  ;; Helpers
-  ;;===----------------------------------------------------------------------===
-
-  (define normalize-http-method
-    (lambda (who method)
+  (define normalize-headers (lambda (headers) (unless (list? headers) (errorf 'normalize-headers "expected a header list")) (map (lambda (e) (unless (and (pair? e) (string? (car e)) (string? (cdr e))) (errorf 'normalize-headers "invalid header ~s" e)) e) headers)))
+  (define monotonic-ms (lambda () (let ([t (current-time 'time-monotonic)]) (+ (* (time-second t) 1000) (quotient (time-nanosecond t) 1000000)))))
+  (define slice-bv (lambda (b i e) (let ([x (make-bytevector (- e i))]) (bytevector-copy! b i x 0 (- e i)) x)))
+  (define request-path (lambda (u) (let ([p (or (uri-raw-path u) "/")] [q (uri-raw-query u)]) (if q (string-append (if (string=? p "") "/" p) "?" q) (if (string=? p "") "/" p)))))
+  (define bytevector-slice
+    (lambda (bv start stop)
+      (let ([out (make-bytevector (- stop start) 0)])
+        (bytevector-copy! bv start out 0 (- stop start))
+        out)))
+  (define bytevector-concatenate
+    (lambda (bytevector*)
+      (let ([out (make-bytevector
+                  (fold-left (lambda (length bytes)
+                               (+ length (bytevector-length bytes)))
+                             0 bytevector*) 0)])
+        (let loop ([rest bytevector*] [offset 0])
+          (unless (null? rest)
+            (let ([bytes (car rest)])
+              (bytevector-copy! bytes 0 out offset (bytevector-length bytes))
+              (loop (cdr rest) (+ offset (bytevector-length bytes))))))
+        out)))
+  #|proc:make-http-request
+Builds a request from method, URI, headers, and optional body; returns a request record.
+|#
+  (define make-http-request
+    (case-lambda [(method uri) (make-http-request method uri '() #f)] [(method uri headers) (make-http-request method uri headers #f)]
+      [(method uri headers body) (pcheck ([(lambda (x) (or (string? x) (symbol? x))) method] [(lambda (x) (or (string? x) (uri? x))) uri] [list? headers] [(lambda (x) (or (not x) (string? x) (bytevector? x) (http-body-source? x))) body]) (let ([u (if (uri? uri) uri (string->uri uri))]) (unless u (errorf 'make-http-request "invalid URI ~s" uri)) (%make-http-request (if (symbol? method) (string-upcase (symbol->string method)) (string-upcase method)) u (normalize-headers headers) body)))]))
+  #|proc:make-http-response
+Builds a response from status, reason, headers, body, trailers, and version.
+Returns a response record.
+|#
+  (define make-http-response (case-lambda [(s r h b) (make-http-response s r h b '() 'h1)] [(s r h b t v) (pcheck ([fixnum? s] [string? r] [list? h] [list? t] [symbol? v]) (%make-http-response s r (normalize-headers h) b t v))]))
+  #|proc:make-http-body-source
+Builds a pull body source from producer, length, and optional closer; returns a source record.
+|#
+  (define make-http-body-source (case-lambda [(p l) (make-http-body-source p l void)] [(p l c) (pcheck ([procedure? p] [procedure? c]) (%make-http-body-source p l c #f))]))
+  #|proc:http-body-source-read
+Reads at most `n` bytes from source `s`, returning bytes or end-of-file.
+|#
+  (define http-body-source-read (lambda (s n) (pcheck ([http-body-source? s] [positive? n]) ((http-body-source-producer s) n))))
+  #|proc:make-http-body-sink
+Creates a response sink from a consumer `(bytevector start count)` and optional finisher.
+Returns a sink record.
+|#
+  (define make-http-body-sink (case-lambda [(c) (make-http-body-sink c void)] [(c f) (pcheck ([procedure? c f]) (%make-http-body-sink c f #f))]))
+  #|proc:http-body-sink-write!
+Writes `count` bytes from `body` at `start` to sink `sink`; returns an unspecified value.
+|#
+  (define http-body-sink-write! (lambda (s b i n) (pcheck ([http-body-sink? s] [bytevector? b] [natural? i n]) ((http-body-sink-consumer s) b i n))))
+  #|proc:http-body-sink-finish!
+Finishes sink `sink` once and returns an unspecified value. Later calls do not finish it again.
+|#
+  (define http-body-sink-finish! (lambda (s) (pcheck ([http-body-sink? s]) (unless (http-body-sink-finished? s) (http-body-sink-finished?-set! s #t) ((http-body-sink-finisher s))))))
+  #|proc:make-http-port-body-source
+Creates a body source that reads from input port `port` with optional byte length `length`.
+Returns the body source and leaves `port` open when the source finishes.
+|#
+  (define make-http-port-body-source (lambda (p l) (pcheck ([input-port? p]) (make-http-body-source (lambda (n) (get-bytevector-n p n)) l))))
+  #|proc:make-http-file-body-source
+Opens file `path` and returns a body source that closes the file after the body is consumed.
+|#
+  (define make-http-file-body-source (lambda (path) (pcheck ([string? path]) (let ([p (open-file-input-port path)]) (make-http-body-source (lambda (n) (get-bytevector-n p n)) (file-size path) (lambda () (close-port p)))))))
+  #|proc:make-http-port-body-sink
+Creates a body sink that writes to output port `port`.
+Returns a sink that flushes but does not close the port.
+|#
+  (define make-http-port-body-sink (lambda (p) (pcheck ([output-port? p]) (make-http-body-sink (lambda (b i n) (put-bytevector p b i n)) (lambda () (flush-output-port p))))))
+  #|proc:make-http-file-body-sink
+Opens file `path` for replacement and returns a body sink that closes the file when finished.
+|#
+  (define make-http-file-body-sink (lambda (path) (pcheck ([string? path]) (let ([p (open-file-output-port path (file-options no-fail replace))]) (make-http-body-sink (lambda (b i n) (put-bytevector p b i n)) (lambda () (close-port p)))))))
+  #|proc:make-http-cookie
+Creates and returns a cookie. `name` and `value` are its pair, `domain` and `path` limit its scope,
+and `secure?` requires secure transport.
+|#
+  (define make-http-cookie (lambda (n v d p s) (pcheck ([string? n v d p] [boolean? s]) (%make-http-cookie n v d p s))))
+  #|proc:make-http-cookie-jar
+Creates and returns an empty mutable HTTP cookie jar.
+|#
+  (define make-http-cookie-jar (lambda () (%make-http-cookie-jar '())))
+  #|proc:make-http-proxy
+Creates and returns a proxy configuration from URI or URI string `uri`.
+|#
+  (define make-http-proxy (lambda (u) (pcheck ([(lambda (x) (or (string? x) (uri? x))) u]) (%make-http-proxy (if (uri? u) u (string->uri u))))))
+  #|proc:make-http-multipart-part
+Creates and returns a multipart part. `name` identifies `value`; optional `filename` and
+`content-type` describe file data.
+|#
+  (define make-http-multipart-part (case-lambda [(n v) (make-http-multipart-part n v #f #f)] [(n v f c) (pcheck ([string? n]) (%make-http-multipart-part n v f c))]))
+  #|proc:make-http-pool-policy
+Creates and returns a pool policy. `max-idle` and `max-active` bound connections, while
+`idle-timeout-ms` sets their idle lifetime in milliseconds.
+|#
+  (define make-http-pool-policy (lambda (i a t) (pcheck ([natural? i a t]) (%make-http-pool-policy i a t))))
+  (define header-name-string
+    (lambda (name)
+      (if (symbol? name) (symbol->string name) name)))
+  #|proc:http-header-ref
+Returns the case-insensitive value for header `name` in `headers`, or `default` when absent.
+|#
+  (define http-header-ref (case-lambda [(h n) (http-header-ref h n #f)] [(h n d) (pcheck ([list? h] [(lambda (x) (or (string? x) (symbol? x))) n]) (let ([n (header-name-string n)] [x (find (lambda (e) (string-ci=? (car e) n)) h)]) (if x (cdr x) d)))]))
+  #|proc:http-header-set
+Returns `headers` with case-insensitive header `name` replaced by string `value`.
+|#
+  (define http-header-set (lambda (h n v) (pcheck ([list? h] [(lambda (x) (or (string? x) (symbol? x))) n] [string? v]) (let ([n (header-name-string n)]) (cons (cons n v) (filter (lambda (e) (not (string-ci=? (car e) n))) h))))))
+  #|proc:http-header-add
+Returns `headers` with string `value` appended for header `name`, preserving existing fields.
+|#
+  (define http-header-add (lambda (h n v) (pcheck ([list? h] [(lambda (x) (or (string? x) (symbol? x))) n] [string? v]) (append h (list (cons (header-name-string n) v))))))
+  #|proc:http-open
+Opens and returns a new HTTP client. Optional `tls-context` is a caller-owned client TLS context
+retained for the client's lifetime, or `#f` for the default TLS policy.
+|#
+  (define http-open
+    (case-lambda
+      [() (http-open #f)]
+      [(tls-context)
+       (pcheck ([(lambda (value) (or (not value) (tls-context? value))) tls-context])
+         (%make-http-client #f '() 30000 #t #f #f #f #f 'auto #f '() tls-context '()
+                            (make-mutex 'http-client)))]))
+  (define ensure-open (lambda (c) (when (http-client-closed? c) (raise-net-error 'http 'closed "HTTP client is closed" c))))
+  (define close-body-source!
+    (lambda (source)
+      (when (and (http-body-source? source) (not (http-body-source-closed? source)))
+        (http-body-source-closed?-set! source #t)
+        ((http-body-source-closer source)))))
+  (define body-producer
+    (lambda (b)
       (cond
-       [(string? method) (string-upcase method)]
-       [(symbol? method) (string-upcase (symbol->string method))]
-       [else (errorf who "expected HTTP method string or symbol, given ~s" method)])))
-
-  (define normalize-http-uri
-    (lambda (who value)
-      (cond
-       [(uri? value) value]
-       [(string? value)
-        (or (string->uri value)
-            (errorf who "invalid URI string ~s" value))]
-       [else
-        (errorf who "expected URI object or string, given ~s" value)])))
-
-  (define normalize-http-body
-    (lambda (who body)
-      (cond
-       [(or (not body) (string? body) (bytevector? body)) body]
-       [else
-        (errorf who "expected body to be #f, string, or bytevector, given ~s" body)])))
-
-  (define normalize-http-header-name
-    (lambda (who name)
-      (cond
-       [(string? name) name]
-       [(symbol? name) (symbol->string name)]
-       [else
-        (errorf who "expected header name string or symbol, given ~s" name)])))
-
-  (define normalize-http-headers
-    (lambda (who headers)
-      (unless (list? headers)
-        (errorf who "expected header association list, given ~s" headers))
-      (map (lambda (entry)
-             (unless (pair? entry)
-               (errorf who "expected header pair, given ~s" entry))
-             (let ([name (normalize-http-header-name who (car entry))]
-                   [value (cdr entry)])
-               (unless (string? value)
-                 (errorf who "expected header value string, given ~s" value))
-               (cons name value)))
-           headers)))
-
-  (define normalize-http-status
-    (lambda (who status)
-      (unless (and (integer? status) (exact? status) (<= 100 status 599))
-        (errorf who "expected HTTP status in [100, 599], given ~s" status))
-      status))
-
-  (define ensure-client-open
-    (lambda (who client)
-      (when (http-client-closed? client)
-        (raise-net-error who 'http "HTTP client is closed" client))))
-
-  (define ensure-no-pending-mismatch
-    (lambda (who client kind args)
-      (let ([pending (http-client-pending client)])
-        (when (and pending
-                   (or (not (eq? (http-pending-kind pending) kind))
-                       (not (equal? (http-pending-args pending) args))))
-          (raise-net-error who 'http "another nonblocking HTTP operation is pending" pending)))))
-
-  (define ensure-server-open
-    (lambda (who server)
-      (when (http-server-closed? server)
-        (raise-net-error who 'http "HTTP server is closed" server))))
-
-  (define ensure-connection-open
-    (lambda (who conn)
-      (when (http-connection-closed? conn)
-        (raise-net-error who 'http "HTTP connection is closed" conn))))
-
-  (define http-default-timeout-ms 30000)
-
-  (define check-timeout-ms
-    (lambda (who timeout-ms)
-      (unless (fixnum? timeout-ms)
-        (errorf who "expected timeout fixnum, given ~s" timeout-ms))
-      (when (fx< timeout-ms 0)
-        (errorf who "timeout must be non-negative, given ~s" timeout-ms))
-      timeout-ms))
-
-  (define current-time-ms
-    (lambda ()
-      (let ([t (current-time)])
-        (+ (* (time-second t) 1000)
-           (quotient (time-nanosecond t) 1000000)))))
-
-  (define timeout->deadline-ms
-    (lambda (timeout-ms)
-      (and (fx>= timeout-ms 0)
-           (+ (current-time-ms) timeout-ms))))
-
-  (define remaining-timeout-ms
-    (lambda (deadline-ms)
-      (and deadline-ms
-           (max 0 (- deadline-ms (current-time-ms))))))
-
-  (define connection-close?
-    (lambda (headers)
-      (let ([value (http-header-ref headers "Connection" #f)])
-        (and value
-             (ormap (lambda (part)
-                      (string-ci=? (string-trim part) "close"))
-                    (string-split value #\,))))))
-
-  (define request-origin-key
-    (lambda (request)
-      (let* ([u (http-request-uri request)]
-             [scheme (or (uri-scheme u) "http")]
-             [host (or (uri-host u) "localhost")]
-             [port (default-port-for-uri 'request-origin-key u)])
-        (list scheme host port))))
-
-  (define http-connection-deadline-ms
-    (lambda (conn)
-      (vector-ref (http-connection-deadline-cell conn) 0)))
-
-  (define http-connection-deadline-ms-set!
-    (lambda (conn deadline-ms)
-      (vector-set! (http-connection-deadline-cell conn) 0 deadline-ms)))
-
-  (define close-pending-notifier!
-    (lambda (pending)
-      (guard (c [else #f])
-        (close-socket (http-pending-reader pending)))
-      (guard (c [else #f])
-        (close-socket (http-pending-writer pending)))))
-
-  (define open-pending-notifier
-    (lambda ()
-      (let ([listener (open-socket 'inet 'stream)]
-            [client #f]
-            [server #f])
-        (guard (c [else
-                   (when server
-                     (guard (x [else #f])
-                       (close-socket server)))
-                   (when client
-                     (guard (x [else #f])
-                       (close-socket client)))
-                   (guard (x [else #f])
-                     (close-socket listener))
-                   (raise c)])
-          (dynamic-wind
-            void
-            (lambda ()
-              (socket-set-option! listener 'reuse-address #t)
-              (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
-              (socket-listen! listener 1)
-              (let ([addr (socket-local-address listener)])
-                (set! client (open-socket 'inet 'stream))
-                (socket-connect! client addr)
-                (let-values ([(accepted peer) (socket-accept listener)])
-                  (set! server accepted)
-                  (values server client))))
-            (lambda ()
-              (guard (c [else #f])
-                (close-socket listener))))))))
-
-  (define start-pending!
-    (lambda (client kind args thunk)
-      (let-values ([(reader writer) (open-pending-notifier)])
-        (letrec ([pending
-                  (%make-http-pending-op
-                   kind
-                   args
-                   reader
-                   writer
-                   (fork-thread
-                    (lambda ()
-                      (let ([result
-                             (guard (c [else c])
-                               (thunk pending))])
-                        (when (http-pending-cancelled? pending)
-                          (set! result #f))
-                        (http-pending-result-set! pending result))
-                      (http-pending-done?-set! pending #t)
-                      (guard (c [else #f])
-                        (socket-send-all writer #vu8(1)))))
-                   #f
-                   #f
-                   #f
-                   #f)])
-          (http-client-pending-set! client pending)
-          pending))))
-
-  (define pending-ready?
-    (lambda (pending)
-      (or (http-pending-done? pending)
-          (let* ([target (make-poll-target (http-pending-reader pending)
-                                           '(read error hup invalid))]
-                 [ready (car (poll/nonblocking (list target)))])
-            (memq 'read (poll-target-ready-events ready))))))
-
-  (define finish-pending!
-    (lambda (who client pending)
-      (http-client-pending-set! client #f)
-      (thread-join (http-pending-thread pending))
-      (close-pending-notifier! pending)
-      (let ([result (http-pending-result pending)])
-        (if (condition? result)
-            (raise result)
-            result))))
-
-  (define cancel-pending!
-    (lambda (client pending)
-      (http-pending-cancelled?-set! pending #t)
-      (let ([conn (http-pending-connection pending)])
-        (when conn
-          (http-pending-connection-set! pending #f)
-          (uncache-http-connection! client conn)
-          (close-http-connection conn)))
-      (close-pending-notifier! pending)
-      (http-client-pending-set! client #f)
-      (thread-join (http-pending-thread pending))
-      client))
-
-  (define http-transfer/nonblocking
-    (lambda (who client kind args thunk)
-      (ensure-client-open who client)
-      (ensure-no-pending-mismatch who client kind args)
-      (let ([pending (or (http-client-pending client)
-                         (start-pending! client kind args thunk))])
-        (if (pending-ready? pending)
-            (finish-pending! who client pending)
-            #f))))
-
-  (define request-key
-    (lambda (request)
-      (list (http-request-method request)
-            (uri->string (http-request-uri request))
-            (http-request-headers request)
-            (http-request-body request))))
-
-  (define raise-http-timeout
-    (lambda (who detail data)
-      (raise-net-error who 'http detail data)))
-
-  (define tls-timeout-condition?
-    (lambda (c)
-      (and (net-error? c)
-           (eq? (net-error-kind c) 'tls)
-           (string-contains? (net-error-message c) "timed out"))))
-
-  (define call-with-http-timeout-translation
-    (lambda (who thunk)
-      (guard (c [else
-                 (if (tls-timeout-condition? c)
-                     (raise-http-timeout who "HTTP request timed out" c)
-                     (raise c))])
-        (thunk))))
-
-  (define wait-socket-ready!
-    (lambda (who sock event* deadline-ms detail)
-      (let* ([timeout-ms (let ([x (remaining-timeout-ms deadline-ms)])
-                           (if x x -1))]
-             [target (car (poll (list (make-poll-target sock event*)) timeout-ms))]
-             [ready (poll-target-ready-events target)])
-        (when (null? ready)
-          (raise-http-timeout who detail sock))
-        ready)))
-
-  (define make-deadline-socket-input-port
-    (lambda (who sock deadline-ref)
-      (make-custom-binary-input-port
-       "chezpp-http-client-input"
-       (lambda (bv start count)
-         (let ([stop (fx+ start count)])
-           (let loop ()
-             (let ([n (socket-recv!/nonblocking sock bv start stop)])
-               (cond
-                [(fixnum? n) n]
-                [(eof-object? n) 0]
-                [else
-                 (wait-socket-ready! who
-                                     sock
-                                     '(read error hup invalid)
-                                     (deadline-ref)
-                                     "HTTP request timed out")
-                 (loop)])))))
-       (lambda () #f)
-       (lambda (x) #f)
-       (lambda () #t))))
-
-  (define make-deadline-socket-output-port
-    (lambda (who sock deadline-ref)
-      (make-custom-binary-output-port
-       "chezpp-http-client-output"
-       (lambda (bv start count)
-         (let ([stop (fx+ start count)])
-           (let loop ([i start])
-             (if (fx= i stop)
-                 count
-                 (let ([n (socket-send/nonblocking sock bv i stop)])
-                   (if n
-                       (loop (fx+ i n))
-                       (begin
-                         (wait-socket-ready! who
-                                             sock
-                                             '(write error hup invalid)
-                                             (deadline-ref)
-                                             "HTTP request timed out")
-                         (loop i))))))))
-       (lambda () #f)
-       (lambda (x) #f)
-       (lambda () #t))))
-
-  (define make-deadline-tls-input-port
-    (lambda (who session deadline-ref)
-      (make-custom-binary-input-port
-       "chezpp-http-client-tls-input"
-       (lambda (bv start count)
-         (call-with-http-timeout-translation
-          who
-          (lambda ()
-            (let ([n (tls-read! session
-                                bv
-                                start
-                                (fx+ start count)
-                                (let ([x (remaining-timeout-ms (deadline-ref))])
-                                  (if x x -1)))])
-              (if (eof-object? n) 0 n)))))
-       (lambda () #f)
-       (lambda (x) #f)
-       (lambda () #t))))
-
-  (define make-deadline-tls-output-port
-    (lambda (who session deadline-ref)
-      (make-custom-binary-output-port
-       "chezpp-http-client-tls-output"
-       (lambda (bv start count)
-         (call-with-http-timeout-translation
-          who
-          (lambda ()
-            (tls-write-all session
-                           bv
-                           start
-                           (fx+ start count)
-                           (let ([x (remaining-timeout-ms (deadline-ref))])
-                             (if x x -1))))))
-       (lambda () #f)
-       (lambda (x) #f)
-       (lambda () #t))))
-
-  (define body->bytevector
+       [(http-body-source? b)
+        (lambda (n)
+          (guard (condition
+                  [else
+                   (guard (ignored [else (void)]) (close-body-source! b))
+                   (raise condition)])
+            (let ([chunk ((http-body-source-producer b) n)])
+              (when (eof-object? chunk) (close-body-source! b))
+              chunk)))]
+       [(string? b)
+        (let ([v (string->utf8 b)] [i 0])
+          (lambda (n)
+            (if (>= i (bytevector-length v))
+                (eof-object)
+                (let ([e (min (bytevector-length v) (+ i n))])
+                  (let ([x (slice-bv v i e)]) (set! i e) x)))))]
+       [(bytevector? b)
+        (let ([i 0])
+          (lambda (n)
+            (if (>= i (bytevector-length b))
+                (eof-object)
+                (let ([e (min (bytevector-length b) (+ i n))])
+                  (let ([x (slice-bv b i e)]) (set! i e) x)))))]
+       [else #f])))
+  (define body-length
     (lambda (body)
       (cond
-       [(not body) (make-bytevector 0 0)]
-       [(bytevector? body) body]
-       [(string? body) (string->utf8 body)]
-       [else (assert-unreachable)])))
-
-  (define default-reason
-    (lambda (status)
-      (case status
-        [(200) "OK"]
-        [(201) "Created"]
-        [(204) "No Content"]
-        [(301) "Moved Permanently"]
-        [(302) "Found"]
-        [(303) "See Other"]
-        [(307) "Temporary Redirect"]
-        [(308) "Permanent Redirect"]
-        [(400) "Bad Request"]
-        [(401) "Unauthorized"]
-        [(403) "Forbidden"]
-        [(404) "Not Found"]
-        [(500) "Internal Server Error"]
-        [(502) "Bad Gateway"]
-        [(503) "Service Unavailable"]
-        [else ""])))
-
-  (define default-port-for-uri
-    (lambda (who u)
-      (or (uri-port u)
-          (cond
-           [(string=? (uri-scheme u) "http") 80]
-           [(string=? (uri-scheme u) "https") 443]
-           [else
-            (errorf who "unsupported HTTP scheme ~s" (uri-scheme u))]))))
-
-  (define http-uri-target
-    (lambda (u)
-      (let ([path (uri-path u)]
-            [query (uri-query u)])
-        (string-append
-         (if (or (not path) (string=? path "")) "/" path)
-         (if query (string-append "?" query) "")))))
-
-  (define http-host-header
-    (lambda (u)
-      (let* ([host (or (uri-host u) "localhost")]
-             [port (uri-port u)]
-             [default-port (if (string=? (uri-scheme u) "https") 443 80)])
-        (if (and port (not (= port default-port)))
-            (format "~a:~a" host port)
-            host))))
-
+       [(string? body) (bytevector-length (string->utf8 body))]
+       [(bytevector? body) (bytevector-length body)]
+       [(and (http-body-source? body) (http-body-source-length body))
+        (http-body-source-length body)]
+       [else #f])))
+  (define normalize-request-headers
+    (lambda (headers body)
+      (let* ([length (body-length body)]
+             [content-length (http-header-ref headers "Content-Length" #f)]
+             [transfer-encoding (http-header-ref headers "Transfer-Encoding" #f)])
+        (when (and content-length transfer-encoding)
+          (raise-net-error 'http 'framing
+                           "conflicting Content-Length and Transfer-Encoding headers" headers))
+        (if (and length (not content-length) (not transfer-encoding))
+            (http-header-add headers "Content-Length" (number->string length))
+            headers))))
+  (define base64-encode
+    (lambda (bytes)
+      (let ([alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"]
+            [length (bytevector-length bytes)])
+        (let loop ([index 0] [out '()])
+          (if (>= index length)
+              (apply string-append (reverse out))
+              (let* ([remaining (- length index)]
+                     [a (bytevector-u8-ref bytes index)]
+                     [b (if (> remaining 1) (bytevector-u8-ref bytes (+ index 1)) 0)]
+                     [c (if (> remaining 2) (bytevector-u8-ref bytes (+ index 2)) 0)])
+                (loop (+ index 3)
+                      (cons
+                       (string (string-ref alphabet (fxsra a 2))
+                               (string-ref alphabet
+                                           (fxior (fxsll (fxand a 3) 4) (fxsra b 4)))
+                               (if (> remaining 1)
+                                   (string-ref alphabet
+                                               (fxior (fxsll (fxand b 15) 2) (fxsra c 6)))
+                                   #\=)
+                               (if (> remaining 2)
+                                   (string-ref alphabet (fxand c 63)) #\=))
+                       out))))))))
+  (define request-policy-headers
+    (lambda (client request headers)
+      (define string-prefix-of?
+        (lambda (prefix value)
+          (and (<= (string-length prefix) (string-length value))
+               (string=? prefix (substring value 0 (string-length prefix))))))
+      (define join-cookie-values
+        (lambda (value*)
+          (if (null? value*) ""
+              (let loop ([rest (cdr value*)] [answer (car value*)])
+                (if (null? rest) answer
+                    (loop (cdr rest) (string-append answer "; " (car rest))))))))
+      (let* ([auth (http-client-auth client)]
+             [headers
+              (cond
+               [(and auth (eq? (car auth) 'basic))
+                (http-header-set
+                 headers "Authorization"
+                 (string-append "Basic "
+                                (base64-encode
+                                 (string->utf8
+                                  (string-append (car (cdr auth)) ":" (cdr (cdr auth)))))))]
+               [(and auth (eq? (car auth) 'bearer))
+                (http-header-set headers "Authorization"
+                                 (string-append "Bearer " (cdr auth)))]
+               [else headers])]
+             [jar (http-client-cookie-jar client)]
+             [uri (http-request-uri request)]
+             [host (or (uri-host uri) "")]
+             [path (or (uri-raw-path uri) "/")]
+             [secure? (string-ci=? (or (uri-scheme uri) "http") "https")]
+             [cookie* (if jar
+                          (filter (lambda (cookie)
+                                    (and (or (string=? (http-cookie-domain cookie) "")
+                                             (string-ci=? host (http-cookie-domain cookie)))
+                                         (string-prefix-of? (http-cookie-path cookie) path)
+                                         (or (not (http-cookie-secure? cookie)) secure?)))
+                                  (http-cookie-jar-cookies jar))
+                          '())])
+        (if (null? cookie*) headers
+            (http-header-set
+             headers "Cookie"
+             (join-cookie-values
+              (map (lambda (cookie)
+                     (string-append (http-cookie-name cookie) "="
+                                    (http-cookie-value cookie))) cookie*)))))))
+  (define store-response-cookies!
+    (lambda (client request headers)
+      (let ([jar (http-client-cookie-jar client)]
+            [host (or (uri-host (http-request-uri request)) "")])
+        (when jar
+          (for-each
+           (lambda (header)
+             (when (string-ci=? (car header) "Set-Cookie")
+               (let* ([value (cdr header)]
+                      [semi (let loop ([index 0])
+                              (cond [(= index (string-length value)) #f]
+                                    [(char=? (string-ref value index) #\;) index]
+                                    [else (loop (fx1+ index))]))]
+                      [pair (if semi (substring value 0 semi) value)]
+                      [equals (let loop ([index 0])
+                                (cond [(= index (string-length pair)) #f]
+                                      [(char=? (string-ref pair index) #\=) index]
+                                      [else (loop (fx1+ index))]))])
+                 (when (and equals (positive? equals))
+                   (let ([cookie (%make-http-cookie
+                                  (substring pair 0 equals)
+                                  (substring pair (fx1+ equals) (string-length pair))
+                                  host "/" #f)])
+                     (http-cookie-jar-cookies-set!
+                      jar
+                      (cons cookie
+                            (filter (lambda (old)
+                                      (not (and (string=? (http-cookie-name old)
+                                                          (http-cookie-name cookie))
+                                                (string-ci=? (http-cookie-domain old) host))))
+                                    (http-cookie-jar-cookies jar)))))))))
+           headers)))))
+  (define decode-response-body
+    (lambda (response)
+      (let* ([headers (http-response-headers response)]
+             [encoding (http-header-ref headers "Content-Encoding" #f)]
+             [body (http-response-body response)])
+        (if (and (bytevector? body) encoding
+                 (or (string-ci=? encoding "gzip") (string-ci=? encoding "deflate")))
+            (let ([handle (ffi-zlib-stream-open 0 (if (string-ci=? encoding "gzip") 1 0))])
+              (when (zero? handle)
+                (raise-net-error 'http 'unsupported "zlib decompression is unavailable" response))
+              (dynamic-wind
+                void
+                (lambda ()
+                  (let ([answer (ffi-zlib-stream-process handle body 0
+                                                         (bytevector-length body) 1
+                                                         (* 256 1024 1024))])
+                    (unless (and (vector? answer) (= (vector-length answer) 2)
+                                 (bytevector? (vector-ref answer 0)))
+                      (raise-net-error 'http 'compression
+                                       "HTTP response decompression failed" answer))
+                    (%make-http-response
+                     (http-response-status response) (http-response-reason response)
+                     (filter (lambda (header)
+                               (not (or (string-ci=? (car header) "Content-Encoding")
+                                        (string-ci=? (car header) "Content-Length")))) headers)
+                     (vector-ref answer 0) (http-response-trailers response)
+                     (http-response-version response))))
+                (lambda () (ffi-zlib-stream-close handle))))
+            response))))
+  (define dispatch
+    (case-lambda
+     [(c req sink)
+      (dispatch c req sink (+ (monotonic-ms) (http-client-timeout-ms c)))]
+     [(c req sink deadline)
+      (ensure-open c)
+      (let* ([u (http-request-uri req)]
+             [tls? (string=? (string-downcase (or (uri-scheme u) "http")) "https")]
+             [host (or (uri-host u) "")]
+             [port (or (uri-port u) (if tls? 443 80))]
+             [proxy (http-client-proxy c)]
+             [proxy-uri (and proxy (http-proxy-uri proxy))]
+             [proxy-host (and proxy-uri (or (uri-host proxy-uri) ""))]
+             [proxy-port (and proxy-uri (or (uri-port proxy-uri) 8080))]
+             [policy (http-client-pool-policy c)]
+             [max-active (if policy (http-pool-policy-max-active policy) 64)]
+             [max-idle (if policy (http-pool-policy-max-idle policy) 8)]
+             [idle-timeout-ms (if policy (http-pool-policy-idle-timeout-ms policy) 30000)]
+             ;; Capture mutable client policy before the operation becomes visible.
+             [follow-redirects? (http-client-follow-redirects? c)]
+             [source (body-producer (http-request-body req))]
+             [headers (request-policy-headers
+                       c req
+                       (normalize-request-headers
+                        (append (http-client-headers c) (http-request-headers req))
+                        (http-request-body req)))]
+             [policy-snapshot
+              (make-http-request-policy
+               headers (http-client-auth c) (http-client-cookie-jar c)
+               (http-client-proxy c) (http-client-tls-context c) (http-client-version c)
+               policy follow-redirects? 10 deadline)]
+             [vec (make-normalized-http-request
+                   (http-request-method req) u (or (uri-scheme u) "http") host port tls?
+                   (request-path u) headers source (body-length (http-request-body req))
+                   policy-snapshot)]
+             [sv (and sink
+                      (vector (lambda (b i n) (http-body-sink-write! sink b i n))
+                              void
+                              (lambda (status response-headers)
+                                (and follow-redirects?
+                                     (redirect-status? status)
+                                     (exists (lambda (entry)
+                                               (string-ci=? "location" (car entry)))
+                                             response-headers)))))]
+             [transport (http-client-transport c)]
+             [inner (lws-client-request/nonblocking transport vec sv)]
+             [outer #f])
+        (set! outer
+              (make-net-operation
+               'http
+               (lambda ()
+                 (net-operation-step! inner)
+                 (case (net-operation-state inner)
+                   [(completed)
+                   (let* ([transport-response (net-operation-result inner)]
+                          [response
+                           (make-http-response
+                            (transport-response-status transport-response)
+                            (transport-response-reason transport-response)
+                            (transport-response-headers transport-response)
+                            (transport-response-body transport-response)
+                            (transport-response-trailers transport-response)
+                            (transport-response-version transport-response))])
+                      (store-response-cookies! c req (http-response-headers response))
+                      (http-client-active-set! c (remq outer (http-client-active c)))
+                      (net-operation-completed (decode-response-body response)))]
+                   [(failed cancelled)
+                    (http-client-active-set! c (remq outer (http-client-active c)))
+                    (net-operation-failed (net-operation-condition inner))]
+                   [else
+                    (net-operation-pending (net-operation-poll-targets inner)
+                                           (net-operation-deadline-ms inner))]))
+               (lambda () (net-operation-cancel! inner))
+               (lambda ()
+                 (lws-client-release-operation! transport inner)
+                 (http-client-active-set! c (remq outer (http-client-active c)))
+                 (guard (ignored [else (void)]) (close-body-source! (http-request-body req))))))
+        (http-client-active-set! c (cons outer (http-client-active c)))
+        outer)]))
+  #|proc:http-send/nonblocking
+Starts request `request` on client `client`, optionally streaming response bytes to `sink`.
+Returns a distinct nonblocking network operation covering redirects and retries. A sink consumer
+has signature `(bytevector start count) -> unspecified` and its finisher has signature
+`() -> unspecified`.
+|#
+  (define http-send/nonblocking
+    (case-lambda
+      [(c r) (http-send/nonblocking c r #f)]
+      [(c r s)
+       (pcheck ([http-client? c] [http-request? r]
+                [(lambda (x) (or (not x) (http-body-sink? x))) s])
+         (ensure-open c)
+         (dispatch-with-redirects c r s (+ (monotonic-ms) (http-client-timeout-ms c))))]))
   (define redirect-status?
     (lambda (status)
-      (memq status '(301 302 303 307 308))))
-
-  (define response-body-length
-    (lambda (headers)
-      (let ([value (http-header-ref headers "Content-Length" #f)])
-        (and value
-             (let ([n (string->number value)])
-               (and n (exact? n) (integer? n) (>= n 0) n))))))
-
-  (define header-token-member?
-    (lambda (headers name token)
-      (let ([value (http-header-ref headers name #f)])
-        (and value
-             (let ([target (string-downcase token)])
-               (let loop ([rest (string-split value #\,)])
-                 (and (not (null? rest))
-                      (or (string=? (string-trim (string-downcase (car rest))) target)
-                          (loop (cdr rest))))))))))
-
-  (define chunked-transfer?
-    (lambda (headers)
-      (header-token-member? headers "Transfer-Encoding" "chunked")))
-
-  (define parse-chunk-size
-    (lambda (who line)
-      (let* ([semi (string-search line (string-ref ";" 0))]
-             [size-text (string-trim (if semi
-                                         (substring line 0 semi)
-                                         line))]
-             [n (string->number size-text 16)])
-        (unless (and n (exact? n) (integer? n) (>= n 0))
-          (raise-net-error who 'http "invalid HTTP chunk size" line))
-        n)))
-
-  (define normalize-response-body
-    (lambda (status method headers body)
-      (if (or (string=? method "HEAD")
-              (= status 204)
-              (= status 304))
-          #f
-          body)))
-
-  (define header-list-set-many
-    (lambda (headers updates)
-      (let loop ([rest updates] [out headers])
-        (if (null? rest)
-            out
-            (loop (cdr rest)
-                  (http-header-set out (caar rest) (cdar rest)))))))
-
-  (define http-header-remove
-    (lambda (headers name)
-      (let loop ([rest headers] [out '()])
-        (cond
-         [(null? rest) (reverse out)]
-         [(string-ci=? (caar rest) name)
-          (loop (cdr rest) out)]
-         [else
-          (loop (cdr rest) (cons (car rest) out))]))))
-
-  (define merge-request-headers
-    (lambda (request client)
-      (let* ([body (body->bytevector (http-request-body request))]
-             [headers (header-list-set-many (http-client-default-headers client)
-                                            (http-request-headers request))]
-             [headers (if (http-header-ref headers "Host" #f)
-                          headers
-                          (http-header-set headers "Host"
-                                           (http-host-header (http-request-uri request))))]
-             [headers (if (http-header-ref headers "Connection" #f)
-                          headers
-                          (http-header-set headers "Connection" "keep-alive"))])
-        (if (http-header-ref headers "Content-Length" #f)
-            headers
-            (http-header-set headers "Content-Length"
-                             (number->string (bytevector-length body)))))))
-
-  (define http-u8-list->bytevector
-    (lambda (u8*)
-      (let ([out (make-bytevector (length u8*) 0)])
-        (let loop ([rest u8*] [i 0])
-          (unless (null? rest)
-            (bytevector-u8-set! out i (car rest))
-            (loop (cdr rest) (fx1+ i))))
-        out)))
-
-  (define read-http-line
-    (lambda (ip)
-      (let loop ([rev '()])
-        (let ([b (get-u8 ip)])
-          (cond
-           [(eof-object? b)
-            (if (null? rev)
-                b
-                (utf8->string (http-u8-list->bytevector (reverse rev))))]
-           [(= b 10)
-            (let ([rev (if (and (pair? rev) (= (car rev) 13))
-                           (cdr rev)
-                           rev)])
-              (utf8->string (http-u8-list->bytevector (reverse rev))))]
-           [else
-            (loop (cons b rev))])))))
-
-  (define read-http-headers
-    (lambda (who ip)
-      (let loop ([out '()])
-        (let ([line (read-http-line ip)])
-          (cond
-           [(eof-object? line) (reverse out)]
-           [(string=? line "") (reverse out)]
-           [else
-            (let ([i (string-search line #\:)])
-              (unless i
-                (errorf who "invalid HTTP header line ~s" line))
-              (loop
-               (cons (cons (substring line 0 i)
-                           (string-trim-left
-                            (substring line (fx1+ i) (string-length line))))
-                     out)))])))))
-
-  (define read-http-body/exact
-    (lambda (who ip n)
-      (let ([bv (make-bytevector n 0)])
-        (let loop ([i 0])
-          (if (fx= i n)
-              bv
-              (let ([b (get-u8 ip)])
-                (when (eof-object? b)
-                  (errorf who "unexpected EOF while reading HTTP body"))
-                (bytevector-u8-set! bv i b)
-                (loop (fx1+ i))))))))
-
-  (define read-http-body/to-eof
-    (lambda (ip)
-      (let loop ([parts '()] [total 0])
-        (let ([chunk (get-bytevector-n ip 4096)])
-          (if (eof-object? chunk)
-              (let ([out (make-bytevector total 0)])
-                (let fill ([rest (reverse parts)] [i 0])
-                  (if (null? rest)
-                      out
-                      (let* ([part (car rest)]
-                             [n (bytevector-length part)])
-                        (bytevector-copy! part 0 out i n)
-                        (fill (cdr rest) (fx+ i n))))))
-              (let ([n (bytevector-length chunk)])
-                (loop (cons chunk parts) (fx+ total n))))))))
-
-  (define read-http-body/chunked
-    (lambda (who ip)
-      (let loop ([parts '()] [total 0])
-        (let ([line (read-http-line ip)])
-          (when (eof-object? line)
-            (raise-net-error who 'http "unexpected EOF while reading HTTP chunk size"))
-          (let ([size (parse-chunk-size who line)])
-            (if (= size 0)
-                (begin
-                  (let trailer-loop ()
-                    (let ([trailer (read-http-line ip)])
-                      (when (eof-object? trailer)
-                        (raise-net-error who 'http "unexpected EOF while reading HTTP trailers"))
-                      (unless (string=? trailer "")
-                        (trailer-loop))))
-                  (let ([out (make-bytevector total 0)])
-                    (let fill ([rest (reverse parts)] [i 0])
-                      (if (null? rest)
-                          out
-                          (let* ([part (car rest)]
-                                 [n (bytevector-length part)])
-                            (bytevector-copy! part 0 out i n)
-                            (fill (cdr rest) (fx+ i n)))))))
-                (let* ([chunk (read-http-body/exact who ip size)]
-                       [crlf (read-http-line ip)])
-                  (unless (string=? crlf "")
-                    (raise-net-error who 'http "invalid HTTP chunk terminator" crlf))
-                  (loop (cons chunk parts) (fx+ total size)))))))))
-
-  (define parse-response-line
-    (lambda (who line)
-      (let ([parts (string-split line #\space)])
-        (unless (>= (length parts) 2)
-          (errorf who "invalid HTTP response line ~s" line))
-        (let ([status (string->number (cadr parts))]
-              [reason (if (>= (length parts) 3)
-                          (substring line
-                                     (+ (string-length (car parts))
-                                        (string-length (cadr parts))
-                                        2)
-                                     (string-length line))
-                          "")])
-          (unless status
-            (errorf who "invalid HTTP response line ~s" line))
-          (values status reason)))))
-
-  (define parse-request-line
-    (lambda (who line)
-      (let ([parts (string-split line #\space)])
-        (unless (= (length parts) 3)
-          (errorf who "invalid HTTP request line ~s" line))
-        (values (car parts) (cadr parts) (caddr parts)))))
-
-  (define request-target->uri
-    (lambda (who conn target headers)
-      (cond
-       [(string-contains? target "://")
-        (normalize-http-uri who target)]
-       [else
-        (let* ([host (or (http-header-ref headers "Host" #f) "localhost")]
-               [scheme (if (http-connection-secure? conn) "https" "http")])
-          (normalize-http-uri who (string-append scheme "://" host target)))])))
-
-  (define write-header-lines
-    (lambda (op headers)
-      (for-each
-       (lambda (entry)
-         (put-bytevector op
-                         (string->utf8
-                          (format "~a: ~a\r\n" (car entry) (cdr entry)))))
-       headers)))
-
-  (define write-request-port
-    (lambda (op request headers)
-      (let ([body (body->bytevector (http-request-body request))])
-        (put-bytevector op
-                        (string->utf8
-                         (format "~a ~a HTTP/1.1\r\n"
-                                 (http-request-method request)
-                                 (http-uri-target (http-request-uri request)))))
-        (write-header-lines op headers)
-        (put-bytevector op (string->utf8 "\r\n"))
-        (unless (fx= 0 (bytevector-length body))
-          (put-bytevector op body))
-        (flush-output-port op))))
-
-  (define ensure-response-headers
-    (lambda (response)
-      (let* ([body (body->bytevector (http-response-body response))]
-             [headers (if (http-header-ref (http-response-headers response) "Connection" #f)
-                          (http-response-headers response)
-                          (http-header-set (http-response-headers response)
-                                           "Connection"
-                                           "close"))])
-        (cond
-         [(chunked-transfer? headers)
-          (http-header-remove headers "Content-Length")]
-         [(http-header-ref headers "Content-Length" #f)
-          headers]
-         [else
-          (http-header-set headers "Content-Length"
-                           (number->string (bytevector-length body)))]))))
-
-  (define write-http-body/chunked
-    (lambda (op body)
-      (let ([len (bytevector-length body)])
-        (unless (fx= len 0)
-          (put-bytevector op
-                          (string->utf8
-                           (string-append (number->string len 16) "\r\n")))
-          (put-bytevector op body)
-          (put-bytevector op (string->utf8 "\r\n")))
-        (put-bytevector op (string->utf8 "0\r\n\r\n")))))
-
-  (define write-response-port
-    (lambda (op response)
-      (let ([headers (ensure-response-headers response)]
-            [body (body->bytevector (http-response-body response))])
-        (put-bytevector op
-                        (string->utf8
-                         (format "HTTP/1.1 ~a ~a\r\n"
-                                 (http-response-status response)
-                                 (http-response-reason response))))
-        (write-header-lines op headers)
-        (put-bytevector op (string->utf8 "\r\n"))
-        (if (chunked-transfer? headers)
-            (write-http-body/chunked op body)
-            (unless (fx= 0 (bytevector-length body))
-              (put-bytevector op body)))
-        (flush-output-port op))))
-
-  (define read-http-response*
-    (lambda (who ip method)
-      (let ([line (read-http-line ip)])
-        (when (eof-object? line)
-          (errorf who "unexpected EOF while reading HTTP response"))
-        (let-values ([(status reason) (parse-response-line who line)])
-          (let* ([headers (read-http-headers who ip)]
-                 [content-length (response-body-length headers)]
-                 [body (cond
-                        [(chunked-transfer? headers)
-                         (read-http-body/chunked who ip)]
-                        [content-length
-                         (read-http-body/exact who ip content-length)]
-                        [else
-                         (read-http-body/to-eof ip)])])
-            (make-http-response status
-                                reason
-                                headers
-                                (normalize-response-body status method headers body)))))))
-
-  (define make-http-connection*
-    (lambda (who sock tls-session secure? deadline-ms)
-      (let ([deadline-cell (vector deadline-ms)])
-        (%make-http-connection sock
-                               tls-session
-                               deadline-cell
-                               (if tls-session
-                                   (make-deadline-tls-input-port
-                                    who
-                                    tls-session
-                                    (lambda () (vector-ref deadline-cell 0)))
-                                   (make-deadline-socket-input-port
-                                    who
-                                    sock
-                                    (lambda () (vector-ref deadline-cell 0))))
-                               (if tls-session
-                                   (make-deadline-tls-output-port
-                                    who
-                                    tls-session
-                                    (lambda () (vector-ref deadline-cell 0)))
-                                   (make-deadline-socket-output-port
-                                    who
-                                    sock
-                                    (lambda () (vector-ref deadline-cell 0))))
-                               secure?
-                               #f))))
-
-  (define cache-http-connection!
-    (lambda (client origin conn)
-      (let ([old (http-client-cached-connection client)])
-        (when (and old (not (eq? old conn)))
-          (close-http-connection old)))
-      (http-client-cached-origin-set! client origin)
-      (http-client-cached-connection-set! client conn)
-      conn))
-
-  (define uncache-http-connection!
-    (lambda (client conn)
-      (when (eq? (http-client-cached-connection client) conn)
-        (http-client-cached-origin-set! client #f)
-        (http-client-cached-connection-set! client #f))))
-
-  (define reusable-http-connection-stale?
-    (lambda (conn)
-      (let* ([ready (poll/nonblocking
-                     (list (make-poll-target (http-connection-socket conn)
-                                             '(read hup error invalid))))]
-             [events (poll-target-ready-events (car ready))])
-        (or (memq 'read events)
-            (memq 'hup events)
-            (memq 'error events)
-            (memq 'invalid events)))))
-
-  (define take-http-connection
-    (lambda (client request deadline-ms)
-      (let* ([origin (request-origin-key request)]
-             [cached-origin (http-client-cached-origin client)]
-             [cached-conn (http-client-cached-connection client)])
-        (cond
-         [(and cached-conn
-               (equal? cached-origin origin)
-               (not (http-connection-closed? cached-conn))
-               (not (reusable-http-connection-stale? cached-conn)))
-          (http-client-cached-origin-set! client #f)
-          (http-client-cached-connection-set! client #f)
-          (http-connection-deadline-ms-set! cached-conn deadline-ms)
-          cached-conn]
-         [else
-          (when (and cached-conn
-                     (or (http-connection-closed? cached-conn)
-                         (reusable-http-connection-stale? cached-conn)))
-            (uncache-http-connection! client cached-conn)
-            (close-http-connection cached-conn))
-          #f]))))
-
-  (define reusable-response?
-    (lambda (request-headers response method)
-      (let ([status (http-response-status response)]
-            [body (http-response-body response)])
-        (and (not (connection-close? request-headers))
-             (not (connection-close? (http-response-headers response)))
-             (or (string=? method "HEAD")
-                 (= status 204)
-                 (= status 304)
-                 (http-header-ref (http-response-headers response) "Content-Length" #f)
-                 (chunked-transfer? (http-response-headers response))
-                 (and (bytevector? body)
-                      (fx= 0 (bytevector-length body))))))))
-
-  (define open-http-connection
-    (lambda (who client request deadline-ms)
-      (or (take-http-connection client request deadline-ms)
-          (let* ([u (http-request-uri request)]
-                 [host (or (uri-host u) "localhost")]
-                 [port (default-port-for-uri who u)]
-                 [address (or (resolve-address host port #f 'stream)
-                              (raise-net-error who 'http "failed to resolve HTTP endpoint" u))]
-                 [sock (open-socket (socket-address-family address) 'stream)]
-                 [session #f])
-            (guard (c [else
-                       (when session
-                         (guard (x [else #f])
-                           (close-tls-session session)))
-                       (guard (x [else #f])
-                         (close-socket sock))
-                       (raise c)])
-              (socket-set-blocking! sock #f)
-              (unless (socket-connect! sock address)
-                (let ([ready (wait-socket-ready! who
-                                                 sock
-                                                 '(write error hup invalid)
-                                                 deadline-ms
-                                                 "HTTP request timed out")])
-                  (when (and (memq 'error ready) (not (memq 'write ready)))
-                    (raise-net-error who 'http "HTTP connect failed" address))
-                  (when (memq 'invalid ready)
-                    (raise-net-error who 'http "HTTP connect failed" address))))
-              (if (string=? (uri-scheme u) "https")
-                  (let ([ctx (or (http-client-tls-context client)
-                                 (make-tls-context 'client))])
-                    (set! session
-                          (call-with-http-timeout-translation
-                           who
-                           (lambda ()
-                             (tls-connect ctx
-                                          sock
-                                          host
-                                          (let ([x (remaining-timeout-ms deadline-ms)])
-                                            (if x x -1))))))
-                    (make-http-connection* who sock session #t deadline-ms))
-                  (make-http-connection* who sock #f #f deadline-ms)))))))
-
-  (define close-http-connection
-    (lambda (conn)
-      (unless (http-connection-closed? conn)
-        (guard (c [else #f])
-          (close-port (http-connection-input-port conn)))
-        (guard (c [else #f])
-          (close-port (http-connection-output-port conn)))
-        (when (http-connection-tls-session conn)
-          (guard (c [else #f])
-            (close-tls-session (http-connection-tls-session conn))))
-        (guard (c [else #f])
-          (close-socket (http-connection-socket conn)))
-        (http-connection-closed?-set! conn #t))))
-
-  (define server-prepare-response
-    (lambda (request response)
-      (let* ([headers (http-response-headers response)]
-             [close? (or (connection-close? (http-request-headers request))
-                         (connection-close? headers))]
-             [headers (if (http-header-ref headers "Connection" #f)
-                          headers
-                          (http-header-set headers
-                                           "Connection"
-                                           (if close? "close" "keep-alive")))])
-        (values close?
-                (make-http-response (http-response-status response)
-                                    (http-response-reason response)
-                                    headers
-                                    (http-response-body response))))))
-
-  (define redirect-request
+      (memv status '(301 302 303 307 308))))
+  (define redirected-request
     (lambda (request response)
       (let ([location (http-header-ref (http-response-headers response) "Location" #f)])
         (and location
-             (let* ([ref (normalize-http-uri 'redirect-request location)]
-                    [next-uri (uri-resolve (http-request-uri request) ref)]
-                    [status (http-response-status response)])
-               (if (memq status '(301 302 303))
-                   (make-http-request 'get next-uri (http-request-headers request) #f)
-                   (make-http-request (http-request-method request)
-                                      next-uri
-                                      (http-request-headers request)
-                                      (http-request-body request))))))))
+             (let ([method (http-request-method request)])
+               (when (and (memv (http-response-status response) '(307 308))
+                          (http-body-source? (http-request-body request)))
+                 (errorf 'http-send
+                         "cannot replay a one-shot body source across a ~a redirect"
+                         (http-response-status response)))
+               (make-http-request
+                (if (and (memv (http-response-status response) '(301 302 303))
+                         (not (string-ci=? method "GET"))
+                         (not (string-ci=? method "HEAD")))
+                    "GET"
+                    method)
+                (uri-resolve (http-request-uri request) (string->uri location))
+                (http-request-headers request)
+                (if (memv (http-response-status response) '(301 302 303)) #f
+                    (http-request-body request))))))))
+  (define dispatch-with-redirects
+    (lambda (owner request sink deadline)
+      (let ([current request] [remaining 10] [child #f] [outer #f]
+            [c (snapshot-http-client owner)]
+            [follow-redirects? (http-client-follow-redirects? owner)])
+        (set! child (dispatch c current sink deadline))
+        (set! outer
+              (make-net-operation
+               'http
+               (lambda ()
+                (let advance ()
+                 (net-operation-step! child)
+                 (case (net-operation-state child)
+                   [(completed)
+                    (let* ([response (net-operation-result child)]
+                           [next (and follow-redirects?
+                                      (redirect-status? (http-response-status response))
+                                      (redirected-request current response))])
+                      (if next
+                          (begin
+                            (when (zero? remaining)
+                              (raise-net-error 'http 'redirect-limit
+                                               "maximum redirect count exceeded" current))
+                            (unless (equal? (request-origin current) (request-origin next))
+                              (set! next (make-http-request
+                                          (http-request-method next) (http-request-uri next)
+                                          (strip-origin-headers (http-request-headers next))
+                                          (http-request-body next)))
+                              (http-client-headers-set! c (strip-origin-headers (http-client-headers c)))
+                              (%http-client-auth-set! c #f))
+                            (set! current next)
+                            (set! remaining (fx1- remaining))
+                            (set! child (dispatch c current sink deadline))
+                            (advance))
+                          (begin
+                            (when sink (http-body-sink-finish! sink))
+                            (net-operation-completed response))))]
+                   [(failed cancelled) (net-operation-failed (net-operation-condition child))]
+                   [else (net-operation-pending (net-operation-poll-targets child)
+                                                (net-operation-deadline-ms child))])))
+               (lambda () (net-operation-cancel! child))
+               (lambda ()
+                 ;; Removal is idempotent so completion, cancellation, and close race safely.
+                 (with-interrupts-disabled
+                   (with-mutex (http-client-mutex owner)
+                     (http-client-active-set! owner (remq outer (http-client-active owner)))))
+                 (close-retired-transports! owner)
+                 (when sink
+                   (guard (ignored [else (void)]) (http-body-sink-finish! sink))))))
+        (unless (with-interrupts-disabled
+                  (with-mutex (http-client-mutex owner)
+                    (and (not (http-client-closed? owner))
+                         (begin
+                           (http-client-active-set! owner (cons outer (http-client-active owner)))
+                           #t))))
+          (net-operation-cancel! outer)
+          (ensure-open owner))
+        outer)))
 
-  (define cache-connection-allowed?
-    (lambda (client pending)
-      (or (not pending)
-          (and (not (http-client-closed? client))
-               (eq? (http-client-pending client) pending)
-               (not (http-pending-cancelled? pending))))))
+  (define snapshot-http-client
+    (lambda (client)
+      ;; A timer must not suspend a fiber while it owns the ordinary client mutex.
+      (with-interrupts-disabled
+        (with-mutex (http-client-mutex client)
+          (ensure-open client)
+          (unless (http-client-transport client)
+            (let* ([proxy (http-client-proxy client)]
+                   [uri (and proxy (http-proxy-uri proxy))]
+                   [policy (http-client-pool-policy client)]
+                   [tls (http-client-tls-context client)])
+              (http-client-transport-set!
+               client
+               (make-lws-client-transport
+                (if (eq? 'h2 (http-client-version client)) 'h2 'http1) 64 65536 64
+                (if tls (tls-context-native-handle tls) 0)
+                (if uri (or (uri-host uri) "") "") (if uri (or (uri-port uri) 8080) 0)
+                (if policy (http-pool-policy-max-active policy) 64)
+                (if policy (http-pool-policy-max-idle policy) 8)
+                (if policy (http-pool-policy-idle-timeout-ms policy) 30000)))))
+          (%make-http-client #f (http-client-headers client) (http-client-timeout-ms client)
+                            (http-client-follow-redirects? client) (http-client-cookie-jar client)
+                            (http-client-auth client) (http-client-proxy client)
+                            (http-client-pool-policy client) (http-client-version client)
+                            (http-client-transport client) '() (http-client-tls-context client) '()
+                            (make-mutex 'http-policy-snapshot))))))
 
-  (define http-send*
+  (define close-retired-transports!
+    (lambda (client)
+      (let ([retired
+             (with-interrupts-disabled
+               (with-mutex (http-client-mutex client)
+                 (if (null? (http-client-active client))
+                     (let ([retired (http-client-retired client)])
+                       (http-client-retired-set! client '()) retired)
+                     '())))])
+        (for-each lws-client-close! retired))))
+
+  (define retire-transport!
+    (lambda (client)
+      (when (http-client-transport client)
+        (http-client-retired-set!
+         client (cons (http-client-transport client) (http-client-retired client)))
+        (http-client-transport-set! client #f)
+        (close-retired-transports! client))))
+
+  (define request-origin
+    (lambda (request)
+      (let* ([uri (http-request-uri request)] [scheme (or (uri-scheme uri) "http")])
+        (list (string-downcase scheme) (string-downcase (or (uri-host uri) ""))
+              (or (uri-port uri) (if (string-ci=? scheme "https") 443 80))))))
+
+  (define strip-origin-headers
+    (lambda (headers)
+      (filter (lambda (entry)
+                (not (or (string-ci=? (car entry) "authorization")
+                         (string-ci=? (car entry) "cookie")
+                         (string-ci=? (car entry) "host")))) headers)))
+  #|proc:http-send
+Sends `request` through client `client`, waits for completion, and returns the HTTP response.
+|#
+  (define http-send
+    (lambda (c r)
+      (pcheck ([http-client? c] [http-request? r])
+        (let ([deadline (+ (monotonic-ms) (http-client-timeout-ms c))])
+          (net-operation-wait (dispatch-with-redirects c r #f deadline))))))
+  (define one-shot (lambda (m u h b) (let ([c (http-open)]) (dynamic-wind void (lambda () (http-send c (make-http-request m u h b))) (lambda () (http-close c))))))
+  (define make-verb (lambda (m) (case-lambda [(u) (one-shot m u '() #f)] [(c u) (http-send c (make-http-request m u '() #f))] [(c u b) (http-send c (make-http-request m u '() b))] [(c u h b) (http-send c (make-http-request m u h b))])))
+  (define http-get (make-verb 'get)) (define http-head (make-verb 'head)) (define http-post (make-verb 'post)) (define http-put (make-verb 'put)) (define http-delete (make-verb 'delete))
+  #|proc:http-request
+Sends a one-shot request with `method`, `uri`, optional `headers`, and optional `body`.
+Returns the HTTP response.
+|#
+  (define http-request (case-lambda [(m u) (one-shot m u '() #f)] [(m u h) (one-shot m u h #f)] [(m u h b) (one-shot m u h b)]))
+  #|proc:http-request/nonblocking
+Starts a request on `client` with `method`, `uri`, optional `headers`, and optional `body`.
+Returns a distinct nonblocking network operation.
+|#
+  (define http-request/nonblocking (case-lambda [(c m u) (http-request/nonblocking c m u '() #f)] [(c m u h) (http-request/nonblocking c m u h #f)] [(c m u h b) (http-send/nonblocking c (make-http-request m u h b))]))
+  #|proc:http-download
+Downloads `uri` to file `path`, using optional `client`, and returns the HTTP response.
+|#
+  (define http-download
     (case-lambda
-      [(who client request redirects-left deadline-ms)
-       (http-send* who client request redirects-left deadline-ms #f)]
-      [(who client request redirects-left deadline-ms pending)
-      (let ([conn (open-http-connection who client request deadline-ms)]
-            [keep-open? #f]
-            [origin (request-origin-key request)])
-        (dynamic-wind
-          void
-          (lambda ()
-            (when pending
-              (http-pending-connection-set! pending conn))
-            (http-connection-deadline-ms-set! conn deadline-ms)
-            (uncache-http-connection! client conn)
-            (let ([request-headers (merge-request-headers request client)])
-              (write-request-port (http-connection-output-port conn)
-                                  request
-                                  request-headers)
-              (let ([response (read-http-response* who
-                                                   (http-connection-input-port conn)
-                                                   (http-request-method request))])
-                (set! keep-open?
-                  (and (reusable-response? request-headers
-                                           response
-                                           (http-request-method request))
-                       (cache-connection-allowed? client pending)))
-                (when keep-open?
-                  (cache-http-connection! client origin conn))
-                (if (and (http-client-follow-redirects? client)
-                         (> redirects-left 0)
-                         (redirect-status? (http-response-status response)))
-                    (let ([next-request (redirect-request request response)])
-                      (if next-request
-                          (http-send* who client next-request (fx1- redirects-left) deadline-ms pending)
-                          response))
-                    response))))
-          (lambda ()
-            (when (and pending
-                       (eq? (http-pending-connection pending) conn))
-              (http-pending-connection-set! pending #f))
-            (unless keep-open?
-              (close-http-connection conn)))))]))
+      [(u p)
+       (let ([c (http-open)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (http-download c u p))
+           (lambda () (http-close c))))]
+      [(c u p)
+       (let ([sink (make-http-file-body-sink p)])
+         (net-operation-wait
+          (http-send/nonblocking c (make-http-request 'get u '() #f) sink)))]))
+  #|proc:http-upload
+Uploads file `path` to `uri` with PUT, using optional `client`, and returns the HTTP response.
+|#
+  (define http-upload (case-lambda [(u p) (one-shot 'put u '() (make-http-file-body-source p))] [(c u p) (http-send c (make-http-request 'put u '() (make-http-file-body-source p)))]))
+  #|proc:http-download/nonblocking
+Starts downloading `uri` through `client` to file `path`; returns a nonblocking network operation.
+|#
+  (define http-download/nonblocking
+    (lambda (c u p)
+      (pcheck ([http-client? c] [string? p])
+        (http-send/nonblocking c (make-http-request 'get u '() #f)
+                               (make-http-file-body-sink p)))))
+  #|proc:http-upload/nonblocking
+Starts uploading file `path` through `client` to `uri`; returns a nonblocking network operation.
+|#
+  (define http-upload/nonblocking
+    (lambda (c u p)
+      (pcheck ([http-client? c] [string? p])
+        (http-request/nonblocking c 'put u '() (make-http-file-body-source p)))))
+  #|proc:http-close
+Closes client `client`, cancels its active operations, and returns `client`. Closing is idempotent.
+|#
+  (define http-close
+    (lambda (c)
+      (pcheck ([http-client? c])
+        (unless (http-client-closed? c)
+          ;; Reject new work before cancelling the snapshot of active operations.
+          (http-client-closed?-set! c #t)
+          (let ([active (http-client-active c)])
+            (http-client-active-set! c '())
+            (for-each net-operation-cancel! active))
+          (when (http-client-transport c)
+            (lws-client-close! (http-client-transport c)))
+          (close-retired-transports! c))
+        c)))
+  #|proc:http-follow-redirects!
+Sets whether client `client` follows redirects to boolean `follow?` and returns `client`.
+|#
+  (define http-follow-redirects! (lambda (c x) (pcheck ([http-client? c] [boolean? x]) (http-client-follow-redirects?-set! c x) c)))
+  #|proc:http-set-header!
+Sets default header `name` to string `value` on client `client` and returns `client`.
+|#
+  (define http-set-header! (lambda (c n v) (pcheck ([http-client? c] [string? n v]) (http-client-headers-set! c (http-header-set (http-client-headers c) n v)) c)))
+  #|proc:http-set-timeout!
+Sets client `client`'s request timeout to `timeout-ms` milliseconds and returns `client`.
+|#
+  (define http-set-timeout! (lambda (c n) (pcheck ([http-client? c] [natural? n]) (http-client-timeout-ms-set! c n) c)))
+  #|proc:http-cancel-pending!
+Cancels a snapshot of all active operations on client `client` and returns `client`.
+|#
+  (define http-cancel-pending!
+    (lambda (c)
+      (pcheck ([http-client? c])
+        (let ([active (http-client-active c)])
+          (http-client-active-set! c '())
+          (for-each net-operation-cancel! active)
+          c))))
+  #|proc:http-client-cookie-jar-set!
+Sets client `client`'s cookie jar to `cookie-jar` or `#f` and returns `client`.
+|#
+  (define http-client-cookie-jar-set!
+    (lambda (c x) (pcheck ([http-client? c] [(lambda (v) (or (not v) (http-cookie-jar? v))) x])
+                    (%http-client-cookie-jar-set! c x) c)))
+  #|proc:http-client-auth-set!
+Sets authentication on client `client` and returns `client`. `scheme` is `basic`, `bearer`, a
+procedure, or `#f`; `credential` is a user/password pair for Basic or a token for Bearer. An auth
+procedure has signature `(request response-or-#f) -> request`.
+|#
+  (define http-client-auth-set!
+    (case-lambda
+      [(c scheme) (http-client-auth-set! c scheme #f)]
+      [(c scheme credential)
+       (pcheck ([http-client? c])
+         (unless (or (not scheme) (procedure? scheme) (memq scheme '(basic bearer)))
+           (errorf 'http-client-auth-set! "expected basic, bearer, procedure, or #f"))
+         (when (eq? scheme 'basic)
+           (unless (and (pair? credential) (string? (car credential))
+                        (string? (cdr credential)))
+             (errorf 'http-client-auth-set! "basic credential must be (user . password)")))
+         (when (eq? scheme 'bearer)
+           (unless (string? credential)
+             (errorf 'http-client-auth-set! "bearer credential must be a string")))
+         (%http-client-auth-set! c (and scheme (cons scheme credential)))
+         c)]))
+  #|proc:http-client-proxy-set!
+Sets client `client`'s proxy to `proxy` or `#f`, retires incompatible transport, and returns client.
+|#
+  (define http-client-proxy-set!
+    (lambda (c x) (pcheck ([http-client? c] [(lambda (v) (or (not v) (http-proxy? v))) x])
+                    (unless (eq? x (http-client-proxy c))
+                      (retire-transport! c))
+                    (%http-client-proxy-set! c x) c)))
+  #|proc:http-client-pool-policy-set!
+Sets `pool-policy` for future operations on client `client` and returns `client`.
+|#
+  (define http-client-pool-policy-set!
+    (lambda (c x) (pcheck ([http-client? c] [http-pool-policy? x])
+                    (%http-client-pool-policy-set! c x) c)))
+  #|proc:http-client-version-set!
+Sets client `client`'s protocol policy to `version` and returns `client`. `version` is `auto`,
+`http/1.1`, or `h2`; incompatible transport is retired.
+|#
+  (define http-client-version-set!
+    (lambda (c x) (pcheck ([http-client? c] [symbol? x])
+                    (unless (memq x '(auto http/1.1 h2))
+                      (errorf 'http-client-version-set!
+                              "expected auto, http/1.1, or h2"))
+                    (unless (eq? x (http-client-version c))
+                      (retire-transport! c))
+                    (%http-client-version-set! c x) c)))
+  #|proc:make-http-multipart-body
+Encodes multipart parts `parts`. Returns a body source and its multipart content-type string.
+|#
+  (define make-http-multipart-body
+    (lambda (part*)
+      (pcheck ([list? part*])
+        (unless (andmap http-multipart-part? part*)
+          (errorf 'make-http-multipart-body "expected a list of multipart parts"))
+        (let ([boundary "chezpp-7d9e4f6a2b1c"])
+          (define contains-newline?
+            (lambda (value)
+              (let loop ([index 0])
+                (and (< index (string-length value))
+                     (let ([char (string-ref value index)])
+                       (or (char=? char #\return) (char=? char #\newline)
+                           (loop (fx1+ index))))))))
+          (let* ([pieces
+                  (append
+                   (fold-right
+                    append '()
+                    (map
+                     (lambda (part)
+                       (let ([name (http-multipart-part-name part)]
+                             [filename (http-multipart-part-filename part)]
+                             [value (http-multipart-part-value part)])
+                         (when (or (contains-newline? name)
+                                   (and filename (contains-newline? filename)))
+                           (errorf 'make-http-multipart-body
+                                   "multipart name or filename contains a newline"))
+                         (list
+                          (string->utf8
+                           (string-append
+                            "--" boundary "\r\nContent-Disposition: form-data; name=\""
+                            name "\"" (if filename (string-append "; filename=\"" filename "\"") "")
+                            "\r\n" (if (http-multipart-part-content-type part)
+                                       (string-append "Content-Type: "
+                                                      (http-multipart-part-content-type part) "\r\n") "")
+                            "\r\n"))
+                          (if (string? value) (string->utf8 value) value)
+                          (string->utf8 "\r\n")))) part*))
+                   (list (string->utf8 (string-append "--" boundary "--\r\n"))))]
+                 [body (bytevector-concatenate pieces)])
+            (values (make-http-body-source (body-producer body) (bytevector-length body))
+                    (string-append "multipart/form-data; boundary=" boundary)))))))
+  (define ensure-http-server-open
+    (lambda (who server)
+      (when (http-server-closed? server) (errorf who "HTTP server is closed"))))
 
-  (define make-handler-key
+  (define handler-key
     (case-lambda
       [(path) path]
       [(method path)
-       (cons (normalize-http-method 'make-handler-key method) path)]))
-
-  (define lookup-handler
-    (lambda (server request)
-      (let* ([path (or (uri-path (http-request-uri request)) "/")]
-             [path (if (string=? path "") "/" path)]
-             [method-key (make-handler-key (http-request-method request) path)])
-        (cond
-         [(assoc method-key (http-server-handlers server)) => cdr]
-         [(assoc path (http-server-handlers server)) => cdr]
-         [else #f]))))
-
-  (define default-handler
-    (lambda (request)
-      (make-http-response 404
-                          "Not Found"
-                          '(("Content-Type" . "text/plain"))
-                          "not found")))
-
-  (define make-server-connection
-    (lambda (sock tls-context)
-      (if tls-context
-          (let ([session #f])
-            (guard (c [else
-                       (when session
-                         (guard (x [else #f])
-                           (close-tls-session session)))
-                       (guard (x [else #f])
-                         (close-socket sock))
-                       (raise c)])
-              (set! session (tls-accept tls-context sock))
-              (%make-http-connection sock
-                                     session
-                                     (vector #f)
-                                     (open-tls-input-port session)
-                                     (open-tls-output-port session)
-                                     #t
-                                     #f)))
-          (%make-http-connection sock
-                                 #f
-                                 (vector #f)
-                                 (open-socket-input-port sock)
-                                 (open-socket-output-port sock)
-                                 #f
-                                 #f))))
-
-  (define serve-http-connection
-    (lambda (who server conn)
-      (dynamic-wind
-        void
-        (lambda ()
-          (let loop ()
-            (let ([request (guard (c [(and (net-error? c)
-                                           (string=? (net-error-message c)
-                                                     "unexpected EOF while reading HTTP request"))
-                                      #f]
-                                  [else (raise c)])
-                             (http-read-request conn))])
-              (when request
-                (let* ([handler (or (lookup-handler server request)
-                                    default-handler)]
-                       [response (handler request)])
-                  (unless (http-response? response)
-                    (errorf who "HTTP handler must return an HTTP response, given ~s"
-                            response))
-                  (let-values ([(close? prepared)
-                                (server-prepare-response request response)])
-                    (http-write-response conn prepared)
-                    (unless close?
-                      (loop))))))))
-        (lambda ()
-          (http-connection-close conn)))))
-
-  ;;===----------------------------------------------------------------------===
-  ;; Data Model API
-  ;;===----------------------------------------------------------------------===
-
-  #|proc:make-http-request
-The `make-http-request` procedure constructs an HTTP request record from a method, URI, headers, and optional body.
-|#
-  (define-who make-http-request
-    (case-lambda
-      [(method uri)
-       (make-http-request method uri '() #f)]
-      [(method uri headers)
-       (make-http-request method uri headers #f)]
-      [(method uri headers body)
-       (%make-http-request (normalize-http-method who method)
-                           (normalize-http-uri who uri)
-                           (normalize-http-headers who headers)
-                           (normalize-http-body who body))]))
-
-  #|proc:make-http-response
-The `make-http-response` procedure constructs an HTTP response record from a status, reason, headers, and optional body.
-|#
-  (define-who make-http-response
-    (case-lambda
-      [(status)
-       (make-http-response status (default-reason status) '() #f)]
-      [(status reason)
-       (make-http-response status reason '() #f)]
-      [(status reason headers)
-       (make-http-response status reason headers #f)]
-      [(status reason headers body)
-       (pcheck ([string? reason])
-               (%make-http-response (normalize-http-status who status)
-                                    reason
-                                    (normalize-http-headers who headers)
-                                    (normalize-http-body who body)))]))
-
-  #|proc:http-header-ref
-The `http-header-ref` procedure returns the first matching header value using case-insensitive name comparison.
-|#
-  (define-who http-header-ref
-    (case-lambda
-      [(headers name)
-       (http-header-ref headers name #f)]
-      [(headers name default)
-       (let ([headers (normalize-http-headers who headers)]
-             [name (normalize-http-header-name who name)])
-         (let loop ([rest headers])
-           (cond
-            [(null? rest) default]
-            [(string-ci=? (caar rest) name) (cdar rest)]
-            [else (loop (cdr rest))])))]))
-
-  #|proc:http-header-set
-The `http-header-set` procedure returns a header list with a single value for the named header.
-|#
-  (define-who http-header-set
-    (lambda (headers name value)
-      (pcheck ([string? value])
-              (let ([headers (normalize-http-headers who headers)]
-                    [name (normalize-http-header-name who name)])
-                (let loop ([rest headers] [out '()] [seen? #f])
-                  (cond
-                   [(null? rest)
-                    (reverse (cons (cons name value) out))]
-                   [(string-ci=? (caar rest) name)
-                    (if seen?
-                        (loop (cdr rest) out seen?)
-                        (loop (cdr rest) (cons (cons name value) out) #t))]
-                   [else
-                    (loop (cdr rest) (cons (car rest) out) seen?)]))))))
-
-  #|proc:http-header-add
-The `http-header-add` procedure returns a header list with an additional value appended for the named header.
-|#
-  (define-who http-header-add
-    (lambda (headers name value)
-      (pcheck ([string? value])
-              (append (normalize-http-headers who headers)
-                      (list (cons (normalize-http-header-name who name) value))))))
-
-  ;;===----------------------------------------------------------------------===
-  ;; Client API
-  ;;===----------------------------------------------------------------------===
-
-  #|proc:http-open
-The `http-open` procedure constructs an HTTP client with optional TLS context state for HTTPS requests.
-|#
-  (define-who http-open
-    (case-lambda
-      [()
-       (%make-http-client '() #f http-default-timeout-ms #f #f #f #f #f)]
-      [(tls-context)
-       (pcheck ([tls-context? tls-context])
-               (%make-http-client '() #f http-default-timeout-ms tls-context #f #f #f #f))]))
-
-  #|proc:http-close
-The `http-close` procedure marks an HTTP client as closed.
-|#
-  (define-who http-close
-    (lambda (client)
-      (pcheck ([http-client? client])
-              (let ([pending (http-client-pending client)])
-                (when pending
-                  (cancel-pending! client pending)))
-              (let ([conn (http-client-cached-connection client)])
-                (when conn
-                  (uncache-http-connection! client conn)
-                  (close-http-connection conn)))
-              (http-client-closed?-set! client #t)
-              client)))
-
-  #|proc:http-follow-redirects!
-The `http-follow-redirects!` procedure enables or disables automatic redirect handling on an HTTP client.
-|#
-  (define-who http-follow-redirects!
-    (lambda (client follow?)
-      (pcheck ([http-client? client] [boolean? follow?])
-              (ensure-client-open who client)
-              (http-client-follow-redirects?-set! client follow?)
-              follow?)))
-
-  #|proc:http-set-header!
-The `http-set-header!` procedure sets a default header on an HTTP client.
-|#
-  (define-who http-set-header!
-    (lambda (client name value)
-      (pcheck ([http-client? client] [string? value])
-              (ensure-client-open who client)
-              (http-client-default-headers-set!
-               client
-               (http-header-set (http-client-default-headers client) name value))
-              client)))
-
-  #|proc:http-set-timeout!
-The `http-set-timeout!` procedure records a client timeout value in milliseconds for future request operations.
-|#
-  (define-who http-set-timeout!
-    (lambda (client timeout-ms)
-      (pcheck ([http-client? client] [fixnum? timeout-ms])
-              (check-timeout-ms who timeout-ms)
-              (ensure-client-open who client)
-              (http-client-timeout-ms-set! client timeout-ms)
-              timeout-ms)))
-
-  #|proc:http-cancel-pending!
-The `http-cancel-pending!` procedure cancels and discards the currently pending non-blocking HTTP operation on a client, if any.
-|#
-  (define-who http-cancel-pending!
-    (lambda (client)
-      (pcheck ([http-client? client])
-              (ensure-client-open who client)
-              (let ([pending (http-client-pending client)])
-                (when pending
-                  (cancel-pending! client pending)))
-              client)))
-
-  #|proc:http-send
-The `http-send` procedure sends an HTTP request with a configured client and returns an HTTP response.
-|#
-  (define-who http-send
-    (lambda (client request)
-      (pcheck ([http-client? client] [http-request? request])
-              (ensure-client-open who client)
-              (http-send* who
-                          client
-                          request
-                          5
-                          (timeout->deadline-ms
-                           (http-client-timeout-ms client))))))
-
-  #|proc:http-send/nonblocking
-The `http-send/nonblocking` procedure progresses an HTTP request and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
-|#
-  (define-who http-send/nonblocking
-    (lambda (client request)
-      (pcheck ([http-client? client] [http-request? request])
-              (http-transfer/nonblocking
-               who
-               client
-               'send
-               (request-key request)
-               (lambda (pending)
-                 (http-send* who
-                             client
-                             request
-                             5
-                             (timeout->deadline-ms
-                              (http-client-timeout-ms client))
-                             pending))))))
-
-  #|proc:http-request
-The `http-request` procedure sends a one-shot HTTP request without manually managing a client object.
-|#
-  (define-who http-request
-    (case-lambda
-      [(method uri)
-       (http-request method uri '() #f)]
-      [(method uri headers)
-       (http-request method uri headers #f)]
-      [(method uri headers body)
-       (let ([client (http-open)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (http-send client (make-http-request method uri headers body)))
-           (lambda ()
-             (http-close client))))]))
-
-  #|proc:http-request/nonblocking
-The `http-request/nonblocking` procedure progresses a one-client HTTP request and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
-|#
-  (define-who http-request/nonblocking
-    (case-lambda
-      [(client method uri)
-       (http-request/nonblocking client method uri '() #f)]
-      [(client method uri headers)
-       (http-request/nonblocking client method uri headers #f)]
-      [(client method uri headers body)
-       (pcheck ([http-client? client])
-               (let ([request (make-http-request method uri headers body)])
-                 (http-transfer/nonblocking
-                 who
-                  client
-                  'request
-                  (request-key request)
-                  (lambda (pending)
-                    (http-send* who
-                                client
-                                request
-                                5
-                                (timeout->deadline-ms
-                                 (http-client-timeout-ms client))
-                                pending)))))]))
-
-  (define make-http-verb
-    (lambda (method)
-      (case-lambda
-        [(uri)
-         (http-request method uri '() #f)]
-        [(client uri)
-         (pcheck ([http-client? client])
-                 (http-send client (make-http-request method uri '() #f)))]
-        [(client uri body)
-         (pcheck ([http-client? client])
-                 (http-send client (make-http-request method uri '() body)))]
-        [(client uri headers body)
-         (pcheck ([http-client? client])
-                 (http-send client (make-http-request method uri headers body)))])))
-
-  #|proc:http-get
-The `http-get` procedure sends an HTTP GET request either with a supplied client or as a one-shot operation.
-|#
-  (define http-get (make-http-verb 'get))
-
-  #|proc:http-head
-The `http-head` procedure sends an HTTP HEAD request either with a supplied client or as a one-shot operation.
-|#
-  (define http-head (make-http-verb 'head))
-
-  #|proc:http-post
-The `http-post` procedure sends an HTTP POST request either with a supplied client or as a one-shot operation.
-|#
-  (define http-post (make-http-verb 'post))
-
-  #|proc:http-put
-The `http-put` procedure sends an HTTP PUT request either with a supplied client or as a one-shot operation.
-|#
-  (define http-put (make-http-verb 'put))
-
-  #|proc:http-delete
-The `http-delete` procedure sends an HTTP DELETE request either with a supplied client or as a one-shot operation.
-|#
-  (define http-delete (make-http-verb 'delete))
-
-  #|proc:http-download
-The `http-download` procedure downloads a response body to `path` and returns the full HTTP response.
-|#
-  (define-who http-download
-    (case-lambda
-      [(uri path)
-       (let ([client (http-open)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (http-download client uri path))
-           (lambda ()
-             (http-close client))))]
-      [(client uri path)
-       (pcheck ([http-client? client] [string? path])
-               (let ([response (http-get client uri)])
-                 (when (bytevector? (http-response-body response))
-                   (write-u8vec! path (http-response-body response)))
-                 response))]))
-
-  #|proc:http-download/nonblocking
-The `http-download/nonblocking` procedure progresses a download and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
-|#
-  (define-who http-download/nonblocking
-    (lambda (client uri path)
-      (pcheck ([http-client? client] [string? path])
-              (http-transfer/nonblocking
-               who
-               client
-               'download
-               (list (if (uri? uri) (uri->string uri) uri) path)
-               (lambda (pending)
-                 (let ([response
-                        (http-send* who
-                                    client
-                                    (make-http-request 'get uri '() #f)
-                                    5
-                                    (timeout->deadline-ms
-                                     (http-client-timeout-ms client))
-                                    pending)])
-                   (when (bytevector? (http-response-body response))
-                     (write-u8vec! path (http-response-body response)))
-                   response))))))
-
-  #|proc:http-upload
-The `http-upload` procedure uploads a file as a PUT request body and returns the HTTP response.
-|#
-  (define-who http-upload
-    (case-lambda
-      [(uri path)
-       (let ([client (http-open)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (http-upload client uri path))
-           (lambda ()
-             (http-close client))))]
-      [(client uri path)
-       (pcheck ([http-client? client] [string? path])
-               (http-put client
-                         uri
-                         '(("Content-Type" . "application/octet-stream"))
-                         (read-u8vec path)))]))
-
-  #|proc:http-upload/nonblocking
-The `http-upload/nonblocking` procedure progresses an upload and returns `#f` while the response is still pending. The high-level transfer runs in a Scheme worker thread and is reported through a notifier socket; cancellation closes the client-side connection and marks the pending operation cancelled, but the worker may finish later.
-|#
-  (define-who http-upload/nonblocking
-    (lambda (client uri path)
-      (pcheck ([http-client? client] [string? path])
-              (http-transfer/nonblocking
-               who
-               client
-               'upload
-               (list (if (uri? uri) (uri->string uri) uri) path)
-               (lambda (pending)
-                 (http-send* who
-                             client
-                             (make-http-request
-                              'put
-                              uri
-                              '(("Content-Type" . "application/octet-stream"))
-                              (read-u8vec path))
-                             5
-                             (timeout->deadline-ms
-                              (http-client-timeout-ms client))
-                             pending))))))
-
-  ;;===----------------------------------------------------------------------===
-  ;; Server API
-  ;;===----------------------------------------------------------------------===
+       (cons (if (symbol? method) (string-upcase (symbol->string method))
+                 (string-upcase method)) path)]))
 
   #|proc:http-listen
-The `http-listen` procedure opens a listening HTTP server on `host` and `port`, optionally wrapping accepted connections with TLS.
+The `http-listen` procedure opens an LWS HTTP server on `host` and `port`. `tls-context` is `#f`
+or a server TLS context, and `backlog` is retained for API compatibility. It returns the server.
 |#
   (define-who http-listen
     (case-lambda
-      [(host port)
-       (http-listen host port #f 128)]
-      [(host port tls-context)
-       (http-listen host port tls-context 128)]
+      [(host port) (http-listen host port #f 128)]
+      [(host port tls-context) (http-listen host port tls-context 128)]
       [(host port tls-context backlog)
-       (pcheck ([string? host] [fixnum? port] [fixnum? backlog])
-               (check-port who port)
-               (check-backlog who backlog)
-               (unless (or (not tls-context) (tls-context? tls-context))
-                 (errorf who "expected #f or TLS context, given ~s" tls-context))
-               (let ([server-socket (open-socket 'inet 'stream)])
-                 (guard (c [else
-                            (guard (x [else #f])
-                              (close-socket server-socket))
-                            (raise c)])
-                   (socket-set-option! server-socket 'reuse-address #t)
-                   (socket-bind! server-socket (make-socket-address 'inet host port))
-                   (socket-listen! server-socket backlog)
-                   (%make-http-server server-socket
-                                      host
-                                      (socket-address-port
-                                       (socket-local-address server-socket))
-                                      tls-context
-                                      '()
-                                      #f))))]))
+       (pcheck ([string? host] [fixnum? port backlog])
+         (unless (and (fxpositive? port) (fx<= port 65535))
+           (errorf who "invalid port ~s" port))
+         (unless (fxpositive? backlog) (errorf who "invalid backlog ~s" backlog))
+         (unless (or (not tls-context) (tls-context? tls-context))
+           (errorf who "expected #f or a TLS context"))
+         (%make-http-server
+          (make-lws-http-server host port (if tls-context
+                                              (tls-context-native-handle tls-context) 0))
+          (make-hashtable equal-hash equal?) (make-mutex 'http-server) #f))]))
 
   #|proc:http-server-close
-The `http-server-close` procedure closes the listening socket owned by an HTTP server.
+The `http-server-close` procedure closes `server` and active logical requests. It returns `server`.
 |#
-  (define-who http-server-close
+  (define http-server-close
     (lambda (server)
       (pcheck ([http-server? server])
-              (unless (http-server-closed? server)
-                (close-socket (http-server-socket server))
-                (http-server-closed?-set! server #t))
-              server)))
+        (unless (http-server-closed? server)
+          (http-server-closed?-set! server #t)
+          (lws-http-server-close! (http-server-transport server)))
+        server)))
 
   #|proc:http-register-handler!
-The `http-register-handler!` procedure registers a path-specific or method/path-specific request handler on an HTTP server.
+The `http-register-handler!` procedure registers `handler` for `path` and optional `method` on
+`server`. A handler has signature `(http-request) -> http-response`. It returns the old handler.
 |#
-  (define-who http-register-handler!
+  (define http-register-handler!
     (case-lambda
-      [(server path proc)
-       (pcheck ([http-server? server] [string? path] [procedure? proc])
-               (ensure-server-open who server)
-               (http-server-handlers-set!
-                server
-                (cons (cons (make-handler-key path) proc)
-                      (http-server-handlers server)))
-               server)]
-      [(server method path proc)
-       (pcheck ([http-server? server] [string? path] [procedure? proc])
-               (ensure-server-open who server)
-               (http-server-handlers-set!
-                server
-                (cons (cons (make-handler-key method path) proc)
-                      (http-server-handlers server)))
-               server)]))
+      [(server path handler)
+       (http-register-handler! server #f path handler)]
+      [(server method path handler)
+       (pcheck ([http-server? server] [string? path] [procedure? handler])
+         (ensure-http-server-open 'http-register-handler! server)
+         (with-mutex (http-server-mutex server)
+           (let* ([key (if method (handler-key method path) path)]
+                  [old (hashtable-ref (http-server-handlers server) key #f)])
+             (hashtable-set! (http-server-handlers server) key handler)
+             old)))]))
 
-  #|proc:http-accept
-The `http-accept` procedure accepts a client connection from an HTTP server and returns an HTTP connection object.
+  #|proc:http-handler-ref
+The `http-handler-ref` procedure returns the handler for `method` and `path` on `server`, or
+`default` when no method-specific or path handler exists.
 |#
-  (define-who http-accept
-    (lambda (server)
-      (pcheck ([http-server? server])
-              (ensure-server-open who server)
-              (let-values ([(sock peer)
-                            (socket-accept (http-server-socket server))])
-                (make-server-connection sock (http-server-tls-context server))))))
+  (define http-handler-ref
+    (lambda (server method path default)
+      (pcheck ([http-server? server] [string? path])
+        (with-mutex (http-server-mutex server)
+          (or (hashtable-ref (http-server-handlers server) (handler-key method path) #f)
+              (hashtable-ref (http-server-handlers server) path default))))))
+
+  #|proc:http-unregister-handler!
+The `http-unregister-handler!` procedure removes the handler for `path` and optional `method` from
+`server`. It returns the removed handler or `#f`.
+|#
+  (define http-unregister-handler!
+    (case-lambda
+      [(server path) (http-unregister-handler! server #f path)]
+      [(server method path)
+       (pcheck ([http-server? server] [string? path])
+         (with-mutex (http-server-mutex server)
+           (let* ([key (if method (handler-key method path) path)]
+                  [old (hashtable-ref (http-server-handlers server) key #f)])
+             (hashtable-delete! (http-server-handlers server) key)
+             old)))]))
+
+  (define wrap-server-request
+    (lambda (handle) (and handle (%make-http-connection handle #f #f))))
 
   #|proc:http-accept/nonblocking
-The `http-accept/nonblocking` procedure accepts an HTTP connection if one is ready and returns `#f` otherwise.
+The `http-accept/nonblocking` procedure returns the next logical request connection from `server`,
+or `#f` when no complete request headers are ready.
 |#
-  (define-who http-accept/nonblocking
+  (define http-accept/nonblocking
     (lambda (server)
       (pcheck ([http-server? server])
-              (ensure-server-open who server)
-              (call-with-values
-               (lambda ()
-                 (socket-accept/nonblocking (http-server-socket server)))
-               (case-lambda
-                 [(sock peer)
-                  (make-server-connection sock (http-server-tls-context server))]
-                 [(value)
-                  (and (not value) #f)])))))
+        (ensure-http-server-open 'http-accept/nonblocking server)
+        (wrap-server-request
+         (lws-http-server-accept/nonblocking (http-server-transport server))))))
+
+  #|proc:http-accept
+The `http-accept` procedure waits for the next logical request on `server` and returns its
+connection handle.
+|#
+  (define http-accept
+    (lambda (server)
+      (pcheck ([http-server? server])
+        (ensure-http-server-open 'http-accept server)
+        (wrap-server-request (lws-http-server-accept (http-server-transport server))))))
 
   #|proc:http-connection-close
-The `http-connection-close` procedure closes an HTTP connection and all resources it owns.
+The `http-connection-close` procedure cancels logical `connection` without closing HTTP/2 siblings.
+It returns `connection` and is idempotent.
 |#
-  (define-who http-connection-close
-    (lambda (conn)
-      (pcheck ([http-connection? conn])
-              (close-http-connection conn)
-              conn)))
+  (define http-connection-close
+    (lambda (connection)
+      (pcheck ([http-connection? connection])
+        (unless (http-connection-closed? connection)
+          (http-connection-closed?-set! connection #t)
+          (lws-http-request-close! (http-connection-request-handle connection)))
+        connection)))
 
   #|proc:http-read-request
-The `http-read-request` procedure reads one HTTP request from an accepted connection.
+The `http-read-request` procedure materializes and returns the request represented by `connection`.
 |#
-  (define-who http-read-request
-    (lambda (conn)
-      (pcheck ([http-connection? conn])
-              (ensure-connection-open who conn)
-              (let ([line (read-http-line (http-connection-input-port conn))])
-                (when (eof-object? line)
-                  (raise-net-error who 'http "unexpected EOF while reading HTTP request"))
-                (let-values ([(method target version)
-                              (parse-request-line who line)])
-                  (let* ([headers (read-http-headers who (http-connection-input-port conn))]
-                         [content-length (response-body-length headers)]
-                         [body (cond
-                                [(chunked-transfer? headers)
-                                 (read-http-body/chunked who (http-connection-input-port conn))]
-                                [content-length
-                                 (read-http-body/exact who
-                                                       (http-connection-input-port conn)
-                                                       content-length)]
-                                [else #f])]
-                         [u (request-target->uri who conn target headers)])
-                    (make-http-request method u headers body)))))))
+  (define http-read-request
+    (lambda (connection)
+      (pcheck ([http-connection? connection])
+        (when (http-connection-closed? connection)
+          (errorf 'http-read-request "HTTP connection is closed"))
+        (or (http-connection-request connection)
+            (let* ([handle (http-connection-request-handle connection)]
+                   [request (make-http-request
+                             (lws-http-request-method handle)
+                             (lws-http-request-path handle) (lws-http-request-headers handle)
+                             (and (lws-http-request-has-body? handle)
+                                  (lws-http-request-read-body handle)))])
+              (http-connection-request-set! connection request)
+              request)))))
 
   #|proc:http-read-request/nonblocking
-The `http-read-request/nonblocking` procedure attempts to read one HTTP request if the connection is currently readable, and returns `#f` otherwise.
+The `http-read-request/nonblocking` procedure returns the already accepted request from
+`connection`; accepted LWS requests always have complete headers.
 |#
-  (define-who http-read-request/nonblocking
-    (lambda (conn)
-      (pcheck ([http-connection? conn])
-              (ensure-connection-open who conn)
-              (let ([ready (poll/nonblocking
-                            (list (make-poll-target (http-connection-socket conn)
-                                                    '(read))))])
-                (if (memq 'read (poll-target-ready-events (car ready)))
-                    (http-read-request conn)
-                    #f)))))
+  (define http-read-request/nonblocking http-read-request)
 
-  #|proc:http-write-response
-The `http-write-response` procedure writes one HTTP response to an accepted connection.
-|#
-  (define-who http-write-response
-    (lambda (conn response)
-      (pcheck ([http-connection? conn] [http-response? response])
-              (ensure-connection-open who conn)
-              (write-response-port (http-connection-output-port conn) response)
-              response)))
+  (define response-bytes
+    (lambda (body)
+      (cond [(not body) #vu8()]
+            [(bytevector? body) body]
+            [(string? body) (string->utf8 body)]
+            [else (errorf 'http-write-response "unsupported response body ~s" body)])))
 
   #|proc:http-write-response/nonblocking
-The `http-write-response/nonblocking` procedure writes an HTTP response if the connection is currently writable, and returns `#f` otherwise.
+The `http-write-response/nonblocking` procedure queues `response` for logical `connection`. It
+returns `response` when accepted and `#f` when reactor backpressure rejects the command.
 |#
-  (define-who http-write-response/nonblocking
-    (lambda (conn response)
-      (pcheck ([http-connection? conn] [http-response? response])
-              (ensure-connection-open who conn)
-              (let ([ready (poll/nonblocking
-                            (list (make-poll-target (http-connection-socket conn)
-                                                    '(write))))])
-                (if (memq 'write (poll-target-ready-events (car ready)))
-                    (http-write-response conn response)
-                    #f)))))
+  (define http-write-response/nonblocking
+    (lambda (connection response)
+      (pcheck ([http-connection? connection] [http-response? response])
+        (and (not (http-connection-closed? connection))
+             (lws-http-request-write-response!
+              (http-connection-request-handle connection) (http-response-status response)
+              (http-response-headers response)
+              (response-bytes (http-response-body response)) #t)
+             response))))
+
+  #|proc:http-write-response
+The `http-write-response` procedure writes `response` to logical `connection` and returns it.
+Materialized bodies and body sources with a known length are sent in bounded chunks, waiting for
+each native write before producing the next chunk. A body source is closed after success or failure.
+It raises an error if the stream closes, the source length is invalid, or the command queue is full.
+|#
+  (define http-write-response
+    (lambda (connection response)
+      (pcheck ([http-connection? connection] [http-response? response])
+        (let* ([body (http-response-body response)]
+               [producer (body-producer body)]
+               [length (if body (body-length body) 0)]
+               [handle (http-connection-request-handle connection)]
+               [failure #f])
+          (dynamic-wind
+            void
+            (lambda ()
+             (guard (condition [else (set! failure condition) (raise condition)])
+              (when (http-connection-closed? connection)
+                (errorf 'http-write-response "HTTP connection is closed"))
+              (unless (and (integer? length) (exact? length) (>= length 0))
+                (errorf 'http-write-response "response body source requires a known length"))
+              (let ([headers (http-header-set (http-response-headers response)
+                                             "Content-Length" (number->string length))])
+                (let loop ([sent 0])
+                  (let* ([chunk (if producer (producer 65536) (eof-object))]
+                         [final? (eof-object? chunk)]
+                         [bytes (if final? #vu8() chunk)])
+                    (unless (and (bytevector? bytes) (<= (bytevector-length bytes) 65536))
+                      (errorf 'http-write-response "body producer returned an invalid chunk"))
+                    (let ([next (+ sent (bytevector-length bytes))])
+                      (when (or (> next length) (and final? (not (= next length))))
+                        (errorf 'http-write-response "response body does not match its length"))
+                      (unless (lws-http-request-write-response!
+                               handle (http-response-status response) headers bytes
+                               (or final? (= next length)))
+                        (errorf 'http-write-response "server response queue is full"))
+                      (lws-http-request-wait-response! handle)
+                      (cond
+                       [final? (void)]
+                       [(= next length)
+                        (unless (eof-object? (producer 65536))
+                          (errorf 'http-write-response "response body exceeds its length"))]
+                       [else (loop next)])))))
+              response))
+            (lambda ()
+              (if failure
+                  (guard (ignored [else (void)]) (close-body-source! body))
+                  (close-body-source! body))))))))
+
+  (define serve-one
+    (lambda (server connection)
+      (let* ([request (http-read-request connection)]
+             [path (or (uri-raw-path (http-request-uri request)) "/")]
+             [handler (http-handler-ref server (http-request-method request) path #f)]
+             [response
+              (guard (condition [else (make-http-response 500 "Internal Server Error" '()
+                                                         #vu8() '() 'h1)])
+                (if handler (handler request)
+                    (make-http-response 404 "Not Found" '() #vu8() '() 'h1)))])
+        (unless (http-response? response)
+          (set! response (make-http-response 500 "Internal Server Error" '() #vu8() '() 'h1)))
+        (http-write-response connection response)
+        response)))
 
   #|proc:http-serve
-The `http-serve` procedure accepts one connection, dispatches requests through the registered handler table, and keeps serving that connection until either side asks to close it.
+The `http-serve` procedure accepts and dispatches one logical request on `server`. Handlers run
+outside reactor and native locks. It returns the handler response.
 |#
-  (define-who http-serve
+  (define http-serve
     (lambda (server)
-      (pcheck ([http-server? server])
-              (ensure-server-open who server)
-              (let ([conn (http-accept server)])
-                (serve-http-connection who server conn)))))
+      (pcheck ([http-server? server]) (serve-one server (http-accept server)))))
 
   #|proc:http-serve-loop
-The `http-serve-loop` procedure repeatedly accepts and serves HTTP connections until the server is closed. If `threaded?` is true, each accepted connection is served in a new Scheme thread; otherwise connections are served serially.
+The `http-serve-loop` procedure dispatches requests until `server` closes and then returns it.
 |#
-  (define-who http-serve-loop
-    (case-lambda
-      [(server) (http-serve-loop server #t)]
-      [(server threaded?)
-       (pcheck ([http-server? server] [boolean? threaded?])
-               (let loop ()
-                 (unless (http-server-closed? server)
-                   (let* ([ready (poll (list (make-poll-target
-                                               (http-server-socket server)
-                                               '(read error hup invalid)))
-                                       100)]
-                          [events (poll-target-ready-events (car ready))])
-                     (when (and (not (http-server-closed? server))
-                                (memq 'read events))
-                       (guard (c [else
-                                  (unless (http-server-closed? server)
-                                    (raise c))])
-                         (if threaded?
-                             (let ([conn (http-accept server)])
-                               (fork-thread
-                                (lambda ()
-                                  (serve-http-connection who server conn))))
-                             (http-serve server)))))
-                   (loop)))
-               server)])))
+  (define http-serve-loop
+    (lambda (server)
+      (pcheck ([http-server? server])
+        (let loop ()
+          (unless (http-server-closed? server)
+            (let ([connection (http-accept/nonblocking server)])
+              (if connection (serve-one server connection)
+                  ($sleep (make-time 'time-duration 1000000 0))))
+            (loop)))
+        server)))
+  )

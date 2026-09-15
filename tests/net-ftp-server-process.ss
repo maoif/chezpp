@@ -6,6 +6,9 @@
 (define main
   (lambda ()
     (let ([root (car (command-line-arguments))])
+      (define connection-count-path (string-append root ".control-connections"))
+      (define command-log-path (string-append root ".commands"))
+      (define accepted-connections 0)
       (let ([listener (open-socket 'inet 'stream)])
         (socket-set-option! listener 'reuse-address #t)
         (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
@@ -27,6 +30,16 @@
           (define physical-path
             (lambda (virtual-path)
               (string-append root (normalize-absolute-test-path virtual-path))))
+          (define log-command!
+            (lambda (line)
+              (let ([op (open-file-output-port command-log-path
+                                               (file-options no-fail no-truncate)
+                                               (buffer-mode block)
+                                               (native-transcoder))])
+                (dynamic-wind
+                  (lambda () (file-position op (file-length op)))
+                  (lambda () (put-string op line) (newline op))
+                  (lambda () (close-port op))))))
           (define open-passive
             (lambda ()
               (let ([sock (open-socket 'inet 'stream)])
@@ -45,6 +58,7 @@
                     [op (open-socket-output-port client)])
                 (define cwd "/")
                 (define rename-from #f)
+                (define restart-offset 0)
                 (define passive-listener #f)
                 (define passive-port #f)
                 (define data-accept
@@ -63,10 +77,25 @@
                   (lambda (path)
                     (map (lambda (name) (string-append name "\r\n"))
                          (directory-list path))))
+                (define mlsd-line
+                  (lambda (path name)
+                    (let ([entry-path (if (string-endswith? path "/")
+                                          (string-append path name)
+                                          (string-append path "/" name))])
+                      (if (file-directory? entry-path)
+                          (format "type=dir;modify=20260812000000;perm=elcmfd; ~a\r\n" name)
+                          (format "type=file;size=~a;modify=20260812000000;perm=rwafd; ~a\r\n"
+                                  (file-size entry-path)
+                                  name)))))
+                (define mlsd-dir
+                  (lambda (path)
+                    (map (lambda (name) (mlsd-line path name))
+                         (directory-list path))))
                 (send-crlf-line op "220 chezpp ftp test server")
                 (let loop ()
                   (let ([line (read-crlf-line ip)])
                     (when line
+                      (log-command! line)
                       (let* ([parts (string-split line #\space)]
                              [cmd (string-upcase (car parts))]
                              [arg (if (> (string-length line) (+ (string-length (car parts)) 1))
@@ -86,6 +115,8 @@
                          [(string=? cmd "FEAT")
                           (send-crlf-line op "211-Features")
                           (send-crlf-line op " EPSV")
+                          (send-crlf-line op " MLSD")
+                          (send-crlf-line op " MLST type*;size*;modify*;perm*;")
                           (send-crlf-line op " UTF8")
                           (send-crlf-line op "211 End")
                           (loop)]
@@ -120,7 +151,8 @@
                                               (format "229 Entering Extended Passive Mode (|||~a|)"
                                                       passive-port)))
                           (loop)]
-                         [(or (string=? cmd "LIST") (string=? cmd "NLST"))
+                         [(or (string=? cmd "LIST") (string=? cmd "NLST")
+                              (string=? cmd "MLSD"))
                           (let* ([target (if (string=? arg "") cwd (test-path-join cwd arg))]
                                  [path (physical-path target)])
                             (if (file-directory? path)
@@ -132,11 +164,30 @@
                                     (let ([dop (open-socket-output-port data)])
                                       (for-each (lambda (entry)
                                                   (put-bytevector dop (string->utf8 entry)))
-                                                (list-dir path))
+                                                (if (string=? cmd "MLSD")
+                                                    (mlsd-dir path)
+                                                    (list-dir path)))
                                       (flush-output-port dop)
                                       (close-port dop))
                                     (close-socket data)
                                     (send-crlf-line op "226 transfer complete")))
+                                (send-crlf-line op "550 unavailable"))
+                            (loop))]
+                         [(string=? cmd "MLST")
+                          (let* ([target (test-path-join cwd arg)]
+                                 [path (physical-path target)])
+                            (if (file-exists? path)
+                                (begin
+                                  (send-crlf-line op "250-Listing")
+                                  (send-crlf-line
+                                   op
+                                   (string-append " "
+                                                  (let ([line (mlsd-line
+                                                               (path-dirname path)
+                                                               (file-basename path))])
+                                                    (substring line 0
+                                                               (fx- (string-length line) 2)))))
+                                  (send-crlf-line op "250 End"))
                                 (send-crlf-line op "550 unavailable"))
                             (loop))]
                          [(string=? cmd "SIZE")
@@ -146,6 +197,14 @@
                                 (send-crlf-line op (format "213 ~a" (file-size path)))
                                 (send-crlf-line op "550 unavailable"))
                             (loop))]
+                         [(string=? cmd "REST")
+                          (let ([offset (string->number arg)])
+                            (if (and offset (natural? offset))
+                                (begin
+                                  (set! restart-offset offset)
+                                  (send-crlf-line op "350 restart position accepted"))
+                                (send-crlf-line op "501 invalid restart position"))
+                            (loop))]
                          [(string=? cmd "RETR")
                           (let* ([target (test-path-join cwd arg)]
                                  [path (physical-path target)])
@@ -153,10 +212,14 @@
                                 (begin
                                   (send-crlf-line op "150 opening data connection")
                                   (let ([data (data-accept)])
-                                    (let ([dop (open-socket-output-port data)])
-                                      (put-bytevector dop (read-u8vec path))
+                                    (let* ([dop (open-socket-output-port data)]
+                                           [content (read-u8vec path)])
+                                      (put-bytevector dop content restart-offset
+                                                      (fx- (bytevector-length content)
+                                                           restart-offset))
                                       (flush-output-port dop)
                                       (close-port dop))
+                                    (set! restart-offset 0)
                                     (close-socket data)
                                     (send-crlf-line op "226 transfer complete")))
                                 (send-crlf-line op "550 unavailable"))
@@ -167,10 +230,25 @@
                             (ensure-parent-dir path)
                             (send-crlf-line op "150 opening data connection")
                             (let ([data (data-accept)])
-                              (let ([dip (open-socket-input-port data)])
-                                (write-bytevector-file path (read-port->bytevector dip))
+                              (let* ([dip (open-socket-input-port data)]
+                                     [incoming (read-port->bytevector dip)]
+                                     [prefix (if (and (fx> restart-offset 0)
+                                                      (file-exists? path))
+                                                 (let* ([old (read-u8vec path)]
+                                                        [copy (make-bytevector restart-offset)])
+                                                   (bytevector-copy! old 0 copy 0 restart-offset)
+                                                   copy)
+                                                 #vu8())]
+                                     [content (make-bytevector
+                                               (fx+ (bytevector-length prefix)
+                                                    (bytevector-length incoming)))])
+                                (bytevector-copy! prefix 0 content 0 (bytevector-length prefix))
+                                (bytevector-copy! incoming 0 content (bytevector-length prefix)
+                                                  (bytevector-length incoming))
+                                (write-bytevector-file path content)
                                 (close-port dip))
                               (close-socket data)
+                              (set! restart-offset 0)
                               (send-crlf-line op "226 transfer complete"))
                             (loop))]
                          [(string=? cmd "DELE")
@@ -243,9 +321,13 @@
                                 [(v) v]
                                 [(client peer)
                                  (cons client peer)])))])
-                     (if accepted
+                     (if (and accepted (not (net-would-block? accepted)))
                          (let ([client (car accepted)]
                                [peer (cdr accepted)])
+                           (set! accepted-connections (+ accepted-connections 1))
+                           (write-bytevector-file
+                            connection-count-path
+                            (string->utf8 (number->string accepted-connections)))
                            (spawn-client-handler client)
                            (loop))
                          (begin
@@ -260,7 +342,12 @@
                      (when (string=? line "stop")
                        (set! running? #f)
                        (guard (c [else #f])
-                         (close-socket listener)))
+                         (close-socket listener))
+                       (for-each
+                        (lambda (client)
+                          (guard (c [else #f]) (close-socket client)))
+                        client-sockets)
+                       (exit 0))
                      (when running?
                        (loop))))))))
           (write port)
@@ -270,11 +357,13 @@
           (set! running? #f)
           (guard (c [else #f])
             (close-socket listener))
+          (for-each (lambda (client)
+                      (guard (c [else #f]) (close-socket client)))
+                    client-sockets)
           (thread-join accept-thread)
           (for-each (lambda (client)
                       (guard (c [else #f])
                         (close-socket client)))
-                    client-sockets)
-          (for-each thread-join client-threads))))))
+                    client-sockets))))))
 
 (main)

@@ -69,10 +69,18 @@
 
   (define ffi-blake3-load-error
     (foreign-procedure "chezpp_blake3_load_error" () ptr))
+  (define ffi-openssl-load-error
+    (foreign-procedure "crypto_openssl_load_error" () ptr))
 
   (define ensure-blake3
     (lambda (who)
       (let ([message (ffi-blake3-load-error)])
+        (when message
+          (error who message)))))
+
+  (define ensure-openssl
+    (lambda (who)
+      (let ([message (ffi-openssl-load-error)])
         (when message
           (error who message)))))
 
@@ -126,7 +134,7 @@
 
   (define-syntax define-digester
     (syntax-rules ()
-      [(_ name ffi x? x-length)
+      [(_ name ffi ensure-library x? x-length)
        (define-who name
          (case-lambda
            [(x)
@@ -140,37 +148,38 @@
                         (errorf who "start index ~a is greater than stop index ~a" start stop))
                       (when (fx> stop len)
                         (errorf who "stop index ~a is greater than total length ~a" stop len))
+                      (ensure-library who)
                       (ffi x start stop)))]))]))
 
-  (define-digester md5-bytevector ffi-md5-bv bytevector? bytevector-length)
-  (define-digester sha224-bytevector ffi-sha224-bv bytevector? bytevector-length)
-  (define-digester sha256-bytevector ffi-sha256-bv bytevector? bytevector-length)
-  (define-digester sha384-bytevector ffi-sha384-bv bytevector? bytevector-length)
-  (define-digester sha512-bytevector ffi-sha512-bv bytevector? bytevector-length)
-  (define-digester sha512-224-bytevector ffi-sha512-224-bv bytevector? bytevector-length)
-  (define-digester sha512-256-bytevector ffi-sha512-256-bv bytevector? bytevector-length)
-  (define-digester sha3-224-bytevector ffi-sha3-224-bv bytevector? bytevector-length)
-  (define-digester sha3-256-bytevector ffi-sha3-256-bv bytevector? bytevector-length)
-  (define-digester sha3-384-bytevector ffi-sha3-384-bv bytevector? bytevector-length)
-  (define-digester sha3-512-bytevector ffi-sha3-512-bv bytevector? bytevector-length)
-  (define-digester blake2b-512-bytevector ffi-blake2b-512-bv bytevector? bytevector-length)
-  (define-digester blake2s-256-bytevector ffi-blake2s-256-bv bytevector? bytevector-length)
-  (define-digester blake3-bytevector ffi-blake3-bv bytevector? bytevector-length)
+  (define-digester md5-bytevector ffi-md5-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha224-bytevector ffi-sha224-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha256-bytevector ffi-sha256-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha384-bytevector ffi-sha384-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha512-bytevector ffi-sha512-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha512-224-bytevector ffi-sha512-224-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha512-256-bytevector ffi-sha512-256-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha3-224-bytevector ffi-sha3-224-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha3-256-bytevector ffi-sha3-256-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha3-384-bytevector ffi-sha3-384-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester sha3-512-bytevector ffi-sha3-512-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester blake2b-512-bytevector ffi-blake2b-512-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester blake2s-256-bytevector ffi-blake2s-256-bv ensure-openssl bytevector? bytevector-length)
+  (define-digester blake3-bytevector ffi-blake3-bv ensure-blake3 bytevector? bytevector-length)
 
-  (define-digester md5-string ffi-md5-str string? string-length)
-  (define-digester sha224-string ffi-sha224-str string? string-length)
-  (define-digester sha256-string ffi-sha256-str string? string-length)
-  (define-digester sha384-string ffi-sha384-str string? string-length)
-  (define-digester sha512-string ffi-sha512-str string? string-length)
-  (define-digester sha512-224-string ffi-sha512-224-str string? string-length)
-  (define-digester sha512-256-string ffi-sha512-256-str string? string-length)
-  (define-digester sha3-224-string ffi-sha3-224-str string? string-length)
-  (define-digester sha3-256-string ffi-sha3-256-str string? string-length)
-  (define-digester sha3-384-string ffi-sha3-384-str string? string-length)
-  (define-digester sha3-512-string ffi-sha3-512-str string? string-length)
-  (define-digester blake2b-512-string ffi-blake2b-512-str string? string-length)
-  (define-digester blake2s-256-string ffi-blake2s-256-str string? string-length)
-  (define-digester blake3-string ffi-blake3-str string? string-length)
+  (define-digester md5-string ffi-md5-str ensure-openssl string? string-length)
+  (define-digester sha224-string ffi-sha224-str ensure-openssl string? string-length)
+  (define-digester sha256-string ffi-sha256-str ensure-openssl string? string-length)
+  (define-digester sha384-string ffi-sha384-str ensure-openssl string? string-length)
+  (define-digester sha512-string ffi-sha512-str ensure-openssl string? string-length)
+  (define-digester sha512-224-string ffi-sha512-224-str ensure-openssl string? string-length)
+  (define-digester sha512-256-string ffi-sha512-256-str ensure-openssl string? string-length)
+  (define-digester sha3-224-string ffi-sha3-224-str ensure-openssl string? string-length)
+  (define-digester sha3-256-string ffi-sha3-256-str ensure-openssl string? string-length)
+  (define-digester sha3-384-string ffi-sha3-384-str ensure-openssl string? string-length)
+  (define-digester sha3-512-string ffi-sha3-512-str ensure-openssl string? string-length)
+  (define-digester blake2b-512-string ffi-blake2b-512-str ensure-openssl string? string-length)
+  (define-digester blake2s-256-string ffi-blake2s-256-str ensure-openssl string? string-length)
+  (define-digester blake3-string ffi-blake3-str ensure-blake3 string? string-length)
 
 
   (define-syntax define-file-digester
@@ -290,6 +299,7 @@
            sha512-224 sha512-256
            sha3-224 sha3-256 sha3-384 sha3-512
            blake2b-512 blake2s-256)
+          (ensure-openssl who)
           (mk-digester (ffi-openssl-create which)
                        ffi-openssl-get
                        ffi-openssl-string-update!

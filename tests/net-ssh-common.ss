@@ -28,12 +28,23 @@
   (lambda (thunk)
     (let loop ([attempt 40])
       (let ([x (thunk)])
-        (if (eq? x #f)
-            (and (fx> attempt 0)
-                 (begin
-                   (milisleep 50)
-                   (loop (fx1- attempt))))
-            x)))))
+        (cond
+         [(net-would-block? x)
+          (and (fx> attempt 0)
+               (begin
+                 (poll
+                  (list
+                   (make-poll-target
+                    (net-would-block-resource x)
+                    (net-would-block-events x)))
+                  50)
+                 (loop (fx1- attempt))))]
+         [(eq? x #f)
+          (and (fx> attempt 0)
+               (begin
+                 (milisleep 50)
+                 (loop (fx1- attempt))))]
+         [else x])))))
 
 (define complete-sftp-write-all-nonblocking
   (lambda (file bv start stop)
@@ -46,8 +57,13 @@
        [else
         (let ([n (sftp-write-all/nonblocking file bv i stop)])
           (cond
-           [(eq? n #f)
-            (milisleep 25)
+           [(net-would-block? n)
+            (poll
+             (list
+              (make-poll-target
+               (net-would-block-resource n)
+               (net-would-block-events n)))
+             25)
             (loop i (fx1- attempt))]
            [(fx= n 0)
             (milisleep 25)
@@ -135,7 +151,7 @@
       (write-bytevector-file
        config-path
        (string->utf8
-        (format "Port ~a\nListenAddress 127.0.0.1\nHostKey ~a\nPidFile ~a\nAuthorizedKeysFile ~a\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nChallengeResponseAuthentication no\nPubkeyAuthentication yes\nUsePAM no\nPermitRootLogin no\nStrictModes no\nLogLevel ERROR\nSubsystem sftp internal-sftp\nAllowUsers ~a\n"
+        (format "Port ~a\nListenAddress 127.0.0.1\nHostKey ~a\nPidFile ~a\nAuthorizedKeysFile ~a\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nChallengeResponseAuthentication no\nPubkeyAuthentication yes\nUsePAM no\nPermitRootLogin no\nStrictModes no\nLogLevel ERROR\nAcceptEnv CHEZPP_TEST_ENV\nSubsystem sftp internal-sftp\nAllowUsers ~a\n"
                 port
                 host-key
                 pid-path
@@ -157,6 +173,73 @@
                   (milisleep 50))
                 (when (file-exists? root)
                   (file-removetree root #f)))))))
+
+(define with-test-ssh-channel
+  (lambda (command proc)
+    (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (with-env
+           "HOME"
+           home
+           (lambda ()
+             (let ([session (ssh-open "127.0.0.1" port user)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (ssh-auth-publickey! session user)
+                   (let ([channel (ssh-exec session command)])
+                     (dynamic-wind
+                       void
+                       (lambda () (proc channel))
+                       (lambda () (ssh-close-channel channel)))))
+                 (lambda () (ssh-close session)))))))
+        stop-server))))
+
+(define with-test-sftp-session
+  (lambda (procedure)
+    (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (with-env
+           "HOME" home
+           (lambda ()
+             (let ([ssh-session (ssh-open "127.0.0.1" port user)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (ssh-auth-publickey! ssh-session user)
+                   (let ([sftp-session (sftp-open ssh-session)])
+                     (dynamic-wind
+                       void
+                       (lambda () (procedure sftp-session remote-root))
+                       (lambda () (sftp-close sftp-session)))))
+                 (lambda () (ssh-close ssh-session)))))))
+        stop-server))))
+
+(define with-test-scp-session
+  (lambda (procedure)
+    (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+      (dynamic-wind
+        void
+        (lambda ()
+          (with-env
+           "HOME" home
+           (lambda ()
+             (let ([ssh-session (ssh-open "127.0.0.1" port user)])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (ssh-auth-publickey! ssh-session user)
+                   (let ([scp-session (scp-open ssh-session)])
+                     (dynamic-wind
+                       void
+                       (lambda () (procedure scp-session remote-root))
+                       (lambda () (scp-close scp-session)))))
+                 (lambda () (ssh-close ssh-session)))))))
+        stop-server))))
 
 (define ssh-test-pty
   (lambda (session)
@@ -211,7 +294,7 @@
         void
         (lambda ()
           (let ([n1 #f] [n2 #f] [n3 #f])
-            (and (not (ssh-read/nonblocking channel 8))
+            (and (net-would-block? (ssh-read/nonblocking channel 8))
                  (begin
                    (set! n1 (wait-for-result
                              (lambda ()
@@ -359,13 +442,14 @@
   (lambda (sftp remote-root)
     (and
      (let ([entries (sftp-list sftp remote-root)])
-       (and (member "." entries)
-            (member ".." entries)
-            (member "hello.txt" entries)
-            (member "nested" entries)))
+       (let ([name* (map sftp-attributes-name entries)])
+         (and (member "." name*)
+              (member ".." name*)
+              (member "hello.txt" name*)
+              (member "nested" name*))))
      (let ([info (sftp-stat sftp (string-append remote-root "/hello.txt"))])
-       (and (eq? (cdr (assq 'type info)) 'regular)
-            (= (cdr (assq 'size info)) 10))))))
+       (and (eq? (sftp-attributes-type info) 'regular)
+            (= (sftp-attributes-size info) 10))))))
 
 (define sftp-test-read-apis
   (lambda (sftp remote-root)
@@ -573,13 +657,15 @@
                         (string-append remote-root "/renamed.txt"))
           sftp)
      (let ([entries (sftp-list sftp remote-root)])
-       (and (member "renamed.txt" entries)
-            (member "tmpdir" entries)))
+       (let ([name* (map sftp-attributes-name entries)])
+         (and (member "renamed.txt" name*)
+              (member "tmpdir" name*))))
      (eq? (sftp-delete! sftp (string-append remote-root "/renamed.txt")) sftp)
      (eq? (sftp-rmdir! sftp (string-append remote-root "/tmpdir")) sftp)
      (let ([entries (sftp-list sftp remote-root)])
-       (and (not (member "renamed.txt" entries))
-            (not (member "tmpdir" entries)))))))
+       (let ([name* (map sftp-attributes-name entries)])
+         (and (not (member "renamed.txt" name*))
+              (not (member "tmpdir" name*))))))))
 
 (define sftp-test-timeouts
   (lambda (session sftp remote-root timeout?)
@@ -587,6 +673,19 @@
           [read-path-2 (string-append remote-root "/nested/base.txt")]
           [write-path (string-append remote-root "/timeout-write.txt")])
       (and
+       (let ([file (sftp-open-file sftp read-path-1 'read)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (with-suspended-ssh-session-child
+              'sftp-test-timeouts
+              remote-root
+              (lambda ()
+                (let ([answer (sftp-read/nonblocking file 16)])
+                  (and (net-would-block? answer)
+                       (fixnum? (net-would-block-resource answer))
+                       (pair? (net-would-block-events answer)))))))
+           (lambda () (sftp-close-file file))))
        (let ([file (sftp-open-file sftp read-path-1 'read)])
          (dynamic-wind
            void
@@ -636,7 +735,9 @@
              [upload-path "/tmp/chezpp-net-sftp-upload.bin"]
              [download-path "/tmp/chezpp-net-sftp-download.bin"])
          (dynamic-wind
-           void
+           (lambda ()
+             (when (file-exists? upload-path) (delete-file upload-path))
+             (when (file-exists? download-path) (delete-file download-path)))
            (lambda ()
              (and
               (eq? (ssh-auth-publickey! session user) session)
@@ -657,7 +758,10 @@
                       upload-path
                       download-path)))
                   (lambda () (sftp-close sftp))))))
-           (lambda () (ssh-close session))))))))
+           (lambda ()
+             (ssh-close session)
+             (when (file-exists? upload-path) (delete-file upload-path))
+             (when (file-exists? download-path) (delete-file download-path)))))))))
 
 (define run-net-sftp-nonblocking-test
   (lambda (remote-root home port user)

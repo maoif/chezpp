@@ -1,0 +1,10 @@
+(import (chezpp)
+        (chezpp net))
+
+(load "examples/net/file-transfer/file-transfer-common.ss")
+(load "examples/net/file-transfer/file-transfer-tcp.ss")
+(load "examples/net/file-transfer/file-transfer-http.ss")
+(load "examples/net/file-transfer/file-transfer-ftp.ss")
+(load "examples/net/file-transfer/file-transfer-sftp.ss")
+(load "examples/net/file-transfer/file-transfer-websocket.ss")
+(load "examples/net/file-transfer/file-transfer-grpc.ss")

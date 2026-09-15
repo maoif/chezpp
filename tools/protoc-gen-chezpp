@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+tool_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$tool_dir/../chez++" --script "$tool_dir/protoc-gen-chezpp.ss"

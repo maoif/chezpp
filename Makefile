@@ -1,16 +1,17 @@
 SCHEME := scheme
 SCHEME_SCRIPT := $(or $(shell command -v $(SCHEME) 2>/dev/null),$(SCHEME))
+SCHEME_EXE := $(realpath $(SCHEME_SCRIPT))
+SCHEME_INCLUDE_DIR := $(dir $(SCHEME_EXE))
 PREFIX := /usr
-
-# TODO include Chez header file
 
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
 SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
-SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c')
+SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c')
 
 CC := gcc
-CFLAGS := -fPIC -Wall -Wextra -O2 -shared
-LDLIBS := -luuid -lssl -lcrypto -ldl
+CFLAGS := -fPIC -Wall -Wextra -O2 -shared -pthread
+CFLAGS += -I$(SCHEME_INCLUDE_DIR)
+LDLIBS := -luuid -ldl
 
 chezpplibs = chezpp.lib
 chezppwpos = chezpp.wpo
@@ -22,6 +23,7 @@ define generate_chezpp_launcher
 	      -e 's|@SCHEME_SCRIPT@|$(SCHEME_SCRIPT)|g' \
 	      -e 's|@LIBCHEZPP@|$(2)|g' \
 	      -e 's|@CHEZPP_LIB@|$(3)|g' \
+	      -e 's|@FIBER_LIB@|$(4)|g' \
 	      chez++.in > $(1)
 	@chmod +x $(1)
 endef
@@ -33,22 +35,47 @@ all: chez++
 run: chez++
 	@./chez++
 
-libchezpp.so:
+.PHONY: protobuf-generate
+protobuf-generate: chez++
+	@mkdir -p tests/generated
+	@chmod +x tools/protoc-gen-chezpp
+	@protoc --plugin=protoc-gen-chezpp=tools/protoc-gen-chezpp \
+	        --chezpp_out=tests/generated --proto_path=tests/data \
+	        tests/data/file-transfer.proto tests/data/codegen-features.proto
+
+.PHONY: check-scheme-header
+check-scheme-header:
+	@header='$(SCHEME_INCLUDE_DIR)/scheme.h'; \
+	if [ ! -r "$$header" ]; then \
+	  echo "error: ChezScheme header not found or unreadable: $$header" >&2; \
+	  exit 1; \
+	fi; \
+	header_version=$$(sed -n 's/^#define VERSION "\([^"]*\)"/\1/p' "$$header" | head -n 1); \
+	if [ -z "$$header_version" ]; then \
+	  echo "error: ChezScheme header version not found in $$header" >&2; \
+	  exit 1; \
+	fi; \
+	scheme_version=$$($(SCHEME) --version 2>&1); \
+	if [ "$$header_version" != "$$scheme_version" ]; then \
+	  echo "error: ChezScheme header version mismatch: $$header reports $$header_version; $(SCHEME) reports $$scheme_version" >&2; \
+	  exit 1; \
+	fi
+
+libchezpp.so: check-scheme-header
 	$(CC) $(CFLAGS) -o $@ $(SRCS_C) $(LDLIBS)
 
 ${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
-	@echo '(guard (condition [else (display-condition condition (current-error-port)) (newline (current-error-port)) (exit 1)])' \
-	      '(optimize-level 1)' \
+	@echo '(optimize-level 1)' \
 	      '(compile-imported-libraries #t) (generate-inspector-information #t) (generate-procedure-source-information #t)'\
 	      '(generate-wpo-files #t)' \
 	      '(time (compile-file "chezpp.ss"))' \
 	      '(unless (null? (compile-whole-library "chezpp.wpo" "chezpp.lib"))' \
-	      '  (errorf "chezpp.lib" "dependency has to be null")))' \
-	      | ${SCHEME} -q
+	      '  (errorf "chezpp.lib" "dependency has to be null"))' \
+	      | ${SCHEME} --script /dev/stdin
 	@rm -f chezpp.so
 
 chez++: ${chezppdeps} chez++.in Makefile
-	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib))
+	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib),)
 
 .PHONY: chez++.exe
 chez++.exe: chez++
@@ -62,7 +89,7 @@ installdeps: ${chezppdeps}
 .PHONY: install
 install: chez++ installdeps
 	rm -f $(PREFIX)/bin/chez++ $(PREFIX)/lib/chez++.ss
-	$(call generate_chezpp_launcher,$(PREFIX)/bin/chez++,$(abspath $(PREFIX)/lib/libchezpp.so),$(abspath $(PREFIX)/lib/chezpp.lib))
+	$(call generate_chezpp_launcher,$(PREFIX)/bin/chez++,$(abspath $(PREFIX)/lib/libchezpp.so),$(abspath $(PREFIX)/lib/chezpp.lib),)
 
 .PHONY: clean
 clean:

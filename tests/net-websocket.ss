@@ -40,27 +40,104 @@
 
 (define start-websocket-send-with-pending
   (lambda (conn payload)
+    (define pending-state
+      (lambda (answer state)
+        (and (net-would-block? answer)
+             (fixnum? (net-would-block-resource answer))
+             (memq 'write (net-would-block-events answer))
+             state)))
     (let ([first (websocket-send/nonblocking conn 'binary payload)])
-      (if (not first)
-          'pending-first
+      (if (net-would-block? first)
+          (pending-state first 'pending-first)
           (let ([second (websocket-send/nonblocking conn 'binary payload)])
-            (if (not second)
-                'sent-once-then-pending
+            (if (net-would-block? second)
+                (pending-state second 'sent-once-then-pending)
                 (error 'start-websocket-send-with-pending
                        "WebSocket nonblocking send did not become pending on the second send")))))))
+
+(define websocket-read-would-block?
+  (lambda (answer)
+    (and (net-would-block? answer)
+         (fixnum? (net-would-block-resource answer))
+         (not (not (memq 'read (net-would-block-events answer)))))))
 
 (define await-websocket-message
   (lambda (conn)
     (let loop ([i 0])
       (let ([ans (websocket-recv/nonblocking conn)])
-        (if ans
-            ans
+        (if (net-would-block? ans)
             (begin
               (when (> i 1000)
                 (error 'await-websocket-message
                        "WebSocket message did not arrive"))
-              (milisleep 10)
-              (loop (+ i 1))))))))
+              (poll
+               (list
+                (make-poll-target
+                 (net-would-block-resource ans)
+                 (net-would-block-events ans)))
+               10)
+              (loop (+ i 1)))
+            ans)))))
+
+(mat net-websocket-concurrent-first-use
+     (let* ([count 8]
+            [server* (make-vector count #f)]
+            [thread*
+             (vector-map
+              (lambda (index)
+                (fork-thread
+                 (lambda ()
+                   (let ([server (websocket-listen "127.0.0.1" 0)])
+                     (vector-set! server* index server)))))
+              '#(0 1 2 3 4 5 6 7))])
+       (dynamic-wind
+         (lambda ()
+           (vector-for-each thread-join thread*))
+         (lambda ()
+           (andmap websocket-server? (vector->list server*)))
+         (lambda ()
+           (vector-for-each
+            (lambda (server)
+              (when (websocket-server? server)
+                (websocket-server-close server)))
+            server*)))))
+
+(mat net-websocket-readiness
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([answer (websocket-accept/nonblocking server)])
+             (and (net-would-block? answer)
+                  (fixnum? (net-would-block-resource answer))
+                  (not (not
+                        (memq 'read
+                              (net-would-block-events answer)))))))
+         (lambda ()
+           (websocket-server-close server)))))
+
+(mat net-websocket-connection-readiness
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [uri (format "ws://127.0.0.1:~a/readiness" port)]
+            [client #f]
+            [accepted #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (set! client (websocket-connect uri))
+           (set! accepted (websocket-accept server))
+           (let ([accept-answer (websocket-accept/nonblocking server)]
+                 [recv-answer (websocket-recv/nonblocking accepted)])
+             (and (websocket-read-would-block? accept-answer)
+                  (websocket-read-would-block? recv-answer)
+                  (not (fx= (net-would-block-resource accept-answer)
+                            (net-would-block-resource recv-answer))))))
+         (lambda ()
+           (when accepted (websocket-close accepted))
+           (when client (websocket-close client))
+           (websocket-server-close server)))))
 
 (mat net-websocket
      (let* ([port (reserve-loopback-port)]
@@ -72,7 +149,7 @@
          (lambda ()
            (and
             (websocket-server? server)
-            (not (websocket-accept/nonblocking server))
+            (net-would-block? (websocket-accept/nonblocking server))
             (let ([client (websocket-connect uri1)]
                   [accepted #f])
               (dynamic-wind
@@ -83,15 +160,17 @@
                   (and
                    (websocket-connection? client)
                    (websocket-connection? accepted)
-                   (not (websocket-recv/nonblocking client))
-                   (not (websocket-recv/nonblocking accepted))
+                   (websocket-read-would-block?
+                    (websocket-recv/nonblocking client))
+                   (websocket-read-would-block?
+                    (websocket-recv/nonblocking accepted))
                    (= (websocket-send-text client "hello websocket") 15)
                    (let ([msg (websocket-next-message accepted)])
                      (and (websocket-message? msg)
                           (eq? (websocket-message-type msg) 'text)
                           (equal? (websocket-message-data msg) "hello websocket")))
                    (let ([ans (websocket-send/nonblocking accepted 'binary #vu8(1 2 3 4))])
-                     (or (not ans) (= ans 4)))
+                     (or (net-would-block? ans) (= ans 4)))
                    (let ([msg (websocket-recv client)])
                      (and (websocket-message? msg)
                           (eq? (websocket-message-type msg) 'binary)
@@ -112,7 +191,7 @@
                       (websocket-connection? client)
                       (websocket-connection? accepted)
                       (let ([ans (websocket-send/nonblocking client 'text "via-call")])
-                        (or (not ans) (= ans 8)))
+                        (or (net-would-block? ans) (= ans 8)))
                       (let ([msg (websocket-recv accepted)])
                         (and (websocket-message? msg)
                              (eq? (websocket-message-type msg) 'text)
@@ -328,3 +407,125 @@
                  (websocket-close client)))))
          (lambda ()
            (websocket-server-close server)))))
+
+(define wait-websocket-write
+  (lambda (answer)
+    (when (net-would-block? answer)
+      (poll (list (make-poll-target (net-would-block-resource answer)
+                                    (net-would-block-events answer)))
+            100))))
+
+(mat net-websocket-phase4-features
+     (let* ([port (reserve-loopback-port)]
+            [options (make-websocket-options #f '("chezpp.v2" "chezpp.v1")
+                                             #t 65536 #f 500)]
+            [server (websocket-listen "127.0.0.1" port options)]
+            [uri (format "ws://127.0.0.1:~a/features" port)]
+            [client #f]
+            [accepted #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (set! client (websocket-connect uri options))
+           (set! accepted (websocket-accept server))
+           (let ([first (websocket-send-fragment/nonblocking client 'text "one-")])
+             (wait-websocket-write first)
+             (let ([second (websocket-send-fragment/nonblocking client 'text "two-")])
+               (wait-websocket-write second)
+               (let ([third (websocket-finish-message/nonblocking client "three")])
+                 (wait-websocket-write third))))
+           (let ([message (websocket-recv accepted)])
+             (let ([pong-thread
+                    (fork-thread
+                     (lambda ()
+                       (guard (condition [else #f])
+                         (let ([ping (websocket-recv accepted 500)])
+                           (when (websocket-message? ping)
+                             (websocket-send-pong accepted #vu8(1 2 3) 500))))))])
+             (and (websocket-message? message)
+                  (eq? (websocket-message-type message) 'text)
+                  (equal? (websocket-message-data message) "one-two-three")
+                  (equal? (websocket-negotiated-subprotocol client) "chezpp.v2")
+                  (equal? (websocket-negotiated-subprotocol accepted) "chezpp.v2")
+                  (eq? (websocket-compression client) 'permessage-deflate)
+                  (eq? (websocket-compression accepted) 'permessage-deflate)
+                  (let ([result
+                         (net-operation-wait
+                          (websocket-ping-operation client #vu8(1 2 3) 500))])
+                    (thread-join pong-thread)
+                    result)
+                  (begin
+                    (websocket-close client 1000 "phase4 complete")
+                    (= (websocket-close-code client) 1000))
+                  (equal? (websocket-close-reason client) "phase4 complete")))))
+         (lambda ()
+           (when (and accepted (not (eof-object? accepted)))
+             (websocket-close accepted))
+           (when client (websocket-close client))
+           (websocket-server-close server)))))
+
+(mat net-websocket-pong-timeout
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [client #f]
+            [accepted #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (set! client
+                 (websocket-connect (format "ws://127.0.0.1:~a/timeout" port)))
+           (set! accepted (websocket-accept server))
+           (and
+            (websocket-net-error-message?
+             "websocket pong timed out"
+             (lambda ()
+               (net-operation-wait
+                (websocket-ping-operation client #vu8(9) 20))))
+            (= (websocket-close-code client) 1001)
+            (equal? (websocket-close-reason client) "pong timeout")))
+         (lambda ()
+           (when accepted (websocket-close accepted))
+           (when client (websocket-close client))
+           (websocket-server-close server)))))
+
+(mat net-websocket-wss
+     (begin
+       (write-test-san-cert-files)
+       (let* ([server-context (make-tls-context 'server)]
+              [client-context (make-tls-context 'client)]
+              [port (reserve-loopback-port)]
+              [server-options #f]
+              [client-options #f]
+              [server #f]
+              [client #f]
+              [accepted #f])
+         (dynamic-wind
+           (lambda ()
+             (tls-context-load-cert! server-context
+                                     "/tmp/chezpp-net-test-san-cert.pem")
+             (tls-context-load-private-key! server-context
+                                            "/tmp/chezpp-net-test-san-key.pem")
+             (tls-context-load-ca-file! client-context
+                                        "/tmp/chezpp-net-test-san-cert.pem")
+             (set! server-options
+                   (make-websocket-options server-context '("chezpp-wss")
+                                           #f 65536 #f 500))
+             (set! client-options
+                   (make-websocket-options client-context '("chezpp-wss")
+                                           #f 65536 #f 500))
+             (set! server (websocket-listen "127.0.0.1" port server-options)))
+           (lambda ()
+             (set! client
+                   (websocket-connect (format "wss://127.0.0.1:~a/secure" port)
+                                      client-options 2000))
+             (set! accepted (websocket-accept server 2000))
+             (and (= (websocket-send-text client "secure") 6)
+                  (let ([message (websocket-recv accepted 2000)])
+                    (and (websocket-message? message)
+                         (equal? (websocket-message-data message) "secure")))))
+           (lambda ()
+             (when accepted (websocket-close accepted))
+             (when client (websocket-close client))
+             (when server (websocket-server-close server))
+             (close-tls-context client-context)
+             (close-tls-context server-context))))))

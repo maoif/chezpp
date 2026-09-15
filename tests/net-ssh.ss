@@ -90,6 +90,66 @@
            (guard (c [else #f])
              (close-socket listener)))))
 
+(mat net-ssh-stderr-readiness
+     (with-test-ssh-channel
+      "sh -c 'sleep 1; printf err >&2'"
+      (lambda (channel)
+        (let ([answer (ssh-read-stderr/nonblocking channel 16)]
+              [into-answer
+               (ssh-read-stderr!/nonblocking channel (make-bytevector 16 0))])
+          (and (net-would-block? answer)
+               (fixnum? (net-would-block-resource answer))
+               (not (not (memq 'read (net-would-block-events answer))))
+               (net-would-block? into-answer)
+               (eq? (net-would-block-resource answer)
+                    (net-would-block-resource into-answer))
+               (not (not (memq 'read (net-would-block-events into-answer))))))))
+
+     (with-test-ssh-channel
+      "sh -c 'printf err >&2'"
+      (lambda (channel)
+        (equal? (ssh-read-stderr channel 3) (string->utf8 "err"))))
+
+     (with-test-ssh-channel
+      "sh -c 'printf err >&2'"
+      (lambda (channel)
+        (let ([buffer (make-bytevector 3 0)])
+          (and (fx= 3 (ssh-read-stderr! channel buffer 0 3))
+               (equal? buffer (string->utf8 "err"))))))
+     )
+
+(mat net-ssh-channel-requests
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME" home
+            (lambda ()
+              (let ([session (ssh-open "127.0.0.1" port user)])
+                (dynamic-wind
+                  void
+                  (lambda ()
+                    (ssh-auth-publickey! session user)
+                    (let ([channel (ssh-open-channel session)]
+                          [subsystem-channel (ssh-open-channel session)])
+                      (dynamic-wind
+                        void
+                        (lambda ()
+                          (and
+                           (eq? (ssh-request-environment!
+                                 channel "CHEZPP_TEST_ENV" "request-value") channel)
+                           (ssh-error-message-contains?
+                            "subsystem must not be empty"
+                            (lambda () (ssh-request-subsystem! subsystem-channel "")))
+                           (eq? (ssh-request-subsystem! subsystem-channel "sftp")
+                                subsystem-channel)))
+                        (lambda ()
+                          (ssh-close-channel subsystem-channel)
+                          (ssh-close-channel channel)))))
+                  (lambda () (ssh-close session)))))))
+         (lambda () (stop-server)))))
+
 (mat net-ssh-known-hosts
      ;; Negative test: strict host-key verification rejects a server when HOME
      ;; has no known_hosts entry.
@@ -216,6 +276,74 @@
                      (ssh-close session))))))))
          (lambda ()
            (stop-server)))))
+
+(mat net-ssh-auth-known-hosts-and-forwarding
+     (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (with-env
+            "HOME" home
+            (lambda ()
+              (let* ([known-hosts (string-append home "/.ssh/managed_hosts")]
+                     [private-key (string-append home "/.ssh/id_ed25519")]
+                     [public-key (string-append private-key ".pub")]
+                     [listener (open-socket 'inet 'stream)])
+                (dynamic-wind
+                  (lambda ()
+                    (socket-set-option! listener 'reuse-address #t)
+                    (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+                    (socket-listen! listener 1))
+                  (lambda ()
+                    (let* ([echo-port
+                            (socket-address-port (socket-local-address listener))]
+                           [echo-thread
+                            (fork-thread
+                             (lambda ()
+                               (let-values ([(client peer) (socket-accept listener)])
+                                 (dynamic-wind
+                                   void
+                                   (lambda ()
+                                     (let ([payload (socket-recv client 4)])
+                                       (socket-send-all client payload)))
+                                   (lambda () (close-socket client))))))]
+                           [session
+                            (ssh-open-with-policy "127.0.0.1" port user 30000 'insecure)])
+                      (dynamic-wind
+                        void
+                        (lambda ()
+                          (and
+                           (eq? session
+                                (ssh-auth-private-key! session user public-key private-key #f))
+                           (memq (ssh-check-known-host session known-hosts)
+                                 '(not-found unknown))
+                           (ssh-known-host? (ssh-add-known-host! session known-hosts))
+                           (eq? (ssh-check-known-host session known-hosts) 'ok)
+                           (= (length (ssh-list-known-hosts session known-hosts)) 1)
+                           (let ([forward
+                                  (ssh-open-local-forward
+                                   session "127.0.0.1" echo-port "127.0.0.1" 0)])
+                             (dynamic-wind
+                               void
+                               (lambda ()
+                                 (let ([channel (ssh-forwarding-channel forward)])
+                                   (and (fixnum? (ssh-forwarding-descriptor forward))
+                                        (= (ssh-write-all channel (string->utf8 "ping")) 4)
+                                        (equal? (ssh-read channel 4) (string->utf8 "ping")))))
+                               (lambda ()
+                                 (ssh-close-forwarding forward)
+                                 (ssh-close-forwarding forward))))
+                           (= (ssh-remove-known-host! session
+                                                     (car (ssh-list-known-hosts
+                                                           session known-hosts))
+                                                     known-hosts)
+                              1)
+                           (null? (ssh-list-known-hosts session known-hosts))))
+                        (lambda ()
+                          (ssh-close session)
+                          (thread-join echo-thread)))))
+                  (lambda () (close-socket listener)))))))
+         (lambda () (stop-server)))))
 
 (mat net-ssh-port-validation
      (and

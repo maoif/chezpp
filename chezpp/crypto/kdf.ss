@@ -102,6 +102,7 @@ The `scrypt` procedure derives a key from `password` and `salt` using the given 
   (define-who scrypt
     (lambda (password salt n r p len)
       (pcheck ([natural? n r p len])
+              (ensure-openssl who)
               (let* ([password-bv (normalized-bytevector who password)]
                      [salt-bv (normalized-bytevector who salt)]
                      [ans (ffi-scrypt password-bv 0 (bytevector-length password-bv)

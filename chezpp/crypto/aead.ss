@@ -89,6 +89,7 @@
 
   (define do-aead-encrypt
     (lambda (who which key nonce aad plaintext)
+      (ensure-openssl who)
       (let ([ans (ffi-aead-encrypt which
                                    key 0 (bytevector-length key)
                                    nonce 0 (bytevector-length nonce)
@@ -101,6 +102,7 @@
 
   (define do-aead-decrypt
     (lambda (who which key nonce aad ciphertext tag)
+      (ensure-openssl who)
       (let ([ans (ffi-aead-decrypt which
                                    key 0 (bytevector-length key)
                                    nonce 0 (bytevector-length nonce)

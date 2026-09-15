@@ -1,6 +1,13 @@
 #include "../common.h"
+#include "../optional_library.h"
 
-#include <dlfcn.h>
+#include <pthread.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#ifdef __linux__
+#include <sys/eventfd.h>
+#endif
 
 #include <grpc/grpc.h>
 #include <grpc/byte_buffer.h>
@@ -14,6 +21,8 @@ typedef struct chezpp_grpc_server chezpp_grpc_server;
 typedef struct chezpp_grpc_server_call chezpp_grpc_server_call;
 typedef struct chezpp_grpc_unary_call chezpp_grpc_unary_call;
 typedef struct chezpp_grpc_stream chezpp_grpc_stream;
+typedef struct chezpp_grpc_completed_tag chezpp_grpc_completed_tag;
+typedef struct chezpp_grpc_retired_tag chezpp_grpc_retired_tag;
 
 #define CHEZPP_GRPC_STREAM_SHAPE_SERVER 1
 #define CHEZPP_GRPC_STREAM_SHAPE_CLIENT 2
@@ -40,15 +49,30 @@ struct chezpp_grpc_server_call {
 
 struct chezpp_grpc_unary_call {
   grpc_completion_queue *cq;
+  int owns_cq;
   grpc_call *call;
   grpc_metadata *send_metadata;
   size_t send_metadata_count;
   grpc_metadata_array recv_initial_metadata;
   grpc_metadata_array recv_trailing_metadata;
+  grpc_byte_buffer *send_message;
   grpc_byte_buffer *recv_message;
   grpc_status_code status;
   grpc_slice status_details;
   const char *error_string;
+};
+
+struct chezpp_grpc_completed_tag {
+  void *tag;
+  int success;
+  chezpp_grpc_completed_tag *next;
+};
+
+struct chezpp_grpc_retired_tag {
+  void *tag;
+  void *owner;
+  void (*cleanup)(void *);
+  chezpp_grpc_retired_tag *next;
 };
 
 struct chezpp_grpc_stream {
@@ -59,18 +83,27 @@ struct chezpp_grpc_stream {
   size_t send_metadata_count;
   grpc_metadata_array recv_initial_metadata;
   grpc_metadata_array recv_trailing_metadata;
+  grpc_byte_buffer *pending_send_message;
+  grpc_byte_buffer *pending_recv_message;
   grpc_status_code status;
   grpc_slice status_details;
   const char *error_string;
   int shape;
   int side;
   int owns_cq;
+  int shared_cq;
   int send_started;
   int send_closed;
   int recv_initial_done;
   int recv_closed;
   int status_received;
   int closed;
+  int open_pending;
+  int send_pending;
+  int recv_pending;
+  int status_pending;
+  int close_send_pending;
+  int retired_pending;
   int send_tag;
   int recv_tag;
   int status_tag;
@@ -79,6 +112,7 @@ struct chezpp_grpc_stream {
 typedef void (*grpc_init_fn)(void);
 typedef void (*grpc_shutdown_fn)(void);
 typedef grpc_completion_queue *(*grpc_completion_queue_create_for_pluck_fn)(void *);
+typedef grpc_completion_queue *(*grpc_completion_queue_create_for_next_fn)(void *);
 typedef grpc_event (*grpc_completion_queue_pluck_fn)(grpc_completion_queue *, void *,
                                                      gpr_timespec, void *);
 typedef grpc_event (*grpc_completion_queue_next_fn)(grpc_completion_queue *, gpr_timespec, void *);
@@ -86,6 +120,10 @@ typedef void (*grpc_completion_queue_shutdown_fn)(grpc_completion_queue *);
 typedef void (*grpc_completion_queue_destroy_fn)(grpc_completion_queue *);
 typedef grpc_channel_credentials *(*grpc_insecure_credentials_create_fn)(void);
 typedef grpc_server_credentials *(*grpc_insecure_server_credentials_create_fn)(void);
+typedef grpc_channel_credentials *(*grpc_ssl_credentials_create_fn)(
+    const char *, grpc_ssl_pem_key_cert_pair *, const void *, void *);
+typedef grpc_server_credentials *(*grpc_ssl_server_credentials_create_fn)(
+    const char *, grpc_ssl_pem_key_cert_pair *, size_t, int, void *);
 typedef void (*grpc_channel_credentials_release_fn)(grpc_channel_credentials *);
 typedef void (*grpc_server_credentials_release_fn)(grpc_server_credentials *);
 typedef grpc_channel *(*grpc_channel_create_fn)(const char *, grpc_channel_credentials *,
@@ -130,19 +168,42 @@ typedef gpr_timespec (*gpr_time_from_millis_fn)(int64_t, gpr_clock_type);
 typedef gpr_timespec (*gpr_now_fn)(gpr_clock_type);
 typedef gpr_timespec (*gpr_time_add_fn)(gpr_timespec, gpr_timespec);
 typedef void (*gpr_free_fn)(void *);
+typedef const char *(*grpc_version_string_fn)(void);
 
+static const char *const grpc_names[] = {"libgrpc.so.54", "libgrpc.so.56", NULL};
+static chezpp_optional_library grpc_library =
+    CHEZPP_OPTIONAL_LIBRARY_INIT("grpc", grpc_names);
+static const char *const gpr_names[] = {"libgpr.so.54", "libgpr.so.56", NULL};
+static chezpp_optional_library gpr_library =
+    CHEZPP_OPTIONAL_LIBRARY_INIT("gpr", gpr_names);
+static pthread_once_t grpc_once = PTHREAD_ONCE_INIT;
+static int grpc_available;
+static unsigned grpc_capabilities;
 static void *grpc_handle = NULL;
 static void *gpr_handle = NULL;
+static grpc_completion_queue *grpc_driver_cq = NULL;
+static pthread_t grpc_driver_thread;
+static int grpc_driver_fd = -1;
+static int grpc_driver_write_fd = -1;
+static int grpc_driver_started;
+static int grpc_driver_shutdown;
+static pthread_mutex_t grpc_completed_mutex = PTHREAD_MUTEX_INITIALIZER;
+static chezpp_grpc_completed_tag *grpc_completed_head;
+static chezpp_grpc_completed_tag *grpc_completed_tail;
+static chezpp_grpc_retired_tag *grpc_retired_head;
 
 static grpc_init_fn p_grpc_init = NULL;
 static grpc_shutdown_fn p_grpc_shutdown = NULL;
 static grpc_completion_queue_create_for_pluck_fn p_grpc_completion_queue_create_for_pluck = NULL;
+static grpc_completion_queue_create_for_next_fn p_grpc_completion_queue_create_for_next = NULL;
 static grpc_completion_queue_pluck_fn p_grpc_completion_queue_pluck = NULL;
 static grpc_completion_queue_next_fn p_grpc_completion_queue_next = NULL;
 static grpc_completion_queue_shutdown_fn p_grpc_completion_queue_shutdown = NULL;
 static grpc_completion_queue_destroy_fn p_grpc_completion_queue_destroy = NULL;
 static grpc_insecure_credentials_create_fn p_grpc_insecure_credentials_create = NULL;
 static grpc_insecure_server_credentials_create_fn p_grpc_insecure_server_credentials_create = NULL;
+static grpc_ssl_credentials_create_fn p_grpc_ssl_credentials_create = NULL;
+static grpc_ssl_server_credentials_create_fn p_grpc_ssl_server_credentials_create = NULL;
 static grpc_channel_credentials_release_fn p_grpc_channel_credentials_release = NULL;
 static grpc_server_credentials_release_fn p_grpc_server_credentials_release = NULL;
 static grpc_channel_create_fn p_grpc_channel_create = NULL;
@@ -181,6 +242,8 @@ static gpr_free_fn p_gpr_free = NULL;
 static int grpc_initialized = 0;
 
 static ptr make_call_error_status(grpc_call_error error);
+static void cleanup_unary_call(chezpp_grpc_unary_call *op);
+static void cleanup_grpc_stream(chezpp_grpc_stream *stream);
 
 static ptr make_status(const char *tag, ptr value) {
   ptr v = Smake_vector(2, Sfalse);
@@ -193,40 +256,269 @@ static ptr make_error_status_message(const char *msg) {
   return make_status("error", msg == NULL ? Sstring("gRPC error") : Sstring(msg));
 }
 
+static ptr make_would_block_status(void) {
+  return make_status("would-block", Sfalse);
+}
+
 static ptr make_handle(uptr handle) { return Sunsigned(handle); }
 
 static int load_symbol(void **out, void *handle, const char *name) {
-  *out = dlsym(handle, name);
-  return *out != NULL;
+  chezpp_optional_library *library =
+      handle == grpc_handle ? &grpc_library : &gpr_library;
+  return chezpp_optional_library_symbol(library, name, out);
 }
 
-static int ensure_grpc_loaded(void) {
-  const char *grpc_names[] = {"libgrpc.so.52", "libgrpc.so", NULL};
-  const char *gpr_names[] = {"libgpr.so.52", "libgpr.so", NULL};
-  int i;
-
-  if (grpc_handle != NULL && gpr_handle != NULL) return 1;
-
-  for (i = 0; grpc_names[i] != NULL; i += 1) {
-    grpc_handle = dlopen(grpc_names[i], RTLD_NOW | RTLD_LOCAL);
-    if (grpc_handle != NULL) break;
-  }
-  if (grpc_handle == NULL) return 0;
-
-  for (i = 0; gpr_names[i] != NULL; i += 1) {
-    gpr_handle = dlopen(gpr_names[i], RTLD_NOW | RTLD_LOCAL);
-    if (gpr_handle != NULL) break;
-  }
-  if (gpr_handle == NULL) {
-    dlclose(grpc_handle);
-    grpc_handle = NULL;
+static int grpc_enqueue_completed_tag(void *tag, int success) {
+  chezpp_grpc_completed_tag *node =
+      (chezpp_grpc_completed_tag *)malloc(sizeof(*node));
+  chezpp_grpc_retired_tag **retired_link;
+  chezpp_grpc_retired_tag *retired;
+  if (node == NULL) return 0;
+  node->tag = tag;
+  node->success = success;
+  node->next = NULL;
+  pthread_mutex_lock(&grpc_completed_mutex);
+  retired_link = &grpc_retired_head;
+  while (*retired_link != NULL && (*retired_link)->tag != tag)
+    retired_link = &(*retired_link)->next;
+  retired = *retired_link;
+  if (retired != NULL) *retired_link = retired->next;
+  if (retired != NULL) {
+    pthread_mutex_unlock(&grpc_completed_mutex);
+    free(node);
+    retired->cleanup(retired->owner);
+    free(retired);
     return 0;
   }
+  if (grpc_completed_tail == NULL) grpc_completed_head = node;
+  else grpc_completed_tail->next = node;
+  grpc_completed_tail = node;
+  pthread_mutex_unlock(&grpc_completed_mutex);
+  return 1;
+}
+
+static void grpc_consume_driver_notification(void) {
+#ifdef __linux__
+  uint64_t count;
+  if (grpc_driver_fd >= 0) {
+    while (read(grpc_driver_fd, &count, sizeof(count)) < 0 && errno == EINTR) {}
+    if (count > 1) {
+      uint64_t remaining = count - 1;
+      while (write(grpc_driver_write_fd, &remaining, sizeof(remaining)) < 0 &&
+             errno == EINTR) {}
+    }
+  }
+#else
+  unsigned char byte;
+  if (grpc_driver_fd >= 0) {
+    while (read(grpc_driver_fd, &byte, 1) < 0 && errno == EINTR) {}
+  }
+#endif
+}
+
+static void grpc_retire_tag(void *tag, void *owner, void (*cleanup)(void *)) {
+  chezpp_grpc_completed_tag **completed_link;
+  chezpp_grpc_completed_tag *completed;
+  chezpp_grpc_retired_tag *retired;
+  pthread_mutex_lock(&grpc_completed_mutex);
+  completed_link = &grpc_completed_head;
+  while (*completed_link != NULL && (*completed_link)->tag != tag)
+    completed_link = &(*completed_link)->next;
+  completed = *completed_link;
+  if (completed != NULL) {
+    *completed_link = completed->next;
+    if (grpc_completed_tail == completed) grpc_completed_tail = NULL;
+    if (grpc_completed_head != NULL && grpc_completed_tail == NULL) {
+      grpc_completed_tail = grpc_completed_head;
+      while (grpc_completed_tail->next != NULL)
+        grpc_completed_tail = grpc_completed_tail->next;
+    }
+    pthread_mutex_unlock(&grpc_completed_mutex);
+    free(completed);
+    grpc_consume_driver_notification();
+    cleanup(owner);
+    return;
+  }
+  retired = (chezpp_grpc_retired_tag *)malloc(sizeof(*retired));
+  if (retired == NULL) {
+    pthread_mutex_unlock(&grpc_completed_mutex);
+    return;
+  }
+  retired->tag = tag;
+  retired->owner = owner;
+  retired->cleanup = cleanup;
+  retired->next = grpc_retired_head;
+  grpc_retired_head = retired;
+  pthread_mutex_unlock(&grpc_completed_mutex);
+}
+
+static int grpc_take_completed_tag(void *tag, int *success) {
+  chezpp_grpc_completed_tag **link;
+  chezpp_grpc_completed_tag *node;
+  pthread_mutex_lock(&grpc_completed_mutex);
+  link = &grpc_completed_head;
+  while (*link != NULL && (*link)->tag != tag) link = &(*link)->next;
+  node = *link;
+  if (node != NULL) {
+    *link = node->next;
+    if (grpc_completed_tail == node) {
+      grpc_completed_tail = grpc_completed_head;
+      while (grpc_completed_tail != NULL && grpc_completed_tail->next != NULL)
+        grpc_completed_tail = grpc_completed_tail->next;
+    }
+  }
+  pthread_mutex_unlock(&grpc_completed_mutex);
+  if (node == NULL) return 0;
+  grpc_consume_driver_notification();
+  *success = node->success;
+  free(node);
+  return 1;
+}
+
+static void *grpc_completion_driver_main(void *unused) {
+  (void)unused;
+  for (;;) {
+    grpc_event event = p_grpc_completion_queue_next(
+        grpc_driver_cq, p_gpr_inf_future(GPR_CLOCK_REALTIME), NULL);
+    if (event.type == GRPC_QUEUE_SHUTDOWN) break;
+    if (event.type == GRPC_OP_COMPLETE &&
+        grpc_enqueue_completed_tag(event.tag, event.success) &&
+        grpc_driver_write_fd >= 0) {
+#ifdef __linux__
+      uint64_t one = 1;
+      while (write(grpc_driver_write_fd, &one, sizeof(one)) < 0 && errno == EINTR) {}
+#else
+      unsigned char one = 1;
+      while (write(grpc_driver_write_fd, &one, 1) < 0 && errno == EINTR) {}
+#endif
+    }
+  }
+  return NULL;
+}
+
+static void shutdown_grpc_completion_driver(void) {
+  chezpp_grpc_completed_tag *node;
+  chezpp_grpc_retired_tag *retired;
+  if (grpc_driver_shutdown) return;
+  grpc_driver_shutdown = 1;
+  if (grpc_driver_started) {
+    p_grpc_completion_queue_shutdown(grpc_driver_cq);
+    (void)pthread_join(grpc_driver_thread, NULL);
+    grpc_driver_started = 0;
+  }
+  if (grpc_driver_cq != NULL) {
+    p_grpc_completion_queue_destroy(grpc_driver_cq);
+    grpc_driver_cq = NULL;
+  }
+  if (grpc_driver_fd >= 0) close(grpc_driver_fd);
+  if (grpc_driver_write_fd >= 0 && grpc_driver_write_fd != grpc_driver_fd)
+    close(grpc_driver_write_fd);
+  grpc_driver_fd = -1;
+  grpc_driver_write_fd = -1;
+  pthread_mutex_lock(&grpc_completed_mutex);
+  node = grpc_completed_head;
+  retired = grpc_retired_head;
+  grpc_completed_head = NULL;
+  grpc_completed_tail = NULL;
+  grpc_retired_head = NULL;
+  pthread_mutex_unlock(&grpc_completed_mutex);
+  while (node != NULL) {
+    chezpp_grpc_completed_tag *next = node->next;
+    free(node);
+    node = next;
+  }
+  while (retired != NULL) {
+    chezpp_grpc_retired_tag *next = retired->next;
+    retired->cleanup(retired->owner);
+    free(retired);
+    retired = next;
+  }
+  if (grpc_initialized) {
+    p_grpc_shutdown();
+    grpc_initialized = 0;
+  }
+}
+
+static int start_grpc_completion_driver(void) {
+#ifndef __linux__
+  int pipefd[2] = {-1, -1};
+#endif
+  if (grpc_driver_started) return 1;
+  grpc_driver_cq = p_grpc_completion_queue_create_for_next(NULL);
+  if (grpc_driver_cq == NULL) return 0;
+#ifdef __linux__
+  grpc_driver_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  grpc_driver_write_fd = grpc_driver_fd;
+#else
+  if (pipe(pipefd) == 0) {
+    grpc_driver_fd = pipefd[0];
+    grpc_driver_write_fd = pipefd[1];
+    (void)fcntl(grpc_driver_fd, F_SETFL, fcntl(grpc_driver_fd, F_GETFL) | O_NONBLOCK);
+    (void)fcntl(grpc_driver_write_fd, F_SETFL,
+                fcntl(grpc_driver_write_fd, F_GETFL) | O_NONBLOCK);
+    (void)fcntl(grpc_driver_fd, F_SETFD, FD_CLOEXEC);
+    (void)fcntl(grpc_driver_write_fd, F_SETFD, FD_CLOEXEC);
+  }
+#endif
+  if (grpc_driver_fd < 0 ||
+      pthread_create(&grpc_driver_thread, NULL, grpc_completion_driver_main, NULL) != 0) {
+    if (grpc_driver_fd >= 0) close(grpc_driver_fd);
+    if (grpc_driver_write_fd >= 0 && grpc_driver_write_fd != grpc_driver_fd)
+      close(grpc_driver_write_fd);
+    grpc_driver_fd = -1;
+    grpc_driver_write_fd = -1;
+    p_grpc_completion_queue_shutdown(grpc_driver_cq);
+    p_grpc_completion_queue_destroy(grpc_driver_cq);
+    grpc_driver_cq = NULL;
+    return 0;
+  }
+  grpc_driver_started = 1;
+  (void)atexit(shutdown_grpc_completion_driver);
+  return 1;
+}
+
+static void initialize_grpc(void) {
+  grpc_version_string_fn version_fn = NULL;
+  const char *version;
+  unsigned major;
+  unsigned minor;
+  unsigned patch;
+
+  if (!chezpp_optional_library_open(&grpc_library)) return;
+  grpc_handle = grpc_library.handle;
+  if (!load_symbol((void **)&version_fn, grpc_handle, "grpc_version_string")) return;
+  version = version_fn();
+  if (version == NULL ||
+      sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3) {
+    chezpp_optional_library_fail(
+        &grpc_library, "grpc: unable to parse runtime version %s",
+        version == NULL ? "(null)" : version);
+    return;
+  }
+  chezpp_optional_library_set_version(&grpc_library, version);
+  if (major != 54 && major != 56) {
+    chezpp_optional_library_fail(
+        &grpc_library,
+        "grpc: runtime ABI major %u (version %u.%u.%u) requires major 54 or 56",
+        major, major, minor, patch);
+    return;
+  }
+  if (!chezpp_optional_library_open(&gpr_library)) {
+    char diagnostic[sizeof(grpc_library.error)];
+    snprintf(diagnostic, sizeof(diagnostic), "%s", gpr_library.error);
+    chezpp_optional_library_fail(
+        &grpc_library, "grpc: companion gpr unavailable: %s", diagnostic);
+    return;
+  }
+  gpr_handle = gpr_library.handle;
+  chezpp_optional_library_set_version(&gpr_library, version);
 
   if (!load_symbol((void **)&p_grpc_init, grpc_handle, "grpc_init") ||
       !load_symbol((void **)&p_grpc_shutdown, grpc_handle, "grpc_shutdown") ||
       !load_symbol((void **)&p_grpc_completion_queue_create_for_pluck, grpc_handle,
                    "grpc_completion_queue_create_for_pluck") ||
+      !load_symbol((void **)&p_grpc_completion_queue_create_for_next, grpc_handle,
+                   "grpc_completion_queue_create_for_next") ||
       !load_symbol((void **)&p_grpc_completion_queue_pluck, grpc_handle,
                    "grpc_completion_queue_pluck") ||
       !load_symbol((void **)&p_grpc_completion_queue_next, grpc_handle,
@@ -289,19 +581,89 @@ static int ensure_grpc_loaded(void) {
       !load_symbol((void **)&p_gpr_now, gpr_handle, "gpr_now") ||
       !load_symbol((void **)&p_gpr_time_add, gpr_handle, "gpr_time_add") ||
       !load_symbol((void **)&p_gpr_free, gpr_handle, "gpr_free")) {
-    dlclose(gpr_handle);
-    dlclose(grpc_handle);
-    gpr_handle = NULL;
-    grpc_handle = NULL;
-    return 0;
+    char diagnostic[sizeof(grpc_library.error)];
+    snprintf(diagnostic, sizeof(diagnostic), "%s",
+             grpc_library.error[0] != '\0' ? grpc_library.error : gpr_library.error);
+    if (gpr_library.state == 1)
+      chezpp_optional_library_fail(&gpr_library,
+                                   "grpc initialization aborted: %s", diagnostic);
+    if (grpc_library.state == 1)
+      chezpp_optional_library_fail(&grpc_library, "%s", diagnostic);
+    return;
   }
 
   if (!grpc_initialized) {
     p_grpc_init();
     grpc_initialized = 1;
   }
+  if (!start_grpc_completion_driver()) {
+    chezpp_optional_library_fail(&grpc_library,
+                                 "grpc: failed to start completion driver");
+    return;
+  }
 
-  return 1;
+  {
+    void *symbol = NULL;
+    if (chezpp_optional_library_probe_symbol(
+            &grpc_library, "grpc_ssl_credentials_create", &symbol) &&
+        chezpp_optional_library_probe_symbol(
+            &grpc_library, "grpc_ssl_server_credentials_create", &symbol))
+      grpc_capabilities |= 1U;
+    (void)chezpp_optional_library_symbol(
+        &grpc_library, "grpc_ssl_credentials_create",
+        (void **)&p_grpc_ssl_credentials_create);
+    (void)chezpp_optional_library_symbol(
+        &grpc_library, "grpc_ssl_server_credentials_create",
+        (void **)&p_grpc_ssl_server_credentials_create);
+    if (chezpp_optional_library_probe_symbol(
+            &grpc_library, "grpc_compression_algorithm_name", &symbol))
+      grpc_capabilities |= 2U;
+  }
+
+  grpc_available = 1;
+}
+
+static int ensure_grpc_loaded(void) {
+  pthread_once(&grpc_once, initialize_grpc);
+  return grpc_available;
+}
+
+const chezpp_optional_library *chezpp_net_grpc_library(void) {
+  (void)ensure_grpc_loaded();
+  if (grpc_library.error[0] != '\0') return &grpc_library;
+  if (gpr_library.error[0] != '\0') return &gpr_library;
+  return &grpc_library;
+}
+
+unsigned chezpp_net_grpc_capabilities(void) {
+  (void)ensure_grpc_loaded();
+  return grpc_capabilities;
+}
+
+int chezpp_net_grpc_driver_fd(void) {
+  (void)ensure_grpc_loaded();
+  return grpc_driver_fd;
+}
+
+ptr chezpp_net_grpc_driver_drain(void) {
+#ifdef __linux__
+  uint64_t count = 0;
+  if (grpc_driver_fd >= 0) {
+    while (read(grpc_driver_fd, &count, sizeof(count)) < 0 && errno == EINTR) {}
+  }
+  return Sunsigned64(count);
+#else
+  unsigned char buffer[256];
+  uint64_t count = 0;
+  ssize_t n;
+  if (grpc_driver_fd >= 0) {
+    do {
+      n = read(grpc_driver_fd, buffer, sizeof(buffer));
+      if (n > 0) count += (uint64_t)n;
+    } while (n > 0 || (n < 0 && errno == EINTR));
+  }
+  return Sunsigned64(count);
+#endif
 }
 
 static gpr_timespec make_deadline(int timeout_ms) {
@@ -481,12 +843,13 @@ static grpc_byte_buffer *make_request_buffer(ptr payload, int start, int stop) {
 }
 
 static ptr make_response_vector(ptr payload, ptr metadata, grpc_status_code status,
-                                const char *message) {
-  ptr out = Smake_vector(4, Sfalse);
+                                const char *message, ptr details) {
+  ptr out = Smake_vector(5, Sfalse);
   Svector_set(out, 0, payload);
   Svector_set(out, 1, metadata);
   Svector_set(out, 2, Sinteger((iptr)status));
   Svector_set(out, 3, Sstring(message == NULL ? "" : message));
+  Svector_set(out, 4, details);
   return out;
 }
 
@@ -516,6 +879,10 @@ static void cleanup_unary_call(chezpp_grpc_unary_call *op) {
     p_grpc_byte_buffer_destroy(op->recv_message);
     op->recv_message = NULL;
   }
+  if (op->send_message != NULL) {
+    p_grpc_byte_buffer_destroy(op->send_message);
+    op->send_message = NULL;
+  }
   p_grpc_metadata_array_destroy(&op->recv_initial_metadata);
   p_grpc_metadata_array_destroy(&op->recv_trailing_metadata);
   if (GRPC_SLICE_LENGTH(op->status_details) > 0) {
@@ -532,11 +899,11 @@ static void cleanup_unary_call(chezpp_grpc_unary_call *op) {
     p_grpc_call_unref(op->call);
     op->call = NULL;
   }
-  if (op->cq != NULL) {
+  if (op->cq != NULL && op->owns_cq) {
     p_grpc_completion_queue_shutdown(op->cq);
     p_grpc_completion_queue_destroy(op->cq);
-    op->cq = NULL;
   }
+  op->cq = NULL;
   free(op);
 }
 
@@ -555,6 +922,14 @@ static void cleanup_grpc_stream(chezpp_grpc_stream *stream) {
     p_gpr_free((void *)stream->error_string);
     stream->error_string = NULL;
   }
+  if (stream->pending_recv_message != NULL) {
+    p_grpc_byte_buffer_destroy(stream->pending_recv_message);
+    stream->pending_recv_message = NULL;
+  }
+  if (stream->pending_send_message != NULL) {
+    p_grpc_byte_buffer_destroy(stream->pending_send_message);
+    stream->pending_send_message = NULL;
+  }
   free_metadata_array(stream->send_metadata, stream->send_metadata_count);
   stream->send_metadata = NULL;
   stream->send_metadata_count = 0;
@@ -571,11 +946,61 @@ static void cleanup_grpc_stream(chezpp_grpc_stream *stream) {
   free(stream);
 }
 
+static void retire_grpc_stream_tag(void *owner) {
+  chezpp_grpc_stream *stream = (chezpp_grpc_stream *)owner;
+  if (__sync_sub_and_fetch(&stream->retired_pending, 1) == 0)
+    cleanup_grpc_stream(stream);
+}
+
+static void retire_grpc_stream(chezpp_grpc_stream *stream) {
+  int pending = 0;
+  int send_pending = stream->open_pending || stream->send_pending ||
+                     stream->close_send_pending;
+  if (send_pending) pending++;
+  if (stream->recv_pending) pending++;
+  if (stream->status_pending) pending++;
+  if (stream->call != NULL) (void)p_grpc_call_cancel(stream->call, NULL);
+  if (pending == 0) {
+    cleanup_grpc_stream(stream);
+    return;
+  }
+  stream->retired_pending = pending;
+  if (send_pending)
+    grpc_retire_tag(&stream->send_tag, stream, retire_grpc_stream_tag);
+  if (stream->recv_pending)
+    grpc_retire_tag(&stream->recv_tag, stream, retire_grpc_stream_tag);
+  if (stream->status_pending)
+    grpc_retire_tag(&stream->status_tag, stream, retire_grpc_stream_tag);
+}
+
 static grpc_event pluck_stream_event(chezpp_grpc_stream *stream, void *tag) {
   return p_grpc_completion_queue_pluck(stream->cq, tag, p_gpr_inf_future(GPR_CLOCK_REALTIME), NULL);
 }
 
 static ptr wait_stream_complete(chezpp_grpc_stream *stream, void *tag, const char *message) {
+  if (stream->shared_cq) {
+    int success = 0;
+    for (;;) {
+      struct pollfd pfd;
+      uint64_t count;
+      if (grpc_take_completed_tag(tag, &success)) {
+        if (success) return Strue;
+        {
+          ptr out = make_error_status_message(message);
+          cleanup_grpc_stream(stream);
+          return out;
+        }
+      }
+      pfd.fd = grpc_driver_fd;
+      pfd.events = POLLIN;
+      pfd.revents = 0;
+      if (poll(&pfd, 1, -1) < 0) {
+        if (errno == EINTR) continue;
+        return make_error_status_message("gRPC readiness wait failed");
+      }
+      while (read(grpc_driver_fd, &count, sizeof(count)) < 0 && errno == EINTR) {}
+    }
+  }
   grpc_event ev = pluck_stream_event(stream, tag);
   if (ev.type != GRPC_OP_COMPLETE) {
     cleanup_grpc_stream(stream);
@@ -611,18 +1036,29 @@ static ptr receive_stream_status(chezpp_grpc_stream *stream) {
     if (stream->error_string != NULL) return make_error_status_message(stream->error_string);
     return make_error_status_message("gRPC stream failed");
   }
-  memset(ops, 0, sizeof(ops));
-  ops[0].op = GRPC_OP_RECV_STATUS_ON_CLIENT;
-  ops[0].data.recv_status_on_client.trailing_metadata = &stream->recv_trailing_metadata;
-  ops[0].data.recv_status_on_client.status = &stream->status;
-  ops[0].data.recv_status_on_client.status_details = &stream->status_details;
-  ops[0].data.recv_status_on_client.error_string = &stream->error_string;
-  err = p_grpc_call_start_batch(stream->call, ops, 1, &stream->status_tag, NULL);
-  if (err != GRPC_CALL_OK) return make_call_error_status(err);
-  {
+  if (!stream->status_pending) {
+    memset(ops, 0, sizeof(ops));
+    ops[0].op = GRPC_OP_RECV_STATUS_ON_CLIENT;
+    ops[0].data.recv_status_on_client.trailing_metadata = &stream->recv_trailing_metadata;
+    ops[0].data.recv_status_on_client.status = &stream->status;
+    ops[0].data.recv_status_on_client.status_details = &stream->status_details;
+    ops[0].data.recv_status_on_client.error_string = &stream->error_string;
+    err = p_grpc_call_start_batch(stream->call, ops, 1, &stream->status_tag, NULL);
+    if (err != GRPC_CALL_OK) return make_call_error_status(err);
+    stream->status_pending = 1;
+    if (stream->shared_cq) return make_would_block_status();
+  }
+  if (stream->shared_cq) {
+    int success = 0;
+    if (!grpc_take_completed_tag(&stream->status_tag, &success))
+      return make_would_block_status();
+    stream->status_pending = 0;
+    if (!success) return make_error_status_message("gRPC stream status receive failed");
+  } else {
     ptr ans = wait_stream_complete(stream, &stream->status_tag,
                                    "unexpected gRPC client status event");
     if (ans != Strue) return ans;
+    stream->status_pending = 0;
   }
   stream->status_received = 1;
   if (stream->status == GRPC_STATUS_OK) return Strue;
@@ -642,6 +1078,20 @@ static ptr stream_send_message(chezpp_grpc_stream *stream, ptr payload, int star
   if (stream == NULL || stream->call == NULL) return make_error_status_message("invalid gRPC stream");
   if (stream->closed || stream->send_closed) return make_error_status_message("gRPC stream send side is closed");
 
+  if (stream->send_pending) {
+    int success = 0;
+    if (!grpc_take_completed_tag(&stream->send_tag, &success))
+      return make_would_block_status();
+    stream->send_pending = 0;
+    if (stream->pending_send_message != NULL) {
+      p_grpc_byte_buffer_destroy(stream->pending_send_message);
+      stream->pending_send_message = NULL;
+    }
+    if (!success) return make_error_status_message("gRPC stream send failed");
+    stream->send_started = 1;
+    return Strue;
+  }
+
   memset(ops, 0, sizeof(ops));
   if (!stream->send_started) {
     ops[nops].op = GRPC_OP_SEND_INITIAL_METADATA;
@@ -651,17 +1101,31 @@ static ptr stream_send_message(chezpp_grpc_stream *stream, ptr payload, int star
   }
 
   send_message = make_request_buffer(payload, start, stop);
+  stream->pending_send_message = send_message;
   ops[nops].op = GRPC_OP_SEND_MESSAGE;
   ops[nops].data.send_message.send_message = send_message;
   nops += 1;
 
   err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->send_tag, NULL);
-  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
-  if (err != GRPC_CALL_OK) return make_call_error_status(err);
+  if (err != GRPC_CALL_OK) {
+    if (stream->pending_send_message != NULL) {
+      p_grpc_byte_buffer_destroy(stream->pending_send_message);
+      stream->pending_send_message = NULL;
+    }
+    return make_call_error_status(err);
+  }
+  if (stream->shared_cq) {
+    stream->send_pending = 1;
+    return make_would_block_status();
+  }
   {
     ptr ans = wait_stream_complete(stream, &stream->send_tag,
                                    "unexpected gRPC stream send event");
     if (ans != Strue) return ans;
+  }
+  if (stream->pending_send_message != NULL) {
+    p_grpc_byte_buffer_destroy(stream->pending_send_message);
+    stream->pending_send_message = NULL;
   }
   stream->send_started = 1;
   return Strue;
@@ -709,15 +1173,17 @@ static ptr stream_finish_server(chezpp_grpc_stream *stream, ptr payload, int sta
   nops += 1;
 
   err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->status_tag, NULL);
-  p_grpc_slice_unref(status_slice);
-  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
   if (err != GRPC_CALL_OK) {
+    p_grpc_slice_unref(status_slice);
+    if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
     free_metadata_array(metadata, metadata_count);
     return make_call_error_status(err);
   }
   {
     ptr ans = wait_stream_complete(stream, &stream->status_tag,
                                    "unexpected gRPC server stream completion event");
+    p_grpc_slice_unref(status_slice);
+    if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
     free_metadata_array(metadata, metadata_count);
     if (ans != Strue) return ans;
   }
@@ -730,15 +1196,17 @@ static ptr finalize_unary_call(chezpp_grpc_unary_call *op) {
   ptr payload = maybe_bytevector_from_buffer(op->recv_message);
   ptr metadata = metadata_array_to_scheme(&op->recv_trailing_metadata);
   ptr message = Sstring("");
+  ptr details = Smake_bytevector(0, 0);
   ptr response;
 
   if (GRPC_SLICE_LENGTH(op->status_details) > 0) {
     message = maybe_string_from_slice(op->status_details);
+    details = bytevector_from_slice(op->status_details);
   } else if (op->error_string != NULL) {
     message = Sstring(op->error_string);
   }
 
-  response = make_response_vector(payload, metadata, op->status, "");
+  response = make_response_vector(payload, metadata, op->status, "", details);
   Svector_set(response, 3, message);
   cleanup_unary_call(op);
   return response;
@@ -761,31 +1229,38 @@ static ptr start_unary_call(grpc_channel *channel, const char *method, ptr paylo
   const char *metadata_error = NULL;
   size_t nops = 0;
 
-  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (!ensure_grpc_loaded())
+    return make_error_status_message(chezpp_optional_library_error(
+        (chezpp_optional_library *)chezpp_net_grpc_library()));
   if (channel == NULL) return make_error_status_message("invalid gRPC channel");
 
-  cq = p_grpc_completion_queue_create_for_pluck(NULL);
-  if (cq == NULL) return make_error_status_message("failed to create gRPC completion queue");
+  cq = blocking ? p_grpc_completion_queue_create_for_pluck(NULL) : grpc_driver_cq;
+  if (cq == NULL) return make_error_status_message("failed to acquire gRPC completion queue");
 
   method_slice = p_grpc_slice_from_copied_string(method);
   call = p_grpc_channel_create_call(channel, NULL, GRPC_PROPAGATE_DEFAULTS, cq, method_slice, NULL,
                                     make_deadline(timeout_ms), NULL);
   p_grpc_slice_unref(method_slice);
   if (call == NULL) {
-    p_grpc_completion_queue_shutdown(cq);
-    p_grpc_completion_queue_destroy(cq);
+    if (blocking) {
+      p_grpc_completion_queue_shutdown(cq);
+      p_grpc_completion_queue_destroy(cq);
+    }
     return make_error_status_message("failed to create gRPC call");
   }
 
   op = (chezpp_grpc_unary_call *)calloc(1, sizeof(chezpp_grpc_unary_call));
   if (op == NULL) {
     p_grpc_call_unref(call);
-    p_grpc_completion_queue_shutdown(cq);
-    p_grpc_completion_queue_destroy(cq);
+    if (blocking) {
+      p_grpc_completion_queue_shutdown(cq);
+      p_grpc_completion_queue_destroy(cq);
+    }
     return make_error_status_message("out of memory");
   }
 
   op->cq = cq;
+  op->owns_cq = blocking;
   op->call = call;
   p_grpc_metadata_array_init(&op->recv_initial_metadata);
   p_grpc_metadata_array_init(&op->recv_trailing_metadata);
@@ -802,6 +1277,7 @@ static ptr start_unary_call(grpc_channel *channel, const char *method, ptr paylo
 
   memset(ops, 0, sizeof(ops));
   send_message = make_request_buffer(payload, start, stop);
+  op->send_message = send_message;
 
   ops[nops].op = GRPC_OP_SEND_INITIAL_METADATA;
   ops[nops].data.send_initial_metadata.count = op->send_metadata_count;
@@ -828,7 +1304,6 @@ static ptr start_unary_call(grpc_channel *channel, const char *method, ptr paylo
   nops += 1;
 
   err = p_grpc_call_start_batch(call, ops, nops, op, NULL);
-  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
   if (err != GRPC_CALL_OK) {
     cleanup_unary_call(op);
     return make_call_error_status(err);
@@ -865,12 +1340,39 @@ ptr chezpp_net_grpc_channel_open(const char *target) {
   grpc_channel_credentials *creds;
   grpc_channel *channel;
 
-  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (!ensure_grpc_loaded())
+    return make_error_status_message(chezpp_optional_library_error(
+        (chezpp_optional_library *)chezpp_net_grpc_library()));
   creds = p_grpc_insecure_credentials_create();
   if (creds == NULL) return make_error_status_message("failed to create insecure gRPC credentials");
   channel = p_grpc_channel_create(target, creds, NULL);
   p_grpc_channel_credentials_release(creds);
   if (channel == NULL) return make_error_status_message("failed to create gRPC channel");
+  return make_handle((uptr)channel);
+}
+
+ptr chezpp_net_grpc_channel_open_tls(const char *target, const char *root_certs,
+                                     const char *certificate_chain, const char *private_key) {
+  grpc_channel_credentials *creds;
+  grpc_channel *channel;
+  grpc_ssl_pem_key_cert_pair pair;
+  grpc_ssl_pem_key_cert_pair *pair_ptr = NULL;
+  if (!ensure_grpc_loaded() || p_grpc_ssl_credentials_create == NULL)
+    return make_error_status_message("gRPC TLS credentials are unavailable");
+  memset(&pair, 0, sizeof(pair));
+  if (certificate_chain != NULL && certificate_chain[0] != '\0' &&
+      private_key != NULL && private_key[0] != '\0') {
+    pair.cert_chain = certificate_chain;
+    pair.private_key = private_key;
+    pair_ptr = &pair;
+  }
+  creds = p_grpc_ssl_credentials_create(
+      root_certs != NULL && root_certs[0] != '\0' ? root_certs : NULL,
+      pair_ptr, NULL, NULL);
+  if (creds == NULL) return make_error_status_message("failed to create gRPC TLS credentials");
+  channel = p_grpc_channel_create(target, creds, NULL);
+  p_grpc_channel_credentials_release(creds);
+  if (channel == NULL) return make_error_status_message("failed to create gRPC TLS channel");
   return make_handle((uptr)channel);
 }
 
@@ -888,7 +1390,9 @@ ptr chezpp_net_grpc_server_open(const char *host, int port) {
   int bound_port;
   ptr out;
 
-  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (!ensure_grpc_loaded())
+    return make_error_status_message(chezpp_optional_library_error(
+        (chezpp_optional_library *)chezpp_net_grpc_library()));
   server = (chezpp_grpc_server *)calloc(1, sizeof(chezpp_grpc_server));
   if (server == NULL) return make_error_status_message("out of memory");
 
@@ -917,6 +1421,58 @@ ptr chezpp_net_grpc_server_open(const char *host, int port) {
     p_grpc_completion_queue_destroy(server->cq);
     free(server);
     return make_error_status_message("failed to bind gRPC server");
+  }
+  p_grpc_server_start(server->server);
+  server->port = bound_port;
+  out = Smake_vector(2, Sfalse);
+  Svector_set(out, 0, make_handle((uptr)server));
+  Svector_set(out, 1, Sinteger(bound_port));
+  return out;
+}
+
+ptr chezpp_net_grpc_server_open_tls(const char *host, int port, const char *root_certs,
+                                    const char *certificate_chain, const char *private_key) {
+  chezpp_grpc_server *server;
+  grpc_server_credentials *creds;
+  grpc_ssl_pem_key_cert_pair pair;
+  char endpoint[256];
+  int bound_port;
+  ptr out;
+  if (!ensure_grpc_loaded() || p_grpc_ssl_server_credentials_create == NULL)
+    return make_error_status_message("gRPC TLS server credentials are unavailable");
+  if (certificate_chain == NULL || certificate_chain[0] == '\0' ||
+      private_key == NULL || private_key[0] == '\0')
+    return make_error_status_message("gRPC TLS server requires certificate and key");
+  server = (chezpp_grpc_server *)calloc(1, sizeof(*server));
+  if (server == NULL) return make_error_status_message("out of memory");
+  server->cq = p_grpc_completion_queue_create_for_pluck(NULL);
+  server->server = p_grpc_server_create(NULL, NULL);
+  if (server->cq == NULL || server->server == NULL) {
+    if (server->server) p_grpc_server_destroy(server->server);
+    if (server->cq) p_grpc_completion_queue_destroy(server->cq);
+    free(server);
+    return make_error_status_message("failed to create gRPC TLS server");
+  }
+  p_grpc_server_register_completion_queue(server->server, server->cq, NULL);
+  pair.cert_chain = certificate_chain;
+  pair.private_key = private_key;
+  creds = p_grpc_ssl_server_credentials_create(
+      root_certs != NULL && root_certs[0] != '\0' ? root_certs : NULL,
+      &pair, 1, root_certs != NULL && root_certs[0] != '\0', NULL);
+  if (creds == NULL) {
+    p_grpc_server_destroy(server->server);
+    p_grpc_completion_queue_destroy(server->cq);
+    free(server);
+    return make_error_status_message("failed to create gRPC TLS server credentials");
+  }
+  snprintf(endpoint, sizeof(endpoint), "%s:%d", host, port);
+  bound_port = p_grpc_server_add_http2_port(server->server, endpoint, creds);
+  p_grpc_server_credentials_release(creds);
+  if (bound_port == 0) {
+    p_grpc_server_destroy(server->server);
+    p_grpc_completion_queue_destroy(server->cq);
+    free(server);
+    return make_error_status_message("failed to bind gRPC TLS server");
   }
   p_grpc_server_start(server->server);
   server->port = bound_port;
@@ -957,7 +1513,16 @@ ptr chezpp_net_grpc_unary_start(uptr handle, const char *method, ptr payload, in
 ptr chezpp_net_grpc_unary_poll(uptr handle) {
   chezpp_grpc_unary_call *op = (chezpp_grpc_unary_call *)handle;
   grpc_event ev;
+  int success = 0;
   if (op == NULL) return make_error_status_message("invalid gRPC call handle");
+  if (!op->owns_cq) {
+    if (!grpc_take_completed_tag(op, &success)) return Sfalse;
+    if (!success) {
+      cleanup_unary_call(op);
+      return make_error_status_message("gRPC unary operation failed");
+    }
+    return finalize_unary_call(op);
+  }
   ev = p_grpc_completion_queue_pluck(op->cq, op, make_immediate_deadline(), NULL);
   if (ev.type == GRPC_QUEUE_TIMEOUT) return Sfalse;
   if (ev.type != GRPC_OP_COMPLETE) {
@@ -968,7 +1533,13 @@ ptr chezpp_net_grpc_unary_poll(uptr handle) {
 }
 
 ptr chezpp_net_grpc_unary_close(uptr handle) {
-  cleanup_unary_call((chezpp_grpc_unary_call *)handle);
+  chezpp_grpc_unary_call *op = (chezpp_grpc_unary_call *)handle;
+  if (op == NULL) return Strue;
+  if (op->owns_cq) cleanup_unary_call(op);
+  else {
+    if (op->call != NULL) (void)p_grpc_call_cancel(op->call, NULL);
+    grpc_retire_tag(op, op, (void (*)(void *))cleanup_unary_call);
+  }
   return Strue;
 }
 
@@ -1071,9 +1642,9 @@ ptr chezpp_net_grpc_server_respond(uptr handle, ptr payload, int start, int stop
   nops += 1;
 
   err = p_grpc_call_start_batch(call->call, ops, nops, call, NULL);
-  p_grpc_slice_unref(status_slice);
-  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
   if (err != GRPC_CALL_OK) {
+    p_grpc_slice_unref(status_slice);
+    if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
     free_metadata_array(metadata, metadata_count);
     cleanup_server_call(call);
     return make_call_error_status(err);
@@ -1081,6 +1652,8 @@ ptr chezpp_net_grpc_server_respond(uptr handle, ptr payload, int start, int stop
 
   ev = p_grpc_completion_queue_pluck(call->server->cq, call, p_gpr_inf_future(GPR_CLOCK_REALTIME),
                                      NULL);
+  p_grpc_slice_unref(status_slice);
+  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
   free_metadata_array(metadata, metadata_count);
   if (ev.type != GRPC_OP_COMPLETE) {
     cleanup_server_call(call);
@@ -1090,8 +1663,8 @@ ptr chezpp_net_grpc_server_respond(uptr handle, ptr payload, int start, int stop
   return Strue;
 }
 
-ptr chezpp_net_grpc_stream_open(uptr handle, const char *method, int shape, ptr payload, int start,
-                                int stop, ptr metadata_ls, int timeout_ms) {
+static ptr start_grpc_stream(uptr handle, const char *method, int shape, ptr payload, int start,
+                             int stop, ptr metadata_ls, int timeout_ms, int blocking) {
   grpc_channel *channel = (grpc_channel *)handle;
   grpc_completion_queue *cq;
   grpc_slice method_slice;
@@ -1103,13 +1676,15 @@ ptr chezpp_net_grpc_stream_open(uptr handle, const char *method, int shape, ptr 
   const char *metadata_error = NULL;
   size_t nops = 0;
 
-  if (!ensure_grpc_loaded()) return make_error_status_message("failed to load gRPC runtime");
+  if (!ensure_grpc_loaded())
+    return make_error_status_message(chezpp_optional_library_error(
+        (chezpp_optional_library *)chezpp_net_grpc_library()));
   if (channel == NULL) return make_error_status_message("invalid gRPC channel");
   if (shape != CHEZPP_GRPC_STREAM_SHAPE_SERVER && shape != CHEZPP_GRPC_STREAM_SHAPE_CLIENT &&
       shape != CHEZPP_GRPC_STREAM_SHAPE_BIDI)
     return make_error_status_message("invalid gRPC stream shape");
 
-  cq = p_grpc_completion_queue_create_for_pluck(NULL);
+  cq = blocking ? p_grpc_completion_queue_create_for_pluck(NULL) : grpc_driver_cq;
   if (cq == NULL) return make_error_status_message("failed to create gRPC completion queue");
 
   method_slice = p_grpc_slice_from_copied_string(method);
@@ -1117,19 +1692,24 @@ ptr chezpp_net_grpc_stream_open(uptr handle, const char *method, int shape, ptr 
                                     make_deadline(timeout_ms), NULL);
   p_grpc_slice_unref(method_slice);
   if (call == NULL) {
-    p_grpc_completion_queue_shutdown(cq);
-    p_grpc_completion_queue_destroy(cq);
+    if (blocking) {
+      p_grpc_completion_queue_shutdown(cq);
+      p_grpc_completion_queue_destroy(cq);
+    }
     return make_error_status_message("failed to create gRPC call");
   }
 
   stream = (chezpp_grpc_stream *)calloc(1, sizeof(chezpp_grpc_stream));
   if (stream == NULL) {
     p_grpc_call_unref(call);
-    p_grpc_completion_queue_shutdown(cq);
-    p_grpc_completion_queue_destroy(cq);
+    if (blocking) {
+      p_grpc_completion_queue_shutdown(cq);
+      p_grpc_completion_queue_destroy(cq);
+    }
     return make_error_status_message("out of memory");
   }
-  init_grpc_stream(stream, call, cq, NULL, CHEZPP_GRPC_STREAM_SIDE_CLIENT, shape, 1);
+  init_grpc_stream(stream, call, cq, NULL, CHEZPP_GRPC_STREAM_SIDE_CLIENT, shape, blocking);
+  stream->shared_cq = !blocking;
 
   if (!scheme_metadata_to_grpc(metadata_ls, &stream->send_metadata, &stream->send_metadata_count,
                                &metadata_error)) {
@@ -1145,6 +1725,7 @@ ptr chezpp_net_grpc_stream_open(uptr handle, const char *method, int shape, ptr 
   if (shape == CHEZPP_GRPC_STREAM_SHAPE_SERVER) {
     if (payload != Sfalse) {
       send_message = make_request_buffer(payload, start, stop);
+      stream->pending_send_message = send_message;
       ops[nops].op = GRPC_OP_SEND_MESSAGE;
       ops[nops].data.send_message.send_message = send_message;
       nops += 1;
@@ -1154,19 +1735,52 @@ ptr chezpp_net_grpc_stream_open(uptr handle, const char *method, int shape, ptr 
   }
 
   err = p_grpc_call_start_batch(call, ops, nops, &stream->send_tag, NULL);
-  if (send_message != NULL) p_grpc_byte_buffer_destroy(send_message);
   if (err != GRPC_CALL_OK) {
     cleanup_grpc_stream(stream);
     return make_call_error_status(err);
   }
-  {
+  if (!blocking) stream->open_pending = 1;
+  if (blocking) {
     ptr ans = wait_stream_complete(stream, &stream->send_tag,
                                    "unexpected gRPC stream open event");
     if (ans != Strue) return ans;
+    if (stream->pending_send_message != NULL) {
+      p_grpc_byte_buffer_destroy(stream->pending_send_message);
+      stream->pending_send_message = NULL;
+    }
+    stream->send_started = 1;
+    if (shape == CHEZPP_GRPC_STREAM_SHAPE_SERVER) stream->send_closed = 1;
   }
-  stream->send_started = 1;
-  if (shape == CHEZPP_GRPC_STREAM_SHAPE_SERVER) stream->send_closed = 1;
   return make_handle((uptr)stream);
+}
+
+ptr chezpp_net_grpc_stream_open(uptr handle, const char *method, int shape, ptr payload, int start,
+                                int stop, ptr metadata_ls, int timeout_ms) {
+  return start_grpc_stream(handle, method, shape, payload, start, stop, metadata_ls,
+                           timeout_ms, 1);
+}
+
+ptr chezpp_net_grpc_stream_open_start(uptr handle, const char *method, int shape, ptr payload,
+                                      int start, int stop, ptr metadata_ls, int timeout_ms) {
+  return start_grpc_stream(handle, method, shape, payload, start, stop, metadata_ls,
+                           timeout_ms, 0);
+}
+
+ptr chezpp_net_grpc_stream_open_poll(uptr handle) {
+  chezpp_grpc_stream *stream = (chezpp_grpc_stream *)handle;
+  int success = 0;
+  if (stream == NULL || stream->closed)
+    return make_error_status_message("invalid gRPC stream handle");
+  if (!grpc_take_completed_tag(&stream->send_tag, &success)) return Sfalse;
+  stream->open_pending = 0;
+  if (stream->pending_send_message != NULL) {
+    p_grpc_byte_buffer_destroy(stream->pending_send_message);
+    stream->pending_send_message = NULL;
+  }
+  if (!success) return make_error_status_message("gRPC stream open failed");
+  stream->send_started = 1;
+  if (stream->shape == CHEZPP_GRPC_STREAM_SHAPE_SERVER) stream->send_closed = 1;
+  return Strue;
 }
 
 ptr chezpp_net_grpc_stream_send(uptr handle, ptr payload, int start, int stop) {
@@ -1176,37 +1790,53 @@ ptr chezpp_net_grpc_stream_send(uptr handle, ptr payload, int start, int stop) {
 ptr chezpp_net_grpc_stream_recv(uptr handle) {
   chezpp_grpc_stream *stream = (chezpp_grpc_stream *)handle;
   grpc_op ops[2];
-  grpc_byte_buffer *recv_message = NULL;
   grpc_call_error err;
   size_t nops = 0;
   ptr payload;
 
   if (stream == NULL || stream->call == NULL) return make_error_status_message("invalid gRPC stream");
   if (stream->closed) return make_error_status_message("gRPC stream is closed");
-  if (stream->recv_closed) return Seof_object;
-
-  memset(ops, 0, sizeof(ops));
-  if (stream->side == CHEZPP_GRPC_STREAM_SIDE_CLIENT && !stream->recv_initial_done) {
-    ops[nops].op = GRPC_OP_RECV_INITIAL_METADATA;
-    ops[nops].data.recv_initial_metadata.recv_initial_metadata = &stream->recv_initial_metadata;
-    nops += 1;
+  if (stream->recv_closed) {
+    if (stream->side == CHEZPP_GRPC_STREAM_SIDE_CLIENT) {
+      ptr status = receive_stream_status(stream);
+      if (status != Strue) return status;
+    }
+    return Seof_object;
   }
-  ops[nops].op = GRPC_OP_RECV_MESSAGE;
-  ops[nops].data.recv_message.recv_message = &recv_message;
-  nops += 1;
 
-  err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->recv_tag, NULL);
-  if (err != GRPC_CALL_OK) return make_call_error_status(err);
-  {
+  if (!stream->recv_pending) {
+    memset(ops, 0, sizeof(ops));
+    if (stream->side == CHEZPP_GRPC_STREAM_SIDE_CLIENT && !stream->recv_initial_done) {
+      ops[nops].op = GRPC_OP_RECV_INITIAL_METADATA;
+      ops[nops].data.recv_initial_metadata.recv_initial_metadata = &stream->recv_initial_metadata;
+      nops += 1;
+    }
+    ops[nops].op = GRPC_OP_RECV_MESSAGE;
+    ops[nops].data.recv_message.recv_message = &stream->pending_recv_message;
+    nops += 1;
+    err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->recv_tag, NULL);
+    if (err != GRPC_CALL_OK) return make_call_error_status(err);
+    stream->recv_pending = 1;
+    if (stream->shared_cq) return make_would_block_status();
+  }
+  if (stream->shared_cq) {
+    int success = 0;
+    if (!grpc_take_completed_tag(&stream->recv_tag, &success))
+      return make_would_block_status();
+    stream->recv_pending = 0;
+    if (!success) return make_error_status_message("gRPC stream receive failed");
+  } else {
     ptr ans = wait_stream_complete(stream, &stream->recv_tag,
                                    "unexpected gRPC stream receive event");
     if (ans != Strue) return ans;
+    stream->recv_pending = 0;
   }
   if (stream->side == CHEZPP_GRPC_STREAM_SIDE_CLIENT) stream->recv_initial_done = 1;
 
-  if (recv_message != NULL) {
-    payload = maybe_bytevector_from_buffer(recv_message);
-    p_grpc_byte_buffer_destroy(recv_message);
+  if (stream->pending_recv_message != NULL) {
+    payload = maybe_bytevector_from_buffer(stream->pending_recv_message);
+    p_grpc_byte_buffer_destroy(stream->pending_recv_message);
+    stream->pending_recv_message = NULL;
     return payload;
   }
 
@@ -1231,6 +1861,17 @@ ptr chezpp_net_grpc_stream_close_send(uptr handle) {
     return stream_finish_server(stream, Sfalse, 0, 0, GRPC_STATUS_OK, "", Snil);
   }
 
+  if (stream->close_send_pending) {
+    int success = 0;
+    if (!grpc_take_completed_tag(&stream->send_tag, &success))
+      return make_would_block_status();
+    stream->close_send_pending = 0;
+    if (!success) return make_error_status_message("gRPC close-send failed");
+    stream->send_started = 1;
+    stream->send_closed = 1;
+    return Strue;
+  }
+
   memset(ops, 0, sizeof(ops));
   if (!stream->send_started) {
     ops[nops].op = GRPC_OP_SEND_INITIAL_METADATA;
@@ -1243,6 +1884,10 @@ ptr chezpp_net_grpc_stream_close_send(uptr handle) {
 
   err = p_grpc_call_start_batch(stream->call, ops, nops, &stream->send_tag, NULL);
   if (err != GRPC_CALL_OK) return make_call_error_status(err);
+  if (stream->shared_cq) {
+    stream->close_send_pending = 1;
+    return make_would_block_status();
+  }
   {
     ptr ans = wait_stream_complete(stream, &stream->send_tag,
                                    "unexpected gRPC client close event");
@@ -1263,6 +1908,12 @@ ptr chezpp_net_grpc_stream_close(uptr handle) {
   chezpp_grpc_stream *stream = (chezpp_grpc_stream *)handle;
   ptr ans = Strue;
   if (stream == NULL) return Strue;
+  if (stream->shared_cq &&
+      (stream->open_pending || stream->send_pending || stream->recv_pending ||
+       stream->status_pending || stream->close_send_pending)) {
+    retire_grpc_stream(stream);
+    return Strue;
+  }
   if (stream->side == CHEZPP_GRPC_STREAM_SIDE_SERVER && !stream->send_closed) {
     ans = stream_finish_server(stream, Sfalse, 0, 0, GRPC_STATUS_OK, "", Snil);
   }

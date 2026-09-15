@@ -1,5 +1,6 @@
 (library (chezpp crypto ffi)
-  (export ffi-random-status
+  (export ffi-openssl-load-error
+          ffi-random-status
           ffi-random-bytevector
           ffi-random-fill!
           ffi-constant-time-eq
@@ -74,6 +75,8 @@
           ffi-cert-verify-state-destroy)
   (import (chezpp chez))
 
+  (define ffi-openssl-load-error
+    (foreign-procedure "crypto_openssl_load_error" () ptr))
   (define ffi-random-status (foreign-procedure "crypto_random_status" () int))
   (define ffi-random-bytevector (foreign-procedure "crypto_random_bytevector" (unsigned-64) ptr))
   (define ffi-random-fill! (foreign-procedure "crypto_random_fill" (ptr unsigned-64 unsigned-64) int))

@@ -15,6 +15,12 @@
       (thunk)
       #f)))
 
+(define wait-for-scp-operation
+  (lambda (thunk)
+    (let ([operation (thunk)])
+      (and (net-operation? operation)
+           (net-operation-wait operation)))))
+
 (define run-net-scp-basic-test
   (lambda (remote-root home port user)
     (let ([local-root (format "/tmp/chezpp-net-scp-basic-~a" port)])
@@ -105,32 +111,44 @@
                         (lambda ()
                           (let ([upload-path (path-build local-root "upload-nb.txt")]
                                 [download-path (path-build local-root "download-nb.txt")]
+                                [cancel-path (path-build local-root "cancel-nb.txt")]
                                 [tree-path (path-build local-root "tree-nb")]
-                                [tree-out-path (path-build local-root "tree-nb-out")])
-                            (write-u8vec! upload-path (string->utf8 "scp-upload-nb"))
+                                [tree-out-path (path-build local-root "tree-nb-out")]
+                                [large-payload (make-bytevector 200000 77)])
+                            (write-u8vec! upload-path large-payload)
                             (mkdirs (path-build tree-path "nested"))
                             (write-u8vec! (path-build tree-path "a.txt")
                                           (string->utf8 "A"))
                             (write-u8vec! (path-build (path-build tree-path "nested") "b.txt")
                                           (string->utf8 "B"))
                             (and
-                             (equal? (wait-for-result
+                             (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-upload/nonblocking
                                          scp
                                          upload-path
                                          (string-append remote-root "/uploaded-nb.txt"))))
                                      (string-append remote-root "/uploaded-nb.txt"))
-                             (equal? (wait-for-result
+                             (let ([operation
+                                    (scp-download/nonblocking
+                                     scp
+                                     (string-append remote-root "/uploaded-nb.txt")
+                                     cancel-path)])
+                               (and (file-exists? cancel-path)
+                                    (eq? (scp-cancel-pending! scp) scp)
+                                    (eq? (net-operation-state operation) 'cancelled)
+                                    (not (file-exists? cancel-path))))
+                             (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-download/nonblocking
                                          scp
                                          (string-append remote-root "/uploaded-nb.txt")
                                          download-path)))
                                      download-path)
-                             (equal? (read-u8vec download-path)
-                                     (string->utf8 "scp-upload-nb"))
-                             (equal? (wait-for-result
+                             (equal? (read-u8vec download-path) large-payload)
+                             (equal? (sha256-file upload-path)
+                                     (sha256-file download-path))
+                             (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-copy-directory/nonblocking
                                          scp
@@ -138,7 +156,7 @@
                                          tree-path
                                          (string-append remote-root "/tree-nb-remote"))))
                                      (string-append remote-root "/tree-nb-remote"))
-                             (equal? (wait-for-result
+                             (equal? (wait-for-scp-operation
                                       (lambda ()
                                         (scp-copy-directory/nonblocking
                                          scp
@@ -231,6 +249,43 @@
            (run-net-scp-basic-test remote-root home port user))
          (lambda ()
            (stop-server)))))
+
+(mat net-scp-metadata-and-policy
+     (with-test-scp-session
+      (lambda (session remote-root)
+        (let ([local-path "/tmp/chezpp-net-scp-policy.txt"])
+          (dynamic-wind
+            (lambda () (write-u8vec! local-path (string->utf8 "keep")))
+            (lambda ()
+              (let ([attributes (scp-stat session (string-append remote-root "/hello.txt"))])
+                (and (scp-attributes? attributes)
+                     (eq? 'regular (scp-attributes-type attributes))
+                     (= 10 (scp-attributes-size attributes))
+                     (not (scp-stat session (string-append remote-root "/missing")))
+                     ;; Overwrite mode `error` rejects an existing local target.
+                     (scp-error-message-contains?
+                      "local destination exists"
+                      (lambda ()
+                        (scp-download session (string-append remote-root "/hello.txt") local-path
+                                      (make-transfer-policy 'never 'error 4096 #f))))
+                     (equal? local-path
+                             (scp-download session (string-append remote-root "/hello.txt")
+                                           local-path
+                                           (make-transfer-policy 'never 'skip 4096 #f)))
+                     (equal? (read-u8vec local-path) (string->utf8 "keep"))
+                     (equal? local-path
+                             (scp-download session (string-append remote-root "/hello.txt")
+                                           local-path
+                                           (make-transfer-policy 'never 'replace 4096 #f)))
+                     (equal? (read-u8vec local-path) (string->utf8 "hello sftp"))
+                     ;; SCP resume is rejected when no verified restart helper exists.
+                     (scp-error-message-contains?
+                      "restart helper"
+                      (lambda ()
+                        (scp-download session (string-append remote-root "/hello.txt") local-path
+                                      (make-transfer-policy 'resume 'replace 4096 #f)))))))
+            (lambda ()
+              (when (file-exists? local-path) (delete-file local-path #f))))))))
 
 (mat net-scp-nonblocking
      (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])

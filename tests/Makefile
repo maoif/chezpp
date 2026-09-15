@@ -1,20 +1,37 @@
-NET_TESTS := net-core.ss net-http.ss net-ftp.ss net-ssh.ss net-sftp.ss net-scp.ss net-websocket.ss net-grpc.ss
-NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss
-PARSER_TESTS := parser-csv.ss parser-json5.ss parser-xml.ss parser-toml.ss \
-                parser-elf.ss parser-wasm.ss
-PARSER_OBJS := $(PARSER_TESTS:.ss=.so)
-PARSER_TEST_SUPPORT := parser-external-tools.ss
+.ONESHELL:
+
+NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss net-lws-reactor.ss \
+             net-lws-http2.ss \
+             net-lws-server.ss \
+             net-http-fiber.ss net-lws-stress.ss net-http-stress.ss \
+             net-http.ss net-ftp.ss \
+             net-ssh.ss net-sftp.ss \
+             net-scp.ss net-websocket.ss net-grpc.ss net-examples.ss
+NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss \
+                    net-lws-fixture.ss
 
 SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss navigator.ss \
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
-             hashset.ss treemap.ss treeset.ss regex.ss rbtree-specialized.ss \
+             hashset.ss treemap.ss treeset.ss \
              bittree.ss bitvec.ss dset.ss \
              concurrency.ss \
-             cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss uuid.ss $(NET_TESTS) \
-             parser.ss
+             cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss optional-openssl.ss net-loader.ss uuid.ss \
+             protobuf.ss protobuf-codegen.ss \
+             $(NET_TESTS) \
+             parser.ss net-errors.ss net-address.ss net-dns.ss net-ip.ss net-docs.ss \
+             net-socket-datagram.ss net-uri.ss
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      ?= $(SRCS_TEST)
 TEST_OBJS := $(addsuffix .so,$(basename $(TEST)))
+
+HTTP_ERROR_SOAK_SECONDS ?= 300
+HTTP_ERROR_SOAK_TESTS := net-http net-lws-http2 net-lws-server
+HTTP_ERROR_SOAK_OBJS := $(addsuffix .so,$(HTTP_ERROR_SOAK_TESTS))
+
+lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
+	$(CC) -Wall -Wextra -O2 $< -o $@ -ldl
+
+net-lws-http2.so net-http-fiber.so: lws-http2-fixture
 
 .PHONY: test
 test: test-all
@@ -23,18 +40,16 @@ mat.so: mat.sls
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' "== compiling mat.sls =="; \
-	echo '(optimize-level 3)(compile-file "mat.sls")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	echo '(optimize-level 3)(compile-file "mat.sls")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
-parser.so $(PARSER_OBJS): $(PARSER_TEST_SUPPORT)
-
-$(OBJS_TEST) $(PARSER_OBJS): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
+$(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
-	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -42,13 +57,24 @@ $(OBJS_TEST) $(PARSER_OBJS): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../che
 
 .PHONY: test-all
 test-all: mat.so $(OBJS_TEST)
-	@rm -f *.out *.stdout *.stderr
+	@cleanup() { \
+	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
+	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
+	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
+	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
+	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
+	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
+	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
+	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
+	    /tmp/upload-root; \
+	}; \
+	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
 	@status=0; \
 	for item in $(OBJS_TEST); do \
 	  stdout="$$item.stdout"; stderr="$$item.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$item =="; \
-	  echo '(load "mat.so")(load "'"$$item"'")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	  echo '(load "mat.so")(load "'"$$item"'")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	  if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -59,7 +85,18 @@ test-all: mat.so $(OBJS_TEST)
 
 .PHONY: test-some
 test-some: mat.so $(TEST_OBJS)
-	@rm -f *.out *.stdout *.stderr
+	@cleanup() { \
+	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
+	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
+	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
+	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
+	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
+	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
+	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
+	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
+	    /tmp/upload-root; \
+	}; \
+	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
 	@status=0; \
 	for item in $(TEST); do \
 	  case "$$item" in \
@@ -70,7 +107,7 @@ test-some: mat.so $(TEST_OBJS)
 	  stdout="$$base.stdout"; stderr="$$base.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$base.so =="; \
-	  echo '(load "mat.so")(load "'"$$base"'.so")' | ../chez++ -q >"$$stdout" 2>"$$stderr"; \
+	  echo '(load "mat.so")(load "'"$$base"'.so")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	  if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -78,6 +115,50 @@ test-some: mat.so $(TEST_OBJS)
 	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
 	done; \
 	exit $$status
+
+.PHONY: test-http-error-soak
+test-http-error-soak: mat.so $(HTTP_ERROR_SOAK_OBJS)
+	@case "$(HTTP_ERROR_SOAK_SECONDS)" in \
+	  ''|*[!0-9]*) \
+	    printf '%s\n' "HTTP_ERROR_SOAK_SECONDS must be a positive integer" >&2; exit 2 ;; \
+	esac
+	@if [ "$(HTTP_ERROR_SOAK_SECONDS)" -le 0 ]; then \
+	  printf '%s\n' "HTTP_ERROR_SOAK_SECONDS must be a positive integer" >&2; exit 2; \
+	fi
+	@cleanup() { \
+	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
+	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
+	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
+	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
+	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
+	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
+	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
+	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
+	    /tmp/upload-root; \
+	}; \
+	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
+	@start=$$(date +%s); deadline=$$((start + $(HTTP_ERROR_SOAK_SECONDS))); round=0; \
+	while :; do \
+	  round=$$((round + 1)); \
+	  for base in $(HTTP_ERROR_SOAK_TESTS); do \
+	    stdout="$$base.stdout"; stderr="$$base.stderr"; \
+	    rm -f "$$stdout" "$$stderr"; \
+	    printf '%s\n' "== soak round $$round: $$base.so =="; \
+	    echo '(load "mat.so")(load "'"$$base"'.so")' | \
+	      ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	    code=$$?; \
+	    if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
+	    if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
+	    if [ $$code -ne 0 ] || grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then \
+	      exit 1; \
+	    fi; \
+	  done; \
+	  now=$$(date +%s); \
+	  if [ $$now -ge $$deadline ]; then \
+	    printf '%s\n' "completed $$round soak rounds in $$((now - start)) seconds"; \
+	    break; \
+	  fi; \
+	done
 
 .PHONY: test-cov
 test-cov: $(SRCS_TESTS)
@@ -87,6 +168,21 @@ test-cov: $(SRCS_TESTS)
 test-optional-hash-linkage:
 	@./optional-hash-linkage.sh
 
+.PHONY: test-optional-library-loader
+test-optional-library-loader:
+	@./optional-library-loader.sh
+
+.PHONY: test-optional-library-linkage
+test-optional-library-linkage:
+	@./optional-library-linkage.sh
+
 .PHONY: clean
 clean:
-	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr
+	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr lws-http2-fixture
+	@rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
+	  /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
+	  /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
+	  /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt
+	@rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
+	  /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
+	  /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state /tmp/upload-root

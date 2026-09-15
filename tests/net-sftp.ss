@@ -33,6 +33,92 @@
          (lambda ()
            (stop-server)))))
 
+(mat net-sftp-attributes
+     (with-test-sftp-session
+      (lambda (session remote-root)
+        (let ([attributes (sftp-stat session remote-root)])
+          (and (sftp-attributes? attributes)
+               (eq? 'directory (sftp-attributes-type attributes))
+               (natural? (sftp-attributes-permissions attributes))))))
+
+     (with-test-sftp-session
+      (lambda (session remote-root)
+        (call-with-sftp-directory
+         session remote-root
+         (lambda (directory)
+           (let loop ([count 0])
+             (let ([entry (sftp-read-directory/nonblocking directory)])
+               (cond [(net-would-block? entry) (loop count)]
+                     [(eof-object? entry) (> count 0)]
+                     [else
+                      (and (sftp-attributes? entry)
+                           (loop (fx1+ count)))]))))))))
+
+(mat net-sftp-path-and-metadata
+     (with-test-sftp-session
+      (lambda (session remote-root)
+        (sftp-cwd! session remote-root)
+        (sftp-chmod! session "hello.txt" #o600)
+        (sftp-utime! session "hello.txt" 1000000000 1000000001)
+        (sftp-symlink! session "hello.txt" "hello.link")
+        (let ([observed
+               (list (sftp-pwd session)
+                     (sftp-normalize-path session "nested/../hello.txt")
+                     (sftp-attributes-size (sftp-stat session "hello.txt"))
+                     (fxlogand #o777
+                               (sftp-attributes-permissions (sftp-stat session "hello.txt")))
+                     (sftp-attributes-modification-time (sftp-stat session "hello.txt"))
+                     (sftp-readlink session "hello.link"))])
+          (unless (equal? observed
+                          (list remote-root (string-append remote-root "/hello.txt")
+                                10 #o600 1000000001 "hello.txt"))
+            (errorf 'net-sftp-path-and-metadata "unexpected observations: ~s" observed))
+          #t))))
+
+(mat net-sftp-recursive-transfer
+     (with-test-sftp-session
+      (lambda (session remote-root)
+        (let ([source "/tmp/chezpp-net-sftp-tree-source"]
+              [dest "/tmp/chezpp-net-sftp-tree-dest"]
+              [remote (string-append remote-root "/tree")])
+          (dynamic-wind
+            (lambda ()
+              (when (file-exists? source) (file-removetree source #f))
+              (when (file-exists? dest) (file-removetree dest #f))
+              (mkdirs (string-append source "/nested"))
+              (write-bytevector-file (string-append source "/top.txt")
+                                     (string->utf8 "top"))
+              (write-bytevector-file (string-append source "/nested/data.txt")
+                                     (string->utf8 "nested")))
+            (lambda ()
+              (sftp-upload-directory session source remote default-transfer-policy #t)
+              (sftp-download-directory session remote dest default-transfer-policy #t)
+              (and (equal? (read-u8vec (string-append dest "/top.txt"))
+                           (string->utf8 "top"))
+                   (equal? (read-u8vec (string-append dest "/nested/data.txt"))
+                           (string->utf8 "nested"))))
+            (lambda ()
+              (when (file-exists? source) (file-removetree source #f))
+              (when (file-exists? dest) (file-removetree dest #f)))))))
+
+     ;; Recursive SFTP upload rejects local symbolic links.
+     (with-test-sftp-session
+      (lambda (session remote-root)
+        (let ([source "/tmp/chezpp-net-sftp-link-source"])
+          (dynamic-wind
+            (lambda ()
+              (when (file-exists? source) (file-removetree source #f))
+              (mkdirs source)
+              (file-symlink "/tmp" (string-append source "/link")))
+            (lambda ()
+              (sftp-error-message-contains?
+               "rejects symbolic links"
+               (lambda ()
+                 (sftp-upload-directory session source
+                                        (string-append remote-root "/links")))))
+            (lambda ()
+              (when (file-exists? source) (file-removetree source #f))))))))
+
 (mat net-sftp-nonblocking
      (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
        (dynamic-wind

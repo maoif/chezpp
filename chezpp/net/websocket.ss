@@ -4,15 +4,24 @@
           websocket-server-close
           websocket-accept
           websocket-accept/nonblocking
+          websocket-options? make-websocket-options
+          websocket-options-tls-context websocket-options-subprotocols
+          websocket-options-compression? websocket-options-fragment-size
+          websocket-options-ping-interval-ms websocket-options-pong-timeout-ms
           websocket-connection?
           websocket-connect
           websocket-close
+          websocket-negotiated-subprotocol websocket-compression
+          websocket-close-code websocket-close-reason
           websocket-send-text
           websocket-send-binary
           websocket-send-ping
           websocket-send-pong
           websocket-cancel-pending-send!
           websocket-send/nonblocking
+          websocket-send-fragment/nonblocking
+          websocket-finish-message/nonblocking
+          websocket-ping-operation
           websocket-recv
           websocket-recv/nonblocking
           websocket-next-message
@@ -26,11 +35,35 @@
           (chezpp net uri)
           (chezpp net errors)
           (chezpp net ffi)
-          (chezpp net private))
+          (chezpp net private)
+          (chezpp net poll)
+          (chezpp net operation)
+          (chezpp net tls)
+          (chezpp optional-library))
 
   (define websocket-default-timeout-ms 30000)
   (define websocket-no-timeout -1)
 
+  #|record:websocket-options
+The `websocket-options` record is immutable connection and listener policy.
+It contains an optional TLS context, ordered subprotocol strings, compression flag, positive
+fragment size, and optional positive ping interval and pong timeout in milliseconds.
+|#
+  (define-record-type (websocket-options %make-websocket-options websocket-options?)
+    (sealed #t)
+    (opaque #f)
+    (fields (immutable tls-context websocket-options-tls-context)
+            (immutable subprotocols websocket-options-subprotocols)
+            (immutable compression? websocket-options-compression?)
+            (immutable fragment-size websocket-options-fragment-size)
+            (immutable ping-interval-ms websocket-options-ping-interval-ms)
+            (immutable pong-timeout-ms websocket-options-pong-timeout-ms)))
+
+  #|record:websocket-server
+The `websocket-server` record owns a listener for one host, port, protocol, and options value.
+`websocket-server-close` releases the native listener once; later accepts raise an error.
+The TLS context in its options remains caller-owned.
+|#
   (define-record-type (websocket-server %make-websocket-server websocket-server?)
     (sealed #t)
     (opaque #f)
@@ -38,8 +71,14 @@
             (immutable host websocket-server-host)
             (immutable port websocket-server-port)
             (immutable protocol websocket-server-protocol)
+            (immutable options websocket-server-options)
             (mutable closed? websocket-server-closed? websocket-server-closed?-set!)))
 
+  #|record:websocket-connection
+The `websocket-connection` record owns one client or accepted WebSocket transport.
+It records endpoint and negotiated subprotocol and compression, then close code and reason during
+shutdown. `websocket-close` releases the handle and makes later send or receive operations fail.
+|#
   (define-record-type (websocket-connection %make-websocket-connection websocket-connection?)
     (sealed #t)
     (opaque #f)
@@ -49,8 +88,26 @@
             (immutable path websocket-connection-path)
             (immutable secure? websocket-connection-secure?)
             (immutable protocol websocket-connection-protocol)
+            (immutable options websocket-connection-options)
+            (mutable negotiated-subprotocol websocket-connection-negotiated-subprotocol
+                     websocket-connection-negotiated-subprotocol-set!)
+            (mutable compression websocket-connection-compression
+                     websocket-connection-compression-set!)
+            (mutable close-code websocket-connection-close-code
+                     websocket-connection-close-code-set!)
+            (mutable close-reason websocket-connection-close-reason
+                     websocket-connection-close-reason-set!)
+            (mutable deferred websocket-connection-deferred
+                     websocket-connection-deferred-set!)
             (mutable closed? websocket-connection-closed? websocket-connection-closed?-set!)))
 
+  (define default-websocket-options
+    (%make-websocket-options #f '("chezpp-websocket") #f 65536 #f 30000))
+
+  #|record:websocket-message-record
+The `websocket-message-record` record is an immutable complete WebSocket message.
+Type is `text`, `binary`, `ping`, or `pong`, and data is the copied message bytevector.
+|#
   (define-record-type (websocket-message-record %make-websocket-message websocket-message?)
     (sealed #t)
     (opaque #f)
@@ -96,8 +153,8 @@
 
   (define uri-path*
     (lambda (u)
-      (let ([path (uri-path u)]
-            [query (uri-query u)])
+      (let ([path (uri-raw-path u)]
+            [query (uri-raw-query u)])
         (string-append
          (if (or (not path) (string=? path "")) "/" path)
          (if query (string-append "?" query) "")))))
@@ -125,7 +182,7 @@
   (define recv-result
     (lambda (who x)
       (cond
-       [(ffi-would-block? x) #f]
+       [(ffi-would-block? x) (websocket-would-block-result who x)]
        [(ffi-error? x) (ensure-success who x)]
        [(eof-object? x) x]
        [(vector? x) (message-from-ffi x)]
@@ -135,23 +192,35 @@
     (lambda (who server x)
       (cond
        [(ffi-error? x) (ensure-success who x)]
-       [(ffi-would-block? x) #f]
+       [(ffi-would-block? x) (websocket-would-block-result who x)]
        [(eof-object? x) x]
        [else
-        (%make-websocket-connection x
-                                    (websocket-server-host server)
-                                    (websocket-server-port server)
-                                    "/"
-                                    #f
-                                    (websocket-server-protocol server)
-                                    #f)])))
+        (let ([state (ensure-success who (ffi-net-websocket-state x))])
+          (%make-websocket-connection
+           x (websocket-server-host server) (websocket-server-port server) "/"
+           (and (websocket-options-tls-context (websocket-server-options server)) #t)
+           (websocket-server-protocol server) (websocket-server-options server)
+           (vector-ref state 0) (vector-ref state 1)
+           (vector-ref state 2) (vector-ref state 3) '() #f))])))
 
   (define send-result
     (lambda (who x)
       (cond
        [(fixnum? x) x]
-       [(ffi-would-block? x) #f]
+       [(ffi-would-block? x) (websocket-would-block-result who x)]
        [else (ensure-success who x)])))
+
+  (define websocket-would-block-result
+    (lambda (who answer)
+      (let ([detail (vector-ref answer 1)])
+        (unless (and (vector? detail)
+                     (fx= (vector-length detail) 2)
+                     (fixnum? (vector-ref detail 0))
+                     (list? (vector-ref detail 1)))
+          (raise-net-error who 'websocket
+                           "invalid websocket readiness result"
+                           answer))
+        (make-net-would-block (vector-ref detail 0) (vector-ref detail 1)))))
 
   (define normalize-binary-payload
     (lambda (who payload)
@@ -167,33 +236,93 @@
         (errorf who "timeout must be non-negative, given ~s" timeout-ms))
       timeout-ms))
 
-  (define current-time-ms
+  (define current-monotonic-ms
     (lambda ()
-      (let ([t (current-time)])
+      (let ([t (current-time 'time-monotonic)])
         (+ (* (time-second t) 1000)
            (quotient (time-nanosecond t) 1000000)))))
 
   (define timeout->deadline-ms
     (lambda (timeout-ms)
-      (+ (current-time-ms) timeout-ms)))
+      (+ (current-monotonic-ms) timeout-ms)))
 
   (define remaining-timeout-ms
     (lambda (deadline-ms)
-      (max 0 (- deadline-ms (current-time-ms)))))
+      (max 0 (- deadline-ms (current-monotonic-ms)))))
 
-  (define wait-nonblocking
+  (define wait-for-websocket-result
     (lambda (who timeout-ms timeout-message thunk)
       (let ([deadline-ms (timeout->deadline-ms timeout-ms)])
-        (let loop ()
-          (let ([ans (thunk)])
-            (if ans
-                ans
-                (let ([remaining-ms (remaining-timeout-ms deadline-ms)])
-                  (if (fx<= remaining-ms 0)
-                      (raise-net-error who 'websocket timeout-message)
-                      (begin
-                        (milisleep (min 10 remaining-ms))
-                        (loop))))))))))
+        (net-operation-wait
+         (make-net-operation
+          'websocket
+          (lambda ()
+            (when (fx<= (remaining-timeout-ms deadline-ms) 0)
+              (raise-net-error who 'websocket timeout-message))
+            (let ([answer (thunk)])
+              (if (net-would-block? answer)
+                  (net-operation-pending
+                   (list
+                    (make-poll-target
+                     (net-would-block-resource answer)
+                     (net-would-block-events answer)))
+                   deadline-ms)
+                  (net-operation-completed answer))))
+          void)))))
+
+  (define make-websocket-connect-operation
+    (lambda (who host port path secure? protocol options timeout-ms)
+      (let* ([answer (ffi-net-websocket-connect host
+                                                port
+                                                path
+                                                protocol
+                                                (options-protocol-offer options)
+                                                (if secure? 1 0)
+                                                (if (websocket-options-compression? options) 1 0)
+                                                (if (websocket-options-tls-context options)
+                                                    (tls-context-native-handle
+                                                     (websocket-options-tls-context options))
+                                                    0)
+                                                websocket-no-timeout)]
+             [handle (if (ffi-error? answer)
+                         (ensure-success who answer)
+                         answer)]
+             [deadline-ms (timeout->deadline-ms timeout-ms)])
+        (make-net-operation
+         'websocket-connect
+         (lambda ()
+           (when (fx<= (remaining-timeout-ms deadline-ms) 0)
+             (raise-net-error who 'websocket "websocket connect timed out"))
+           (let ([step (ffi-net-websocket-connect-step handle)])
+             (cond
+              [(eq? step #t)
+               (let* ([state (ensure-success who (ffi-net-websocket-state handle))]
+                      [connection
+                       (%make-websocket-connection
+                        handle host port path secure? protocol options
+                        (vector-ref state 0) (vector-ref state 1)
+                        (vector-ref state 2) (vector-ref state 3) '() #f)])
+                 (set! handle 0)
+                 (net-operation-completed connection))]
+              [(ffi-would-block? step)
+               (let ([would-block (websocket-would-block-result who step)])
+                 (net-operation-pending
+                  (list
+                   (make-poll-target
+                    (net-would-block-resource would-block)
+                    (net-would-block-events would-block)))
+                  deadline-ms))]
+              [else
+               (ensure-success who step)
+               (assert-unreachable)])))
+         (lambda ()
+           (unless (zero? handle)
+             (ensure-success who (ffi-net-websocket-close handle))
+             (set! handle 0)))
+         (lambda ()
+           (unless (zero? handle)
+             (ensure-success who (ffi-net-websocket-close handle))
+             (set! handle 0)))))))
 
   (define do-send
     (lambda (who conn type payload nonblocking? timeout-ms)
@@ -222,19 +351,78 @@
                                                (if nonblocking? 1 0)
                                                (if nonblocking? websocket-no-timeout timeout-ms))))])))
 
+  #|proc:make-websocket-options
+The `make-websocket-options` procedure creates WebSocket transport options.
+`tls-context` is a TLS context or `#f`; `subprotocols` is a nonempty list of strings.
+`compression?` requests permessage-deflate, and `fragment-size` is the positive send chunk size.
+`ping-interval-ms` is a nonnegative interval or `#f`; `pong-timeout-ms` is nonnegative.
+The return value is a new options record.
+|#
+  (define make-websocket-options
+    (case-lambda
+      [() default-websocket-options]
+      [(tls-context subprotocols compression? fragment-size ping-interval-ms pong-timeout-ms)
+       (pcheck ([(lambda (value) (or (not value) (tls-context? value))) tls-context]
+                [list? subprotocols] [boolean? compression?] [positive? fragment-size]
+                [(lambda (value) (or (not value) (natural? value))) ping-interval-ms]
+                [natural? pong-timeout-ms])
+         (unless (and (pair? subprotocols) (andmap string? subprotocols)
+                      (andmap (lambda (value) (positive? (string-length value))) subprotocols))
+           (errorf 'make-websocket-options
+                   "subprotocols must be a nonempty list of nonempty strings"))
+         (when compression?
+           (let ([info (optional-library-info 'websockets)])
+             (unless (and (optional-library-available? info)
+                          (memq 'compression
+                                (optional-library-capabilities info)))
+               (errorf 'make-websocket-options
+                       "permessage-deflate support is unavailable"))))
+         (%make-websocket-options tls-context subprotocols compression? fragment-size
+                                  ping-interval-ms pong-timeout-ms))]))
+
+  (define options-protocol
+    (lambda (options)
+      (car (websocket-options-subprotocols options))))
+
+  (define options-protocol-offer
+    (lambda (options)
+      (let loop ([remaining (websocket-options-subprotocols options)] [result ""])
+        (if (null? remaining)
+            result
+            (loop (cdr remaining)
+                  (string-append result
+                                 (if (zero? (string-length result)) "" ", ")
+                                 (car remaining)))))))
+
   #|proc:websocket-listen
 The `websocket-listen` procedure creates a WebSocket server listener.
 |#
   (define-who websocket-listen
     (case-lambda
-      [(host port) (websocket-listen host port "chezpp-websocket")]
-      [(host port protocol)
-       (pcheck ([string? host] [fixnum? port] [string? protocol])
+      [(host port) (websocket-listen host port default-websocket-options)]
+      [(host port protocol-or-options)
+       (pcheck ([string? host] [fixnum? port])
                (check-port who port)
-               (let ([ans (ffi-net-websocket-listen host port protocol)])
+               (let* ([options
+                       (cond
+                        [(websocket-options? protocol-or-options) protocol-or-options]
+                        [(string? protocol-or-options)
+                         (%make-websocket-options #f (list protocol-or-options)
+                                                  #f 65536 #f 30000)]
+                        [else
+                         (errorf who "expected protocol string or WebSocket options")])]
+                      [protocol (options-protocol options)])
+                 (let ([ans (ffi-net-websocket-listen
+                             host port protocol
+                             (options-protocol-offer options)
+                             (if (websocket-options-compression? options) 1 0)
+                             (if (websocket-options-tls-context options)
+                                 (tls-context-native-handle
+                                  (websocket-options-tls-context options))
+                                 0))])
                  (if (ffi-error? ans)
                      (ensure-success who ans)
-                     (%make-websocket-server ans host port protocol #f))))]))
+                     (%make-websocket-server ans host port protocol options #f)))))]))
 
   #|proc:websocket-server-close
 The `websocket-server-close` procedure closes a WebSocket server listener.
@@ -260,14 +448,14 @@ The `websocket-accept` procedure accepts an incoming WebSocket connection.
        (pcheck ([websocket-server? server])
                (check-timeout-ms who timeout-ms)
                (ensure-server-open who server)
-               (accept-result who
-                              server
-                              (ffi-net-websocket-accept (websocket-server-handle server)
-                                                        0
-                                                        timeout-ms)))]))
+               (wait-for-websocket-result
+                who timeout-ms "websocket accept timed out"
+                (lambda () (websocket-accept/nonblocking server))))]))
 
   #|proc:websocket-accept/nonblocking
-The `websocket-accept/nonblocking` procedure accepts an incoming WebSocket connection if one is ready, and returns `#f` otherwise.
+The `websocket-accept/nonblocking` procedure attempts one WebSocket accept operation.
+The `server` parameter is an open WebSocket server.
+The return value is a connection, EOF, or a would-block value naming a service descriptor.
 |#
   (define-who websocket-accept/nonblocking
     (lambda (server)
@@ -280,7 +468,8 @@ The `websocket-accept/nonblocking` procedure accepts an incoming WebSocket conne
                                                        websocket-no-timeout)))))
 
   #|proc:websocket-connect
-The `websocket-connect` procedure connects to a WebSocket endpoint described by a `ws:` or `wss:` URI.
+The `websocket-connect` procedure connects to a WebSocket endpoint described by a `ws:` or `wss:`
+URI.
 |#
   (define-who websocket-connect
     (case-lambda
@@ -288,6 +477,8 @@ The `websocket-connect` procedure connects to a WebSocket endpoint described by 
        (websocket-connect value "chezpp-websocket" websocket-default-timeout-ms)]
       [(value protocol-or-timeout)
        (cond
+        [(websocket-options? protocol-or-timeout)
+         (websocket-connect value protocol-or-timeout websocket-default-timeout-ms)]
         [(string? protocol-or-timeout)
          (websocket-connect value protocol-or-timeout websocket-default-timeout-ms)]
         [(fixnum? protocol-or-timeout)
@@ -295,36 +486,107 @@ The `websocket-connect` procedure connects to a WebSocket endpoint described by 
         [else
          (errorf who "expected websocket protocol string or timeout fixnum, given ~s"
                  protocol-or-timeout)])]
-      [(value protocol timeout-ms)
-       (pcheck ([string? protocol])
+      [(value protocol-or-options timeout-ms)
+       (pcheck ([fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
-               (let* ([u (normalize-uri who value)]
+               (let* ([options
+                       (cond
+                        [(websocket-options? protocol-or-options) protocol-or-options]
+                        [(string? protocol-or-options)
+                         (%make-websocket-options #f (list protocol-or-options)
+                                                  #f 65536 #f 30000)]
+                        [else
+                         (errorf who "expected protocol string or WebSocket options")])]
+                      [protocol (options-protocol options)]
+                      [u (normalize-uri who value)]
                       [host (uri-host u)]
                       [port (uri-default-port u)]
                       [path (uri-path* u)]
                       [secure? (string=? (uri-scheme u) "wss")]
-                      [ans (ffi-net-websocket-connect host
-                                                      port
-                                                      path
-                                                      protocol
-                                                      (if secure? 1 0)
-                                                      timeout-ms)])
-                 (if (ffi-error? ans)
-                     (ensure-success who ans)
-                     (%make-websocket-connection ans host port path secure? protocol #f))))]))
+                      [operation
+                       (make-websocket-connect-operation
+                        who host port path secure? protocol options timeout-ms)])
+                 (net-operation-wait operation)))]))
+
+  (define valid-websocket-close-code?
+    (lambda (code)
+      (or (memv code '(1000 1001 1002 1003 1007 1008 1009 1010 1011 1012 1013 1014))
+          (<= 3000 code 4999))))
 
   #|proc:websocket-close
-The `websocket-close` procedure closes a WebSocket connection.
+The `websocket-close` procedure closes WebSocket `conn` with optional `code` and UTF-8 `reason`.
+The default close code is 1000. The return value is `conn`.
 |#
   (define-who websocket-close
+    (case-lambda
+      [(conn) (websocket-close conn 1000 "")]
+      [(conn code reason)
+       (pcheck ([websocket-connection? conn] [integer? code] [string? reason])
+         (unless (valid-websocket-close-code? code)
+           (errorf who "invalid WebSocket close code ~s" code))
+         (let ([reason-bytes (string->utf8 reason)])
+           (when (> (bytevector-length reason-bytes) 123)
+             (errorf who "WebSocket close reason exceeds 123 UTF-8 bytes"))
+           (unless (websocket-connection-closed? conn)
+             (ensure-success
+              who
+              (ffi-net-websocket-close-with-reason
+               (websocket-connection-handle conn) code reason-bytes))
+             (websocket-connection-close-code-set! conn code)
+             (websocket-connection-close-reason-set! conn reason)
+             (websocket-connection-handle-set! conn 0)
+             (websocket-connection-closed?-set! conn #t)))
+         conn)]))
+
+  (define refresh-websocket-state!
+    (lambda (who conn)
+      (unless (websocket-connection-closed? conn)
+        (let ([state (ensure-success
+                      who
+                      (ffi-net-websocket-state (websocket-connection-handle conn)))])
+          (websocket-connection-negotiated-subprotocol-set! conn (vector-ref state 0))
+          (websocket-connection-compression-set! conn (vector-ref state 1))
+          (when (vector-ref state 2)
+            (websocket-connection-close-code-set! conn (vector-ref state 2)))
+          (when (positive? (string-length (vector-ref state 3)))
+            (websocket-connection-close-reason-set! conn (vector-ref state 3)))
+          state))))
+
+  #|proc:websocket-negotiated-subprotocol
+The `websocket-negotiated-subprotocol` procedure returns the selected protocol for `conn`, or `#f`.
+|#
+  (define websocket-negotiated-subprotocol
     (lambda (conn)
       (pcheck ([websocket-connection? conn])
-              (unless (websocket-connection-closed? conn)
-                (ensure-success who
-                                (ffi-net-websocket-close (websocket-connection-handle conn)))
-                (websocket-connection-handle-set! conn 0)
-                (websocket-connection-closed?-set! conn #t))
-              conn)))
+        (refresh-websocket-state! 'websocket-negotiated-subprotocol conn)
+        (websocket-connection-negotiated-subprotocol conn))))
+
+  #|proc:websocket-compression
+The `websocket-compression` procedure returns `permessage-deflate` for compressed `conn`, or `#f`.
+|#
+  (define websocket-compression
+    (lambda (conn)
+      (pcheck ([websocket-connection? conn])
+        (refresh-websocket-state! 'websocket-compression conn)
+        (and (websocket-connection-compression conn) 'permessage-deflate))))
+
+  #|proc:websocket-close-code
+The `websocket-close-code` procedure returns the peer or local close code for `conn`, or `#f`.
+|#
+  (define websocket-close-code
+    (lambda (conn)
+      (pcheck ([websocket-connection? conn])
+        (refresh-websocket-state! 'websocket-close-code conn)
+        (websocket-connection-close-code conn))))
+
+  #|proc:websocket-close-reason
+The `websocket-close-reason` procedure returns the copied peer or local close reason for `conn`.
+|#
+  (define websocket-close-reason
+    (lambda (conn)
+      (pcheck ([websocket-connection? conn])
+        (refresh-websocket-state! 'websocket-close-reason conn)
+        (websocket-connection-close-reason conn))))
 
   #|proc:websocket-send-text
 The `websocket-send-text` procedure sends a text message on a WebSocket connection.
@@ -336,7 +598,10 @@ The `websocket-send-text` procedure sends a text message on a WebSocket connecti
       [(conn payload timeout-ms)
        (pcheck ([websocket-connection? conn] [string? payload])
                (check-timeout-ms who timeout-ms)
-               (do-send who conn 'text payload #f timeout-ms))]))
+               (wait-for-websocket-result
+                who timeout-ms "websocket send timed out"
+                (lambda ()
+                  (do-send who conn 'text payload #t websocket-no-timeout))))]))
 
   #|proc:websocket-send-binary
 The `websocket-send-binary` procedure sends a binary message on a WebSocket connection.
@@ -348,7 +613,10 @@ The `websocket-send-binary` procedure sends a binary message on a WebSocket conn
       [(conn payload timeout-ms)
        (pcheck ([websocket-connection? conn] [bytevector? payload])
                (check-timeout-ms who timeout-ms)
-               (do-send who conn 'binary payload #f timeout-ms))]))
+               (wait-for-websocket-result
+                who timeout-ms "websocket send timed out"
+                (lambda ()
+                  (do-send who conn 'binary payload #t websocket-no-timeout))))]))
 
   #|proc:websocket-send-ping
 The `websocket-send-ping` procedure sends a ping frame on a WebSocket connection.
@@ -362,7 +630,10 @@ The `websocket-send-ping` procedure sends a ping frame on a WebSocket connection
       [(conn payload timeout-ms)
        (pcheck ([websocket-connection? conn] [bytevector? payload])
                (check-timeout-ms who timeout-ms)
-               (do-send who conn 'ping payload #f timeout-ms))]))
+               (wait-for-websocket-result
+                who timeout-ms "websocket send timed out"
+                (lambda ()
+                  (do-send who conn 'ping payload #t websocket-no-timeout))))]))
 
   #|proc:websocket-send-pong
 The `websocket-send-pong` procedure sends a pong frame on a WebSocket connection.
@@ -376,10 +647,14 @@ The `websocket-send-pong` procedure sends a pong frame on a WebSocket connection
       [(conn payload timeout-ms)
        (pcheck ([websocket-connection? conn] [bytevector? payload])
                (check-timeout-ms who timeout-ms)
-               (do-send who conn 'pong payload #f timeout-ms))]))
+               (wait-for-websocket-result
+                who timeout-ms "websocket send timed out"
+                (lambda ()
+                  (do-send who conn 'pong payload #t websocket-no-timeout))))]))
 
   #|proc:websocket-cancel-pending-send!
-The `websocket-cancel-pending-send!` procedure cancels and discards the currently pending non-blocking send on a WebSocket connection, if any.
+The `websocket-cancel-pending-send!` procedure cancels and discards the currently pending
+non-blocking send on a WebSocket connection, if any.
 |#
   (define-who websocket-cancel-pending-send!
     (lambda (conn)
@@ -391,12 +666,132 @@ The `websocket-cancel-pending-send!` procedure cancels and discards the currentl
               conn)))
 
   #|proc:websocket-send/nonblocking
-The `websocket-send/nonblocking` procedure attempts to send a WebSocket frame without blocking and returns `#f` if the send is still pending.
+The `websocket-send/nonblocking` procedure attempts one WebSocket frame send.
+The `conn` parameter is an open WebSocket connection. The `type` parameter is the frame type.
+The `payload` parameter is a string for text or a bytevector for other frame types.
+The return value is a byte count or a would-block value naming a service descriptor.
 |#
   (define-who websocket-send/nonblocking
     (lambda (conn type payload)
       (pcheck ([websocket-connection? conn])
               (do-send who conn type payload #t websocket-no-timeout))))
+
+  (define fragment-payload
+    (lambda (who type payload)
+      (case type
+        [(text)
+         (unless (string? payload)
+           (errorf who "text WebSocket fragment payload must be a string"))
+         (string->utf8 payload)]
+        [(binary)
+         (unless (bytevector? payload)
+           (errorf who "binary WebSocket fragment payload must be a bytevector"))
+         payload]
+        [else (errorf who "fragment type must be text or binary")])))
+
+  #|proc:websocket-send-fragment/nonblocking
+The `websocket-send-fragment/nonblocking` procedure sends a non-final fragment on `conn`.
+`type` is `text` or `binary`; `payload` has the corresponding string or bytevector type.
+The return value is a byte count or a would-block value.
+|#
+  (define websocket-send-fragment/nonblocking
+    (lambda (conn type payload)
+      (pcheck ([websocket-connection? conn] [symbol? type])
+        (ensure-connection-open 'websocket-send-fragment/nonblocking conn)
+        (let ([bytes (fragment-payload 'websocket-send-fragment/nonblocking type payload)])
+          (send-result
+           'websocket-send-fragment/nonblocking
+           (ffi-net-websocket-send-fragment
+            (websocket-connection-handle conn)
+            (websocket-type->int 'websocket-send-fragment/nonblocking type)
+            bytes 0 (bytevector-length bytes) 0 1 websocket-no-timeout))))))
+
+  #|proc:websocket-finish-message/nonblocking
+The `websocket-finish-message/nonblocking` procedure sends final continuation `payload` on `conn`.
+`payload` is a string or bytevector matching the open message. It returns a count or would-block.
+|#
+  (define websocket-finish-message/nonblocking
+    (lambda (conn payload)
+      (pcheck ([websocket-connection? conn])
+        (ensure-connection-open 'websocket-finish-message/nonblocking conn)
+        (let ([bytes (cond
+                      [(string? payload) (string->utf8 payload)]
+                      [(bytevector? payload) payload]
+                      [else
+                       (errorf 'websocket-finish-message/nonblocking
+                               "fragment payload must be a string or bytevector")])])
+          (send-result
+           'websocket-finish-message/nonblocking
+           (ffi-net-websocket-send-fragment
+            (websocket-connection-handle conn) 2 bytes 0 (bytevector-length bytes)
+            1 1 websocket-no-timeout))))))
+
+  #|proc:websocket-ping-operation
+The `websocket-ping-operation` procedure sends `payload` on `conn` and waits for a pong.
+`payload` is a bytevector and optional `timeout-ms` is nonnegative. It returns a net operation.
+|#
+  (define websocket-ping-operation
+    (case-lambda
+      [(conn) (websocket-ping-operation conn #vu8() websocket-default-timeout-ms)]
+      [(conn payload)
+       (websocket-ping-operation conn payload websocket-default-timeout-ms)]
+      [(conn payload timeout-ms)
+       (pcheck ([websocket-connection? conn] [bytevector? payload] [fixnum? timeout-ms])
+         (check-timeout-ms 'websocket-ping-operation timeout-ms)
+         (ensure-connection-open 'websocket-ping-operation conn)
+         (let* ([initial-state
+                 (ensure-success
+                  'websocket-ping-operation
+                  (ffi-net-websocket-state (websocket-connection-handle conn)))]
+                [initial-pong-count (vector-ref initial-state 4)]
+                [deadline-ms (timeout->deadline-ms timeout-ms)]
+                [sent? #f])
+           (make-net-operation
+            'websocket-ping
+            (lambda ()
+              (when (fx<= (remaining-timeout-ms deadline-ms) 0)
+                (websocket-close conn 1001 "pong timeout")
+                (raise-net-error 'websocket-ping-operation 'websocket
+                                 "websocket pong timed out" conn))
+              (if (not sent?)
+                  (let ([answer (do-send 'websocket-ping-operation conn 'ping payload
+                                         #t websocket-no-timeout)])
+                    (if (net-would-block? answer)
+                        (net-operation-pending
+                         (list (make-poll-target (net-would-block-resource answer)
+                                                 (net-would-block-events answer)))
+                         deadline-ms)
+                        (begin
+                          (set! sent? #t)
+                          (net-operation-pending '() (current-monotonic-ms)))))
+                  (let ([state
+                         (ensure-success
+                          'websocket-ping-operation
+                          (ffi-net-websocket-state (websocket-connection-handle conn)))])
+                    (if (> (vector-ref state 4) initial-pong-count)
+                        (net-operation-completed #t)
+                        (let ([answer (recv-result
+                                       'websocket-ping-operation
+                                       (ffi-net-websocket-recv
+                                        (websocket-connection-handle conn)
+                                        1 websocket-no-timeout))])
+                          (cond
+                           [(net-would-block? answer)
+                            (net-operation-pending
+                             (list (make-poll-target
+                                    (net-would-block-resource answer)
+                                    (net-would-block-events answer)))
+                             deadline-ms)]
+                           [(websocket-message? answer)
+                            (websocket-connection-deferred-set!
+                             conn
+                             (append (websocket-connection-deferred conn) (list answer)))
+                            (net-operation-pending '() (current-monotonic-ms))]
+                           [else
+                            (net-operation-failed
+                             (make-net-error 'websocket-ping-operation 'websocket
+                                             "connection closed before pong" conn))]))))))
+            void)))]))
 
   #|proc:websocket-recv
 The `websocket-recv` procedure receives the next complete WebSocket message.
@@ -409,22 +804,28 @@ The `websocket-recv` procedure receives the next complete WebSocket message.
        (pcheck ([websocket-connection? conn] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
                (ensure-connection-open who conn)
-               (recv-result who
-                            (ffi-net-websocket-recv (websocket-connection-handle conn)
-                                                    0
-                                                    timeout-ms)))]))
+               (wait-for-websocket-result
+                who timeout-ms "websocket receive timed out"
+                (lambda () (websocket-recv/nonblocking conn))))]))
 
   #|proc:websocket-recv/nonblocking
-The `websocket-recv/nonblocking` procedure receives the next complete WebSocket message if one is ready, and returns `#f` otherwise.
+The `websocket-recv/nonblocking` procedure attempts to receive one complete WebSocket message.
+The `conn` parameter is an open WebSocket connection.
+The return value is a message, EOF, or a would-block value naming a service descriptor.
 |#
   (define-who websocket-recv/nonblocking
     (lambda (conn)
       (pcheck ([websocket-connection? conn])
               (ensure-connection-open who conn)
-              (recv-result who
-                           (ffi-net-websocket-recv (websocket-connection-handle conn)
-                                                   1
-                                                   websocket-no-timeout)))))
+              (let ([deferred (websocket-connection-deferred conn)])
+                (if (pair? deferred)
+                    (begin
+                      (websocket-connection-deferred-set! conn (cdr deferred))
+                      (car deferred))
+                    (recv-result who
+                                 (ffi-net-websocket-recv
+                                  (websocket-connection-handle conn)
+                                  1 websocket-no-timeout)))))))
 
   #|proc:websocket-next-message
 The `websocket-next-message` procedure is an alias of `websocket-recv`.
@@ -438,7 +839,8 @@ The `websocket-next-message` procedure is an alias of `websocket-recv`.
                (websocket-recv conn timeout-ms))]))
 
   #|proc:call-with-websocket
-The `call-with-websocket` procedure opens a WebSocket connection, passes it to `proc`, and closes it afterward.
+The `call-with-websocket` procedure opens a WebSocket connection, passes it to `proc`, and closes
+it afterward.
 |#
   (define-who call-with-websocket
     (case-lambda
@@ -447,6 +849,9 @@ The `call-with-websocket` procedure opens a WebSocket connection, passes it to `
       [(value protocol-or-timeout proc)
        (pcheck ([procedure? proc])
                (cond
+                [(websocket-options? protocol-or-timeout)
+                 (call-with-websocket value protocol-or-timeout
+                                      websocket-default-timeout-ms proc)]
                 [(string? protocol-or-timeout)
                  (call-with-websocket value
                                       protocol-or-timeout
@@ -460,10 +865,13 @@ The `call-with-websocket` procedure opens a WebSocket connection, passes it to `
                 [else
                  (errorf who "expected websocket protocol string or timeout fixnum, given ~s"
                          protocol-or-timeout)]))]
-      [(value protocol timeout-ms proc)
-       (pcheck ([string? protocol] [procedure? proc])
+      [(value protocol-or-options timeout-ms proc)
+       (pcheck ([procedure? proc])
                (check-timeout-ms who timeout-ms)
-               (let ([conn (websocket-connect value protocol timeout-ms)])
+               (unless (or (string? protocol-or-options)
+                           (websocket-options? protocol-or-options))
+                 (errorf who "expected websocket protocol string or options"))
+               (let ([conn (websocket-connect value protocol-or-options timeout-ms)])
                  (dynamic-wind
                    void
                    (lambda () (proc conn))

@@ -14,6 +14,7 @@ The `constant-time-subbytevector=?` procedure compares two bytevector slices in 
       (pcheck ([bytevector? bv1 bv2])
               (check-slice who (bytevector-length bv1) start1 stop1)
               (check-slice who (bytevector-length bv2) start2 stop2)
+              (ensure-openssl who)
               (not (fx= 0 (ffi-constant-time-eq bv1 start1 stop1 bv2 start2 stop2))))))
 
   #|proc:constant-time-bytevector=?

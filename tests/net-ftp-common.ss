@@ -11,6 +11,12 @@
 (define start-ftp-test-server
   (lambda ()
     (let ([root "/tmp/chezpp-net-ftp-root"])
+      (let ([connection-count-path (string-append root ".control-connections")])
+        (when (file-exists? connection-count-path)
+          (delete-file connection-count-path)))
+      (let ([command-log-path (string-append root ".commands")])
+        (when (file-exists? command-log-path)
+          (delete-file command-log-path)))
       (when (file-exists? root)
         (file-removetree root #f))
       (mkdirs (string-append root "/docs"))
@@ -20,7 +26,7 @@
       (write-bytevector-file (string-append root "/slow/wait.txt") (string->utf8 "slow file"))
       (let-values ([(to-stdin from-stdout from-stderr pid)
                     (open-process-ports
-                     (format "../newpp --script net-ftp-server-process.ss ~s" root)
+                     (format "../chez++ --script net-ftp-server-process.ss ~s" root)
                      (buffer-mode block)
                      (native-transcoder))])
         (let ([port
@@ -53,4 +59,21 @@
                                 stdout-stuff
                                 stderr-stuff)))
                     (when (file-exists? root)
-                      (file-removetree root #f)))))))))
+                      (file-removetree root #f))
+                    (let ([connection-count-path
+                           (string-append root ".control-connections")])
+                      (when (file-exists? connection-count-path)
+                        (delete-file connection-count-path))))))))))
+
+(define with-test-ftp-session
+  (lambda (proc)
+    (let-values ([(root port stop-server) (start-ftp-test-server)])
+      (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))])
+        (dynamic-wind
+          void
+          (lambda ()
+            (ftp-login! session "user" "pass")
+            (proc session))
+          (lambda ()
+            (ftp-close session)
+            (stop-server)))))))
