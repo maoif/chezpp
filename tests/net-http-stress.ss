@@ -90,5 +90,29 @@
                (net-operation-cancel! operation)
                (when (eq? 'cancelled (net-operation-state operation))
                  (set! passed (fx1+ passed)))))
-           (= passed 16))
+         (= passed 16))
          (lambda () (http-close client)))))
+
+(mat net-http2-repeated-cancellation-stress
+     ;; Error case: repeated H2 cancellation must terminate cancelled streams without affecting peers.
+     (call-with-h2-fixture
+      8
+      (lambda (port command)
+        (let ([client (http-open)] [passed 0])
+          (dynamic-wind
+            void
+            (lambda ()
+              (http-client-version-set! client 'h2)
+              (http-set-timeout! client 10000)
+              (do ([round 0 (fx1+ round)]) ((fx= round 4) (= passed 16))
+                (let ([operations
+                       (map (lambda (_) (http-send/nonblocking client
+                                           (make-http-request 'get
+                                             (format "http://127.0.0.1:~a/large" port)) #f))
+                            '(1 2 3 4))])
+                  (for-each (lambda (operation) (net-operation-cancel! operation)) operations)
+                  (for-each (lambda (operation)
+                              (when (eq? 'cancelled (net-operation-state operation))
+                                (set! passed (fx1+ passed))))
+                            operations))))
+            (lambda () (http-close client)))))))

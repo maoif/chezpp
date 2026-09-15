@@ -24,6 +24,10 @@ OBJS_TEST := $(SRCS_TEST:.ss=.so)
 TEST      ?= $(SRCS_TEST)
 TEST_OBJS := $(addsuffix .so,$(basename $(TEST)))
 
+HTTP_ERROR_SOAK_SECONDS ?= 300
+HTTP_ERROR_SOAK_TESTS := net-http net-lws-http2 net-lws-server
+HTTP_ERROR_SOAK_OBJS := $(addsuffix .so,$(HTTP_ERROR_SOAK_TESTS))
+
 lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
 	$(CC) -Wall -Wextra -O2 $< -o $@ -ldl
 
@@ -111,6 +115,50 @@ test-some: mat.so $(TEST_OBJS)
 	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
 	done; \
 	exit $$status
+
+.PHONY: test-http-error-soak
+test-http-error-soak: mat.so $(HTTP_ERROR_SOAK_OBJS)
+	@case "$(HTTP_ERROR_SOAK_SECONDS)" in \
+	  ''|*[!0-9]*) \
+	    printf '%s\n' "HTTP_ERROR_SOAK_SECONDS must be a positive integer" >&2; exit 2 ;; \
+	esac
+	@if [ "$(HTTP_ERROR_SOAK_SECONDS)" -le 0 ]; then \
+	  printf '%s\n' "HTTP_ERROR_SOAK_SECONDS must be a positive integer" >&2; exit 2; \
+	fi
+	@cleanup() { \
+	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
+	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
+	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
+	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
+	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
+	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
+	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
+	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
+	    /tmp/upload-root; \
+	}; \
+	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
+	@start=$$(date +%s); deadline=$$((start + $(HTTP_ERROR_SOAK_SECONDS))); round=0; \
+	while :; do \
+	  round=$$((round + 1)); \
+	  for base in $(HTTP_ERROR_SOAK_TESTS); do \
+	    stdout="$$base.stdout"; stderr="$$base.stderr"; \
+	    rm -f "$$stdout" "$$stderr"; \
+	    printf '%s\n' "== soak round $$round: $$base.so =="; \
+	    echo '(load "mat.so")(load "'"$$base"'.so")' | \
+	      ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	    code=$$?; \
+	    if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
+	    if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
+	    if [ $$code -ne 0 ] || grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then \
+	      exit 1; \
+	    fi; \
+	  done; \
+	  now=$$(date +%s); \
+	  if [ $$now -ge $$deadline ]; then \
+	    printf '%s\n' "completed $$round soak rounds in $$((now - start)) seconds"; \
+	    break; \
+	  fi; \
+	done
 
 .PHONY: test-cov
 test-cov: $(SRCS_TESTS)

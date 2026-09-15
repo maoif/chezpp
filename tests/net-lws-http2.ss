@@ -13,71 +13,7 @@
            (lws-capability? (vector-ref status 1) lws-cap-http2)
            (lws-capability? (vector-ref status 1) lws-cap-tls)))))
 
-(define call-with-h2-fixture
-  (lambda (maximum-streams procedure)
-    (let-values ([(input output errors pid)
-                  (open-process-ports
-                   (format "timeout 15s ./lws-http2-fixture 0 ~a" maximum-streams)
-                   (buffer-mode block) (native-transcoder))])
-      (dynamic-wind
-        void
-        (lambda ()
-          (let ([ready (read output)])
-            (unless (and (list? ready) (= 2 (length ready)) (eq? 'ready (car ready)))
-              (errorf 'call-with-h2-fixture "fixture did not become ready: ~s" ready))
-            (procedure (cadr ready)
-                       (lambda (command)
-                         (display command input) (newline input)
-                         (flush-output-port input)
-                         (if (eq? command 'stats) (read output) (void))))))
-        (lambda ()
-          (guard (ignored [else (void)])
-            (display "stop\n" input) (flush-output-port input))
-          (close-port input)
-          (let* ([remaining (read output)] [diagnostic (get-string-all errors)])
-            (close-port output) (close-port errors)
-            (unless (and (eof-object? remaining)
-                         (or (eof-object? diagnostic) (string=? "" diagnostic)))
-              (errorf 'call-with-h2-fixture "unexpected fixture output: ~s ~s"
-                      remaining diagnostic))))))))
-
-(define call-with-h2-tls-fixture
-  (lambda (maximum-streams procedure)
-    (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-san-certificate)
-    (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-san-private-key)
-    (let-values ([(input output errors pid)
-                  (open-process-ports
-                   (format "timeout 15s ./lws-http2-fixture 0 ~a /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem"
-                           maximum-streams)
-                   (buffer-mode block) (native-transcoder))])
-      (dynamic-wind
-        void
-        (lambda ()
-          (let ([ready (read output)])
-            (unless (and (list? ready) (= 2 (length ready)) (eq? 'ready (car ready)))
-              (errorf 'call-with-h2-tls-fixture "fixture did not become ready: ~s" ready))
-            (procedure (cadr ready)
-                       (lambda (command)
-                         (display command input) (newline input)
-                         (flush-output-port input)
-                         (if (eq? command 'stats) (read output) (void))))))
-        (lambda ()
-          (guard (ignored [else (void)])
-            (display "stop\n" input) (flush-output-port input))
-          (close-port input) (close-port output) (close-port errors))))))
-
-(define await-h2-streams
-  (lambda (operations command count)
-    (let loop ([remaining 500])
-      (for-each
-       (lambda (operation)
-         (when (eq? 'pending (net-operation-state operation)) (net-operation-step! operation)))
-       operations)
-      (let ([stats (command 'stats)])
-        (cond
-         [(and (list? stats) (= (list-ref stats 4) count)) stats]
-         [(fxzero? remaining) #f]
-       [else (milisleep 1) (loop (fx1- remaining))])))))
+(load "net-lws-fixture.ss")
 
 (define make-h2-tls-test-request
   (lambda (path port)
@@ -176,6 +112,73 @@
                      (= 262144 received))))
             (lambda () (http-close client)))))))
 
+(mat net-lws-http2-live-peer-settings-goaway
+     ;; Error case: LWS 4.5.8 rejects oversubscription with GOAWAY instead of queuing the excess.
+     (call-with-h2-fixture
+      2
+      (lambda (port command)
+        (let ([client (http-open)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (http-client-version-set! client 'h2)
+              (http-set-timeout! client 4000)
+              (let ([operations
+                      (map (lambda (index)
+                             (http-send/nonblocking client
+                               (make-http-request 'get
+                                 (format "http://127.0.0.1:~a/hold/~a" port index))))
+                           (iota 6))])
+                (let drain ([remaining 1500])
+                  (for-each (lambda (operation)
+                              (when (eq? 'pending (net-operation-state operation))
+                                (net-operation-step! operation))) (reverse operations))
+                  (cond
+                   [(for-all (lambda (operation)
+                               (not (eq? 'pending (net-operation-state operation)))) operations)
+                    (let ([stats (command 'stats)])
+                      (and (= 1 (cadr stats)) (positive? (list-ref stats 6))
+                           (positive? (list-ref stats 7))
+                           (<= (list-ref stats 3) 2)
+                           (for-all (lambda (operation)
+                                      (and (eq? 'failed (net-operation-state operation))
+                                           (net-error? (net-operation-condition operation))
+                                           (not (eq? 'timeout
+                                                      (net-error-kind
+                                                       (net-operation-condition operation))))))
+                                    operations)))]
+                   [(fxzero? remaining) #f]
+                   [else (milisleep 1) (drain (fx1- remaining))]))))
+            (lambda () (http-close client)))))))
+
+(mat net-lws-http2-live-network-close
+     ;; Error case: closing a physical H2 connection terminates every outstanding child.
+     (call-with-h2-fixture
+      4
+      (lambda (port command)
+        (let ([client (http-open)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (http-client-version-set! client 'h2)
+              (http-set-timeout! client 1500)
+              (let ([operations
+                     (map (lambda (index)
+                            (http-send/nonblocking client
+                              (make-http-request 'get (format "http://127.0.0.1:~a/hold" port))))
+                          (iota 3))])
+                (let ([started (await-h2-streams operations command 3)])
+                  (command 'close)
+                  (and started
+                       (for-all
+                        (lambda (operation)
+                          (guard (condition
+                                  [else (and (net-error? condition)
+                                             (not (eq? 'timeout (net-error-kind condition))))])
+                            (net-operation-wait operation) #f))
+                        operations)))))
+            (lambda () (http-close client)))))))
+
 (mat net-lws-http2-live-tls-alpn
      ;; A trusted localhost certificate must negotiate H2 through the LWS ALPN path.
      (if (not run-live-h2-tls-tests?)
@@ -201,3 +204,38 @@
                 (lambda ()
                   (when client (lws-http2-client-close! client))
                   (close-tls-context tls))))))))
+
+(mat net-http-live-tls-http1-policy
+     (call-with-h2-tls-fixture
+      4
+      (lambda (port command)
+        (let ([tls (make-tls-context 'client)] [client #f])
+          (dynamic-wind
+            void
+            (lambda ()
+              (tls-context-load-ca-file! tls "/tmp/chezpp-net-test-cert.pem")
+              (tls-context-set-verify! tls #t)
+              (set! client (http-open tls))
+              (http-client-version-set! client 'http/1.1)
+              (http-set-timeout! client 2000)
+              (let ([response (http-get client (format "https://127.0.0.1:~a/" port))])
+                (and (= 200 (http-response-status response))
+                     (eq? 'h1 (http-response-version response)))))
+            (lambda () (when client (http-close client)) (close-tls-context tls)))))))
+
+(mat net-http-live-tls-untrusted
+     ;; Error case: an untrusted certificate must fail through the public HTTPS API.
+     (call-with-h2-tls-fixture
+      4
+      (lambda (port command)
+        (let ([tls (make-tls-context 'client)] [client #f])
+          (dynamic-wind
+            void
+            (lambda ()
+              (tls-context-set-verify! tls #t)
+              (set! client (http-open tls))
+              (http-client-version-set! client 'http/1.1)
+              (http-set-timeout! client 2000)
+              (guard (condition [else (net-error? condition)])
+                (http-get client (format "https://127.0.0.1:~a/" port)) #f))
+            (lambda () (when client (http-close client)) (close-tls-context tls)))))))

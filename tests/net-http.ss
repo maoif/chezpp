@@ -99,6 +99,257 @@
       (thunk)
       #f)))
 
+(define call-with-http1-response
+  (lambda (wire procedure)
+    (let-values ([(port thread)
+                  (start-http1-fixture
+                   (lambda (input output)
+                     (read-http-request-head input)
+                     (put-bytevector output (string->utf8 wire))
+                     (flush-output-port output)))])
+      (let ([client (http-open)])
+        (dynamic-wind
+          void
+          (lambda ()
+            (http-set-timeout! client 1500)
+            (procedure client (format "http://127.0.0.1:~a/live" port)))
+          (lambda () (http-close client) (thread-join thread)))))))
+
+(mat net-http-live-eof-delimited
+     (call-with-http1-response
+      "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\neof-body"
+      (lambda (client uri)
+        (let ([response (http-get client uri)])
+          (and (eq? 'h1 (http-response-version response))
+               (equal? #vu8(101 111 102 45 98 111 100 121) (http-response-body response)))))))
+
+(mat net-http-live-truncated-body
+     ;; Error case: EOF before Content-Length must not produce a successful response.
+     (call-with-http1-response
+      "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort"
+      (lambda (client uri)
+        (guard (condition [else #t]) (http-get client uri) #f))))
+
+(mat net-http-live-unsupported-trailers
+     ;; Error case: LWS 4.5.8 rejects trailer fields; Chezpp must not reparse failed wire data.
+     (call-with-http1-response
+      "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\nX-End: yes\r\n\r\n"
+      (lambda (client uri)
+        (guard (condition [else (net-error? condition)]) (http-get client uri) #f))))
+
+(mat net-http-live-sink-failure
+     ;; Error case: preserve the consumer condition even if its finalizer also raises.
+     (call-with-http1-response
+      "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata"
+      (lambda (client uri)
+        (let ([failure (condition (make-message-condition "consumer failed"))]
+              [finished 0])
+          (let ([operation
+                 (http-send/nonblocking client (make-http-request 'get uri)
+                   (make-http-body-sink
+                    (lambda (bytes start count) (raise failure))
+                    (lambda () (set! finished (fx1+ finished))
+                      (errorf 'finisher "secondary failure"))))])
+            (and (guard (condition [else (eq? failure condition)])
+                   (net-operation-wait operation) #f)
+                 (begin (http-close client) #t)
+                 (= finished 1)))))))
+
+(mat net-http-live-source-failure
+     ;; Error case: producer failure closes its source once and survives a failing closer.
+     (let ([closed 0] [failure (condition (make-message-condition "producer failed"))])
+       (let-values ([(port thread)
+                     (start-http1-fixture
+                      (lambda (input output)
+                        (read-http-request-head input)
+                        (get-bytevector-all input)))])
+         (let ([client (http-open)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (http-set-timeout! client 1000)
+               (and (guard (condition [else (eq? failure condition)])
+                      (http-send client
+                       (make-http-request 'post (format "http://127.0.0.1:~a/source" port)
+                         '() (make-http-body-source
+                              (lambda (maximum) (raise failure)) 8
+                              (lambda () (set! closed (fx1+ closed))
+                                (errorf 'closer "secondary failure")))))
+                      #f)
+                    (= closed 1)))
+             (lambda () (http-close client) (thread-join thread)))))))
+
+(mat net-http-live-cancel-finalizers
+     ;; Error case: cancellation before body production still closes the source and sink once.
+     (let ([closed 0] [finished 0] [client (http-open)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([operation
+                  (http-send/nonblocking client
+                    (make-http-request 'post "http://127.0.0.1:1/cancel" '()
+                      (make-http-body-source (lambda (maximum) (eof-object)) #f
+                                            (lambda () (set! closed (fx1+ closed)))))
+                    (make-http-body-sink void (lambda () (set! finished (fx1+ finished)))))])
+             (net-operation-cancel! operation)
+             (http-cancel-pending! client)
+             (http-close client)
+             (and (eq? 'cancelled (net-operation-state operation))
+                  (= closed 1) (= finished 1))))
+         (lambda () (http-close client)))))
+
+(mat net-http-live-download
+     (call-with-http1-response
+      "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ndownload"
+      (lambda (client uri)
+        (let ([path (format "/tmp/chezpp-http-download-~a" (get-process-id))])
+          (dynamic-wind
+            void
+            (lambda ()
+              (let ([response (http-download client uri path)])
+                (and (= 200 (http-response-status response))
+                     (not (http-response-body response))
+                     (equal? (string->utf8 "download") (read-u8vec path)))))
+            (lambda () (when (file-exists? path) (delete-file path))))))))
+
+(mat net-http-live-header-readiness
+     (call-with-http1-response
+      "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx"
+      (lambda (unused uri)
+        (let ([client (make-lws-http1-client 64 65536 64)] [ready 0])
+          (dynamic-wind
+            void
+            (lambda ()
+              (let* ([parsed (string->uri uri)]
+                     [request
+                      (make-normalized-http-request "GET" parsed 'http "127.0.0.1"
+                        (uri-port parsed) #f "/ready" '() #f #f
+                        (make-http-request-policy '() #f #f #f 0 'http/1.1 #f #f 0 #f))]
+                     [response (net-operation-wait
+                                (lws-http1-request/nonblocking client request #f
+                                  (lambda () (set! ready (fx1+ ready)))))])
+                (and (= ready 1) (= 200 (transport-response-status response)))))
+            (lambda () (lws-http1-client-close! client)))))))
+
+(mat net-http-live-redirect-credentials-and-sink
+     ;; Cross-origin redirects must strip credentials and stream only the final response body.
+     (let ([received #f] [chunks '()] [finished 0])
+       (let-values ([(target-port target-thread)
+                     (start-http1-fixture
+                      (lambda (input output)
+                        (let-values ([(line headers) (read-http-request-head input)])
+                          (set! received headers))
+                        (put-bytevector output
+                          (string->utf8 "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nfinal"))
+                        (flush-output-port output)))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (call-with-http1-response
+              (format "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:~a/final\r\nContent-Length: 4\r\nConnection: close\r\n\r\nskip"
+                      target-port)
+              (lambda (client uri)
+                (http-client-auth-set! client 'bearer "private-token")
+                (http-set-header! client "Cookie" "secret=1")
+                (let ([response
+                       (net-operation-wait
+                        (http-send/nonblocking client
+                          (make-http-request 'get uri '(("Authorization" . "Basic private")))
+                          (make-http-body-sink
+                           (lambda (bytes start count)
+                             (set! chunks (cons (bytevector-copy bytes) chunks)))
+                           (lambda () (set! finished (fx1+ finished))))))])
+                  (and (= 200 (http-response-status response))
+                       (= finished 1)
+                       (equal? (string->utf8 "final")
+                               (concatenate-bytevectors (reverse chunks)))
+                       (not (fixture-header-ref received "Authorization" #f))
+                       (not (fixture-header-ref received "Cookie" #f)))))))
+           (lambda () (thread-join target-thread))))))
+
+(mat net-http-live-redirect-deadline
+     ;; Error case: a redirect must retain the original deadline rather than start a new one.
+     (let-values ([(target-port target-thread)
+                   (start-http1-fixture
+                    (lambda (input output)
+                      (read-http-request-head input)
+                      (milisleep 250)))])
+       (dynamic-wind
+         void
+         (lambda ()
+           (call-with-http1-response
+            (format "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:~a/slow\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    target-port)
+            (lambda (client uri)
+              (http-set-timeout! client 150)
+              (let ([operation (http-send/nonblocking client (make-http-request 'get uri))])
+                (net-operation-step! operation)
+                (let ([deadline (net-operation-deadline-ms operation)])
+                  (guard (condition
+                          [else (and (net-error? condition)
+                                     (eq? 'timeout (net-error-kind condition)))])
+                    (net-operation-wait operation)
+                    #f))))))
+         (lambda () (thread-join target-thread)))))
+
+(mat net-http-live-proxy-transition
+     ;; An active direct request keeps its transport when later requests switch to a proxy.
+     (let ([proxy-line #f])
+       (let-values ([(proxy-port proxy-thread)
+                     (start-http1-fixture
+                      (lambda (input output)
+                        (let-values ([(line headers) (read-http-request-head input)])
+                          (set! proxy-line line))
+                        (put-bytevector output
+                          (string->utf8 "HTTP/1.1 200 Connection established\r\n\r\n"))
+                        (flush-output-port output)
+                        (read-http-request-head input)
+                        (put-bytevector output
+                          (string->utf8 "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nproxy"))
+                        (flush-output-port output)))])
+         (dynamic-wind
+           void
+           (lambda ()
+             (call-with-http1-response
+              "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect"
+              (lambda (client uri)
+                (let ([direct (http-send/nonblocking client (make-http-request 'get uri))])
+                  (http-client-proxy-set! client
+                    (make-http-proxy (format "http://127.0.0.1:~a" proxy-port)))
+                  (let* ([through-proxy (http-get client "http://example.invalid/proxy")]
+                         [original (net-operation-wait direct)])
+                    (and (equal? (string->utf8 "direct") (http-response-body original))
+                         (equal? (string->utf8 "proxy") (http-response-body through-proxy))
+                         (string-contains? proxy-line "CONNECT example.invalid:80")))))))
+           (lambda () (thread-join proxy-thread))))))
+
+(mat net-http-live-redirect-limit
+     ;; Error case: an endless redirect chain fails explicitly and finishes its sink once.
+     (let* ([port (+ 40000 (modulo (get-process-id) 10000))]
+            [server (http-listen "127.0.0.1" port)] [client (http-open)]
+            [worker #f] [finished 0])
+       (dynamic-wind
+         void
+         (lambda ()
+           (http-register-handler! server "/loop"
+             (lambda (request)
+               (make-http-response 302 "Found" '(("Location" . "/loop")) "redirect")))
+           (set! worker (fork-thread (lambda ()
+                                      (guard (condition [else (void)])
+                                        (http-serve-loop server)))))
+           (http-set-timeout! client 3000)
+           (and (guard (condition
+                        [else (and (net-error? condition)
+                                   (eq? 'redirect-limit (net-error-kind condition)))])
+                  (net-operation-wait
+                   (http-send/nonblocking client
+                     (make-http-request 'get (format "http://127.0.0.1:~a/loop" port))
+                     (make-http-body-sink void (lambda () (set! finished (fx1+ finished))))))
+                  #f)
+                (= finished 1)))
+         (lambda () (http-close client) (http-server-close server)
+           (when worker (thread-join worker))))))
+
 (define make-h2-test-request
   (case-lambda
     [(path) (make-h2-test-request path #f)]
@@ -214,7 +465,7 @@
                          (milisleep 10))
                        '("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n"
                          "Connection: close\r\n\r\n"
-                         "4\r\nWiki\r\n5\r\npedia\r\n0\r\nX-End: yes\r\n\r\n"))))])
+                         "4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n"))))])
          (let ([client (http-open)])
          (dynamic-wind void
            (lambda ()

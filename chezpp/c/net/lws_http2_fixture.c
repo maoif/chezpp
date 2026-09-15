@@ -37,8 +37,17 @@ static struct lws *networks[64];
 static unsigned network_ids[64];
 static fixture_stream *streams[64];
 static unsigned accepts, active, peak, requests;
+static unsigned goaways, admission_rejections;
 static size_t received_bytes;
 static int running = 1;
+
+/* LWS exposes GOAWAY scheduling through its public log callback, not a frame callback.
+ * This observes the LWS action without encoding or parsing any HTTP/2 frames here. */
+static void fixture_log(int level, const char *line) {
+  (void)level;
+  if (strstr(line, "lws_h2_goaway:") != NULL) goaways++;
+  if (strstr(line, "Another stream not allowed") != NULL) admission_rejections++;
+}
 
 static unsigned network_id(struct lws *wsi) {
   struct lws *network = fn_lws_get_network_wsi(wsi);
@@ -147,7 +156,8 @@ static int callback(struct lws *wsi, enum lws_callback_reasons reason,
 static void command(const char *line) {
   size_t i;
   if (strcmp(line, "stats") == 0) {
-    printf("(stats %u %u %u %u %zu)\n", accepts, active, peak, requests, received_bytes);
+    printf("(stats %u %u %u %u %zu %u %u)\n", accepts, active, peak, requests, received_bytes,
+           goaways, admission_rejections);
     fflush(stdout);
   } else if (strcmp(line, "release") == 0) {
     for (i = 0; i < 64; i++) {
@@ -196,7 +206,7 @@ int main(int argc, char **argv) {
 } while (0);
   LWS_FUNCTIONS(LOAD)
 #undef LOAD
-  fn_lws_set_log_level(0, NULL);
+  fn_lws_set_log_level(LLL_ERR | LLL_WARN | LLL_NOTICE | LLL_INFO, fixture_log);
   memset(&info, 0, sizeof(info));
   info.port = port;
   info.iface = "127.0.0.1";

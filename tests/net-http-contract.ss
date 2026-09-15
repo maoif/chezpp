@@ -7,6 +7,9 @@
 (define net-ffi-environment
   (environment '(chezpp net ffi)))
 
+(define net-private-environment
+  (environment '(chezpp net private)))
+
 (define retained-http-exports
   '(http-request? make-http-request http-request-method http-request-uri http-request-headers
     http-request-body http-response? make-http-response http-response-status http-response-reason
@@ -110,6 +113,15 @@
      (guard (condition [else #t])
        (eval 'ffi-net-http2-open net-ffi-environment)
        #f))
+
+(mat net-http-obsolete-private-hooks-absent
+     ;; Error case: old HTTP/2 adapter test hooks must not remain in the private net API.
+     (and (guard (condition [else #t])
+            (eval '%http2-transport-read-hook net-private-environment)
+            #f)
+          (guard (condition [else #t])
+            (eval '%http2-event-hook net-private-environment)
+            #f)))
 
 (mat net-http-version-policy-contract
      (let ([client (http-open)])

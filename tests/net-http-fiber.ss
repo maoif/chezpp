@@ -2,6 +2,9 @@
         (chezpp concurrency fiber)
         (chezpp net operation))
 
+(load "net-common.ss")
+(load "net-lws-fixture.ss")
+
 (mat net-operation-fiber-event-completes
      (eq? 'done
           (run-fibers
@@ -180,3 +183,89 @@
              (and (eq? 'h1 (http-response-version response))
                   (equal? "fiber-ok" (utf8->string (http-response-body response))))))
          (lambda () (http-close client) (http-server-close server)))))
+
+(mat net-operation-fiber-live-mixed-stress
+     ;; Reuse the clients across scheduler lifetimes while both protocols complete concurrently.
+     (call-with-h2-tls-fixture
+      16
+      (lambda (port command)
+        (let* ([tls (make-tls-context 'client)]
+               [http1 (http-open tls)] [http2 (http-open tls)] [high-water #f])
+          (dynamic-wind
+            void
+            (lambda ()
+              (tls-context-load-ca-file! tls "/tmp/chezpp-net-test-cert.pem")
+              (tls-context-set-verify! tls #t)
+              (http-client-version-set! http1 'http/1.1)
+              (http-client-version-set! http2 'h2)
+              (http-set-timeout! http1 2000)
+              (http-set-timeout! http2 2000)
+              (for-all
+               (lambda (round)
+                 (and
+                  (run-fibers
+                   (lambda ()
+                     (let ([results (make-channel)])
+                       (for-each
+                        (lambda (index)
+                          (spawn-fiber
+                           (lambda ()
+                             (channel-put! results
+                               (guard (condition [else #f])
+                                 (let ([response
+                                        (http-get (if (even? index) http1 http2)
+                                          (format "https://127.0.0.1:~a/" port))])
+                                   (and (= 200 (http-response-status response))
+                                        (eq? (if (even? index) 'h1 'h2)
+                                             (http-response-version response))
+                                        (equal? (make-bytevector 10 120)
+                                                (http-response-body response)))))))))
+                        (iota 8))
+                       (for-all (lambda (_) (channel-get results)) (iota 8)))))
+                  (let ([metrics (net-operation-event-pool-metrics)])
+                    (unless high-water (set! high-water (vector-ref metrics 2)))
+                    (and (fxzero? (vector-ref metrics 0))
+                         (fxzero? (vector-ref metrics 1))
+                         (fx<= (vector-ref metrics 2) 8)))))
+               (iota 8)))
+            (lambda () (http-close http1) (http-close http2) (close-tls-context tls)))))))
+
+(mat net-operation-fiber-live-cancel-timeout-close
+     ;; Error cases: cancel, deadline expiry, and client shutdown must release live H2 waiters.
+     (call-with-h2-fixture
+      8
+      (lambda (port command)
+        (for-all
+         (lambda (mode)
+           (let ([client (http-open)])
+             (dynamic-wind
+               void
+               (lambda ()
+                 (http-client-version-set! client 'h2)
+                 (http-set-timeout! client (if (eq? mode 'timeout) 100 1500))
+                 (let* ([operation (http-send/nonblocking client
+                                     (make-http-request 'get
+                                       (format "http://127.0.0.1:~a/hold" port)))]
+                        [result
+                         (run-fibers
+                          (lambda ()
+                            (let ([results (make-channel)])
+                              (spawn-fiber
+                               (lambda ()
+                                 (channel-put! results
+                                   (guard (condition [else #t])
+                                     (net-operation-wait operation) #f))))
+                              (let wait ([remaining 10000])
+                                (when (and (positive? remaining)
+                                           (fxzero? (vector-ref (net-operation-event-pool-metrics) 1)))
+                                  (fiber-yield) (wait (fx1- remaining))))
+                              (case mode
+                                [(cancel) (net-operation-cancel! operation)]
+                                [(close) (http-close client)])
+                              (channel-get results))))])
+                   (and result
+                        (let ([metrics (net-operation-event-pool-metrics)])
+                          (and (fxzero? (vector-ref metrics 0))
+                               (fxzero? (vector-ref metrics 1)))))))
+               (lambda () (http-close client)))))
+         '(cancel timeout close)))))
