@@ -53,6 +53,7 @@
             (immutable deadline-ms h2-stream-deadline-ms)
             (mutable request h2-stream-request h2-stream-request-set!)
             (mutable response-sink h2-stream-response-sink h2-stream-response-sink-set!)
+            (mutable redirect-body? h2-stream-redirect-body? h2-stream-redirect-body?-set!)
             (mutable response-finish h2-stream-response-finish
                      h2-stream-response-finish-set!)
             (mutable body-source h2-stream-body-source h2-stream-body-source-set!)
@@ -190,7 +191,9 @@
       (let ([sink (h2-stream-response-sink stream)]
             [count (bytevector-length payload)])
         (if sink
-            (sink payload 0 count)
+            (unless ((h2-stream-redirect-body? stream)
+                     (h2-stream-status stream) (h2-stream-headers stream))
+              (sink payload 0 count))
             (begin
               (h2-stream-body-parts-set!
                stream (cons payload (h2-stream-body-parts stream)))
@@ -461,6 +464,8 @@ record after LWS observes HTTP/2.
                  client origin (h2-origin-connection-id origin) stream-id generation
                  (request-deadline request) request
                  (and response-sink (vector-ref response-sink 0))
+                 (if (and response-sink (fx> (vector-length response-sink) 2))
+                     (vector-ref response-sink 2) (lambda (s h) #f))
                  (if response-sink (vector-ref response-sink 1) void)
                  (normalized-http-request-body-factory request)
                  #f #f '() #f '() 0 '() #f #f #f #f #f #f #f)]

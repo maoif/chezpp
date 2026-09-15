@@ -284,10 +284,11 @@
                           (reactor-operation-state-lifecycle-set! state 'failed)
                           (reactor-operation-state-failure-set!
                            state
-                           (make-network-condition
-                            'lws-reactor tag
+                           (make-net-error
+                            'lws-reactor tag (format "HTTP stream ~a" tag)
                             (list (vector-ref event 2) (vector-ref event 3)
-                                  (vector-ref event 5))))))
+                                  (vector-ref event 4) (vector-ref event 5)
+                                  (vector-ref (vector-ref event 7) 3))))))
                     (set! procedure*
                           (release-operation-waiters-locked! reactor state))))))))
         (for-each (lambda (procedure) (procedure operation)) procedure*)

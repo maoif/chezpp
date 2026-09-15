@@ -81,6 +81,7 @@ struct lws_http_stream {
   unsigned char *headers;
   unsigned char *terminal_payload;
   size_t outbound_length;
+  size_t submitted_body_length;
   size_t headers_length;
   size_t terminal_payload_length;
   size_t pending_body_bytes;
@@ -99,6 +100,8 @@ struct lws_http_stream {
   int failure_pending;
   int failure_status;
   int server_stream;
+  int server_request_complete;
+  size_t server_body_remaining;
   int response_status;
   int response_headers_sent;
   int h2;
@@ -180,6 +183,7 @@ struct lws_http_context {
   size_t body_byte_limit;
   size_t live_handle_count;
   int tls_verify_peer;
+  uintptr_t server_tls_context_handle;
   int initializing;
   int closing;
 };

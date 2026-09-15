@@ -38,9 +38,7 @@
           ffi-would-block-write?
           ffi-would-block-event
           ffi-would-block-events
-          ffi-error-message
-          %http2-transport-read-hook
-          %http2-event-hook)
+          ffi-error-message)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp net ffi)
@@ -149,12 +147,6 @@
     (lambda (value)
       (and (ffi-error? value)
            (vector-ref value 1))))
-
-  ;; Internal test seam for deterministic transport-read readiness regressions.
-  (define %http2-transport-read-hook (make-parameter #f))
-
-  ;; Internal test seam for deterministic scheduler event-processing regressions.
-  (define %http2-event-hook (make-parameter #f))
 
   ;; Socket address result: #(family host port path). Family is inet, inet6, or unix. Host and
   ;; path are strings or #f; port is an integer in [0, 65535] or #f. Strings are Scheme-owned.

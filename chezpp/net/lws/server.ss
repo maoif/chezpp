@@ -11,6 +11,7 @@
           lws-http-request-has-body?
           lws-http-request-read-body
           lws-http-request-write-response!
+          lws-http-request-wait-response!
           lws-http-request-close!)
   (import (chezpp chez)
           (chezpp utils)
@@ -58,6 +59,17 @@ An accepted logical HTTP request identified by connection, stream, and generatio
                                      (fxpositive? (vector-ref event 5))
                                      #f)))))
 
+  (define take-pending-event!
+    (lambda (server predicate)
+      (with-mutex (lws-http-server-mutex server)
+        (let loop ([before '()] [after (lws-http-server-pending-events server)])
+          (cond
+           [(null? after) #f]
+           [(predicate (car after))
+            (lws-http-server-pending-events-set! server (append (reverse before) (cdr after)))
+            (car after)]
+           [else (loop (cons (car after) before) (cdr after))])))))
+
   #|proc:make-lws-http-server
 The `make-lws-http-server` procedure creates a listening server. `interface-name` and `port`
 select its address, while `tls-context-handle` is zero or a native TLS context handle. It returns
@@ -92,8 +104,13 @@ or `#f` when none is ready.
       (pcheck ([lws-http-server? server])
         (and (not (lws-http-server-closed? server))
              (let loop ()
-               (let ([event (lws-reactor-server-request-dequeue!
-                             (lws-http-server-reactor server))])
+               (let ([event (or (take-pending-event!
+                                server
+                                (lambda (event)
+                                  (and (eq? (vector-ref event 0) 'headers)
+                                       (fx>= (vector-ref event 5) 0))))
+                               (lws-reactor-server-request-dequeue!
+                                (lws-http-server-reactor server)))])
                  (and event
                       (or (event->request server event)
                           (begin
@@ -145,16 +162,7 @@ The optional `headers` alist carries response header string pairs on the first c
   (define next-request-event
     (lambda (request)
       (let* ([server (lws-http-request-server request)]
-             [saved
-              (with-mutex (lws-http-server-mutex server)
-                (let loop ([before '()] [after (lws-http-server-pending-events server)])
-                  (cond
-                   [(null? after) #f]
-                   [(matching-event? request (car after))
-                    (lws-http-server-pending-events-set!
-                     server (append (reverse before) (cdr after)))
-                    (car after)]
-                   [else (loop (cons (car after) before) (cdr after))])))])
+             [saved (take-pending-event! server (lambda (event) (matching-event? request event)))])
         (or saved
             (let loop ()
               (let ([event (lws-reactor-server-request-dequeue!
@@ -167,6 +175,25 @@ The optional `headers` alist carries response header string pairs on the first c
                     (lws-http-server-pending-events-set!
                      server (append (lws-http-server-pending-events server) (list event))))
                   (loop)])))))))
+
+  #|proc:lws-http-request-wait-response!
+The `lws-http-request-wait-response!` procedure waits for the queued response chunk of `request`
+to be written. It returns `#t`, or raises an error when the request or server closes first.
+|#
+  (define lws-http-request-wait-response!
+    (lambda (request)
+      (pcheck ([lws-http-request? request])
+        (let loop ()
+          (when (or (lws-http-request-closed? request)
+                    (lws-http-server-closed? (lws-http-request-server request)))
+            (errorf 'lws-http-request-wait-response! "request or server is closed"))
+          (let ([event (next-request-event request)])
+            (cond
+             [(not event) ($sleep (make-time 'time-duration 1000000 0)) (loop)]
+             [(memq (vector-ref event 0) '(writable complete)) #t]
+             [(memq (vector-ref event 0) '(closed failed reset goaway))
+              (errorf 'lws-http-request-wait-response! "response stream terminated")]
+             [else (loop)]))))))
 
   #|proc:lws-http-request-read-body
 The `lws-http-request-read-body` procedure waits for all bounded body chunks of logical `request`,
@@ -186,6 +213,8 @@ acknowledges each chunk to resume LWS receive flow, and returns their concatenat
              [(not event)
               ($sleep (make-time 'time-duration 1000000 0))
               (loop chunk* length)]
+             [(memq (vector-ref event 0) '(closed failed reset goaway))
+              (errorf 'lws-http-request-read-body "request stream terminated before body completed")]
              [(eq? (vector-ref event 0) 'readable)
               (let ([chunk (vector-ref event 6)])
                 (lws-reactor-consume-body!

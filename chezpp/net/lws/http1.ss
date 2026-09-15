@@ -6,6 +6,7 @@
           lws-http1-client-pool-metrics)
   (import (chezpp chez)
           (chezpp utils)
+          (only (chezpp concurrency) abox abox-add1&get!)
           (chezpp net errors)
           (chezpp net operation)
           (chezpp net poll)
@@ -17,7 +18,7 @@
     (sealed #t)
     (opaque #t)
     (fields (immutable reactor lws-http1-client-reactor)
-            (mutable next-id lws-http1-client-next-id lws-http1-client-next-id-set!)
+            (immutable next-id lws-http1-client-next-id)
             (mutable pool lws-http1-client-pool lws-http1-client-pool-set!)
             (mutable active lws-http1-client-active lws-http1-client-active-set!)
             (mutable max-active lws-http1-client-max-active lws-http1-client-max-active-set!)
@@ -34,6 +35,7 @@
             (immutable operation lws-http1-state-operation)
             (immutable request lws-http1-state-request)
             (immutable response-sink lws-http1-state-response-sink)
+            (immutable redirect-body? lws-http1-state-redirect-body?)
             (immutable finish lws-http1-state-finish)
             (immutable ready lws-http1-state-ready)
             (immutable connection-id lws-http1-state-connection-id)
@@ -125,7 +127,7 @@
             (lws-http1-client-pool-set! client (reverse kept))
             (loop (cdr rest) (fx1+ count) (cons (car rest) kept))))))
 
-  (define next-generation 0)
+  (define next-generation (abox 0))
 
   (define current-time-ms
     (lambda ()
@@ -163,7 +165,7 @@ The return value is an internal transport client.
          (let ([reactor (make-lws-reactor event-capacity payload-capacity command-capacity
                                           tls-context-handle proxy-address proxy-port)])
            (lws-reactor-start! reactor)
-           (%make-lws-http1-client reactor 0 '() 0 max-active max-idle idle-timeout-ms '() #f)))]))
+           (%make-lws-http1-client reactor (abox 0) '() 0 max-active max-idle idle-timeout-ms '() #f)))]))
 
   (define decode-event-headers
     (lambda (state bytes)
@@ -174,7 +176,9 @@ The return value is an internal transport client.
       (let ([count (bytevector-length bytes)]
             [sink (lws-http1-state-response-sink state)])
         (if sink
-            (sink bytes 0 count)
+            (unless ((lws-http1-state-redirect-body? state)
+                     (lws-http1-state-status state) (lws-http1-state-headers state))
+              (sink bytes 0 count))
             (begin
               (lws-http1-state-body-parts-set!
                state (cons bytes (lws-http1-state-body-parts state)))
@@ -223,6 +227,9 @@ The return value is an internal transport client.
       (let* ([reactor (lws-http1-client-reactor (lws-http1-state-client state))]
              [operation (lws-http1-state-operation state)]
              [events (lws-reactor-drain-operation-events! reactor operation)])
+        (when (and (getenv "CHEZPP_LWS_TRACE") (pair? events))
+          (fprintf (current-error-port) "events ~a: ~s\n" (lws-http1-state-stream-id state)
+                   (map (lambda (event) (vector-ref event 0)) events)))
         (let loop ([rest events])
           (unless (or (null? rest) (lws-http1-state-protocol-failure state))
             (let* ([event (car rest)]
@@ -236,11 +243,12 @@ The return value is an internal transport client.
                      state (lws-transport-decode-headers payload))
                     (begin
                       (lws-http1-state-status-set! state (vector-ref event 5))
-                      (decode-event-headers state payload)))]
+                      (decode-event-headers state payload)
+                      (let ([ready (lws-http1-state-ready state)])
+                        (when ready (ready)))))]
                [(and (eq? tag 'connected) (= (vector-ref event 5) -2000))
                 (lws-http1-state-observed-version-set! state 'h2)
-                (let ([ready (lws-http1-state-ready state)])
-                  (when ready (ready)))]
+                (void)]
                [(eq? tag 'connected)
                 (let* ([metadata (vector-ref event 7)]
                        [protocol (and (vector? metadata) (vector-ref metadata 0))])
@@ -303,7 +311,8 @@ The return value is an internal transport client.
   #|proc:lws-http1-request/nonblocking
 The `lws-http1-request/nonblocking` procedure starts normalized request record `request` on
 `client`. `response-sink` is `#f` or a write/finish procedure vector. The optional `ready`
-procedure is called when an HTTP/2 connection has completed stream migration. The return value is
+procedure has signature `() -> unspecified` and runs after final response headers are available.
+The return value is
 a `net-operation` completing with a transport response record.
 |#
   (define-who lws-http1-request/nonblocking
@@ -328,21 +337,21 @@ a `net-operation` completing with a transport response record.
                ;; LWS 4.5.8 closes completed client HTTP transactions; no supported API restarts
                ;; a transaction on an idle WSI, so every HTTP/1 request gets a new connection.
                [reused-id #f]
-               [selected-id (fx1+ (lws-http1-client-next-id client))]
+               [selected-id (abox-add1&get! (lws-http1-client-next-id client))]
                [connection-id selected-id]
                [stream-id selected-id]
-               [generation (fx1+ next-generation)]
+               [generation (abox-add1&get! next-generation)]
                [deadline-ms (request-field request 9)]
                [reactor (lws-http1-client-reactor client)]
                [inner (make-lws-reactor-operation reactor 'http1 connection-id stream-id
                                                    generation deadline-ms #t)]
                [state #f]
                [operation #f])
-          (set! next-generation generation)
-          (unless reused-id (lws-http1-client-next-id-set! client connection-id))
           (set! state
                 (%make-lws-http1-state client inner request
                                         (and response-sink (vector-ref response-sink 0))
+                                        (if (and response-sink (fx> (vector-length response-sink) 2))
+                                            (vector-ref response-sink 2) (lambda (s h) #f))
                                         (if response-sink (vector-ref response-sink 1) void)
                                         ready
                                         connection-id stream-id generation deadline-ms

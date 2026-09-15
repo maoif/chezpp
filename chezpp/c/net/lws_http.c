@@ -1,6 +1,7 @@
 #include "lws_http.h"
 
 #include "lws_loader.h"
+#include "../openssl_loader.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -61,6 +62,8 @@ typedef int (*lws_finalize_write_http_header_fn)(struct lws *, unsigned char *,
                                                   unsigned char *);
 typedef int (*lws_http_transaction_completed_fn)(struct lws *);
 typedef void (*lws_set_timeout_fn)(struct lws *, enum pending_timeout, int);
+typedef int (*lws_rx_flow_control_fn)(struct lws *, int);
+typedef int (*lws_get_socket_fd_fn)(struct lws *);
 
 /*
  * Callback ordering audited against libwebsockets 4.5.x (the minimum runtime
@@ -402,6 +405,7 @@ static void stream_release_locked(lws_http_context *context,
   stream->generation = generation;
   stream->wsi = NULL;
   stream->outbound_length = 0;
+  stream->submitted_body_length = 0;
   stream->headers_length = 0;
   stream->terminal_payload_length = 0;
   stream->pending_body_bytes = 0;
@@ -420,6 +424,8 @@ static void stream_release_locked(lws_http_context *context,
   stream->failure_pending = 0;
   stream->failure_status = 0;
   stream->server_stream = 0;
+  stream->server_request_complete = 0;
+  stream->server_body_remaining = SIZE_MAX;
   stream->response_status = 0;
   stream->response_headers_sent = 0;
   stream->observed_protocol = LWS_HTTP_PROTOCOL_UNKNOWN;
@@ -755,153 +761,6 @@ static size_t copy_server_request(lws_http_context *context, struct lws *wsi,
   return copy_http_headers(context, wsi, used);
 }
 
-static const unsigned char *find_crlf(const unsigned char *bytes,
-                                      const unsigned char *end) {
-  while (bytes + 1 < end) {
-    if (bytes[0] == '\r' && bytes[1] == '\n') return bytes;
-    bytes++;
-  }
-  return NULL;
-}
-
-static int parse_chunk_size(const unsigned char *start,
-                            const unsigned char *line_end, size_t *size) {
-  size_t value = 0;
-  int digits = 0;
-  while (start < line_end && *start != ';') {
-    unsigned digit;
-    if (*start >= '0' && *start <= '9')
-      digit = (unsigned)(*start - '0');
-    else if (*start >= 'a' && *start <= 'f')
-      digit = (unsigned)(*start - 'a' + 10);
-    else if (*start >= 'A' && *start <= 'F')
-      digit = (unsigned)(*start - 'A' + 10);
-    else
-      return 0;
-    if (value > (SIZE_MAX - digit) / 16) return 0;
-    value = value * 16 + digit;
-    digits = 1;
-    start++;
-  }
-  if (!digits) return 0;
-  *size = value;
-  return 1;
-}
-
-static int valid_chunk_sequence(const unsigned char *bytes,
-                                const unsigned char *end) {
-  for (;;) {
-    const unsigned char *line_end = find_crlf(bytes, end);
-    size_t size;
-    if (line_end == NULL || !parse_chunk_size(bytes, line_end, &size)) return 0;
-    bytes = line_end + 2;
-    if (size == 0) {
-      if (bytes + 2 <= end && bytes[0] == '\r' && bytes[1] == '\n')
-        return bytes + 2 == end;
-      return end - bytes >= 4 && end[-4] == '\r' && end[-3] == '\n' &&
-             end[-2] == '\r' && end[-1] == '\n';
-    }
-    if (size > (size_t)(end - bytes) || bytes + size + 2 > end ||
-        bytes[size] != '\r' || bytes[size + 1] != '\n')
-      return 0;
-    bytes += size + 2;
-  }
-}
-
-static int queue_trailers(lws_http_context *context, lws_http_stream *stream,
-                          const unsigned char *bytes,
-                          const unsigned char *end) {
-  size_t used = 0;
-  while (bytes + 2 <= end && !(bytes[0] == '\r' && bytes[1] == '\n')) {
-    const unsigned char *line_end = find_crlf(bytes, end);
-    const unsigned char *colon;
-    const unsigned char *value;
-    size_t name_length;
-    size_t value_length;
-    if (line_end == NULL) return 0;
-    colon = memchr(bytes, ':', (size_t)(line_end - bytes));
-    if (colon == NULL) return 0;
-    name_length = (size_t)(colon - bytes);
-    value = colon + 1;
-    while (value < line_end && (*value == ' ' || *value == '\t')) value++;
-    value_length = (size_t)(line_end - value);
-    if (used + name_length + value_length + 2 > context->payload_capacity)
-      return 0;
-    memcpy(context->drain_buffer + used, bytes, name_length);
-    context->drain_buffer[used + name_length] = 0;
-    used += name_length + 1;
-    memcpy(context->drain_buffer + used, value, value_length);
-    context->drain_buffer[used + value_length] = 0;
-    used += value_length + 1;
-    bytes = line_end + 2;
-  }
-  return used == 0 ||
-         callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS, -1,
-                               context->drain_buffer, used);
-}
-
-static int queue_chunk_sequence(lws_http_context *context,
-                                lws_http_stream *stream,
-                                const unsigned char *bytes,
-                                const unsigned char *end) {
-  for (;;) {
-    const unsigned char *line_end = find_crlf(bytes, end);
-    size_t size;
-    if (line_end == NULL || !parse_chunk_size(bytes, line_end, &size)) return 0;
-    bytes = line_end + 2;
-    if (size == 0)
-      return queue_trailers(context, stream, bytes, end) &&
-             callback_queue_stream(context, stream, LWS_HTTP_EVENT_COMPLETE,
-                                   0, NULL, 0);
-    if (size > (size_t)(end - bytes) || bytes + size + 2 > end)
-      return 0;
-    if (!callback_queue_stream(context, stream, LWS_HTTP_EVENT_READABLE, 0,
-                               bytes, size))
-      return 0;
-    pthread_mutex_lock(&context->lock);
-    stream->pending_body_bytes += size;
-    pthread_mutex_unlock(&context->lock);
-    bytes += size + 2;
-  }
-}
-
-static int recover_chunked_residual(lws_http_context *context,
-                                    lws_http_stream *stream,
-                                    const unsigned char *bytes, size_t length) {
-  const unsigned char *end = bytes + length;
-  if (length == 0) return 0;
-  if (*bytes == ';') {
-    const unsigned char *extension_end = find_crlf(bytes, end);
-    const unsigned char *body;
-    const unsigned char *candidate;
-    if (extension_end == NULL) return 0;
-    body = extension_end + 2;
-    for (candidate = body; candidate + 2 < end; candidate++) {
-      if (candidate[0] == '\r' && candidate[1] == '\n' &&
-          valid_chunk_sequence(candidate + 2, end)) {
-        size_t body_length = (size_t)(candidate - body);
-        if (body_length != 0 &&
-            !callback_queue_stream(context, stream, LWS_HTTP_EVENT_READABLE,
-                                   0, body, body_length))
-          return 0;
-        if (body_length != 0) {
-          pthread_mutex_lock(&context->lock);
-          stream->pending_body_bytes += body_length;
-          pthread_mutex_unlock(&context->lock);
-        }
-        return queue_chunk_sequence(context, stream, candidate + 2, end);
-      }
-    }
-    return 0;
-  }
-  if (valid_chunk_sequence(bytes, end))
-    return queue_chunk_sequence(context, stream, bytes, end);
-  if (end - bytes >= 2 && end[-2] == '\r' && end[-1] == '\n')
-    return queue_trailers(context, stream, bytes, end) &&
-           callback_queue_stream(context, stream, LWS_HTTP_EVENT_COMPLETE, 0,
-                                 NULL, 0);
-  return 0;
-}
 
 static int append_request_headers(lws_http_stream *stream, struct lws *wsi,
                                   unsigned char **cursor,
@@ -991,6 +850,20 @@ static int lws_http_callback(struct lws *wsi,
   lws_http_context *context = callback_context(wsi);
   lws_http_stream *stream = callback_stream(wsi, user);
   switch (reason) {
+    case LWS_CALLBACK_OPENSSL_LOAD_EXTRA_SERVER_VERIFY_CERTS:
+#if !defined(LWS_WITH_MBEDTLS)
+      if (context != NULL && context->server_tls_context_handle != 0) {
+        SSL_CTX *source = chezpp_net_tls_context_native(context->server_tls_context_handle);
+        SSL_CTX *destination = user;
+        X509 *certificate = chezpp_openssl_SSL_CTX_get0_certificate(source);
+        EVP_PKEY *key = chezpp_openssl_SSL_CTX_get0_privatekey(source);
+        if (certificate == NULL || key == NULL ||
+            chezpp_openssl_SSL_CTX_use_certificate(destination, certificate) != 1 ||
+            chezpp_openssl_SSL_CTX_use_PrivateKey(destination, key) != 1)
+          return -1;
+      }
+#endif
+      return 0;
     case LWS_CALLBACK_ADD_POLL_FD:
     case LWS_CALLBACK_CHANGE_MODE_POLL_FD:
     case LWS_CALLBACK_DEL_POLL_FD: {
@@ -1087,12 +960,6 @@ static int lws_http_callback(struct lws *wsi,
         stream->pending_body_bytes += (size_t)available;
         pthread_mutex_unlock(&context->lock);
       }
-      if (result < 0 && available > 0 && buffer != NULL &&
-          recover_chunked_residual(context, stream,
-                                   (const unsigned char *)buffer,
-                                   (size_t)available)) {
-        return 0;
-      }
       /* A positive lws_http_client_read result is progress metadata, not a
        * callback failure.  Returning it from the callback makes LWS abort the
        * stream (the raw chunked path surfaced this as native status 103).
@@ -1114,6 +981,11 @@ static int lws_http_callback(struct lws *wsi,
       }
       stream->pending_body_bytes += length;
       pthread_mutex_unlock(&context->lock);
+      {
+        lws_rx_flow_control_fn flow_fn =
+            (lws_rx_flow_control_fn)lws_function("lws_rx_flow_control");
+        if (flow_fn != NULL) flow_fn(wsi, 0);
+      }
       return 0;
     case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE: {
       lws_write_fn write_fn;
@@ -1194,27 +1066,75 @@ static int lws_http_callback(struct lws *wsi,
         int has_body = total_length_fn != NULL &&
                        (total_length_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0 ||
                         total_length_fn(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0);
+        if (stream != NULL) stream->server_request_complete = !has_body;
+        if (stream != NULL) {
+          lws_hdr_copy_fn copy_fn = (lws_hdr_copy_fn)lws_function("lws_hdr_copy");
+          char content_length[32];
+          stream->server_body_remaining = SIZE_MAX;
+          if (copy_fn != NULL && total_length_fn != NULL &&
+              total_length_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0) {
+            char *end;
+            unsigned long long count;
+            if (copy_fn(wsi, content_length, sizeof(content_length),
+                        WSI_TOKEN_HTTP_CONTENT_LENGTH) <= 0)
+              return -1;
+            errno = 0;
+            count = strtoull(content_length, &end, 10);
+            if (errno != 0 || *end != '\0' || count > SIZE_MAX) return -1;
+            stream->server_body_remaining = (size_t)count;
+          }
+        }
+        /* LWS 4.5's HTTP/1 server parser forwards transfer-coded bodies verbatim and
+         * cannot signal their completion. Fail before exposing an unfinishable request. */
+        if (observe_protocol(wsi) != LWS_HTTP_PROTOCOL_HTTP2 && total_length_fn != NULL &&
+            total_length_fn(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0)
+          return -1;
         size_t request_length = copy_server_request(context, wsi, input, length);
         if (request_length == SIZE_MAX ||
             !callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS, has_body,
                                    context->drain_buffer, request_length))
           return -1;
+        if (!has_body && observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
+          lws_rx_flow_control_fn flow_fn =
+              (lws_rx_flow_control_fn)lws_function("lws_rx_flow_control");
+          if (flow_fn != NULL) flow_fn(wsi, 0);
+        }
       }
       return 0;
     case LWS_CALLBACK_HTTP_BODY:
       if (context == NULL || stream == NULL) return 0;
+      /* Reject LWS versions that include a pipelined request in the preceding body. */
+      if (stream->server_body_remaining != SIZE_MAX) {
+        if (length > stream->server_body_remaining) return -1;
+        stream->server_body_remaining -= length;
+      }
+      {
+      int queued;
+      lws_rx_flow_control_fn flow_fn =
+          (lws_rx_flow_control_fn)lws_function("lws_rx_flow_control");
       pthread_mutex_lock(&context->lock);
-      if (stream->pending_body_bytes == 0 &&
-          queue_event_locked(context, LWS_HTTP_EVENT_READABLE,
+      queued = queue_event_locked(context, LWS_HTTP_EVENT_READABLE,
                              stream->connection->identity, stream->identity,
-                             stream->generation, 0, input, length))
+                             stream->generation, 0, input, length);
+      if (queued) {
         stream->pending_body_bytes += length;
+      }
       pthread_mutex_unlock(&context->lock);
+      if (!queued) return -1;
+      if (flow_fn != NULL) flow_fn(wsi, 0);
       return 0;
+      }
     case LWS_CALLBACK_HTTP_BODY_COMPLETION:
-      if (context != NULL && stream != NULL && stream->server_stream)
+      if (context != NULL && stream != NULL && stream->server_stream) {
+        stream->server_request_complete = 1;
         (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS, -1,
                                     NULL, 0);
+        if (observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
+          lws_rx_flow_control_fn flow_fn =
+              (lws_rx_flow_control_fn)lws_function("lws_rx_flow_control");
+          if (flow_fn != NULL) flow_fn(wsi, 0);
+        }
+      }
       return 0;
     case LWS_CALLBACK_HTTP_WRITEABLE:
       if (context != NULL && stream != NULL && stream->outbound_length <=
@@ -1268,16 +1188,29 @@ static int lws_http_callback(struct lws *wsi,
           (void)callback_queue_stream(context, stream,
                                       LWS_HTTP_EVENT_COMPLETE, written, NULL,
                                       0);
-          if (completed_fn != NULL && completed_fn(wsi) != 0) return -1;
+          /* Completion may immediately dispatch the next pipelined request. Detach the
+           * old request first so its cleanup cannot erase that request's user pointer. */
           pthread_mutex_lock(&context->lock);
           stream->wsi = NULL;
           if (user != NULL) *(lws_http_stream **)user = NULL;
           stream_release_locked(context, stream);
           pthread_mutex_unlock(&context->lock);
+          if (completed_fn != NULL && completed_fn(wsi) != 0) return -1;
+          {
+            lws_rx_flow_control_fn flow_fn =
+                (lws_rx_flow_control_fn)lws_function("lws_rx_flow_control");
+            if (flow_fn != NULL) flow_fn(wsi, 1);
+          }
           return 0;
         }
         (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_WRITABLE,
                                     written, NULL, 0);
+        if (stream->server_request_complete &&
+            observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
+          lws_rx_flow_control_fn flow_fn =
+              (lws_rx_flow_control_fn)lws_function("lws_rx_flow_control");
+          if (flow_fn != NULL) flow_fn(wsi, 0);
+        }
         return 0;
       }
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_WRITABLE, 0,
@@ -1286,11 +1219,19 @@ static int lws_http_callback(struct lws *wsi,
     case LWS_CALLBACK_CLIENT_HTTP_DROP_PROTOCOL:
     case LWS_CALLBACK_HTTP_DROP_PROTOCOL:
       if (context != NULL && stream != NULL) {
+        /* LWS may detach an H2 child without a separate CLOSED_CLIENT_HTTP callback. */
+        (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_CLOSED,
+                                    0, NULL, 0);
         pthread_mutex_lock(&context->lock);
         stream->wsi = NULL;
-        stream->terminal = 1;
+        if (!stream->terminal_pending) stream->terminal = 1;
         if (user != NULL) *(lws_http_stream **)user = NULL;
         pthread_mutex_unlock(&context->lock);
+        {
+          void (*set_opaque_fn)(struct lws *, void *) =
+              (void (*)(struct lws *, void *))lws_function("lws_set_opaque_user_data");
+          if (set_opaque_fn != NULL) set_opaque_fn(wsi, NULL);
+        }
       }
       return 0;
     default:
@@ -1453,8 +1394,13 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
   }
 #if !defined(LWS_WITH_MBEDTLS)
   if (tls_context_handle != 0) {
-    information.provided_client_ssl_ctx =
-        (SSL_CTX *)chezpp_net_tls_context_native((uptr)tls_context_handle);
+    if (listen_port >= 0) {
+      information.options |= LWS_SERVER_OPTION_CREATE_VHOST_SSL_CTX;
+      context->server_tls_context_handle = tls_context_handle;
+    } else {
+      information.provided_client_ssl_ctx =
+          (SSL_CTX *)chezpp_net_tls_context_native((uptr)tls_context_handle);
+    }
     context->tls_verify_peer =
         chezpp_net_tls_context_verifies_peer((uptr)tls_context_handle);
   }
@@ -1562,6 +1508,26 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
   }
   pthread_mutex_unlock(&context->lock);
   poll_descriptor.revents = (short)revents;
+  if (revents & POLLOUT) {
+    lws_get_socket_fd_fn socket_fn =
+        (lws_get_socket_fd_fn)lws_function("lws_get_socket_fd");
+    lws_rx_flow_control_fn flow_fn =
+        (lws_rx_flow_control_fn)lws_function("lws_rx_flow_control");
+    size_t index;
+    /* LWS 4.5's H1 role suppresses POLLOUT while RX is paused. Unpause only for
+     * the observed write-ready event, keeping buffered pipelined input deferred. */
+    if (socket_fn != NULL && flow_fn != NULL)
+      for (index = 0; index < context->stream_capacity; index++) {
+        lws_http_stream *stream = &context->streams[index];
+        if (stream->active && stream->server_stream && stream->server_request_complete &&
+            stream->wsi != NULL && socket_fn(stream->wsi) == fd &&
+            observe_protocol(stream->wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
+          flow_fn(stream->wsi, 1);
+          poll_descriptor.revents &= (short)~POLLIN;
+          break;
+        }
+      }
+  }
   return service_fn(context->lws, &poll_descriptor);
 }
 
@@ -1784,6 +1750,7 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
            initial_body_length);
   stream->headers_length = headers_length;
   stream->outbound_length = initial_body_length;
+  stream->submitted_body_length = initial_body_length;
   stream->outbound_final =
       initial_body_is_complete(stream, initial_body_length);
   stream->has_request_body = has_body != 0;
@@ -1891,7 +1858,9 @@ int chezpp_lws_http_client_body_submit(uintptr_t context_handle,
   if (length != 0)
     memcpy(stream->outbound + LWS_PRE, Sbytevector_data(payload), length);
   stream->outbound_length = length;
-  stream->outbound_final = final_chunk != 0;
+  stream->submitted_body_length += length;
+  stream->outbound_final = final_chunk != 0 ||
+                          initial_body_is_complete(stream, stream->submitted_body_length);
   pthread_mutex_unlock(&context->lock);
   {
     lws_client_http_body_pending_fn pending_fn =
@@ -2030,6 +1999,7 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
   int resume;
+  struct lws *resume_wsi;
   if (context == NULL) return 0;
   pthread_mutex_lock(&context->lock);
   stream = stream_find_locked(context, connection_id, stream_id);
@@ -2044,6 +2014,8 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
   else
     context->queued_body_bytes = 0;
   resume = stream->pending_body_bytes == 0;
+  resume_wsi = resume && !(stream->server_stream && stream->server_request_complete)
+                   ? stream->wsi : NULL;
   if (resume && stream->terminal_pending && !flush_terminal_locked(context, stream)) {
     stream->terminal_pending = 0;
     stream->terminal = 1;
@@ -2051,6 +2023,11 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
     stream->failure_status = ENOBUFS;
   }
   pthread_mutex_unlock(&context->lock);
+  if (resume_wsi != NULL) {
+    lws_rx_flow_control_fn flow_fn =
+        (lws_rx_flow_control_fn)lws_function("lws_rx_flow_control");
+    if (flow_fn != NULL) flow_fn(resume_wsi, 1);
+  }
   if (resume)
     (void)chezpp_lws_http_context_wakeup(context_handle);
   return 1;

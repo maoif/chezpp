@@ -1,11 +1,24 @@
 (library (chezpp net lws transport)
   (export lws-transport-encode-headers lws-transport-decode-headers
+          lws-transport-redirect-response?
           lws-transport-start! lws-transport-submit-body! lws-transport-consume-body!)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp net errors)
           (chezpp net http private)
           (chezpp net lws reactor))
+
+  #|proc:lws-transport-redirect-response?
+Returns whether `request` policy follows the redirect described by integer `status` and header
+alist `headers`. Reducers discard intermediate redirect bodies before invoking a user sink.
+|#
+  (define lws-transport-redirect-response?
+    (lambda (request status headers)
+      (pcheck ([normalized-http-request? request] [integer? status] [list? headers])
+        (and (http-request-policy-follow-redirects? (normalized-http-request-policy request))
+             (memv status '(301 302 303 307 308))
+             (exists (lambda (entry) (string-ci=? "location" (car entry))) headers)
+             #t))))
 
   (define header-list?
     (lambda (headers)
