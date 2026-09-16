@@ -2,7 +2,7 @@
   (export bittree make-bittree bittree? bittree-size bittree-empty?
           bittree-set! bittree-unset! bittree-flip!
           bittree-set? bittree-clear! bittree-copy
-          bittree-merge
+          bittree-merge bittree-or bittree-and bittree-xor
 
           bittree-andmap bittree-ormap
           bittree-for-each bittree-fold-left bittree-fold-right
@@ -195,6 +195,43 @@
                      rbt))
                   rbt*)
                  newbt))]))
+
+  #|proc:bittree-or
+  Return a new bittree containing the union of `left` and `right`.
+  Inputs are not mutated, and results traverse in ascending bit-index order.
+  |#
+  (define-who bittree-or
+    (lambda (left right)
+      (pcheck ([bittree? left right])
+              (bittree-merge left right))))
+
+  #|proc:bittree-and
+  Return a new bittree containing bits present in both `left` and `right`.
+  Inputs are not mutated, and results traverse in ascending bit-index order.
+  |#
+  (define-who bittree-and
+    (lambda (left right)
+      (pcheck ([bittree? left right])
+              (let ([result (make-bittree)])
+                (bittree-for-each
+                 (lambda (index)
+                   (when (bittree-set? right index)
+                     (bittree-set! result index)))
+                 left)
+                result))))
+
+  #|proc:bittree-xor
+  Return a new bittree containing bits present in exactly one input.
+  Inputs are not mutated, and results traverse in ascending bit-index order.
+  |#
+  (define-who bittree-xor
+    (lambda (left right)
+      (pcheck ([bittree? left right])
+              (let ([result (bittree-copy left)])
+                (bittree-for-each
+                 (lambda (index) (bittree-flip! result index))
+                 right)
+                result))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

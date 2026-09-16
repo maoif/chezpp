@@ -139,6 +139,18 @@
      )
 
 
+(mat bittree-algebra
+     (let ([left (bittree 1 2)] [right (bittree 2 3)])
+       (and (equal? '(1 2 3) (bittree->list (bittree-or left right)))
+            (equal? '(1 2) (bittree->list left))
+            (equal? '(2 3) (bittree->list right))))
+     (equal? '(2) (bittree->list (bittree-and (bittree 1 2) (bittree 2 3))))
+     (equal? '(1 3) (bittree->list (bittree-xor (bittree 1 2) (bittree 2 3))))
+     (error? (bittree-or (bittree) 'not-a-bittree))
+     (error? (bittree-and 'not-a-bittree (bittree)))
+     (error? (bittree-xor (bittree) 'not-a-bittree)))
+
+
 (define n-1e5-1 (nums 0 #e1e5 1))
 (define n-1e5-2 (nums 0 #e1e5 2))
 (define n-1e5-even n-1e5-2)

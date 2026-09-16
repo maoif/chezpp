@@ -1,5 +1,5 @@
 (library (chezpp bitvec)
-  (export bitvec make-bitvec make-full-bitvec bitvec? bitvec-size bitvec-empty?
+  (export bitvec make-bitvec make-full-bitvec bitvec? bitvec-size bitvec-bound bitvec-empty?
           bitvec-set! bitvec-unset! bitvec-flip!
           bitvec-set? bitvec-clear! bitvec-copy
 
@@ -26,9 +26,17 @@
   (define-record-type ($bitvec mk-bitvec bitvec?)
     (fields
      ;; #bits actually allowed
-     (immutable bound bitvec-bound)
+     (immutable bound $bitvec-bound)
      ;; fxvector
      (mutable data bitvec-data bitvec-data-set!)))
+
+  #|proc:bitvec-bound
+  Return the maximum exclusive bit index accepted by `bv`.
+  |#
+  (define-who bitvec-bound
+    (lambda (bv)
+      (pcheck ([bitvec? bv])
+              ($bitvec-bound bv))))
 
   (define all-naturals?
     (lambda (args) (andmap natural? args)))

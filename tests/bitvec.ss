@@ -18,6 +18,8 @@
      (bitvec-empty? (make-bitvec 10))
      (bitvec-empty? (make-full-bitvec 0))
      (not (bitvec-empty? (bitvec 1 3 5 7)))
+     (= 64 (bitvec-bound (make-bitvec 64)))
+     (error? (bitvec-bound 64))
 
      (andmap (lambda (n)
                (= n (bitvec-size (make-full-bitvec n))))
@@ -25,6 +27,7 @@
 
      (error? (let ([bv (make-bitvec 3)])
                (bitvec-set! bv 4)))
+     (error? (bitvec-set! (make-bitvec 4) 4))
 
      (begin (define (test1 n)
               (let* ([n* (iota n)]
