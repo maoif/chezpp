@@ -23,6 +23,9 @@
   ;; TODO ranged ops
 
 
+  #|record:$bittree
+  Sparse mutable bit-set record backed by an ordered tree.
+  |#
   (define-record-type ($bittree mk-bittree bittree?)
     (fields (immutable rbt bittree-rbt)))
 
@@ -41,7 +44,7 @@
     (lambda (x) (* x *num-bits*)))
 
 
-  #|doc
+  #|proc:make-bittree
   Construct a bittree object.
   |#
   (define-who make-bittree
@@ -50,6 +53,9 @@
 
 
   ;; args must be a list of naturals
+  #|proc:bittree
+  Return a sparse bit set containing the natural-number indexes in `args`.
+  |#
   (define-who bittree
     (lambda args
       (pcheck ([all-naturals? args])
@@ -58,7 +64,7 @@
                 bt))))
 
 
-  #|doc
+  #|proc:bittree-set!
   Set the i'th bit in the bittree `bt`, regardless of whether
   the i'th bit is already set or not.
   |#
@@ -75,7 +81,7 @@
                     (rbtree-set! who rbt k (fxlogbit1 off 0)))))))
 
 
-  #|doc
+  #|proc:bittree-unset!
   Unset the i'th bit in the bittree `bt`, regardless of whether
   the i'th bit is already set or not.
   |#
@@ -93,7 +99,7 @@
                         (rbtree-set! who rbt k v))))))))
 
 
-  #|doc
+  #|proc:bittree-flip!
   Flip the i'th bit in the bittree `bt`.
   |#
   (define-who bittree-flip!
@@ -113,7 +119,7 @@
                     (rbtree-set! who rbt k (fxlogbit1 off 0)))))))
 
 
-  #|doc
+  #|proc:bittree-set?
   Check whether the bittree `bt` has the i'th bit set.
   |#
   (define-who bittree-set?
@@ -126,7 +132,7 @@
                 (and v (fxlogbit? off v))))))
 
 
-  #|doc
+  #|proc:bittree-clear!
   Unset all bits in the bittree `bt`.
   |#
   (define-who bittree-clear!
@@ -135,7 +141,7 @@
               (rbtree-clear! who (bittree-rbt bt)))))
 
 
-  #|doc
+  #|proc:bittree-empty?
   Check whether the bittree `bt` is empty, i.e., has no bits set.
   |#
   (define-who bittree-empty?
@@ -145,7 +151,7 @@
                 (fx= 0 (rbtree-size rbt))))))
 
 
-  #|doc
+  #|proc:bittree-size
   Return the number of set bits in the bittree `bt`.
   |#
   (define-who bittree-size
@@ -156,7 +162,7 @@
                                 0 (bittree-rbt bt)))))
 
 
-  #|doc
+  #|proc:bittree-copy
   Make a copy of the bittree `bt`.
   |#
   (define-who bittree-copy
@@ -172,7 +178,7 @@
                 newbt))))
 
 
-  #|doc
+  #|proc:bittree-merge
   Merge bittrees, i.e., union all set bits together, and return a new bittree.
   If only one bittree is given, it is returned directly.
   |#
@@ -295,7 +301,7 @@
                 (loop acc (fx1- i)))))))
 
 
-  #|doc
+  #|proc:bittree-andmap
   Apply the unary procedure `proc` to the indices of set bits in bittree `bt`.
   The result is #t if `proc` returns #t for all indices;
   if `proc` returns #f on any set of indices,
@@ -314,7 +320,7 @@
                                rbt)))))
 
 
-  #|doc
+  #|proc:bittree-ormap
   Apply the unary procedure `proc` to the indices of set bits in bittree `bt`.
   The result is #t if `proc` returns #t for at least one index;
   if `proc` returns #f on all indices, `bittree-ormap` returns #f.
@@ -333,7 +339,7 @@
 
 
 
-  #|doc
+  #|proc:bittree-for-each
   Apply the unary procedure `proc` to the indices of set bits in
   bittree `bt` for side effects, sequentially in ascending order.
   |#
@@ -350,6 +356,9 @@
                                  rbt)))))
 
 
+  #|proc:bittree-fold-left
+  Fold set bit indexes in ascending order with `proc`, returning the accumulator.
+  |#
   (define-who bittree-fold-left
     (lambda (proc acc bt)
       (pcheck ([procedure? proc] [bittree? bt])
@@ -363,6 +372,9 @@
                                   acc rbt)))))
 
 
+  #|proc:bittree-fold-right
+  Fold set bit indexes in descending order with `proc`, returning the accumulator.
+  |#
   (define-who bittree-fold-right
     (lambda (proc acc bt)
       (pcheck ([procedure? proc] [bittree? bt])
@@ -376,7 +388,7 @@
                                    acc rbt)))))
 
 
-  #|doc
+  #|proc:bittree->list
   Convert the bittree `bt` to a list, that is,
   put all indices of set bits into a list, in ascending order.
   |#

@@ -12,6 +12,9 @@
           (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
+  #|record:$queue
+  Mutable first-in, first-out queue backed by a doubly linked list.
+  |#
   (define-record-type ($queue mk-queue queue?)
     (fields (immutable dl queue-dl)))
 
@@ -23,7 +26,7 @@
     (lambda () (mk-queue (make-dlist))))
 
 
-  #|doc
+  #|proc:queue
   Construct a queue object from a list of items.
   The items in the list are pushed into the queue from left to right.
   |#
@@ -31,7 +34,7 @@
     (lambda args (mk-queue (apply dlist args))))
 
 
-  #|doc
+  #|proc:queue-push!
   Push one or more items into the queue `q`.
   |#
   (define-who queue-push!
@@ -47,7 +50,7 @@
                            v*)))]))
 
 
-  #|doc
+  #|proc:queue-pop!
   Pop the oldest item from the queue `q`.
   It is an error if the queue is empty.
   |#
@@ -81,7 +84,7 @@
                  (dlist-clear! dl)))]))
 
 
-  #|doc
+  #|proc:queue-peek
   Get the oldest item in the queue without removing it.
   It is an error if the queue is empty.
   |#
@@ -94,7 +97,7 @@
                     (dlist-ref dl 0))))))
 
 
-  #|doc
+  #|proc:queue-size
   Return the number of items currently in the queue.
   |#
   (define-who queue-size
@@ -103,7 +106,7 @@
               (dlist-size (queue-dl q)))))
 
 
-  #|doc
+  #|proc:queue-empty?
   Check whether the queue is empty.
   |#
   (define-who queue-empty?
@@ -112,7 +115,7 @@
               (dlist-empty? (queue-dl q)))))
 
 
-  #|doc
+  #|proc:queue-clear!
   Remove all items in the queue.
   |#
   (define-who queue-clear!
@@ -121,7 +124,7 @@
               (dlist-clear! (queue-dl q)))))
 
 
-  #|doc
+  #|proc:queue-contains?
   Return whether the queue `q` contains the given item `v`.
   If it does, the procedure returns #t; otheriwse it returns #f.
   Items are compared using `equal?`.
@@ -141,7 +144,7 @@
               (dlist-contains/p? (queue-dl q) pred))))
 
 
-  #|doc
+  #|proc:queue-copy
   Make a copy of the queue `q`.
   |#
   (define-who queue-copy
@@ -150,7 +153,7 @@
               (mk-queue (dlist-copy (queue-dl q))))))
 
 
-  #|doc
+  #|proc:queue->list
   Convert the queue into a list, without popping the queue's items.
   |#
   (define-who queue->list

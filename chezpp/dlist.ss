@@ -39,6 +39,9 @@
   (define null-dnode (make-dnode #f #f #f))
   (define null-dnode? (lambda (x) (eq? x null-dnode)))
 
+  #|record:$dlist
+  Mutable doubly linked list record with cached size and end nodes.
+  |#
   (define-record-type ($dlist mk-dlist dlist?)
     (nongenerative) (sealed #t)
     ;; When empty, `first` and `last` is null-dnode.
@@ -57,7 +60,7 @@
   (define all-dlists? (lambda (dl*) (andmap dlist? dl*)))
 
 
-  #|doc
+  #|proc:make-dlist
   Create a doubly-linked list (dlist) object.
 
   If no arguments are given, an empty dlist is created.
@@ -78,7 +81,7 @@
                               (loop (sub1 i)))))))]))
 
 
-  #|doc
+  #|proc:dlist
   Create a dlist from the given arguments.
   |#
   (define-who dlist
@@ -88,7 +91,7 @@
         dl)))
 
 
-  #|doc
+  #|proc:dlist-empty?
   Return whether the dlist is empty.
   |#
   (define-who dlist-empty?
@@ -97,7 +100,7 @@
               (fx= 0 ($dlist-size dl)))))
 
 
-  #|doc
+  #|proc:dlist-ref
   Return the value at the specified index in the dlist.
 
   TODO default value?
@@ -117,7 +120,7 @@
                                       (next (fx- i 1) (dnode-right n))))]))))))
 
 
-  #|doc
+  #|proc:dlist-set!
   Update the item at the specified index in the dlist.
   |#
   (define-who dlist-set!
@@ -141,7 +144,7 @@
         ($dlist-size-set! dl 1))))
 
 
-  #|doc
+  #|proc:dlist-add!
   Add an item to the dlist.
   |#
   (define-who dlist-add!
@@ -189,7 +192,7 @@
                   [else (errorf who "index ~a out of range ~a" i len)])))]))
 
 
-  #|doc
+  #|proc:dlist-delete!
   Remove an item at the specified index in the dlist.
   |#
   (define-who dlist-delete!
@@ -225,7 +228,7 @@
 
 
 
-  #|doc
+  #|proc:dlist-clear!
   Remove all items in the dlist.
   |#
   (define-who dlist-clear!
@@ -236,7 +239,7 @@
                     ($dlist-size-set! dl 0))]))
 
 
-  #|doc
+  #|proc:dlist-reverse
   Return a newly allocated dlist consisting of the items of `dl` in reverse order.
   |#
   (define-who dlist-reverse
@@ -255,7 +258,7 @@
                                          (loop (dnode-left n)))))])))))
 
 
-  #|doc
+  #|proc:dlist-reverse!
   Reverse the items in the dlist in place.
   |#
   (define-who dlist-reverse!
@@ -275,7 +278,7 @@
                                  (loop R n))))))))))
 
 
-  #|doc
+  #|proc:dlist-partition
   Return two dlists, the first dlist contains values `x` such that `(proc x)` returns #t,
   the second contains values `x` such that `(proc x)` returns #f.
   |#
@@ -293,7 +296,7 @@
                         (loop (dnode-right n)))))))))
 
 
-  #|doc
+  #|proc:dlist-append
   Return a new dlist whose items are those from the given dlists, in the given order.
   |#
   (define-who dlist-append
@@ -311,7 +314,7 @@
                                      (loop (dnode-right n))))))))))))
 
 
-  #|doc
+  #|proc:dlist-append!
   Append given dlists to dlist `dl`.
   After this operation, operations on the dlists can be observed in `dl`.
   |#
@@ -389,7 +392,7 @@
                         (loop (fx1+ i) (dnode-right n))))))))
 
 
-  #|doc
+  #|proc:dlist-filter
   Apply `pred` to every item of dlist `dl` and return a new dlist
   of the items of `dl` for which `pred` returns #t.
   |#
@@ -406,7 +409,7 @@
                         (loop (dnode-right n)))))))))
 
 
-  #|doc
+  #|proc:dlist-filter!
   Similar to `dlist-filter`, but dist `dl` is modified in place to contain
   only items `x` such that `(pred x)` returns #t.
   |#
@@ -432,7 +435,7 @@
                           (loop (dnode-right n) prev))))))))
 
 
-  #|doc
+  #|proc:dlist-search
   Return the first item in the dlist that satisfies the predicate `pred`.
   If no such item is found, #f is returned.
   |#
@@ -448,7 +451,7 @@
                           (loop (dnode-right n)))))))))
 
 
-  #|doc
+  #|proc:dlist-search*
   Search for items in dlist `dl` that satisfies the predicate `pred`.
 
   By default the items satisfying `pred` are returned in a list.
@@ -473,7 +476,7 @@
                      (loop (dnode-right n))))))]))
 
 
-  #|doc
+  #|proc:dlist-slice
   Return a slice (sub-dlist) of the dlist `dl` specified by `start`, `end` and `step`.
 
   Meanings of `start`, `end` and `step` are the same as in list:slice.
@@ -526,7 +529,7 @@
                            [else newdl]))))]))
 
 
-  #|doc
+  #|proc:dlist-slice!
   Imperatively slice the dlist `dl` to the range specified by `start`, `end` and `step`.
 
   Meanings of `start`, `end` and `step` are the same as in list:slice.
@@ -601,7 +604,7 @@
                  dl))]))
 
 
-  #|doc
+  #|proc:dlist-copy
   Make a copy of the dlist `dl`.
   |#
   (define-who dlist-copy
@@ -632,7 +635,7 @@
                   (loop (sub1 j) (dnode-left n))))))))
 
 
-  #|doc
+  #|proc:dlist-copy!
   Copy items in `src` from indices src-start, ..., src-start + k - 1
   to consecutive indices in `tgt` starting at `tgt-start`.
 
@@ -679,7 +682,7 @@
                         (loop (fx1- k) (dnode-right i) (dnode-right j)))))))))
 
 
-  #|doc
+  #|proc:dlist-sorted?
   Check whether the given dlist is sorted according to comparison procedure `<?`.
   If `stop` is given, only the items with indices [0, stop) are checked;
   If both `start` and `stop` are given, only the items with indices [start, stop) are checked.
@@ -722,7 +725,7 @@
                      (loop (fx1+ i) (fx1+ j) (dnode-right n))))))))
 
 
-  #|doc
+  #|proc:dlist-sort
   The `dlist-sort` procedure uses the binary comparison procedure `<?` to sort the dlist `dl`.
   If only two arguments are given, the entire dlist is sorted;
   If the `stop` argument is given, the range from 0 to `stop-1` in `dl` is sorted;
@@ -752,8 +755,8 @@
                   [else (vector->dlist (vsort <? ($dlist->vector dl start stop)))])))]))
 
 
-  #|doc
-  The `dlist-sort!` procedure uses the binary comparison procedure `<?` to sort the dlist `dl`, in place.
+  #|proc:dlist-sort!
+  Sort `dl` in place using binary comparison procedure `<?`.
   If only two arguments are given, the entire dlist is sorted;
   If the `stop` argument is given, the range from 0 to `stop-1` in `dl` is sorted;
   If both `start` and `stop` are given, the range from `start` to `stop-1` in `dl` is sorted.
@@ -782,7 +785,7 @@
                          (loop (fx1+ i) (fx1+ j) (dnode-right n))))))))]))
 
 
-  #|doc
+  #|proc:dlist-iota
   `n` must be a natural number.
   This procedure creates a dlist that contains numbers ranging from 0 to n-1, inclusive.
   This is similar to `iota` for lists.
@@ -798,7 +801,7 @@
                              (loop (add1 i)))))))))
 
 
-  #|doc
+  #|proc:dlist-nums
   Generate a dlist of of numbers: start, start+step*1, start+step*2, ...
 
   `start`, `stop` and `step` must be numbers that meet the following requirements:
@@ -829,7 +832,7 @@
 ;;;; stack ops
 
 
-  #|doc
+  #|proc:dlist-push!
   Add the item `v` to the front of the dlist `dl`.
   |#
   (define-who dlist-push!
@@ -837,7 +840,7 @@
       (pcheck ([dlist? dl]) (dlist-add! dl 0 v))))
 
 
-  #|doc
+  #|proc:dlist-pop!
   Remove the first item from the dlist `dl` and return it.
   It is an error if the dlist is empty.
   |#
@@ -851,14 +854,14 @@
                     v)))))
 
 
-  #|doc
+  #|proc:dlist-push-back!
   Add the item `v` to the back of the dlist `dl`.
   |#
   (define-who dlist-push-back!
     (lambda (dl v) (pcheck ([dlist? dl]) (dlist-add! dl v))))
 
 
-  #|doc
+  #|proc:dlist-pop-back!
   Remove the last item from the dlist `dl` and return it.
   It is an error if the dlist is empty.
   |#
@@ -893,6 +896,9 @@
          (unless (apply fx= ($dlist-size dl0) (map $dlist-size dl*))
            (errorf who "dlists are not of the same length")))]))
 
+  #|proc:dlist-map
+  Return a dlist containing `proc` results for corresponding input items.
+  |#
   (define-who dlist-map
     (case-lambda
       [(proc dl0)
@@ -923,6 +929,9 @@
                               (loop (dnode-right n0) (map dnode-right n*)))))))]))
 
 
+  #|proc:dlist-map/i
+  Return mapped items while passing each zero-based index first to `proc`.
+  |#
   (define-who dlist-map/i
     (case-lambda
       [(proc dl0)
@@ -953,6 +962,9 @@
                               (loop (fx1+ i) (dnode-right n0) (map dnode-right n*)))))))]))
 
 
+  #|proc:dlist-map!
+  Replace items in the first dlist with `proc` results and return that dlist.
+  |#
   (define-who dlist-map!
     (case-lambda
       [(proc dl0)
@@ -980,6 +992,9 @@
                             (loop (dnode-right n0) (map dnode-right n*))))))]))
 
 
+  #|proc:dlist-map/i!
+  Replace items using zero-based indexes and `proc`, then return the first dlist.
+  |#
   (define-who dlist-map/i!
     (case-lambda
       [(proc dl0)
@@ -1007,6 +1022,9 @@
                             (loop (fx1+ i) (dnode-right n0) (map dnode-right n*))))))]))
 
 
+  #|proc:dlist-for-each
+  Call `proc` on corresponding items in index order and return the result of `(void)`.
+  |#
   (define-who dlist-for-each
     (case-lambda
       [(proc dl0)
@@ -1031,6 +1049,9 @@
                           (loop (dnode-right n0) (map dnode-right n*))))))]))
 
 
+  #|proc:dlist-for-each/i
+  Call `proc` with each index and corresponding items, then return `(void)`.
+  |#
   (define-who dlist-for-each/i
     (case-lambda
       [(proc dl0)
@@ -1055,6 +1076,9 @@
                           (loop (fx1+ i) (dnode-right n0) (map dnode-right n*))))))]))
 
 
+  #|proc:dlist-andmap
+  Apply `proc` to corresponding items and return their short-circuiting conjunction.
+  |#
   (define-who dlist-andmap
     (case-lambda
       [(proc dl0)
@@ -1082,6 +1106,9 @@
                           (loop (dnode-right n0) (map dnode-right n*))))))]))
 
 
+  #|proc:dlist-ormap
+  Apply `proc` to corresponding items and return their short-circuiting disjunction.
+  |#
   (define-who dlist-ormap
     (case-lambda
       [(proc dl0)
@@ -1111,7 +1138,7 @@
 
 ;;;; reverse order
 
-  #|doc
+  #|proc:dlist-map-rev
   `proc` is applied to items of given dlist(s) in reverse order,
   the result of which is collected into a new dlist.
   |#
@@ -1145,7 +1172,7 @@
                               (loop (dnode-left n0) (map dnode-left n*)))))))]))
 
 
-  #|doc
+  #|proc:dlist-map/i-rev
   Note that the index starts from the dlist length minus 1.
   |#
   (define-who dlist-map/i-rev
@@ -1178,6 +1205,9 @@
                               (loop (fx1- i) (dnode-left n0) (map dnode-left n*)))))))]))
 
 
+  #|proc:dlist-for-each-rev
+  Call `proc` on corresponding items in reverse index order, then return `(void)`.
+  |#
   (define-who dlist-for-each-rev
     (case-lambda
       [(proc dl0)
@@ -1202,6 +1232,9 @@
                           (loop (dnode-left n0) (map dnode-left n*))))))]))
 
 
+  #|proc:dlist-for-each/i-rev
+  Call `proc` with reverse indexes and corresponding items, then return `(void)`.
+  |#
   (define-who dlist-for-each/i-rev
     (case-lambda
       [(proc dl0)
@@ -1229,6 +1262,9 @@
 ;;;; folds
 
 
+  #|proc:dlist-fold-left
+  Fold corresponding items from left to right and return the final accumulator.
+  |#
   (define-who dlist-fold-left
     (case-lambda
       [(proc acc dl0)
@@ -1256,6 +1292,9 @@
                            (dnode-right n0) (map dnode-right n*)))))]))
 
 
+  #|proc:dlist-fold-left/i
+  Fold corresponding items with zero-based indexes and return the final accumulator.
+  |#
   (define-who dlist-fold-left/i
     (case-lambda
       [(proc acc dl0)
@@ -1283,6 +1322,9 @@
                            (dnode-right n0) (map dnode-right n*)))))]))
 
 
+  #|proc:dlist-fold-right
+  Fold corresponding items from right to left and return the final accumulator.
+  |#
   (define-who dlist-fold-right
     (case-lambda
       [(proc acc dl0)
@@ -1310,6 +1352,9 @@
                            (dnode-left n0) (map dnode-left n*)))))]))
 
 
+  #|proc:dlist-fold-right/i
+  Fold corresponding items with reverse indexes and return the final accumulator.
+  |#
   (define-who dlist-fold-right/i
     (case-lambda
       [(proc acc dl0)
@@ -1346,7 +1391,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  #|doc
+  #|proc:dlist->list
   Convert a doubly-linked list to a list.
   |#
   (define-who dlist->list
@@ -1363,7 +1408,7 @@
                                     (loop (dnode-right n)))))))))))
 
 
-  #|doc
+  #|proc:list->dlist
   Convert a list to a doubly-linked list.
   |#
   (define-who list->dlist
@@ -1372,7 +1417,7 @@
                    (apply dlist ls))))
 
 
-  #|doc
+  #|proc:dlist->vector
   Convert a doubly-linked list to a vector.
   |#
   (define-who dlist->vector
@@ -1389,7 +1434,7 @@
                                    (loop (fx1+ i) (dnode-right n)))))))))))
 
 
-  #|doc
+  #|proc:vector->dlist
   Convert a vector to a doubly-linked list.
   |#
   (define-who vector->dlist

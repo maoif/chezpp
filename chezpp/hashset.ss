@@ -23,6 +23,9 @@
   ;; dummy value for all keys
   (define V #f)
 
+  #|record:$hashset
+  Mutable hash-set record preserving its equality and hashing strategy.
+  |#
   (define-record-type ($hashset mk-hashset hashset?)
     (nongenerative) (opaque #t)
     (fields (immutable ht hashset-ht)
@@ -30,7 +33,7 @@
             (immutable type hashset-type)))
 
 
-  #|doc
+  #|proc:make-hashset
   Return a newly allocated mutable hashset using `hash` as the hash function
   and `=?` as the equivalence function used to compare values.
   If a third argument is given, the initial capacity of the hashset is
@@ -51,7 +54,7 @@
       [(hash =? k) (mk-hashset (make-hashtable hash =? k) 'others)]))
 
 
-  #|doc
+  #|proc:make-eq-hashset
   Make a mutable eq-hashset that accepts arbirary objects as values,
   and compares those values using `eq?`.
 
@@ -64,7 +67,7 @@
       [(k) (mk-hashset (make-eq-hashtable k) 'eq)]))
 
 
-  #|doc
+  #|proc:make-eqv-hashset
   Make a mutable eqv-hashset that accepts arbirary objects as values,
   and compares those values using `eqv?`.
 
@@ -77,7 +80,7 @@
       [(k) (mk-hashset (make-eqv-hashtable k) 'eqv)]))
 
 
-  #|doc
+  #|proc:make-symbol-hashset
   Make a mutable symbol-hashset that accepts symbols as values.
 
   If an argument is given, the initial capacity of the
@@ -89,8 +92,8 @@
       [(k) (mk-hashset (make-hashtable symbol-hash symbol=? k) 'others)]))
 
 
-  #|doc
-  Make a mutable eqv-hashset and add all arguments to the hashset.
+  #|proc:hashset
+  Return a mutable eqv-hashset containing all `args`.
   |#
   (define-who hashset
     (lambda args
@@ -99,7 +102,7 @@
         hs)))
 
 
-  #|doc
+  #|proc:hashset-empty?
   Return whether the hashset is empty.
   |#
   (define-who hashset-empty?
@@ -108,7 +111,7 @@
               (= 0 (hashtable-size (hashset-ht hs))))))
 
 
-  #|doc
+  #|proc:hashset-add!
   Add a new item `v` to the hashset `hs` if `v` does not exist yet.
   |#
   (define-who hashset-add!
@@ -126,7 +129,7 @@
               (hashtable-delete! (hashset-ht hs) v))))
 
 
-  #|doc
+  #|proc:hashset-clear!
   Remove all items from the hashset `hs`.
   |#
   (define-who hashset-clear!
@@ -135,7 +138,7 @@
               (hashtable-clear! (hashset-ht hs)))))
 
 
-  #|doc
+  #|proc:hashset-size
   Return the number of items in the hashset.
   |#
   (define-who hashset-size
@@ -157,7 +160,7 @@
         (mk-hashset newht (hashset-type hs)))))
 
 
-  #|doc
+  #|proc:hashset-filter
   Return a new hashset `h` such that for each item `x` in `h`,
   (pred x) returns #t.
   |#
@@ -171,7 +174,7 @@
                 newhs))))
 
 
-  #|doc
+  #|proc:hashset-filter!
   Remove all items in `hs` that do not satisfy the predicate `pred`.
   |#
   (define-who hashset-filter!
@@ -182,7 +185,7 @@
                 hs))))
 
 
-  #|doc
+  #|proc:hashset-partition
   Apply `pred` to every item in hashset `hs` and return two values,
   the first one a hashset of the items of `hs` for which `(pred v)` returns #t,
   the second one a hashset of the items of `hs` for which `(pred v)` returns #f.
@@ -201,7 +204,7 @@
                 (values T F)))))
 
 
-  #|doc
+  #|proc:hashset-contains?
   Return whether the hashset `hs` already contains the value `v`.
   |#
   (define-who hashset-contains?
@@ -210,7 +213,7 @@
               (hashtable-contains? (hashset-ht hs) v))))
 
 
-  #|doc
+  #|proc:hashset-contains/p?
   Return whether the hashset `hs` contains the item `v`
   such that `(pred v)` returns #t.
   |#
@@ -226,7 +229,7 @@
                           (loop (fx1+ i)))))))))
 
 
-  #|doc
+  #|proc:hashset-search
   Return the 1st item in the hashset `hs` that satisfies the predicate `pred`.
   If no such item exists, #f is returned.
   |#
@@ -242,7 +245,7 @@
                           (loop (fx1+ i)))))))))
 
 
-  #|doc
+  #|proc:hashset-search*
   Return the the list of items in the hashset `hs` that satify the predicate `pred`.
 
   By default the items satisfying `pred` are returned in a list.
@@ -282,7 +285,7 @@
   ;; TODO containment relations
 
 
-  #|doc
+  #|proc:hashset+
   Compute the union of the hashsets, i.e., the hashset that contains all items
   in all the given hashsets.
   If only one hashset is given, it is returned immediately.
@@ -306,7 +309,7 @@
                             newhs))))))
 
 
-  #|doc
+  #|proc:hashset-
   Compute the difference of the hashsets, i.e., the hashset that contains those items
   that are in the first hashset, but are not in the rest of the hashsets.
   If only one hashset is given, it is returned immediately.
@@ -334,7 +337,7 @@
                             newhs))))))
 
 
-  #|doc
+  #|proc:hashset&
   Compute the intersection of the hashsets, i.e., the hashset whose items are contained
   in all given hashsets.
   If only one hashset is given, it is returned immediately.
@@ -360,7 +363,7 @@
                             newhs))))))
 
 
-  #|doc
+  #|proc:hashset^
   Compute the symmetric difference of the hashsets, i.e., the difference of the union
   and the intersection of the hashsets.
   If only one hashset is given, it is returned immediately.
@@ -389,7 +392,7 @@
 ;;;; imperative versions
 
 
-  #|doc
+  #|proc:hashset+!
   Union.
   |#
   (define-who hashset+!
@@ -400,7 +403,7 @@
                   (todo)))))
 
 
-  #|doc
+  #|proc:hashset-!
   Difference.
   |#
   (define-who hashset-!
@@ -411,7 +414,7 @@
                   (todo)))))
 
 
-  #|doc
+  #|proc:hashset&!
   Intersection.
   |#
   (define-who hashset&!
@@ -422,7 +425,7 @@
                   (todo)))))
 
 
-  #|doc
+  #|proc:hashset^!
   symmetric difference
   |#
   (define-who hashset^!
@@ -452,6 +455,9 @@
            (errorf who "hashsets are not of the same size")))]))
 
 
+  #|proc:hashset-map
+  Return a hashset containing `proc` results for corresponding input members.
+  |#
   (define-who hashset-map
     (case-lambda
       [(proc hs0)
@@ -482,6 +488,9 @@
                               (loop (fx1+ i)))))))]))
 
 
+  #|proc:hashset-for-each
+  Call `proc` on corresponding members and return the result of `(void)`.
+  |#
   (define-who hashset-for-each
     (case-lambda
       [(proc hs0)
@@ -514,7 +523,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  #|doc
+  #|proc:hashset->list
   Convert a hashset `hs` into a list.
   |#
   (define-who hashset->list
@@ -523,7 +532,7 @@
               (vector->list (hashtable-keys (hashset-ht hs))))))
 
 
-  #|doc
+  #|proc:hashset->vector
   Convert a hashset `hs` into a vector.
   |#
   (define-who hashset->vector
@@ -532,7 +541,7 @@
               (vector-copy (hashtable-keys (hashset-ht hs))))))
 
 
-  #|doc
+  #|proc:list->eq-hashset
   Convert a list `ls` into an eq-hashset.
   |#
   (define-who list->eq-hashset
@@ -544,7 +553,7 @@
                 hs))))
 
 
-  #|doc
+  #|proc:vector->eq-hashset
   Convert a vector `vec` into an eq-hashset.
   |#
   (define-who vector->eq-hashset
@@ -556,7 +565,7 @@
                 hs))))
 
 
-  #|doc
+  #|proc:list->eqv-hashset
   Convert a list `ls` into an eqv-hashset.
   |#
   (define-who list->eqv-hashset
@@ -568,7 +577,7 @@
                 hs))))
 
 
-  #|doc
+  #|proc:vector->eqv-hashset
   Convert a vector `vec` into an eqv-hashset.
   |#
   (define-who vector->eqv-hashset

@@ -1749,11 +1749,29 @@
                            (loop (add1 i) (if (f x res) x res)))))))))
 
 
+  #|proc:vmax
+  Return the greatest item in nonempty vector `vec`, or `#f` for an empty vector.
+  |#
   (define vmax   (lambda (vec) (vextreme   >   vec)))
+  #|proc:fxvmax
+  Return the greatest fixnum in `vec`, or `#f` for an empty fxvector.
+  |#
   (define fxvmax (lambda (vec) (fxvextreme fx> vec)))
+  #|proc:flvmax
+  Return the greatest flonum in `vec`, or `#f` for an empty flvector.
+  |#
   (define flvmax (lambda (vec) (flvextreme fl> vec)))
+  #|proc:vmin
+  Return the least item in nonempty vector `vec`, or `#f` for an empty vector.
+  |#
   (define vmin   (lambda (vec) (vextreme   <   vec)))
+  #|proc:fxvmin
+  Return the least fixnum in `vec`, or `#f` for an empty fxvector.
+  |#
   (define fxvmin (lambda (vec) (fxvextreme fx< vec)))
+  #|proc:flvmin
+  Return the least flonum in `vec`, or `#f` for an empty flvector.
+  |#
   (define flvmin (lambda (vec) (flvextreme fl< vec)))
 
 

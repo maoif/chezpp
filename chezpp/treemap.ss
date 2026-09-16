@@ -45,6 +45,9 @@
   Return whether `object` is a treemap restricted to fixnum keys and values.
   Any object may be tested.
   |#
+  #|record:$fixnum-treemap
+  Ordered map record restricted to fixnum keys and values.
+  |#
   (define-record-type ($fixnum-treemap mk-fixnum-treemap fixnum-treemap?)
     (parent rbtree) (nongenerative) (opaque #t)
     (protocol (lambda (pnew)

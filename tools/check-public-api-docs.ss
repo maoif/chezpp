@@ -114,7 +114,8 @@
 
 (define doc-adjacent?
   (lambda (source kind name definition-prefix*)
-    (let* ([tag (string-append "#|" (symbol->string kind) ":" (symbol->string name))]
+    (let* ([tag (string-append "#|" (symbol->string kind) ":"
+                               (symbol->string name) "\n")]
            [tag-index (string-contains source tag)])
       (and tag-index
            (let ([end-index (string-contains-from source "|#" tag-index)])

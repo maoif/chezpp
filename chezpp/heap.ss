@@ -12,6 +12,9 @@
           (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
+  #|record:$heap
+  Mutable priority-heap record with an optional capacity bound.
+  |#
   (define-record-type ($heap mk-heap heap?)
     (fields (immutable <? heap-<?)
             (immutable bound heap-bound)
@@ -45,7 +48,7 @@
                (mk-heap <? #f (make-vector (max *default-cap* cap)) 0))]))
 
 
-  #|doc
+  #|proc:make-bounded-heap
   `<?` must be a procedure that can be used to compare items;
   `bound` must be a natural number specifying the max number of items
   the heap can store.
@@ -63,7 +66,7 @@
               (mk-heap <? bound (make-vector (fx1+ bound)) 0))))
 
 
-  #|doc
+  #|proc:heap
   `<?` must be a procedure that can be used to compare items.
 
   `heap` constructs a unbounded heap using the comparison procedure `<?`
@@ -133,7 +136,7 @@
               (loop pi)))))))
 
 
-  #|doc
+  #|proc:heap-push!
   Push one or more items into the heap `hp`.
   |#
   (define-who heap-push!
@@ -201,7 +204,7 @@
           v))))
 
 
-  #|doc
+  #|proc:heap-pop!
   Pop the top item from the heap `hp`.
   It is an error if the heap is empty.
   |#
@@ -213,7 +216,7 @@
                   (pop! hp)))))
 
 
-  #|doc
+  #|proc:heap-pop-all!
   Pop all items from the heap `hp` into a list.
   The first item in the list corresponds to the top item in the heap.
   If an additional procedure `proc` is given, it is apply to
@@ -241,7 +244,7 @@
                      (loop (fx1- size))))))]))
 
 
-  #|doc
+  #|proc:heap-peek
   Get the top item in the heap without removing it.
   It is an error if the heap is empty.
   |#
@@ -254,7 +257,7 @@
                     (vector-ref data 0))))))
 
 
-  #|doc
+  #|proc:heap-clear!
   Remove all items in the heap.
   |#
   (define-who heap-clear!
@@ -266,7 +269,7 @@
                   (heap-size-set! hp 0))))))
 
 
-  #|doc
+  #|proc:heap-empty?
   Check whether the heap is empty.
   |#
   (define-who heap-empty?
@@ -275,7 +278,7 @@
               (fx= (heap-size hp) 0))))
 
 
-  #|doc
+  #|proc:heap-bounded?
   Check whether the heap `hp` is bounded.
   |#
   (define-who heap-bounded?
@@ -284,7 +287,7 @@
               (bool (heap-bound hp)))))
 
 
-  #|doc
+  #|proc:heap-contains?
   Return whether the heap `hp` contains the given item `v`.
   If it does, the procedure returns #t; otheriwse it returns #f.
   Items are compared using `equal?`.
@@ -316,7 +319,7 @@
                           (loop (fx1+ i)))))))))
 
 
-  #|doc
+  #|proc:heap-copy
   Make a copy of the heap `hp`.
   |#
   (define-who heap-copy
@@ -328,7 +331,7 @@
                        (heap-size hp)))))
 
 
-  #|doc
+  #|proc:heap->list
   Convert the heap into a list, without popping the heap's items.
   |#
   (define-who heap->list

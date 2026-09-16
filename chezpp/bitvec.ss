@@ -23,6 +23,9 @@
   ;; TODO ranged ops
 
 
+  #|record:$bitvec
+  Dense mutable bit-set record with a fixed exclusive bound.
+  |#
   (define-record-type ($bitvec mk-bitvec bitvec?)
     (fields
      ;; #bits actually allowed
@@ -56,7 +59,7 @@
     (lambda (i) (modulo i *num-bits*)))
 
 
-  #|doc
+  #|proc:make-bitvec
   Construct a bitvec with bound `bound`.
   `bound` must be a natural number.
   |#
@@ -67,7 +70,7 @@
                 (mk-bitvec bound (make-fxvector size 0))))))
 
 
-  #|doc
+  #|proc:make-full-bitvec
   Construct a full bitvec with bound `bound`, that is,
   all `bound` bits in the bitvec are set.
   `bound` must be a natural number.
@@ -80,7 +83,7 @@
                 (mk-bitvec bound (make-fxvector size (most-positive-fixnum)))))))
 
 
-  #|doc
+  #|proc:bitvec
   Construct a bitvec from the list of naturals in `args`.
   The bound of the bitvec is set to the largest number in `args` plus 1.
   |#
@@ -99,7 +102,7 @@
                     bv)))))
 
 
-  #|doc
+  #|proc:bitvec-set!
   Set the `i`th bit in the bitvec `bv`.
   `i` must be a natural number less than the bound of bv`.
   |#
@@ -112,7 +115,7 @@
                   (fxvector-set! data idx (fxlogbit1 off (fxvector-ref data idx))))))))
 
 
-  #|doc
+  #|proc:bitvec-unset!
   Unset the `i`th bit in the bitvec `bv`.
   `i` must be a natural number less than the bound of bv`.
   |#
@@ -125,7 +128,7 @@
                   (fxvector-set! data idx (fxlogbit0 off (fxvector-ref data idx))))))))
 
 
-  #|doc
+  #|proc:bitvec-set?
   Test if the `i`th bit in the bitvec `bv` is set.
   `i` must be a natural number less than the bound of bv`.
   |#
@@ -138,7 +141,7 @@
                   (fxlogbit? off (fxvector-ref data idx)))))))
 
 
-  #|doc
+  #|proc:bitvec-flip!
   Flip the `i`th bit in the bitvec `bv`.
   `i` must be a natural number less than the bound of bv`.
   |#
@@ -154,7 +157,7 @@
                       (fxvector-set! data idx (fxlogbit1 off n))))))))
 
 
-  #|doc
+  #|proc:bitvec-size
   Get the number of set bits in the bitvev `bv`.
   |#
   (define-who bitvec-size
@@ -176,7 +179,7 @@
                           (loop (fx1+ i) (fx+ c (fxpopcount (fxvector-ref data i)))))))))))
 
 
-  #|doc
+  #|proc:bitvec-clear!
   Clear all set bits in the bitvec `bv`.
   |#
   (define-who bitvec-clear!
@@ -185,7 +188,7 @@
               (fxvector-fill! (bitvec-data bv) 0))))
 
 
-  #|doc
+  #|proc:bitvec-empty?
   Check if none of the bits in the bitvec `bv` is set.
   |#
   (define-who bitvec-empty?
@@ -194,7 +197,7 @@
               (fx= 0 (bitvec-size bv)))))
 
 
-  #|doc
+  #|proc:bitvec-copy
   Make a copy of the bitvec `bv`.
   |#
   (define-who bitvec-copy
@@ -204,7 +207,7 @@
                          (fxvector-copy (bitvec-data bv))))))
 
 
-  #|doc
+  #|proc:bitvec-copy!
   Copy the bits in `src` from indices src-start, ..., src-start + k - 1
   to consecutive indices in `tgt` starting at `tgt-start`.
 
@@ -235,7 +238,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  #|doc
+  #|proc:bitvec-and
   Compute the logical and of the given bitvecs.
   If only one bitvec is given, it is returned directly.
   The bound of the resulting bitvec equals the smallest bound of those of the inputs.
@@ -301,7 +304,7 @@
                 [else 0])))))
 
 
-  #|doc
+  #|proc:bitvec-or
   Compute the logical or (inclusive) of the given bitvecs.
   If only one bitvec is given, it is returned directly.
   The bound of the resulting bitvec equals the largest bound of those of the inputs.
@@ -341,7 +344,7 @@
                  newbv))]))
 
 
-  #|doc
+  #|proc:bitvec-xor
   Compute the logical xor of the given bitvecs.
   If only one bitvec is given, it is returned directly.
   The bound of the resulting bitvec equals the largest bound of those of the inputs.
@@ -381,7 +384,7 @@
                  newbv))]))
 
 
-  #|doc
+  #|proc:bitvec-not
   Return a new bitvec that has all bits in the input bitvec `bv` inverted/flipped.
   |#
   (define-who bitvec-not
@@ -466,6 +469,9 @@
                 (loop acc (fx1- i)))))))
 
 
+  #|proc:bitvec-andmap
+  Apply `proc` to set bit indexes in ascending order and return their conjunction.
+  |#
   (define-who bitvec-andmap
     (lambda (proc bv)
       (pcheck ([procedure? proc] [bitvec? bv])
@@ -480,6 +486,9 @@
                              (loop (fx1+ i))))))))))
 
 
+  #|proc:bitvec-ormap
+  Apply `proc` to set bit indexes in ascending order and return their disjunction.
+  |#
   (define-who bitvec-ormap
     (lambda (proc bv)
       (pcheck ([procedure? proc] [bitvec? bv])
@@ -494,7 +503,7 @@
                             (loop (fx1+ i))))))))))
 
 
-    #|doc
+    #|proc:bitvec-for-each
     Apply the unary procedure `proc` to the indices of the set bits
     in bitvec `bv` for side effects, from left to right.
     |#
@@ -511,6 +520,9 @@
                              (loop (fx1+ i))))))))))
 
 
+    #|proc:bitvec-fold-left
+    Fold set bit indexes in ascending order with `proc`, returning the accumulator.
+    |#
     (define-who bitvec-fold-left
       (lambda (proc acc bv)
         (pcheck ([procedure? proc] [bitvec? bv])
@@ -525,6 +537,9 @@
                                 (fx1+ i)))))))))
 
 
+    #|proc:bitvec-fold-right
+    Fold set bit indexes in descending order with `proc`, returning the accumulator.
+    |#
     (define-who bitvec-fold-right
       (lambda (proc acc bv)
         (pcheck ([procedure? proc] [bitvec? bv])
@@ -546,7 +561,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-    #|doc
+    #|proc:bitvec->list
     Convert the indices of set bits in the bitvec `bv` into a list,
     in ascending order.
     |#

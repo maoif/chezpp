@@ -16,6 +16,9 @@
     (fields (mutable parent)
             (mutable rank)))
 
+  #|record:dset
+  Mutable disjoint-set record containing union-find nodes.
+  |#
   (define-record-type (dset mk-dset dset?)
     (fields vec))
 
@@ -27,7 +30,7 @@
         (when (fx>= x len)
           (errorf who "invalid index for dset of ~a items" len)))))
 
-  #|doc
+  #|proc:make-dset
   Construct a dset (disjoint set) object with an initial number of `n` items.
   `n` must be a natural number.
   |#
@@ -50,7 +53,7 @@
               newpi)))))
 
 
-  #|doc
+  #|proc:dset-same?
   Given two or more items, check whether they belong to the same set.
   |#
   (define-who dset-same?
@@ -81,7 +84,7 @@
                    (when (fx= rx ry)
                      (node-rank-set! ny (fx1+ ry))))))))
 
-  #|doc
+  #|proc:dset-union!
   Mark two or more items as belonging to the same set the dset `ds`.
   After this operation, `(dset-same? ds x ...)` always evaluates to #t.
   |#
@@ -102,7 +105,7 @@
                            (cdr x*))))]))
 
 
-  #|doc
+  #|proc:dset-size
   Return the number of disjoint sets in the dset.
   |#
   (define-who dset-size

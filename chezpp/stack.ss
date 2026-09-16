@@ -11,18 +11,21 @@
           (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
+  #|record:$stack
+  Mutable last-in, first-out stack backed by a list.
+  |#
   (define-record-type ($stack mk-stack stack?)
     (fields (mutable stk stack-stk stack-stk-set!)))
 
 
-  #|doc
+  #|proc:make-stack
   Construct a stack object.
   |#
   (define-who make-stack
     (lambda () (mk-stack '())))
 
 
-  #|doc
+  #|proc:stack
   Construct a stack object from a list of items.
   The items in the list are pushed onto the stack from left to right.
   |#
@@ -30,7 +33,7 @@
     (lambda args (mk-stack (reverse args))))
 
 
-  #|doc
+  #|proc:stack-push!
   Push one or more items onto the stack `stk`.
   |#
   (define-who stack-push!
@@ -47,7 +50,7 @@
                                             s v*))))]))
 
 
-  #|doc
+  #|proc:stack-pop!
   Pop the newest item from the stack `stk`.
   It is an error if the stack is empty.
   |#
@@ -62,7 +65,7 @@
                       v))))))
 
 
-  #|doc
+  #|proc:stack-pop-all!
   Pop all items from the stack `stk` into a list.
   The first item in the list corresponds to the newest item in the stack.
   If an additional procedure `proc` is given, it is apply to
@@ -82,7 +85,7 @@
                  (for-each proc s)))]))
 
 
-  #|doc
+  #|proc:stack-peek
   Get the newest item in the stack without removing it.
   It is an error if the stack is empty.
   |#
@@ -95,7 +98,7 @@
                     (car s))))))
 
 
-  #|doc
+  #|proc:stack-size
   Return the number of items currently in the stack.
   |#
   (define-who stack-size
@@ -104,7 +107,7 @@
               (length (stack-stk stk)))))
 
 
-  #|doc
+  #|proc:stack-empty?
   Check whether the stack is empty.
   |#
   (define-who stack-empty?
@@ -113,7 +116,7 @@
               (eq? '() (stack-stk stk)))))
 
 
-  #|doc
+  #|proc:stack-clear!
   Remove all items in the stack.
   |#
   (define-who stack-clear!
@@ -122,7 +125,7 @@
               (stack-stk-set! stk '()))))
 
 
-  #|doc
+  #|proc:stack-contains?
   Return whether the stack `stk` contains the given item `v`.
   If it does, the procedure returns #t;
   otheriwse it returns #f.
@@ -134,7 +137,7 @@
               (bool (member v (stack-stk stk))))))
 
 
-  #|doc
+  #|proc:stack-contains/p?
   Return whether the stack `stk` contains an item that satisfies the predicate `=?`.
   If it does, the procedure returns the index of the given item;
   otheriwse it returns #f.
@@ -145,7 +148,7 @@
               (bool (memp =? (stack-stk stk))))))
 
 
-  #|doc
+  #|proc:stack-copy
   Make a copy of the stack `stk`.
   |#
   (define-who stack-copy
@@ -154,7 +157,7 @@
               (mk-stack (list-copy (stack-stk stk))))))
 
 
-  #|doc
+  #|proc:stack->list
   Convert the stack into a list, without popping the stack's items.
   |#
   (define-who stack->list

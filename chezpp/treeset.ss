@@ -39,6 +39,9 @@
   #|proc:fixnum-treeset?
   Return whether `object` is a fixnum treeset. Any object may be tested.
   |#
+  #|record:$fixnum-treeset
+  Ordered set record restricted to fixnum members.
+  |#
   (define-record-type ($fixnum-treeset mk-fixnum-treeset fixnum-treeset?)
     (parent rbtree) (nongenerative) (opaque #t)
     (protocol (lambda (pnew) (lambda (=? <? size) ((pnew =? <? size #t #f))))))

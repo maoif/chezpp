@@ -12,6 +12,15 @@
          "../chez++ --script ../tools/check-public-api-docs.ss \
 ../chezpp/net ../chezpp/protobuf ../chezpp/optional-library.ss >/dev/null 2>&1")))
 
+(mat reviewed-data-structure-documentation
+     (= 0
+        (system
+         "../chez++ --script ../tools/check-public-api-docs.ss \
+../chezpp/array.ss ../chezpp/bittree.ss ../chezpp/bitvec.ss ../chezpp/dlist.ss \
+../chezpp/dset.ss ../chezpp/hashset.ss ../chezpp/heap.ss ../chezpp/list.ss \
+../chezpp/queue.ss ../chezpp/stack.ss ../chezpp/treeset.ss ../chezpp/treemap.ss \
+../chezpp/vector.ss ../chezpp/string.ss >/dev/null 2>&1")))
+
 (mat net-public-api-documentation-errors
      ;; Error cases: detached documentation, an overlong line, and vague return wording are rejected.
      (let* ([stem (format "/tmp/chezpp-net-docs-~a" (get-process-id))]

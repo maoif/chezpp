@@ -68,6 +68,9 @@
   ;; TODO allow change incr-factor?
   ;; TODO shrink the array when memory is low?
 
+  #|record:$array
+  Mutable array storage shared by generic, fixnum, and byte arrays.
+  |#
   (define-record-type ($array mk-array array?)
     (nongenerative)
     (fields
@@ -77,10 +80,16 @@
      ;; the actual number of items in vec
      (mutable size $array-size $array-size-set!)))
 
+  #|record:$fxarray
+  Mutable fixnum-array record derived from `$array`.
+  |#
   (define-record-type ($fxarray mk-fxarray fxarray?)
     (parent $array))
   (define-record-type ($flarray mk-flarray flarray?)
     (parent $array))
+  #|record:$u8array
+  Mutable unsigned-byte-array record derived from `$array`.
+  |#
   (define-record-type ($u8array mk-u8array u8array?)
     (parent $array))
 
@@ -355,7 +364,7 @@
               (mk-u8array (make-bytevector cap v) 2 len))))
 
 
-  #|doc
+  #|proc:make-array
   Create an array.
 
   If no arguments are given, an empty array is created.
@@ -371,12 +380,18 @@
       [(len)   ($make-array who len      #f len)]
       [(len v) ($make-array who len      v  len)]))
 
+  #|proc:make-fxarray
+  Return a fixnum array of optional length `len`, filled with optional fixnum `v`.
+  |#
   (define-who make-fxarray
     (case-lambda
       [()      ($make-fxarray who *mincap* #f 0)]
       [(len)   ($make-fxarray who len      0  len)]
       [(len v) ($make-fxarray who len      v  len)]))
 
+  #|proc:make-u8array
+  Return a byte array of optional length `len`, filled with optional byte `v`.
+  |#
   (define-who make-u8array
     (case-lambda
       [()      ($make-u8array who *mincap* #f 0)]
@@ -384,7 +399,7 @@
       [(len v) ($make-u8array who len      v  len)]))
 
 
-  #|doc
+  #|proc:array
   Create an array from the given arguments.
   |#
   (define-who array
@@ -398,6 +413,9 @@
                 (begin (vector-set! vec i (car args))
                        (loop (fx1+ i) (cdr args)))))))))
 
+  #|proc:fxarray
+  Return a fixnum array containing `args` in argument order.
+  |#
   (define-who fxarray
     (lambda args
       (unless (andmap fixnum? args)
@@ -411,6 +429,9 @@
                 (begin (fxvector-set! vec i (car args))
                        (loop (fx1+ i) (cdr args)))))))))
 
+  #|proc:u8array
+  Return a byte array containing `args` in argument order.
+  |#
   (define-who u8array
     (lambda args
       (unless (andmap u8? args)
@@ -437,7 +458,7 @@
              ($array-size arr)))
 
 
-  #|doc
+  #|proc:list->array
   Return whether the array is empty.
   |#
   (define-array-procedure (a fxa u8a)
@@ -1762,7 +1783,7 @@
               (apply array ls))))
 
 
-  #|doc
+  #|proc:vector->array
   Convert a vector `vec` to an array.
   |#
   (define-who vector->array
@@ -1776,7 +1797,7 @@
                       (begin (array-set! arr i (vector-ref vec i))
                              (loop (fx1+ i)))))))))
 
-  #|doc
+  #|proc:fxvector->fxarray
   Convert a fxvector `vec` to a fxarray.
   |#
   (define-who fxvector->fxarray
@@ -1790,7 +1811,7 @@
                       (begin (fxarray-set! arr i (fxvector-ref vec i))
                              (loop (fx1+ i)))))))))
 
-  #|doc
+  #|proc:u8vector->u8array
   Convert a bytevector/u8vector `vec` to a u8array.
   |#
   (define-who u8vector->u8array
@@ -1805,7 +1826,7 @@
                              (loop (fx1+ i)))))))))
 
 
-  #|doc
+  #|
   Convert an array to a list.
   |#
   ;; defines {,fx,u8}array->list
@@ -1820,7 +1841,7 @@
                             (loop (fx1+ i))))))))
 
 
-  #|doc
+  #|proc:array->vector
   Convert an array `arr` into a vector.
   |#
   (define-who array->vector
@@ -1835,7 +1856,7 @@
                              (loop (fx1+ i)))))))))
 
 
-  #|doc
+  #|proc:fxarray->fxvector
   Convert a fxarray `arr` into a fxvector.
   |#
   (define-who fxarray->fxvector
@@ -1849,7 +1870,7 @@
                       (begin (fxvector-set! vec i (fxarray-ref arr i))
                              (loop (fx1+ i)))))))))
 
-  #|doc
+  #|proc:u8array->u8vector
   Convert a u8array `arr` into a bytevector.
   |#
   (define-who u8array->u8vector

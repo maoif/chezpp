@@ -31,6 +31,9 @@
   (define all-lists? (lambda (ls*) (andmap list? ls*)))
 
 
+  #|proc:map/iota
+  Return a list of `(proc index)` results for indexes from zero through `n - 1`.
+  |#
   (define map/iota
     (lambda (proc n)
       (pcheck ([procedure? proc] [natural? n])
@@ -42,7 +45,7 @@
                              (loop (add1 i)))))))))
 
 
-  #|doc
+  #|proc:map!
   Similar to `map`, but the values returned by `proc` are stored directly into `ls0`.
   Return the first list.
   |#
@@ -82,7 +85,7 @@
                               (loop (cdr ls) (map cdr ls*)))))))]))
 
 
-  #|doc
+  #|proc:map!/i
   Similar to `map!`, but `proc` takes as its first argument the index of the list items.
   Return the first list.
   |#
@@ -122,7 +125,7 @@
                               (loop (add1 i) (cdr ls) (map cdr ls*)))))))]))
 
 
-  #|doc
+  #|proc:map/i
   Similar to `map`, but `proc` takes as its first argument the index of the list items.
   |#
   (define map/i
@@ -165,7 +168,7 @@
                                 (loop (add1 i) (cdr ls) (map cdr ls*))))))))]))
 
 
-  #|doc
+  #|proc:for-each/i
   Similar to `for-each`, but `proc` takes as its first argument the index of the list items.
   |#
   (define for-each/i
@@ -200,7 +203,7 @@
                             (loop (add1 i) (cdr ls) (map cdr ls*)))))))]))
 
 
-  #|doc
+  #|proc:fold-left/i
   Similar to `fold-left`, but `proc` takes as its first argument the index of the list items.
   |#
   (define fold-left/i
@@ -235,10 +238,13 @@
                        (loop (add1 i) (apply proc i acc (map car ls*)) (cdr ls) (map cdr ls*))))))]))
 
 
-  #|doc
+  #|
   Similar to `fold-right`, but `proc` takes as its first argument the index of the list items.
   |#
   ;; the index goes backwards
+  #|proc:fold-right/i
+  Fold equal-length lists from right to left, passing each zero-based index to `proc`.
+  |#
   (define fold-right/i
     (case-lambda
       [(proc acc ls0)
@@ -270,8 +276,8 @@
                        acc
                        (apply proc i `(,@(map car ls*) ,(loop (add1 i) (cdr ls) (map cdr ls*))))))))]))
 
-  #|doc
-  Tests whether items in a list are unique (no duplicates).
+  #|proc:unique?
+  Return whether `ls` has no duplicate items under optional equality procedure `eq`.
   |#
   (define unique?
     (case-lambda
@@ -285,9 +291,8 @@
                          #f
                          (loop (cdr ls))))))]))
 
-  #|doc
-  Returnes a list where duplicates are removed.
-  Note that the relative order of the items in the list is not preserved.
+  #|proc:unique
+  Return the items of `ls` with duplicates removed under optional equality procedure `eq`.
   |#
   (define unique
     (case-lambda
@@ -305,7 +310,7 @@
                                     (loop (cdr ls)))))))))]))
 
 
-  #|doc
+  #|proc:list-last
   Return the last element of a list.
   |#
   (define list-last
@@ -319,7 +324,7 @@
                              (loop (cdr ls))))))))
 
 
-  #|doc
+  #|proc:list-set!
   Imperatively store the value `v` into list `ls` at index `i`.
   It is an error if `i` is not a valid index of `ls`.
   |#
@@ -335,12 +340,15 @@
                       (loop (cdr ls) (fx1+ n))))))))
 
 
+  #|proc:zip
+  Return lists of corresponding items from the equal-length input lists.
+  |#
   (define zip
     (lambda (ls1 ls2 . ls*)
       (apply map list ls1 ls2 ls*)))
 
 
-  #|doc
+  #|proc:zip!
   Similar to `zip`, but the zip result is stored directly in `ls1`,
   which is also the return value.
   |#
@@ -366,7 +374,7 @@
                               (loop (cdr ls1) (cdr ls2) (map cdr ls*)))))))]))
 
 
-  #|doc
+  #|proc:snoc!
   Imperatively append a value to the list.
   |#
   (define snoc!
@@ -381,7 +389,7 @@
                              (loop (cdr l))))))))
 
 
-  #|doc
+  #|proc:list-sorted?
   Check whether the given list `ls` is sorted according to predicate `<?`.
   |#
   (define-who list-sorted?
@@ -396,6 +404,9 @@
                              (loop (cdr ls)))))))))
 
 
+  #|proc:scan-left-ex
+  Return exclusive left-scan accumulators for equal-length input lists.
+  |#
   (define-who scan-left-ex
     (case-lambda
       [(proc acc ls0)
@@ -447,6 +458,9 @@
                              (loop nacc (map cdr ls*))))))))]))
 
 
+  #|proc:scan-left-in
+  Return inclusive left-scan accumulators for equal-length input lists.
+  |#
   (define-who scan-left-in
     (case-lambda
       [(proc acc ls0)
@@ -498,6 +512,9 @@
                              (loop nacc (map cdr ls*))))))))]))
 
 
+  #|proc:scan-right-ex
+  Return exclusive right-scan accumulators for equal-length input lists.
+  |#
   (define-who scan-right-ex
     (case-lambda
       [(proc acc ls0)
@@ -560,6 +577,9 @@
                      (lb))))]))
 
 
+  #|proc:scan-right-in
+  Return inclusive right-scan accumulators for equal-length input lists.
+  |#
   (define-who scan-right-in
     (case-lambda
       [(proc acc ls0)
@@ -655,7 +675,7 @@
                        lb])))))))
 
 
-  #|doc
+  #|proc:nums
   Generate a list of of numbers: start, start+step*1, start+step*2, ...
 
   `start`, `stop` and `step` must be numbers that meet the following requirements:
@@ -682,7 +702,7 @@
                    (errorf who "invalid range: ~a, ~a, ~a" start stop step)))]))
 
 
-  #|doc
+  #|proc:slice
   Return a slice, or sublist of the original list.
   `start` and `end` specify the first and last item, respectively.
   `step` is the amount by which `start` is incremented every time an item is selected.
@@ -743,7 +763,7 @@
                            [else '()]))))]))
 
 
-  #|doc
+  #|proc:list-cyclic?
   Check whether the list `ls` contains a cycle.
   Note that `list-cyclic?` cares about cyclic "cdr pointers" only.
   If the car field somewhere inside the list points back, it is not detected.
