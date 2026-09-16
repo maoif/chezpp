@@ -16,7 +16,8 @@
           (chezpp internal)
           (chezpp utils)
           (chezpp list)
-          (only (chezpp iter) iter-register-source! make-iter iter-end))
+          (only (chezpp iter) iter-register-source! make-iter iter-end)
+          (only (chezpp navigator) nav-register-set!))
 
 
   ;; dummy value for all keys
@@ -595,6 +596,29 @@
                 (set! remaining (cdr remaining))
                 item)))
         (lambda () (set! remaining items))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Navigator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (nav-register-set!
+   hashset? hashset->list
+   (lambda (hs members)
+     (let ([copy (hashset-map (lambda (item) item) hs)])
+       (hashset-clear! copy)
+       (for-each (lambda (member) (hashset-add! copy member)) members)
+       copy))
+   (lambda (hs members)
+     (hashset-clear! hs)
+     (for-each (lambda (member) (hashset-add! hs member)) members)
+     hs)
+   (lambda (hs member)
+     (let ([copy (hashset-map (lambda (item) item) hs)])
+       (hashset-delete! copy member)
+       copy))
+   (lambda (hs member)
+     (hashset-delete! hs member)
+     hs))
 
   (record-writer (type-descriptor $hashset)
                  (lambda (r p wr)

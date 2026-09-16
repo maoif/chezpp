@@ -26,7 +26,8 @@
           (chezpp internal)
           (chezpp utils)
           (chezpp private rbtree)
-          (only (chezpp iter) iter-register-source! make-iter iter-end))
+          (only (chezpp iter) iter-register-source! make-iter iter-end)
+          (only (chezpp navigator) nav-register-set!))
 
 
   (define-record-type ($treeset mk-treeset treeset-record?)
@@ -834,6 +835,29 @@
                 (set! remaining (cdr remaining))
                 item)))
         (lambda () (set! remaining items))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Navigator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (nav-register-set!
+   treeset? treeset->list
+   (lambda (ts members)
+     (let ([copy (treeset-map (lambda (item) item) ts)])
+       (treeset-clear! copy)
+       (for-each (lambda (member) (treeset-add! copy member)) members)
+       copy))
+   (lambda (ts members)
+     (treeset-clear! ts)
+     (for-each (lambda (member) (treeset-add! ts member)) members)
+     ts)
+   (lambda (ts member)
+     (let ([copy (treeset-map (lambda (item) item) ts)])
+       (treeset-delete! copy member)
+       copy))
+   (lambda (ts member)
+     (treeset-delete! ts member)
+     ts))
 
   (record-writer (type-descriptor $treeset) write-treeset)
   (record-writer (type-descriptor $fixnum-treeset) write-treeset)

@@ -62,7 +62,8 @@
           (chezpp list)
           (chezpp vector)
           (chezpp utils)
-          (only (chezpp iter) iter-register-source! make-iter iter-end))
+          (only (chezpp iter) iter-register-source! make-iter iter-end)
+          (only (chezpp navigator) nav-register-indexed!))
 
   ;; TODO allow change incr-factor?
   ;; TODO shrink the array when memory is low?
@@ -1912,6 +1913,30 @@
                 (set! remaining (cdr remaining))
                 item)))
         (lambda () (set! remaining items))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Navigator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (nav-register-indexed!
+   array? array-size
+   (lambda (arr index)
+     (cond [(fxarray? arr) (fxarray-ref arr index)]
+           [(u8array? arr) (u8array-ref arr index)]
+           [else (array-ref arr index)]))
+   (lambda (arr index value)
+     (let ([copy (cond [(fxarray? arr) (fxarray-copy arr)]
+                       [(u8array? arr) (u8array-copy arr)]
+                       [else (array-copy arr)])])
+       (cond [(fxarray? copy) (fxarray-set! copy index value)]
+             [(u8array? copy) (u8array-set! copy index value)]
+             [else (array-set! copy index value)])
+       copy))
+   (lambda (arr index value)
+     (cond [(fxarray? arr) (fxarray-set! arr index value)]
+           [(u8array? arr) (u8array-set! arr index value)]
+           [else (array-set! arr index value)])
+     arr))
 
   (gen-array-record-writer $array   "#[array ("   vector-ref)
   (gen-array-record-writer $fxarray "#[fxarray (" fxvector-ref)

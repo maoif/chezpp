@@ -13,7 +13,8 @@
           (chezpp utils)
           (chezpp internal)
           (chezpp vector)
-          (only (chezpp iter) iter-register-source! make-iter iter-end))
+          (only (chezpp iter) iter-register-source! make-iter iter-end)
+          (only (chezpp navigator) nav-register-set!))
 
   ;; Bitvector: finite dense bit set.
   ;; Use a fxvector rather than reply on bitwise-* procs to
@@ -575,6 +576,29 @@
                   (set! remaining (cdr remaining))
                   item)))
           (lambda () (set! remaining items))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Navigator extension registration
+;;;;===----------------------------------------------------------------------===
+
+    (nav-register-set!
+     bitvec? bitvec->list
+     (lambda (bv members)
+       (let ([copy (bitvec-copy bv)])
+         (bitvec-clear! copy)
+         (for-each (lambda (member) (bitvec-set! copy member)) members)
+         copy))
+     (lambda (bv members)
+       (bitvec-clear! bv)
+       (for-each (lambda (member) (bitvec-set! bv member)) members)
+       bv)
+     (lambda (bv member)
+       (let ([copy (bitvec-copy bv)])
+         (bitvec-unset! copy member)
+         copy))
+     (lambda (bv member)
+       (bitvec-unset! bv member)
+       bv))
 
     (record-writer
      (type-descriptor $bitvec)

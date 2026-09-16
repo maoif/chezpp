@@ -12,7 +12,8 @@
           (chezpp utils)
           (chezpp internal)
           (chezpp private rbtree)
-          (only (chezpp iter) iter-register-source! make-iter iter-end))
+          (only (chezpp iter) iter-register-source! make-iter iter-end)
+          (only (chezpp navigator) nav-register-set!))
 
   ;; Bittree: huge sparse bit set.
   ;; Use rbtree to represent the bittree.
@@ -370,6 +371,29 @@
                 (set! remaining (cdr remaining))
                 item)))
         (lambda () (set! remaining items))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Navigator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (nav-register-set!
+   bittree? bittree->list
+   (lambda (bt members)
+     (let ([copy (bittree-copy bt)])
+       (bittree-clear! copy)
+       (for-each (lambda (member) (bittree-set! copy member)) members)
+       copy))
+   (lambda (bt members)
+     (bittree-clear! bt)
+     (for-each (lambda (member) (bittree-set! bt member)) members)
+     bt)
+   (lambda (bt member)
+     (let ([copy (bittree-copy bt)])
+       (bittree-unset! copy member)
+       copy))
+   (lambda (bt member)
+     (bittree-unset! bt member)
+     bt))
 
   (record-writer
    (type-descriptor $bittree)

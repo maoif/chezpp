@@ -2,7 +2,7 @@
   (export nav/stay nav/none nav/all nav/values nav/keys nav/entries
           nav/nth nav/nth/default nav/first nav/second nav/last nav/slice
           nav/key nav/key/default nav/key-values nav/submap nav/car nav/cdr
-          nav-register-indexed! nav-register-keyed!)
+          nav-register-indexed! nav-register-keyed! nav-register-set!)
   (import (chezscheme)
           (chezpp utils)
           (chezpp navigator private core)
@@ -92,6 +92,8 @@
                    (loop (+ i 1)))))]
             [(keyed-values value)
              => (lambda (values) (for-each emit values))]
+            [(set-values value)
+             => (lambda (values) (for-each emit values))]
             [else (nav-error 'nav/all "unsupported collection: ~s" value)])))
 
   (define transform-all-values
@@ -106,6 +108,9 @@
                         (loop (cdr entries)
                               (keyed-set value (caar entries)
                                          (update (cdar entries)))))))]
+            [(set-values value)
+             => (lambda (values)
+                  (set-replace value (map update values)))]
             [else (nav-error 'nav-transform "unsupported collection: ~s" value)])))
 
   (define transform-all-values!
@@ -119,7 +124,42 @@
                      (keyed-set! value (car entry) (update! (cdr entry))))
                    entries)
                   value)]
+            [(set-values value)
+             => (lambda (values)
+                  (set-replace! value (map update! values)))]
             [else (nav-error 'nav-transform! "unsupported collection: ~s" value)])))
+
+  (define clear-all-values
+    (lambda (value clear)
+      (let ([values (set-values value)])
+        (if values
+            (set-replace
+             value
+             (let loop ([values values] [members '()])
+               (if (null? values)
+                   (reverse members)
+                   (let ([member (clear (car values))])
+                     (loop (cdr values)
+                           (if (nav-missing? member)
+                               members
+                               (cons member members)))))))
+            (unsupported-clear 'nav-clearval value)))))
+
+  (define clear-all-values!
+    (lambda (value clear!)
+      (let ([values (set-values value)])
+        (if values
+            (set-replace!
+             value
+             (let loop ([values values] [members '()])
+               (if (null? values)
+                   (reverse members)
+                   (let ([member (clear! (car values))])
+                     (loop (cdr values)
+                           (if (nav-missing? member)
+                               members
+                               (cons member members)))))))
+            (unsupported-clear 'nav-clearval! value)))))
 
   (define emit-alist-key-values
     (lambda (alist key emit)
@@ -297,8 +337,8 @@
                     emit-indexed-values
                     transform-all-values
                     transform-all-values!
-                    (lambda (value clear) (unsupported-clear 'nav-clearval value))
-                    (lambda (value clear!) (unsupported-clear 'nav-clearval! value))))
+                    clear-all-values
+                    clear-all-values!))
 
   #|proc:nav/values
   The `nav/values` navigator focuses collection values.
@@ -308,8 +348,8 @@
                     emit-indexed-values
                     transform-all-values
                     transform-all-values!
-                    (lambda (value clear) (unsupported-clear 'nav-clearval value))
-                    (lambda (value clear!) (unsupported-clear 'nav-clearval! value))))
+                    clear-all-values
+                    clear-all-values!))
 
   #|proc:nav/keys
   The `nav/keys` navigator focuses sequence indexes or hashtable keys for

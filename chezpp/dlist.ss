@@ -26,7 +26,8 @@
           (chezpp utils)
           (chezpp list)
           (chezpp vector)
-          (only (chezpp iter) iter-register-source! make-iter iter-end))
+          (only (chezpp iter) iter-register-source! make-iter iter-end)
+          (only (chezpp navigator) nav-register-indexed!))
 
 
   (define-record-type dnode
@@ -1418,6 +1419,20 @@
                 (set! remaining (cdr remaining))
                 item)))
         (lambda () (set! remaining items))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Navigator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (nav-register-indexed!
+   dlist? dlist-size dlist-ref
+   (lambda (dl index value)
+     (let ([copy (dlist-copy dl)])
+       (dlist-set! copy index value)
+       copy))
+   (lambda (dl index value)
+     (dlist-set! dl index value)
+     dl))
 
   (record-writer (type-descriptor $dlist)
                  (lambda (r p wr)

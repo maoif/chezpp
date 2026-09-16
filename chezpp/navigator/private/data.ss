@@ -3,7 +3,9 @@
           indexed-supported?
           keyed-supported? keyed-ref/missing keyed-set keyed-set!
           keyed-delete keyed-delete! keyed-entries keyed-keys keyed-values
-          nav-register-indexed! nav-register-keyed!
+          set-supported? set-values set-replace set-replace!
+          set-delete set-delete!
+          nav-register-indexed! nav-register-keyed! nav-register-set!
           alist? alist-ref/missing)
   (import (chezscheme)
           (chezpp utils)
@@ -27,8 +29,18 @@
             (immutable entries-proc))
     (sealed #t))
 
+  (define-record-type ($set-protocol make-$set-protocol $set-protocol?)
+    (fields (immutable predicate)
+            (immutable values-proc)
+            (immutable replace-proc)
+            (immutable replace!-proc)
+            (immutable delete-proc)
+            (immutable delete!-proc))
+    (sealed #t))
+
   (define indexed-protocols '())
   (define keyed-protocols '())
+  (define set-protocols '())
 
   (define byte?
     (lambda (x)
@@ -85,6 +97,24 @@
                           keyed-protocols))
               (void))))
 
+  #|proc:nav-register-set!
+  Register callbacks for a set-like container. `predicate` recognizes the container.
+  `values-proc` returns its members in traversal order. The replace callbacks receive
+  a set and a list containing its complete replacement membership. The delete callbacks
+  receive a set and one member.
+  Pure callbacks return rebuilt sets. Mutating callbacks mutate their set and may return
+  any value; navigator mutation still returns the original set object.
+  |#
+  (define nav-register-set!
+    (lambda (predicate values-proc replace-proc replace!-proc delete-proc delete!-proc)
+      (pcheck ([procedure? predicate values-proc replace-proc replace!-proc
+                           delete-proc delete!-proc])
+              (set! set-protocols
+                    (cons (make-$set-protocol predicate values-proc replace-proc
+                                              replace!-proc delete-proc delete!-proc)
+                          set-protocols))
+              (void))))
+
   (define find-indexed-protocol
     (lambda (value)
       (let loop ([protocols indexed-protocols])
@@ -97,6 +127,13 @@
       (let loop ([protocols keyed-protocols])
         (cond [(null? protocols) #f]
               [(($keyed-protocol-predicate (car protocols)) value) (car protocols)]
+              [else (loop (cdr protocols))]))))
+
+  (define find-set-protocol
+    (lambda (value)
+      (let loop ([protocols set-protocols])
+        (cond [(null? protocols) #f]
+              [(($set-protocol-predicate (car protocols)) value) (car protocols)]
               [else (loop (cdr protocols))]))))
 
   (define indexed-length
@@ -341,4 +378,47 @@
   (define keyed-values
     (lambda (value)
       (let ([entries (keyed-entries value)])
-        (and entries (map cdr entries))))))
+        (and entries (map cdr entries)))))
+
+  (define set-supported?
+    (lambda (value)
+      (and (find-set-protocol value) #t)))
+
+  (define set-values
+    (lambda (value)
+      (let ([protocol (find-set-protocol value)])
+        (and protocol (($set-protocol-values-proc protocol) value)))))
+
+  (define set-replace
+    (lambda (value members)
+      (let ([protocol (find-set-protocol value)])
+        (if protocol
+            (($set-protocol-replace-proc protocol) value members)
+            (nav-error 'nav-transform "unsupported set value: ~s" value)))))
+
+  (define set-replace!
+    (lambda (value members)
+      (let ([protocol (find-set-protocol value)])
+        (if protocol
+            (begin
+              (($set-protocol-replace!-proc protocol) value members)
+              value)
+            (nav-error 'nav-transform! "unsupported set value: ~s" value)))))
+
+  (define set-delete
+    (lambda (value member)
+      (let ([protocol (find-set-protocol value)])
+        (if protocol
+            (($set-protocol-delete-proc protocol) value member)
+            (nav-error 'nav-clearval "unsupported set value: ~s" value)))))
+
+  (define set-delete!
+    (lambda (value member)
+      (let ([protocol (find-set-protocol value)])
+        (if protocol
+            (begin
+              (($set-protocol-delete!-proc protocol) value member)
+              value)
+            (nav-error 'nav-clearval! "unsupported set value: ~s" value)))))
+
+  )

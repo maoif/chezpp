@@ -296,6 +296,54 @@
      ;; negative: strict key selection rejects missing association keys.
      (error? (nav-select (nav/key 'missing) '((name . x)))))
 
+(mat navigator-data-structures
+     (equal? '(1 2 3) (nav-select nav/all (array 1 2 3)))
+     (equal? '(1 2 3) (nav-select nav/all (dlist 1 2 3)))
+     (equal? '(1 2 3) (nav-select nav/all (treeset = < 3 1 2)))
+     (equal? '(a b)
+             (nav-select nav/values (treemap = < '(2 . b) '(1 . a))))
+     (equal? '(1 2 3) (nav-select nav/all (bitvec 3 1 2)))
+     (equal? '(1 2 3) (nav-select nav/all (bittree 3 1 2)))
+     (equal? '(1 2 3)
+             (sort < (nav-select nav/all (hashset 3 1 2))))
+
+     ;; set-like structures do not expose members as keys or indexes
+     (error? (nav-select (nav/key 'x) (treeset = < 1)))
+     (error? (nav-select (nav/nth 0) (hashset 1)))
+     (error? (nav-select nav/keys (bitvec 1)))
+     (error? (nav-select nav/entries (bittree 1))))
+
+(mat navigator-data-structure-transforms
+     (equal? '(2 3 4)
+             (array->list (nav-transform nav/all add1 (array 1 2 3))))
+     (equal? '(2 3 4)
+             (dlist->list (nav-transform nav/all add1 (dlist 1 2 3))))
+     (equal? '((1 . b) (2 . c))
+             (treemap->list
+              (nav-transform nav/values
+                             (lambda (value) (if (eq? value 'a) 'b 'c))
+                             (treemap = < '(1 . a) '(2 . b)))))
+     (equal? '(2 3 4)
+             (treeset->list (nav-transform nav/all add1 (treeset = < 1 2 3))))
+
+     (let ([arr (array 1 2 3)])
+       (and (eq? arr (nav-transform! nav/all add1 arr))
+            (equal? '(2 3 4) (array->list arr))))
+     (let ([dl (dlist 1 2 3)])
+       (and (eq? dl (nav-transform! nav/all add1 dl))
+            (equal? '(2 3 4) (dlist->list dl))))
+     (let ([tm (treemap = < '(1 . 10) '(2 . 20))])
+       (and (eq? tm (nav-transform! nav/values add1 tm))
+            (equal? '((1 . 11) (2 . 21)) (treemap->list tm))))
+     (let ([ts (treeset = < 1 2 3)])
+       (and (eq? ts (nav-transform! nav/all add1 ts))
+            (equal? '(2 3 4) (treeset->list ts))))
+
+     (treeset-empty? (nav-clearval nav/all (treeset = < 1 2 3)))
+     (let ([bv (bitvec 1 2 3)])
+       (and (eq? bv (nav-clearval! nav/all bv))
+            (bitvec-empty? bv))))
+
 (mat navigator-selection-actions
      (equal? '(Ada)
              (nav-select (nav-path (nav/key 'user) (nav/key 'name))
@@ -1026,4 +1074,7 @@
      ;; negative: nav-traverse expects a procedure.
      (error? (nav-traverse nav/all '(a b) 'not-a-procedure))
      ;; negative: nav-transform expects a procedure.
-     (error? (nav-transform nav/all 'not-a-procedure '(a b))))
+     (error? (nav-transform nav/all 'not-a-procedure '(a b)))
+     ;; negative: set protocol registration requires procedure callbacks.
+     (error? (nav-register-set! 'not-a-procedure values values values values values))
+     (error? (nav-register-set! pair? values values values values 'not-a-procedure)))

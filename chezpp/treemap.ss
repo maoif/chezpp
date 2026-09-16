@@ -25,7 +25,8 @@
           (chezpp utils)
           (chezpp list)
           (chezpp private rbtree)
-          (only (chezpp iter) iter-register-source! make-iter iter-end))
+          (only (chezpp iter) iter-register-source! make-iter iter-end)
+          (only (chezpp navigator) nav-register-keyed!))
 
 
   (define-record-type ($treemap mk-treemap treemap-record?)
@@ -749,6 +750,34 @@
                 (set! remaining (cdr remaining))
                 item)))
         (lambda () (set! remaining items))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Navigator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (nav-register-keyed!
+   treemap?
+   (lambda (tm key default)
+     (if (treemap-contains? tm key) (treemap-ref tm key) default))
+   (lambda (tm key value)
+     (let ([copy (treemap-map (lambda (old-key old-value)
+                                (values old-key old-value))
+                              tm)])
+       (treemap-set! copy key value)
+       copy))
+   (lambda (tm key value)
+     (treemap-set! tm key value)
+     tm)
+   (lambda (tm key)
+     (let ([copy (treemap-map (lambda (old-key old-value)
+                                (values old-key old-value))
+                              tm)])
+       (treemap-delete! copy key)
+       copy))
+   (lambda (tm key)
+     (treemap-delete! tm key)
+     tm)
+   treemap->list)
 
   (record-writer (type-descriptor $treemap) write-treemap)
   (record-writer (type-descriptor $fixnum-treemap) write-treemap)
