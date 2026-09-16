@@ -37,15 +37,20 @@
   (define null-dnode (make-dnode #f #f #f))
   (define null-dnode? (lambda (x) (eq? x null-dnode)))
 
-  #|proc:dlist-size
-  Return the number of items in the dlist.
-  |#
   (define-record-type ($dlist mk-dlist dlist?)
     (nongenerative) (sealed #t)
     ;; When empty, `first` and `last` is null-dnode.
     (fields (mutable first  dlist-first  dlist-first-set!)
             (mutable last   dlist-last   dlist-last-set!)
-            (mutable size dlist-size dlist-size-set!)))
+            (mutable size $dlist-size $dlist-size-set!)))
+
+  #|proc:dlist-size
+  Return the number of items in the dlist.
+  |#
+  (define-who dlist-size
+    (lambda (dl)
+      (pcheck ([dlist? dl])
+              ($dlist-size dl))))
 
   (define all-dlists? (lambda (dl*) (andmap dlist? dl*)))
 
@@ -87,7 +92,7 @@
   (define-who dlist-empty?
     (lambda (dl)
       (pcheck ([dlist? dl])
-              (fx= 0 (dlist-size dl)))))
+              (fx= 0 ($dlist-size dl)))))
 
 
   #|doc
@@ -98,7 +103,7 @@
   (define-who dlist-ref
     (lambda (dl i)
       (pcheck ([dlist? dl] [natural? i])
-              (let ([len (dlist-size dl)])
+              (let ([len ($dlist-size dl)])
                 (if (fx>= i len)
                     (errorf who "index ~a out of range ~a" i len)
                     (cond [(fx= i 0) (dnode-value (dlist-first dl))]
@@ -116,7 +121,7 @@
   (define-who dlist-set!
     (lambda (dl i v)
       (pcheck ([dlist? dl] [natural? i])
-              (let ([len (dlist-size dl)])
+              (let ([len ($dlist-size dl)])
                 (if (fx< i len)
                     (let next ([i i] [n (dlist-first dl)])
                       ;; TODO optimize: proceed from left/right based on i and length
@@ -131,7 +136,7 @@
       (let ([n (make-dnode v null-dnode null-dnode)])
         (dlist-first-set!  dl n)
         (dlist-last-set!   dl n)
-        (dlist-size-set! dl 1))))
+        ($dlist-size-set! dl 1))))
 
 
   #|doc
@@ -141,7 +146,7 @@
     (case-lambda
       [(dl v)
        (pcheck ([dlist? dl])
-               (let ([len (dlist-size dl)])
+               (let ([len ($dlist-size dl)])
                  ;; add to tail
                  (cond [(fx= len 0)
                         ($dlist-add0 dl v)]
@@ -150,15 +155,15 @@
                                [n2 (make-dnode v n1 null-dnode)])
                           (dnode-right-set!  n1 n2)
                           (dlist-last-set!   dl n2)
-                          (dlist-size-set! dl 2))]
+                          ($dlist-size-set! dl 2))]
                        [else (let* ([last (dlist-last dl)]
                                     [n (make-dnode v last null-dnode)])
                                (dnode-right-set!  last n)
                                (dlist-last-set!   dl   n)
-                               (dlist-size-set! dl (fx+ len 1)))])))]
+                               ($dlist-size-set! dl (fx+ len 1)))])))]
       [(dl i v)
        (pcheck ([dlist? dl] [natural? i])
-               (let ([len (dlist-size dl)])
+               (let ([len ($dlist-size dl)])
                  (cond
                   [(fx= i 0)
                    (if (fx= len 0)
@@ -168,7 +173,7 @@
                               [n (make-dnode v null-dnode n0)])
                          (dnode-left-set!   n0 n)
                          (dlist-first-set!  dl n)
-                         (dlist-size-set! dl (fx+ (dlist-size dl) 1))))]
+                         ($dlist-size-set! dl (fx+ ($dlist-size dl) 1))))]
                   [(fx= i len) (dlist-add! dl v)]
                   ;; TODO optimize: proceed from left/right based on i and length
                   [(fx< i len)
@@ -177,7 +182,7 @@
                          (let* ([L (dnode-left n)]
                                 [N (make-dnode v L n)])
                            (dnode-right-set! L N)
-                           (dlist-size-set! dl (fx+ (dlist-size dl) 1)))
+                           ($dlist-size-set! dl (fx+ ($dlist-size dl) 1)))
                          (next (fx1- i) (dnode-right n))))]
                   [else (errorf who "index ~a out of range ~a" i len)])))]))
 
@@ -188,7 +193,7 @@
   (define-who dlist-delete!
     (lambda (dl i)
       (pcheck ([dlist? dl] [natural? i])
-              (let ([len (dlist-size dl)])
+              (let ([len ($dlist-size dl)])
                 (if (fx>= i len)
                     (errorf who "index ~a out of range ~a" i len)
                     (if (fx> len 1)
@@ -196,25 +201,25 @@
                                (let* ([n (dlist-first dl)]
                                       [R (dnode-right n)])
                                  (dlist-first-set!  dl R)
-                                 (dlist-size-set! dl (fx1- len)))]
+                                 ($dlist-size-set! dl (fx1- len)))]
                               [(fx= i (fx- len 1))
                                (let* ([n (dlist-last dl)]
                                       [L (dnode-left n)])
                                  (dnode-right-set!  L null-dnode)
                                  (dlist-last-set!   dl L)
-                                 (dlist-size-set! dl (fx1- len)))]
+                                 ($dlist-size-set! dl (fx1- len)))]
                               [else (let next ([i i] [n (dlist-first dl)])
                                       (if (fx= i 0)
                                           (let* ([L (dnode-left  n)]
                                                  [R (dnode-right n)])
                                             (dnode-right-set! L R)
                                             (dnode-left-set!  R L)
-                                            (dlist-size-set! dl (fx1- len)))
+                                            ($dlist-size-set! dl (fx1- len)))
                                           (next (fx- i 1) (dnode-right n))))])
                         (begin (assert (and (fx= len 1) (fx= i 0)))
                                (dlist-first-set!  dl null-dnode)
                                (dlist-last-set!   dl null-dnode)
-                               (dlist-size-set! dl 0))))))))
+                               ($dlist-size-set! dl 0))))))))
 
 
 
@@ -226,7 +231,7 @@
       [(dl) (pcheck ([dlist? dl])
                     (dlist-first-set!  dl null-dnode)
                     (dlist-last-set!   dl null-dnode)
-                    (dlist-size-set! dl 0))]))
+                    ($dlist-size-set! dl 0))]))
 
 
   #|doc
@@ -235,7 +240,7 @@
   (define-who dlist-reverse
     (lambda (dl)
       (pcheck ([dlist? dl])
-              (let ([len (dlist-size dl)] [newdl (make-dlist)])
+              (let ([len ($dlist-size dl)] [newdl (make-dlist)])
                 (cond [(fx= 0 len) newdl]
                       [(fx= 1 len)
                        (dlist-add! newdl (dnode-value (dlist-first dl)))
@@ -254,7 +259,7 @@
   (define-who dlist-reverse!
     (lambda (dl)
       (pcheck ([dlist? dl])
-              (when (fx> (dlist-size dl) 1)
+              (when (fx> ($dlist-size dl) 1)
                 (let ([first (dlist-first dl)] [last (dlist-last dl)])
                   (let loop ([n first] [prev (dnode-left first)])
                     (let ([R (dnode-right n)])
@@ -328,7 +333,7 @@
   (define-who dlist-contains?
     (lambda (dl v)
       (pcheck ([dlist? dl])
-              (if (fx= 0 (dlist-size dl))
+              (if (fx= 0 ($dlist-size dl))
                   #f
                   (let loop ([n (dlist-first dl)])
                     (if (null-dnode? n)
@@ -344,7 +349,7 @@
   (define-who dlist-contains/p?
     (lambda (dl pred)
       (pcheck ([dlist? dl] [procedure? pred])
-              (if (fx= 0 (dlist-size dl))
+              (if (fx= 0 ($dlist-size dl))
                   #f
                   (let loop ([n (dlist-first dl)])
                     (if (null-dnode? n)
@@ -480,7 +485,7 @@
       [(dl start end step)
        (pcheck ([dlist? dl] [fixnum? start end step])
                (when (fx= step 0) (errorf who "step cannot be 0"))
-               (let* ([len (dlist-size dl)] [newdl (make-dlist)]
+               (let* ([len ($dlist-size dl)] [newdl (make-dlist)]
                       [s (let ([s (if (fx>= start 0) start (fx+ len start))])
                            (cond [(fx< s 0) 0]
                                  [(fx> s len) (fx1- len)]
@@ -536,7 +541,7 @@
        (pcheck ([dlist? dl] [fixnum? start end step])
                (when (fx= step 0) (errorf who "step cannot be 0"))
                ;; create linked notes first, then update `dl`
-               (let* ([len (dlist-size dl)]
+               (let* ([len ($dlist-size dl)]
                       [s (let ([s (if (fx>= start 0) start (fx+ len start))])
                            (cond [(fx< s 0) 0]
                                  [(fx> s len) (fx1- len)]
@@ -565,7 +570,7 @@
                                            (dnode-right-set!  prev null-dnode)
                                            (dlist-first-set!  dl n)
                                            (dlist-last-set!   dl prev)
-                                           (dlist-size-set! dl nlen)]
+                                           ($dlist-size-set! dl nlen)]
                                           [(fx= k 0)
                                            (link! prev n1)
                                            (loop i n1)]
@@ -582,7 +587,7 @@
                                            (dnode-right-set!  prev null-dnode)
                                            (dlist-first-set!  dl n)
                                            (dlist-last-set!   dl prev)
-                                           (dlist-size-set! dl nlen)]
+                                           ($dlist-size-set! dl nlen)]
                                           [(fx= k 0)
                                            ;; record L since after linking, n1's left is updated
                                            (let ([L (dnode-left n1)])
@@ -610,7 +615,7 @@
 
   (define find-node
     (lambda (dl i)
-      (let ([len (dlist-size dl)])
+      (let ([len ($dlist-size dl)])
         ;; TODO check corner
         (if (< i (ash len -1))
             ;; left-to-right
@@ -639,8 +644,8 @@
   (define-who dlist-copy!
     (lambda (src src-start tgt tgt-start k)
       (pcheck ([dlist? src tgt] [natural? src-start tgt-start k])
-              (let ([len1 (dlist-size src)]
-                    [len2 (dlist-size tgt)])
+              (let ([len1 ($dlist-size src)]
+                    [len2 ($dlist-size tgt)])
                 (when (> (fx+ src-start k) len1)
                   (errorf who "range ~a is too large in source dlist" k))
                 (when (> (fx+ tgt-start k) len2)
@@ -683,13 +688,13 @@
     (case-lambda
       [(<? dl)
        (pcheck ([dlist? dl])
-               (dlist-sorted? <? dl 0 (dlist-size dl)))]
+               (dlist-sorted? <? dl 0 ($dlist-size dl)))]
       [(<? dl stop)
        (pcheck ([dlist? dl])
                (dlist-sorted? <? dl 0 stop))]
       [(<? dl start stop)
        (pcheck ([procedure? <?] [dlist? dl] [natural? start stop])
-               (let ([len (dlist-size dl)])
+               (let ([len ($dlist-size dl)])
                  (when (fx> stop len)
                    (errorf who "stop index ~a out of bound ~a" stop len))
                  (when (fx> start stop)
@@ -728,12 +733,12 @@
   (define-who dlist-sort
     (case-lambda
       [(<? dl)
-       (dlist-sort <? dl 0 (dlist-size dl))]
+       (dlist-sort <? dl 0 ($dlist-size dl))]
       [(<? dl stop)
        (dlist-sort <? dl 0 stop)]
       [(<? dl start stop)
        (pcheck ([dlist? dl] [procedure? <?] [natural? start stop])
-               (let ([len (dlist-size dl)])
+               (let ([len ($dlist-size dl)])
                  (when (fx> stop len)
                    (errorf who "stop index ~a out of bound ~a" stop len))
                  (when (fx> start stop)
@@ -756,12 +761,12 @@
   (define-who dlist-sort!
     (case-lambda
       [(<? dl)
-       (dlist-sort! <? dl 0 (dlist-size dl))]
+       (dlist-sort! <? dl 0 ($dlist-size dl))]
       [(<? dl stop)
        (dlist-sort! <? dl 0 stop)]
       [(<? dl start stop)
        (pcheck ([dlist? dl] [procedure? <?] [natural? start stop])
-               (let ([len (dlist-size dl)])
+               (let ([len ($dlist-size dl)])
                  (when (fx> stop len)
                    (errorf who "stop index ~a out of bound ~a" stop len))
                  (when (fx> start stop)
@@ -837,7 +842,7 @@
   (define-who dlist-pop!
     (lambda (dl)
       (pcheck ([dlist? dl])
-              (if (fx= 0 (dlist-size dl))
+              (if (fx= 0 ($dlist-size dl))
                   (errorf who "dlist is empty")
                   (let ([v (dlist-ref dl 0)])
                     (dlist-delete! dl 0)
@@ -858,7 +863,7 @@
   (define-who dlist-pop-back!
     (lambda (dl)
       (pcheck ([dlist? dl])
-              (let* ([len (dlist-size dl)] [i (fx1- len)])
+              (let* ([len ($dlist-size dl)] [i (fx1- len)])
                 (if (fx= 0 len)
                     (errorf who "dlist is empty")
                     (let ([v (dlist-ref dl i)])
@@ -879,11 +884,11 @@
   (define check-length
     (case-lambda
       [(who dl0 dl1)
-       (unless (fx= (dlist-size dl0) (dlist-size dl1))
+       (unless (fx= ($dlist-size dl0) ($dlist-size dl1))
          (errorf who "dlists are not of the same length"))]
       [(who dl0 . dl*)
        (unless (null? dl*)
-         (unless (apply fx= (dlist-size dl0) (map dlist-size dl*))
+         (unless (apply fx= ($dlist-size dl0) (map $dlist-size dl*))
            (errorf who "dlists are not of the same length")))]))
 
   (define-who dlist-map
@@ -1146,7 +1151,7 @@
       [(proc dl0)
        (pcheck ([procedure? proc] [dlist? dl0])
                (let ([newdl (make-dlist)])
-                 (let loop ([i (fx1- (dlist-size dl0))] [n0 (dlist-last dl0)])
+                 (let loop ([i (fx1- ($dlist-size dl0))] [n0 (dlist-last dl0)])
                    (if (null-dnode? n0)
                        newdl
                        (begin (dlist-add! newdl (proc i (dnode-value n0)))
@@ -1155,7 +1160,7 @@
        (pcheck ([procedure? proc] [dlist? dl0] [dlist? dl1])
                (check-length who dl0 dl1)
                (let ([newdl (make-dlist)])
-                 (let loop ([i (fx1- (dlist-size dl0))] [n0 (dlist-last dl0)] [n1 (dlist-last dl1)])
+                 (let loop ([i (fx1- ($dlist-size dl0))] [n0 (dlist-last dl0)] [n1 (dlist-last dl1)])
                    (if (null-dnode? n0)
                        newdl
                        (begin (dlist-add! newdl (proc i (dnode-value n0) (dnode-value n1)))
@@ -1164,7 +1169,7 @@
        (pcheck ([procedure? proc] [dlist? dl0] [all-dlists? dl*])
                (apply check-length who dl0 dl*)
                (let ([newdl (make-dlist)])
-                 (let loop ([i (fx1- (dlist-size dl0))] [n0 (dlist-last dl0)] [n* (map dlist-last dl*)])
+                 (let loop ([i (fx1- ($dlist-size dl0))] [n0 (dlist-last dl0)] [n* (map dlist-last dl*)])
                    (if (null-dnode? n0)
                        newdl
                        (begin (dlist-add! newdl (apply proc i (dnode-value n0) (map dnode-value n*)))
@@ -1199,21 +1204,21 @@
     (case-lambda
       [(proc dl0)
        (pcheck ([procedure? proc] [dlist? dl0])
-               (let loop ([i (fx1- (dlist-size dl0))] [n0 (dlist-last dl0)])
+               (let loop ([i (fx1- ($dlist-size dl0))] [n0 (dlist-last dl0)])
                  (unless (null-dnode? n0)
                    (begin (proc i (dnode-value n0))
                           (loop (fx1- i) (dnode-left n0))))))]
       [(proc dl0 dl1)
        (pcheck ([procedure? proc] [dlist? dl0] [dlist? dl1])
                (check-length who dl0 dl1)
-               (let loop ([i (fx1- (dlist-size dl0))] [n0 (dlist-last dl0)] [n1 (dlist-last dl1)])
+               (let loop ([i (fx1- ($dlist-size dl0))] [n0 (dlist-last dl0)] [n1 (dlist-last dl1)])
                  (unless (null-dnode? n0)
                    (begin (proc i (dnode-value n0) (dnode-value n1))
                           (loop (fx1- i) (dnode-left n0) (dnode-left n1))))))]
       [(proc dl0 . dl*)
        (pcheck ([procedure? proc] [dlist? dl0] [all-dlists? dl*])
                (apply check-length who dl0 dl*)
-               (let loop ([i (fx1- (dlist-size dl0))] [n0 (dlist-last dl0)] [n* (map dlist-last dl*)])
+               (let loop ([i (fx1- ($dlist-size dl0))] [n0 (dlist-last dl0)] [n* (map dlist-last dl*)])
                  (unless (null-dnode? n0)
                    (begin (apply proc i (dnode-value n0) (map dnode-value n*))
                           (loop (fx1- i) (dnode-left n0) (map dnode-left n*))))))]))
@@ -1307,7 +1312,7 @@
     (case-lambda
       [(proc acc dl0)
        (pcheck ([procedure? proc] [dlist? dl0])
-               (let loop ([i (fx1- (dlist-size dl0))] [acc acc] [n0 (dlist-last dl0)])
+               (let loop ([i (fx1- ($dlist-size dl0))] [acc acc] [n0 (dlist-last dl0)])
                  (if (null-dnode? n0)
                      acc
                      (loop (fx1- i) (proc i (dnode-value n0) acc)
@@ -1315,7 +1320,7 @@
       [(proc acc dl0 dl1)
        (pcheck ([procedure? proc] [dlist? dl0] [dlist? dl1])
                (check-length who dl0 dl1)
-               (let loop ([i (fx1- (dlist-size dl0))] [acc acc] [n0 (dlist-last dl0)] [n1 (dlist-last dl1)])
+               (let loop ([i (fx1- ($dlist-size dl0))] [acc acc] [n0 (dlist-last dl0)] [n1 (dlist-last dl1)])
                  (if (null-dnode? n0)
                      acc
                      (loop (fx1- i) (proc i (dnode-value n0) (dnode-value n1) acc)
@@ -1323,7 +1328,7 @@
       [(proc acc dl0 . dl*)
        (pcheck ([procedure? proc] [dlist? dl0] [all-dlists? dl*])
                (apply check-length who dl0 dl*)
-               (let loop ([i (fx1- (dlist-size dl0))] [acc acc] [n0 (dlist-last dl0)] [n* (map dlist-last dl*)])
+               (let loop ([i (fx1- ($dlist-size dl0))] [acc acc] [n0 (dlist-last dl0)] [n* (map dlist-last dl*)])
                  (if (null-dnode? n0)
                      acc
                      (loop (fx1- i) (apply proc i (dnode-value n0) `(,@(map dnode-value n*) ,acc))
@@ -1345,7 +1350,7 @@
   (define-who dlist->list
     (lambda (dl)
       (pcheck ([dlist? dl])
-              (let ([len (dlist-size dl)])
+              (let ([len ($dlist-size dl)])
                 (if (fx= len 0)
                     '()
                     (let ([lb (make-list-builder)])
@@ -1371,7 +1376,7 @@
   (define-who dlist->vector
     (lambda (dl)
       (pcheck ([dlist? dl])
-              (let ([len (dlist-size dl)])
+              (let ([len ($dlist-size dl)])
                 (if (fx= len 0)
                     (vector)
                     (let ([vec (make-vector len)])
@@ -1411,7 +1416,7 @@
 
   (record-type-equal-procedure (type-descriptor $dlist)
                                (lambda (dl1 dl2 =?)
-                                 (and (fx= (dlist-size dl1) (dlist-size dl2))
+                                 (and (fx= ($dlist-size dl1) ($dlist-size dl2))
                                       (let loop ([n1 (dlist-first dl1)] [n2 (dlist-first dl2)])
                                         (if (null-dnode? n1)
                                             #t

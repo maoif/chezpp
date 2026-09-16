@@ -3,6 +3,14 @@
 
 (mat array
 
+     ;; invalid array: size observers validate through pcheck
+     (guard (condition
+             [(and (who-condition? condition)
+                   (eq? 'pcheck (condition-who condition))) #t]
+             [else #f])
+       (array-size 42)
+       #f)
+
      (let ([arr (apply array (iota 10))])
        (fx= (array-size arr) 10))
 

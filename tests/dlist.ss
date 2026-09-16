@@ -4,6 +4,14 @@
 
 (mat dlist
 
+     ;; invalid dlist: the size observer validates through pcheck
+     (guard (condition
+             [(and (who-condition? condition)
+                   (eq? 'pcheck (condition-who condition))) #t]
+             [else #f])
+       (dlist-size 42)
+       #f)
+
      (let* ([l (iota 10)]
             [dl (apply dlist l)])
        (= (dlist-size dl) (length l)))
