@@ -12,7 +12,8 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal)
-          (chezpp vector))
+          (chezpp vector)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
   ;; Bitvector: finite dense bit set.
   ;; Use a fxvector rather than reply on bitwise-* procs to
@@ -557,6 +558,23 @@
                                             x))))
                    '() data)))))
 
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+    (iter-register-source!
+     bitvec?
+     (lambda (bv)
+       (let* ([items (bitvec->list bv)] [remaining items])
+         (make-iter
+          (lambda ()
+            (if (null? remaining)
+                iter-end
+                (let ([item (car remaining)])
+                  (set! remaining (cdr remaining))
+                  item)))
+          (lambda () (set! remaining items))))))
 
     (record-writer
      (type-descriptor $bitvec)

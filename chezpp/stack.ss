@@ -7,7 +7,8 @@
           stack-copy stack->list)
   (import (chezpp chez)
           (chezpp utils)
-          (chezpp internal))
+          (chezpp internal)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
   (define-record-type ($stack mk-stack stack?)
@@ -162,6 +163,23 @@
               ;; return a copy in case it is mutated
               (list-copy (stack-stk stk)))))
 
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   stack?
+   (lambda (stk)
+     (let* ([items (stack->list stk)] [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
 
   (record-writer
    (type-descriptor $stack)

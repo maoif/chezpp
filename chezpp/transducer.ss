@@ -233,7 +233,7 @@
                 [(flvector? source) (run-flvector reducer acc source)]
                 [(hashtable? source) (run-hashtable reducer acc source)]
                 [(iter? source) (run-iter reducer acc source)]
-                [else (errorf 'transduce "unsupported transducer source: ~a" source)]))))
+                [else (run-iter reducer acc (iter-source->iter source))]))))
 
   (define transduce-run
     (lambda (who xform reducer init source runner)
@@ -1513,15 +1513,9 @@
   (define source->iter
     (lambda (source)
       (pcheck ([transducible? source])
-              (cond [(iter? source) source]
-                    [(list? source) (list->iter source)]
-                    [(vector? source) (vector->iter source)]
-                    [(string? source) (string->iter source)]
-                    [(bytevector? source) (bytevector->iter source)]
-                    [(fxvector? source) (fxvector->iter source)]
-                    [(flvector? source) (flvector->iter source)]
-                    [(hashtable? source) (vector->iter (hashtable-values source))]
-                    [(eduction? source) (sequence (tidentity) source)]))))
+              (if (eduction? source)
+                  (sequence (tidentity) source)
+                  (iter-source->iter source)))))
 
   #|proc:transducible?
   The `transducible?` procedure returns `#t` for Phase 1 sources accepted by
@@ -1529,12 +1523,5 @@
   |#
   (define transducible?
     (lambda (x)
-      (or (list? x)
-          (vector? x)
-          (bytevector? x)
-          (string? x)
-          (fxvector? x)
-          (flvector? x)
-          (hashtable? x)
-          (iter? x)
+      (or (iterable? x)
           (eduction? x)))))

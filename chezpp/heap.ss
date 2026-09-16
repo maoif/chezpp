@@ -8,7 +8,8 @@
           (chezpp utils)
           (chezpp internal)
           (chezpp list)
-          (chezpp vector))
+          (chezpp vector)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
   (define-record-type ($heap mk-heap heap?)
@@ -335,6 +336,23 @@
       (pcheck ([heap? hp])
               (heap-pop-all! (heap-copy hp)))))
 
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   heap?
+   (lambda (hp)
+     (let* ([items (heap->list hp)] [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
 
   (record-writer
    (type-descriptor $heap)

@@ -61,7 +61,8 @@
           (chezpp internal)
           (chezpp list)
           (chezpp vector)
-          (chezpp utils))
+          (chezpp utils)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
   ;; TODO allow change incr-factor?
   ;; TODO shrink the array when memory is low?
@@ -1891,6 +1892,26 @@
                                                    #t
                                                    (and (=? (vref vec1 i) (vref vec2 i))
                                                         (loop (fx1+ i)))))))))]))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   array?
+   (lambda (arr)
+     (let* ([items (cond [(fxarray? arr) (fxarray->list arr)]
+                         [(u8array? arr) (u8array->list arr)]
+                         [else (array->list arr)])]
+            [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
 
   (gen-array-record-writer $array   "#[array ("   vector-ref)
   (gen-array-record-writer $fxarray "#[fxarray (" fxvector-ref)

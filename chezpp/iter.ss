@@ -4,7 +4,7 @@
           bytevector->iter fxvector->iter flvector->iter
           port->iter port-lines->iter port-chars->iter port-data->iter
           file->iter file-lines->iter file-chars->iter file-data->iter
-          iter->list
+          iter->list iter-source->iter iterable? iter-register-source!
 
           get-iter make-iter iter-end iter-end? iter-next! iter-reset! iter-finalize!
           (rename ($iter-finalized? iter-finalized?)
@@ -37,6 +37,26 @@
                            (p next!-proc reset!-proc void (make-list-builder) #f))]))))
   (define iter-end (mk-$iter void void))
   (define iter-end? (sect eq? _ iter-end))
+
+  (define source-adapters '())
+
+  #|proc:iter-register-source!
+  Register `predicate` and `iterator-maker` as an iterator source adapter.
+  The maker receives one matching source and returns an iterator.
+  Newer registrations are checked before older registrations.
+  |#
+  (define-who iter-register-source!
+    (lambda (predicate iterator-maker)
+      (pcheck ([procedure? predicate iterator-maker])
+              (set! source-adapters
+                    (cons (cons predicate iterator-maker) source-adapters)))))
+
+  (define find-source-adapter
+    (lambda (source)
+      (let loop ([adapters source-adapters])
+        (cond [(null? adapters) #f]
+              [((caar adapters) source) (cdar adapters)]
+              [else (loop (cdr adapters))]))))
 
   #|proc:make-iter
   The `make-iter` procedure returns an iterator using `next!-proc`,
@@ -252,6 +272,38 @@
   |#
   (define flvector->iter
     (define-indexed->iter 'flvector->iter flvector? flvector-length flvector-ref))
+
+  #|proc:iterable?
+  Return whether `source` is a built-in or registered iterator source.
+  |#
+  (define iterable?
+    (lambda (source)
+      (or ($iter? source)
+          (list? source)
+          (vector? source)
+          (string? source)
+          (bytevector? source)
+          (fxvector? source)
+          (flvector? source)
+          (hashtable? source)
+          (bool (find-source-adapter source)))))
+
+  #|proc:iter-source->iter
+  Convert a built-in or registered `source` to an iterator.
+  Registered adapters are consulted after all built-in source types.
+  |#
+  (define-who iter-source->iter
+    (lambda (source)
+      (pcheck ([iterable? source])
+              (cond [($iter? source) source]
+                    [(list? source) (list->iter source)]
+                    [(vector? source) (vector->iter source)]
+                    [(string? source) (string->iter source)]
+                    [(bytevector? source) (bytevector->iter source)]
+                    [(fxvector? source) (fxvector->iter source)]
+                    [(flvector? source) (flvector->iter source)]
+                    [(hashtable? source) (vector->iter (hashtable-values source))]
+                    [else ((find-source-adapter source) source)]))))
 
 
 ;;;; ports are opened and closed by the caller

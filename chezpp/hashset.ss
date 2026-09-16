@@ -15,7 +15,8 @@
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils)
-          (chezpp list))
+          (chezpp list)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
   ;; dummy value for all keys
@@ -577,6 +578,23 @@
                 (vector-for-each (lambda (x) (hashset-add! hs x)) vec)
                 hs))))
 
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   hashset?
+   (lambda (hs)
+     (let* ([items (hashset->list hs)] [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
 
   (record-writer (type-descriptor $hashset)
                  (lambda (r p wr)

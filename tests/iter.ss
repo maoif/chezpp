@@ -1,5 +1,50 @@
 (import (chezpp))
 
+(define collect-iter
+  (lambda (iter)
+    (let loop ([acc '()])
+      (let ([value (iter-next! iter)])
+        (if (iter-end? value)
+            (reverse acc)
+            (loop (cons value acc)))))))
+
+(define reset-sequence?
+  (lambda (expected source)
+    (let ([iter (source->iter source)])
+      (and (equal? expected (collect-iter iter))
+           (begin
+             (iter-reset! iter)
+             (equal? expected (collect-iter iter)))))))
+
+
+(mat registered-source-iterators
+
+     (reset-sequence? '(1 2 3) (array 1 2 3))
+     (reset-sequence? '(1 2 3) (fxarray 1 2 3))
+     (reset-sequence? '(1 2 3) (u8array 1 2 3))
+     (reset-sequence? '(1 2 3) (dlist 1 2 3))
+     (reset-sequence? '(1 2 3) (queue 1 2 3))
+     (reset-sequence? '(3 2 1) (stack 1 2 3))
+     (reset-sequence? '(1 2 3) (heap < 3 1 2))
+     (reset-sequence? '(1 2 3) (treeset = < 3 1 2))
+     (reset-sequence? '((1 . a) (2 . b))
+                      (treemap = < '(2 . b) '(1 . a)))
+     (reset-sequence? '(1 3 5) (bitvec 5 1 3))
+     (reset-sequence? '(1 3 5) (bittree 5 1 3))
+     (reset-sequence? '(0 1 2 3) (make-dset 4))
+
+     (let ([source (hashset 3 1 2)]
+           [iter #f])
+       (set! iter (source->iter source))
+       (let ([first (sort < (collect-iter iter))])
+         (iter-reset! iter)
+         (and (equal? '(1 2 3) first)
+              (equal? '(1 2 3) (sort < (collect-iter iter))))))
+
+     ;; invalid registration callbacks are rejected at the public boundary
+     (error? (iter-register-source! 1 (lambda (source) source)))
+     (error? (iter-register-source! pair? 1)))
+
 
 (mat iterators
 

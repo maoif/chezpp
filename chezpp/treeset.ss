@@ -25,7 +25,8 @@
           (chezpp list)
           (chezpp internal)
           (chezpp utils)
-          (chezpp private rbtree))
+          (chezpp private rbtree)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
   (define-record-type ($treeset mk-treeset treeset-record?)
@@ -816,6 +817,23 @@
                                            (set! i (fx1+ i)))
                                          r)
                            (display ")]" p))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   treeset?
+   (lambda (ts)
+     (let* ([items (treeset->list ts)] [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
 
   (record-writer (type-descriptor $treeset) write-treeset)
   (record-writer (type-descriptor $fixnum-treeset) write-treeset)

@@ -24,7 +24,8 @@
           (chezpp internal)
           (chezpp utils)
           (chezpp list)
-          (chezpp private rbtree))
+          (chezpp private rbtree)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
   (define-record-type ($treemap mk-treemap treemap-record?)
@@ -732,6 +733,23 @@
                                            (set! i (fx1+ i)))
                                          r)
                            (display ")]" p))))))
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   treemap?
+   (lambda (tm)
+     (let* ([items (treemap->list tm)] [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
+
   (record-writer (type-descriptor $treemap) write-treemap)
   (record-writer (type-descriptor $fixnum-treemap) write-treemap)
 

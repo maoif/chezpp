@@ -8,7 +8,8 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal)
-          (chezpp dlist))
+          (chezpp dlist)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
   (define-record-type ($queue mk-queue queue?)
@@ -157,6 +158,23 @@
       (pcheck ([queue? q])
               (dlist->list (queue-dl q)))))
 
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   queue?
+   (lambda (q)
+     (let* ([items (queue->list q)] [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
 
   (record-writer
    (type-descriptor $queue)

@@ -5,7 +5,8 @@
           (chezpp utils)
           (chezpp internal)
           (chezpp list)
-          (chezpp vector))
+          (chezpp vector)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
   ;; A disjoint set implementation that supports union-find operations.
   ;; `dset` operates on natural numbers only.
@@ -110,6 +111,23 @@
                       (if (fx= i (node-parent n)) (add1 acc) acc))
                     0 (dset-vec ds))))
 
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   dset?
+   (lambda (ds)
+     (let ([index 0] [size (dset-size ds)])
+       (make-iter
+        (lambda ()
+          (if (fx= index size)
+              iter-end
+              (let ([item index])
+                (set! index (fx1+ index))
+                item)))
+        (lambda () (set! index 0))))))
 
   (record-writer (type-descriptor dset)
                  (lambda (r p wr)

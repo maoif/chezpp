@@ -11,7 +11,8 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp internal)
-          (chezpp private rbtree))
+          (chezpp private rbtree)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
   ;; Bittree: huge sparse bit set.
   ;; Use rbtree to represent the bittree.
@@ -352,6 +353,23 @@
                                                       acc v)))
                                  '() (bittree-rbt bt)))))
 
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   bittree?
+   (lambda (bt)
+     (let* ([items (bittree->list bt)] [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
 
   (record-writer
    (type-descriptor $bittree)

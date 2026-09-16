@@ -25,7 +25,8 @@
           (chezpp internal)
           (chezpp utils)
           (chezpp list)
-          (chezpp vector))
+          (chezpp vector)
+          (only (chezpp iter) iter-register-source! make-iter iter-end))
 
 
   (define-record-type dnode
@@ -1400,6 +1401,23 @@
                        dl))))
 
 
+
+;;;;===----------------------------------------------------------------------===
+;;;; Iterator extension registration
+;;;;===----------------------------------------------------------------------===
+
+  (iter-register-source!
+   dlist?
+   (lambda (dl)
+     (let* ([items (dlist->list dl)] [remaining items])
+       (make-iter
+        (lambda ()
+          (if (null? remaining)
+              iter-end
+              (let ([item (car remaining)])
+                (set! remaining (cdr remaining))
+                item)))
+        (lambda () (set! remaining items))))))
 
   (record-writer (type-descriptor $dlist)
                  (lambda (r p wr)
