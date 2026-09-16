@@ -6,21 +6,21 @@
 
      (let* ([l (iota 10)]
             [dl (apply dlist l)])
-       (= (dlist-length dl) (length l)))
+       (= (dlist-size dl) (length l)))
 
      (let* ([l (random-list 30)]
             [dl (apply dlist l)])
        (equal? l (dlist->list dl)))
 
-     (fx= 0 (dlist-length (dlist)))
+     (fx= 0 (dlist-size (dlist)))
      )
 
 
 (mat make-dlist
 
-     (fx= 0 (dlist-length (make-dlist)))
-     (fx= 10 (dlist-length (make-dlist 10)))
-     (fx= 100 (dlist-length (make-dlist 100)))
+     (fx= 0 (dlist-size (make-dlist)))
+     (fx= 10 (dlist-size (make-dlist 10)))
+     (fx= 100 (dlist-size (make-dlist 100)))
 
      (error? (make-dlist #f))
 
@@ -52,16 +52,16 @@
        (dlist-add! dl 0 -2)
        (dlist-add! dl 0 -3)
        (dlist-add! dl 0 -4)
-       (and (= 9 (dlist-length dl))
+       (and (= 9 (dlist-size dl))
             (equal? '(-4 -3 -2 -1 0 1 2 3 4) (dlist->list dl))))
 
      ;; end
      (let ([dl (apply dlist (iota 5))])
-       (dlist-add! dl (dlist-length dl) -1)
-       (dlist-add! dl (dlist-length dl) -2)
-       (dlist-add! dl (dlist-length dl) -3)
-       (dlist-add! dl (dlist-length dl) -4)
-       (and (= 9 (dlist-length dl))
+       (dlist-add! dl (dlist-size dl) -1)
+       (dlist-add! dl (dlist-size dl) -2)
+       (dlist-add! dl (dlist-size dl) -3)
+       (dlist-add! dl (dlist-size dl) -4)
+       (and (= 9 (dlist-size dl))
             (equal? '(0 1 2 3 4 -1 -2 -3 -4) (dlist->list dl))))
 
      ;; middle
@@ -70,7 +70,7 @@
        (dlist-add! dl 3 -2)
        (dlist-add! dl 3 -3)
        (dlist-add! dl 3 -4)
-       (and (= 9 (dlist-length dl))
+       (and (= 9 (dlist-size dl))
             (equal? '(0 1 2 -4 -3 -2 -1 3 4) (dlist->list dl))))
 
      (let ([dl (apply dlist (iota 5))])
@@ -78,7 +78,7 @@
        (dlist-add! dl 0 -1)
        (dlist-add! dl 2 -2)
        (dlist-add! dl 4 -3)
-       (and (= 9 (dlist-length dl))
+       (and (= 9 (dlist-size dl))
             (equal? '(-1 0 -2 1 -3 2 3 4 5) (dlist->list dl))))
      )
 
@@ -136,6 +136,7 @@
 
      ;; bad index
      (error? (dlist-delete! (dlist) 1))
+     ;; index exceeds the size
      (error? (dlist-delete! (dlist 1) 2))
      (error? (dlist-delete! (dlist) -1))
      (error? (dlist-delete! (dlist) -2))
@@ -144,33 +145,33 @@
      (let ([dl (dlist 1)])
        (dlist-delete! dl 0)
        (and (null? (dlist->list dl))
-            (= 0 (dlist-length dl))))
+            (= 0 (dlist-size dl))))
 
      ;; middle
      (let ([dl (dlist 1 2 3)])
        (dlist-delete! dl 1)
-       (and (= 2 (dlist-length dl))
+       (and (= 2 (dlist-size dl))
             (equal? '(1 3) (dlist->list dl))))
 
      ;; first
      (let ([dl (dlist 1 2 3)])
        (dlist-delete! dl 0)
-       (and (= 2 (dlist-length dl))
+       (and (= 2 (dlist-size dl))
             (equal? '(2 3) (dlist->list dl))))
 
      ;; last
      (let ([dl (dlist 1 2 3)])
        (dlist-delete! dl 2)
-       (and (= 2 (dlist-length dl))
+       (and (= 2 (dlist-size dl))
             (equal? '(1 2) (dlist->list dl))))
 
 
      (let ([dl (apply dlist (iota 10))])
        (dlist-delete! dl 0)
-       (dlist-delete! dl (fx1- (dlist-length dl)))
+       (dlist-delete! dl (fx1- (dlist-size dl)))
        (dlist-delete! dl 3)
        (dlist-delete! dl 5)
-       (and (dlist-length dl)
+       (and (dlist-size dl)
             (equal? '(1 2 3 5 6 8) (dlist->list dl))))
 
 
@@ -336,6 +337,12 @@
      (error? (dlist-contains? 42 42))
      (error? (dlist-contains? (dlist)))
 
+     (not (dlist-contains? (dlist 10 20) 30))
+     (eq? #t (dlist-contains? (dlist 10 20) 10))
+     (= 0 (dlist-index-of (dlist 10 20) 10))
+     (= 1 (dlist-find-index (dlist 10 20)
+                            (lambda (x) (= x 20))))
+
      (let* ([ls (iota 10)]
             [dl (apply dlist ls)])
        (bool (andmap (lambda (x) (dlist-contains? dl x)) ls)))
@@ -350,6 +357,9 @@
 
      (error? (dlist-contains/p? = 42))
      (error? (dlist-contains/p? odd? (dlist)))
+
+     (eq? #t (dlist-contains/p? (dlist 1 2) odd?))
+     (not (dlist-contains/p? (dlist 1 3) even?))
 
      (let* ([ls (iota 10)]
             [dl (apply dlist ls)])

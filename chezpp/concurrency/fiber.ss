@@ -53,7 +53,7 @@
 
   (define dequeue!
     (lambda (Q)
-      ;; (printf "remaining ~a tasks~n" (dlist-length Q))
+      ;; (printf "remaining ~a tasks~n" (dlist-size Q))
       (if (dlist-empty? Q)
           #f
           (let ([v (dlist-ref Q 0)])
@@ -165,7 +165,7 @@
             (begin
               #;
               (printf "[~a] sched quit (remaining tasks: ~a)~n"
-              (scheduler-i sched) (dlist-length (scheduler-rq sched)))
+              (scheduler-i sched) (dlist-size (scheduler-rq sched)))
               ;; (printf "[~a] sched quit~n" (scheduler-i sched))
               (void))
             (let lp ([j j])
@@ -763,10 +763,10 @@
     (lambda (Q lock pred)
       (with-timer-off
        (spinlock-acquire lock)
-       (let ([v (if (fx= 0 (dlist-length Q))
+       (let ([v (if (fx= 0 (dlist-size Q))
                     #f
                     ;; TODO optimize
-                    (let ([i (dlist-contains/p? Q pred)])
+                    (let ([i (dlist-find-index Q pred)])
                       (if i
                           (let ([v (dlist-ref Q i)])
                             (dlist-delete! Q i)
@@ -1065,7 +1065,7 @@
                   (lambda ()
                     #;
                     (with-spinlock blockQ-lock
-                    (printf "acq: ~a~n" (dlist-length blockQ)))
+                    (printf "acq: ~a~n" (dlist-size blockQ)))
                     (if (abox-cas! lock #f #t)
                         ;; locked
                         #f
@@ -1124,7 +1124,7 @@
                   (lambda ()
                     #;
                     (with-spinlock waitQ-lock
-                    (printf "wait: ~a~n" (dlist-length waitQ)))
+                    (printf "wait: ~a~n" (dlist-size waitQ)))
                     (if (unabox lock)
                         ;; "release" the lock
                         (let ([resume-task ($locked-dequeue! blockQ blockQ-lock)])

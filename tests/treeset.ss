@@ -82,6 +82,12 @@
 
 (mat treeset-delete!
 
+     ;; absent value: deletion is idempotent
+     (let ([ts (treeset = < 1)])
+       (treeset-delete! ts 2)
+       (and (= 1 (treeset-size ts))
+            (treeset-contains? ts 1)))
+
      (let ([ts (make-treeset fx= fx<)])
        (fxvfor-each (lambda (x) (treeset-add! ts x)) v100)
        (fxvfor-each (lambda (x) (when (odd? x) (treeset-delete! ts x))) v100)

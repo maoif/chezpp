@@ -29,7 +29,7 @@
     (println (heap-data hp)))
 
 
-  #|doc
+  #|proc:make-heap
   `<?` must be a procedure that can be used to compare items;
   `cap` must be a natural number specifying initial approximate capacity of the heap,
   and can be used to reduce heap resize overhead.
@@ -300,19 +300,17 @@
                           (loop (fx1+ i)))))))))
 
 
-  #|doc
-  Return whether the heap `hp` contains an item that satisfies the predicate `=?`.
-  If it does, the procedure returns the index of the given item;
-  otheriwse it returns #f.
+  #|proc:heap-contains/p?
+  Return whether the heap `hp` contains an item that satisfies `pred`.
   |#
   (define-who heap-contains/p?
-    (lambda (hp =?)
-      (pcheck ([heap? hp] [procedure? =?])
+    (lambda (hp pred)
+      (pcheck ([heap? hp] [procedure? pred])
               (let* ([data (heap-data hp)] [size (heap-size hp)])
                 (let loop ([i 0])
                   (if (fx= i size)
                       #f
-                      (if (=? (vector-ref data i))
+                      (if (pred (vector-ref data i))
                           #t
                           (loop (fx1+ i)))))))))
 

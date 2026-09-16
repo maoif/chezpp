@@ -150,12 +150,13 @@
 
   #|proc:treemap-delete!
   Remove the key `k` along with its value from the treemap `tm`.
-  An error is raised if `k` does not exist.
+  If `k` is absent, the treemap is unchanged.
   |#
   (define-who treemap-delete!
     (lambda (tm k)
       (pcheck ([treemap? tm])
-              (rbtree-delete! who tm k))))
+              (when (rbtree-contains? who tm k)
+                (rbtree-delete! who tm k)))))
 
 
   #|proc:treemap-clear!
@@ -314,7 +315,6 @@
   #|proc:treemap-max
   Return a pair consisting of the maximum (rightmost) key and its value in the treemap `tm`.
 
-  An error is raised if the treemap is empty.
   If the treemap is empty, #f is returned.
   |#
   (define-who treemap-max

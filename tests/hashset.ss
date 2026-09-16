@@ -41,6 +41,12 @@
 
 (mat hashset-delete!
 
+     ;; absent value: deletion is idempotent
+     (let ([hs (hashset 1)])
+       (hashset-delete! hs 2)
+       (and (= 1 (hashset-size hs))
+            (hashset-contains? hs 1)))
+
      (let ([hs (make-hashset)])
        (fxvfor-each (lambda (x) (hashset-add! hs x)) v10000)
        (fxvfor-each (lambda (x) (when (odd? x) (hashset-delete! hs x))) v10000)

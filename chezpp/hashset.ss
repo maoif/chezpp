@@ -114,8 +114,9 @@
       (pcheck ([hashset? hs])
               (hashtable-set! (hashset-ht hs) v V))))
 
-  #|doc
+  #|proc:hashset-delete!
   Remove the value `v` from the hashset `hs`.
+  If `v` is absent, the hashset is unchanged.
   |#
   (define-who hashset-delete!
     (lambda (hs v)

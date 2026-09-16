@@ -124,13 +124,13 @@
 
   #|proc:treeset-delete!
   Remove the value `v` from the treeset `ts`.
-
-  An error is raised if `v` does not exist.
+  If `v` is absent, the treeset is unchanged.
   |#
   (define-who treeset-delete!
     (lambda (ts v)
       (pcheck ([treeset? ts])
-              (rbtree-delete! who ts v))))
+              (when (rbtree-contains? who ts v)
+                (rbtree-delete! who ts v)))))
 
 
   #|proc:treeset-clear!

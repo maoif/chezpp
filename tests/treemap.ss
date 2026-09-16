@@ -174,6 +174,12 @@
 
 (mat treemap-delete!
 
+     ;; absent key: deletion is idempotent
+     (let ([tm (treemap = < '(1 . one))])
+       (treemap-delete! tm 2)
+       (and (= 1 (treemap-size tm))
+            (eq? 'one (treemap-ref tm 1))))
+
 
      (let ([tm (make-treemap fx= fx<)])
        (fxvfor-each (lambda (x) (treemap-set! tm x x)) v100)

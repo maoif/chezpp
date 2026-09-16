@@ -4,13 +4,13 @@
 (mat array
 
      (let ([arr (apply array (iota 10))])
-       (fx= (array-length arr) 10))
+       (fx= (array-size arr) 10))
 
      (let ([arr (apply fxarray (iota 10))])
-       (fx= (fxarray-length arr) 10))
+       (fx= (fxarray-size arr) 10))
 
      (let ([arr (apply u8array (iota 10))])
-       (fx= (u8array-length arr) 10))
+       (fx= (u8array-size arr) 10))
 
 
 
@@ -41,13 +41,13 @@
        (array-add! arr 3 300)
        (array-add! arr 4 400)
        (displayln arr)
-       (and (= 9 (array-length arr))
+       (and (= 9 (array-size arr))
             (equal? '(-2 200 100 300 400 -1 0 1 2) (array->list arr))))
 
      (let ([arr (array)] [n 9999])
        (let loop ([i 0])
          (if (fx= i n)
-             (and (fx= n (array-length arr))
+             (and (fx= n (array-size arr))
                   (equal? (iota n) (array->list arr)))
              (begin (array-add! arr i)
                     (loop (fx1+ i))))))
@@ -55,7 +55,7 @@
      (let ([arr (make-array 0 0)] [n 9999])
        (let loop ([i 0])
          (if (fx= i n)
-             (and (fx= n (array-length arr))
+             (and (fx= n (array-size arr))
                   (equal? (iota n) (array->list arr)))
              (begin (array-add! arr i)
                     (loop (fx1+ i))))))
@@ -73,7 +73,7 @@
             [arr (make-array (vector-length v))])
        (vfor-each/i (lambda (i x) (array-set! arr i x)) v)
        (let loop ([i 0])
-         (if (fx= i (array-length arr))
+         (if (fx= i (array-size arr))
              #t
              (and (equal? (vector-ref v i) (array-ref arr i))
                   (loop (fx1+ i))))))
@@ -100,7 +100,11 @@
      (error? (array-delete! 42 42))
      (error? (array-delete! (array) 0))
      (error? (array-delete! (array) 1))
+     ;; index is equal to the size
      (error? (array-delete! (array 1) 1))
+
+     ;; index exceeds the size
+     (error? (array-delete! (array 1) 3))
 
      ;; delete first
      (let ([arr (array 1)])
@@ -109,23 +113,23 @@
 
      (let ([arr (array 0 1)])
        (array-delete! arr 0)
-       (and (= 1 (array-length arr))
+       (and (= 1 (array-size arr))
             (= 1 (array-ref arr 0))))
 
      (let ([arr (array 0 1 2)])
        (array-delete! arr 0)
-       (and (= 2 (array-length arr))
+       (and (= 2 (array-size arr))
             (= 1 (array-ref arr 0))))
 
      ;; delete last
      (let ([arr (array 0 1)])
        (array-delete! arr 1)
-       (and (= 1 (array-length arr))
+       (and (= 1 (array-size arr))
             (= 0 (array-ref arr 0))))
 
      (let ([arr (array 0 1 2)])
        (array-delete! arr 2)
-       (and (= 2 (array-length arr))
+       (and (= 2 (array-size arr))
             (= 0 (array-ref arr 0))))
 
      (let* ([n* (iota 100)]
@@ -154,6 +158,24 @@
      (error? (array-contains? 42 42))
      (error? (array-contains? (array)))
 
+     (not (array-contains? (array 10 20) 30))
+     (eq? #t (array-contains? (array 10 20) 10))
+     (= 1 (array-index-of (array 10 20) 20))
+     (= 1 (array-find-index (array 10 20)
+                            (lambda (x) (= x 20))))
+
+     (not (fxarray-contains? (fxarray 10 20) 30))
+     (eq? #t (fxarray-contains? (fxarray 10 20) 10))
+     (= 1 (fxarray-index-of (fxarray 10 20) 20))
+     (= 1 (fxarray-find-index (fxarray 10 20)
+                              (lambda (x) (= x 20))))
+
+     (not (u8array-contains? (u8array 10 20) 30))
+     (eq? #t (u8array-contains? (u8array 10 20) 10))
+     (= 1 (u8array-index-of (u8array 10 20) 20))
+     (= 1 (u8array-find-index (u8array 10 20)
+                              (lambda (x) (= x 20))))
+
      (let* ([ls (iota 10)]
             [arr (apply array ls)])
        (bool (andmap (lambda (x) (array-contains? arr x)) ls)))
@@ -169,6 +191,9 @@
 
      (error? (array-contains/p? = 42))
      (error? (array-contains/p? odd? (array)))
+
+     (eq? #t (array-contains/p? (array 1 2) odd?))
+     (not (array-contains/p? (array 1 3) even?))
 
      (let* ([ls (iota 10)]
             [arr (apply array ls)])

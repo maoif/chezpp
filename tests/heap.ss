@@ -127,6 +127,10 @@
      (equal? '() (heap-pop-all! (make-heap <)))
      (equal? '() (heap-pop-all! (heap <)))
 
+     ;; empty heap pop and peek are invalid
+     (error? (heap-pop! (heap <)))
+     (error? (heap-peek (heap <)))
+
      (let* ([n* (iota 1000)]
             [hp (apply heap > n*)])
        (equal? (heap-pop-all! hp)

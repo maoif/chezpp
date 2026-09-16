@@ -15,7 +15,7 @@
     (fields (immutable dl queue-dl)))
 
 
-  #|doc
+  #|proc:make-queue
   Construct a queue object.
   |#
   (define-who make-queue
@@ -59,7 +59,7 @@
                     (dlist-pop! dl))))))
 
 
-  #|doc
+  #|proc:queue-pop-all!
   Pop all items from the queue `q` into a list.
   The first item in the list corresponds to the oldest item in the queue.
   If an additional procedure `proc` is given, it is apply to
@@ -74,9 +74,10 @@
                    (dlist-clear! dl)
                    res)))]
       [(q proc)
-       (let ([dl (queue-dl q)] [procedure? proc])
-         (dlist-for-each proc dl)
-         (dlist-clear! dl))]))
+       (pcheck ([queue? q] [procedure? proc])
+               (let ([dl (queue-dl q)])
+                 (dlist-for-each proc dl)
+                 (dlist-clear! dl)))]))
 
 
   #|doc
@@ -98,7 +99,7 @@
   (define-who queue-size
     (lambda (q)
       (pcheck ([queue? q])
-              (dlist-length (queue-dl q)))))
+              (dlist-size (queue-dl q)))))
 
 
   #|doc
@@ -130,15 +131,13 @@
               (bool (dlist-contains? (queue-dl q) v)))))
 
 
-  #|doc
-  Return whether the queue `q` contains an item that satisfies the predicate `=?`.
-  If it does, the procedure returns the index of the given item;
-  otheriwse it returns #f.
+  #|proc:queue-contains/p?
+  Return whether the queue `q` contains an item that satisfies `pred`.
   |#
   (define-who queue-contains/p?
-    (lambda (q =?)
-      (pcheck ([queue? q] [procedure? =?])
-              (bool (dlist-contains/p? (queue-dl q) =?)))))
+    (lambda (q pred)
+      (pcheck ([queue? q] [procedure? pred])
+              (dlist-contains/p? (queue-dl q) pred))))
 
 
   #|doc

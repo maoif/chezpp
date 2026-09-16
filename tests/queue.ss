@@ -13,6 +13,9 @@
      (error? (queue-peek (queue)))
      (error? (queue-pop! (queue)))
 
+     ;; callback is not a procedure
+     (error? (queue-pop-all! (queue 1) 42))
+
      (let ([s (make-queue)])
        (queue-push! s 1)
        (queue-push! s 2)
