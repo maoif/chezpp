@@ -7,5 +7,6 @@
 
   (export (import (except (chezscheme)
                           sleep
+                          string-for-each
                           ;; file.ss
                           file-access-time file-change-time file-modification-time))))

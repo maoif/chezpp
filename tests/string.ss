@@ -1,6 +1,41 @@
 (import (chezpp))
 
 
+(mat string-edit-distance
+     (= 0 (edit-distance "" ""))
+     (= 3 (edit-distance "kitten" "sitting"))
+     (= 2 (edit-distance "flaw" "lawn"))
+     (error? (edit-distance 'kitten "sitting")))
+
+(mat string-sequence-procedures
+     (let ([seen '()])
+       (string-for-each (lambda (ch) (set! seen (cons ch seen))) "ab")
+       (equal? '(#\b #\a) seen))
+     (let ([seen '()])
+       (string-for-each/i
+        (lambda (i ch) (set! seen (cons (cons i ch) seen)))
+        "ab")
+       (equal? '((1 . #\b) (0 . #\a)) seen))
+     (string=? "AB" (string-map char-upcase "ab"))
+     (string=? "AbCd"
+               (string-map/i
+                (lambda (i ch) (if (even? i) (char-upcase ch) ch))
+                "abcd"))
+     (string=? "axby"
+               (string-map (lambda (a b) (if (char=? a b) a b)) "aabb" "axby"))
+     (error? (string-map (lambda (ch) 1) "a"))
+     (error? (string-map char-upcase "a" "ab"))
+     (error? (string-for-each values "a" 1)))
+
+(mat string-slice
+     (string=? "01234" (string-slice "0123456789" 5))
+     (string=? "864" (string-slice "0123456789" 8 2 -2))
+     (string=? "" (string-slice "0123456789" 2 9 -1))
+     (string=? "89" (string-slice "0123456789" -2 20))
+     (error? (string-slice 123 1))
+     (error? (string-slice "abc" 0 2 0)))
+
+
 (mat string-search
 
      (= 0 (string-search "" ""))
@@ -65,10 +100,12 @@
      ;; type error
      (error? (string-split #\a #\a))
      (error? (string-split "string" 1))
+     ;; empty string delimiters are invalid
+     (error? (string-split "string" ""))
+     (error? (string-split "" ""))
 
      ;; empty string
      (equal? '("") (string-split "" "foo"))
-     (equal? '("") (string-split "" ""))
      (equal? '("") (string-split "" #\?))
 
      ;; delimiter on the side of the string
