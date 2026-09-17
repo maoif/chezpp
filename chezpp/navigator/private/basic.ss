@@ -133,32 +133,38 @@
     (lambda (value clear)
       (let ([values (set-values value)])
         (if values
-            (set-replace
-             value
-             (let loop ([values values] [members '()])
-               (if (null? values)
-                   (reverse members)
-                   (let ([member (clear (car values))])
-                     (loop (cdr values)
-                           (if (nav-missing? member)
-                               members
-                               (cons member members)))))))
+            (let loop ([remaining values]
+                       [members '()]
+                       [result value]
+                       [changed? #f])
+              (if (null? remaining)
+                  (if changed?
+                      (set-replace result (reverse members))
+                      result)
+                  (let* ([old (car remaining)] [member (clear old)])
+                    (if (nav-missing? member)
+                        (loop (cdr remaining) members
+                              (set-delete result old) changed?)
+                        (loop (cdr remaining) (cons member members) result
+                              (or changed? (not (equal? old member))))))))
             (unsupported-clear 'nav-clearval value)))))
 
   (define clear-all-values!
     (lambda (value clear!)
       (let ([values (set-values value)])
         (if values
-            (set-replace!
-             value
-             (let loop ([values values] [members '()])
-               (if (null? values)
-                   (reverse members)
-                   (let ([member (clear! (car values))])
-                     (loop (cdr values)
-                           (if (nav-missing? member)
-                               members
-                               (cons member members)))))))
+            (let loop ([remaining values] [members '()] [changed? #f])
+              (if (null? remaining)
+                  (if changed?
+                      (set-replace! value (reverse members))
+                      value)
+                  (let* ([old (car remaining)] [member (clear! old)])
+                    (if (nav-missing? member)
+                        (begin
+                          (set-delete! value old)
+                          (loop (cdr remaining) members changed?))
+                        (loop (cdr remaining) (cons member members)
+                              (or changed? (not (equal? old member))))))))
             (unsupported-clear 'nav-clearval! value)))))
 
   (define emit-alist-key-values

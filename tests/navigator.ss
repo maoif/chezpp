@@ -236,6 +236,22 @@
   (lambda (box)
     (kvbox-entries box)))
 
+(define-record-type (setbox make-setbox setbox?)
+  (fields (mutable items)))
+
+(nav-register-set!
+ setbox?
+ setbox-items
+ (lambda (box items) (errorf 'setbox "replace callback must not clear members"))
+ (lambda (box items) (errorf 'setbox "replace! callback must not clear members"))
+ (lambda (box member)
+   (make-setbox (remp (lambda (item) (equal? item member)) (setbox-items box))))
+ (lambda (box member)
+   (setbox-items-set! box
+                      (remp (lambda (item) (equal? item member))
+                            (setbox-items box)))
+   box))
+
 (mat navigator-core
      (nav? nav/stay)
      (nav-path? nav-empty-path)
@@ -342,7 +358,11 @@
      (treeset-empty? (nav-clearval nav/all (treeset = < 1 2 3)))
      (let ([bv (bitvec 1 2 3)])
        (and (eq? bv (nav-clearval! nav/all bv))
-            (bitvec-empty? bv))))
+            (bitvec-empty? bv)))
+     (null? (setbox-items (nav-clearval nav/all (make-setbox '(1 2 3)))))
+     (let ([box (make-setbox '(1 2 3))])
+       (and (eq? box (nav-clearval! nav/all box))
+            (null? (setbox-items box)))))
 
 (mat navigator-selection-actions
      (equal? '(Ada)
