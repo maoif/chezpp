@@ -5,27 +5,72 @@
 Reviewed `array`, `bittree`, `bitvec`, `dlist`, `dset`, `hashset`, `heap`, `list`,
 `queue`, `stack`, `string`, `treeset`, `treemap`, and `vector`.
 
-## Findings
+## Current Status (2026-09-18)
 
-1. Custom data structures cannot currently participate in `iter` or `transducer`.
-   `iter` supports built-in sequences and ports, while `transducer` dispatches only
-   those source types. `dlist` still contains `TODO iter API`.
-2. `queue-pop-all!` does not validate its `(queue callback)` branch with `pcheck` and
-   binds a local named `procedure?`, so invalid arguments produce incidental errors.
-3. `array-contains?` and `dlist-contains?` return an index, while hashset, treeset,
-   queue, stack, and heap variants return booleans. `heap-contains/p?` is documented
-   as returning an index but returns `#t`.
-4. Deletion semantics differ: tree deletion errors when absent, hashset deletion is
-   idempotent, and indexed deletion errors out of range. The policy should be explicit.
-5. Public documentation is inconsistent. Most APIs use `#|doc`, while the repository
-   documentation checker expects `#|proc:name`; it reports many exported APIs as
-   undocumented.
-6. `treemap-max` documentation says both that empty maps raise an error and return
-   `#f`.
-7. There is no `chezpp/char.ss`; character operations are ChezScheme/string APIs.
-8. `bitvec` and `bittree` expose different algebra surfaces. `bitvec` has and/or/xor/not,
-   while `bittree` exposes merge only. `bitvec-size` is population count, but its bound
-   is not public.
+The API review implementation is complete through the current integration commits.
+Custom data structures now register iterator and navigator adapters from their owning
+libraries, and transducers consume the same iterator registry for custom sources.
+Sizes, membership, deletion policy, bit-set bounds/algebra, string traversal/slicing,
+and the reviewed public documentation have been normalized. Navigator set clearing now
+uses delete callbacks, including for custom set protocols.
+
+The focused reviewed suites, clean build, documentation checker, Scheme balance checks,
+and the copied ChezScheme header comparison pass. The aggregate `make -C tests test-all`
+run still has an unrelated, timing-dependent `net-websocket-phase4-features` failure:
+`websocket pong timed out`. The focused `net-websocket` suite passes, and this branch has
+no networking changes.
+
+## Resolved Findings
+
+1. Registered adapters make arrays, dlists, queues, stacks, heaps, sets, maps, bit sets,
+   and dsets available to `iter` and `transducer` with documented traversal orders.
+2. `queue-pop-all!` validates its callback branch, and the reviewed heap and treemap
+   documentation now matches their boolean and empty-map behavior.
+3. Sequence `X-contains?` procedures return booleans; indexed lookup is provided by
+   `X-index-of` and `X-find-index`.
+4. Indexed deletion reports range errors, while absent set/map deletion is idempotent.
+5. Reviewed public APIs use checker-compatible `#|proc:name` and `#|macro:name` docs.
+6. There is no separate character library requirement; string character operations use
+   ChezScheme primitives, with the missing string traversal procedures supplied here.
+7. `bitvec-bound` is public and sparse bittree union, intersection, and xor are exposed.
+
+## Remaining Iterator Improvements
+
+The iterator registry is useful and covered by focused tests, but `chezpp/iter.ss` still
+has a separate set of correctness and API issues:
+
+1. **Reject or define zero and negative steps.** `list->iter`, `vector->iter`, string
+   iterators, the typed indexed iterators, and `range` accept a zero step. Their next
+   operation then repeats forever. Negative steps are marked TODO; current calls can
+   silently return an empty iterator or fail through an incidental bounds error. Share
+   the slice/index normalization rules used elsewhere, or explicitly reject unsupported
+   directions with a checked error.
+2. **Guard finalized iterators.** `iter-reset!` rejects finalized iterators, but
+   `iter-next!` does not. After `iter->list` finalizes an iterator, another `iter-next!`
+   can still invoke its source callback, including a callback for a closed file or port.
+   Make the lifecycle contract consistent and test next/reset/finalize transitions.
+3. **Finish the hashtable iterator path.** The public `get-iter` dispatch calls the
+   unimplemented `hashtable->iter` TODO, while `iter-source->iter` separately converts
+   hashtable values to a vector. Implement one path and make both dispatchers agree on
+   value traversal and unspecified ordering.
+4. **Clarify the source-conversion API.** The plan names the iterator-library helper
+   `source->iter`, but `(chezpp iter)` exports `iter-source->iter` because transducer
+   already exports `source->iter`. Keep the split only if it is intentional and document
+   it; otherwise provide an unambiguous alias so users do not need to know the layering.
+5. **Resolve port ownership.** `iter.ss` says callers open and close ports, but the
+   textual port iterator finalizer closes the caller-provided port. Document iterator
+   ownership explicitly or stop closing externally owned ports; file iterators, which
+   open their own ports, should continue to close them during finalization.
+6. **Specify adapter snapshot semantics.** Most registered adapters snapshot through
+   `X->list` when the iterator is created. This makes reset stable but hides subsequent
+   source mutations. Document that behavior, or provide stateful adapters where live
+   traversal is part of the data-structure contract.
+7. **Define registration replacement policy.** Registrations are prepended, so duplicate
+   predicates are allowed and the newest one shadows older entries. Either document this
+   deliberately or reject duplicate registrations to avoid load-order surprises.
+
+These iterator items are follow-up improvements rather than regressions in the completed
+data-structure API work.
 
 ## API Summary
 

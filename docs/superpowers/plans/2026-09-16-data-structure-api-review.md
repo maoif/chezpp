@@ -5,6 +5,20 @@
 **Goal:** Make ChezPP custom data structures consistently sized, searchable, documented,
 iterable, transducible, and navigable while completing the reviewed string and bit-set APIs.
 
+## Current Status (2026-09-18)
+
+Tasks 1 through 7 are implemented in this worktree through the integration commits and
+the follow-up navigator deletion-callback fix. The focused reviewed tests, clean build,
+documentation checker, Scheme balance checks, and ChezScheme header comparison pass.
+The aggregate test suite retains one unrelated, timing-dependent
+`net-websocket-phase4-features` failure (`websocket pong timed out`); focused
+`net-websocket` passes and this branch has no networking changes.
+
+The implementation review is now recorded in `docs/data-structure-api-review.md`.
+The remaining iterator follow-ups are zero/negative-step validation, finalized-iterator
+guards, the unfinished hashtable path, source-conversion naming, port ownership, adapter
+snapshot semantics, and duplicate-registration policy.
+
 **Architecture:** Expose extension-registration APIs from `(chezpp iter)` and
 `(chezpp navigator)`. Each traversable data-structure library imports those APIs and
 registers its own iter and navigator adapters during its own library initialization, with a
