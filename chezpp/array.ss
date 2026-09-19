@@ -37,7 +37,8 @@
           fxarray-iota fxarray-nums
 
           flarray make-flarray flarray? flarray-size flarray-empty?
-          flarray-ref flarray-add! flarray-set! flarray-add*!
+          flarray-ref flarray-add! flarray-add*! flarray-delete! flarray-clear!
+          flarray->list flarray->iter flarray->flvector flvector->flarray
 
           u8array make-u8array u8array? u8array-size u8array-empty?
           u8array-ref u8array-add! u8array-add*! u8array-delete! u8array-set! u8array-clear!
@@ -525,6 +526,46 @@
       (pcheck ([flarray? arr] [flonum? v])
               (unless (andmap flonum? vs) (errorf who "values must be flonums"))
               (for-each (lambda (x) (flarray-add! arr x)) (cons v vs)))))
+  #|proc:flarray-delete!
+  Remove the flonum at index `i` from `arr`.
+  |#
+  (define-who flarray-delete!
+    (lambda (arr i)
+      (pcheck ([flarray? arr] [natural? i])
+              (let ([len ($array-size arr)] [vec (array-vec arr)])
+                (if (fx< i len)
+                    (begin (when (fx< i (fx1- len))
+                             (flvcopy! vec (fx1+ i) vec i (fx- len i 1)))
+                           ($array-size-set! arr (fx1- len)))
+                    (errorf who "index ~a out of range" i))))))
+  #|proc:flarray-clear!
+  Remove all values from `arr`.
+  |#
+  (define-who flarray-clear!
+    (lambda (arr) (pcheck ([flarray? arr]) ($array-size-set! arr 0))))
+  #|proc:flarray->list
+  Convert `arr` to a list in index order.
+  |#
+  (define-who flarray->list
+    (lambda (arr) (pcheck ([flarray? arr])
+                          (let loop ([i 0] [r '()])
+                            (if (fx= i ($array-size arr)) (reverse r)
+                                (loop (fx1+ i) (cons (flvector-ref (array-vec arr) i) r)))))))
+  #|proc:flarray->flvector
+  Convert `arr` to an exact-size flvector.
+  |#
+  (define-who flarray->flvector
+    (lambda (arr) (pcheck ([flarray? arr])
+                          (let ([v (make-flvector ($array-size arr) 0.0)])
+                            (flvcopy! (array-vec arr) 0 v 0 ($array-size arr)) v))))
+  #|proc:flvector->flarray
+  Convert flvector `vec` to a flarray.
+  |#
+  (define-who flvector->flarray
+    (lambda (vec) (pcheck-flvector (vec)
+                                   (let* ([n (flvector-length vec)] [arr (make-flarray n)])
+                                     (flvcopy! vec 0 (array-vec arr) 0 n)
+                                     arr))))
 
   #|proc:u8array
   Return a byte array containing `args` in argument order.
@@ -1957,6 +1998,11 @@
   |#
   (define array->iter
     (make-indexed-iter 'array->iter array? array-size array-ref))
+  #|proc:flarray->iter
+  Return an iterator over the current values of flarray `source`.
+  |#
+  (define flarray->iter
+    (make-indexed-iter 'flarray->iter flarray? flarray-size flarray-ref))
 
   #|proc:fxarray->iter
   The `fxarray->iter` procedure returns an iterator over fixnums in the fxarray `source`.
