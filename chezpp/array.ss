@@ -78,7 +78,24 @@
           bytearray-iota bytearray-nums
           bytearray-u16-ref bytearray-U16-ref bytearray-u16-set! bytearray-U16-set!
           bytearray-s16-ref bytearray-S16-ref bytearray-s16-set! bytearray-S16-set!
+          bytearray-u8-ref bytearray-U8-ref bytearray-u8-set! bytearray-U8-set!
+          bytearray-s8-ref bytearray-S8-ref bytearray-s8-set! bytearray-S8-set!
+          bytearray-u16-ref bytearray-U16-ref bytearray-u16-set! bytearray-U16-set!
+          bytearray-s16-ref bytearray-S16-ref bytearray-s16-set! bytearray-S16-set!
+          bytearray-u24-ref bytearray-U24-ref bytearray-u24-set! bytearray-U24-set!
+          bytearray-s24-ref bytearray-S24-ref bytearray-s24-set! bytearray-S24-set!
+          bytearray-u32-ref bytearray-U32-ref bytearray-u32-set! bytearray-U32-set!
+          bytearray-s32-ref bytearray-S32-ref bytearray-s32-set! bytearray-S32-set!
+          bytearray-u40-ref bytearray-U40-ref bytearray-u40-set! bytearray-U40-set!
+          bytearray-s40-ref bytearray-S40-ref bytearray-s40-set! bytearray-S40-set!
+          bytearray-u48-ref bytearray-U48-ref bytearray-u48-set! bytearray-U48-set!
+          bytearray-s48-ref bytearray-S48-ref bytearray-s48-set! bytearray-S48-set!
+          bytearray-u56-ref bytearray-U56-ref bytearray-u56-set! bytearray-U56-set!
+          bytearray-s56-ref bytearray-S56-ref bytearray-s56-set! bytearray-S56-set!
+          bytearray-u64-ref bytearray-U64-ref bytearray-u64-set! bytearray-U64-set!
+          bytearray-s64-ref bytearray-S64-ref bytearray-s64-set! bytearray-S64-set!
           bytearray-fp32-ref bytearray-FP32-ref bytearray-fp32-set! bytearray-FP32-set!
+          bytearray-fp64-ref bytearray-FP64-ref bytearray-fp64-set! bytearray-FP64-set!
 
           array->list fxarray->list u8array->list bytearray->list
           array->iter fxarray->iter u8array->iter bytearray->iter
@@ -2142,6 +2159,8 @@
   (define-syntax define-bytearray-width
     (syntax-rules ()
       [(_ ref-name set-name width-ref width-set width)
+       (define-bytearray-width ref-name set-name width-ref width-set width (lambda (v) #t))]
+      [(_ ref-name set-name width-ref width-set width pred)
        (begin
          (define-who ref-name
            (lambda (arr i)
@@ -2159,14 +2178,33 @@
                        (when (not (fx= (modulo n width) 0))
                          (errorf who "bytearray length is not aligned to width ~a" width))
                        (if (fx< i (fx/ n width))
-                           (width-set (array-vec arr) (fx* i width) v)
-                           (errorf who "index ~a out of range" i)))))))]))
+                           (begin (unless (pred v) (errorf who "value out of range for width ~a: ~a" width v))
+                                  (width-set (array-vec arr) (fx* i width) v))
+                                  (errorf who "index ~a out of range" i)))))))]))
+  (define bytearray-u8-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 255))))
+  (define bytearray-s8-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -128 v 127))))
+  (define bytearray-u16-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 65535))))
+  (define bytearray-s16-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -32768 v 32767))))
+  (define bytearray-u24-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 16777215))))
+  (define bytearray-s24-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -8388608 v 8388607))))
+  (define bytearray-u32-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 4294967295))))
+  (define bytearray-s32-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -2147483648 v 2147483647))))
+  (define bytearray-u40-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 1099511627775))))
+  (define bytearray-s40-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -549755813888 v 549755813887))))
+  (define bytearray-u48-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 281474976710655))))
+  (define bytearray-s48-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -140737488355328 v 140737488355327))))
+  (define bytearray-u56-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 72057594037927935))))
+  (define bytearray-s56-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -36028797018963968 v 36028797018963967))))
+  (define bytearray-u64-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 18446744073709551615))))
+  (define bytearray-s64-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -9223372036854775808 v 9223372036854775807))))
   (define-bytearray-width bytearray-u16-ref bytearray-u16-set!
     (lambda (bv i) (bytevector-u16-ref bv i (endianness little)))
-    (lambda (bv i v) (bytevector-u16-set! bv i v (endianness little))) 2)
+    (lambda (bv i v) (bytevector-u16-set! bv i v (endianness little))) 2
+    (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 65535))))
   (define-bytearray-width bytearray-U16-ref bytearray-U16-set!
     (lambda (bv i) (bytevector-u16-ref bv i (endianness big)))
-    (lambda (bv i v) (bytevector-u16-set! bv i v (endianness big))) 2)
+    (lambda (bv i v) (bytevector-u16-set! bv i v (endianness big))) 2
+    (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 65535))))
   (define-bytearray-width bytearray-s16-ref bytearray-s16-set!
     (lambda (bv i) (bytevector-s16-ref bv i (endianness little)))
     (lambda (bv i v) (bytevector-s16-set! bv i v (endianness little))) 2)
@@ -2179,6 +2217,44 @@
   (define-bytearray-width bytearray-FP32-ref bytearray-FP32-set!
     (lambda (bv i) (bytevector-ieee-single-ref bv i (endianness big)))
     (lambda (bv i v) (bytevector-ieee-single-set! bv i v (endianness big))) 4)
+  (define-bytearray-width bytearray-u8-ref bytearray-u8-set!
+    (lambda (bv i) (bytevector-u8-ref bv i))
+    (lambda (bv i v) (bytevector-u8-set! bv i v)) 1 bytearray-u8-value?)
+  (define-bytearray-width bytearray-U8-ref bytearray-U8-set!
+    (lambda (bv i) (bytevector-u8-ref bv i))
+    (lambda (bv i v) (bytevector-u8-set! bv i v)) 1 bytearray-u8-value?)
+  (define-bytearray-width bytearray-s8-ref bytearray-s8-set!
+    (lambda (bv i) (bytevector-s8-ref bv i))
+    (lambda (bv i v) (bytevector-s8-set! bv i v)) 1 bytearray-s8-value?)
+  (define-bytearray-width bytearray-S8-ref bytearray-S8-set!
+    (lambda (bv i) (bytevector-s8-ref bv i))
+    (lambda (bv i v) (bytevector-s8-set! bv i v)) 1 bytearray-s8-value?)
+  (define-bytearray-width bytearray-u24-ref bytearray-u24-set! (lambda (bv i) (bytevector-u24-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u24-set! bv i v (endianness little))) 3 bytearray-u24-value?)
+  (define-bytearray-width bytearray-U24-ref bytearray-U24-set! (lambda (bv i) (bytevector-u24-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u24-set! bv i v (endianness big))) 3 bytearray-u24-value?)
+  (define-bytearray-width bytearray-s24-ref bytearray-s24-set! (lambda (bv i) (bytevector-s24-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s24-set! bv i v (endianness little))) 3 bytearray-s24-value?)
+  (define-bytearray-width bytearray-S24-ref bytearray-S24-set! (lambda (bv i) (bytevector-s24-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s24-set! bv i v (endianness big))) 3 bytearray-s24-value?)
+  (define-bytearray-width bytearray-u32-ref bytearray-u32-set! (lambda (bv i) (bytevector-u32-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u32-set! bv i v (endianness little))) 4 bytearray-u32-value?)
+  (define-bytearray-width bytearray-U32-ref bytearray-U32-set! (lambda (bv i) (bytevector-u32-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u32-set! bv i v (endianness big))) 4 bytearray-u32-value?)
+  (define-bytearray-width bytearray-s32-ref bytearray-s32-set! (lambda (bv i) (bytevector-s32-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s32-set! bv i v (endianness little))) 4 bytearray-s32-value?)
+  (define-bytearray-width bytearray-S32-ref bytearray-S32-set! (lambda (bv i) (bytevector-s32-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s32-set! bv i v (endianness big))) 4 bytearray-s32-value?)
+  (define-bytearray-width bytearray-u40-ref bytearray-u40-set! (lambda (bv i) (bytevector-u40-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u40-set! bv i v (endianness little))) 5 bytearray-u40-value?)
+  (define-bytearray-width bytearray-U40-ref bytearray-U40-set! (lambda (bv i) (bytevector-u40-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u40-set! bv i v (endianness big))) 5 bytearray-u40-value?)
+  (define-bytearray-width bytearray-s40-ref bytearray-s40-set! (lambda (bv i) (bytevector-s40-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s40-set! bv i v (endianness little))) 5 bytearray-s40-value?)
+  (define-bytearray-width bytearray-S40-ref bytearray-S40-set! (lambda (bv i) (bytevector-s40-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s40-set! bv i v (endianness big))) 5 bytearray-s40-value?)
+  (define-bytearray-width bytearray-u48-ref bytearray-u48-set! (lambda (bv i) (bytevector-u48-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u48-set! bv i v (endianness little))) 6 bytearray-u48-value?)
+  (define-bytearray-width bytearray-U48-ref bytearray-U48-set! (lambda (bv i) (bytevector-u48-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u48-set! bv i v (endianness big))) 6 bytearray-u48-value?)
+  (define-bytearray-width bytearray-s48-ref bytearray-s48-set! (lambda (bv i) (bytevector-s48-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s48-set! bv i v (endianness little))) 6 bytearray-s48-value?)
+  (define-bytearray-width bytearray-S48-ref bytearray-S48-set! (lambda (bv i) (bytevector-s48-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s48-set! bv i v (endianness big))) 6 bytearray-s48-value?)
+  (define-bytearray-width bytearray-u56-ref bytearray-u56-set! (lambda (bv i) (bytevector-u56-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u56-set! bv i v (endianness little))) 7 bytearray-u56-value?)
+  (define-bytearray-width bytearray-U56-ref bytearray-U56-set! (lambda (bv i) (bytevector-u56-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u56-set! bv i v (endianness big))) 7 bytearray-u56-value?)
+  (define-bytearray-width bytearray-s56-ref bytearray-s56-set! (lambda (bv i) (bytevector-s56-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s56-set! bv i v (endianness little))) 7 bytearray-s56-value?)
+  (define-bytearray-width bytearray-S56-ref bytearray-S56-set! (lambda (bv i) (bytevector-s56-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s56-set! bv i v (endianness big))) 7 bytearray-s56-value?)
+  (define-bytearray-width bytearray-u64-ref bytearray-u64-set! (lambda (bv i) (bytevector-u64-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u64-set! bv i v (endianness little))) 8 bytearray-u64-value?)
+  (define-bytearray-width bytearray-U64-ref bytearray-U64-set! (lambda (bv i) (bytevector-u64-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u64-set! bv i v (endianness big))) 8 bytearray-u64-value?)
+  (define-bytearray-width bytearray-s64-ref bytearray-s64-set! (lambda (bv i) (bytevector-s64-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s64-set! bv i v (endianness little))) 8 bytearray-s64-value?)
+  (define-bytearray-width bytearray-S64-ref bytearray-S64-set! (lambda (bv i) (bytevector-s64-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s64-set! bv i v (endianness big))) 8 bytearray-s64-value?)
+  (define-bytearray-width bytearray-fp64-ref bytearray-fp64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness little))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness little))) 8 flonum?)
+  (define-bytearray-width bytearray-FP64-ref bytearray-FP64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness big))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness big))) 8 flonum?)
 
 
   (define-syntax gen-array-record-writer
