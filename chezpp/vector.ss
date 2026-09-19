@@ -50,7 +50,10 @@
           random-vector random-fxvector random-flvector
           bvmap-u8 bvmap-U8 bvmap-u16 bvmap-U16 bvmap-s16 bvmap-S16
           bvmap-fp32 bvmap-FP32 bvfor-each-u8 bvfor-each-U8
-          bvslice-u8 bvslice-U8 bvsum-u8 bvsum-U8)
+          bvslice-u8 bvslice-U8 bvsum-u8 bvsum-U8
+          bvmap!-u8 bvmap!-U8 bvfilter-u8 bvfilter-U8 bvreverse-u8 bvreverse-U8
+          bvcopy-u8 bvcopy-U8 bvsort-u8 bvsort-U8 bvsorted?-u8 bvsorted?-U8
+          bvnums-u8 bvnums-U8)
   (import (chezscheme)
           (chezpp utils)
           (chezpp internal))
@@ -1840,6 +1843,86 @@
                 (if (fx= i (bytevector-length bv)) s
                     (loop (fx1+ i) (fx+ s (bytevector-u8-ref bv i))))))))
   (define bvsum-U8 bvsum-u8)
+
+  #|proc:bvmap!-u8
+  Map `proc` in place over the bytes of `bv` and return `bv`.
+  |#
+  (define bvmap!-u8
+    (lambda (proc bv)
+      (pcheck ([procedure? proc] [bytevector? bv])
+              (let loop ([i 0])
+                (if (fx= i (bytevector-length bv)) bv
+                    (begin (bytevector-u8-set! bv i (proc (bytevector-u8-ref bv i)))
+                           (loop (fx1+ i))))))))
+  (define bvmap!-U8 bvmap!-u8)
+  #|proc:bvfilter-u8
+  Return a bytevector containing bytes of `bv` satisfying `pred`.
+  |#
+  (define bvfilter-u8
+    (lambda (pred bv)
+      (pcheck ([procedure? pred] [bytevector? bv])
+              (let loop ([i 0] [r '()])
+                (if (fx= i (bytevector-length bv))
+                    (let* ([xs (reverse r)] [out (make-bytevector (length xs))])
+                      (let fill ([j 0] [ys xs])
+                        (if (null? ys) out
+                            (begin (bytevector-u8-set! out j (car ys))
+                                   (fill (fx1+ j) (cdr ys))))))
+                    (let ([x (bytevector-u8-ref bv i)])
+                      (loop (fx1+ i) (if (pred x) (cons x r) r))))))))
+  (define bvfilter-U8 bvfilter-u8)
+  #|proc:bvreverse-u8
+  Return a reversed copy of bytevector `bv`.
+  |#
+  (define bvreverse-u8
+    (lambda (bv)
+      (pcheck ([bytevector? bv])
+              (let* ([n (bytevector-length bv)] [out (make-bytevector n)])
+                (let loop ([i 0])
+                  (if (fx= i n) out
+                      (begin (bytevector-u8-set! out i (bytevector-u8-ref bv (fx- n i 1)))
+                             (loop (fx1+ i)))))))))
+  (define bvreverse-U8 bvreverse-u8)
+  #|proc:bvcopy-u8
+  Return a copy of bytevector `bv`.
+  |#
+  (define bvcopy-u8 (lambda (bv) (pcheck ([bytevector? bv]) (bytevector-copy bv))))
+  (define bvcopy-U8 bvcopy-u8)
+  #|proc:bvsort-u8
+  Return a sorted copy of bytevector `bv` using comparator `<?`.
+  |#
+  (define bvsort-u8
+    (lambda (<? bv)
+      (pcheck ([procedure? <?] [bytevector? bv])
+              (let ([out (bytevector-copy bv)])
+                (let loop ([i 1])
+                  (if (fx= i (bytevector-length out)) out
+                      (let ([x (bytevector-u8-ref out i)])
+                        (let inner ([j i])
+                          (if (and (fx> j 0) (<? x (bytevector-u8-ref out (fx- j 1))))
+                              (begin (bytevector-u8-set! out j (bytevector-u8-ref out (fx- j 1)))
+                                     (inner (fx- j 1)))
+                              (begin (bytevector-u8-set! out j x) (loop (fx1+ i))))))))))))
+  (define bvsort-U8 bvsort-u8)
+  #|proc:bvsorted?-u8
+  Return whether bytevector `bv` is sorted according to `<?`.
+  |#
+  (define bvsorted?-u8
+    (lambda (<? bv)
+      (pcheck ([procedure? <?] [bytevector? bv])
+              (let loop ([i 1])
+                (or (fx= i (bytevector-length bv))
+                    (and (not (<? (bytevector-u8-ref bv i) (bytevector-u8-ref bv (fx- i 1))))
+                         (loop (fx1+ i))))))))
+  (define bvsorted?-U8 bvsorted?-u8)
+  #|proc:bvnums-u8
+  Return a bytevector containing the arithmetic progression from `start` to `stop`.
+  |#
+  (define bvnums-u8
+    (lambda (start stop step)
+      (pcheck ([natural? start stop step])
+              (let ([out (make-bytevector (if (fx<= stop start) 0 (fx/ (fx- stop start) step)))]) out))))
+  (define bvnums-U8 bvnums-u8)
 
 
   )
