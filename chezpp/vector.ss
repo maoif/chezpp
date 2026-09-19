@@ -1789,6 +1789,9 @@
                       (begin (bytevector-u8-set! out i (proc (bytevector-u8-ref bv i)))
                              (loop (fx1+ i)))))))))
   (define bvmap-U8 bvmap-u8)
+  #|proc:bvmap-u16
+  Map `proc` over little-endian unsigned 16-bit values in bytevector `bv`.
+  |#
   (define bvmap-u16
     (lambda (proc bv)
       (pcheck ([procedure? proc] [bytevector? bv])
@@ -1806,6 +1809,9 @@
   (define bvmap-S16 bvmap-u16)
   (define bvmap-fp32 bvmap-u16)
   (define bvmap-FP32 bvmap-u16)
+  #|proc:bvfor-each-u8
+  Call `proc` for each byte in bytevector `bv`.
+  |#
   (define bvfor-each-u8
     (lambda (proc bv)
       (pcheck ([procedure? proc] [bytevector? bv])
@@ -1814,11 +1820,17 @@
                   (proc (bytevector-u8-ref bv i))
                   (loop (fx1+ i)))))))
   (define bvfor-each-U8 bvfor-each-u8)
+  #|proc:bvslice-u8
+  Return the byte slice from logical index `start` through `end` of `bv`.
+  |#
   (define bvslice-u8
     (lambda (bv start end)
       (pcheck ([bytevector? bv] [natural? start end])
               (bytevector-copy bv start end))))
   (define bvslice-U8 bvslice-u8)
+  #|proc:bvsum-u8
+  Return the sum of bytes in bytevector `bv`.
+  |#
   (define bvsum-u8
     (lambda (bv)
       (pcheck ([bytevector? bv])
