@@ -99,6 +99,7 @@
           bytearray-u16-add! bytearray-U16-add! bytearray-u16-delete! bytearray-U16-delete!
           bytearray-u16->list bytearray-U16->list
           bytearray-u16-map bytearray-U16-map bytearray-u16-for-each bytearray-U16-for-each
+          bytearray-u16->iter bytearray-U16->iter
 
           array->list fxarray->list u8array->list bytearray->list
           array->iter fxarray->iter u8array->iter bytearray->iter
@@ -2328,6 +2329,13 @@
                     (proc (bytevector-u16-ref (array-vec arr) i (endianness little)))
                     (loop (fx+ i 2))))))))
   (define bytearray-U16-for-each bytearray-u16-for-each)
+  #|proc:bytearray-u16->iter
+  Return an iterator over logical little-endian 16-bit values in `arr`.
+  |#
+  (define bytearray-u16->iter
+    (make-indexed-iter 'bytearray-u16->iter u8array?
+      (lambda (arr) (fx/ (u8array-size arr) 2)) bytearray-u16-ref))
+  (define bytearray-U16->iter bytearray-u16->iter)
 
 
   (define-syntax gen-array-record-writer
