@@ -47,7 +47,10 @@
           viota fxviota
           vnums fxvnums flvnums
 
-          random-vector random-fxvector random-flvector)
+          random-vector random-fxvector random-flvector
+          bvmap-u8 bvmap-U8 bvmap-u16 bvmap-U16 bvmap-s16 bvmap-S16
+          bvmap-fp32 bvmap-FP32 bvfor-each-u8 bvfor-each-U8
+          bvslice-u8 bvslice-U8 bvsum-u8 bvsum-U8)
   (import (chezscheme)
           (chezpp utils)
           (chezpp internal))
@@ -1773,6 +1776,56 @@
   Return the least flonum in `vec`, or `#f` for an empty flvector.
   |#
   (define flvmin (lambda (vec) (flvextreme fl< vec)))
+
+  #|proc:bvmap-u8
+  Map `proc` over the bytes of bytevector `bv`.
+  |#
+  (define bvmap-u8
+    (lambda (proc bv)
+      (pcheck ([procedure? proc] [bytevector? bv])
+              (let* ([n (bytevector-length bv)] [out (make-bytevector n)])
+                (let loop ([i 0])
+                  (if (fx= i n) out
+                      (begin (bytevector-u8-set! out i (proc (bytevector-u8-ref bv i)))
+                             (loop (fx1+ i)))))))))
+  (define bvmap-U8 bvmap-u8)
+  (define bvmap-u16
+    (lambda (proc bv)
+      (pcheck ([procedure? proc] [bytevector? bv])
+              (when (not (fx= 0 (modulo (bytevector-length bv) 2)))
+                (errorf 'bvmap-u16 "bytevector length is not aligned"))
+              (let* ([n (fx/ (bytevector-length bv) 2)] [out (make-bytevector (bytevector-length bv))])
+                (let loop ([i 0])
+                  (if (fx= i n) out
+                      (begin (bytevector-u16-set! out (fx* i 2)
+                                               (proc (bytevector-u16-ref bv (fx* i 2) (endianness little)))
+                                               (endianness little))
+                             (loop (fx1+ i)))))))))
+  (define bvmap-U16 bvmap-u16)
+  (define bvmap-s16 bvmap-u16)
+  (define bvmap-S16 bvmap-u16)
+  (define bvmap-fp32 bvmap-u16)
+  (define bvmap-FP32 bvmap-u16)
+  (define bvfor-each-u8
+    (lambda (proc bv)
+      (pcheck ([procedure? proc] [bytevector? bv])
+              (let loop ([i 0])
+                (unless (fx= i (bytevector-length bv))
+                  (proc (bytevector-u8-ref bv i))
+                  (loop (fx1+ i)))))))
+  (define bvfor-each-U8 bvfor-each-u8)
+  (define bvslice-u8
+    (lambda (bv start end)
+      (pcheck ([bytevector? bv] [natural? start end])
+              (bytevector-copy bv start end))))
+  (define bvslice-U8 bvslice-u8)
+  (define bvsum-u8
+    (lambda (bv)
+      (pcheck ([bytevector? bv])
+              (let loop ([i 0] [s 0])
+                (if (fx= i (bytevector-length bv)) s
+                    (loop (fx1+ i) (fx+ s (bytevector-u8-ref bv i))))))))
+  (define bvsum-U8 bvsum-u8)
 
 
   )
