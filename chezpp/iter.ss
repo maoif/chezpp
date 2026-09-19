@@ -1,5 +1,5 @@
 (library (chezpp iter)
-  (export range
+  (export range make-indexed-iter
           list->iter vector->iter string->iter
           bytevector->iter fxvector->iter flvector->iter
           port->iter port-lines->iter port-chars->iter port-data->iter
@@ -109,169 +109,182 @@
     (lambda (iter op)
       (($iter-ops iter) op)))
 
-  (define list->iter
+  #|proc:make-indexed-iter
+  The `make-indexed-iter` procedure returns an indexed iterator constructor named by
+  `constructor-name`. The `source-predicate` procedure has signature `(source) -> boolean`.
+  The `source-length` procedure has signature `(source) -> nonnegative integer`, and the
+  `source-ref` procedure has signature `(source index) -> value`. The returned constructor
+  accepts a source with optional `start`, `stop`, and nonzero `step` integers and returns an
+  iterator. Negative bounds count from the source end, and reset renormalizes the bounds.
+  |#
+  (define make-indexed-iter
+    (lambda (constructor-name source-predicate source-length source-ref)
+      (pcheck ([symbol? constructor-name]
+               [procedure? source-predicate source-length source-ref])
+              (letrec ([make-source-iter
+                        (lambda (source original-start original-stop step full-source?)
+                          (let ([index 0] [stop 0])
+                            (define reset!
+                              (lambda ()
+                                (let* ([length (source-length source)]
+                                       [start-index
+                                        (if (>= original-start 0)
+                                            original-start
+                                            (+ length original-start))]
+                                       [stop-index
+                                        (if full-source?
+                                            length
+                                            (if (>= original-stop 0)
+                                                original-stop
+                                                (+ length original-stop)))])
+                                  (if (= length 0)
+                                      (begin
+                                        (set! index 0)
+                                        (set! stop 0))
+                                      (begin
+                                        (set! index
+                                              (cond [(< start-index 0) 0]
+                                                    [(> start-index length) (- length 1)]
+                                                    [else start-index]))
+                                        (set! stop
+                                              (cond [(<= stop-index -1) -1]
+                                                    [(>= stop-index length) length]
+                                                    [else stop-index])))))))
+                            (reset!)
+                            (mk-$iter
+                             (lambda ()
+                               (if (if (> step 0)
+                                       (>= index stop)
+                                       (<= index stop))
+                                   iter-end
+                                   (let ([value (source-ref source index)])
+                                     (set! index (+ index step))
+                                     value)))
+                             reset!)))])
+                (case-lambda
+                  [(source)
+                   (pcheck ([source-predicate source])
+                           (make-source-iter source 0 0 1 #t))]
+                  [(source stop)
+                   (pcheck ([source-predicate source] [integer? stop])
+                           (make-source-iter source 0 stop 1 #f))]
+                  [(source start stop)
+                   (pcheck ([source-predicate source] [integer? start stop])
+                           (make-source-iter source start stop 1 #f))]
+                  [(source start stop step)
+                   (pcheck ([source-predicate source] [integer? start stop step])
+                           (when (= step 0)
+                             (errorf constructor-name "step cannot be 0"))
+                           (make-source-iter source start stop step #f))])))))
+
+  #|proc:list->iter
+  The `list->iter` procedure returns a forward iterator over `source`. The optional integer
+  `start` and `stop` parameters select a half-open range, and positive `step` selects the
+  distance between values. The iterator returns each selected value until it reaches its end.
+  |#
+  (define-who list->iter
     (case-lambda
-      [(val)
-       (pcheck-list (val)
-                    (let ([v val])
+      [(source)
+       (pcheck-list (source)
+                    (let ([remaining source])
                       (mk-$iter
                        (lambda ()
-                         (if (null? v)
+                         (if (null? remaining)
                              iter-end
-                             (let ([next (car v)])
-                               (cdr! v)
+                             (let ([next (car remaining)])
+                               (cdr! remaining)
                                next)))
-                       (lambda () (set! v val)))))]
-      [(val stop)
-       (pcheck-list (val) (list->iter val 0 stop 1))]
-      [(val start stop)
-       (pcheck-list (val) (list->iter val start stop 1))]
-      [(val start stop step)
-       ;; TODO handle start < stop and step < 0
-       (pcheck ([list? val] [integer? start stop step])
+                       (lambda () (set! remaining source)))))]
+      [(source stop)
+       (pcheck-list (source) (list->iter source 0 stop 1))]
+      [(source start stop)
+       (pcheck-list (source) (list->iter source start stop 1))]
+      [(source start stop step)
+       (pcheck ([list? source] [integer? start stop step])
+               (when (<= step 0)
+                 (errorf who "step must be positive"))
                ;; run to the start first
-               (let ([val (let loop ([v val] [c start])
-                            (cond [(null? v) '()]
-                                  [(fx= c 0) v]
-                                  [else (loop (cdr v) (sub1 c))]))])
-                 (let ([i start] [v val])
+               (let ([initial-tail
+                      (let loop ([remaining source] [count start])
+                        (cond [(null? remaining) '()]
+                              [(= count 0) remaining]
+                              [else (loop (cdr remaining) (sub1 count))]))])
+                 (let ([index start] [remaining initial-tail])
                    (mk-$iter
                     (lambda ()
-                      (if (or (null? v) (fx>= i stop))
+                      (if (or (null? remaining) (>= index stop))
                           iter-end
-                          (let ([res (car v)])
-                            (let loop ([v1 v] [c step])
-                              (cond [(null? v1)
-                                     (set! v '())]
-                                    [(fx= c 0)
-                                     (set! i (fx+ i step))
-                                     (set! v v1)]
-                                    [else (loop (cdr v1) (sub1 c))]))
-                            res)))
-                    (lambda () (set! i start) (set! v val))))))]))
+                          (let ([value (car remaining)])
+                            (let loop ([tail remaining] [count step])
+                              (cond [(null? tail)
+                                     (set! remaining '())]
+                                    [(= count 0)
+                                     (set! index (+ index step))
+                                     (set! remaining tail)]
+                                    [else (loop (cdr tail) (sub1 count))]))
+                            value)))
+                    (lambda ()
+                      (set! index start)
+                      (set! remaining initial-tail))))))]))
 
+  #|proc:vector->iter
+  The `vector->iter` procedure returns an iterator over `source`. The optional integer
+  `start`, `stop`, and nonzero `step` parameters select and direct a half-open indexed range.
+  The iterator returns each selected vector value until it reaches its end.
+  |#
   (define vector->iter
-    (case-lambda
-      [(val)
-       (pcheck-vector (val)
-                      (let ([len (vector-length val)] [i 0])
-                        (mk-$iter
-                         (lambda ()
-                           (if (fx= i len)
-                               iter-end
-                               (let ([next (vector-ref val i)])
-                                 (incr! i)
-                                 next)))
-                         (lambda () (set! i 0)))))]
-      [(val stop)
-       (pcheck-vector (val) (vector->iter val 0 stop 1))]
-      [(val start stop)
-       (pcheck-vector (val) (vector->iter val start stop 1))]
-      [(val start stop step)
-       (pcheck ([vector? val] [integer? start stop step])
-               ;; TODO handle start < stop and step < 0
-               (let* ([i start]
-                      [vlen (vector-length val)]
-                      [stop (if (fx>= stop vlen) vlen stop)])
-                 (mk-$iter
-                  (lambda ()
-                    (if (fx>= i stop)
-                        iter-end
-                        (let ([v (vector-ref val i)])
-                          (set! i (fx+ i step))
-                          v)))
-                  (lambda () (set! i start)))))]))
+    (make-indexed-iter 'vector->iter vector? vector-length vector-ref))
 
   (define hashtable->iter
     (lambda (val)
-      ;; return (values iter-end #f) when reaching end
       (pcheck-hashtable (val)
-                        (todo 'hashtable->iter))))
+                        (let ([keys #f] [i 0] [len 0])
+                          (define reset!
+                            (lambda ()
+                              (set! keys (hashtable-keys val))
+                              (set! len (vector-length keys))
+                              (set! i 0)))
+                          (reset!)
+                          (mk-$iter
+                           (lambda ()
+                             (if (fx= i len)
+                                 iter-end
+                                 (let ([key (vector-ref keys i)])
+                                   (set! i (fx1+ i))
+                                   (hashtable-ref val key #f))))
+                           reset!)))))
 
+  #|proc:string->iter
+  The `string->iter` procedure returns an iterator over `source`. The optional integer
+  `start`, `stop`, and nonzero `step` parameters select and direct a half-open indexed range.
+  The iterator returns each selected character until it reaches its end.
+  |#
   (define string->iter
-    (case-lambda
-      [(val)
-       (pcheck-string (val)
-                      (let ([len (string-length val)] [i 0])
-                        (mk-$iter
-                         (lambda ()
-                           (if (fx= i len)
-                               iter-end
-                               (let ([next (string-ref val i)])
-                                 (incr! i)
-                                 next)))
-                         (lambda () (set! i 0)))))]
-      [(val stop)
-       (pcheck-string (val) (string->iter val 0 stop 1))]
-      [(val start stop)
-       (pcheck-string (val) (string->iter val start stop 1))]
-      [(val start stop step)
-       (pcheck ([string? val] [integer? start stop step])
-               ;; TODO handle start < stop and step < 0
-               (let* ([i start]
-                      [vlen (string-length val)]
-                      [stop (if (fx>= stop vlen) vlen stop)])
-                 (mk-$iter
-	                  (lambda ()
-	                    (if (fx>= i stop)
-	                        iter-end
-	                        (let ([v (string-ref val i)])
-	                          (set! i (fx+ i step))
-	                          v)))
-	                  (lambda () (set! i start)))))]))
-
-  (define define-indexed->iter
-    (lambda (who pred len-proc ref-proc)
-      (case-lambda
-        [(val)
-         (pcheck ([pred val])
-                 (let ([len (len-proc val)] [i 0])
-                   (mk-$iter
-                    (lambda ()
-                      (if (fx= i len)
-                          iter-end
-                          (let ([next (ref-proc val i)])
-                            (incr! i)
-                            next)))
-                    (lambda () (set! i 0)))))]
-        [(val stop)
-         (pcheck ([pred val])
-                 ((define-indexed->iter who pred len-proc ref-proc) val 0 stop 1))]
-        [(val start stop)
-         (pcheck ([pred val])
-                 ((define-indexed->iter who pred len-proc ref-proc) val start stop 1))]
-        [(val start stop step)
-         (pcheck ([pred val] [integer? start stop step])
-                 (let* ([i start]
-                        [vlen (len-proc val)]
-                        [stop (if (fx>= stop vlen) vlen stop)])
-                   (mk-$iter
-                    (lambda ()
-                      (if (fx>= i stop)
-                          iter-end
-                          (let ([v (ref-proc val i)])
-                            (set! i (fx+ i step))
-                            v)))
-                    (lambda () (set! i start)))))])))
+    (make-indexed-iter 'string->iter string? string-length string-ref))
 
   #|proc:bytevector->iter
-  The `bytevector->iter` procedure returns an iterator over the unsigned bytes
-  in `val`.
+  The `bytevector->iter` procedure returns an iterator over unsigned bytes in `source`. The
+  optional integer `start`, `stop`, and nonzero `step` parameters select and direct a half-open
+  indexed range. The iterator returns each selected byte until it reaches its end.
   |#
   (define bytevector->iter
-    (define-indexed->iter 'bytevector->iter bytevector? bytevector-length bytevector-u8-ref))
+    (make-indexed-iter 'bytevector->iter bytevector? bytevector-length bytevector-u8-ref))
 
   #|proc:fxvector->iter
-  The `fxvector->iter` procedure returns an iterator over the fixnums in `val`.
+  The `fxvector->iter` procedure returns an iterator over fixnums in `source`. The optional
+  integer `start`, `stop`, and nonzero `step` parameters select and direct a half-open indexed
+  range. The iterator returns each selected fixnum until it reaches its end.
   |#
   (define fxvector->iter
-    (define-indexed->iter 'fxvector->iter fxvector? fxvector-length fxvector-ref))
+    (make-indexed-iter 'fxvector->iter fxvector? fxvector-length fxvector-ref))
 
   #|proc:flvector->iter
-  The `flvector->iter` procedure returns an iterator over the flonums in `val`.
+  The `flvector->iter` procedure returns an iterator over flonums in `source`. The optional
+  integer `start`, `stop`, and nonzero `step` parameters select and direct a half-open indexed
+  range. The iterator returns each selected flonum until it reaches its end.
   |#
   (define flvector->iter
-    (define-indexed->iter 'flvector->iter flvector? flvector-length flvector-ref))
+    (make-indexed-iter 'flvector->iter flvector? flvector-length flvector-ref))
 
   #|proc:iterable?
   Return whether `source` is a built-in or registered iterator source.
@@ -291,6 +304,10 @@
   #|proc:iter-source->iter
   Convert a built-in or registered `source` to an iterator.
   Registered adapters are consulted after all built-in source types.
+  This is the low-level iterator-library conversion procedure. The transducer
+  library's `source->iter` wrapper additionally accepts transducer-specific sources.
+  Hashtable passes snapshot keys because ChezScheme provides no lazy table cursor;
+  values are read from the source table as they are requested, and reset snapshots keys again.
   |#
   (define-who iter-source->iter
     (lambda (source)
@@ -302,7 +319,7 @@
                     [(bytevector? source) (bytevector->iter source)]
                     [(fxvector? source) (fxvector->iter source)]
                     [(flvector? source) (flvector->iter source)]
-                    [(hashtable? source) (vector->iter (hashtable-values source))]
+                    [(hashtable? source) (hashtable->iter source)]
                     [else ((find-source-adapter source) source)]))))
 
 
@@ -370,46 +387,41 @@
   (define file-data->iter
     (define-file->iter 'file-data->iter open-input-file get-datum))
 
-  (define iter-table '())
-
-  (define add-for-iter-type!
-    (lambda (pred iter-gen)
-      (pcheck-proc (pred iter-gen)
-                   (set! iter-table (cons (cons pred iter-gen) iter-table)))))
-
   (define get-iter
     (lambda (who val)
-      (if ($iter? val)
-          val
-          (cond [(list? val) (list->iter val)]
-                [(vector? val) (vector->iter val)]
-                [(string? val) (string->iter val)]
-                [(hashtable? val) (hashtable->iter val)]
-                [else (let loop ([table iter-table])
-                        (if (null? table)
-                            (errorf who "cannot be iterated: ~a" val)
-                            (if ((caar table) val)
-                                ((cdar table) val)
-                                (loop (cdr table)))))]))))
+      (if (iterable? val)
+          (iter-source->iter val)
+          (errorf who "cannot be iterated: ~a" val))))
 
-  #|doc
-  Returns a number iterator.
+  #|proc:range
+  The `range` procedure returns an iterator over numbers from `start` toward exclusive `stop`.
+  The nonzero `step` parameter is added after each value and must point toward `stop`. When only
+  `stop` is supplied, `start` is zero; when `step` is omitted, it is one. Equal bounds produce
+  an empty iterator.
   |#
-  (define range
+  (define-who range
     (case-lambda
       [(stop) (range 0 stop 1)]
       [(start stop) (range start stop 1)]
       [(start stop step)
-       (let ([val start])
-         (mk-$iter
-          (lambda ()
-            (if (>= val stop)
-                iter-end
-                (let ([n (+ val step)] [v val])
-                  ;; TODO optimize this update
-                  (set! val n)
-                  v)))
-          (lambda () (set! val start))))]))
+       (pcheck ([number? start stop step])
+               (when (= step 0)
+                 (errorf who "step cannot be 0"))
+               (unless (or (= start stop)
+                           (and (< start stop) (> step 0))
+                           (and (> start stop) (< step 0)))
+                 (errorf who "step does not point from ~a toward ~a" start stop))
+               (let ([value start])
+                 (mk-$iter
+                  (lambda ()
+                    (if (if (> step 0)
+                            (>= value stop)
+                            (<= value stop))
+                        iter-end
+                        (let ([current value])
+                          (set! value (+ value step))
+                          current)))
+                  (lambda () (set! value start)))))]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

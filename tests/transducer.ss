@@ -8,6 +8,18 @@
      (transducible? (queue 1 2 3)))
 
 
+(mat hashtable-source-dispatch
+
+     (let ([ht (make-hashtable equal-hash equal?)])
+       (hashtable-set! ht 'a 2)
+       (hashtable-set! ht 'b 1)
+       (let ([iter-values (sort < (iter->list (source->iter ht)))]
+             [transduced-values (sort < (transduce (tidentity) (rflist) ht))])
+         (equal? iter-values transduced-values)))
+
+     )
+
+
 (mat transducer-records
 
      (transducer? (tidentity))

@@ -1,5 +1,13 @@
 (import (chezpp))
 
+(define collect-array-iter
+  (lambda (iter)
+    (let loop ([values '()])
+      (let ([value (iter-next! iter)])
+        (if (iter-end? value)
+            (reverse values)
+            (loop (cons value values)))))))
+
 
 (mat array
 
@@ -1001,6 +1009,74 @@
 
      (let ([v (random-u8vec 100 20000)])
        (equal? v (u8array->u8vector (u8vector->u8array v))))
+
+     )
+
+
+(mat array-iter-directional
+
+     (equal? '(0 1 2) (iter->list (array->iter (array 0 1 2))))
+     (equal? '(8 6 4) (iter->list (array->iter (array 0 1 2 3 4 5 6 7 8 9)
+                                               8 2 -2)))
+     (equal? '(8 6 4) (iter->list (fxarray->iter (fxarray 0 1 2 3 4 5 6 7 8 9)
+                                                 8 2 -2)))
+     (equal? '(8 6 4) (iter->list (u8array->iter (u8array 0 1 2 3 4 5 6 7 8 9)
+                                                 8 2 -2)))
+     (equal? '() (iter->list (fxarray->iter (fxarray 1 2) 0 2 -1)))
+
+     ;; A zero step cannot advance an array iterator.
+     (error? (array->iter (array 1 2) 0 2 0))
+
+     (let ([iter (array->iter (array 0 1 2 3 4 5 6 7 8 9) 8 2 -2)])
+       (and (equal? '(8 6 4) (collect-array-iter iter))
+            (begin
+              (iter-reset! iter)
+              (equal? '(8 6 4) (collect-array-iter iter)))))
+     (let ([iter (fxarray->iter (fxarray 0 1 2 3 4 5 6 7 8 9) 8 2 -2)])
+       (and (equal? '(8 6 4) (collect-array-iter iter))
+            (begin
+              (iter-reset! iter)
+              (equal? '(8 6 4) (collect-array-iter iter)))))
+     (let ([iter (u8array->iter (u8array 0 1 2 3 4 5 6 7 8 9) 8 2 -2)])
+       (and (equal? '(8 6 4) (collect-array-iter iter))
+            (begin
+              (iter-reset! iter)
+              (equal? '(8 6 4) (collect-array-iter iter)))))
+
+     (let* ([arr (array 0 1 2)]
+            [iter (array->iter arr)])
+       (array-set! arr 1 9)
+       (equal? '(0 9 2) (iter->list iter)))
+     (let* ([arr (fxarray 0 1 2)]
+            [iter (fxarray->iter arr)])
+       (fxarray-set! arr 1 9)
+       (equal? '(0 9 2) (iter->list iter)))
+     (let* ([arr (u8array 0 1 2)]
+            [iter (u8array->iter arr)])
+       (u8array-set! arr 1 9)
+       (equal? '(0 9 2) (iter->list iter)))
+
+     (let* ([arr (array 0 1)]
+            [iter (array->iter arr)])
+       (and (equal? '(0 1) (collect-array-iter iter))
+            (begin
+              (array-push-back! arr 2)
+              (iter-reset! iter)
+              (equal? '(0 1 2) (collect-array-iter iter)))))
+     (let* ([arr (fxarray 0 1)]
+            [iter (fxarray->iter arr)])
+       (and (equal? '(0 1) (collect-array-iter iter))
+            (begin
+              (fxarray-push-back! arr 2)
+              (iter-reset! iter)
+              (equal? '(0 1 2) (collect-array-iter iter)))))
+     (let* ([arr (u8array 0 1)]
+            [iter (u8array->iter arr)])
+       (and (equal? '(0 1) (collect-array-iter iter))
+            (begin
+              (u8array-push-back! arr 2)
+              (iter-reset! iter)
+              (equal? '(0 1 2) (collect-array-iter iter)))))
 
      )
 

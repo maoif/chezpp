@@ -46,6 +46,59 @@
      (error? (iter-register-source! pair? 1)))
 
 
+(mat registered-array-iterators-are-live
+
+     (let* ([source (array 0 1)]
+            [iter (source->iter source)])
+       (array-set! source 1 9)
+       (and (equal? '(0 9) (collect-iter iter))
+            (begin
+              (array-push-back! source 2)
+              (iter-reset! iter)
+              (equal? '(0 9 2) (collect-iter iter)))))
+     (let* ([source (fxarray 0 1)]
+            [iter (source->iter source)])
+       (fxarray-set! source 1 9)
+       (and (equal? '(0 9) (collect-iter iter))
+            (begin
+              (fxarray-push-back! source 2)
+              (iter-reset! iter)
+              (equal? '(0 9 2) (collect-iter iter)))))
+     (let* ([source (u8array 0 1)]
+            [iter (source->iter source)])
+       (u8array-set! source 1 9)
+       (and (equal? '(0 9) (collect-iter iter))
+            (begin
+              (u8array-push-back! source 2)
+              (iter-reset! iter)
+              (equal? '(0 9 2) (collect-iter iter)))))
+
+     )
+
+
+(mat iterator-dispatch
+
+     (let ([ht (make-hashtable equal-hash equal?)])
+       (hashtable-set! ht 'a 1)
+       (hashtable-set! ht 'b 2)
+       (equal? '(1 2) (sort < (collect-iter (iter-source->iter ht)))))
+
+     (let ([arr (array 1 2 3)])
+       (equal? '(1 2 3) (collect-iter (get-iter 'test arr))))
+
+     (let ([ht (make-hashtable equal-hash equal?)])
+       (hashtable-set! ht 'a 1)
+       (let ([iter (iter-source->iter ht)])
+         (and (equal? '(1) (collect-iter iter))
+              (begin
+                (hashtable-delete! ht 'a)
+                (hashtable-set! ht 'b 2)
+                (iter-reset! iter)
+                (equal? '(2) (collect-iter iter))))))
+
+     )
+
+
 (mat iterators
 
      ;; range
@@ -69,7 +122,8 @@
             (eq? 8 (iter-next! r))
             (eq? iter-end (iter-next! r))))
 
-     (eq? iter-end (iter-next! (range 10 0)))
+     ;; A descending range requires an explicitly negative step.
+     (error? (range 10 0))
 
 
      ;; nums
@@ -130,6 +184,52 @@
              (iter->list (flvector->iter '#vfl(0.5 1.5 2.5 3.5) 1 4 2)))
 
      )
+
+
+(mat iter-directional-indexes
+
+     (equal? '(8 6 4) (iter->list (vector->iter '#(0 1 2 3 4 5 6 7 8 9)
+                                                   8 2 -2)))
+     (equal? '(#\8 #\6 #\4) (iter->list (string->iter "0123456789" 8 2 -2)))
+     (equal? '(8 6 4) (iter->list (bytevector->iter #vu8(0 1 2 3 4 5 6 7 8 9)
+                                                       8 2 -2)))
+     (equal? '(8 6 4) (iter->list (fxvector->iter '#vfx(0 1 2 3 4 5 6 7 8 9)
+                                                       8 2 -2)))
+     (equal? '(8.0 6.0 4.0)
+             (iter->list
+              (flvector->iter '#vfl(0.0 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0)
+                              8 2 -2)))
+     (equal? '(8 6 4) (iter->list (vector->iter '#(0 1 2 3 4 5 6 7 8 9)
+                                                   -2 -8 -2)))
+     (equal? '() (iter->list (vector->iter '#(0 1 2) 1 1 -1)))
+     (equal? '() (iter->list (vector->iter '#() 1 2)))
+
+     ;; A zero step cannot advance a vector iterator.
+     (error? (vector->iter '#(1 2) 0 2 0))
+
+     ;; A zero step cannot advance a string iterator.
+     (error? (string->iter "12" 0 2 0))
+
+     ;; List iterators support forward traversal only.
+     (error? (list->iter '(1 2) 0 2 -1)))
+
+
+(mat iter-directional-ranges
+
+     (equal? '(5 3 1) (iter->list (range 5 0 -2)))
+     (equal? '(0 2 4) (iter->list (range 0 5 2)))
+     (reset-sequence? '(5 3 1) (range 5 0 -2))
+     (reset-sequence? '(0 2 4) (range 0 5 2))
+     (equal? '() (iter->list (range 2 2 -1)))
+
+     ;; A zero step cannot advance a range.
+     (error? (range 0 5 0))
+
+     ;; An ascending range requires a positive step.
+     (error? (range 0 5 -1))
+
+     ;; A descending range requires a negative step.
+     (error? (range 5 0 1)))
 
 
 (mat iter-ops
@@ -221,9 +321,9 @@
      (fl= (/ (apply fl+ (nums 0.0 10000)) 10000)
           (iter-flavg (range 0.0 10000)))
 
-     (and (not (iter-avg (range 10 0)))
-          (not (iter-fxavg (range 10 0)))
-          (not (iter-flavg (range 10.0 0))))
+     (and (not (iter-avg (range 0)))
+          (not (iter-fxavg (range 0)))
+          (not (iter-flavg (range 0.0))))
 
      )
 

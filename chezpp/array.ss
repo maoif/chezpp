@@ -55,6 +55,7 @@
           u8array-iota u8array-nums
 
           array->list fxarray->list u8array->list
+          array->iter fxarray->iter u8array->iter
           array->vector fxarray->fxvector u8array->u8vector
           vector->array fxvector->fxarray u8vector->u8array)
   (import (chezpp chez)
@@ -62,7 +63,7 @@
           (chezpp list)
           (chezpp vector)
           (chezpp utils)
-          (only (chezpp iter) iter-register-source! make-iter iter-end)
+          (only (chezpp iter) iter-register-source! make-indexed-iter)
           (only (chezpp navigator) nav-register-indexed!))
 
   ;; TODO allow change incr-factor?
@@ -1841,6 +1842,40 @@
                             (loop (fx1+ i))))))))
 
 
+  #|proc:array->iter
+  The `array->iter` procedure returns an iterator over values in the array `source`.
+  `(source)` traverses the current full array and reevaluates its size on reset.
+  `(source stop)` defaults `start` to 0, and `(source start stop)` defaults `step` to 1.
+  `(source start stop step)` selects a half-open indexed range with a nonzero integer `step`.
+  A positive `step` visits increasing indexes at that stride; a negative `step` visits
+  decreasing indexes at the absolute stride. The iterator returns each selected value.
+  |#
+  (define array->iter
+    (make-indexed-iter 'array->iter array? array-size array-ref))
+
+  #|proc:fxarray->iter
+  The `fxarray->iter` procedure returns an iterator over fixnums in the fxarray `source`.
+  `(source)` traverses the current full fxarray and reevaluates its size on reset.
+  `(source stop)` defaults `start` to 0, and `(source start stop)` defaults `step` to 1.
+  `(source start stop step)` selects a half-open indexed range with a nonzero integer `step`.
+  A positive `step` visits increasing indexes at that stride; a negative `step` visits
+  decreasing indexes at the absolute stride. The iterator returns each selected fixnum.
+  |#
+  (define fxarray->iter
+    (make-indexed-iter 'fxarray->iter fxarray? fxarray-size fxarray-ref))
+
+  #|proc:u8array->iter
+  The `u8array->iter` procedure returns an iterator over bytes in the u8array `source`.
+  `(source)` traverses the current full u8array and reevaluates its size on reset.
+  `(source stop)` defaults `start` to 0, and `(source start stop)` defaults `step` to 1.
+  `(source start stop step)` selects a half-open indexed range with a nonzero integer `step`.
+  A positive `step` visits increasing indexes at that stride; a negative `step` visits
+  decreasing indexes at the absolute stride. The iterator returns each selected byte.
+  |#
+  (define u8array->iter
+    (make-indexed-iter 'u8array->iter u8array? u8array-size u8array-ref))
+
+
   #|proc:array->vector
   Convert an array `arr` into a vector.
   |#
@@ -1922,18 +1957,9 @@
   (iter-register-source!
    array?
    (lambda (arr)
-     (let* ([items (cond [(fxarray? arr) (fxarray->list arr)]
-                         [(u8array? arr) (u8array->list arr)]
-                         [else (array->list arr)])]
-            [remaining items])
-       (make-iter
-        (lambda ()
-          (if (null? remaining)
-              iter-end
-              (let ([item (car remaining)])
-                (set! remaining (cdr remaining))
-                item)))
-        (lambda () (set! remaining items))))))
+     (cond [(fxarray? arr) (fxarray->iter arr)]
+           [(u8array? arr) (u8array->iter arr)]
+           [else (array->iter arr)])))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Navigator extension registration
