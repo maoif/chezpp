@@ -96,6 +96,8 @@
           bytearray-s64-ref bytearray-S64-ref bytearray-s64-set! bytearray-S64-set!
           bytearray-fp32-ref bytearray-FP32-ref bytearray-fp32-set! bytearray-FP32-set!
           bytearray-fp64-ref bytearray-FP64-ref bytearray-fp64-set! bytearray-FP64-set!
+          bytearray-u16-add! bytearray-U16-add! bytearray-u16-delete! bytearray-U16-delete!
+          bytearray-u16->list bytearray-U16->list
 
           array->list fxarray->list u8array->list bytearray->list
           array->iter fxarray->iter u8array->iter bytearray->iter
@@ -2255,6 +2257,41 @@
   (define-bytearray-width bytearray-S64-ref bytearray-S64-set! (lambda (bv i) (bytevector-s64-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s64-set! bv i v (endianness big))) 8 bytearray-s64-value?)
   (define-bytearray-width bytearray-fp64-ref bytearray-fp64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness little))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness little))) 8 flonum?)
   (define-bytearray-width bytearray-FP64-ref bytearray-FP64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness big))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness big))) 8 flonum?)
+
+  (define-who bytearray-u16-add!
+    (case-lambda
+      [(arr v) (bytearray-u16-add! arr (fx/ (u8array-size arr) 2) v)]
+      [(arr i v)
+       (pcheck ([u8array? arr] [natural? i])
+               (let* ([old (bytearray->bytevector arr)] [n (bytevector-length old)]
+                      [nv (make-bytevector (fx+ n 2) 0)])
+                 (bytevector-copy! old 0 nv 0 (fx* i 2))
+                 (bytevector-u16-set! nv (fx* i 2) v (endianness little))
+                 (bytevector-copy! old (fx* i 2) nv (fx* (fx1+ i) 2) (fx- n (fx* i 2)))
+                 (u8array-clear! arr)
+                 (let loop ([j 0])
+                   (when (fx< j (bytevector-length nv))
+                     (u8array-add! arr (bytevector-u8-ref nv j))
+                     (loop (fx1+ j))))))]))
+  (define bytearray-U16-add! bytearray-u16-add!)
+  (define-who bytearray-u16-delete!
+    (lambda (arr i)
+      (pcheck ([u8array? arr] [natural? i])
+              (let* ([old (bytearray->bytevector arr)] [n (bytevector-length old)]
+                     [nv (make-bytevector (fx- n 2) 0)])
+                (bytevector-copy! old 0 nv 0 (fx* i 2))
+                (bytevector-copy! old (fx* (fx1+ i) 2) nv (fx* i 2) (fx- n (fx* (fx1+ i) 2)))
+                (u8array-clear! arr)
+                (let loop ([j 0])
+                  (when (fx< j (bytevector-length nv))
+                    (u8array-add! arr (bytevector-u8-ref nv j))
+                    (loop (fx1+ j))))))))
+  (define bytearray-U16-delete! bytearray-u16-delete!)
+  (define bytearray-u16->list
+    (lambda (arr) (pcheck ([u8array? arr]) (let loop ([i 0] [r '()])
+      (if (fx= i (fx/ (u8array-size arr) 2)) (reverse r)
+          (loop (fx1+ i) (cons (bytearray-u16-ref arr i) r)))))))
+  (define bytearray-U16->list bytearray-u16->list)
 
 
   (define-syntax gen-array-record-writer
