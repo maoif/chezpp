@@ -2259,6 +2259,9 @@
   (define-bytearray-width bytearray-fp64-ref bytearray-fp64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness little))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness little))) 8 flonum?)
   (define-bytearray-width bytearray-FP64-ref bytearray-FP64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness big))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness big))) 8 flonum?)
 
+  #|proc:bytearray-u16-add!
+  Add a logical unsigned 16-bit value to bytearray `arr`.
+  |#
   (define-who bytearray-u16-add!
     (case-lambda
       [(arr v) (bytearray-u16-add! arr (fx/ (u8array-size arr) 2) v)]
@@ -2275,6 +2278,9 @@
                      (u8array-add! arr (bytevector-u8-ref nv j))
                      (loop (fx1+ j))))))]))
   (define bytearray-U16-add! bytearray-u16-add!)
+  #|proc:bytearray-u16-delete!
+  Delete the logical unsigned 16-bit value at index `i` from `arr`.
+  |#
   (define-who bytearray-u16-delete!
     (lambda (arr i)
       (pcheck ([u8array? arr] [natural? i])
@@ -2288,6 +2294,9 @@
                     (u8array-add! arr (bytevector-u8-ref nv j))
                     (loop (fx1+ j))))))))
   (define bytearray-U16-delete! bytearray-u16-delete!)
+  #|proc:bytearray-u16->list
+  Convert logical unsigned 16-bit values in bytearray `arr` to a list.
+  |#
   (define bytearray-u16->list
     (lambda (arr) (pcheck ([u8array? arr]) (let loop ([i 0] [r '()])
       (if (fx= i (fx/ (u8array-size arr) 2)) (reverse r)
