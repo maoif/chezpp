@@ -10,7 +10,8 @@
           (rename ($iter-finalized? iter-finalized?)
                   ($iter? iter?))
           iter-for-each iter-map iter-filter iter-take iter-drop iter-fold
-          iter-append iter-zip iter-interleave
+          iter-append iter-concat iter-distinct iter-sorted iter-zip iter-interleave
+          iter->vector
 
           iter-sum iter-product iter-avg
           iter-fxsum iter-fxproduct iter-fxavg
@@ -636,17 +637,65 @@
                                (for-each iter-reset! iter*)
                                (set! itvec (list->vector iter*))
                                (set! idx 0)))))))))
-  ;; iter of iters -> iter
+  #|proc:iter-concat
+  Return an iterator concatenating one or more source iterators in order.
+  Reset resets every source iterator and restarts from the first source.
+  |#
   (define iter-concat
-    (lambda (iter)
-      (todo)))
-  ;; remove duplicates
+    (lambda (iter . iter*)
+      (pcheck ([$iter? iter] [all-iters? iter*])
+              (let ([sources (cons iter iter*)] [current iter])
+                (mk-$iter
+                 (lambda ()
+                   (let loop ()
+                     (let ([x (iter-next! current)])
+                       (if (iter-end? x)
+                           (let ([rest (memq current sources)])
+                             (if (and rest (pair? (cdr rest)))
+                                 (begin (set! current (cadr rest)) (loop))
+                                 iter-end))
+                           x))))
+                 (lambda ()
+                   (for-each iter-reset! sources)
+                   (set! current iter)))))))
+  #|proc:iter-distinct
+  Return an iterator that emits the first value from `iter` for each equivalence
+  class according to binary procedure `equal?`.
+  |#
   (define iter-distinct
-    (lambda (proc iter)
-      (todo)))
+    (lambda (equal? iter)
+      (pcheck ([procedure? equal?] [$iter? iter])
+              (let ([seen '()])
+                (mk-$iter
+                 (lambda ()
+                   (let loop ()
+                     (let ([x (iter-next! iter)])
+                       (if (iter-end? x)
+                           iter-end
+                           (if (exists (lambda (y) (equal? y x)) seen)
+                               (loop)
+                               (begin (set! seen (cons x seen)) x))))))
+                 (lambda () (iter-reset! iter) (set! seen '())))))))
+  #|proc:iter-sorted
+  Consume `iter`, sort its values with binary procedure `<?`, and iterate the result.
+  Reset rebuilds the sorted snapshot from the reset source.
+  |#
   (define iter-sorted
-    (lambda (proc iter)
-      (todo)))
+    (lambda (<? iter)
+      (pcheck ([procedure? <?] [$iter? iter])
+              (let ([snapshot '#()] [index 0])
+                (define rebuild!
+                  (lambda ()
+                    (set! snapshot (iter->vector iter))
+                    (vsort! <? snapshot)
+                    (set! index 0)))
+                (rebuild!)
+                (mk-$iter
+                 (lambda () (if (fx>= index (vector-length snapshot))
+                                iter-end
+                                (let ([x (vector-ref snapshot index)])
+                                  (set! index (fx1+ index)) x)))
+                 (lambda () (iter-reset! iter) (rebuild!)))))))
 
 ;;; terminal ops
 
@@ -794,25 +843,14 @@
                                (lb))
                         (begin (lb x)
                                (iter-loop)))))))))
+  #|proc:iter->vector
+  Collect values from `iter` into a vector in traversal order and finalize `iter`.
+  |#
   (define iter->vector
     (lambda (iter)
-      (todo)))
-  (define iter->dynvec
-    (lambda (iter)
-      (todo)))
-
-
-
-  #|doc
-  Build iterator pipeline.
-  For the sake of extensibility, iter ops should take the iter argument last,
-  so `iter>>>` can expand properly.
-  |#
-  (define-syntax iter>>>
-    (lambda (stx)
-      (syntax-case stx ()
-        [(k iter op ops ...)
-         (todo)])))
+      (pcheck ([$iter? iter])
+              (let ([xs (iter->list iter)])
+                (list->vector xs)))))
 
 
 

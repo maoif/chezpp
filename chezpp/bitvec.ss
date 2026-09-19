@@ -228,7 +228,23 @@
                 (when (> (fx+ tgt-start k) bd2)
                   (errorf who "range ~a is too large in target bitvec" k))
                 (when (fx> k 0)
-                  (todo))))))
+                  (let* ([same? (eq? src tgt)]
+                         [backward? (and same?
+                                         (fx> tgt-start src-start)
+                                         (fx< tgt-start (fx+ src-start k)))])
+                    (if backward?
+                        (let loop ([j (fx1- k)])
+                          (when (fx>= j 0)
+                            (if (bitvec-set? src (fx+ src-start j))
+                                (bitvec-set! tgt (fx+ tgt-start j))
+                                (bitvec-unset! tgt (fx+ tgt-start j)))
+                            (loop (fx1- j))))
+                        (let loop ([j 0])
+                          (when (fx< j k)
+                            (if (bitvec-set? src (fx+ src-start j))
+                                (bitvec-set! tgt (fx+ tgt-start j))
+                                (bitvec-unset! tgt (fx+ tgt-start j)))
+                            (loop (fx1+ j)))))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
