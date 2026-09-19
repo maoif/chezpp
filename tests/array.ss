@@ -32,6 +32,25 @@
 
      )
 
+(mat bytearray-widths
+     (let ([a (make-bytearray 2 0)])
+       (bytearray-u16-set! a 0 #x1234)
+       (and (= (bytearray-u16-ref a 0) #x1234)
+            (= (bytearray-U16-ref a 0) #x3412)))
+
+     (let ([a (make-bytearray 4 0)])
+       (bytearray-fp32-set! a 0 1.5)
+       (= (bytearray-fp32-ref a 0) 1.5))
+
+     ;; Width-qualified access rejects storage with trailing partial bytes.
+     (error? (bytearray-u16-ref (make-bytearray 1 0) 0))
+
+     ;; Width-qualified access uses logical element indexes.
+     (let ([a (make-bytearray 4 0)])
+       (bytearray-u16-set! a 1 99)
+       (= (bytearray-u16-ref a 1) 99))
+     )
+
 
 (mat array-add!
 
