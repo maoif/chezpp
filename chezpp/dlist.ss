@@ -20,7 +20,7 @@
           dlist-iota dlist-nums
 
           dlist->list list->dlist
-          dlist->vector vector->dlist)
+          dlist->vector vector->dlist dlist->iter)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp utils)
@@ -1452,18 +1452,26 @@
 ;;;; Iterator extension registration
 ;;;;===----------------------------------------------------------------------===
 
+  #|proc:dlist->iter
+  Return a forward iterator over live dlist node values. Reset starts at the
+  current first node; mutation during an active pass is unspecified.
+  |#
+  (define dlist->iter
+    (lambda (dl)
+      (pcheck ([dlist? dl])
+              (let ([node (dlist-first dl)])
+                (make-iter
+                 (lambda ()
+                   (if (null-dnode? node)
+                       iter-end
+                       (let ([value (dnode-value node)])
+                         (set! node (dnode-right node))
+                         value)))
+                 (lambda () (set! node (dlist-first dl))))))))
+
   (iter-register-source!
    dlist?
-   (lambda (dl)
-     (let* ([items (dlist->list dl)] [remaining items])
-       (make-iter
-        (lambda ()
-          (if (null? remaining)
-              iter-end
-              (let ([item (car remaining)])
-                (set! remaining (cdr remaining))
-                item)))
-        (lambda () (set! remaining items))))))
+   dlist->iter)
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Navigator extension registration

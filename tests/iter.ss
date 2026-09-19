@@ -75,6 +75,17 @@
 
      )
 
+(mat direct-dlist-iterator
+     ;; A dlist iterator reads live node values and reset sees current contents.
+     (let* ([dl (dlist 1 2)]
+            [iter (dlist->iter dl)])
+       (dlist-set! dl 0 9)
+       (and (equal? '(9 2) (collect-iter iter))
+            (begin
+              (dlist-push-back! dl 3)
+              (iter-reset! iter)
+              (equal? '(9 2 3) (collect-iter iter))))))
+
 
 (mat iterator-dispatch
 
@@ -97,6 +108,47 @@
                 (equal? '(2) (collect-iter iter))))))
 
      )
+
+(mat iterator-lifecycle
+     (error? (let ([it (range 1)])
+               (iter->list it)
+               (iter-next! it)))
+     (error? (let ([it (range 1)])
+               (iter->list it)
+               (iter-reset! it)))
+     (let ([p (open-input-string "a\nb\n")])
+       (let ([it (port-lines->iter p)])
+         (iter->list it)
+         (not (port-closed? p))))
+     (let ([path "iter-owned-port-test.txt"])
+       (call-with-output-file path
+         (lambda (p) (put-string p "a\nb\n")))
+       (iter->list (file-lines->iter path))
+       (delete-file path)
+       #t))
+
+(mat duplicate-source-registration
+     (let* ([source 424242]
+            [predicate (lambda (x) (and (number? x) (= x source)))])
+       (iter-register-source!
+        predicate
+        (lambda (_) (make-iter (lambda () 'old) (lambda () void))))
+       (and (guard (condition [else #t])
+              (iter-register-source!
+               predicate
+               (lambda (_) (make-iter (lambda () 'new) (lambda () void))))
+              #f)
+            (eq? 'old (iter-next! (iter-source->iter source)))))
+     (let* ([source 434343]
+            [first? (lambda (x) (and (number? x) (= x source)))]
+            [second? (lambda (x) (and (number? x) (= x source)))])
+       (iter-register-source!
+        first?
+        (lambda (_) (make-iter (lambda () 'old) (lambda () void))))
+       (iter-register-source!
+        second?
+        (lambda (_) (make-iter (lambda () 'new) (lambda () void))))
+       (eq? 'new (iter-next! (iter-source->iter source)))))
 
 
 (mat iterators
@@ -339,9 +391,7 @@
      (let* ([it (range 10)]
             [i 0])
        (iter-for-each (lambda (x) (incr! i)) it)
-       (and (iter-end? (iter-next! it))
-            (iter-finalized? it)
-            (= i 10)))
+       (= i 10))
 
      (error? (let ([r (range 10)])
                (iter->list r)

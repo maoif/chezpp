@@ -7,6 +7,7 @@
 
           rbtree-successor rbtree-predecessor
           rbtree-min rbtree-max
+          rbtree-inorder-cursor
 
           rbtree-andmap rbtree-ormap
           rbtree-map rbtree-map/i rbtree-map! rbtree-map/i!
@@ -711,6 +712,18 @@
                                                    (car T))
                                             (next (cdr stk))))))))
                           (loop (L n) (cons (cons n 'L) stk)))))))))))
+
+  #|proc:rbtree-inorder-cursor
+  Return a procedure that traverses `rbt` in ascending key order. Each call
+  returns a `(key . value)` pair, or `#f` after all nodes have been visited.
+  |#
+  (define rbtree-inorder-cursor
+    (lambda (rbt)
+      (pcheck ([rbtree? rbt])
+              (let ([next-node (single-step-rbtree-left rbt)])
+                (lambda ()
+                  (let ([node (next-node)])
+                    (and node (cons (K node) (V node)))))))))
 
   ;; symmetric case: walk the tree from the rightmost node
   (define single-step-rbtree-right

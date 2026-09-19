@@ -48,8 +48,11 @@
   (define-who iter-register-source!
     (lambda (predicate iterator-maker)
       (pcheck ([procedure? predicate iterator-maker])
-              (set! source-adapters
-                    (cons (cons predicate iterator-maker) source-adapters)))))
+              (if (assq predicate source-adapters)
+                  (errorf 'iter-register-source!
+                          "predicate procedure is already registered")
+                  (set! source-adapters
+                        (cons (cons predicate iterator-maker) source-adapters))))))
 
   (define find-source-adapter
     (lambda (source)
@@ -74,7 +77,9 @@
   (define iter-next!
     (lambda (iter)
       (pcheck ([$iter? iter])
-              (let ([ops (($iter-ops iter))])
+              (if ($iter-finalized? iter)
+                  (errorf 'iter-next! "finalized iterator cannot be advanced!")
+                  (let ([ops (($iter-ops iter))])
                 (if (null? ops)
                     (($iter-next!-proc iter))
                     (let iter-loop ()
@@ -90,7 +95,7 @@
                                       [proc (op-loop (cdr op*) (proc x))]
                                       [filter (if (proc x)
                                                   (op-loop (cdr op*) x)
-                                                  (iter-loop))]))))))))))))
+                                                  (iter-loop))])))))))))))))
   (define iter-reset!
     (lambda (iter)
       (pcheck ([$iter? iter])
@@ -336,7 +341,7 @@
                            iter-end
                            x)))
           (lambda () (set-port-position! port 0))
-          (lambda () (close-port port)))))))
+          void)))))
   (define port->iter
     (define-textual-port->iter 'port->iter get-line))
   (define port-lines->iter
@@ -350,14 +355,13 @@
     (lambda (port)
       (pcheck-open-binary-port
        (port)
-       (let ([port (open-file-input-port port)])
-         (mk-$iter
-          (lambda () (let ([x (get-u8 port)])
-                       (if (eof-object? x)
-                           iter-end
-                           x)))
-          (lambda () (set-port-position! port 0))
-          (lambda () (close-port port)))))))
+       (mk-$iter
+        (lambda () (let ([x (get-u8 port)])
+                     (if (eof-object? x)
+                         iter-end
+                         x)))
+        (lambda () (set-port-position! port 0))
+        void))))
 
 
 
