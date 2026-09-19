@@ -1826,7 +1826,9 @@
   (define bvslice-u8
     (lambda (bv start end)
       (pcheck ([bytevector? bv] [natural? start end])
-              (bytevector-copy bv start end))))
+              (let ([out (make-bytevector (fx- end start))])
+                (bytevector-copy! bv start out 0 (fx- end start))
+                out))))
   (define bvslice-U8 bvslice-u8)
   #|proc:bvsum-u8
   Return the sum of bytes in bytevector `bv`.

@@ -1,4 +1,12 @@
- (import (chezpp))
+(import (chezpp))
+
+(mat bvector-widths
+     (let ([bv (make-bytevector 2 0)])
+       (bytevector-u16-set! bv 0 #x1234 (endianness little))
+       (= (bytevector-u16-ref (bvmap-u16 (lambda (x) x) bv) 0 (endianness little)) #x1234))
+     (equal? '#vu8(2 3) (bvslice-u8 '#vu8(1 2 3 4) 1 3))
+     (= (bvsum-u8 '#vu8(1 2 3)) 6)
+     )
 
 
 (mat iterations
