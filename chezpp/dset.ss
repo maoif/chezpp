@@ -122,7 +122,7 @@
   (iter-register-source!
    dset?
    (lambda (ds)
-     (let ([index 0] [size (dset-size ds)])
+     (let ([index 0] [size (vector-length (dset-vec ds))])
        (make-iter
         (lambda ()
           (if (fx= index size)
@@ -130,7 +130,9 @@
               (let ([item index])
                 (set! index (fx1+ index))
                 item)))
-        (lambda () (set! index 0))))))
+        (lambda ()
+          (set! size (vector-length (dset-vec ds)))
+          (set! index 0))))))
 
   (record-writer (type-descriptor dset)
                  (lambda (r p wr)

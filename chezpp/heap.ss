@@ -347,15 +347,32 @@
   (iter-register-source!
    heap?
    (lambda (hp)
-     (let* ([items (heap->list hp)] [remaining items])
+     (let ([frontier
+            (make-heap
+             (lambda (left-index right-index)
+               ((heap-<? hp)
+                (vector-ref (heap-data hp) left-index)
+                (vector-ref (heap-data hp) right-index))))]
+           [size 0])
+       (define reset-frontier!
+         (lambda ()
+           (set! size (heap-size hp))
+           (heap-clear! frontier)
+           (unless (fx= size 0) (heap-push! frontier 0))))
+       (reset-frontier!)
        (make-iter
         (lambda ()
-          (if (null? remaining)
+          (if (heap-empty? frontier)
               iter-end
-              (let ([item (car remaining)])
-                (set! remaining (cdr remaining))
-                item)))
-        (lambda () (set! remaining items))))))
+              (let* ([index (heap-pop! frontier)]
+                     [left (L index)]
+                     [right (R index)])
+                (when (fx< left size)
+                  (heap-push! frontier left))
+                (when (fx< right size)
+                  (heap-push! frontier right))
+                (vector-ref (heap-data hp) index))))
+        reset-frontier!))))
 
   (record-writer
    (type-descriptor $heap)

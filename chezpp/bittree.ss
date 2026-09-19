@@ -411,15 +411,31 @@
   (iter-register-source!
    bittree?
    (lambda (bt)
-     (let* ([items (bittree->list bt)] [remaining items])
+     (let ([cursor (rbtree-inorder-cursor (bittree-rbt bt))]
+           [base 0]
+           [bits 0]
+           [offset *num-bits*])
        (make-iter
         (lambda ()
-          (if (null? remaining)
-              iter-end
-              (let ([item (car remaining)])
-                (set! remaining (cdr remaining))
-                item)))
-        (lambda () (set! remaining items))))))
+          (let loop ()
+            (cond [(fx< offset *num-bits*)
+                   (let ([current offset])
+                     (set! offset (fx1+ offset))
+                     (if (fxlogbit? current bits)
+                         (fx+ base current)
+                         (loop)))]
+                  [else
+                   (let ([entry (cursor)])
+                     (if entry
+                         (begin
+                           (set! base (key->index (car entry)))
+                           (set! bits (cdr entry))
+                           (set! offset 0)
+                           (loop))
+                         iter-end))])))
+        (lambda ()
+          (set! cursor (rbtree-inorder-cursor (bittree-rbt bt)))
+          (set! offset *num-bits*))))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Navigator extension registration

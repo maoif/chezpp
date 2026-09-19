@@ -34,10 +34,10 @@ no networking changes.
    ChezScheme primitives, with the missing string traversal procedures supplied here.
 7. `bitvec-bound` is public and sparse bittree union, intersection, and xor are exposed.
 
-## Remaining Iterator Improvements
+## Resolved Iterator Improvements
 
-The iterator registry is useful and covered by focused tests, but `chezpp/iter.ss` still
-has a separate set of correctness and API issues:
+The iterator follow-up has resolved the registry and lifecycle issues identified by this
+review:
 
 1. **Reject or define zero and negative steps.** `list->iter`, `vector->iter`, string
    iterators, the typed indexed iterators, and `range` accept a zero step. Their next
@@ -69,8 +69,14 @@ has a separate set of correctness and API issues:
    predicates are allowed and the newest one shadows older entries. Either document this
    deliberately or reject duplicate registrations to avoid load-order surprises.
 
-These iterator items are follow-up improvements rather than regressions in the completed
-data-structure API work.
+Indexed sources now use directional slice-compatible bounds and reject zero steps, while lists
+remain forward-only. Iterator lifecycle checks are consistent, port ownership is explicit, and
+the low-level iterator conversion is distinct from the transducer wrapper. Registered mutable
+sources traverse live storage and reset against current contents; active-pass mutation is
+unspecified. ChezScheme hashtables and hashsets are the documented exception: each pass snapshots
+keys because ChezScheme exposes no lazy cursor, while values are read from the source as needed.
+Duplicate predicate procedure objects are rejected atomically, and distinct overlapping
+predicates retain newest-first precedence.
 
 ## API Summary
 

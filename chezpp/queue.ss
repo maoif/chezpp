@@ -168,16 +168,7 @@
 
   (iter-register-source!
    queue?
-   (lambda (q)
-     (let* ([items (queue->list q)] [remaining items])
-       (make-iter
-        (lambda ()
-          (if (null? remaining)
-              iter-end
-              (let ([item (car remaining)])
-                (set! remaining (cdr remaining))
-                item)))
-        (lambda () (set! remaining items))))))
+   (lambda (q) (dlist->iter (queue-dl q))))
 
   (record-writer
    (type-descriptor $queue)

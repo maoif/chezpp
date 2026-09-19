@@ -829,15 +829,12 @@
   (iter-register-source!
    treeset?
    (lambda (ts)
-     (let* ([items (treeset->list ts)] [remaining items])
+     (let ([cursor (rbtree-inorder-cursor ts)])
        (make-iter
         (lambda ()
-          (if (null? remaining)
-              iter-end
-              (let ([item (car remaining)])
-                (set! remaining (cdr remaining))
-                item)))
-        (lambda () (set! remaining items))))))
+          (let ([entry (cursor)])
+            (if entry (car entry) iter-end)))
+        (lambda () (set! cursor (rbtree-inorder-cursor ts)))))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Navigator extension registration

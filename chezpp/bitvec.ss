@@ -590,15 +590,19 @@
     (iter-register-source!
      bitvec?
      (lambda (bv)
-       (let* ([items (bitvec->list bv)] [remaining items])
+       (let ([index 0])
          (make-iter
           (lambda ()
-            (if (null? remaining)
-                iter-end
-                (let ([item (car remaining)])
-                  (set! remaining (cdr remaining))
-                  item)))
-          (lambda () (set! remaining items))))))
+            (let loop ()
+              (cond [(fx= index (bitvec-bound bv)) iter-end]
+                    [(bitvec-set? bv index)
+                     (let ([item index])
+                       (set! index (fx1+ index))
+                       item)]
+                    [else
+                     (set! index (fx1+ index))
+                     (loop)])))
+          (lambda () (set! index 0))))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Navigator extension registration

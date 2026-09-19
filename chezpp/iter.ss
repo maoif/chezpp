@@ -42,8 +42,13 @@
 
   #|proc:iter-register-source!
   Register `predicate` and `iterator-maker` as an iterator source adapter.
-  The maker receives one matching source and returns an iterator.
-  Newer registrations are checked before older registrations.
+  Both parameters must be procedures. The maker receives one matching source and must
+  return an iterator. Registering the same predicate procedure object twice raises an
+  error without changing the registry. Distinct overlapping predicates are allowed,
+  and newer registrations are checked first.
+  Adapters should traverse source storage directly, rebuild state from current contents
+  on reset, and treat active-pass mutation as unspecified. Hashtable-backed adapters may
+  snapshot keys when the source API has no lazy cursor.
   |#
   (define-who iter-register-source!
     (lambda (predicate iterator-maker)
@@ -313,6 +318,8 @@
   library's `source->iter` wrapper additionally accepts transducer-specific sources.
   Hashtable passes snapshot keys because ChezScheme provides no lazy table cursor;
   values are read from the source table as they are requested, and reset snapshots keys again.
+  Other mutable sources are traversed directly and reset against current contents.
+  Mutation during an active pass is unspecified.
   |#
   (define-who iter-source->iter
     (lambda (source)

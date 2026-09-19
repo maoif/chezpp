@@ -1508,7 +1508,8 @@
 
   #|proc:source->iter
   The `source->iter` procedure converts a supported Phase 2 transducer source
-  to an iterator for explicit interop or debug traversal.
+  to an iterator for explicit interop or debug traversal. It wraps the lower-level
+  `iter-source->iter` conversion and additionally handles transducer eduction sources.
   |#
   (define source->iter
     (lambda (source)

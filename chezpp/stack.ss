@@ -174,7 +174,7 @@
   (iter-register-source!
    stack?
    (lambda (stk)
-     (let* ([items (stack->list stk)] [remaining items])
+     (let ([remaining (stack-stk stk)])
        (make-iter
         (lambda ()
           (if (null? remaining)
@@ -182,7 +182,7 @@
               (let ([item (car remaining)])
                 (set! remaining (cdr remaining))
                 item)))
-        (lambda () (set! remaining items))))))
+        (lambda () (set! remaining (stack-stk stk)))))))
 
   (record-writer
    (type-descriptor $stack)

@@ -744,15 +744,12 @@
   (iter-register-source!
    treemap?
    (lambda (tm)
-     (let* ([items (treemap->list tm)] [remaining items])
+     (let ([cursor (rbtree-inorder-cursor tm)])
        (make-iter
         (lambda ()
-          (if (null? remaining)
-              iter-end
-              (let ([item (car remaining)])
-                (set! remaining (cdr remaining))
-                item)))
-        (lambda () (set! remaining items))))))
+          (let ([entry (cursor)])
+            (if entry entry iter-end)))
+        (lambda () (set! cursor (rbtree-inorder-cursor tm)))))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Navigator extension registration

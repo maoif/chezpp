@@ -596,15 +596,18 @@
   (iter-register-source!
    hashset?
    (lambda (hs)
-     (let* ([items (hashset->list hs)] [remaining items])
+     ;; ChezScheme exposes no lazy hashtable cursor, so snapshot only the keys.
+     (let ([keys (hashtable-keys (hashset-ht hs))] [index 0])
        (make-iter
         (lambda ()
-          (if (null? remaining)
+          (if (fx= index (vector-length keys))
               iter-end
-              (let ([item (car remaining)])
-                (set! remaining (cdr remaining))
-                item)))
-        (lambda () (set! remaining items))))))
+              (let ([key (vector-ref keys index)])
+                (set! index (fx1+ index))
+                key)))
+        (lambda ()
+          (set! keys (hashtable-keys (hashset-ht hs)))
+          (set! index 0))))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Navigator extension registration
