@@ -1,6 +1,6 @@
 (library (chezpp dlist)
   (export dlist make-dlist dlist? dlist-size dlist-empty?
-          dlist-ref dlist-set! dlist-add! dlist-delete! dlist-clear!
+          dlist-ref dlist-set! dlist-add! dlist-add*! dlist-delete! dlist-clear!
           dlist-reverse dlist-reverse!
           dlist-filter dlist-filter! dlist-partition
           dlist-contains? dlist-contains/p? dlist-index-of dlist-find-index
@@ -190,6 +190,24 @@
                            ($dlist-size-set! dl (fx+ ($dlist-size dl) 1)))
                          (next (fx1- i) (dnode-right n))))]
                   [else (errorf who "index ~a out of range ~a" i len)])))]))
+
+  #|proc:dlist-add*!
+  Add multiple values to `dl`, either at the end or before the item at index `i`.
+  All values are collected before any mutation occurs.
+  |#
+  (define-who dlist-add*!
+    (case-lambda
+      [(dl v . vs)
+       (pcheck ([dlist? dl])
+               (for-each (lambda (x) (dlist-add! dl x)) (cons v vs)))]
+      [(dl i v . vs)
+       (pcheck ([dlist? dl] [natural? i])
+               (let ([vals (cons v vs)] [len ($dlist-size dl)])
+                 (when (fx> i len) (errorf who "index ~a out of range ~a" i len))
+                 (let loop ([j 0] [xs vals])
+                   (unless (null? xs)
+                     (dlist-add! dl (fx+ i j) (car xs))
+                     (loop (fx1+ j) (cdr xs))))))]))
 
 
   #|proc:dlist-delete!
@@ -884,7 +902,6 @@
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  ;; TODO iter API
 
   (define check-length
     (case-lambda

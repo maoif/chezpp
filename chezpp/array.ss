@@ -1,6 +1,6 @@
 (library (chezpp array)
   (export array make-array array? array-size array-empty?
-          array-ref array-add! array-delete! array-set! array-clear!
+          array-ref array-add! array-add*! array-delete! array-set! array-clear!
           array-slice array-slice! array-copy array-copy!
           array-push! array-pop! array-push-back! array-pop-back!
           array-filter array-filter! array-partition
@@ -19,7 +19,7 @@
 
 
           fxarray make-fxarray fxarray? fxarray-size fxarray-empty?
-          fxarray-ref fxarray-add! fxarray-delete! fxarray-set! fxarray-clear!
+          fxarray-ref fxarray-add! fxarray-add*! fxarray-delete! fxarray-set! fxarray-clear!
           fxarray-slice fxarray-slice! fxarray-copy fxarray-copy!
           fxarray-push! fxarray-pop! fxarray-push-back! fxarray-pop-back!
           fxarray-filter fxarray-filter! fxarray-partition
@@ -36,8 +36,11 @@
           fxarray-sorted? fxarray-sort fxarray-sort!
           fxarray-iota fxarray-nums
 
+          flarray make-flarray flarray? flarray-size flarray-empty?
+          flarray-ref flarray-add! flarray-set! flarray-add*!
+
           u8array make-u8array u8array? u8array-size u8array-empty?
-          u8array-ref u8array-add! u8array-delete! u8array-set! u8array-clear!
+          u8array-ref u8array-add! u8array-add*! u8array-delete! u8array-set! u8array-clear!
           u8array-slice u8array-slice! u8array-copy u8array-copy!
           u8array-push! u8array-pop! u8array-push-back! u8array-pop-back!
           u8array-filter u8array-filter! u8array-partition
@@ -54,10 +57,29 @@
           u8array-sorted? u8array-sort u8array-sort!
           u8array-iota u8array-nums
 
-          array->list fxarray->list u8array->list
-          array->iter fxarray->iter u8array->iter
-          array->vector fxarray->fxvector u8array->u8vector
-          vector->array fxvector->fxarray u8vector->u8array)
+          ;; Bytearray is the public name for the raw unsigned-byte array API.
+          bytearray make-bytearray bytearray? bytearray-size bytearray-empty?
+          bytearray-ref bytearray-add! bytearray-add*! bytearray-delete! bytearray-set! bytearray-clear!
+          bytearray-slice bytearray-slice! bytearray-copy bytearray-copy!
+          bytearray-push! bytearray-pop! bytearray-push-back! bytearray-pop-back!
+          bytearray-filter bytearray-filter! bytearray-partition
+          bytearray-contains? bytearray-contains/p? bytearray-index-of bytearray-find-index
+          bytearray-search bytearray-search*
+          bytearray-append bytearray-append!
+          bytearray-reverse bytearray-reverse!
+          bytearray-map bytearray-map/i bytearray-map! bytearray-map/i!
+          bytearray-for-each bytearray-for-each/i
+          bytearray-map-rev bytearray-map/i-rev
+          bytearray-for-each-rev bytearray-for-each/i-rev
+          bytearray-andmap bytearray-ormap
+          bytearray-fold-left bytearray-fold-left/i bytearray-fold-right bytearray-fold-right/i
+          bytearray-sorted? bytearray-sort bytearray-sort!
+          bytearray-iota bytearray-nums
+
+          array->list fxarray->list u8array->list bytearray->list
+          array->iter fxarray->iter u8array->iter bytearray->iter
+          array->vector fxarray->fxvector u8array->u8vector bytearray->bytevector
+          vector->array fxvector->fxarray u8vector->u8array bytevector->bytearray)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp list)
@@ -86,6 +108,9 @@
   |#
   (define-record-type ($fxarray mk-fxarray fxarray?)
     (parent $array))
+  #|record:$flarray
+  Mutable flonum-array record derived from `$array`.
+  |#
   (define-record-type ($flarray mk-flarray flarray?)
     (parent $array))
   #|record:$u8array
@@ -359,6 +384,10 @@
     (lambda (who cap v len)
       (pcheck ([natural? cap len] [fixnum? v])
               (mk-fxarray (make-fxvector cap v) 2 len))))
+  (define $make-flarray
+    (lambda (who cap v len)
+      (pcheck ([natural? cap len] [flonum? v])
+              (mk-flarray (make-flvector cap v) 2 len))))
   (define $make-u8array
     (lambda (who cap v len)
       (pcheck ([natural? cap len] [u8? v])
@@ -389,6 +418,15 @@
       [()      ($make-fxarray who *mincap* #f 0)]
       [(len)   ($make-fxarray who len      0  len)]
       [(len v) ($make-fxarray who len      v  len)]))
+
+  #|proc:make-flarray
+  Return a flonum array of optional length `len`, filled with optional flonum `v`.
+  |#
+  (define-who make-flarray
+    (case-lambda
+      [() ($make-flarray who *mincap* 0.0 0)]
+      [(len) ($make-flarray who len 0.0 len)]
+      [(len v) ($make-flarray who len v len)]))
 
   #|proc:make-u8array
   Return a byte array of optional length `len`, filled with optional byte `v`.
@@ -429,6 +467,64 @@
                        arr)
                 (begin (fxvector-set! vec i (car args))
                        (loop (fx1+ i) (cdr args)))))))))
+
+  #|proc:flarray
+  Return a flonum array containing `args` in argument order.
+  |#
+  (define-who flarray
+    (lambda args
+      (unless (andmap flonum? args) (errorf who "arguments must be flonums: ~a" args))
+      (let* ([len (length args)] [arr (make-flarray (max *mincap* len))]
+             [vec (array-vec arr)])
+        (let loop ([i 0] [xs args])
+          (if (null? xs)
+              (begin ($array-size-set! arr len) arr)
+              (begin (flvector-set! vec i (car xs)) (loop (fx1+ i) (cdr xs))))))))
+
+  #|proc:flarray-size
+  Return the number of items in the flarray `arr`.
+  |#
+  (define-who flarray-size (lambda (arr) (pcheck ([flarray? arr]) ($array-size arr))))
+  #|proc:flarray-empty?
+  Return whether `arr` contains no items.
+  |#
+  (define-who flarray-empty? (lambda (arr) (pcheck ([flarray? arr]) (fx= 0 ($array-size arr)))))
+  #|proc:flarray-ref
+  Return the flonum at index `i` in `arr`.
+  |#
+  (define-who flarray-ref
+    (lambda (arr i) (pcheck ([flarray? arr] [natural? i])
+                             (if (fx< i ($array-size arr))
+                                 (flvector-ref (array-vec arr) i)
+                                 (errorf who "index ~a out of range" i)))))
+  #|proc:flarray-set!
+  Set index `i` of `arr` to flonum `v`.
+  |#
+  (define-who flarray-set!
+    (lambda (arr i v) (pcheck ([flarray? arr] [natural? i] [flonum? v])
+                              (if (fx< i ($array-size arr))
+                                  (flvector-set! (array-vec arr) i v)
+                                  (errorf who "index ~a out of range" i)))))
+  #|proc:flarray-add!
+  Append flonum `v` to `arr`.
+  |#
+  (define-who flarray-add!
+    (lambda (arr v) (pcheck ([flarray? arr] [flonum? v])
+                            (when (fx= ($array-size arr) (flvector-length (array-vec arr)))
+                              (let* ([old (array-vec arr)]
+                                     [nv (make-flvector (fx* 2 (max 1 (flvector-length old))) 0.0)])
+                                (flvcopy! old 0 nv 0 ($array-size arr))
+                                (array-vec-set! arr nv)))
+                            (flvector-set! (array-vec arr) ($array-size arr) v)
+                            ($array-size-set! arr (fx1+ ($array-size arr))))))
+  #|proc:flarray-add*!
+  Add multiple flonum values to `arr` in order.
+  |#
+  (define-who flarray-add*!
+    (lambda (arr v . vs)
+      (pcheck ([flarray? arr] [flonum? v])
+              (unless (andmap flonum? vs) (errorf who "values must be flonums"))
+              (for-each (lambda (x) (flarray-add! arr x)) (cons v vs)))))
 
   #|proc:u8array
   Return a byte array containing `args` in argument order.
@@ -519,14 +615,23 @@
   This is faster than `array-add!` when adding multiple values.
   |#
   (define-array-procedure (a fxa u8a) add*!
-    [(arr v . v*) (apcheck (arr) (apply thisproc arr (asize arr) v v*))]
+    [(arr v . v*)
+     (apcheck (arr)
+              (let ([vals (cons v v*)])
+                (for-each aval? vals)
+                (for-each (lambda (x) (aadd! arr x)) vals)))]
     [(arr i v . v*)
      (apcheck (arr)
               (pcheck ([natural? i])
                       (let ([len (asize arr)] [vec (array-vec arr)])
                         (cond
-                         [(fx= i len) (todo)]
-                         [(fx< i len) (todo)]
+                         [(fx<= i len)
+                          (let ([vals (cons v v*)])
+                            (for-each aval? vals)
+                            (let loop ([j i] [xs vals])
+                              (unless (null? xs)
+                                (aadd! arr j (car xs))
+                                (loop (fx1+ j) (cdr xs)))))]
                          [else (errorf who "index ~a out of range ~a" i len)]))))])
 
 
@@ -1918,6 +2023,72 @@
                       vec
                       (begin (bytevector-u8-set! vec i (u8array-ref arr i))
                              (loop (fx1+ i)))))))))
+
+  ;;;;===----------------------------------------------------------------------===
+  ;;;; Public bytearray names (the u8array implementation is retained for compatibility)
+  ;;;;===----------------------------------------------------------------------===
+  #|proc:bytearray
+  Construct a mutable bytearray containing the supplied octets.  The bytearray
+  procedures below are aliases of corresponding u8array procedures; a bytearray
+  stores values in the inclusive range 0 through 255.
+  |#
+  (define bytearray u8array)
+  (define make-bytearray make-u8array)
+  (define bytearray? u8array?)
+  (define bytearray-size u8array-size)
+  (define bytearray-empty? u8array-empty?)
+  (define bytearray-ref u8array-ref)
+  (define bytearray-add! u8array-add!)
+  (define bytearray-add*! u8array-add*!)
+  (define bytearray-delete! u8array-delete!)
+  (define bytearray-set! u8array-set!)
+  (define bytearray-clear! u8array-clear!)
+  (define bytearray-slice u8array-slice)
+  (define bytearray-slice! u8array-slice!)
+  (define bytearray-copy u8array-copy)
+  (define bytearray-copy! u8array-copy!)
+  (define bytearray-push! u8array-push!)
+  (define bytearray-pop! u8array-pop!)
+  (define bytearray-push-back! u8array-push-back!)
+  (define bytearray-pop-back! u8array-pop-back!)
+  (define bytearray-filter u8array-filter)
+  (define bytearray-filter! u8array-filter!)
+  (define bytearray-partition u8array-partition)
+  (define bytearray-contains? u8array-contains?)
+  (define bytearray-contains/p? u8array-contains/p?)
+  (define bytearray-index-of u8array-index-of)
+  (define bytearray-find-index u8array-find-index)
+  (define bytearray-search u8array-search)
+  (define bytearray-search* u8array-search*)
+  (define bytearray-append u8array-append)
+  (define bytearray-append! u8array-append!)
+  (define bytearray-reverse u8array-reverse)
+  (define bytearray-reverse! u8array-reverse!)
+  (define bytearray-map u8array-map)
+  (define bytearray-map/i u8array-map/i)
+  (define bytearray-map! u8array-map!)
+  (define bytearray-map/i! u8array-map/i!)
+  (define bytearray-for-each u8array-for-each)
+  (define bytearray-for-each/i u8array-for-each/i)
+  (define bytearray-map-rev u8array-map-rev)
+  (define bytearray-map/i-rev u8array-map/i-rev)
+  (define bytearray-for-each-rev u8array-for-each-rev)
+  (define bytearray-for-each/i-rev u8array-for-each/i-rev)
+  (define bytearray-andmap u8array-andmap)
+  (define bytearray-ormap u8array-ormap)
+  (define bytearray-fold-left u8array-fold-left)
+  (define bytearray-fold-left/i u8array-fold-left/i)
+  (define bytearray-fold-right u8array-fold-right)
+  (define bytearray-fold-right/i u8array-fold-right/i)
+  (define bytearray-sorted? u8array-sorted?)
+  (define bytearray-sort u8array-sort)
+  (define bytearray-sort! u8array-sort!)
+  (define bytearray-iota u8array-iota)
+  (define bytearray-nums u8array-nums)
+  (define bytearray->list u8array->list)
+  (define bytearray->iter u8array->iter)
+  (define bytearray->bytevector u8array->u8vector)
+  (define bytevector->bytearray u8vector->u8array)
 
 
   (define-syntax gen-array-record-writer
