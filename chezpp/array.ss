@@ -98,6 +98,7 @@
           bytearray-fp64-ref bytearray-FP64-ref bytearray-fp64-set! bytearray-FP64-set!
           bytearray-u16-add! bytearray-U16-add! bytearray-u16-delete! bytearray-U16-delete!
           bytearray-u16->list bytearray-U16->list
+          bytearray-u16-map bytearray-U16-map bytearray-u16-for-each bytearray-U16-for-each
 
           array->list fxarray->list u8array->list bytearray->list
           array->iter fxarray->iter u8array->iter bytearray->iter
@@ -2292,6 +2293,32 @@
       (if (fx= i (fx/ (u8array-size arr) 2)) (reverse r)
           (loop (fx1+ i) (cons (bytearray-u16-ref arr i) r)))))))
   (define bytearray-U16->list bytearray-u16->list)
+  #|proc:bytearray-u16-map
+  Map `proc` over logical little-endian 16-bit values in bytearray `arr`.
+  |#
+  (define bytearray-u16-map
+    (lambda (proc arr)
+      (pcheck ([procedure? proc] [u8array? arr])
+              (let* ([n (u8array-size arr)] [out (make-bytevector n 0)])
+                (when (not (fx= 0 (modulo n 2))) (errorf 'bytearray-u16-map "unaligned bytearray"))
+                (let loop ([i 0])
+                  (if (fx= i n) (bytevector->bytearray out)
+                      (begin (bytevector-u16-set! out i (proc (bytevector-u16-ref (array-vec arr) i (endianness little))) (endianness little))
+                             (loop (fx+ i 2)))))))))
+  (define bytearray-U16-map bytearray-u16-map)
+  #|proc:bytearray-u16-for-each
+  Call `proc` for each logical little-endian 16-bit value in bytearray `arr`.
+  |#
+  (define bytearray-u16-for-each
+    (lambda (proc arr)
+      (pcheck ([procedure? proc] [u8array? arr])
+              (let ([n (u8array-size arr)])
+                (when (not (fx= 0 (modulo n 2))) (errorf 'bytearray-u16-for-each "unaligned bytearray"))
+                (let loop ([i 0])
+                  (unless (fx= i n)
+                    (proc (bytevector-u16-ref (array-vec arr) i (endianness little)))
+                    (loop (fx+ i 2))))))))
+  (define bytearray-U16-for-each bytearray-u16-for-each)
 
 
   (define-syntax gen-array-record-writer
