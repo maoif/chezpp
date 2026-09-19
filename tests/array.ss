@@ -51,6 +51,15 @@
        (= (bytearray-u16-ref a 1) 99))
      )
 
+(mat flarray
+     (let ([a (flarray 1.0 2.0 3.0)])
+       (and (= (flarray-size a) 3)
+            (= (flarray-ref a 1) 2.0)))
+     (let ([a (make-flarray)])
+       (flarray-add! a 4.0)
+       (equal? '(4.0) (flarray->list a)))
+     )
+
 
 (mat array-add!
 
