@@ -79,6 +79,10 @@
 
   ;; Get the next item from the iterator,
   ;; also run the item through the ops pipeline, if any.
+  #|proc:iter-next!
+  Return the next value from `iter`, or `iter-end` when exhausted. It is an error
+  to advance a finalized iterator.
+  |#
   (define iter-next!
     (lambda (iter)
       (pcheck ([$iter? iter])
@@ -101,6 +105,10 @@
                                       [filter (if (proc x)
                                                   (op-loop (cdr op*) x)
                                                   (iter-loop))])))))))))))))
+  #|proc:iter-reset!
+  Reset `iter` for a new pass and clear its operation pipeline. It is an error
+  to reset a finalized iterator. The procedure returns an unspecified value.
+  |#
   (define iter-reset!
     (lambda (iter)
       (pcheck ([$iter? iter])
@@ -108,6 +116,10 @@
                   (errorf 'iter-reset! "finalized iterator cannot be reset!")
                   (begin (($iter-reset!-proc iter))
                          ($iter-ops-set! iter (make-list-builder)))))))
+  #|proc:iter-finalize!
+  Finalize `iter` and release resources it owns. It is an error to finalize an
+  already finalized iterator. The procedure returns an unspecified value.
+  |#
   (define iter-finalize!
     (lambda (iter)
       (pcheck ([$iter? iter])
@@ -398,6 +410,10 @@
   (define file-data->iter
     (define-file->iter 'file-data->iter open-input-file get-datum))
 
+  #|proc:get-iter
+  Return an iterator for `val`. The symbol `who` identifies the caller in the
+  error raised when `val` is not an iterable source.
+  |#
   (define get-iter
     (lambda (who val)
       (if (iterable? val)
@@ -459,16 +475,28 @@
                   (let ([new (mk-$iter ($iter-next!-proc iter) ($iter-reset!-proc iter)
                                        ($iter-fini-proc iter)   ($iter-ops iter))])
                     new)))))
+  #|proc:iter-map
+  Add `proc` to the pipeline of `iter` and return `iter`. The procedure `proc`
+  accepts one source value and returns its mapped value.
+  |#
   (define iter-map
     (lambda (proc iter)
       (pcheck ([$iter? iter] [procedure? proc])
               (iter-ops-add! iter (cons 'proc proc))
               iter)))
+  #|proc:iter-filter
+  Add `proc` to the pipeline of `iter` and return `iter`. The predicate `proc`
+  accepts one source value and returns true when that value should be retained.
+  |#
   (define iter-filter
     (lambda (proc iter)
       (pcheck ([$iter? iter] [procedure? proc])
               (iter-ops-add! iter (cons 'filter proc))
               iter)))
+  #|proc:iter-take
+  Add an operation that retains at most the first nonnegative fixnum `n` values
+  from `iter`, then return `iter`.
+  |#
   (define iter-take
     (lambda (n iter)
       (pcheck ([$iter? iter] [fixnum? n])
@@ -495,6 +523,10 @@
                                                             (begin (set! rest-bad? #t)
                                                                    #f)))))))
               iter)))
+  #|proc:iter-drop
+  Add an operation that discards the first nonnegative fixnum `n` values from
+  `iter`, then return `iter`.
+  |#
   (define iter-drop
     (lambda (n iter)
       (pcheck ([$iter? iter] [fixnum? n])
@@ -524,6 +556,10 @@
 
   ;; (iter-append (a0 a1 ...) (b0 b1 ...)) ->
   ;; (a0 a1 ... b0 b1 ...)
+  #|proc:iter-append
+  Return an iterator that yields all values from `iter` and each iterator in
+  `iter*` in order. Reset resets every source iterator.
+  |#
   (define iter-append
     (lambda (iter . iter*)
       (pcheck ([$iter? iter])
@@ -547,6 +583,10 @@
                                (for-each iter-reset! (cons iter iter*))))))))))
   ;; (iter-zip (a0 a1 ...) (b0 b1 ...)) ->
   ;; ((a0 b0) (a1 b1) ...)
+  #|proc:iter-zip
+  Return an iterator of lists containing corresponding values from `iter` and
+  `iter*`. Traversal stops when any source iterator ends.
+  |#
   (define iter-zip
     (lambda (iter . iter*)
       (pcheck ([$iter? iter])
@@ -562,6 +602,10 @@
                              (lambda () (for-each iter-reset! iter*)))))))))
   ;; (iter-interleave (a0 a1 ...) (b0 b1 ...)) ->
   ;; (a0 b0 a1 b1 ...)
+  #|proc:iter-interleave
+  Return an iterator that alternates values from `iter` and `iter*`, skipping
+  exhausted sources until every source iterator has ended.
+  |#
   (define iter-interleave
     (lambda (iter . iter*)
       (pcheck ([$iter? iter])
@@ -606,6 +650,10 @@
 
 ;;; terminal ops
 
+  #|proc:iter-for-each
+  Call `proc` once for each value from `iter`, finalize `iter`, and return an
+  unspecified value. The procedure `proc` accepts one iterator value.
+  |#
   (define iter-for-each
     (lambda (proc iter)
       (pcheck ([$iter? iter] [procedure? proc])
@@ -615,6 +663,11 @@
                       (iter-finalize! iter)
                       (begin (proc x)
                              (iter-loop))))))))
+  #|proc:iter-fold
+  Fold `iter` from left to right with initial accumulator `acc`, finalize the
+  iterator, and return the final accumulator. The procedure `proc` accepts the
+  current accumulator and one value and returns the next accumulator.
+  |#
   (define iter-fold
     (lambda (proc acc iter)
       (let iter-loop ([acc acc])
@@ -624,14 +677,25 @@
                      acc)
               (iter-loop (proc acc x)))))))
 
+  #|proc:iter-max
+  Return the maximal value from `iter`, or `#f` when empty, and finalize the
+  iterator. Optional comparator `f` accepts two values and returns their ordering.
+  |#
   (define iter-max
     (case-lambda
       [(iter) (iter-max > iter)]
       [(f iter) (iter-fold (lambda (acc x) (if acc (if (f x acc) x acc) x)) #f iter)]))
+  #|proc:iter-min
+  Return the minimal value from `iter`, or `#f` when empty, and finalize the
+  iterator. Optional comparator `f` accepts two values and returns their ordering.
+  |#
   (define iter-min
     (case-lambda
       [(iter) (iter-min < iter)]
       [(f iter) (iter-fold (lambda (acc x) (if acc (if (f x acc) x acc) x)) #f iter)]))
+  #|proc:iter-avg
+  Return the arithmetic mean of numeric values from `iter`, or `#f` when empty.
+  |#
   (define iter-avg
     (lambda (iter)
       (let loop ([i 0] [sum 0])
@@ -639,9 +703,15 @@
           (if (iter-end? x)
               (if (= i 0) #f (/ sum i))
               (loop (add1 i) (+ x sum)))))))
+  #|proc:iter-sum
+  Return the numeric sum of values from `iter` and finalize the iterator.
+  |#
   (define iter-sum
     (lambda (iter)
       (iter-fold (lambda (acc x) (+ acc x)) 0 iter)))
+  #|proc:iter-product
+  Return the numeric product of values from `iter` and finalize the iterator.
+  |#
   (define iter-product
     (lambda (iter)
       (iter-fold (lambda (acc x) (* acc x)) 1 iter)))
@@ -652,6 +722,9 @@
   (define iter-fxmin
     (lambda (iter)
       (iter-min fx< iter)))
+  #|proc:iter-fxavg
+  Return the fixnum arithmetic mean of values from `iter`, or `#f` when empty.
+  |#
   (define iter-fxavg
     (lambda (iter)
       (let loop ([i 0] [sum 0])
@@ -659,9 +732,15 @@
           (if (iter-end? x)
               (if (fx= i 0) #f (fx/ sum i))
               (loop (add1 i) (fx+ x sum)))))))
+  #|proc:iter-fxsum
+  Return the fixnum sum of values from `iter` and finalize the iterator.
+  |#
   (define iter-fxsum
     (lambda (iter)
       (iter-fold (lambda (acc x) (fx+ acc x)) 0 iter)))
+  #|proc:iter-fxproduct
+  Return the fixnum product of values from `iter` and finalize the iterator.
+  |#
   (define iter-fxproduct
     (lambda (iter)
       (iter-fold (lambda (acc x) (fx* acc x)) 1 iter)))
@@ -672,6 +751,9 @@
   (define iter-flmin
     (lambda (iter)
       (iter-min fl< iter)))
+  #|proc:iter-flavg
+  Return the flonum arithmetic mean of values from `iter`, or `#f` when empty.
+  |#
   (define iter-flavg
     (lambda (iter)
       (let loop ([i 0] [sum 0.0])
@@ -679,9 +761,15 @@
           (if (iter-end? x)
               (if (fx= i 0) #f (fl/ sum (inexact i)))
               (loop (add1 i) (fl+ x sum)))))))
+  #|proc:iter-flsum
+  Return the flonum sum of values from `iter` and finalize the iterator.
+  |#
   (define iter-flsum
     (lambda (iter)
       (iter-fold (lambda (acc x) (fl+ acc x)) 0.0 iter)))
+  #|proc:iter-flproduct
+  Return the flonum product of values from `iter` and finalize the iterator.
+  |#
   (define iter-flproduct
     (lambda (iter)
       (iter-fold (lambda (acc x) (fl* acc x)) 1.0 iter)))
@@ -691,6 +779,10 @@
 
 ;;; conversions
 
+  #|proc:iter->list
+  Collect values from `iter` into a list in traversal order, finalize `iter`,
+  and return the list.
+  |#
   (define iter->list
     (lambda (iter)
       (pcheck ([$iter? iter])
