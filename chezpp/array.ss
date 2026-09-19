@@ -76,6 +76,9 @@
           bytearray-fold-left bytearray-fold-left/i bytearray-fold-right bytearray-fold-right/i
           bytearray-sorted? bytearray-sort bytearray-sort!
           bytearray-iota bytearray-nums
+          bytearray-u16-ref bytearray-U16-ref bytearray-u16-set! bytearray-U16-set!
+          bytearray-s16-ref bytearray-S16-ref bytearray-s16-set! bytearray-S16-set!
+          bytearray-fp32-ref bytearray-FP32-ref bytearray-fp32-set! bytearray-FP32-set!
 
           array->list fxarray->list u8array->list bytearray->list
           array->iter fxarray->iter u8array->iter bytearray->iter
@@ -2135,6 +2138,47 @@
   (define bytearray->iter u8array->iter)
   (define bytearray->bytevector u8array->u8vector)
   (define bytevector->bytearray u8vector->u8array)
+
+  (define-syntax define-bytearray-width
+    (syntax-rules ()
+      [(_ ref-name set-name width-ref width-set width)
+       (begin
+         (define-who ref-name
+           (lambda (arr i)
+             (pcheck ([u8array? arr] [natural? i])
+                     (let ([n (u8array-size arr)])
+                       (when (not (fx= (modulo n width) 0))
+                         (errorf who "bytearray length is not aligned to width ~a" width))
+                       (if (fx< i (fx/ n width))
+                           (width-ref (array-vec arr) (fx* i width))
+                           (errorf who "index ~a out of range" i))))))
+         (define-who set-name
+           (lambda (arr i v)
+             (pcheck ([u8array? arr] [natural? i])
+                     (let ([n (u8array-size arr)])
+                       (when (not (fx= (modulo n width) 0))
+                         (errorf who "bytearray length is not aligned to width ~a" width))
+                       (if (fx< i (fx/ n width))
+                           (width-set (array-vec arr) (fx* i width) v)
+                           (errorf who "index ~a out of range" i)))))))]))
+  (define-bytearray-width bytearray-u16-ref bytearray-u16-set!
+    (lambda (bv i) (bytevector-u16-ref bv i (endianness little)))
+    (lambda (bv i v) (bytevector-u16-set! bv i v (endianness little))) 2)
+  (define-bytearray-width bytearray-U16-ref bytearray-U16-set!
+    (lambda (bv i) (bytevector-u16-ref bv i (endianness big)))
+    (lambda (bv i v) (bytevector-u16-set! bv i v (endianness big))) 2)
+  (define-bytearray-width bytearray-s16-ref bytearray-s16-set!
+    (lambda (bv i) (bytevector-s16-ref bv i (endianness little)))
+    (lambda (bv i v) (bytevector-s16-set! bv i v (endianness little))) 2)
+  (define-bytearray-width bytearray-S16-ref bytearray-S16-set!
+    (lambda (bv i) (bytevector-s16-ref bv i (endianness big)))
+    (lambda (bv i v) (bytevector-s16-set! bv i v (endianness big))) 2)
+  (define-bytearray-width bytearray-fp32-ref bytearray-fp32-set!
+    (lambda (bv i) (bytevector-ieee-single-ref bv i (endianness little)))
+    (lambda (bv i v) (bytevector-ieee-single-set! bv i v (endianness little))) 4)
+  (define-bytearray-width bytearray-FP32-ref bytearray-FP32-set!
+    (lambda (bv i) (bytevector-ieee-single-ref bv i (endianness big)))
+    (lambda (bv i v) (bytevector-ieee-single-set! bv i v (endianness big))) 4)
 
 
   (define-syntax gen-array-record-writer
