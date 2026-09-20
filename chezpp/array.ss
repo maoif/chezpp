@@ -37,7 +37,22 @@
           fxarray-iota fxarray-nums
 
           flarray make-flarray flarray? flarray-size flarray-empty?
-          flarray-ref flarray-add! flarray-add*! flarray-delete! flarray-clear!
+          flarray-ref flarray-add! flarray-add*! flarray-delete! flarray-set! flarray-clear!
+          flarray-slice flarray-slice! flarray-copy flarray-copy!
+          flarray-push! flarray-pop! flarray-push-back! flarray-pop-back!
+          flarray-filter flarray-filter! flarray-partition
+          flarray-contains? flarray-contains/p? flarray-index-of flarray-find-index
+          flarray-search flarray-search*
+          flarray-append flarray-append!
+          flarray-reverse flarray-reverse!
+          flarray-map flarray-map/i flarray-map! flarray-map/i!
+          flarray-for-each flarray-for-each/i
+          flarray-map-rev flarray-map/i-rev
+          flarray-for-each-rev flarray-for-each/i-rev
+          flarray-andmap flarray-ormap
+          flarray-fold-left flarray-fold-left/i flarray-fold-right flarray-fold-right/i
+          flarray-sorted? flarray-sort flarray-sort!
+          flarray-iota flarray-nums
           flarray->list flarray->iter flarray->flvector flvector->flarray
 
           u8array make-u8array u8array? u8array-size u8array-empty?
@@ -166,22 +181,22 @@
     (lambda (stx)
       (define valid-ty*?
         (lambda (ty*)
-          (if (null? (remp (lambda (x) (memq x '(a fxa u8a))) ty*))
+          (if (null? (remp (lambda (x) (memq x '(a fxa fla u8a))) ty*))
               #t
-              (syntax-error ty* "define-array-procedure: bad array type flags (allowed ones: a fxa u8a):"))))
+              (syntax-error ty* "define-array-procedure: bad array type flags:"))))
       (define handle-ty*
         (lambda (ty*)
-          (values (memq 'a ty*) (memq 'fxa ty*) (memq 'u8a ty*))))
+          (values (memq 'a ty*) (memq 'fxa ty*) (memq 'fla ty*) (memq 'u8a ty*))))
       (define get-name
         (lambda (which name)
           (let ([n (symbol->string (syntax->datum name))]
-                [pre1 '((a . array-) (fxa . fxarray-) (u8a . u8array-))])
+                [pre1 '((a . array-) (fxa . fxarray-) (fla . flarray-) (u8a . u8array-))])
             ($construct-name name (cdr (assoc which pre1)) n))))
       (syntax-case stx ()
         ;; case-lambda
         [(k (ty* ...) name [args body body* ...] ...)
          (and (identifier? #'name) (valid-ty*? (datum (ty* ...))))
-         (let-values ([(pa? pfxa? pu8a?) (handle-ty* (datum (ty* ...)))])
+         (let-values ([(pa? pfxa? pfla? pu8a?) (handle-ty* (datum (ty* ...)))])
            (with-implicit (k v v? vmake vref vset! vcopy vcopy! vlength vpcheck vcheck-length all-which? thisproc who
                              t+ t- t* t/ t+id t*id t> t<
                              a amk amake aadd! a? avec asize avec-set! apcheck aval?)
@@ -258,6 +273,49 @@
                                    [args body body* ...] ...))
                                (define thisproc name))))
                        #'(define dummy1 'dummy))
+                 #,(if pfla?
+                       (with-syntax ([name (get-name 'fla #'name)])
+                         #`(module (name)
+                             (define a flarray)
+                             (define amk mk-flarray)
+                             (define amake make-flarray)
+                             (define aadd! flarray-add!)
+                             (define a? flarray?)
+                             (define avec array-vec)
+                             (define avec-set! array-vec-set!)
+                             (define asize $array-size)
+                             (define aval?
+                               (lambda (x)
+                                 (unless (flonum? x)
+                                   (errorf 'name "not a flonum: ~a" x))))
+                             (define v flvector)
+                             (define v? flvector?)
+                             (define vmake make-flvector)
+                             (define vref flvector-ref)
+                             (define vset! flvector-set!)
+                             (define vlength flvector-length)
+                             (define vcopy! flvcopy!)
+                             (define vcopy flvector-copy)
+                             (define all-which? all-flarrays?)
+                             (define who 'name)
+                             (define t+ fl+) (define t- fl-)
+                             (define t* fl*) (define t/ fl/)
+                             (define t+id 0.0) (define t*id 1.0)
+                             (define t> fl>) (define t< fl<)
+                             (let-syntax
+                                 ([vpcheck
+                                   (syntax-rules ()
+                                     [(_ e* (... ...))
+                                      (pcheck-flvector e* (... ...))])]
+                                  [apcheck
+                                   (syntax-rules ()
+                                     [(_ (a* (... ...)) e* (... ...))
+                                      (pcheck ([flarray? a* (... ...)]) e* (... ...))])])
+                               (define name
+                                 (case-lambda
+                                   [args body body* ...] ...))
+                               (define thisproc name))))
+                       #'(define dummy-fl 'dummy))
                  #,(if pu8a?
                        (with-syntax ([name (get-name 'u8a #'name)])
                          #`(module (name)
@@ -298,7 +356,7 @@
         ;; lambda
         [(k (ty* ...) (name . args) body* ...)
          (and (identifier? #'name) (valid-ty*? (datum (ty* ...))))
-         (let-values ([(pa? pfxa? pu8a?) (handle-ty* (datum (ty* ...)))])
+         (let-values ([(pa? pfxa? pfla? pu8a?) (handle-ty* (datum (ty* ...)))])
            (with-implicit (k v? vmake vref vset! vlength vcopy vcopy! vpcheck vcheck-length all-which? thisproc who
                              t+ t- t* t/ t+id t*id t> t<
                              a amk amake aadd! a? avec asize avec-set! apcheck aval?)
@@ -368,6 +426,46 @@
                                               [apcheck (syntax-rules () [(_ (a* (... ...)) e* (... ...)) (pcheck ([fxarray? a* (... ...)]) e* (... ...))])])
                                    body* ...)))))
                        #'(define dummy1 'dummy))
+                 #,(if pfla?
+                       (with-syntax ([name (get-name 'fla #'name)])
+                         #`(define name
+                             (lambda args
+                               (let ([a flarray]
+                                     [amk mk-flarray]
+                                     [amake make-flarray]
+                                     [aadd! flarray-add!]
+                                     [a? flarray?]
+                                     [avec array-vec]
+                                     [avec-set! array-vec-set!]
+                                     [asize $array-size]
+                                     [aval? (lambda (x)
+                                              (unless (flonum? x)
+                                                (errorf 'name "not a flonum: ~a" x)))]
+                                     [v flvector]
+                                     [v? flvector?]
+                                     [vmake make-flvector]
+                                     [vref flvector-ref]
+                                     [vset! flvector-set!]
+                                     [vlength flvector-length]
+                                     [vcopy! flvcopy!]
+                                     [vcopy flvector-copy]
+                                     [all-which? all-flarrays?]
+                                     [who 'name]
+                                     [thisproc name]
+                                     [t+ fl+] [t- fl-] [t* fl*] [t/ fl/]
+                                     [t+id 0.0] [t*id 1.0]
+                                     [t> fl>] [t< fl<])
+                                 (let-syntax
+                                     ([vpcheck
+                                       (syntax-rules ()
+                                         [(_ e* (... ...))
+                                          (pcheck-flvector e* (... ...))])]
+                                      [apcheck
+                                       (syntax-rules ()
+                                         [(_ (a* (... ...)) e* (... ...))
+                                          (pcheck ([flarray? a* (... ...)]) e* (... ...))])])
+                                   body* ...)))))
+                       #'(define dummy-fl 'dummy))
                  #,(if pu8a?
                        (with-syntax ([name (get-name 'u8a #'name)])
                          #`(define name
@@ -534,22 +632,28 @@
   Append flonum `v` to `arr`.
   |#
   (define-who flarray-add!
-    (lambda (arr v) (pcheck ([flarray? arr] [flonum? v])
-                            (when (fx= ($array-size arr) (flvector-length (array-vec arr)))
-                              (let* ([old (array-vec arr)]
-                                     [nv (make-flvector (fx* 2 (max 1 (flvector-length old))) 0.0)])
-                                (flvcopy! old 0 nv 0 ($array-size arr))
-                                (array-vec-set! arr nv)))
-                            (flvector-set! (array-vec arr) ($array-size arr) v)
-                            ($array-size-set! arr (fx1+ ($array-size arr))))))
+    (case-lambda
+      [(arr v) (flarray-add! arr ($array-size arr) v)]
+      [(arr i v)
+       (pcheck ([flarray? arr] [natural? i] [flonum? v])
+               ($array-add-values! who arr i (list v) (lambda (x) (void))
+                                   make-flvector flvector-length flvector-set!
+                                   flvcopy! 0.0))]))
   #|proc:flarray-add*!
   Add multiple flonum values to `arr` in order.
   |#
   (define-who flarray-add*!
-    (lambda (arr v . vs)
-      (pcheck ([flarray? arr] [flonum? v])
-              (unless (andmap flonum? vs) (errorf who "values must be flonums"))
-              (for-each (lambda (x) (flarray-add! arr x)) (cons v vs)))))
+    (lambda (arr first . rest)
+      (pcheck ([flarray? arr])
+              (let ([check (lambda (x)
+                             (unless (flonum? x)
+                               (errorf who "not a flonum: ~a" x)))])
+                (if (and (pair? rest) (natural? first) (fx<= first ($array-size arr)))
+                    ($array-add-values! who arr first rest check make-flvector
+                                        flvector-length flvector-set! flvcopy! 0.0)
+                    ($array-add-values! who arr ($array-size arr) (cons first rest) check
+                                        make-flvector flvector-length flvector-set!
+                                        flvcopy! 0.0))))))
   #|proc:flarray-delete!
   Remove the flonum at index `i` from `arr`.
   |#
@@ -567,14 +671,6 @@
   |#
   (define-who flarray-clear!
     (lambda (arr) (pcheck ([flarray? arr]) ($array-size-set! arr 0))))
-  #|proc:flarray->list
-  Convert `arr` to a list in index order.
-  |#
-  (define-who flarray->list
-    (lambda (arr) (pcheck ([flarray? arr])
-                          (let loop ([i 0] [r '()])
-                            (if (fx= i ($array-size arr)) (reverse r)
-                                (loop (fx1+ i) (cons (flvector-ref (array-vec arr) i) r)))))))
   #|proc:flarray->flvector
   Convert `arr` to an exact-size flvector.
   |#
@@ -634,14 +730,17 @@
       (let* ([len ($array-size arr)] [vec (array-vec arr)]
              [vmake (cond [(vector?     vec) make-vector]
                           [(fxvector?   vec) make-fxvector]
+                          [(flvector?   vec) make-flvector]
                           [(bytevector? vec) make-bytevector]
                           [else (assert-unreachable)])]
              [vlength (cond [(vector?     vec) vector-length]
                             [(fxvector?   vec) fxvector-length]
+                            [(flvector?   vec) flvector-length]
                             [(bytevector? vec) bytevector-length]
                             [else (assert-unreachable)])]
              [vcopy! (cond [(vector?     vec) vcopy!]
                            [(fxvector?   vec) fxvcopy!]
+                           [(flvector?   vec) flvcopy!]
                            [(bytevector? vec) bytevector-copy!]
                            [else (assert-unreachable)])]
              [cap (vlength vec)]
@@ -675,7 +774,7 @@
   (define-array-add! u8array-add! u8array? u8?             bytevector-length bytevector-u8-set! u8vcopy!)
 
   (define $array-add-values!
-    (lambda (who arr i values value-check vector-make vector-length vector-set vector-copy!)
+    (lambda (who arr i values value-check vector-make vector-length vector-set vector-copy! fill)
       (let* ([len ($array-size arr)] [count (length values)] [newlen (fx+ len count)]
              [old (array-vec arr)] [capacity (vector-length old)])
         (when (fx> i len)
@@ -686,7 +785,7 @@
               (vector-copy! old i old (fx+ i count) (fx- len i)))
             (let capacity-loop ([new-capacity (if (fx= capacity 0) *mincap* capacity)])
               (if (fx>= new-capacity newlen)
-                  (let ([new (vector-make new-capacity 0)])
+                  (let ([new (vector-make new-capacity fill)])
                     (vector-copy! old 0 new 0 i)
                     (when (fx< i len)
                       (vector-copy! old i new (fx+ i count) (fx- len i)))
@@ -709,9 +808,9 @@
      (apcheck (arr)
               (if (and (pair? rest) (natural? first) (fx<= first (asize arr)))
                   ($array-add-values! who arr first rest aval?
-                                      vmake vlength vset! vcopy!)
+                                      vmake vlength vset! vcopy! t+id)
                   ($array-add-values! who arr (asize arr) (cons first rest) aval?
-                                      vmake vlength vset! vcopy!)))])
+                                      vmake vlength vset! vcopy! t+id)))])
 
 
   #|doc
@@ -773,7 +872,7 @@
   Apply `pred` to every item of the array `arr` and return a new array
   of the items of `arr` for which `pred` returns #t.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (filter pred arr)
     (apcheck (arr)
              (pcheck ([procedure? pred])
@@ -790,7 +889,7 @@
   Similar to `array-filter`, but array `arr` is modified in place to contain
   only items `x` such that `(pred x)` returns #t.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (filter! pred arr)
     (apcheck (arr)
              (pcheck ([procedure? pred])
@@ -812,7 +911,7 @@
   Return two arrays, the first array contains values `x` such that `(proc x)` returns #t,
   the second contains values `x` such that `(proc x)` returns #f.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (partition proc arr)
     (apcheck (arr)
              (pcheck ([procedure? proc])
@@ -830,7 +929,7 @@
   #|doc
   Return a new array whose items are those from the given array, in the given order.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (append arr . arr*)
     (apcheck (arr)
              (pcheck ([all-which? arr*])
@@ -853,7 +952,7 @@
   Imperatively append items of given arrays `arr*` to array `arr`,
   then return the first array `arr`.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (append! arr . arr*)
     (apcheck (arr)
              (unless (null? arr*)
@@ -883,7 +982,7 @@
   #|doc
   Return a newly allocated array consisting of the items of `arr` in reverse order.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (reverse arr)
     (apcheck (arr)
              (let* ([len ($array-size arr)] [vec (array-vec arr)]
@@ -898,7 +997,7 @@
   #|doc
   Reverse the items in the array in place, then return the array.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (reverse! arr)
     (apcheck (arr)
              (let ([len ($array-size arr)] [vec (array-vec arr)])
@@ -921,7 +1020,7 @@
   Return whether the array contains the given item.
   Items are compared using `equal?`.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (contains? arr v)
     (apcheck (arr)
              (aval? v)
@@ -943,7 +1042,7 @@
   #|proc:u8array-contains/p?
   Return whether the array contains an item that satisfies `pred`.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (contains/p? arr pred)
     (apcheck (arr)
              (pcheck ([procedure? pred])
@@ -965,7 +1064,7 @@
   #|proc:u8array-index-of
   Return the index of the first item equal to `v`, or #f if no item matches.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (index-of arr v)
     (apcheck (arr)
              (aval? v)
@@ -987,7 +1086,7 @@
   #|proc:u8array-find-index
   Return the index of the first item satisfying `pred`, or #f if no item matches.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (find-index arr pred)
     (apcheck (arr)
              (pcheck ([procedure? pred])
@@ -1010,7 +1109,7 @@
   Return the first item in the array that satisfies the predicate `pred`.
   If no such item is found, #f is returned.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (search arr pred)
     (apcheck (arr)
              (pcheck ([procedure? pred])
@@ -1031,7 +1130,7 @@
 
   The `collect` argument has the same semantics as in `dlist-search*`.
   |#
-  (define-array-procedure (a fxa u8a) search*
+  (define-array-procedure (a fxa fla u8a) search*
     [(arr pred)
      (apcheck (arr)
               (pcheck ([procedure? pred])
@@ -1056,7 +1155,7 @@
 
   If the indices are out of range in any way, an empty array is returned.
   |#
-  (define-array-procedure (a fxa u8a) slice
+  (define-array-procedure (a fxa fla u8a) slice
     [(arr end) (thisproc arr 0 end 1)]
     [(arr start end) (thisproc arr start end 1)]
     [(arr start end step)
@@ -1102,7 +1201,7 @@
 
   After the operation, `arr` is returned.
   |#
-  (define-array-procedure (a fxa u8a) slice!
+  (define-array-procedure (a fxa fla u8a) slice!
     [(arr end) (thisproc arr 0 end 1)]
     [(arr start end) (thisproc arr start end 1)]
     [(arr start end step)
@@ -1145,7 +1244,7 @@
   #|doc
   Make a copy of the array `arr`.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (copy arr)
     (apcheck (arr)
              (amk (vcopy (array-vec arr))
@@ -1164,7 +1263,7 @@
 
   `src` and `tgt` may or may not be the same array.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (copy! src src-start tgt tgt-start k)
     (apcheck (src tgt)
              (pcheck ([natural? src-start tgt-start k])
@@ -1218,7 +1317,7 @@
 
   `start` and `stop` must satisfy the requirement that `0 <= start <= stop <= length of array`.
   |#
-  (define-array-procedure (a fxa u8a) sorted?
+  (define-array-procedure (a fxa fla u8a) sorted?
     [(<? arr)
      (apcheck (arr)
               (thisproc <? arr 0 (asize arr)))]
@@ -1248,7 +1347,7 @@
 
   The `*array-sort` procedures return the sorted array or the subarray.
   |#
-  (define-array-procedure (a fxa u8a) sort
+  (define-array-procedure (a fxa fla u8a) sort
     [(<? arr)
      (apcheck (arr)
               (thisproc <? arr 0 (asize arr)))]
@@ -1264,9 +1363,11 @@
                         (when (fx> start stop)
                           (errorf who "start index ~a greater than stop index ~a" start stop))
                         (let* ([vsort! (cond [(fxarray? arr) fxvsort!]
+                                             [(flarray? arr) flvsort!]
                                              [(u8array? arr) (todo who)]
                                              [else vsort!])]
                                [acopy! (cond [(fxarray? arr) fxarray-copy!]
+                                             [(flarray? arr) flarray-copy!]
                                              [(u8array? arr) u8array-copy!]
                                              [else array-copy!])]
                                [newarr (amake (fx- stop start))])
@@ -1285,7 +1386,7 @@
 
   `start` and `stop` must satisfy the requirement that `0 <= start <= stop <= length of arr`.
   |#
-  (define-array-procedure (a fxa u8a) sort!
+  (define-array-procedure (a fxa fla u8a) sort!
     [(<? arr)
      (apcheck (arr)
               (thisproc <? arr 0 (asize arr)))]
@@ -1301,6 +1402,7 @@
                         (when (fx> start stop)
                           (errorf who "start index ~a greater than stop index ~a" start stop))
                         (let ([vsort! (cond [(fxarray? arr) fxvsort!]
+                                            [(flarray? arr) flvsort!]
                                             [(u8array? arr) (todo who)]
                                             [else vsort!])]
                               [vec (array-vec arr)])
@@ -1314,14 +1416,14 @@
 
   Note that for u8arrays, it is an error if `n` exceeds 257.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (iota n)
     (pcheck ([natural? n])
             (let ([v (vmake n)])
               (let loop ([i 0])
                 (if (fx= i n)
                     (amk v 2 n)
-                    (begin (vset! v i i)
+                    (begin (vset! v i (if (flvector? v) (inexact i) i))
                            (loop (fx1+ i))))))))
 
 
@@ -1369,11 +1471,33 @@
                                 (loop (fx1+ i) (+ x step))))))
                  (errorf who "invalid range: ~a, ~a, ~a" start stop step)))])
 
+  #|proc:flarray-nums
+  Return a flarray containing the progression from `start` toward `stop` by `step`.
+  |#
+  (define-who flarray-nums
+    (case-lambda
+      [(stop) (flarray-nums 0.0 stop 1.0)]
+      [(start stop) (flarray-nums start stop 1.0)]
+      [(start stop step)
+       (pcheck ([number? start stop step])
+               (let ([start (inexact start)] [stop (inexact stop)] [step (inexact step)])
+                 (unless (or (and (fl<= start stop) (fl> step 0.0))
+                             (and (fl>= start stop) (fl< step 0.0)))
+                   (errorf who "invalid range: ~a, ~a, ~a" start stop step))
+                 (let* ([len (exact (ceiling (fl/ (fl- stop start) step)))]
+                        [arr (make-flarray len)])
+                   (let loop ([i 0] [value start])
+                     (if (fx= i len)
+                         arr
+                         (begin
+                           (flarray-set! arr i value)
+                           (loop (fx1+ i) (fl+ value step))))))))]))
+
 
   #|doc
   Add the item `v` to the front of the array `arr`.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (push! arr v)
     (apcheck (arr)
              (aval? v)
@@ -1388,7 +1512,7 @@
   Remove the first item from the array `arr` and return it.
   It is an error if the array is empty.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (pop! arr)
     (apcheck (arr)
              (let ([len (asize arr)])
@@ -1404,7 +1528,7 @@
   #|doc
   Add the item `v` to the back of the array `arr`.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (push-back! arr v)
     (apcheck (arr)
              (aval? v)
@@ -1418,7 +1542,7 @@
   Remove the last item from the array `arr` and return it.
   It is an error if the array is empty.
   |#
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (pop-back! arr)
     (apcheck (arr)
              (let ([len (asize arr)])
@@ -1451,7 +1575,7 @@
            (errorf who "arrays are not of the same length")))]))
 
 
-  (define-array-procedure (a fxa u8a) map
+  (define-array-procedure (a fxa fla u8a) map
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1485,7 +1609,7 @@
                             (loop (fx1+ i)))))))])
 
 
-  (define-array-procedure (a fxa u8a) map/i
+  (define-array-procedure (a fxa fla u8a) map/i
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1520,7 +1644,7 @@
 
 ;;;; in-place maps
 
-  (define-array-procedure (a fxa u8a) map!
+  (define-array-procedure (a fxa fla u8a) map!
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1551,7 +1675,7 @@
                             (loop (fx1+ i)))))))])
 
 
-  (define-array-procedure (a fxa u8a) map/i!
+  (define-array-procedure (a fxa fla u8a) map/i!
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1582,7 +1706,7 @@
                             (loop (fx1+ i)))))))])
 
 
-  (define-array-procedure (a fxa u8a) for-each
+  (define-array-procedure (a fxa fla u8a) for-each
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1610,7 +1734,7 @@
                    (loop (fx1+ i))))))])
 
 
-  (define-array-procedure (a fxa u8a) for-each/i
+  (define-array-procedure (a fxa fla u8a) for-each/i
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1640,7 +1764,7 @@
 
 ;;;; reverse order
 
-  (define-array-procedure (a fxa u8a) map-rev
+  (define-array-procedure (a fxa fla u8a) map-rev
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1674,7 +1798,7 @@
                             (loop (fx1- i) (fx1+ j)))))))])
 
 
-  (define-array-procedure (a fxa u8a) map/i-rev
+  (define-array-procedure (a fxa fla u8a) map/i-rev
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1708,7 +1832,7 @@
                             (loop (fx1- i) (fx1+ j)))))))])
 
 
-  (define-array-procedure (a fxa u8a) for-each-rev
+  (define-array-procedure (a fxa fla u8a) for-each-rev
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1736,7 +1860,7 @@
                    (loop (fx1- i) (fx1+ j))))))])
 
 
-  (define-array-procedure (a fxa u8a) for-each/i-rev
+  (define-array-procedure (a fxa fla u8a) for-each/i-rev
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1764,7 +1888,7 @@
                    (loop (fx1- i) (fx1+ j))))))])
 
 
-  (define-array-procedure (a fxa u8a) andmap
+  (define-array-procedure (a fxa fla u8a) andmap
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1795,7 +1919,7 @@
                           (loop (fx1+ i)))))))])
 
 
-  (define-array-procedure (a fxa u8a) ormap
+  (define-array-procedure (a fxa fla u8a) ormap
     [(proc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1829,7 +1953,7 @@
 ;;;; folds
 
 
-  (define-array-procedure (a fxa u8a) fold-left
+  (define-array-procedure (a fxa fla u8a) fold-left
     [(proc acc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1860,7 +1984,7 @@
                            (fx1+ i))))))])
 
 
-  (define-array-procedure (a fxa u8a) fold-left/i
+  (define-array-procedure (a fxa fla u8a) fold-left/i
     [(proc acc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1891,7 +2015,7 @@
                            (fx1+ i))))))])
 
 
-  (define-array-procedure (a fxa u8a) fold-right
+  (define-array-procedure (a fxa fla u8a) fold-right
     [(proc acc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -1921,7 +2045,7 @@
                            (fx1- i))))))])
 
 
-  (define-array-procedure (a fxa u8a) fold-right/i
+  (define-array-procedure (a fxa fla u8a) fold-right/i
     [(proc acc arr0)
      (pcheck ([procedure? proc])
              (apcheck (arr0)
@@ -2015,7 +2139,7 @@
   Convert an array to a list.
   |#
   ;; defines {,fx,u8}array->list
-  (define-array-procedure (a fxa u8a)
+  (define-array-procedure (a fxa fla u8a)
     (>list arr)
     (apcheck (arr)
              (let ([lb (make-list-builder)] [vec (array-vec arr)] [len ($array-size arr)])
@@ -2390,6 +2514,7 @@
    array?
    (lambda (arr)
      (cond [(fxarray? arr) (fxarray->iter arr)]
+           [(flarray? arr) (flarray->iter arr)]
            [(u8array? arr) (u8array->iter arr)]
            [else (array->iter arr)])))
 
@@ -2401,28 +2526,34 @@
    array? array-size
    (lambda (arr index)
      (cond [(fxarray? arr) (fxarray-ref arr index)]
+           [(flarray? arr) (flarray-ref arr index)]
            [(u8array? arr) (u8array-ref arr index)]
            [else (array-ref arr index)]))
    (lambda (arr index value)
      (let ([copy (cond [(fxarray? arr) (fxarray-copy arr)]
+                       [(flarray? arr) (flarray-copy arr)]
                        [(u8array? arr) (u8array-copy arr)]
                        [else (array-copy arr)])])
        (cond [(fxarray? copy) (fxarray-set! copy index value)]
+             [(flarray? copy) (flarray-set! copy index value)]
              [(u8array? copy) (u8array-set! copy index value)]
              [else (array-set! copy index value)])
        copy))
    (lambda (arr index value)
      (cond [(fxarray? arr) (fxarray-set! arr index value)]
+           [(flarray? arr) (flarray-set! arr index value)]
            [(u8array? arr) (u8array-set! arr index value)]
            [else (array-set! arr index value)])
      arr))
 
   (gen-array-record-writer $array   "#[array ("   vector-ref)
   (gen-array-record-writer $fxarray "#[fxarray (" fxvector-ref)
+  (gen-array-record-writer $flarray "#[flarray (" flvector-ref)
   (gen-array-record-writer $u8array "#[u8array (" bytevector-u8-ref)
 
   (gen-array-record-type-equal-procedure $array   vector-ref)
   (gen-array-record-type-equal-procedure $fxarray fxvector-ref)
+  (gen-array-record-type-equal-procedure $flarray flvector-ref)
   (gen-array-record-type-equal-procedure $u8array bytevector-u8-ref)
 
   )

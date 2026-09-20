@@ -58,6 +58,31 @@
      (let ([a (make-flarray)])
        (flarray-add! a 4.0)
        (equal? '(4.0) (flarray->list a)))
+
+     (equal? '(2.0 4.0 6.0)
+             (flarray->list (flarray-map (lambda (x) (fl* x 2.0))
+                                         (flarray 1.0 2.0 3.0))))
+
+     (= 6.0 (flarray-fold-left fl+ 0.0 (flarray 1.0 2.0 3.0)))
+
+     (equal? '(1.0 2.0 3.0)
+             (flarray->list (flarray-sort fl< (flarray 3.0 1.0 2.0))))
+
+     (let* ([a (flarray 1.0 2.0)] [iter (flarray->iter a)])
+       (and (equal? '(1.0 2.0) (iter->list iter))
+            (let ([again (flarray->iter a)])
+              (iter-reset! again)
+              (equal? '(1.0 2.0) (iter->list again)))))
+
+     (equal? '(0.0 1.0 2.0) (flarray->list (flarray-iota 3)))
+     (equal? '(1.0 1.5 2.0 2.5)
+             (flarray->list (flarray-nums 1.0 3.0 0.5)))
+
+     (let ([a (flarray 1.0 4.0)])
+       (flarray-add*! a 1 2.0 3.0)
+       (equal? '(1.0 2.0 3.0 4.0) (flarray->list a)))
+
+     (equal? (flarray 1.0 2.0) (flarray 1.0 2.0))
      )
 
 (mat array-add*!
