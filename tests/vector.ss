@@ -6,6 +6,67 @@
        (= (bytevector-u16-ref (bvmap-u16 (lambda (x) x) bv) 0 (endianness little)) #x1234))
      (equal? '#vu8(2 3) (bvslice-u8 '#vu8(1 2 3 4) 1 3))
      (= (bvsum-u8 '#vu8(1 2 3)) 6)
+
+     (let ([little (bvnums-u16 1 3 1)] [big (bvnums-U16 1 3 1)])
+       (and (equal? little '#vu8(1 0 2 0))
+            (equal? big '#vu8(0 1 0 2))))
+
+     (let ([signed (make-bytevector 4 0)])
+       (bytevector-s16-set! signed 0 -2 (endianness little))
+       (bytevector-s16-set! signed 2 3 (endianness little))
+       (= (bvsum-s16 signed) 1))
+
+     (let ([floats (bvnums-fp32 1.0 3.0 1.0)])
+       (= (bvsum-fp32 floats) 3.0))
+
+     (equal? '#vu8(2 3 4) (bvmap-u8 add1 '#vu8(1 2 3)))
+     (let ([bytes (bytevector-copy '#vu8(1 2 3))])
+       (bvmap!-u8 add1 bytes)
+       (equal? bytes '#vu8(2 3 4)))
+
+     (let ([seen '()])
+       (bvfor-each/i-u8
+        (lambda (index value) (set! seen (cons (list index value) seen)))
+        '#vu8(4 5))
+       (equal? '((1 5) (0 4)) seen))
+
+     (equal? '#vu8(2 4) (bvfilter-u8 even? '#vu8(1 2 3 4)))
+     (let-values ([(even odd) (bvpartition-u8 even? '#vu8(1 2 3 4))])
+       (and (equal? even '#vu8(2 4)) (equal? odd '#vu8(1 3))))
+
+     (and (bvormap-u8 odd? '#vu8(2 4 5))
+          (bvandmap-u8 positive? '#vu8(1 2 3))
+          (= (bvmemp-u8 odd? '#vu8(2 4 5)) 2)
+          (= (bvmember-u8 4 '#vu8(2 4 5)) 1))
+
+     (= (bvfold-left-u16 + 0 (bvnums-u16 0 4 1)) 6)
+     (equal? '#vu8(0 1 3)
+             (bvscan-left-ex-u8 + 0 '#vu8(1 2 3)))
+
+     (equal? '#vu8(3 2 1) (bvreverse-u8 '#vu8(1 2 3)))
+     (equal? '#((1 4) (2 5)) (bvzip-u8 '#vu8(1 2) '#vu8(4 5)))
+
+     (let ([shuffled (bvshuffle-u8 '#vu8(1 2 3 4))])
+       (and (= (bytevector-length shuffled) 4)
+            (bvsorted?-u8 < (bvsort-u8 < shuffled))))
+
+     (let ([target (bytevector-copy '#vu8(1 2 3 4))])
+       (bvcopy!-u8 target 0 target 1 3)
+       (equal? target '#vu8(1 1 2 3)))
+
+     (and (= (bvproduct-u8 '#vu8(2 3 4)) 24)
+          (= (bvmax-u8 '#vu8(2 9 4)) 9)
+          (= (bvmin-u8 '#vu8(2 9 4)) 2)
+          (= (bvavg-u8 '#vu8(2 4 6)) 4))
+
+     ;; Width-qualified operations reject partial trailing values.
+     (error? (bvmap-u16 add1 '#vu8(1)))
+
+     ;; Width-qualified operations reject non-bytevector sources.
+     (error? (bvmap-u8 add1 '#(1 2)))
+
+     ;; Endianness is fixed by name and cannot be supplied at runtime.
+     (error? (bvmap-u16 add1 '#vu8(1 0) (endianness little)))
      )
 
 

@@ -48,12 +48,429 @@
           vnums fxvnums flvnums
 
           random-vector random-fxvector random-flvector
-          bvmap-u8 bvmap-U8 bvmap-u16 bvmap-U16 bvmap-s16 bvmap-S16
-          bvmap-fp32 bvmap-FP32 bvfor-each-u8 bvfor-each-U8
-          bvslice-u8 bvslice-U8 bvsum-u8 bvsum-U8
-          bvmap!-u8 bvmap!-U8 bvfilter-u8 bvfilter-U8 bvreverse-u8 bvreverse-U8
-          bvcopy-u8 bvcopy-U8 bvsort-u8 bvsort-U8 bvsorted?-u8 bvsorted?-U8
-          bvnums-u8 bvnums-U8)
+          bvmap-u8 bvmap-U8 bvmap-s8 bvmap-S8
+          bvmap-u16 bvmap-U16 bvmap-s16 bvmap-S16
+          bvmap-u24 bvmap-U24 bvmap-s24 bvmap-S24
+          bvmap-u32 bvmap-U32 bvmap-s32 bvmap-S32
+          bvmap-u40 bvmap-U40 bvmap-s40 bvmap-S40
+          bvmap-u48 bvmap-U48 bvmap-s48 bvmap-S48
+          bvmap-u56 bvmap-U56 bvmap-s56 bvmap-S56
+          bvmap-u64 bvmap-U64 bvmap-s64 bvmap-S64
+          bvmap-fp32 bvmap-FP32 bvmap-fp64 bvmap-FP64
+          bvmap/i-u8 bvmap/i-U8 bvmap/i-s8 bvmap/i-S8
+          bvmap/i-u16 bvmap/i-U16 bvmap/i-s16 bvmap/i-S16
+          bvmap/i-u24 bvmap/i-U24 bvmap/i-s24 bvmap/i-S24
+          bvmap/i-u32 bvmap/i-U32 bvmap/i-s32 bvmap/i-S32
+          bvmap/i-u40 bvmap/i-U40 bvmap/i-s40 bvmap/i-S40
+          bvmap/i-u48 bvmap/i-U48 bvmap/i-s48 bvmap/i-S48
+          bvmap/i-u56 bvmap/i-U56 bvmap/i-s56 bvmap/i-S56
+          bvmap/i-u64 bvmap/i-U64 bvmap/i-s64 bvmap/i-S64
+          bvmap/i-fp32 bvmap/i-FP32 bvmap/i-fp64 bvmap/i-FP64
+          bvmap!-u8 bvmap!-U8 bvmap!-s8 bvmap!-S8
+          bvmap!-u16 bvmap!-U16 bvmap!-s16 bvmap!-S16
+          bvmap!-u24 bvmap!-U24 bvmap!-s24 bvmap!-S24
+          bvmap!-u32 bvmap!-U32 bvmap!-s32 bvmap!-S32
+          bvmap!-u40 bvmap!-U40 bvmap!-s40 bvmap!-S40
+          bvmap!-u48 bvmap!-U48 bvmap!-s48 bvmap!-S48
+          bvmap!-u56 bvmap!-U56 bvmap!-s56 bvmap!-S56
+          bvmap!-u64 bvmap!-U64 bvmap!-s64 bvmap!-S64
+          bvmap!-fp32 bvmap!-FP32 bvmap!-fp64 bvmap!-FP64
+          bvmap!/i-u8 bvmap!/i-U8 bvmap!/i-s8 bvmap!/i-S8
+          bvmap!/i-u16 bvmap!/i-U16 bvmap!/i-s16 bvmap!/i-S16
+          bvmap!/i-u24 bvmap!/i-U24 bvmap!/i-s24 bvmap!/i-S24
+          bvmap!/i-u32 bvmap!/i-U32 bvmap!/i-s32 bvmap!/i-S32
+          bvmap!/i-u40 bvmap!/i-U40 bvmap!/i-s40 bvmap!/i-S40
+          bvmap!/i-u48 bvmap!/i-U48 bvmap!/i-s48 bvmap!/i-S48
+          bvmap!/i-u56 bvmap!/i-U56 bvmap!/i-s56 bvmap!/i-S56
+          bvmap!/i-u64 bvmap!/i-U64 bvmap!/i-s64 bvmap!/i-S64
+          bvmap!/i-fp32 bvmap!/i-FP32 bvmap!/i-fp64 bvmap!/i-FP64
+          bvfor-each-u8 bvfor-each-U8 bvfor-each-s8 bvfor-each-S8
+          bvfor-each-u16 bvfor-each-U16 bvfor-each-s16 bvfor-each-S16
+          bvfor-each-u24 bvfor-each-U24 bvfor-each-s24 bvfor-each-S24
+          bvfor-each-u32 bvfor-each-U32 bvfor-each-s32 bvfor-each-S32
+          bvfor-each-u40 bvfor-each-U40 bvfor-each-s40 bvfor-each-S40
+          bvfor-each-u48 bvfor-each-U48 bvfor-each-s48 bvfor-each-S48
+          bvfor-each-u56 bvfor-each-U56 bvfor-each-s56 bvfor-each-S56
+          bvfor-each-u64 bvfor-each-U64 bvfor-each-s64 bvfor-each-S64
+          bvfor-each-fp32 bvfor-each-FP32 bvfor-each-fp64 bvfor-each-FP64
+          bvfor-each/i-u8 bvfor-each/i-U8 bvfor-each/i-s8 bvfor-each/i-S8
+          bvfor-each/i-u16 bvfor-each/i-U16 bvfor-each/i-s16 bvfor-each/i-S16
+          bvfor-each/i-u24 bvfor-each/i-U24 bvfor-each/i-s24 bvfor-each/i-S24
+          bvfor-each/i-u32 bvfor-each/i-U32 bvfor-each/i-s32 bvfor-each/i-S32
+          bvfor-each/i-u40 bvfor-each/i-U40 bvfor-each/i-s40 bvfor-each/i-S40
+          bvfor-each/i-u48 bvfor-each/i-U48 bvfor-each/i-s48 bvfor-each/i-S48
+          bvfor-each/i-u56 bvfor-each/i-U56 bvfor-each/i-s56 bvfor-each/i-S56
+          bvfor-each/i-u64 bvfor-each/i-U64 bvfor-each/i-s64 bvfor-each/i-S64
+          bvfor-each/i-fp32 bvfor-each/i-FP32 bvfor-each/i-fp64 bvfor-each/i-FP64
+          bvslice-u8 bvslice-U8 bvslice-s8 bvslice-S8
+          bvslice-u16 bvslice-U16 bvslice-s16 bvslice-S16
+          bvslice-u24 bvslice-U24 bvslice-s24 bvslice-S24
+          bvslice-u32 bvslice-U32 bvslice-s32 bvslice-S32
+          bvslice-u40 bvslice-U40 bvslice-s40 bvslice-S40
+          bvslice-u48 bvslice-U48 bvslice-s48 bvslice-S48
+          bvslice-u56 bvslice-U56 bvslice-s56 bvslice-S56
+          bvslice-u64 bvslice-U64 bvslice-s64 bvslice-S64
+          bvslice-fp32 bvslice-FP32 bvslice-fp64 bvslice-FP64
+          bvfilter-u8 bvfilter-U8 bvfilter-s8 bvfilter-S8
+          bvfilter-u16 bvfilter-U16 bvfilter-s16 bvfilter-S16
+          bvfilter-u24 bvfilter-U24 bvfilter-s24 bvfilter-S24
+          bvfilter-u32 bvfilter-U32 bvfilter-s32 bvfilter-S32
+          bvfilter-u40 bvfilter-U40 bvfilter-s40 bvfilter-S40
+          bvfilter-u48 bvfilter-U48 bvfilter-s48 bvfilter-S48
+          bvfilter-u56 bvfilter-U56 bvfilter-s56 bvfilter-S56
+          bvfilter-u64 bvfilter-U64 bvfilter-s64 bvfilter-S64
+          bvfilter-fp32 bvfilter-FP32 bvfilter-fp64 bvfilter-FP64
+          bvpartition-u8 bvpartition-U8 bvpartition-s8 bvpartition-S8
+          bvpartition-u16 bvpartition-U16 bvpartition-s16 bvpartition-S16
+          bvpartition-u24 bvpartition-U24 bvpartition-s24 bvpartition-S24
+          bvpartition-u32 bvpartition-U32 bvpartition-s32 bvpartition-S32
+          bvpartition-u40 bvpartition-U40 bvpartition-s40 bvpartition-S40
+          bvpartition-u48 bvpartition-U48 bvpartition-s48 bvpartition-S48
+          bvpartition-u56 bvpartition-U56 bvpartition-s56 bvpartition-S56
+          bvpartition-u64 bvpartition-U64 bvpartition-s64 bvpartition-S64
+          bvpartition-fp32 bvpartition-FP32 bvpartition-fp64 bvpartition-FP64
+          bvormap-u8 bvormap-U8 bvormap-s8 bvormap-S8
+          bvormap-u16 bvormap-U16 bvormap-s16 bvormap-S16
+          bvormap-u24 bvormap-U24 bvormap-s24 bvormap-S24
+          bvormap-u32 bvormap-U32 bvormap-s32 bvormap-S32
+          bvormap-u40 bvormap-U40 bvormap-s40 bvormap-S40
+          bvormap-u48 bvormap-U48 bvormap-s48 bvormap-S48
+          bvormap-u56 bvormap-U56 bvormap-s56 bvormap-S56
+          bvormap-u64 bvormap-U64 bvormap-s64 bvormap-S64
+          bvormap-fp32 bvormap-FP32 bvormap-fp64 bvormap-FP64
+          bvandmap-u8 bvandmap-U8 bvandmap-s8 bvandmap-S8
+          bvandmap-u16 bvandmap-U16 bvandmap-s16 bvandmap-S16
+          bvandmap-u24 bvandmap-U24 bvandmap-s24 bvandmap-S24
+          bvandmap-u32 bvandmap-U32 bvandmap-s32 bvandmap-S32
+          bvandmap-u40 bvandmap-U40 bvandmap-s40 bvandmap-S40
+          bvandmap-u48 bvandmap-U48 bvandmap-s48 bvandmap-S48
+          bvandmap-u56 bvandmap-U56 bvandmap-s56 bvandmap-S56
+          bvandmap-u64 bvandmap-U64 bvandmap-s64 bvandmap-S64
+          bvandmap-fp32 bvandmap-FP32 bvandmap-fp64 bvandmap-FP64
+          bvexists-u8 bvexists-U8 bvexists-s8 bvexists-S8
+          bvexists-u16 bvexists-U16 bvexists-s16 bvexists-S16
+          bvexists-u24 bvexists-U24 bvexists-s24 bvexists-S24
+          bvexists-u32 bvexists-U32 bvexists-s32 bvexists-S32
+          bvexists-u40 bvexists-U40 bvexists-s40 bvexists-S40
+          bvexists-u48 bvexists-U48 bvexists-s48 bvexists-S48
+          bvexists-u56 bvexists-U56 bvexists-s56 bvexists-S56
+          bvexists-u64 bvexists-U64 bvexists-s64 bvexists-S64
+          bvexists-fp32 bvexists-FP32 bvexists-fp64 bvexists-FP64
+          bvfor-all-u8 bvfor-all-U8 bvfor-all-s8 bvfor-all-S8
+          bvfor-all-u16 bvfor-all-U16 bvfor-all-s16 bvfor-all-S16
+          bvfor-all-u24 bvfor-all-U24 bvfor-all-s24 bvfor-all-S24
+          bvfor-all-u32 bvfor-all-U32 bvfor-all-s32 bvfor-all-S32
+          bvfor-all-u40 bvfor-all-U40 bvfor-all-s40 bvfor-all-S40
+          bvfor-all-u48 bvfor-all-U48 bvfor-all-s48 bvfor-all-S48
+          bvfor-all-u56 bvfor-all-U56 bvfor-all-s56 bvfor-all-S56
+          bvfor-all-u64 bvfor-all-U64 bvfor-all-s64 bvfor-all-S64
+          bvfor-all-fp32 bvfor-all-FP32 bvfor-all-fp64 bvfor-all-FP64
+          bvmemp-u8 bvmemp-U8 bvmemp-s8 bvmemp-S8
+          bvmemp-u16 bvmemp-U16 bvmemp-s16 bvmemp-S16
+          bvmemp-u24 bvmemp-U24 bvmemp-s24 bvmemp-S24
+          bvmemp-u32 bvmemp-U32 bvmemp-s32 bvmemp-S32
+          bvmemp-u40 bvmemp-U40 bvmemp-s40 bvmemp-S40
+          bvmemp-u48 bvmemp-U48 bvmemp-s48 bvmemp-S48
+          bvmemp-u56 bvmemp-U56 bvmemp-s56 bvmemp-S56
+          bvmemp-u64 bvmemp-U64 bvmemp-s64 bvmemp-S64
+          bvmemp-fp32 bvmemp-FP32 bvmemp-fp64 bvmemp-FP64
+          bvmember-u8 bvmember-U8 bvmember-s8 bvmember-S8
+          bvmember-u16 bvmember-U16 bvmember-s16 bvmember-S16
+          bvmember-u24 bvmember-U24 bvmember-s24 bvmember-S24
+          bvmember-u32 bvmember-U32 bvmember-s32 bvmember-S32
+          bvmember-u40 bvmember-U40 bvmember-s40 bvmember-S40
+          bvmember-u48 bvmember-U48 bvmember-s48 bvmember-S48
+          bvmember-u56 bvmember-U56 bvmember-s56 bvmember-S56
+          bvmember-u64 bvmember-U64 bvmember-s64 bvmember-S64
+          bvmember-fp32 bvmember-FP32 bvmember-fp64 bvmember-FP64
+          bvmemq-u8 bvmemq-U8 bvmemq-s8 bvmemq-S8
+          bvmemq-u16 bvmemq-U16 bvmemq-s16 bvmemq-S16
+          bvmemq-u24 bvmemq-U24 bvmemq-s24 bvmemq-S24
+          bvmemq-u32 bvmemq-U32 bvmemq-s32 bvmemq-S32
+          bvmemq-u40 bvmemq-U40 bvmemq-s40 bvmemq-S40
+          bvmemq-u48 bvmemq-U48 bvmemq-s48 bvmemq-S48
+          bvmemq-u56 bvmemq-U56 bvmemq-s56 bvmemq-S56
+          bvmemq-u64 bvmemq-U64 bvmemq-s64 bvmemq-S64
+          bvmemq-fp32 bvmemq-FP32 bvmemq-fp64 bvmemq-FP64
+          bvmemv-u8 bvmemv-U8 bvmemv-s8 bvmemv-S8
+          bvmemv-u16 bvmemv-U16 bvmemv-s16 bvmemv-S16
+          bvmemv-u24 bvmemv-U24 bvmemv-s24 bvmemv-S24
+          bvmemv-u32 bvmemv-U32 bvmemv-s32 bvmemv-S32
+          bvmemv-u40 bvmemv-U40 bvmemv-s40 bvmemv-S40
+          bvmemv-u48 bvmemv-U48 bvmemv-s48 bvmemv-S48
+          bvmemv-u56 bvmemv-U56 bvmemv-s56 bvmemv-S56
+          bvmemv-u64 bvmemv-U64 bvmemv-s64 bvmemv-S64
+          bvmemv-fp32 bvmemv-FP32 bvmemv-fp64 bvmemv-FP64
+          bvfold-left-u8 bvfold-left-U8 bvfold-left-s8 bvfold-left-S8
+          bvfold-left-u16 bvfold-left-U16 bvfold-left-s16 bvfold-left-S16
+          bvfold-left-u24 bvfold-left-U24 bvfold-left-s24 bvfold-left-S24
+          bvfold-left-u32 bvfold-left-U32 bvfold-left-s32 bvfold-left-S32
+          bvfold-left-u40 bvfold-left-U40 bvfold-left-s40 bvfold-left-S40
+          bvfold-left-u48 bvfold-left-U48 bvfold-left-s48 bvfold-left-S48
+          bvfold-left-u56 bvfold-left-U56 bvfold-left-s56 bvfold-left-S56
+          bvfold-left-u64 bvfold-left-U64 bvfold-left-s64 bvfold-left-S64
+          bvfold-left-fp32 bvfold-left-FP32 bvfold-left-fp64 bvfold-left-FP64
+          bvfold-right-u8 bvfold-right-U8 bvfold-right-s8 bvfold-right-S8
+          bvfold-right-u16 bvfold-right-U16 bvfold-right-s16 bvfold-right-S16
+          bvfold-right-u24 bvfold-right-U24 bvfold-right-s24 bvfold-right-S24
+          bvfold-right-u32 bvfold-right-U32 bvfold-right-s32 bvfold-right-S32
+          bvfold-right-u40 bvfold-right-U40 bvfold-right-s40 bvfold-right-S40
+          bvfold-right-u48 bvfold-right-U48 bvfold-right-s48 bvfold-right-S48
+          bvfold-right-u56 bvfold-right-U56 bvfold-right-s56 bvfold-right-S56
+          bvfold-right-u64 bvfold-right-U64 bvfold-right-s64 bvfold-right-S64
+          bvfold-right-fp32 bvfold-right-FP32 bvfold-right-fp64 bvfold-right-FP64
+          bvfold-left/i-u8 bvfold-left/i-U8 bvfold-left/i-s8 bvfold-left/i-S8
+          bvfold-left/i-u16 bvfold-left/i-U16 bvfold-left/i-s16 bvfold-left/i-S16
+          bvfold-left/i-u24 bvfold-left/i-U24 bvfold-left/i-s24 bvfold-left/i-S24
+          bvfold-left/i-u32 bvfold-left/i-U32 bvfold-left/i-s32 bvfold-left/i-S32
+          bvfold-left/i-u40 bvfold-left/i-U40 bvfold-left/i-s40 bvfold-left/i-S40
+          bvfold-left/i-u48 bvfold-left/i-U48 bvfold-left/i-s48 bvfold-left/i-S48
+          bvfold-left/i-u56 bvfold-left/i-U56 bvfold-left/i-s56 bvfold-left/i-S56
+          bvfold-left/i-u64 bvfold-left/i-U64 bvfold-left/i-s64 bvfold-left/i-S64
+          bvfold-left/i-fp32 bvfold-left/i-FP32 bvfold-left/i-fp64 bvfold-left/i-FP64
+          bvfold-right/i-u8 bvfold-right/i-U8 bvfold-right/i-s8 bvfold-right/i-S8
+          bvfold-right/i-u16 bvfold-right/i-U16 bvfold-right/i-s16 bvfold-right/i-S16
+          bvfold-right/i-u24 bvfold-right/i-U24 bvfold-right/i-s24 bvfold-right/i-S24
+          bvfold-right/i-u32 bvfold-right/i-U32 bvfold-right/i-s32 bvfold-right/i-S32
+          bvfold-right/i-u40 bvfold-right/i-U40 bvfold-right/i-s40 bvfold-right/i-S40
+          bvfold-right/i-u48 bvfold-right/i-U48 bvfold-right/i-s48 bvfold-right/i-S48
+          bvfold-right/i-u56 bvfold-right/i-U56 bvfold-right/i-s56 bvfold-right/i-S56
+          bvfold-right/i-u64 bvfold-right/i-U64 bvfold-right/i-s64 bvfold-right/i-S64
+          bvfold-right/i-fp32 bvfold-right/i-FP32 bvfold-right/i-fp64 bvfold-right/i-FP64
+          bvscan-left-ex-u8 bvscan-left-ex-U8 bvscan-left-ex-s8 bvscan-left-ex-S8
+          bvscan-left-ex-u16 bvscan-left-ex-U16 bvscan-left-ex-s16 bvscan-left-ex-S16
+          bvscan-left-ex-u24 bvscan-left-ex-U24 bvscan-left-ex-s24 bvscan-left-ex-S24
+          bvscan-left-ex-u32 bvscan-left-ex-U32 bvscan-left-ex-s32 bvscan-left-ex-S32
+          bvscan-left-ex-u40 bvscan-left-ex-U40 bvscan-left-ex-s40 bvscan-left-ex-S40
+          bvscan-left-ex-u48 bvscan-left-ex-U48 bvscan-left-ex-s48 bvscan-left-ex-S48
+          bvscan-left-ex-u56 bvscan-left-ex-U56 bvscan-left-ex-s56 bvscan-left-ex-S56
+          bvscan-left-ex-u64 bvscan-left-ex-U64 bvscan-left-ex-s64 bvscan-left-ex-S64
+          bvscan-left-ex-fp32 bvscan-left-ex-FP32 bvscan-left-ex-fp64 bvscan-left-ex-FP64
+          bvscan-left-in-u8 bvscan-left-in-U8 bvscan-left-in-s8 bvscan-left-in-S8
+          bvscan-left-in-u16 bvscan-left-in-U16 bvscan-left-in-s16 bvscan-left-in-S16
+          bvscan-left-in-u24 bvscan-left-in-U24 bvscan-left-in-s24 bvscan-left-in-S24
+          bvscan-left-in-u32 bvscan-left-in-U32 bvscan-left-in-s32 bvscan-left-in-S32
+          bvscan-left-in-u40 bvscan-left-in-U40 bvscan-left-in-s40 bvscan-left-in-S40
+          bvscan-left-in-u48 bvscan-left-in-U48 bvscan-left-in-s48 bvscan-left-in-S48
+          bvscan-left-in-u56 bvscan-left-in-U56 bvscan-left-in-s56 bvscan-left-in-S56
+          bvscan-left-in-u64 bvscan-left-in-U64 bvscan-left-in-s64 bvscan-left-in-S64
+          bvscan-left-in-fp32 bvscan-left-in-FP32 bvscan-left-in-fp64 bvscan-left-in-FP64
+          bvscan-right-ex-u8 bvscan-right-ex-U8 bvscan-right-ex-s8 bvscan-right-ex-S8
+          bvscan-right-ex-u16 bvscan-right-ex-U16 bvscan-right-ex-s16 bvscan-right-ex-S16
+          bvscan-right-ex-u24 bvscan-right-ex-U24 bvscan-right-ex-s24 bvscan-right-ex-S24
+          bvscan-right-ex-u32 bvscan-right-ex-U32 bvscan-right-ex-s32 bvscan-right-ex-S32
+          bvscan-right-ex-u40 bvscan-right-ex-U40 bvscan-right-ex-s40 bvscan-right-ex-S40
+          bvscan-right-ex-u48 bvscan-right-ex-U48 bvscan-right-ex-s48 bvscan-right-ex-S48
+          bvscan-right-ex-u56 bvscan-right-ex-U56 bvscan-right-ex-s56 bvscan-right-ex-S56
+          bvscan-right-ex-u64 bvscan-right-ex-U64 bvscan-right-ex-s64 bvscan-right-ex-S64
+          bvscan-right-ex-fp32 bvscan-right-ex-FP32 bvscan-right-ex-fp64 bvscan-right-ex-FP64
+          bvscan-right-in-u8 bvscan-right-in-U8 bvscan-right-in-s8 bvscan-right-in-S8
+          bvscan-right-in-u16 bvscan-right-in-U16 bvscan-right-in-s16 bvscan-right-in-S16
+          bvscan-right-in-u24 bvscan-right-in-U24 bvscan-right-in-s24 bvscan-right-in-S24
+          bvscan-right-in-u32 bvscan-right-in-U32 bvscan-right-in-s32 bvscan-right-in-S32
+          bvscan-right-in-u40 bvscan-right-in-U40 bvscan-right-in-s40 bvscan-right-in-S40
+          bvscan-right-in-u48 bvscan-right-in-U48 bvscan-right-in-s48 bvscan-right-in-S48
+          bvscan-right-in-u56 bvscan-right-in-U56 bvscan-right-in-s56 bvscan-right-in-S56
+          bvscan-right-in-u64 bvscan-right-in-U64 bvscan-right-in-s64 bvscan-right-in-S64
+          bvscan-right-in-fp32 bvscan-right-in-FP32 bvscan-right-in-fp64 bvscan-right-in-FP64
+          bvreverse-u8 bvreverse-U8 bvreverse-s8 bvreverse-S8
+          bvreverse-u16 bvreverse-U16 bvreverse-s16 bvreverse-S16
+          bvreverse-u24 bvreverse-U24 bvreverse-s24 bvreverse-S24
+          bvreverse-u32 bvreverse-U32 bvreverse-s32 bvreverse-S32
+          bvreverse-u40 bvreverse-U40 bvreverse-s40 bvreverse-S40
+          bvreverse-u48 bvreverse-U48 bvreverse-s48 bvreverse-S48
+          bvreverse-u56 bvreverse-U56 bvreverse-s56 bvreverse-S56
+          bvreverse-u64 bvreverse-U64 bvreverse-s64 bvreverse-S64
+          bvreverse-fp32 bvreverse-FP32 bvreverse-fp64 bvreverse-FP64
+          bvreverse!-u8 bvreverse!-U8 bvreverse!-s8 bvreverse!-S8
+          bvreverse!-u16 bvreverse!-U16 bvreverse!-s16 bvreverse!-S16
+          bvreverse!-u24 bvreverse!-U24 bvreverse!-s24 bvreverse!-S24
+          bvreverse!-u32 bvreverse!-U32 bvreverse!-s32 bvreverse!-S32
+          bvreverse!-u40 bvreverse!-U40 bvreverse!-s40 bvreverse!-S40
+          bvreverse!-u48 bvreverse!-U48 bvreverse!-s48 bvreverse!-S48
+          bvreverse!-u56 bvreverse!-U56 bvreverse!-s56 bvreverse!-S56
+          bvreverse!-u64 bvreverse!-U64 bvreverse!-s64 bvreverse!-S64
+          bvreverse!-fp32 bvreverse!-FP32 bvreverse!-fp64 bvreverse!-FP64
+          bvzip-u8 bvzip-U8 bvzip-s8 bvzip-S8
+          bvzip-u16 bvzip-U16 bvzip-s16 bvzip-S16
+          bvzip-u24 bvzip-U24 bvzip-s24 bvzip-S24
+          bvzip-u32 bvzip-U32 bvzip-s32 bvzip-S32
+          bvzip-u40 bvzip-U40 bvzip-s40 bvzip-S40
+          bvzip-u48 bvzip-U48 bvzip-s48 bvzip-S48
+          bvzip-u56 bvzip-U56 bvzip-s56 bvzip-S56
+          bvzip-u64 bvzip-U64 bvzip-s64 bvzip-S64
+          bvzip-fp32 bvzip-FP32 bvzip-fp64 bvzip-FP64
+          bvzipv-u8 bvzipv-U8 bvzipv-s8 bvzipv-S8
+          bvzipv-u16 bvzipv-U16 bvzipv-s16 bvzipv-S16
+          bvzipv-u24 bvzipv-U24 bvzipv-s24 bvzipv-S24
+          bvzipv-u32 bvzipv-U32 bvzipv-s32 bvzipv-S32
+          bvzipv-u40 bvzipv-U40 bvzipv-s40 bvzipv-S40
+          bvzipv-u48 bvzipv-U48 bvzipv-s48 bvzipv-S48
+          bvzipv-u56 bvzipv-U56 bvzipv-s56 bvzipv-S56
+          bvzipv-u64 bvzipv-U64 bvzipv-s64 bvzipv-S64
+          bvzipv-fp32 bvzipv-FP32 bvzipv-fp64 bvzipv-FP64
+          bvshuffle-u8 bvshuffle-U8 bvshuffle-s8 bvshuffle-S8
+          bvshuffle-u16 bvshuffle-U16 bvshuffle-s16 bvshuffle-S16
+          bvshuffle-u24 bvshuffle-U24 bvshuffle-s24 bvshuffle-S24
+          bvshuffle-u32 bvshuffle-U32 bvshuffle-s32 bvshuffle-S32
+          bvshuffle-u40 bvshuffle-U40 bvshuffle-s40 bvshuffle-S40
+          bvshuffle-u48 bvshuffle-U48 bvshuffle-s48 bvshuffle-S48
+          bvshuffle-u56 bvshuffle-U56 bvshuffle-s56 bvshuffle-S56
+          bvshuffle-u64 bvshuffle-U64 bvshuffle-s64 bvshuffle-S64
+          bvshuffle-fp32 bvshuffle-FP32 bvshuffle-fp64 bvshuffle-FP64
+          bvshuffle!-u8 bvshuffle!-U8 bvshuffle!-s8 bvshuffle!-S8
+          bvshuffle!-u16 bvshuffle!-U16 bvshuffle!-s16 bvshuffle!-S16
+          bvshuffle!-u24 bvshuffle!-U24 bvshuffle!-s24 bvshuffle!-S24
+          bvshuffle!-u32 bvshuffle!-U32 bvshuffle!-s32 bvshuffle!-S32
+          bvshuffle!-u40 bvshuffle!-U40 bvshuffle!-s40 bvshuffle!-S40
+          bvshuffle!-u48 bvshuffle!-U48 bvshuffle!-s48 bvshuffle!-S48
+          bvshuffle!-u56 bvshuffle!-U56 bvshuffle!-s56 bvshuffle!-S56
+          bvshuffle!-u64 bvshuffle!-U64 bvshuffle!-s64 bvshuffle!-S64
+          bvshuffle!-fp32 bvshuffle!-FP32 bvshuffle!-fp64 bvshuffle!-FP64
+          bvsort-u8 bvsort-U8 bvsort-s8 bvsort-S8
+          bvsort-u16 bvsort-U16 bvsort-s16 bvsort-S16
+          bvsort-u24 bvsort-U24 bvsort-s24 bvsort-S24
+          bvsort-u32 bvsort-U32 bvsort-s32 bvsort-S32
+          bvsort-u40 bvsort-U40 bvsort-s40 bvsort-S40
+          bvsort-u48 bvsort-U48 bvsort-s48 bvsort-S48
+          bvsort-u56 bvsort-U56 bvsort-s56 bvsort-S56
+          bvsort-u64 bvsort-U64 bvsort-s64 bvsort-S64
+          bvsort-fp32 bvsort-FP32 bvsort-fp64 bvsort-FP64
+          bvsort!-u8 bvsort!-U8 bvsort!-s8 bvsort!-S8
+          bvsort!-u16 bvsort!-U16 bvsort!-s16 bvsort!-S16
+          bvsort!-u24 bvsort!-U24 bvsort!-s24 bvsort!-S24
+          bvsort!-u32 bvsort!-U32 bvsort!-s32 bvsort!-S32
+          bvsort!-u40 bvsort!-U40 bvsort!-s40 bvsort!-S40
+          bvsort!-u48 bvsort!-U48 bvsort!-s48 bvsort!-S48
+          bvsort!-u56 bvsort!-U56 bvsort!-s56 bvsort!-S56
+          bvsort!-u64 bvsort!-U64 bvsort!-s64 bvsort!-S64
+          bvsort!-fp32 bvsort!-FP32 bvsort!-fp64 bvsort!-FP64
+          bvsorted?-u8 bvsorted?-U8 bvsorted?-s8 bvsorted?-S8
+          bvsorted?-u16 bvsorted?-U16 bvsorted?-s16 bvsorted?-S16
+          bvsorted?-u24 bvsorted?-U24 bvsorted?-s24 bvsorted?-S24
+          bvsorted?-u32 bvsorted?-U32 bvsorted?-s32 bvsorted?-S32
+          bvsorted?-u40 bvsorted?-U40 bvsorted?-s40 bvsorted?-S40
+          bvsorted?-u48 bvsorted?-U48 bvsorted?-s48 bvsorted?-S48
+          bvsorted?-u56 bvsorted?-U56 bvsorted?-s56 bvsorted?-S56
+          bvsorted?-u64 bvsorted?-U64 bvsorted?-s64 bvsorted?-S64
+          bvsorted?-fp32 bvsorted?-FP32 bvsorted?-fp64 bvsorted?-FP64
+          bvcopy-u8 bvcopy-U8 bvcopy-s8 bvcopy-S8
+          bvcopy-u16 bvcopy-U16 bvcopy-s16 bvcopy-S16
+          bvcopy-u24 bvcopy-U24 bvcopy-s24 bvcopy-S24
+          bvcopy-u32 bvcopy-U32 bvcopy-s32 bvcopy-S32
+          bvcopy-u40 bvcopy-U40 bvcopy-s40 bvcopy-S40
+          bvcopy-u48 bvcopy-U48 bvcopy-s48 bvcopy-S48
+          bvcopy-u56 bvcopy-U56 bvcopy-s56 bvcopy-S56
+          bvcopy-u64 bvcopy-U64 bvcopy-s64 bvcopy-S64
+          bvcopy-fp32 bvcopy-FP32 bvcopy-fp64 bvcopy-FP64
+          bvcopy!-u8 bvcopy!-U8 bvcopy!-s8 bvcopy!-S8
+          bvcopy!-u16 bvcopy!-U16 bvcopy!-s16 bvcopy!-S16
+          bvcopy!-u24 bvcopy!-U24 bvcopy!-s24 bvcopy!-S24
+          bvcopy!-u32 bvcopy!-U32 bvcopy!-s32 bvcopy!-S32
+          bvcopy!-u40 bvcopy!-U40 bvcopy!-s40 bvcopy!-S40
+          bvcopy!-u48 bvcopy!-U48 bvcopy!-s48 bvcopy!-S48
+          bvcopy!-u56 bvcopy!-U56 bvcopy!-s56 bvcopy!-S56
+          bvcopy!-u64 bvcopy!-U64 bvcopy!-s64 bvcopy!-S64
+          bvcopy!-fp32 bvcopy!-FP32 bvcopy!-fp64 bvcopy!-FP64
+          bvsum-u8 bvsum-U8 bvsum-s8 bvsum-S8
+          bvsum-u16 bvsum-U16 bvsum-s16 bvsum-S16
+          bvsum-u24 bvsum-U24 bvsum-s24 bvsum-S24
+          bvsum-u32 bvsum-U32 bvsum-s32 bvsum-S32
+          bvsum-u40 bvsum-U40 bvsum-s40 bvsum-S40
+          bvsum-u48 bvsum-U48 bvsum-s48 bvsum-S48
+          bvsum-u56 bvsum-U56 bvsum-s56 bvsum-S56
+          bvsum-u64 bvsum-U64 bvsum-s64 bvsum-S64
+          bvsum-fp32 bvsum-FP32 bvsum-fp64 bvsum-FP64
+          bvproduct-u8 bvproduct-U8 bvproduct-s8 bvproduct-S8
+          bvproduct-u16 bvproduct-U16 bvproduct-s16 bvproduct-S16
+          bvproduct-u24 bvproduct-U24 bvproduct-s24 bvproduct-S24
+          bvproduct-u32 bvproduct-U32 bvproduct-s32 bvproduct-S32
+          bvproduct-u40 bvproduct-U40 bvproduct-s40 bvproduct-S40
+          bvproduct-u48 bvproduct-U48 bvproduct-s48 bvproduct-S48
+          bvproduct-u56 bvproduct-U56 bvproduct-s56 bvproduct-S56
+          bvproduct-u64 bvproduct-U64 bvproduct-s64 bvproduct-S64
+          bvproduct-fp32 bvproduct-FP32 bvproduct-fp64 bvproduct-FP64
+          bvextreme-u8 bvextreme-U8 bvextreme-s8 bvextreme-S8
+          bvextreme-u16 bvextreme-U16 bvextreme-s16 bvextreme-S16
+          bvextreme-u24 bvextreme-U24 bvextreme-s24 bvextreme-S24
+          bvextreme-u32 bvextreme-U32 bvextreme-s32 bvextreme-S32
+          bvextreme-u40 bvextreme-U40 bvextreme-s40 bvextreme-S40
+          bvextreme-u48 bvextreme-U48 bvextreme-s48 bvextreme-S48
+          bvextreme-u56 bvextreme-U56 bvextreme-s56 bvextreme-S56
+          bvextreme-u64 bvextreme-U64 bvextreme-s64 bvextreme-S64
+          bvextreme-fp32 bvextreme-FP32 bvextreme-fp64 bvextreme-FP64
+          bvmax-u8 bvmax-U8 bvmax-s8 bvmax-S8
+          bvmax-u16 bvmax-U16 bvmax-s16 bvmax-S16
+          bvmax-u24 bvmax-U24 bvmax-s24 bvmax-S24
+          bvmax-u32 bvmax-U32 bvmax-s32 bvmax-S32
+          bvmax-u40 bvmax-U40 bvmax-s40 bvmax-S40
+          bvmax-u48 bvmax-U48 bvmax-s48 bvmax-S48
+          bvmax-u56 bvmax-U56 bvmax-s56 bvmax-S56
+          bvmax-u64 bvmax-U64 bvmax-s64 bvmax-S64
+          bvmax-fp32 bvmax-FP32 bvmax-fp64 bvmax-FP64
+          bvmin-u8 bvmin-U8 bvmin-s8 bvmin-S8
+          bvmin-u16 bvmin-U16 bvmin-s16 bvmin-S16
+          bvmin-u24 bvmin-U24 bvmin-s24 bvmin-S24
+          bvmin-u32 bvmin-U32 bvmin-s32 bvmin-S32
+          bvmin-u40 bvmin-U40 bvmin-s40 bvmin-S40
+          bvmin-u48 bvmin-U48 bvmin-s48 bvmin-S48
+          bvmin-u56 bvmin-U56 bvmin-s56 bvmin-S56
+          bvmin-u64 bvmin-U64 bvmin-s64 bvmin-S64
+          bvmin-fp32 bvmin-FP32 bvmin-fp64 bvmin-FP64
+          bvavg-u8 bvavg-U8 bvavg-s8 bvavg-S8
+          bvavg-u16 bvavg-U16 bvavg-s16 bvavg-S16
+          bvavg-u24 bvavg-U24 bvavg-s24 bvavg-S24
+          bvavg-u32 bvavg-U32 bvavg-s32 bvavg-S32
+          bvavg-u40 bvavg-U40 bvavg-s40 bvavg-S40
+          bvavg-u48 bvavg-U48 bvavg-s48 bvavg-S48
+          bvavg-u56 bvavg-U56 bvavg-s56 bvavg-S56
+          bvavg-u64 bvavg-U64 bvavg-s64 bvavg-S64
+          bvavg-fp32 bvavg-FP32 bvavg-fp64 bvavg-FP64
+          bvnums-u8 bvnums-U8 bvnums-s8 bvnums-S8
+          bvnums-u16 bvnums-U16 bvnums-s16 bvnums-S16
+          bvnums-u24 bvnums-U24 bvnums-s24 bvnums-S24
+          bvnums-u32 bvnums-U32 bvnums-s32 bvnums-S32
+          bvnums-u40 bvnums-U40 bvnums-s40 bvnums-S40
+          bvnums-u48 bvnums-U48 bvnums-s48 bvnums-S48
+          bvnums-u56 bvnums-U56 bvnums-s56 bvnums-S56
+          bvnums-u64 bvnums-U64 bvnums-s64 bvnums-S64
+          bvnums-fp32 bvnums-FP32 bvnums-fp64 bvnums-FP64
+          bvector-u8-map/i bvector-U8-map/i bvector-s8-map/i bvector-S8-map/i
+          bvector-u16-map/i bvector-U16-map/i bvector-s16-map/i bvector-S16-map/i
+          bvector-u24-map/i bvector-U24-map/i bvector-s24-map/i bvector-S24-map/i
+          bvector-u32-map/i bvector-U32-map/i bvector-s32-map/i bvector-S32-map/i
+          bvector-u40-map/i bvector-U40-map/i bvector-s40-map/i bvector-S40-map/i
+          bvector-u48-map/i bvector-U48-map/i bvector-s48-map/i bvector-S48-map/i
+          bvector-u56-map/i bvector-U56-map/i bvector-s56-map/i bvector-S56-map/i
+          bvector-u64-map/i bvector-U64-map/i bvector-s64-map/i bvector-S64-map/i
+          bvector-fp32-map/i bvector-FP32-map/i bvector-fp64-map/i bvector-FP64-map/i
+          bvector-u8-map! bvector-U8-map! bvector-s8-map! bvector-S8-map!
+          bvector-u16-map! bvector-U16-map! bvector-s16-map! bvector-S16-map!
+          bvector-u24-map! bvector-U24-map! bvector-s24-map! bvector-S24-map!
+          bvector-u32-map! bvector-U32-map! bvector-s32-map! bvector-S32-map!
+          bvector-u40-map! bvector-U40-map! bvector-s40-map! bvector-S40-map!
+          bvector-u48-map! bvector-U48-map! bvector-s48-map! bvector-S48-map!
+          bvector-u56-map! bvector-U56-map! bvector-s56-map! bvector-S56-map!
+          bvector-u64-map! bvector-U64-map! bvector-s64-map! bvector-S64-map!
+          bvector-fp32-map! bvector-FP32-map! bvector-fp64-map! bvector-FP64-map!
+          bvector-u8-map!/i bvector-U8-map!/i bvector-s8-map!/i bvector-S8-map!/i
+          bvector-u16-map!/i bvector-U16-map!/i bvector-s16-map!/i bvector-S16-map!/i
+          bvector-u24-map!/i bvector-U24-map!/i bvector-s24-map!/i bvector-S24-map!/i
+          bvector-u32-map!/i bvector-U32-map!/i bvector-s32-map!/i bvector-S32-map!/i
+          bvector-u40-map!/i bvector-U40-map!/i bvector-s40-map!/i bvector-S40-map!/i
+          bvector-u48-map!/i bvector-U48-map!/i bvector-s48-map!/i bvector-S48-map!/i
+          bvector-u56-map!/i bvector-U56-map!/i bvector-s56-map!/i bvector-S56-map!/i
+          bvector-u64-map!/i bvector-U64-map!/i bvector-s64-map!/i bvector-S64-map!/i
+          bvector-fp32-map!/i bvector-FP32-map!/i bvector-fp64-map!/i bvector-FP64-map!/i
+          bvector-u8-for-each/i bvector-U8-for-each/i bvector-s8-for-each/i bvector-S8-for-each/i
+          bvector-u16-for-each/i bvector-U16-for-each/i bvector-s16-for-each/i bvector-S16-for-each/i
+          bvector-u24-for-each/i bvector-U24-for-each/i bvector-s24-for-each/i bvector-S24-for-each/i
+          bvector-u32-for-each/i bvector-U32-for-each/i bvector-s32-for-each/i bvector-S32-for-each/i
+          bvector-u40-for-each/i bvector-U40-for-each/i bvector-s40-for-each/i bvector-S40-for-each/i
+          bvector-u48-for-each/i bvector-U48-for-each/i bvector-s48-for-each/i bvector-S48-for-each/i
+          bvector-u56-for-each/i bvector-U56-for-each/i bvector-s56-for-each/i bvector-S56-for-each/i
+          bvector-u64-for-each/i bvector-U64-for-each/i bvector-s64-for-each/i bvector-S64-for-each/i
+          bvector-fp32-for-each/i bvector-FP32-for-each/i bvector-fp64-for-each/i bvector-FP64-for-each/i)
   (import (chezscheme)
           (chezpp utils)
           (chezpp internal))
@@ -1780,149 +2197,454 @@
   |#
   (define flvmin (lambda (vec) (flvextreme fl< vec)))
 
-  #|proc:bvmap-u8
-  Map `proc` over the bytes of bytevector `bv`.
-  |#
-  (define bvmap-u8
-    (lambda (proc bv)
-      (pcheck ([procedure? proc] [bytevector? bv])
-              (let* ([n (bytevector-length bv)] [out (make-bytevector n)])
-                (let loop ([i 0])
-                  (if (fx= i n) out
-                      (begin (bytevector-u8-set! out i (proc (bytevector-u8-ref bv i)))
-                             (loop (fx1+ i)))))))))
-  (define bvmap-U8 bvmap-u8)
-  #|proc:bvmap-u16
-  Map `proc` over little-endian unsigned 16-bit values in bytevector `bv`.
-  |#
-  (define bvmap-u16
-    (lambda (proc bv)
-      (pcheck ([procedure? proc] [bytevector? bv])
-              (when (not (fx= 0 (modulo (bytevector-length bv) 2)))
-                (errorf 'bvmap-u16 "bytevector length is not aligned"))
-              (let* ([n (fx/ (bytevector-length bv) 2)] [out (make-bytevector (bytevector-length bv))])
-                (let loop ([i 0])
-                  (if (fx= i n) out
-                      (begin (bytevector-u16-set! out (fx* i 2)
-                                               (proc (bytevector-u16-ref bv (fx* i 2) (endianness little)))
-                                               (endianness little))
-                             (loop (fx1+ i)))))))))
-  (define bvmap-U16 bvmap-u16)
-  (define bvmap-s16 bvmap-u16)
-  (define bvmap-S16 bvmap-u16)
-  (define bvmap-fp32 bvmap-u16)
-  (define bvmap-FP32 bvmap-u16)
-  #|proc:bvfor-each-u8
-  Call `proc` for each byte in bytevector `bv`.
-  |#
-  (define bvfor-each-u8
-    (lambda (proc bv)
-      (pcheck ([procedure? proc] [bytevector? bv])
-              (let loop ([i 0])
-                (unless (fx= i (bytevector-length bv))
-                  (proc (bytevector-u8-ref bv i))
-                  (loop (fx1+ i)))))))
-  (define bvfor-each-U8 bvfor-each-u8)
-  #|proc:bvslice-u8
-  Return the byte slice from logical index `start` through `end` of `bv`.
-  |#
-  (define bvslice-u8
-    (lambda (bv start end)
-      (pcheck ([bytevector? bv] [natural? start end])
-              (let ([out (make-bytevector (fx- end start))])
-                (bytevector-copy! bv start out 0 (fx- end start))
-                out))))
-  (define bvslice-U8 bvslice-u8)
-  #|proc:bvsum-u8
-  Return the sum of bytes in bytevector `bv`.
-  |#
-  (define bvsum-u8
-    (lambda (bv)
-      (pcheck ([bytevector? bv])
-              (let loop ([i 0] [s 0])
-                (if (fx= i (bytevector-length bv)) s
-                    (loop (fx1+ i) (fx+ s (bytevector-u8-ref bv i))))))))
-  (define bvsum-U8 bvsum-u8)
+  (define $bvector-length
+    (lambda (who bytes width)
+      (pcheck ([bytevector? bytes])
+              (let ([length (bytevector-length bytes)])
+                (unless (fx= 0 (modulo length width))
+                  (errorf who "bytevector length ~a is not aligned to width ~a" length width))
+                (fx/ length width)))))
 
-  #|proc:bvmap!-u8
-  Map `proc` in place over the bytes of `bv` and return `bv`.
-  |#
-  (define bvmap!-u8
-    (lambda (proc bv)
-      (pcheck ([procedure? proc] [bytevector? bv])
-              (let loop ([i 0])
-                (if (fx= i (bytevector-length bv)) bv
-                    (begin (bytevector-u8-set! bv i (proc (bytevector-u8-ref bv i)))
-                           (loop (fx1+ i))))))))
-  (define bvmap!-U8 bvmap!-u8)
-  #|proc:bvfilter-u8
-  Return a bytevector containing bytes of `bv` satisfying `pred`.
-  |#
-  (define bvfilter-u8
-    (lambda (pred bv)
-      (pcheck ([procedure? pred] [bytevector? bv])
-              (let loop ([i 0] [r '()])
-                (if (fx= i (bytevector-length bv))
-                    (let* ([xs (reverse r)] [out (make-bytevector (length xs))])
-                      (let fill ([j 0] [ys xs])
-                        (if (null? ys) out
-                            (begin (bytevector-u8-set! out j (car ys))
-                                   (fill (fx1+ j) (cdr ys))))))
-                    (let ([x (bytevector-u8-ref bv i)])
-                      (loop (fx1+ i) (if (pred x) (cons x r) r))))))))
-  (define bvfilter-U8 bvfilter-u8)
-  #|proc:bvreverse-u8
-  Return a reversed copy of bytevector `bv`.
-  |#
-  (define bvreverse-u8
-    (lambda (bv)
-      (pcheck ([bytevector? bv])
-              (let* ([n (bytevector-length bv)] [out (make-bytevector n)])
-                (let loop ([i 0])
-                  (if (fx= i n) out
-                      (begin (bytevector-u8-set! out i (bytevector-u8-ref bv (fx- n i 1)))
-                             (loop (fx1+ i)))))))))
-  (define bvreverse-U8 bvreverse-u8)
-  #|proc:bvcopy-u8
-  Return a copy of bytevector `bv`.
-  |#
-  (define bvcopy-u8 (lambda (bv) (pcheck ([bytevector? bv]) (bytevector-copy bv))))
-  (define bvcopy-U8 bvcopy-u8)
-  #|proc:bvsort-u8
-  Return a sorted copy of bytevector `bv` using comparator `<?`.
-  |#
-  (define bvsort-u8
-    (lambda (<? bv)
-      (pcheck ([procedure? <?] [bytevector? bv])
-              (let ([out (bytevector-copy bv)])
-                (let loop ([i 1])
-                  (if (fx= i (bytevector-length out)) out
-                      (let ([x (bytevector-u8-ref out i)])
-                        (let inner ([j i])
-                          (if (and (fx> j 0) (<? x (bytevector-u8-ref out (fx- j 1))))
-                              (begin (bytevector-u8-set! out j (bytevector-u8-ref out (fx- j 1)))
-                                     (inner (fx- j 1)))
-                              (begin (bytevector-u8-set! out j x) (loop (fx1+ i))))))))))))
-  (define bvsort-U8 bvsort-u8)
-  #|proc:bvsorted?-u8
-  Return whether bytevector `bv` is sorted according to `<?`.
-  |#
-  (define bvsorted?-u8
-    (lambda (<? bv)
-      (pcheck ([procedure? <?] [bytevector? bv])
-              (let loop ([i 1])
-                (or (fx= i (bytevector-length bv))
-                    (and (not (<? (bytevector-u8-ref bv i) (bytevector-u8-ref bv (fx- i 1))))
-                         (loop (fx1+ i))))))))
-  (define bvsorted?-U8 bvsorted?-u8)
-  #|proc:bvnums-u8
-  Return a bytevector containing the arithmetic progression from `start` to `stop`.
-  |#
-  (define bvnums-u8
-    (lambda (start stop step)
-      (pcheck ([natural? start stop step])
-              (let ([out (make-bytevector (if (fx<= stop start) 0 (fx/ (fx- stop start) step)))]) out))))
-  (define bvnums-U8 bvnums-u8)
+  (define $bvector-items
+    (lambda (who bytes width ref)
+      (let ([length ($bvector-length who bytes width)])
+        (let loop ([i 0] [result '()])
+          (if (fx= i length)
+              (reverse result)
+              (loop (fx1+ i) (cons (ref bytes (fx* i width)) result)))))))
 
+  (define $bvector-build
+    (lambda (who items width set value?)
+      (for-each (lambda (item)
+                  (unless (value? item)
+                    (errorf who "value is invalid for the selected width: ~a" item)))
+                items)
+      (let ([bytes (make-bytevector (fx* width (length items)) 0)])
+        (let loop ([i 0] [rest items])
+          (unless (null? rest)
+            (set bytes (fx* i width) (car rest))
+            (loop (fx1+ i) (cdr rest))))
+        bytes)))
+
+  (define $make-bvector-operations
+    (lambda (who width ref set value?)
+      (define items (lambda (bytes) ($bvector-items who bytes width ref)))
+      (define build (lambda (item*) ($bvector-build who item* width set value?)))
+      (define replace!
+        (lambda (target source)
+          (unless (fx= (bytevector-length target) (bytevector-length source))
+            (errorf who "result length differs from target length"))
+          (bytevector-copy! source 0 target 0 (bytevector-length source))
+          target))
+      (define map-values
+        (lambda (proc bytes . bytevectors)
+          (pcheck ([procedure? proc] [bytevector? bytes])
+                  (let ([item-list* (map items (cons bytes bytevectors))])
+                    (unless (apply = (map length item-list*))
+                      (errorf who "bytevectors differ in logical length"))
+                    (build (apply map proc item-list*))))))
+      (define map/i
+        (lambda (proc bytes)
+          (pcheck ([procedure? proc] [bytevector? bytes])
+                  (let loop ([i 0] [rest (items bytes)] [result '()])
+                    (if (null? rest) (build (reverse result))
+                        (loop (fx1+ i) (cdr rest) (cons (proc i (car rest)) result)))))))
+      (define map! (lambda (proc bytes . rest) (replace! bytes (apply map-values proc bytes rest))))
+      (define map!/i (lambda (proc bytes) (replace! bytes (map/i proc bytes))))
+      (define each
+        (lambda (proc bytes . rest)
+          (pcheck ([procedure? proc] [bytevector? bytes])
+                  (apply for-each proc (map items (cons bytes rest))))))
+      (define each/i
+        (lambda (proc bytes)
+          (pcheck ([procedure? proc] [bytevector? bytes])
+                  (let loop ([i 0] [rest (items bytes)])
+                    (unless (null? rest)
+                      (proc i (car rest))
+                      (loop (fx1+ i) (cdr rest)))))))
+      (define slice
+        (case-lambda
+          [(bytes stop) (slice bytes 0 stop 1)]
+          [(bytes start stop) (slice bytes start stop 1)]
+          [(bytes start stop step)
+           (pcheck ([bytevector? bytes] [fixnum? start stop step])
+                   (when (fx= step 0) (errorf who "step cannot be zero"))
+                   (let loop ([i start] [result '()])
+                     (if (if (fx> step 0) (fx>= i stop) (fx<= i stop))
+                         (build (reverse result))
+                         (loop (fx+ i step) (cons (list-ref (items bytes) i) result)))))]))
+      (define filter-values
+        (lambda (pred bytes)
+          (pcheck ([procedure? pred] [bytevector? bytes])
+                  (let loop ([rest (items bytes)] [result '()])
+                    (if (null? rest) (build (reverse result))
+                        (loop (cdr rest) (if (pred (car rest))
+                                             (cons (car rest) result) result)))))))
+      (define partition
+        (lambda (pred bytes)
+          (pcheck ([procedure? pred] [bytevector? bytes])
+                  (let loop ([rest (items bytes)] [yes '()] [no '()])
+                    (if (null? rest)
+                        (values (build (reverse yes)) (build (reverse no)))
+                        (if (pred (car rest))
+                            (loop (cdr rest) (cons (car rest) yes) no)
+                            (loop (cdr rest) yes (cons (car rest) no))))))))
+      (define or-values (lambda (pred bytes) (ormap pred (items bytes))))
+      (define and-values (lambda (pred bytes) (andmap pred (items bytes))))
+      (define memp
+        (lambda (pred bytes)
+          (pcheck ([procedure? pred] [bytevector? bytes])
+                  (let loop ([i 0] [rest (items bytes)])
+                    (cond [(null? rest) #f] [(pred (car rest)) i]
+                          [else (loop (fx1+ i) (cdr rest))])))))
+      (define member-value (lambda (value bytes) (memp (lambda (item) (equal? value item)) bytes)))
+      (define memq-value (lambda (value bytes) (memp (lambda (item) (eq? value item)) bytes)))
+      (define memv-value (lambda (value bytes) (memp (lambda (item) (eqv? value item)) bytes)))
+      (define fold-left-values
+        (lambda (proc init bytes)
+          (let loop ([acc init] [rest (items bytes)])
+            (if (null? rest) acc (loop (proc acc (car rest)) (cdr rest))))))
+      (define fold-right-values
+        (lambda (proc init bytes)
+          (let loop ([rest (reverse (items bytes))] [acc init])
+            (if (null? rest) acc (loop (cdr rest) (proc (car rest) acc))))))
+      (define fold-left/i
+        (lambda (proc init bytes)
+          (let loop ([i 0] [acc init] [rest (items bytes)])
+            (if (null? rest) acc
+                (loop (fx1+ i) (proc i acc (car rest)) (cdr rest))))))
+      (define fold-right/i
+        (lambda (proc init bytes)
+          (let loop ([i (fx1- (length (items bytes)))] [rest (reverse (items bytes))]
+                     [acc init])
+            (if (null? rest) acc
+                (loop (fx1- i) (cdr rest) (proc i (car rest) acc))))))
+      (define scan-left-ex
+        (lambda (proc init bytes)
+          (let loop ([acc init] [rest (items bytes)] [result '()])
+            (if (null? rest) (build (reverse result))
+                (loop (proc acc (car rest)) (cdr rest) (cons acc result))))))
+      (define scan-left-in
+        (lambda (proc init bytes)
+          (let loop ([acc init] [rest (items bytes)] [result '()])
+            (if (null? rest) (build (reverse result))
+                (let ([next (proc acc (car rest))])
+                  (loop next (cdr rest) (cons next result)))))))
+      (define scan-right-ex
+        (lambda (proc init bytes)
+          (build (reverse (items (scan-left-ex proc init (build (reverse (items bytes)))))))))
+      (define scan-right-in
+        (lambda (proc init bytes)
+          (build (reverse (items (scan-left-in proc init (build (reverse (items bytes)))))))))
+      (define reverse-values (lambda (bytes) (build (reverse (items bytes)))))
+      (define reverse-values! (lambda (bytes) (replace! bytes (reverse-values bytes))))
+      (define zip
+        (lambda (bytes . rest)
+          (let ([item-list* (map items (cons bytes rest))])
+            (list->vector (apply map list item-list*)))))
+      (define zipv
+        (lambda (bytes . rest)
+          (let ([item-list* (map items (cons bytes rest))])
+            (list->vector (map build (apply map list item-list*))))))
+      (define shuffle
+        (lambda (bytes)
+          (let ([vector (list->vector (items bytes))])
+            (let loop ([i (fx1- (vector-length vector))])
+              (when (fx> i 0)
+                (let* ([j (random (fx1+ i))] [left (vector-ref vector i)])
+                  (vector-set! vector i (vector-ref vector j))
+                  (vector-set! vector j left)
+                  (loop (fx1- i)))))
+            (build (vector->list vector)))))
+      (define shuffle! (lambda (bytes) (replace! bytes (shuffle bytes))))
+      (define sort-values
+        (lambda (less? bytes) (build (vector->list (vsort less? (list->vector (items bytes)))))))
+      (define sort-values! (lambda (less? bytes) (replace! bytes (sort-values less? bytes))))
+      (define sorted?
+        (lambda (less? bytes)
+          (let loop ([rest (items bytes)])
+            (or (null? rest) (null? (cdr rest))
+                (and (not (less? (cadr rest) (car rest))) (loop (cdr rest)))))))
+      (define copy (lambda (bytes) (build (items bytes))))
+      (define copy!
+        (lambda (src src-start target target-start count)
+          (pcheck ([bytevector? src target] [natural? src-start target-start count])
+                  (let ([source (items src)])
+                    (when (fx> (fx+ src-start count) (length source))
+                      (errorf who "source range is too large"))
+                    (when (fx> (fx+ target-start count) ($bvector-length who target width))
+                      (errorf who "target range is too large"))
+                    (let loop ([i 0])
+                      (unless (fx= i count)
+                        (set target (fx* (fx+ target-start i) width)
+                             (list-ref source (fx+ src-start i)))
+                        (loop (fx1+ i))))
+                    target))))
+      (define sum (lambda (bytes) (apply + (items bytes))))
+      (define product (lambda (bytes) (apply * (items bytes))))
+      (define extreme
+        (lambda (better? bytes)
+          (let ([item* (items bytes)])
+            (and (pair? item*)
+                 (fold-left-values (lambda (best item) (if (better? item best) item best))
+                                   (car item*) (build (cdr item*)))))))
+      (define maximum (lambda (bytes) (extreme > bytes)))
+      (define minimum (lambda (bytes) (extreme < bytes)))
+      (define average
+        (lambda (bytes)
+          (let ([length ($bvector-length who bytes width)])
+            (if (fx= length 0) #f (/ (sum bytes) length)))))
+      (define nums
+        (case-lambda
+          [(stop) (nums 0 stop 1)] [(start stop) (nums start stop 1)]
+          [(start stop step)
+           (pcheck ([number? start stop step])
+                   (let loop ([value start] [result '()])
+                     (if (if (> step 0) (>= value stop) (<= value stop))
+                         (build (reverse result))
+                         (loop (+ value step) (cons value result)))))]))
+      (vector map-values map/i map! map!/i each each/i slice filter-values partition
+              or-values and-values or-values and-values memp member-value memq-value memv-value
+              fold-left-values fold-right-values fold-left/i fold-right/i
+              scan-left-ex scan-left-in scan-right-ex scan-right-in reverse-values reverse-values!
+              zip zipv shuffle shuffle! sort-values sort-values! sorted? copy copy!
+              sum product extreme maximum minimum average nums)))
+
+  (define bvector-u8-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 255))))
+  (define bvector-s8-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= -128 value 127))))
+  (define bvector-u16-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 65535))))
+  (define bvector-s16-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= -32768 value 32767))))
+  (define bvector-u24-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 16777215))))
+  (define bvector-s24-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= -8388608 value 8388607))))
+  (define bvector-u32-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 4294967295))))
+  (define bvector-s32-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= -2147483648 value 2147483647))))
+  (define bvector-u40-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 1099511627775))))
+  (define bvector-s40-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= -549755813888 value 549755813887))))
+  (define bvector-u48-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 281474976710655))))
+  (define bvector-s48-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= -140737488355328 value 140737488355327))))
+  (define bvector-u56-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 72057594037927935))))
+  (define bvector-s56-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= -36028797018963968 value 36028797018963967))))
+  (define bvector-u64-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 18446744073709551615))))
+  (define bvector-s64-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= -9223372036854775808 value 9223372036854775807))))
+
+  #|macro:define-bvector-procedure
+  Define the fixed-width bytevector operation family for descriptor `width`.
+  The `ref` and `set` procedures access byte offsets, and `value?`
+  validates values produced by generated procedures.
+  |#
+  (define-syntax define-bvector-procedure
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ width width-size ref set value?)
+         (let ([name (symbol->string (syntax->datum #'width))])
+           (with-syntax
+               ([operations ($construct-name #'width "$bvector-" name "-operations")]
+                     [n0 ($construct-name #'width "bvmap-" name)]
+                     [n1 ($construct-name #'width "bvmap/i-" name)]
+                     [n2 ($construct-name #'width "bvmap!-" name)]
+                     [n3 ($construct-name #'width "bvmap!/i-" name)]
+                     [n4 ($construct-name #'width "bvfor-each-" name)]
+                     [n5 ($construct-name #'width "bvfor-each/i-" name)]
+                     [n6 ($construct-name #'width "bvslice-" name)]
+                     [n7 ($construct-name #'width "bvfilter-" name)]
+                     [n8 ($construct-name #'width "bvpartition-" name)]
+                     [n9 ($construct-name #'width "bvormap-" name)]
+                     [n10 ($construct-name #'width "bvandmap-" name)]
+                     [n11 ($construct-name #'width "bvexists-" name)]
+                     [n12 ($construct-name #'width "bvfor-all-" name)]
+                     [n13 ($construct-name #'width "bvmemp-" name)]
+                     [n14 ($construct-name #'width "bvmember-" name)]
+                     [n15 ($construct-name #'width "bvmemq-" name)]
+                     [n16 ($construct-name #'width "bvmemv-" name)]
+                     [n17 ($construct-name #'width "bvfold-left-" name)]
+                     [n18 ($construct-name #'width "bvfold-right-" name)]
+                     [n19 ($construct-name #'width "bvfold-left/i-" name)]
+                     [n20 ($construct-name #'width "bvfold-right/i-" name)]
+                     [n21 ($construct-name #'width "bvscan-left-ex-" name)]
+                     [n22 ($construct-name #'width "bvscan-left-in-" name)]
+                     [n23 ($construct-name #'width "bvscan-right-ex-" name)]
+                     [n24 ($construct-name #'width "bvscan-right-in-" name)]
+                     [n25 ($construct-name #'width "bvreverse-" name)]
+                     [n26 ($construct-name #'width "bvreverse!-" name)]
+                     [n27 ($construct-name #'width "bvzip-" name)]
+                     [n28 ($construct-name #'width "bvzipv-" name)]
+                     [n29 ($construct-name #'width "bvshuffle-" name)]
+                     [n30 ($construct-name #'width "bvshuffle!-" name)]
+                     [n31 ($construct-name #'width "bvsort-" name)]
+                     [n32 ($construct-name #'width "bvsort!-" name)]
+                     [n33 ($construct-name #'width "bvsorted?-" name)]
+                     [n34 ($construct-name #'width "bvcopy-" name)]
+                     [n35 ($construct-name #'width "bvcopy!-" name)]
+                     [n36 ($construct-name #'width "bvsum-" name)]
+                     [n37 ($construct-name #'width "bvproduct-" name)]
+                     [n38 ($construct-name #'width "bvextreme-" name)]
+                     [n39 ($construct-name #'width "bvmax-" name)]
+                     [n40 ($construct-name #'width "bvmin-" name)]
+                     [n41 ($construct-name #'width "bvavg-" name)]
+                     [n42 ($construct-name #'width "bvnums-" name)]
+                     [n43 ($construct-name #'width "bvector-" name "-map/i")]
+                     [n44 ($construct-name #'width "bvector-" name "-map!")]
+                     [n45 ($construct-name #'width "bvector-" name "-map!/i")]
+                     [n46 ($construct-name #'width "bvector-" name "-for-each/i")])
+             #'(begin
+                (define operations
+                  ($make-bvector-operations 'width width-size ref set value?))
+                (define n0 (vector-ref operations 0))
+                (define n1 (vector-ref operations 1))
+                (define n2 (vector-ref operations 2))
+                (define n3 (vector-ref operations 3))
+                (define n4 (vector-ref operations 4))
+                (define n5 (vector-ref operations 5))
+                (define n6 (vector-ref operations 6))
+                (define n7 (vector-ref operations 7))
+                (define n8 (vector-ref operations 8))
+                (define n9 (vector-ref operations 9))
+                (define n10 (vector-ref operations 10))
+                (define n11 (vector-ref operations 11))
+                (define n12 (vector-ref operations 12))
+                (define n13 (vector-ref operations 13))
+                (define n14 (vector-ref operations 14))
+                (define n15 (vector-ref operations 15))
+                (define n16 (vector-ref operations 16))
+                (define n17 (vector-ref operations 17))
+                (define n18 (vector-ref operations 18))
+                (define n19 (vector-ref operations 19))
+                (define n20 (vector-ref operations 20))
+                (define n21 (vector-ref operations 21))
+                (define n22 (vector-ref operations 22))
+                (define n23 (vector-ref operations 23))
+                (define n24 (vector-ref operations 24))
+                (define n25 (vector-ref operations 25))
+                (define n26 (vector-ref operations 26))
+                (define n27 (vector-ref operations 27))
+                (define n28 (vector-ref operations 28))
+                (define n29 (vector-ref operations 29))
+                (define n30 (vector-ref operations 30))
+                (define n31 (vector-ref operations 31))
+                (define n32 (vector-ref operations 32))
+                (define n33 (vector-ref operations 33))
+                (define n34 (vector-ref operations 34))
+                (define n35 (vector-ref operations 35))
+                (define n36 (vector-ref operations 36))
+                (define n37 (vector-ref operations 37))
+                (define n38 (vector-ref operations 38))
+                (define n39 (vector-ref operations 39))
+                (define n40 (vector-ref operations 40))
+                (define n41 (vector-ref operations 41))
+                (define n42 (vector-ref operations 42))
+                (define n43 (vector-ref operations 1))
+                (define n44 (vector-ref operations 2))
+                (define n45 (vector-ref operations 3))
+                (define n46 (vector-ref operations 5)))))])))
+
+
+  (define-bvector-procedure u8 1
+    (lambda (bytes offset) (bytevector-u8-ref bytes offset))
+    (lambda (bytes offset value) (bytevector-u8-set! bytes offset value)) bvector-u8-value?)
+  (define-bvector-procedure U8 1
+    (lambda (bytes offset) (bytevector-u8-ref bytes offset))
+    (lambda (bytes offset value) (bytevector-u8-set! bytes offset value)) bvector-u8-value?)
+  (define-bvector-procedure s8 1
+    (lambda (bytes offset) (bytevector-s8-ref bytes offset))
+    (lambda (bytes offset value) (bytevector-s8-set! bytes offset value)) bvector-s8-value?)
+  (define-bvector-procedure S8 1
+    (lambda (bytes offset) (bytevector-s8-ref bytes offset))
+    (lambda (bytes offset value) (bytevector-s8-set! bytes offset value)) bvector-s8-value?)
+  (define-bvector-procedure u16 2
+    (lambda (bytes offset) (bytevector-u16-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-u16-set! bytes offset value (endianness little))) bvector-u16-value?)
+  (define-bvector-procedure U16 2
+    (lambda (bytes offset) (bytevector-u16-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-u16-set! bytes offset value (endianness big))) bvector-u16-value?)
+  (define-bvector-procedure s16 2
+    (lambda (bytes offset) (bytevector-s16-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-s16-set! bytes offset value (endianness little))) bvector-s16-value?)
+  (define-bvector-procedure S16 2
+    (lambda (bytes offset) (bytevector-s16-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-s16-set! bytes offset value (endianness big))) bvector-s16-value?)
+  (define-bvector-procedure u24 3
+    (lambda (bytes offset) (bytevector-u24-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-u24-set! bytes offset value (endianness little))) bvector-u24-value?)
+  (define-bvector-procedure U24 3
+    (lambda (bytes offset) (bytevector-u24-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-u24-set! bytes offset value (endianness big))) bvector-u24-value?)
+  (define-bvector-procedure s24 3
+    (lambda (bytes offset) (bytevector-s24-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-s24-set! bytes offset value (endianness little))) bvector-s24-value?)
+  (define-bvector-procedure S24 3
+    (lambda (bytes offset) (bytevector-s24-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-s24-set! bytes offset value (endianness big))) bvector-s24-value?)
+  (define-bvector-procedure u32 4
+    (lambda (bytes offset) (bytevector-u32-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-u32-set! bytes offset value (endianness little))) bvector-u32-value?)
+  (define-bvector-procedure U32 4
+    (lambda (bytes offset) (bytevector-u32-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-u32-set! bytes offset value (endianness big))) bvector-u32-value?)
+  (define-bvector-procedure s32 4
+    (lambda (bytes offset) (bytevector-s32-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-s32-set! bytes offset value (endianness little))) bvector-s32-value?)
+  (define-bvector-procedure S32 4
+    (lambda (bytes offset) (bytevector-s32-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-s32-set! bytes offset value (endianness big))) bvector-s32-value?)
+  (define-bvector-procedure u40 5
+    (lambda (bytes offset) (bytevector-u40-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-u40-set! bytes offset value (endianness little))) bvector-u40-value?)
+  (define-bvector-procedure U40 5
+    (lambda (bytes offset) (bytevector-u40-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-u40-set! bytes offset value (endianness big))) bvector-u40-value?)
+  (define-bvector-procedure s40 5
+    (lambda (bytes offset) (bytevector-s40-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-s40-set! bytes offset value (endianness little))) bvector-s40-value?)
+  (define-bvector-procedure S40 5
+    (lambda (bytes offset) (bytevector-s40-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-s40-set! bytes offset value (endianness big))) bvector-s40-value?)
+  (define-bvector-procedure u48 6
+    (lambda (bytes offset) (bytevector-u48-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-u48-set! bytes offset value (endianness little))) bvector-u48-value?)
+  (define-bvector-procedure U48 6
+    (lambda (bytes offset) (bytevector-u48-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-u48-set! bytes offset value (endianness big))) bvector-u48-value?)
+  (define-bvector-procedure s48 6
+    (lambda (bytes offset) (bytevector-s48-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-s48-set! bytes offset value (endianness little))) bvector-s48-value?)
+  (define-bvector-procedure S48 6
+    (lambda (bytes offset) (bytevector-s48-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-s48-set! bytes offset value (endianness big))) bvector-s48-value?)
+  (define-bvector-procedure u56 7
+    (lambda (bytes offset) (bytevector-u56-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-u56-set! bytes offset value (endianness little))) bvector-u56-value?)
+  (define-bvector-procedure U56 7
+    (lambda (bytes offset) (bytevector-u56-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-u56-set! bytes offset value (endianness big))) bvector-u56-value?)
+  (define-bvector-procedure s56 7
+    (lambda (bytes offset) (bytevector-s56-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-s56-set! bytes offset value (endianness little))) bvector-s56-value?)
+  (define-bvector-procedure S56 7
+    (lambda (bytes offset) (bytevector-s56-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-s56-set! bytes offset value (endianness big))) bvector-s56-value?)
+  (define-bvector-procedure u64 8
+    (lambda (bytes offset) (bytevector-u64-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-u64-set! bytes offset value (endianness little))) bvector-u64-value?)
+  (define-bvector-procedure U64 8
+    (lambda (bytes offset) (bytevector-u64-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-u64-set! bytes offset value (endianness big))) bvector-u64-value?)
+  (define-bvector-procedure s64 8
+    (lambda (bytes offset) (bytevector-s64-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-s64-set! bytes offset value (endianness little))) bvector-s64-value?)
+  (define-bvector-procedure S64 8
+    (lambda (bytes offset) (bytevector-s64-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-s64-set! bytes offset value (endianness big))) bvector-s64-value?)
+  (define-bvector-procedure fp32 4
+    (lambda (bytes offset) (bytevector-ieee-single-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-ieee-single-set! bytes offset value (endianness little))) flonum?)
+  (define-bvector-procedure FP32 4
+    (lambda (bytes offset) (bytevector-ieee-single-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-ieee-single-set! bytes offset value (endianness big))) flonum?)
+  (define-bvector-procedure fp64 8
+    (lambda (bytes offset) (bytevector-ieee-double-ref bytes offset (endianness little)))
+    (lambda (bytes offset value) (bytevector-ieee-double-set! bytes offset value (endianness little))) flonum?)
+  (define-bvector-procedure FP64 8
+    (lambda (bytes offset) (bytevector-ieee-double-ref bytes offset (endianness big)))
+    (lambda (bytes offset value) (bytevector-ieee-double-set! bytes offset value (endianness big))) flonum?)
 
   )
