@@ -25,8 +25,8 @@
      (let ([arr (apply fxarray (iota 10))])
        (fx= (fxarray-size arr) 10))
 
-     (let ([arr (apply u8array (iota 10))])
-       (fx= (u8array-size arr) 10))
+     (let ([arr (apply bytearray (iota 10))])
+       (fx= (bytearray-size arr) 10))
 
 
 
@@ -115,8 +115,8 @@
 
      (error? (fxarray-add! (fxarray) 'c))
      (error? (fxarray-add! (fxarray) 0.0))
-     (error? (u8array-add! (u8array) 'c))
-     (error? (u8array-add! (u8array) 0.0))
+     (error? (bytearray-add! (bytearray) 'c))
+     (error? (bytearray-add! (bytearray) 0.0))
 
      ;; `array` uses `mincap`, hence `make-array`
      (let ([arr (make-array 0 0)])
@@ -260,10 +260,10 @@
      (= 1 (fxarray-find-index (fxarray 10 20)
                               (lambda (x) (= x 20))))
 
-     (not (u8array-contains? (u8array 10 20) 30))
-     (eq? #t (u8array-contains? (u8array 10 20) 10))
-     (= 1 (u8array-index-of (u8array 10 20) 20))
-     (= 1 (u8array-find-index (u8array 10 20)
+     (not (bytearray-contains? (bytearray 10 20) 30))
+     (eq? #t (bytearray-contains? (bytearray 10 20) 10))
+     (= 1 (bytearray-index-of (bytearray 10 20) 20))
+     (= 1 (bytearray-find-index (bytearray 10 20)
                               (lambda (x) (= x 20))))
 
      (let* ([ls (iota 10)]
@@ -576,8 +576,8 @@
      (error? (fxarray-copy))
      (error? (fxarray-copy #f))
 
-     (error? (u8array-copy))
-     (error? (u8array-copy #f))
+     (error? (bytearray-copy))
+     (error? (bytearray-copy #f))
 
      (let* ([arr (apply array (iota 10))]
             [newarr (array-copy arr)])
@@ -589,8 +589,8 @@
        (and (equal? arr newarr)
             (not (eq? arr newarr))))
 
-     (let* ([arr (apply u8array (iota 10))]
-            [newarr (u8array-copy arr)])
+     (let* ([arr (apply bytearray (iota 10))]
+            [newarr (bytearray-copy arr)])
        (and (equal? arr newarr)
             (not (eq? arr newarr))))
 
@@ -816,25 +816,25 @@
 
      (array-sorted? < (array))
      (fxarray-sorted? < (fxarray))
-     (u8array-sorted? < (u8array))
+     (bytearray-sorted? < (bytearray))
 
      (array-sorted? < (array 42))
      (fxarray-sorted? < (fxarray 42))
-     (u8array-sorted? < (u8array 42))
+     (bytearray-sorted? < (bytearray 42))
 
      (error? (array-sorted? 1 (array)))
      (error? (fxarray-sorted? 1 (fxarray)))
-     (error? (u8array-sorted? 1 (u8array)))
+     (error? (bytearray-sorted? 1 (bytearray)))
      (error? (array-sorted? 1 (array 42)))
      (error? (fxarray-sorted? 1 (fxarray 42)))
-     (error? (u8array-sorted? 1 (u8array 42)))
+     (error? (bytearray-sorted? 1 (bytearray 42)))
 
      (error? (array-sorted? < '()))
      (error? (fxarray-sorted? < '()))
-     (error? (u8array-sorted? < '()))
+     (error? (bytearray-sorted? < '()))
      (error? (array-sorted? < '()))
      (error? (fxarray-sorted? < '()))
-     (error? (u8array-sorted? < '()))
+     (error? (bytearray-sorted? < '()))
 
      (error? (array-sorted? < (array 1 2 3 4) -1))
      (error? (array-sorted? < (array 1 2 3 4) 0 5))
@@ -844,9 +844,9 @@
      (error? (fxarray-sorted? < (fxarray 1 2 3 4) 0 5))
      (error? (fxarray-sorted? < (fxarray 1 2 3 4) 4 2))
 
-     (error? (u8array-sorted? < (u8array 1 2 3 4) -1))
-     (error? (u8array-sorted? < (u8array 1 2 3 4) 0 5))
-     (error? (u8array-sorted? < (u8array 1 2 3 4) 4 2))
+     (error? (bytearray-sorted? < (bytearray 1 2 3 4) -1))
+     (error? (bytearray-sorted? < (bytearray 1 2 3 4) 0 5))
+     (error? (bytearray-sorted? < (bytearray 1 2 3 4) 4 2))
 
      (let ([arr (array 9 8 7 1 2 3 4 0)])
        (and (not (array-sorted? < arr))
@@ -861,9 +861,9 @@
                 (and (fxarray-sorted? < arr)
                      (not (fxarray-sorted? > arr)))))
             (define (u8test n)
-              (let ([arr (apply u8array (iota n))])
-                (and (u8array-sorted? < arr)
-                     (not (u8array-sorted? > arr)))))
+              (let ([arr (apply bytearray (iota n))])
+                (and (bytearray-sorted? < arr)
+                     (not (bytearray-sorted? > arr)))))
             #t)
 
      (test 10)
@@ -888,7 +888,7 @@
      (error? (array-iota -#f))
 
      ;; out of range
-     (error? (u8array-iota 500))
+     (error? (bytearray-iota 500))
 
      (equal? (apply array (iota 10))
              (array-iota 10))
@@ -900,10 +900,10 @@
      (equal? (fxarray)
              (fxarray-iota 0))
 
-     (equal? (apply u8array (iota 10))
-             (u8array-iota 10))
-     (equal? (u8array)
-             (u8array-iota 0))
+     (equal? (apply bytearray (iota 10))
+             (bytearray-iota 10))
+     (equal? (bytearray)
+             (bytearray-iota 0))
 
      )
 
@@ -950,12 +950,12 @@
      (equal? (fxarray-nums 0 -10 -2)
              (fxarray 0 -2 -4 -6 -8))
 
-     (equal? (u8array-nums 0 10)
-             (u8array-iota 10))
-     (equal? (u8array-nums 5 10)
-             (u8array 5 6 7 8 9))
-     (equal? (u8array-nums 5 15 3)
-             (u8array 5 8 11 14))
+     (equal? (bytearray-nums 0 10)
+             (bytearray-iota 10))
+     (equal? (bytearray-nums 5 10)
+             (bytearray 5 6 7 8 9))
+     (equal? (bytearray-nums 5 15 3)
+             (bytearray 5 8 11 14))
 
      )
 
@@ -1055,15 +1055,15 @@
 
      (error? (array->vector))
      (error? (fxarray->fxvector))
-     (error? (u8array->u8vector))
+     (error? (bytearray->bytevector))
 
      (error? (array->vector '()))
      (error? (fxarray->fxvector '()))
-     (error? (u8array->u8vector '()))
+     (error? (bytearray->bytevector '()))
 
      (error? (array->vector '#()))
      (error? (fxarray->fxvector '#()))
-     (error? (u8array->u8vector '#()))
+     (error? (bytearray->bytevector '#()))
 
      (let ([v (random-vector 100)])
        (equal? v (array->vector (vector->array v))))
@@ -1072,7 +1072,7 @@
        (equal? v (fxarray->fxvector (fxvector->fxarray v))))
 
      (let ([v (random-u8vec 100 200)])
-       (equal? v (u8array->u8vector (u8vector->u8array v))))
+       (equal? v (bytearray->bytevector (bytevector->bytearray v))))
 
 
      (let ([v (random-vector 10000)])
@@ -1082,7 +1082,7 @@
        (equal? v (fxarray->fxvector (fxvector->fxarray v))))
 
      (let ([v (random-u8vec 100 20000)])
-       (equal? v (u8array->u8vector (u8vector->u8array v))))
+       (equal? v (bytearray->bytevector (bytevector->bytearray v))))
 
      )
 
@@ -1094,7 +1094,7 @@
                                                8 2 -2)))
      (equal? '(8 6 4) (iter->list (fxarray->iter (fxarray 0 1 2 3 4 5 6 7 8 9)
                                                  8 2 -2)))
-     (equal? '(8 6 4) (iter->list (u8array->iter (u8array 0 1 2 3 4 5 6 7 8 9)
+     (equal? '(8 6 4) (iter->list (bytearray->iter (bytearray 0 1 2 3 4 5 6 7 8 9)
                                                  8 2 -2)))
      (equal? '() (iter->list (fxarray->iter (fxarray 1 2) 0 2 -1)))
 
@@ -1111,7 +1111,7 @@
             (begin
               (iter-reset! iter)
               (equal? '(8 6 4) (collect-array-iter iter)))))
-     (let ([iter (u8array->iter (u8array 0 1 2 3 4 5 6 7 8 9) 8 2 -2)])
+     (let ([iter (bytearray->iter (bytearray 0 1 2 3 4 5 6 7 8 9) 8 2 -2)])
        (and (equal? '(8 6 4) (collect-array-iter iter))
             (begin
               (iter-reset! iter)
@@ -1125,9 +1125,9 @@
             [iter (fxarray->iter arr)])
        (fxarray-set! arr 1 9)
        (equal? '(0 9 2) (iter->list iter)))
-     (let* ([arr (u8array 0 1 2)]
-            [iter (u8array->iter arr)])
-       (u8array-set! arr 1 9)
+     (let* ([arr (bytearray 0 1 2)]
+            [iter (bytearray->iter arr)])
+       (bytearray-set! arr 1 9)
        (equal? '(0 9 2) (iter->list iter)))
 
      (let* ([arr (array 0 1)]
@@ -1144,11 +1144,11 @@
               (fxarray-push-back! arr 2)
               (iter-reset! iter)
               (equal? '(0 1 2) (collect-array-iter iter)))))
-     (let* ([arr (u8array 0 1)]
-            [iter (u8array->iter arr)])
+     (let* ([arr (bytearray 0 1)]
+            [iter (bytearray->iter arr)])
        (and (equal? '(0 1) (collect-array-iter iter))
             (begin
-              (u8array-push-back! arr 2)
+              (bytearray-push-back! arr 2)
               (iter-reset! iter)
               (equal? '(0 1 2) (collect-array-iter iter)))))
 
@@ -1164,24 +1164,24 @@
 
      (array-empty? (array-map   + (array)))
      (array-empty? (fxarray-map + (fxarray)))
-     (array-empty? (u8array-map + (u8array)))
+     (array-empty? (bytearray-map + (bytearray)))
 
      (array-empty? (array-map   + (array) (array)))
      (array-empty? (fxarray-map + (fxarray) (fxarray)))
-     (array-empty? (u8array-map + (u8array) (u8array)))
+     (array-empty? (bytearray-map + (bytearray) (bytearray)))
 
      (array-empty? (array-map   + (array) (array) (array) (array) (array)))
      (array-empty? (fxarray-map + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (array-empty? (u8array-map + (u8array) (u8array) (u8array) (u8array) (u8array)))
+     (array-empty? (bytearray-map + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      ;; length not equal
      (error? (array-map   + (array) (array 1)))
      (error? (fxarray-map + (fxarray) (fxarray 1)))
-     (error? (u8array-map + (u8array) (u8array 1)))
+     (error? (bytearray-map + (bytearray) (bytearray 1)))
 
      (error? (array-map   + (array) (array 1) (array) (array 1 1) (array)))
      (error? (fxarray-map + (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
-     (error? (u8array-map + (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+     (error? (bytearray-map + (bytearray) (bytearray 1) (bytearray) (bytearray 1 1) (bytearray)))
 
 
      ;; one array
@@ -1228,24 +1228,24 @@
 
      (array-empty? (array-map/i   + (array)))
      (array-empty? (fxarray-map/i + (fxarray)))
-     (array-empty? (u8array-map/i + (u8array)))
+     (array-empty? (bytearray-map/i + (bytearray)))
 
      (array-empty? (array-map/i   + (array) (array)))
      (array-empty? (fxarray-map/i + (fxarray) (fxarray)))
-     (array-empty? (u8array-map/i + (u8array) (u8array)))
+     (array-empty? (bytearray-map/i + (bytearray) (bytearray)))
 
      (array-empty? (array-map/i   + (array) (array) (array) (array) (array)))
      (array-empty? (fxarray-map/i + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (array-empty? (u8array-map/i + (u8array) (u8array) (u8array) (u8array) (u8array)))
+     (array-empty? (bytearray-map/i + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      ;; length not equal
      (error? (array-map/i   + (array) (array 1)))
      (error? (fxarray-map/i + (fxarray) (fxarray 1)))
-     (error? (u8array-map/i + (u8array) (u8array 1)))
+     (error? (bytearray-map/i + (bytearray) (bytearray 1)))
 
      (error? (array-map/i   + (array) (array 1) (array) (array 1 1) (array)))
      (error? (fxarray-map/i + (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
-     (error? (u8array-map/i + (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+     (error? (bytearray-map/i + (bytearray) (bytearray 1) (bytearray) (bytearray 1 1) (bytearray)))
 
 
      ;; one array
@@ -1296,24 +1296,24 @@
 
      (array-empty? (array-map!   + (array)))
      (array-empty? (fxarray-map! + (fxarray)))
-     (array-empty? (u8array-map! + (u8array)))
+     (array-empty? (bytearray-map! + (bytearray)))
 
      (array-empty? (array-map!   + (array) (array)))
      (array-empty? (fxarray-map! + (fxarray) (fxarray)))
-     (array-empty? (u8array-map! + (u8array) (u8array)))
+     (array-empty? (bytearray-map! + (bytearray) (bytearray)))
 
      (array-empty? (array-map!   + (array) (array) (array) (array) (array)))
      (array-empty? (fxarray-map! + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (array-empty? (u8array-map! + (u8array) (u8array) (u8array) (u8array) (u8array)))
+     (array-empty? (bytearray-map! + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      ;; length not equal
      (error? (array-map!   + (array) (array 1)))
      (error? (fxarray-map! + (fxarray) (fxarray 1)))
-     (error? (u8array-map! + (u8array) (u8array 1)))
+     (error? (bytearray-map! + (bytearray) (bytearray 1)))
 
      (error? (array-map!   + (array) (array 1) (array) (array 1 1) (array)))
      (error? (fxarray-map! + (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
-     (error? (u8array-map! + (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+     (error? (bytearray-map! + (bytearray) (bytearray 1) (bytearray) (bytearray 1 1) (bytearray)))
 
 
      ;; one array
@@ -1367,24 +1367,24 @@
 
      (array-empty? (array-map/i!   + (array)))
      (array-empty? (fxarray-map/i! + (fxarray)))
-     (array-empty? (u8array-map/i! + (u8array)))
+     (array-empty? (bytearray-map/i! + (bytearray)))
 
      (array-empty? (array-map/i!   + (array) (array)))
      (array-empty? (fxarray-map/i! + (fxarray) (fxarray)))
-     (array-empty? (u8array-map/i! + (u8array) (u8array)))
+     (array-empty? (bytearray-map/i! + (bytearray) (bytearray)))
 
      (array-empty? (array-map/i!   + (array) (array) (array) (array) (array)))
      (array-empty? (fxarray-map/i! + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (array-empty? (u8array-map/i! + (u8array) (u8array) (u8array) (u8array) (u8array)))
+     (array-empty? (bytearray-map/i! + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      ;; length not equal
      (error? (array-map/i!   + (array) (array 1)))
      (error? (fxarray-map/i! + (fxarray) (fxarray 1)))
-     (error? (u8array-map/i! + (u8array) (u8array 1)))
+     (error? (bytearray-map/i! + (bytearray) (bytearray 1)))
 
      (error? (array-map/i!   + (array) (array 1) (array) (array 1 1) (array)))
      (error? (fxarray-map/i! + (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
-     (error? (u8array-map/i! + (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+     (error? (bytearray-map/i! + (bytearray) (bytearray 1) (bytearray) (bytearray 1 1) (bytearray)))
 
      ;; one array
      (let* ([ls0 (iota 10)]
@@ -1669,23 +1669,23 @@
 
      (array-andmap   odd? (array))
      (fxarray-andmap odd? (fxarray))
-     (u8array-andmap odd? (u8array))
+     (bytearray-andmap odd? (bytearray))
 
      (array-andmap   odd? (array) (array))
      (fxarray-andmap odd? (fxarray) (fxarray))
-     (u8array-andmap odd? (u8array) (u8array))
+     (bytearray-andmap odd? (bytearray) (bytearray))
 
      (array-andmap   odd? (array) (array) (array) (array) (array))
      (fxarray-andmap odd? (fxarray) (fxarray) (fxarray) (fxarray) (fxarray))
-     (u8array-andmap odd? (u8array) (u8array) (u8array) (u8array) (u8array))
+     (bytearray-andmap odd? (bytearray) (bytearray) (bytearray) (bytearray) (bytearray))
 
      (error? (array-andmap   odd? (array) (array 1)))
      (error? (fxarray-andmap odd? (fxarray) (fxarray 1)))
-     (error? (u8array-andmap odd? (u8array) (u8array 1)))
+     (error? (bytearray-andmap odd? (bytearray) (bytearray 1)))
 
      (error? (array-andmap   odd? (array) (array 1) (array) (array 1 1) (array)))
      (error? (fxarray-andmap odd? (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
-     (error? (u8array-andmap odd? (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+     (error? (bytearray-andmap odd? (bytearray) (bytearray 1) (bytearray) (bytearray 1 1) (bytearray)))
 
      ;; 1 arr
      (begin (define (test1 arr-proc andmap-proc)
@@ -1696,7 +1696,7 @@
 
      (test1 array   array-andmap)
      (test1 fxarray fxarray-andmap)
-     (test1 u8array u8array-andmap)
+     (test1 bytearray bytearray-andmap)
 
      ;; 2 arrs
      (begin (define (test2 arr-proc andmap-proc)
@@ -1707,7 +1707,7 @@
             #t)
      (test2 array   array-andmap)
      (test2 fxarray fxarray-andmap)
-     (test2 u8array u8array-andmap)
+     (test2 bytearray bytearray-andmap)
 
      ;; more arrs
      (begin (define (test* arr-proc andmap-proc map-proc)
@@ -1721,7 +1721,7 @@
             #t)
      (test* array   array-andmap   array-map)
      (test* fxarray fxarray-andmap fxarray-map)
-     (test* u8array u8array-andmap u8array-map)
+     (test* bytearray bytearray-andmap bytearray-map)
 
      )
 
@@ -1734,23 +1734,23 @@
 
      (not (array-ormap   odd? (array)))
      (not (fxarray-ormap odd? (fxarray)))
-     (not (u8array-ormap odd? (u8array)))
+     (not (bytearray-ormap odd? (bytearray)))
 
      (not (array-ormap   odd? (array) (array)))
      (not (fxarray-ormap odd? (fxarray) (fxarray)))
-     (not (u8array-ormap odd? (u8array) (u8array)))
+     (not (bytearray-ormap odd? (bytearray) (bytearray)))
 
      (not (array-ormap   odd? (array) (array) (array) (array) (array)))
      (not (fxarray-ormap odd? (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (not (u8array-ormap odd? (u8array) (u8array) (u8array) (u8array) (u8array)))
+     (not (bytearray-ormap odd? (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      (error? (array-ormap   odd? (array) (array 1)))
      (error? (fxarray-ormap odd? (fxarray) (fxarray 1)))
-     (error? (u8array-ormap odd? (u8array) (u8array 1)))
+     (error? (bytearray-ormap odd? (bytearray) (bytearray 1)))
 
      (error? (array-ormap   odd? (array) (array 1) (array) (array 1 1) (array)))
      (error? (fxarray-ormap odd? (fxarray) (fxarray 1) (fxarray) (fxarray 1 1) (fxarray)))
-     (error? (u8array-ormap odd? (u8array) (u8array 1) (u8array) (u8array 1 1) (u8array)))
+     (error? (bytearray-ormap odd? (bytearray) (bytearray 1) (bytearray) (bytearray 1 1) (bytearray)))
 
 
      ;; 1 arr
@@ -1762,7 +1762,7 @@
 
      (test1 array   array-ormap)
      (test1 fxarray fxarray-ormap)
-     (test1 u8array u8array-ormap)
+     (test1 bytearray bytearray-ormap)
 
      ;; 2 arrs
      (begin (define (test2 arr-proc ormap-proc)
@@ -1774,7 +1774,7 @@
             #t)
      (test2 array   array-ormap)
      (test2 fxarray fxarray-ormap)
-     (test2 u8array u8array-ormap)
+     (test2 bytearray bytearray-ormap)
 
      ;; more arrs
      (begin (define (test* arr-proc ormap-proc map-proc)
@@ -1788,7 +1788,7 @@
             #t)
      (test* array   array-ormap   array-map)
      (test* fxarray fxarray-ormap fxarray-map)
-     (test* u8array u8array-ormap u8array-map)
+     (test* bytearray bytearray-ormap bytearray-map)
 
      )
 

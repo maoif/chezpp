@@ -21,7 +21,7 @@
 
      (reset-sequence? '(1 2 3) (array 1 2 3))
      (reset-sequence? '(1 2 3) (fxarray 1 2 3))
-     (reset-sequence? '(1 2 3) (u8array 1 2 3))
+     (reset-sequence? '(1 2 3) (bytearray 1 2 3))
      (reset-sequence? '(1 2 3) (dlist 1 2 3))
      (reset-sequence? '(1 2 3) (queue 1 2 3))
      (reset-sequence? '(3 2 1) (stack 1 2 3))
@@ -64,12 +64,12 @@
               (fxarray-push-back! source 2)
               (iter-reset! iter)
               (equal? '(0 9 2) (collect-iter iter)))))
-     (let* ([source (u8array 0 1)]
+     (let* ([source (bytearray 0 1)]
             [iter (source->iter source)])
-       (u8array-set! source 1 9)
+       (bytearray-set! source 1 9)
        (and (equal? '(0 9) (collect-iter iter))
             (begin
-              (u8array-push-back! source 2)
+              (bytearray-push-back! source 2)
               (iter-reset! iter)
               (equal? '(0 9 2) (collect-iter iter)))))
 

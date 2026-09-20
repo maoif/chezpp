@@ -55,25 +55,6 @@
           flarray-iota flarray-nums
           flarray->list flarray->iter flarray->flvector flvector->flarray
 
-          u8array make-u8array u8array? u8array-size u8array-empty?
-          u8array-ref u8array-add! u8array-add*! u8array-delete! u8array-set! u8array-clear!
-          u8array-slice u8array-slice! u8array-copy u8array-copy!
-          u8array-push! u8array-pop! u8array-push-back! u8array-pop-back!
-          u8array-filter u8array-filter! u8array-partition
-          u8array-contains? u8array-contains/p? u8array-index-of u8array-find-index
-          u8array-search u8array-search*
-          u8array-append u8array-append!
-          u8array-reverse u8array-reverse!
-          u8array-map u8array-map/i u8array-map! u8array-map/i!
-          u8array-for-each u8array-for-each/i
-          u8array-map-rev u8array-map/i-rev
-          u8array-for-each-rev u8array-for-each/i-rev
-          u8array-andmap u8array-ormap
-          u8array-fold-left u8array-fold-left/i u8array-fold-right u8array-fold-right/i
-          u8array-sorted? u8array-sort u8array-sort!
-          u8array-iota u8array-nums
-
-          ;; Bytearray is the public name for the raw unsigned-byte array API.
           bytearray make-bytearray bytearray? bytearray-size bytearray-empty?
           bytearray-ref bytearray-add! bytearray-add*! bytearray-delete! bytearray-set! bytearray-clear!
           bytearray-slice bytearray-slice! bytearray-copy bytearray-copy!
@@ -91,8 +72,7 @@
           bytearray-fold-left bytearray-fold-left/i bytearray-fold-right bytearray-fold-right/i
           bytearray-sorted? bytearray-sort bytearray-sort!
           bytearray-iota bytearray-nums
-          bytearray-u16-ref bytearray-U16-ref bytearray-u16-set! bytearray-U16-set!
-          bytearray-s16-ref bytearray-S16-ref bytearray-s16-set! bytearray-S16-set!
+
           bytearray-u8-ref bytearray-U8-ref bytearray-u8-set! bytearray-U8-set!
           bytearray-s8-ref bytearray-S8-ref bytearray-s8-set! bytearray-S8-set!
           bytearray-u16-ref bytearray-U16-ref bytearray-u16-set! bytearray-U16-set!
@@ -116,10 +96,10 @@
           bytearray-u16-map bytearray-U16-map bytearray-u16-for-each bytearray-U16-for-each
           bytearray-u16->iter bytearray-U16->iter
 
-          array->list fxarray->list u8array->list bytearray->list
-          array->iter fxarray->iter u8array->iter bytearray->iter
-          array->vector fxarray->fxvector u8array->u8vector bytearray->bytevector
-          vector->array fxvector->fxarray u8vector->u8array bytevector->bytearray)
+          array->list fxarray->list bytearray->list
+          array->iter fxarray->iter bytearray->iter
+          array->vector fxarray->fxvector bytearray->bytevector
+          vector->array fxvector->fxarray bytevector->bytearray)
   (import (chezpp chez)
           (chezpp internal)
           (chezpp list)
@@ -153,10 +133,10 @@
   |#
   (define-record-type ($flarray mk-flarray flarray?)
     (parent $array))
-  #|record:$u8array
+  #|record:$bytearray
   Mutable unsigned-byte-array record derived from `$array`.
   |#
-  (define-record-type ($u8array mk-u8array u8array?)
+  (define-record-type ($bytearray mk-bytearray bytearray?)
     (parent $array))
 
   #|proc:array-size
@@ -174,7 +154,7 @@
   (define all-arrays?   (lambda (x*) (andmap array?   x*)))
   (define all-fxarrays? (lambda (x*) (andmap fxarray? x*)))
   (define all-flarrays? (lambda (x*) (andmap flarray? x*)))
-  (define all-u8arrays? (lambda (x*) (andmap u8array? x*)))
+  (define all-bytearrays? (lambda (x*) (andmap bytearray? x*)))
 
 
   (define-syntax define-array-procedure
@@ -190,7 +170,7 @@
       (define get-name
         (lambda (which name)
           (let ([n (symbol->string (syntax->datum name))]
-                [pre1 '((a . array-) (fxa . fxarray-) (fla . flarray-) (u8a . u8array-))])
+                [pre1 '((a . array-) (fxa . fxarray-) (fla . flarray-) (u8a . bytearray-))])
             ($construct-name name (cdr (assoc which pre1)) n))))
       (syntax-case stx ()
         ;; case-lambda
@@ -319,11 +299,11 @@
                  #,(if pu8a?
                        (with-syntax ([name (get-name 'u8a #'name)])
                          #`(module (name)
-                             (define a         u8array)
-                             (define amk       mk-u8array)
-                             (define amake     make-u8array)
-                             (define aadd!     u8array-add!)
-                             (define a?        u8array?)
+                             (define a         bytearray)
+                             (define amk       mk-bytearray)
+                             (define amake     make-bytearray)
+                             (define aadd!     bytearray-add!)
+                             (define a?        bytearray?)
                              (define avec      array-vec)
                              (define avec-set! array-vec-set!)
                              (define asize   $array-size)
@@ -337,7 +317,7 @@
                              (define vcopy!  bytevector-copy!)
                              (define vcopy   bytevector-copy)
                              ;;(define vcheck-length check-u8length)
-                             (define all-which? all-u8arrays?)
+                             (define all-which? all-bytearrays?)
                              (define who 'name)
                              (define t+ fx+)
                              (define t- fx-)
@@ -347,7 +327,7 @@
                              (define t*id 1)
                              (define t> fl>)   (define t< fl<)
                              (let-syntax ([vpcheck (syntax-rules () [(_ e* (... ...)) (pcheck-bytevector e* (... ...))])]
-                                          [apcheck (syntax-rules () [(_ (a* (... ...)) e* (... ...)) (pcheck ([u8array? a* (... ...)]) e* (... ...))])])
+                                          [apcheck (syntax-rules () [(_ (a* (... ...)) e* (... ...)) (pcheck ([bytearray? a* (... ...)]) e* (... ...))])])
                                (define name
                                  (case-lambda
                                    [args body body* ...] ...))
@@ -470,11 +450,11 @@
                        (with-syntax ([name (get-name 'u8a #'name)])
                          #`(define name
                              (lambda args
-                               (let ([a         u8array]
-                                     [amk       mk-u8array]
-                                     [amake     make-u8array]
-                                     [aadd!     u8array-add!]
-                                     [a?        u8array?]
+                               (let ([a         bytearray]
+                                     [amk       mk-bytearray]
+                                     [amake     make-bytearray]
+                                     [aadd!     bytearray-add!]
+                                     [a?        bytearray?]
                                      [avec      array-vec]
                                      [avec-set! array-vec-set!]
                                      [asize   $array-size]
@@ -488,13 +468,13 @@
                                      [vcopy!  bytevector-copy!]
                                      [vcopy   bytevector-copy]
                                      ;;[vcheck-length check-u8length]
-                                     [all-which? all-u8arrays?]
+                                     [all-which? all-bytearrays?]
                                      [who 'name]
                                      [thisproc name]
                                      [t+ fx+] [t- fx-] [t* fx*] [t/ fx/] [t+id 0] [t*id 1]
                                      [t> fx>] [t< fx<])
                                  (let-syntax ([vpcheck (syntax-rules () [(_ e* (... ...)) (pcheck-bytevector e* (... ...))])]
-                                              [apcheck (syntax-rules () [(_ (a* (... ...)) e* (... ...)) (pcheck ([u8array? a* (... ...)]) e* (... ...))])])
+                                              [apcheck (syntax-rules () [(_ (a* (... ...)) e* (... ...)) (pcheck ([bytearray? a* (... ...)]) e* (... ...))])])
                                    body* ...)))))
                        #'(define dummy2 'dummy)))))])))
 
@@ -511,10 +491,10 @@
     (lambda (who cap v len)
       (pcheck ([natural? cap len] [flonum? v])
               (mk-flarray (make-flvector cap v) 2 len))))
-  (define $make-u8array
+  (define $make-bytearray
     (lambda (who cap v len)
       (pcheck ([natural? cap len] [u8? v])
-              (mk-u8array (make-bytevector cap v) 2 len))))
+              (mk-bytearray (make-bytevector cap v) 2 len))))
 
 
   #|proc:make-array
@@ -551,14 +531,14 @@
       [(len) ($make-flarray who len 0.0 len)]
       [(len v) ($make-flarray who len v len)]))
 
-  #|proc:make-u8array
+  #|proc:make-bytearray
   Return a byte array of optional length `len`, filled with optional byte `v`.
   |#
-  (define-who make-u8array
+  (define-who make-bytearray
     (case-lambda
-      [()      ($make-u8array who *mincap* #f 0)]
-      [(len)   ($make-u8array who len      0  len)]
-      [(len v) ($make-u8array who len      v  len)]))
+      [()      ($make-bytearray who *mincap* #f 0)]
+      [(len)   ($make-bytearray who len      0  len)]
+      [(len v) ($make-bytearray who len      v  len)]))
 
 
   #|proc:array
@@ -687,15 +667,15 @@
                                      (flvcopy! vec 0 (array-vec arr) 0 n)
                                      arr))))
 
-  #|proc:u8array
+  #|proc:bytearray
   Return a byte array containing `args` in argument order.
   |#
-  (define-who u8array
+  (define-who bytearray
     (lambda args
       (unless (andmap u8? args)
         (errorf who "arguments must be bytes: ~a" args))
       (let ([len (length args)])
-        (let* ([arr (make-u8array (if (fx< len *mincap*) *mincap* len))] [vec (array-vec arr)])
+        (let* ([arr (make-bytearray (if (fx< len *mincap*) *mincap* len))] [vec (array-vec arr)])
           (let loop ([i 0] [args args])
             (if (null? args)
                 (begin ($array-size-set! arr len)
@@ -707,8 +687,8 @@
   #|proc:fxarray-size
   Return the number of items in the fxarray.
   |#
-  #|proc:u8array-size
-  Return the number of items in the u8array.
+  #|proc:bytearray-size
+  Return the number of items in the bytearray.
   |#
   (define-array-procedure (fxa u8a)
     (size arr)
@@ -771,7 +751,7 @@
 
   (define-array-add! array-add!   array?   (lambda (x) #t) vector-length     vector-set!        vcopy!)
   (define-array-add! fxarray-add! fxarray? fixnum?         fxvector-length   fxvector-set!      fxvcopy!)
-  (define-array-add! u8array-add! u8array? u8?             bytevector-length bytevector-u8-set! u8vcopy!)
+  (define-array-add! bytearray-add! bytearray? u8?             bytevector-length bytevector-u8-set! u8vcopy!)
 
   (define $array-add-values!
     (lambda (who arr i values value-check vector-make vector-length vector-set vector-copy! fill)
@@ -1016,7 +996,7 @@
   #|proc:fxarray-contains?
   Return whether the fxarray contains the given item using `equal?`.
   |#
-  #|proc:u8array-contains?
+  #|proc:bytearray-contains?
   Return whether the array contains the given item.
   Items are compared using `equal?`.
   |#
@@ -1039,7 +1019,7 @@
   #|proc:fxarray-contains/p?
   Return whether the fxarray contains an item that satisfies `pred`.
   |#
-  #|proc:u8array-contains/p?
+  #|proc:bytearray-contains/p?
   Return whether the array contains an item that satisfies `pred`.
   |#
   (define-array-procedure (a fxa fla u8a)
@@ -1061,7 +1041,7 @@
   #|proc:fxarray-index-of
   Return the index of the first item equal to `v`, or #f if no item matches.
   |#
-  #|proc:u8array-index-of
+  #|proc:bytearray-index-of
   Return the index of the first item equal to `v`, or #f if no item matches.
   |#
   (define-array-procedure (a fxa fla u8a)
@@ -1083,7 +1063,7 @@
   #|proc:fxarray-find-index
   Return the index of the first item satisfying `pred`, or #f if no item matches.
   |#
-  #|proc:u8array-find-index
+  #|proc:bytearray-find-index
   Return the index of the first item satisfying `pred`, or #f if no item matches.
   |#
   (define-array-procedure (a fxa fla u8a)
@@ -1105,7 +1085,7 @@
   #|proc:fxarray-search
   Return the first item satisfying `pred`, or #f if no item matches.
   |#
-  #|proc:u8array-search
+  #|proc:bytearray-search
   Return the first item in the array that satisfies the predicate `pred`.
   If no such item is found, #f is returned.
   |#
@@ -1364,11 +1344,11 @@
                           (errorf who "start index ~a greater than stop index ~a" start stop))
                         (let* ([vsort! (cond [(fxarray? arr) fxvsort!]
                                              [(flarray? arr) flvsort!]
-                                             [(u8array? arr) (todo who)]
+                                             [(bytearray? arr) (todo who)]
                                              [else vsort!])]
                                [acopy! (cond [(fxarray? arr) fxarray-copy!]
                                              [(flarray? arr) flarray-copy!]
-                                             [(u8array? arr) u8array-copy!]
+                                             [(bytearray? arr) bytearray-copy!]
                                              [else array-copy!])]
                                [newarr (amake (fx- stop start))])
                           (acopy! arr start newarr 0 (fx- stop start))
@@ -1403,7 +1383,7 @@
                           (errorf who "start index ~a greater than stop index ~a" start stop))
                         (let ([vsort! (cond [(fxarray? arr) fxvsort!]
                                             [(flarray? arr) flvsort!]
-                                            [(u8array? arr) (todo who)]
+                                            [(bytearray? arr) (todo who)]
                                             [else vsort!])]
                               [vec (array-vec arr)])
                           (vsort! <? vec start stop)))))])
@@ -1414,7 +1394,7 @@
   This procedure creates an array that contains numbers ranging from 0 to n-1, inclusive.
   This is similar to `iota` for lists.
 
-  Note that for u8arrays, it is an error if `n` exceeds 257.
+  Note that for bytearrays, it is an error if `n` exceeds 257.
   |#
   (define-array-procedure (a fxa fla u8a)
     (iota n)
@@ -1436,7 +1416,7 @@
   If `start` is greater than `stop`, then `step` must be less than 0,
   in which case the sequence terminates when the value is less than or equal to `stop`.
 
-  Note that for u8arrays, it is an error if the numbers contain values that are negative or greater than 256.
+  Note that for bytearrays, it is an error if the numbers contain values that are negative or greater than 256.
   For fxarrays, the generated numbers must be fixnums.
   |#
   (define-array-procedure (a) nums
@@ -2120,18 +2100,18 @@
                       (begin (fxarray-set! arr i (fxvector-ref vec i))
                              (loop (fx1+ i)))))))))
 
-  #|proc:u8vector->u8array
-  Convert a bytevector/u8vector `vec` to a u8array.
+  #|proc:bytevector->bytearray
+  Convert a bytevector/u8vector `vec` to a bytearray.
   |#
-  (define-who u8vector->u8array
+  (define-who bytevector->bytearray
     (lambda (vec)
       (pcheck ([bytevector? vec])
               (let* ([len (bytevector-length vec)]
-                     [arr (make-u8array len)])
+                     [arr (make-bytearray len)])
                 (let loop ([i 0])
                   (if (fx= i len)
                       arr
-                      (begin (u8array-set! arr i (bytevector-u8-ref vec i))
+                      (begin (bytearray-set! arr i (bytevector-u8-ref vec i))
                              (loop (fx1+ i)))))))))
 
 
@@ -2177,16 +2157,16 @@
   (define fxarray->iter
     (make-indexed-iter 'fxarray->iter fxarray? fxarray-size fxarray-ref))
 
-  #|proc:u8array->iter
-  The `u8array->iter` procedure returns an iterator over bytes in the u8array `source`.
-  `(source)` traverses the current full u8array and reevaluates its size on reset.
+  #|proc:bytearray->iter
+  The `bytearray->iter` procedure returns an iterator over bytes in the bytearray `source`.
+  `(source)` traverses the current full bytearray and reevaluates its size on reset.
   `(source stop)` defaults `start` to 0, and `(source start stop)` defaults `step` to 1.
   `(source start stop step)` selects a half-open indexed range with a nonzero integer `step`.
   A positive `step` visits increasing indexes at that stride; a negative `step` visits
   decreasing indexes at the absolute stride. The iterator returns each selected byte.
   |#
-  (define u8array->iter
-    (make-indexed-iter 'u8array->iter u8array? u8array-size u8array-ref))
+  (define bytearray->iter
+    (make-indexed-iter 'bytearray->iter bytearray? bytearray-size bytearray-ref))
 
 
   #|proc:array->vector
@@ -2218,85 +2198,19 @@
                       (begin (fxvector-set! vec i (fxarray-ref arr i))
                              (loop (fx1+ i)))))))))
 
-  #|proc:u8array->u8vector
-  Convert a u8array `arr` into a bytevector.
+  #|proc:bytearray->bytevector
+  Convert a bytearray `arr` into a bytevector.
   |#
-  (define-who u8array->u8vector
+  (define-who bytearray->bytevector
     (lambda (arr)
-      (pcheck ([u8array? arr])
-              (let* ([len (u8array-size arr)]
+      (pcheck ([bytearray? arr])
+              (let* ([len (bytearray-size arr)]
                      [vec (make-bytevector len)])
                 (let loop ([i 0])
                   (if (fx= i len)
                       vec
-                      (begin (bytevector-u8-set! vec i (u8array-ref arr i))
+                      (begin (bytevector-u8-set! vec i (bytearray-ref arr i))
                              (loop (fx1+ i)))))))))
-
-  ;;;;===----------------------------------------------------------------------===
-  ;;;; Public bytearray names (the u8array implementation is retained for compatibility)
-  ;;;;===----------------------------------------------------------------------===
-  #|proc:bytearray
-  Construct a mutable bytearray containing the supplied octets.  The bytearray
-  procedures below are aliases of corresponding u8array procedures; a bytearray
-  stores values in the inclusive range 0 through 255.
-  |#
-  (define bytearray u8array)
-  (define make-bytearray make-u8array)
-  (define bytearray? u8array?)
-  (define bytearray-size u8array-size)
-  (define bytearray-empty? u8array-empty?)
-  (define bytearray-ref u8array-ref)
-  (define bytearray-add! u8array-add!)
-  (define bytearray-add*! u8array-add*!)
-  (define bytearray-delete! u8array-delete!)
-  (define bytearray-set! u8array-set!)
-  (define bytearray-clear! u8array-clear!)
-  (define bytearray-slice u8array-slice)
-  (define bytearray-slice! u8array-slice!)
-  (define bytearray-copy u8array-copy)
-  (define bytearray-copy! u8array-copy!)
-  (define bytearray-push! u8array-push!)
-  (define bytearray-pop! u8array-pop!)
-  (define bytearray-push-back! u8array-push-back!)
-  (define bytearray-pop-back! u8array-pop-back!)
-  (define bytearray-filter u8array-filter)
-  (define bytearray-filter! u8array-filter!)
-  (define bytearray-partition u8array-partition)
-  (define bytearray-contains? u8array-contains?)
-  (define bytearray-contains/p? u8array-contains/p?)
-  (define bytearray-index-of u8array-index-of)
-  (define bytearray-find-index u8array-find-index)
-  (define bytearray-search u8array-search)
-  (define bytearray-search* u8array-search*)
-  (define bytearray-append u8array-append)
-  (define bytearray-append! u8array-append!)
-  (define bytearray-reverse u8array-reverse)
-  (define bytearray-reverse! u8array-reverse!)
-  (define bytearray-map u8array-map)
-  (define bytearray-map/i u8array-map/i)
-  (define bytearray-map! u8array-map!)
-  (define bytearray-map/i! u8array-map/i!)
-  (define bytearray-for-each u8array-for-each)
-  (define bytearray-for-each/i u8array-for-each/i)
-  (define bytearray-map-rev u8array-map-rev)
-  (define bytearray-map/i-rev u8array-map/i-rev)
-  (define bytearray-for-each-rev u8array-for-each-rev)
-  (define bytearray-for-each/i-rev u8array-for-each/i-rev)
-  (define bytearray-andmap u8array-andmap)
-  (define bytearray-ormap u8array-ormap)
-  (define bytearray-fold-left u8array-fold-left)
-  (define bytearray-fold-left/i u8array-fold-left/i)
-  (define bytearray-fold-right u8array-fold-right)
-  (define bytearray-fold-right/i u8array-fold-right/i)
-  (define bytearray-sorted? u8array-sorted?)
-  (define bytearray-sort u8array-sort)
-  (define bytearray-sort! u8array-sort!)
-  (define bytearray-iota u8array-iota)
-  (define bytearray-nums u8array-nums)
-  (define bytearray->list u8array->list)
-  (define bytearray->iter u8array->iter)
-  (define bytearray->bytevector u8array->u8vector)
-  (define bytevector->bytearray u8vector->u8array)
 
   (define-syntax define-bytearray-width
     (syntax-rules ()
@@ -2306,8 +2220,8 @@
        (begin
          (define-who ref-name
            (lambda (arr i)
-             (pcheck ([u8array? arr] [natural? i])
-                     (let ([n (u8array-size arr)])
+             (pcheck ([bytearray? arr] [natural? i])
+                     (let ([n (bytearray-size arr)])
                        (when (not (fx= (modulo n width) 0))
                          (errorf who "bytearray length is not aligned to width ~a" width))
                        (if (fx< i (fx/ n width))
@@ -2315,8 +2229,8 @@
                            (errorf who "index ~a out of range" i))))))
          (define-who set-name
            (lambda (arr i v)
-             (pcheck ([u8array? arr] [natural? i])
-                     (let ([n (u8array-size arr)])
+             (pcheck ([bytearray? arr] [natural? i])
+                     (let ([n (bytearray-size arr)])
                        (when (not (fx= (modulo n width) 0))
                          (errorf who "bytearray length is not aligned to width ~a" width))
                        (if (fx< i (fx/ n width))
@@ -2403,18 +2317,18 @@
   |#
   (define-who bytearray-u16-add!
     (case-lambda
-      [(arr v) (bytearray-u16-add! arr (fx/ (u8array-size arr) 2) v)]
+      [(arr v) (bytearray-u16-add! arr (fx/ (bytearray-size arr) 2) v)]
       [(arr i v)
-       (pcheck ([u8array? arr] [natural? i])
+       (pcheck ([bytearray? arr] [natural? i])
                (let* ([old (bytearray->bytevector arr)] [n (bytevector-length old)]
                       [nv (make-bytevector (fx+ n 2) 0)])
                  (bytevector-copy! old 0 nv 0 (fx* i 2))
                  (bytevector-u16-set! nv (fx* i 2) v (endianness little))
                  (bytevector-copy! old (fx* i 2) nv (fx* (fx1+ i) 2) (fx- n (fx* i 2)))
-                 (u8array-clear! arr)
+                 (bytearray-clear! arr)
                  (let loop ([j 0])
                    (when (fx< j (bytevector-length nv))
-                     (u8array-add! arr (bytevector-u8-ref nv j))
+                     (bytearray-add! arr (bytevector-u8-ref nv j))
                      (loop (fx1+ j))))))]))
   (define bytearray-U16-add! bytearray-u16-add!)
   #|proc:bytearray-u16-delete!
@@ -2422,23 +2336,23 @@
   |#
   (define-who bytearray-u16-delete!
     (lambda (arr i)
-      (pcheck ([u8array? arr] [natural? i])
+      (pcheck ([bytearray? arr] [natural? i])
               (let* ([old (bytearray->bytevector arr)] [n (bytevector-length old)]
                      [nv (make-bytevector (fx- n 2) 0)])
                 (bytevector-copy! old 0 nv 0 (fx* i 2))
                 (bytevector-copy! old (fx* (fx1+ i) 2) nv (fx* i 2) (fx- n (fx* (fx1+ i) 2)))
-                (u8array-clear! arr)
+                (bytearray-clear! arr)
                 (let loop ([j 0])
                   (when (fx< j (bytevector-length nv))
-                    (u8array-add! arr (bytevector-u8-ref nv j))
+                    (bytearray-add! arr (bytevector-u8-ref nv j))
                     (loop (fx1+ j))))))))
   (define bytearray-U16-delete! bytearray-u16-delete!)
   #|proc:bytearray-u16->list
   Convert logical unsigned 16-bit values in bytearray `arr` to a list.
   |#
   (define bytearray-u16->list
-    (lambda (arr) (pcheck ([u8array? arr]) (let loop ([i 0] [r '()])
-      (if (fx= i (fx/ (u8array-size arr) 2)) (reverse r)
+    (lambda (arr) (pcheck ([bytearray? arr]) (let loop ([i 0] [r '()])
+      (if (fx= i (fx/ (bytearray-size arr) 2)) (reverse r)
           (loop (fx1+ i) (cons (bytearray-u16-ref arr i) r)))))))
   (define bytearray-U16->list bytearray-u16->list)
   #|proc:bytearray-u16-map
@@ -2446,8 +2360,8 @@
   |#
   (define bytearray-u16-map
     (lambda (proc arr)
-      (pcheck ([procedure? proc] [u8array? arr])
-              (let* ([n (u8array-size arr)] [out (make-bytevector n 0)])
+      (pcheck ([procedure? proc] [bytearray? arr])
+              (let* ([n (bytearray-size arr)] [out (make-bytevector n 0)])
                 (when (not (fx= 0 (modulo n 2))) (errorf 'bytearray-u16-map "unaligned bytearray"))
                 (let loop ([i 0])
                   (if (fx= i n) (bytevector->bytearray out)
@@ -2459,8 +2373,8 @@
   |#
   (define bytearray-u16-for-each
     (lambda (proc arr)
-      (pcheck ([procedure? proc] [u8array? arr])
-              (let ([n (u8array-size arr)])
+      (pcheck ([procedure? proc] [bytearray? arr])
+              (let ([n (bytearray-size arr)])
                 (when (not (fx= 0 (modulo n 2))) (errorf 'bytearray-u16-for-each "unaligned bytearray"))
                 (let loop ([i 0])
                   (unless (fx= i n)
@@ -2471,8 +2385,8 @@
   Return an iterator over logical little-endian 16-bit values in `arr`.
   |#
   (define bytearray-u16->iter
-    (make-indexed-iter 'bytearray-u16->iter u8array?
-      (lambda (arr) (fx/ (u8array-size arr) 2)) bytearray-u16-ref))
+    (make-indexed-iter 'bytearray-u16->iter bytearray?
+      (lambda (arr) (fx/ (bytearray-size arr) 2)) bytearray-u16-ref))
   (define bytearray-U16->iter bytearray-u16->iter)
 
 
@@ -2515,7 +2429,7 @@
    (lambda (arr)
      (cond [(fxarray? arr) (fxarray->iter arr)]
            [(flarray? arr) (flarray->iter arr)]
-           [(u8array? arr) (u8array->iter arr)]
+           [(bytearray? arr) (bytearray->iter arr)]
            [else (array->iter arr)])))
 
 ;;;;===----------------------------------------------------------------------===
@@ -2527,33 +2441,33 @@
    (lambda (arr index)
      (cond [(fxarray? arr) (fxarray-ref arr index)]
            [(flarray? arr) (flarray-ref arr index)]
-           [(u8array? arr) (u8array-ref arr index)]
+           [(bytearray? arr) (bytearray-ref arr index)]
            [else (array-ref arr index)]))
    (lambda (arr index value)
      (let ([copy (cond [(fxarray? arr) (fxarray-copy arr)]
                        [(flarray? arr) (flarray-copy arr)]
-                       [(u8array? arr) (u8array-copy arr)]
+                       [(bytearray? arr) (bytearray-copy arr)]
                        [else (array-copy arr)])])
        (cond [(fxarray? copy) (fxarray-set! copy index value)]
              [(flarray? copy) (flarray-set! copy index value)]
-             [(u8array? copy) (u8array-set! copy index value)]
+             [(bytearray? copy) (bytearray-set! copy index value)]
              [else (array-set! copy index value)])
        copy))
    (lambda (arr index value)
      (cond [(fxarray? arr) (fxarray-set! arr index value)]
            [(flarray? arr) (flarray-set! arr index value)]
-           [(u8array? arr) (u8array-set! arr index value)]
+           [(bytearray? arr) (bytearray-set! arr index value)]
            [else (array-set! arr index value)])
      arr))
 
   (gen-array-record-writer $array   "#[array ("   vector-ref)
   (gen-array-record-writer $fxarray "#[fxarray (" fxvector-ref)
   (gen-array-record-writer $flarray "#[flarray (" flvector-ref)
-  (gen-array-record-writer $u8array "#[u8array (" bytevector-u8-ref)
+  (gen-array-record-writer $bytearray "#[bytearray (" bytevector-u8-ref)
 
   (gen-array-record-type-equal-procedure $array   vector-ref)
   (gen-array-record-type-equal-procedure $fxarray fxvector-ref)
   (gen-array-record-type-equal-procedure $flarray flvector-ref)
-  (gen-array-record-type-equal-procedure $u8array bytevector-u8-ref)
+  (gen-array-record-type-equal-procedure $bytearray bytevector-u8-ref)
 
   )
