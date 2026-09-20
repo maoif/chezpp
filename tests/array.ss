@@ -8,6 +8,14 @@
             (reverse values)
             (loop (cons value values)))))))
 
+(define bytearray-width-roundtrip?
+  (lambda (width lower-set! lower-ref upper-set! upper-ref value)
+    (let ([lower (make-bytearray width 0)] [upper (make-bytearray width 0)])
+      (lower-set! lower 0 value)
+      (upper-set! upper 0 value)
+      (and (equal? value (lower-ref lower 0))
+           (equal? value (upper-ref upper 0))))))
+
 
 (mat array
 
@@ -33,6 +41,10 @@
      )
 
 (mat bytearray-widths
+     (bytearray-width-roundtrip? 1 bytearray-u8-set! bytearray-u8-ref
+                                  bytearray-U8-set! bytearray-U8-ref 200)
+     (bytearray-width-roundtrip? 1 bytearray-s8-set! bytearray-s8-ref
+                                  bytearray-S8-set! bytearray-S8-ref -100)
      (let ([a (make-bytearray 2 0)])
        (bytearray-u16-set! a 0 #x1234)
        (and (= (bytearray-u16-ref a 0) #x1234)
@@ -42,6 +54,39 @@
        (bytearray-fp32-set! a 0 1.5)
        (= (bytearray-fp32-ref a 0) 1.5))
 
+     (bytearray-width-roundtrip? 2 bytearray-u16-set! bytearray-u16-ref
+                                  bytearray-U16-set! bytearray-U16-ref 50000)
+     (bytearray-width-roundtrip? 2 bytearray-s16-set! bytearray-s16-ref
+                                  bytearray-S16-set! bytearray-S16-ref -20000)
+     (bytearray-width-roundtrip? 3 bytearray-u24-set! bytearray-u24-ref
+                                  bytearray-U24-set! bytearray-U24-ref 1000000)
+     (bytearray-width-roundtrip? 3 bytearray-s24-set! bytearray-s24-ref
+                                  bytearray-S24-set! bytearray-S24-ref -1000000)
+     (bytearray-width-roundtrip? 4 bytearray-u32-set! bytearray-u32-ref
+                                  bytearray-U32-set! bytearray-U32-ref 3000000000)
+     (bytearray-width-roundtrip? 4 bytearray-s32-set! bytearray-s32-ref
+                                  bytearray-S32-set! bytearray-S32-ref -1000000000)
+     (bytearray-width-roundtrip? 5 bytearray-u40-set! bytearray-u40-ref
+                                  bytearray-U40-set! bytearray-U40-ref 100000000000)
+     (bytearray-width-roundtrip? 5 bytearray-s40-set! bytearray-s40-ref
+                                  bytearray-S40-set! bytearray-S40-ref -100000000000)
+     (bytearray-width-roundtrip? 6 bytearray-u48-set! bytearray-u48-ref
+                                  bytearray-U48-set! bytearray-U48-ref 200000000000000)
+     (bytearray-width-roundtrip? 6 bytearray-s48-set! bytearray-s48-ref
+                                  bytearray-S48-set! bytearray-S48-ref -100000000000000)
+     (bytearray-width-roundtrip? 7 bytearray-u56-set! bytearray-u56-ref
+                                  bytearray-U56-set! bytearray-U56-ref 50000000000000000)
+     (bytearray-width-roundtrip? 7 bytearray-s56-set! bytearray-s56-ref
+                                  bytearray-S56-set! bytearray-S56-ref -30000000000000000)
+     (bytearray-width-roundtrip? 8 bytearray-u64-set! bytearray-u64-ref
+                                  bytearray-U64-set! bytearray-U64-ref 10000000000000000000)
+     (bytearray-width-roundtrip? 8 bytearray-s64-set! bytearray-s64-ref
+                                  bytearray-S64-set! bytearray-S64-ref -5000000000000000000)
+     (bytearray-width-roundtrip? 4 bytearray-fp32-set! bytearray-fp32-ref
+                                  bytearray-FP32-set! bytearray-FP32-ref 1.5)
+     (bytearray-width-roundtrip? 8 bytearray-fp64-set! bytearray-fp64-ref
+                                  bytearray-FP64-set! bytearray-FP64-ref 1.5)
+
      ;; Width-qualified access rejects storage with trailing partial bytes.
      (error? (bytearray-u16-ref (make-bytearray 1 0) 0))
 
@@ -49,6 +94,31 @@
      (let ([a (make-bytearray 4 0)])
        (bytearray-u16-set! a 1 99)
        (= (bytearray-u16-ref a 1) 99))
+
+     ;; Width-qualified APIs do not accept a runtime endianness argument.
+     (error? (bytearray-u16-ref (make-bytearray 2 0) 0 (endianness little)))
+
+     (let ([a (bytearray-u16-iota 4)])
+       (bytearray-u16-add*! a 2 8 9)
+       (equal? '(0 1 8 9 2 3) (bytearray-u16->list a)))
+
+     (equal? '(0 2 4)
+             (bytearray-u16->list
+              (bytearray-u16-filter even? (bytearray-u16-iota 5))))
+
+     (equal? '(1 2 3)
+             (bytearray-u16->list
+              (bytearray-u16-sort < (bytearray-u16-nums 3 0 -1))))
+
+     (let ([a (bytearray-u16-iota 5)])
+       (bytearray-u16-copy! a 0 a 1 4)
+       (equal? '(0 0 1 2 3) (bytearray-u16->list a)))
+
+     (let ([seen '()])
+       (bytearray-u16-for-each
+        (lambda (value) (set! seen (cons value seen)))
+        (bytearray-u16-iota 3))
+       (equal? '(2 1 0) seen))
      )
 
 (mat flarray

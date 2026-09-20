@@ -91,10 +91,438 @@
           bytearray-s64-ref bytearray-S64-ref bytearray-s64-set! bytearray-S64-set!
           bytearray-fp32-ref bytearray-FP32-ref bytearray-fp32-set! bytearray-FP32-set!
           bytearray-fp64-ref bytearray-FP64-ref bytearray-fp64-set! bytearray-FP64-set!
-          bytearray-u16-add! bytearray-U16-add! bytearray-u16-delete! bytearray-U16-delete!
-          bytearray-u16->list bytearray-U16->list
-          bytearray-u16-map bytearray-U16-map bytearray-u16-for-each bytearray-U16-for-each
-          bytearray-u16->iter bytearray-U16->iter
+          bytearray-u8-add! bytearray-u8-add*! bytearray-u8-delete! bytearray-u8-slice
+          bytearray-u8-slice! bytearray-u8-copy bytearray-u8-copy! bytearray-u8-push!
+          bytearray-u8-pop! bytearray-u8-push-back! bytearray-u8-pop-back! bytearray-u8-filter
+          bytearray-u8-filter! bytearray-u8-partition bytearray-u8-contains? bytearray-u8-contains/p?
+          bytearray-u8-index-of bytearray-u8-find-index bytearray-u8-search bytearray-u8-search*
+          bytearray-u8-append bytearray-u8-append! bytearray-u8-reverse bytearray-u8-reverse!
+          bytearray-u8-map bytearray-u8-map/i bytearray-u8-map! bytearray-u8-map/i!
+          bytearray-u8-for-each bytearray-u8-for-each/i bytearray-u8-map-rev bytearray-u8-map/i-rev
+          bytearray-u8-for-each-rev bytearray-u8-for-each/i-rev bytearray-u8-andmap bytearray-u8-ormap
+          bytearray-u8-fold-left bytearray-u8-fold-left/i bytearray-u8-fold-right bytearray-u8-fold-right/i
+          bytearray-u8-sorted? bytearray-u8-sort bytearray-u8-sort! bytearray-u8->list
+          bytearray-u8->iter bytearray-u8->bytevector bytearray-u8-iota bytearray-u8-nums
+          bytearray-U8-add! bytearray-U8-add*! bytearray-U8-delete! bytearray-U8-slice
+          bytearray-U8-slice! bytearray-U8-copy bytearray-U8-copy! bytearray-U8-push!
+          bytearray-U8-pop! bytearray-U8-push-back! bytearray-U8-pop-back! bytearray-U8-filter
+          bytearray-U8-filter! bytearray-U8-partition bytearray-U8-contains? bytearray-U8-contains/p?
+          bytearray-U8-index-of bytearray-U8-find-index bytearray-U8-search bytearray-U8-search*
+          bytearray-U8-append bytearray-U8-append! bytearray-U8-reverse bytearray-U8-reverse!
+          bytearray-U8-map bytearray-U8-map/i bytearray-U8-map! bytearray-U8-map/i!
+          bytearray-U8-for-each bytearray-U8-for-each/i bytearray-U8-map-rev bytearray-U8-map/i-rev
+          bytearray-U8-for-each-rev bytearray-U8-for-each/i-rev bytearray-U8-andmap bytearray-U8-ormap
+          bytearray-U8-fold-left bytearray-U8-fold-left/i bytearray-U8-fold-right bytearray-U8-fold-right/i
+          bytearray-U8-sorted? bytearray-U8-sort bytearray-U8-sort! bytearray-U8->list
+          bytearray-U8->iter bytearray-U8->bytevector bytearray-U8-iota bytearray-U8-nums
+          bytearray-s8-add! bytearray-s8-add*! bytearray-s8-delete! bytearray-s8-slice
+          bytearray-s8-slice! bytearray-s8-copy bytearray-s8-copy! bytearray-s8-push!
+          bytearray-s8-pop! bytearray-s8-push-back! bytearray-s8-pop-back! bytearray-s8-filter
+          bytearray-s8-filter! bytearray-s8-partition bytearray-s8-contains? bytearray-s8-contains/p?
+          bytearray-s8-index-of bytearray-s8-find-index bytearray-s8-search bytearray-s8-search*
+          bytearray-s8-append bytearray-s8-append! bytearray-s8-reverse bytearray-s8-reverse!
+          bytearray-s8-map bytearray-s8-map/i bytearray-s8-map! bytearray-s8-map/i!
+          bytearray-s8-for-each bytearray-s8-for-each/i bytearray-s8-map-rev bytearray-s8-map/i-rev
+          bytearray-s8-for-each-rev bytearray-s8-for-each/i-rev bytearray-s8-andmap bytearray-s8-ormap
+          bytearray-s8-fold-left bytearray-s8-fold-left/i bytearray-s8-fold-right bytearray-s8-fold-right/i
+          bytearray-s8-sorted? bytearray-s8-sort bytearray-s8-sort! bytearray-s8->list
+          bytearray-s8->iter bytearray-s8->bytevector bytearray-s8-iota bytearray-s8-nums
+          bytearray-S8-add! bytearray-S8-add*! bytearray-S8-delete! bytearray-S8-slice
+          bytearray-S8-slice! bytearray-S8-copy bytearray-S8-copy! bytearray-S8-push!
+          bytearray-S8-pop! bytearray-S8-push-back! bytearray-S8-pop-back! bytearray-S8-filter
+          bytearray-S8-filter! bytearray-S8-partition bytearray-S8-contains? bytearray-S8-contains/p?
+          bytearray-S8-index-of bytearray-S8-find-index bytearray-S8-search bytearray-S8-search*
+          bytearray-S8-append bytearray-S8-append! bytearray-S8-reverse bytearray-S8-reverse!
+          bytearray-S8-map bytearray-S8-map/i bytearray-S8-map! bytearray-S8-map/i!
+          bytearray-S8-for-each bytearray-S8-for-each/i bytearray-S8-map-rev bytearray-S8-map/i-rev
+          bytearray-S8-for-each-rev bytearray-S8-for-each/i-rev bytearray-S8-andmap bytearray-S8-ormap
+          bytearray-S8-fold-left bytearray-S8-fold-left/i bytearray-S8-fold-right bytearray-S8-fold-right/i
+          bytearray-S8-sorted? bytearray-S8-sort bytearray-S8-sort! bytearray-S8->list
+          bytearray-S8->iter bytearray-S8->bytevector bytearray-S8-iota bytearray-S8-nums
+          bytearray-u16-add! bytearray-u16-add*! bytearray-u16-delete! bytearray-u16-slice
+          bytearray-u16-slice! bytearray-u16-copy bytearray-u16-copy! bytearray-u16-push!
+          bytearray-u16-pop! bytearray-u16-push-back! bytearray-u16-pop-back! bytearray-u16-filter
+          bytearray-u16-filter! bytearray-u16-partition bytearray-u16-contains? bytearray-u16-contains/p?
+          bytearray-u16-index-of bytearray-u16-find-index bytearray-u16-search bytearray-u16-search*
+          bytearray-u16-append bytearray-u16-append! bytearray-u16-reverse bytearray-u16-reverse!
+          bytearray-u16-map bytearray-u16-map/i bytearray-u16-map! bytearray-u16-map/i!
+          bytearray-u16-for-each bytearray-u16-for-each/i bytearray-u16-map-rev bytearray-u16-map/i-rev
+          bytearray-u16-for-each-rev bytearray-u16-for-each/i-rev bytearray-u16-andmap bytearray-u16-ormap
+          bytearray-u16-fold-left bytearray-u16-fold-left/i bytearray-u16-fold-right bytearray-u16-fold-right/i
+          bytearray-u16-sorted? bytearray-u16-sort bytearray-u16-sort! bytearray-u16->list
+          bytearray-u16->iter bytearray-u16->bytevector bytearray-u16-iota bytearray-u16-nums
+          bytearray-U16-add! bytearray-U16-add*! bytearray-U16-delete! bytearray-U16-slice
+          bytearray-U16-slice! bytearray-U16-copy bytearray-U16-copy! bytearray-U16-push!
+          bytearray-U16-pop! bytearray-U16-push-back! bytearray-U16-pop-back! bytearray-U16-filter
+          bytearray-U16-filter! bytearray-U16-partition bytearray-U16-contains? bytearray-U16-contains/p?
+          bytearray-U16-index-of bytearray-U16-find-index bytearray-U16-search bytearray-U16-search*
+          bytearray-U16-append bytearray-U16-append! bytearray-U16-reverse bytearray-U16-reverse!
+          bytearray-U16-map bytearray-U16-map/i bytearray-U16-map! bytearray-U16-map/i!
+          bytearray-U16-for-each bytearray-U16-for-each/i bytearray-U16-map-rev bytearray-U16-map/i-rev
+          bytearray-U16-for-each-rev bytearray-U16-for-each/i-rev bytearray-U16-andmap bytearray-U16-ormap
+          bytearray-U16-fold-left bytearray-U16-fold-left/i bytearray-U16-fold-right bytearray-U16-fold-right/i
+          bytearray-U16-sorted? bytearray-U16-sort bytearray-U16-sort! bytearray-U16->list
+          bytearray-U16->iter bytearray-U16->bytevector bytearray-U16-iota bytearray-U16-nums
+          bytearray-s16-add! bytearray-s16-add*! bytearray-s16-delete! bytearray-s16-slice
+          bytearray-s16-slice! bytearray-s16-copy bytearray-s16-copy! bytearray-s16-push!
+          bytearray-s16-pop! bytearray-s16-push-back! bytearray-s16-pop-back! bytearray-s16-filter
+          bytearray-s16-filter! bytearray-s16-partition bytearray-s16-contains? bytearray-s16-contains/p?
+          bytearray-s16-index-of bytearray-s16-find-index bytearray-s16-search bytearray-s16-search*
+          bytearray-s16-append bytearray-s16-append! bytearray-s16-reverse bytearray-s16-reverse!
+          bytearray-s16-map bytearray-s16-map/i bytearray-s16-map! bytearray-s16-map/i!
+          bytearray-s16-for-each bytearray-s16-for-each/i bytearray-s16-map-rev bytearray-s16-map/i-rev
+          bytearray-s16-for-each-rev bytearray-s16-for-each/i-rev bytearray-s16-andmap bytearray-s16-ormap
+          bytearray-s16-fold-left bytearray-s16-fold-left/i bytearray-s16-fold-right bytearray-s16-fold-right/i
+          bytearray-s16-sorted? bytearray-s16-sort bytearray-s16-sort! bytearray-s16->list
+          bytearray-s16->iter bytearray-s16->bytevector bytearray-s16-iota bytearray-s16-nums
+          bytearray-S16-add! bytearray-S16-add*! bytearray-S16-delete! bytearray-S16-slice
+          bytearray-S16-slice! bytearray-S16-copy bytearray-S16-copy! bytearray-S16-push!
+          bytearray-S16-pop! bytearray-S16-push-back! bytearray-S16-pop-back! bytearray-S16-filter
+          bytearray-S16-filter! bytearray-S16-partition bytearray-S16-contains? bytearray-S16-contains/p?
+          bytearray-S16-index-of bytearray-S16-find-index bytearray-S16-search bytearray-S16-search*
+          bytearray-S16-append bytearray-S16-append! bytearray-S16-reverse bytearray-S16-reverse!
+          bytearray-S16-map bytearray-S16-map/i bytearray-S16-map! bytearray-S16-map/i!
+          bytearray-S16-for-each bytearray-S16-for-each/i bytearray-S16-map-rev bytearray-S16-map/i-rev
+          bytearray-S16-for-each-rev bytearray-S16-for-each/i-rev bytearray-S16-andmap bytearray-S16-ormap
+          bytearray-S16-fold-left bytearray-S16-fold-left/i bytearray-S16-fold-right bytearray-S16-fold-right/i
+          bytearray-S16-sorted? bytearray-S16-sort bytearray-S16-sort! bytearray-S16->list
+          bytearray-S16->iter bytearray-S16->bytevector bytearray-S16-iota bytearray-S16-nums
+          bytearray-u24-add! bytearray-u24-add*! bytearray-u24-delete! bytearray-u24-slice
+          bytearray-u24-slice! bytearray-u24-copy bytearray-u24-copy! bytearray-u24-push!
+          bytearray-u24-pop! bytearray-u24-push-back! bytearray-u24-pop-back! bytearray-u24-filter
+          bytearray-u24-filter! bytearray-u24-partition bytearray-u24-contains? bytearray-u24-contains/p?
+          bytearray-u24-index-of bytearray-u24-find-index bytearray-u24-search bytearray-u24-search*
+          bytearray-u24-append bytearray-u24-append! bytearray-u24-reverse bytearray-u24-reverse!
+          bytearray-u24-map bytearray-u24-map/i bytearray-u24-map! bytearray-u24-map/i!
+          bytearray-u24-for-each bytearray-u24-for-each/i bytearray-u24-map-rev bytearray-u24-map/i-rev
+          bytearray-u24-for-each-rev bytearray-u24-for-each/i-rev bytearray-u24-andmap bytearray-u24-ormap
+          bytearray-u24-fold-left bytearray-u24-fold-left/i bytearray-u24-fold-right bytearray-u24-fold-right/i
+          bytearray-u24-sorted? bytearray-u24-sort bytearray-u24-sort! bytearray-u24->list
+          bytearray-u24->iter bytearray-u24->bytevector bytearray-u24-iota bytearray-u24-nums
+          bytearray-U24-add! bytearray-U24-add*! bytearray-U24-delete! bytearray-U24-slice
+          bytearray-U24-slice! bytearray-U24-copy bytearray-U24-copy! bytearray-U24-push!
+          bytearray-U24-pop! bytearray-U24-push-back! bytearray-U24-pop-back! bytearray-U24-filter
+          bytearray-U24-filter! bytearray-U24-partition bytearray-U24-contains? bytearray-U24-contains/p?
+          bytearray-U24-index-of bytearray-U24-find-index bytearray-U24-search bytearray-U24-search*
+          bytearray-U24-append bytearray-U24-append! bytearray-U24-reverse bytearray-U24-reverse!
+          bytearray-U24-map bytearray-U24-map/i bytearray-U24-map! bytearray-U24-map/i!
+          bytearray-U24-for-each bytearray-U24-for-each/i bytearray-U24-map-rev bytearray-U24-map/i-rev
+          bytearray-U24-for-each-rev bytearray-U24-for-each/i-rev bytearray-U24-andmap bytearray-U24-ormap
+          bytearray-U24-fold-left bytearray-U24-fold-left/i bytearray-U24-fold-right bytearray-U24-fold-right/i
+          bytearray-U24-sorted? bytearray-U24-sort bytearray-U24-sort! bytearray-U24->list
+          bytearray-U24->iter bytearray-U24->bytevector bytearray-U24-iota bytearray-U24-nums
+          bytearray-s24-add! bytearray-s24-add*! bytearray-s24-delete! bytearray-s24-slice
+          bytearray-s24-slice! bytearray-s24-copy bytearray-s24-copy! bytearray-s24-push!
+          bytearray-s24-pop! bytearray-s24-push-back! bytearray-s24-pop-back! bytearray-s24-filter
+          bytearray-s24-filter! bytearray-s24-partition bytearray-s24-contains? bytearray-s24-contains/p?
+          bytearray-s24-index-of bytearray-s24-find-index bytearray-s24-search bytearray-s24-search*
+          bytearray-s24-append bytearray-s24-append! bytearray-s24-reverse bytearray-s24-reverse!
+          bytearray-s24-map bytearray-s24-map/i bytearray-s24-map! bytearray-s24-map/i!
+          bytearray-s24-for-each bytearray-s24-for-each/i bytearray-s24-map-rev bytearray-s24-map/i-rev
+          bytearray-s24-for-each-rev bytearray-s24-for-each/i-rev bytearray-s24-andmap bytearray-s24-ormap
+          bytearray-s24-fold-left bytearray-s24-fold-left/i bytearray-s24-fold-right bytearray-s24-fold-right/i
+          bytearray-s24-sorted? bytearray-s24-sort bytearray-s24-sort! bytearray-s24->list
+          bytearray-s24->iter bytearray-s24->bytevector bytearray-s24-iota bytearray-s24-nums
+          bytearray-S24-add! bytearray-S24-add*! bytearray-S24-delete! bytearray-S24-slice
+          bytearray-S24-slice! bytearray-S24-copy bytearray-S24-copy! bytearray-S24-push!
+          bytearray-S24-pop! bytearray-S24-push-back! bytearray-S24-pop-back! bytearray-S24-filter
+          bytearray-S24-filter! bytearray-S24-partition bytearray-S24-contains? bytearray-S24-contains/p?
+          bytearray-S24-index-of bytearray-S24-find-index bytearray-S24-search bytearray-S24-search*
+          bytearray-S24-append bytearray-S24-append! bytearray-S24-reverse bytearray-S24-reverse!
+          bytearray-S24-map bytearray-S24-map/i bytearray-S24-map! bytearray-S24-map/i!
+          bytearray-S24-for-each bytearray-S24-for-each/i bytearray-S24-map-rev bytearray-S24-map/i-rev
+          bytearray-S24-for-each-rev bytearray-S24-for-each/i-rev bytearray-S24-andmap bytearray-S24-ormap
+          bytearray-S24-fold-left bytearray-S24-fold-left/i bytearray-S24-fold-right bytearray-S24-fold-right/i
+          bytearray-S24-sorted? bytearray-S24-sort bytearray-S24-sort! bytearray-S24->list
+          bytearray-S24->iter bytearray-S24->bytevector bytearray-S24-iota bytearray-S24-nums
+          bytearray-u32-add! bytearray-u32-add*! bytearray-u32-delete! bytearray-u32-slice
+          bytearray-u32-slice! bytearray-u32-copy bytearray-u32-copy! bytearray-u32-push!
+          bytearray-u32-pop! bytearray-u32-push-back! bytearray-u32-pop-back! bytearray-u32-filter
+          bytearray-u32-filter! bytearray-u32-partition bytearray-u32-contains? bytearray-u32-contains/p?
+          bytearray-u32-index-of bytearray-u32-find-index bytearray-u32-search bytearray-u32-search*
+          bytearray-u32-append bytearray-u32-append! bytearray-u32-reverse bytearray-u32-reverse!
+          bytearray-u32-map bytearray-u32-map/i bytearray-u32-map! bytearray-u32-map/i!
+          bytearray-u32-for-each bytearray-u32-for-each/i bytearray-u32-map-rev bytearray-u32-map/i-rev
+          bytearray-u32-for-each-rev bytearray-u32-for-each/i-rev bytearray-u32-andmap bytearray-u32-ormap
+          bytearray-u32-fold-left bytearray-u32-fold-left/i bytearray-u32-fold-right bytearray-u32-fold-right/i
+          bytearray-u32-sorted? bytearray-u32-sort bytearray-u32-sort! bytearray-u32->list
+          bytearray-u32->iter bytearray-u32->bytevector bytearray-u32-iota bytearray-u32-nums
+          bytearray-U32-add! bytearray-U32-add*! bytearray-U32-delete! bytearray-U32-slice
+          bytearray-U32-slice! bytearray-U32-copy bytearray-U32-copy! bytearray-U32-push!
+          bytearray-U32-pop! bytearray-U32-push-back! bytearray-U32-pop-back! bytearray-U32-filter
+          bytearray-U32-filter! bytearray-U32-partition bytearray-U32-contains? bytearray-U32-contains/p?
+          bytearray-U32-index-of bytearray-U32-find-index bytearray-U32-search bytearray-U32-search*
+          bytearray-U32-append bytearray-U32-append! bytearray-U32-reverse bytearray-U32-reverse!
+          bytearray-U32-map bytearray-U32-map/i bytearray-U32-map! bytearray-U32-map/i!
+          bytearray-U32-for-each bytearray-U32-for-each/i bytearray-U32-map-rev bytearray-U32-map/i-rev
+          bytearray-U32-for-each-rev bytearray-U32-for-each/i-rev bytearray-U32-andmap bytearray-U32-ormap
+          bytearray-U32-fold-left bytearray-U32-fold-left/i bytearray-U32-fold-right bytearray-U32-fold-right/i
+          bytearray-U32-sorted? bytearray-U32-sort bytearray-U32-sort! bytearray-U32->list
+          bytearray-U32->iter bytearray-U32->bytevector bytearray-U32-iota bytearray-U32-nums
+          bytearray-s32-add! bytearray-s32-add*! bytearray-s32-delete! bytearray-s32-slice
+          bytearray-s32-slice! bytearray-s32-copy bytearray-s32-copy! bytearray-s32-push!
+          bytearray-s32-pop! bytearray-s32-push-back! bytearray-s32-pop-back! bytearray-s32-filter
+          bytearray-s32-filter! bytearray-s32-partition bytearray-s32-contains? bytearray-s32-contains/p?
+          bytearray-s32-index-of bytearray-s32-find-index bytearray-s32-search bytearray-s32-search*
+          bytearray-s32-append bytearray-s32-append! bytearray-s32-reverse bytearray-s32-reverse!
+          bytearray-s32-map bytearray-s32-map/i bytearray-s32-map! bytearray-s32-map/i!
+          bytearray-s32-for-each bytearray-s32-for-each/i bytearray-s32-map-rev bytearray-s32-map/i-rev
+          bytearray-s32-for-each-rev bytearray-s32-for-each/i-rev bytearray-s32-andmap bytearray-s32-ormap
+          bytearray-s32-fold-left bytearray-s32-fold-left/i bytearray-s32-fold-right bytearray-s32-fold-right/i
+          bytearray-s32-sorted? bytearray-s32-sort bytearray-s32-sort! bytearray-s32->list
+          bytearray-s32->iter bytearray-s32->bytevector bytearray-s32-iota bytearray-s32-nums
+          bytearray-S32-add! bytearray-S32-add*! bytearray-S32-delete! bytearray-S32-slice
+          bytearray-S32-slice! bytearray-S32-copy bytearray-S32-copy! bytearray-S32-push!
+          bytearray-S32-pop! bytearray-S32-push-back! bytearray-S32-pop-back! bytearray-S32-filter
+          bytearray-S32-filter! bytearray-S32-partition bytearray-S32-contains? bytearray-S32-contains/p?
+          bytearray-S32-index-of bytearray-S32-find-index bytearray-S32-search bytearray-S32-search*
+          bytearray-S32-append bytearray-S32-append! bytearray-S32-reverse bytearray-S32-reverse!
+          bytearray-S32-map bytearray-S32-map/i bytearray-S32-map! bytearray-S32-map/i!
+          bytearray-S32-for-each bytearray-S32-for-each/i bytearray-S32-map-rev bytearray-S32-map/i-rev
+          bytearray-S32-for-each-rev bytearray-S32-for-each/i-rev bytearray-S32-andmap bytearray-S32-ormap
+          bytearray-S32-fold-left bytearray-S32-fold-left/i bytearray-S32-fold-right bytearray-S32-fold-right/i
+          bytearray-S32-sorted? bytearray-S32-sort bytearray-S32-sort! bytearray-S32->list
+          bytearray-S32->iter bytearray-S32->bytevector bytearray-S32-iota bytearray-S32-nums
+          bytearray-u40-add! bytearray-u40-add*! bytearray-u40-delete! bytearray-u40-slice
+          bytearray-u40-slice! bytearray-u40-copy bytearray-u40-copy! bytearray-u40-push!
+          bytearray-u40-pop! bytearray-u40-push-back! bytearray-u40-pop-back! bytearray-u40-filter
+          bytearray-u40-filter! bytearray-u40-partition bytearray-u40-contains? bytearray-u40-contains/p?
+          bytearray-u40-index-of bytearray-u40-find-index bytearray-u40-search bytearray-u40-search*
+          bytearray-u40-append bytearray-u40-append! bytearray-u40-reverse bytearray-u40-reverse!
+          bytearray-u40-map bytearray-u40-map/i bytearray-u40-map! bytearray-u40-map/i!
+          bytearray-u40-for-each bytearray-u40-for-each/i bytearray-u40-map-rev bytearray-u40-map/i-rev
+          bytearray-u40-for-each-rev bytearray-u40-for-each/i-rev bytearray-u40-andmap bytearray-u40-ormap
+          bytearray-u40-fold-left bytearray-u40-fold-left/i bytearray-u40-fold-right bytearray-u40-fold-right/i
+          bytearray-u40-sorted? bytearray-u40-sort bytearray-u40-sort! bytearray-u40->list
+          bytearray-u40->iter bytearray-u40->bytevector bytearray-u40-iota bytearray-u40-nums
+          bytearray-U40-add! bytearray-U40-add*! bytearray-U40-delete! bytearray-U40-slice
+          bytearray-U40-slice! bytearray-U40-copy bytearray-U40-copy! bytearray-U40-push!
+          bytearray-U40-pop! bytearray-U40-push-back! bytearray-U40-pop-back! bytearray-U40-filter
+          bytearray-U40-filter! bytearray-U40-partition bytearray-U40-contains? bytearray-U40-contains/p?
+          bytearray-U40-index-of bytearray-U40-find-index bytearray-U40-search bytearray-U40-search*
+          bytearray-U40-append bytearray-U40-append! bytearray-U40-reverse bytearray-U40-reverse!
+          bytearray-U40-map bytearray-U40-map/i bytearray-U40-map! bytearray-U40-map/i!
+          bytearray-U40-for-each bytearray-U40-for-each/i bytearray-U40-map-rev bytearray-U40-map/i-rev
+          bytearray-U40-for-each-rev bytearray-U40-for-each/i-rev bytearray-U40-andmap bytearray-U40-ormap
+          bytearray-U40-fold-left bytearray-U40-fold-left/i bytearray-U40-fold-right bytearray-U40-fold-right/i
+          bytearray-U40-sorted? bytearray-U40-sort bytearray-U40-sort! bytearray-U40->list
+          bytearray-U40->iter bytearray-U40->bytevector bytearray-U40-iota bytearray-U40-nums
+          bytearray-s40-add! bytearray-s40-add*! bytearray-s40-delete! bytearray-s40-slice
+          bytearray-s40-slice! bytearray-s40-copy bytearray-s40-copy! bytearray-s40-push!
+          bytearray-s40-pop! bytearray-s40-push-back! bytearray-s40-pop-back! bytearray-s40-filter
+          bytearray-s40-filter! bytearray-s40-partition bytearray-s40-contains? bytearray-s40-contains/p?
+          bytearray-s40-index-of bytearray-s40-find-index bytearray-s40-search bytearray-s40-search*
+          bytearray-s40-append bytearray-s40-append! bytearray-s40-reverse bytearray-s40-reverse!
+          bytearray-s40-map bytearray-s40-map/i bytearray-s40-map! bytearray-s40-map/i!
+          bytearray-s40-for-each bytearray-s40-for-each/i bytearray-s40-map-rev bytearray-s40-map/i-rev
+          bytearray-s40-for-each-rev bytearray-s40-for-each/i-rev bytearray-s40-andmap bytearray-s40-ormap
+          bytearray-s40-fold-left bytearray-s40-fold-left/i bytearray-s40-fold-right bytearray-s40-fold-right/i
+          bytearray-s40-sorted? bytearray-s40-sort bytearray-s40-sort! bytearray-s40->list
+          bytearray-s40->iter bytearray-s40->bytevector bytearray-s40-iota bytearray-s40-nums
+          bytearray-S40-add! bytearray-S40-add*! bytearray-S40-delete! bytearray-S40-slice
+          bytearray-S40-slice! bytearray-S40-copy bytearray-S40-copy! bytearray-S40-push!
+          bytearray-S40-pop! bytearray-S40-push-back! bytearray-S40-pop-back! bytearray-S40-filter
+          bytearray-S40-filter! bytearray-S40-partition bytearray-S40-contains? bytearray-S40-contains/p?
+          bytearray-S40-index-of bytearray-S40-find-index bytearray-S40-search bytearray-S40-search*
+          bytearray-S40-append bytearray-S40-append! bytearray-S40-reverse bytearray-S40-reverse!
+          bytearray-S40-map bytearray-S40-map/i bytearray-S40-map! bytearray-S40-map/i!
+          bytearray-S40-for-each bytearray-S40-for-each/i bytearray-S40-map-rev bytearray-S40-map/i-rev
+          bytearray-S40-for-each-rev bytearray-S40-for-each/i-rev bytearray-S40-andmap bytearray-S40-ormap
+          bytearray-S40-fold-left bytearray-S40-fold-left/i bytearray-S40-fold-right bytearray-S40-fold-right/i
+          bytearray-S40-sorted? bytearray-S40-sort bytearray-S40-sort! bytearray-S40->list
+          bytearray-S40->iter bytearray-S40->bytevector bytearray-S40-iota bytearray-S40-nums
+          bytearray-u48-add! bytearray-u48-add*! bytearray-u48-delete! bytearray-u48-slice
+          bytearray-u48-slice! bytearray-u48-copy bytearray-u48-copy! bytearray-u48-push!
+          bytearray-u48-pop! bytearray-u48-push-back! bytearray-u48-pop-back! bytearray-u48-filter
+          bytearray-u48-filter! bytearray-u48-partition bytearray-u48-contains? bytearray-u48-contains/p?
+          bytearray-u48-index-of bytearray-u48-find-index bytearray-u48-search bytearray-u48-search*
+          bytearray-u48-append bytearray-u48-append! bytearray-u48-reverse bytearray-u48-reverse!
+          bytearray-u48-map bytearray-u48-map/i bytearray-u48-map! bytearray-u48-map/i!
+          bytearray-u48-for-each bytearray-u48-for-each/i bytearray-u48-map-rev bytearray-u48-map/i-rev
+          bytearray-u48-for-each-rev bytearray-u48-for-each/i-rev bytearray-u48-andmap bytearray-u48-ormap
+          bytearray-u48-fold-left bytearray-u48-fold-left/i bytearray-u48-fold-right bytearray-u48-fold-right/i
+          bytearray-u48-sorted? bytearray-u48-sort bytearray-u48-sort! bytearray-u48->list
+          bytearray-u48->iter bytearray-u48->bytevector bytearray-u48-iota bytearray-u48-nums
+          bytearray-U48-add! bytearray-U48-add*! bytearray-U48-delete! bytearray-U48-slice
+          bytearray-U48-slice! bytearray-U48-copy bytearray-U48-copy! bytearray-U48-push!
+          bytearray-U48-pop! bytearray-U48-push-back! bytearray-U48-pop-back! bytearray-U48-filter
+          bytearray-U48-filter! bytearray-U48-partition bytearray-U48-contains? bytearray-U48-contains/p?
+          bytearray-U48-index-of bytearray-U48-find-index bytearray-U48-search bytearray-U48-search*
+          bytearray-U48-append bytearray-U48-append! bytearray-U48-reverse bytearray-U48-reverse!
+          bytearray-U48-map bytearray-U48-map/i bytearray-U48-map! bytearray-U48-map/i!
+          bytearray-U48-for-each bytearray-U48-for-each/i bytearray-U48-map-rev bytearray-U48-map/i-rev
+          bytearray-U48-for-each-rev bytearray-U48-for-each/i-rev bytearray-U48-andmap bytearray-U48-ormap
+          bytearray-U48-fold-left bytearray-U48-fold-left/i bytearray-U48-fold-right bytearray-U48-fold-right/i
+          bytearray-U48-sorted? bytearray-U48-sort bytearray-U48-sort! bytearray-U48->list
+          bytearray-U48->iter bytearray-U48->bytevector bytearray-U48-iota bytearray-U48-nums
+          bytearray-s48-add! bytearray-s48-add*! bytearray-s48-delete! bytearray-s48-slice
+          bytearray-s48-slice! bytearray-s48-copy bytearray-s48-copy! bytearray-s48-push!
+          bytearray-s48-pop! bytearray-s48-push-back! bytearray-s48-pop-back! bytearray-s48-filter
+          bytearray-s48-filter! bytearray-s48-partition bytearray-s48-contains? bytearray-s48-contains/p?
+          bytearray-s48-index-of bytearray-s48-find-index bytearray-s48-search bytearray-s48-search*
+          bytearray-s48-append bytearray-s48-append! bytearray-s48-reverse bytearray-s48-reverse!
+          bytearray-s48-map bytearray-s48-map/i bytearray-s48-map! bytearray-s48-map/i!
+          bytearray-s48-for-each bytearray-s48-for-each/i bytearray-s48-map-rev bytearray-s48-map/i-rev
+          bytearray-s48-for-each-rev bytearray-s48-for-each/i-rev bytearray-s48-andmap bytearray-s48-ormap
+          bytearray-s48-fold-left bytearray-s48-fold-left/i bytearray-s48-fold-right bytearray-s48-fold-right/i
+          bytearray-s48-sorted? bytearray-s48-sort bytearray-s48-sort! bytearray-s48->list
+          bytearray-s48->iter bytearray-s48->bytevector bytearray-s48-iota bytearray-s48-nums
+          bytearray-S48-add! bytearray-S48-add*! bytearray-S48-delete! bytearray-S48-slice
+          bytearray-S48-slice! bytearray-S48-copy bytearray-S48-copy! bytearray-S48-push!
+          bytearray-S48-pop! bytearray-S48-push-back! bytearray-S48-pop-back! bytearray-S48-filter
+          bytearray-S48-filter! bytearray-S48-partition bytearray-S48-contains? bytearray-S48-contains/p?
+          bytearray-S48-index-of bytearray-S48-find-index bytearray-S48-search bytearray-S48-search*
+          bytearray-S48-append bytearray-S48-append! bytearray-S48-reverse bytearray-S48-reverse!
+          bytearray-S48-map bytearray-S48-map/i bytearray-S48-map! bytearray-S48-map/i!
+          bytearray-S48-for-each bytearray-S48-for-each/i bytearray-S48-map-rev bytearray-S48-map/i-rev
+          bytearray-S48-for-each-rev bytearray-S48-for-each/i-rev bytearray-S48-andmap bytearray-S48-ormap
+          bytearray-S48-fold-left bytearray-S48-fold-left/i bytearray-S48-fold-right bytearray-S48-fold-right/i
+          bytearray-S48-sorted? bytearray-S48-sort bytearray-S48-sort! bytearray-S48->list
+          bytearray-S48->iter bytearray-S48->bytevector bytearray-S48-iota bytearray-S48-nums
+          bytearray-u56-add! bytearray-u56-add*! bytearray-u56-delete! bytearray-u56-slice
+          bytearray-u56-slice! bytearray-u56-copy bytearray-u56-copy! bytearray-u56-push!
+          bytearray-u56-pop! bytearray-u56-push-back! bytearray-u56-pop-back! bytearray-u56-filter
+          bytearray-u56-filter! bytearray-u56-partition bytearray-u56-contains? bytearray-u56-contains/p?
+          bytearray-u56-index-of bytearray-u56-find-index bytearray-u56-search bytearray-u56-search*
+          bytearray-u56-append bytearray-u56-append! bytearray-u56-reverse bytearray-u56-reverse!
+          bytearray-u56-map bytearray-u56-map/i bytearray-u56-map! bytearray-u56-map/i!
+          bytearray-u56-for-each bytearray-u56-for-each/i bytearray-u56-map-rev bytearray-u56-map/i-rev
+          bytearray-u56-for-each-rev bytearray-u56-for-each/i-rev bytearray-u56-andmap bytearray-u56-ormap
+          bytearray-u56-fold-left bytearray-u56-fold-left/i bytearray-u56-fold-right bytearray-u56-fold-right/i
+          bytearray-u56-sorted? bytearray-u56-sort bytearray-u56-sort! bytearray-u56->list
+          bytearray-u56->iter bytearray-u56->bytevector bytearray-u56-iota bytearray-u56-nums
+          bytearray-U56-add! bytearray-U56-add*! bytearray-U56-delete! bytearray-U56-slice
+          bytearray-U56-slice! bytearray-U56-copy bytearray-U56-copy! bytearray-U56-push!
+          bytearray-U56-pop! bytearray-U56-push-back! bytearray-U56-pop-back! bytearray-U56-filter
+          bytearray-U56-filter! bytearray-U56-partition bytearray-U56-contains? bytearray-U56-contains/p?
+          bytearray-U56-index-of bytearray-U56-find-index bytearray-U56-search bytearray-U56-search*
+          bytearray-U56-append bytearray-U56-append! bytearray-U56-reverse bytearray-U56-reverse!
+          bytearray-U56-map bytearray-U56-map/i bytearray-U56-map! bytearray-U56-map/i!
+          bytearray-U56-for-each bytearray-U56-for-each/i bytearray-U56-map-rev bytearray-U56-map/i-rev
+          bytearray-U56-for-each-rev bytearray-U56-for-each/i-rev bytearray-U56-andmap bytearray-U56-ormap
+          bytearray-U56-fold-left bytearray-U56-fold-left/i bytearray-U56-fold-right bytearray-U56-fold-right/i
+          bytearray-U56-sorted? bytearray-U56-sort bytearray-U56-sort! bytearray-U56->list
+          bytearray-U56->iter bytearray-U56->bytevector bytearray-U56-iota bytearray-U56-nums
+          bytearray-s56-add! bytearray-s56-add*! bytearray-s56-delete! bytearray-s56-slice
+          bytearray-s56-slice! bytearray-s56-copy bytearray-s56-copy! bytearray-s56-push!
+          bytearray-s56-pop! bytearray-s56-push-back! bytearray-s56-pop-back! bytearray-s56-filter
+          bytearray-s56-filter! bytearray-s56-partition bytearray-s56-contains? bytearray-s56-contains/p?
+          bytearray-s56-index-of bytearray-s56-find-index bytearray-s56-search bytearray-s56-search*
+          bytearray-s56-append bytearray-s56-append! bytearray-s56-reverse bytearray-s56-reverse!
+          bytearray-s56-map bytearray-s56-map/i bytearray-s56-map! bytearray-s56-map/i!
+          bytearray-s56-for-each bytearray-s56-for-each/i bytearray-s56-map-rev bytearray-s56-map/i-rev
+          bytearray-s56-for-each-rev bytearray-s56-for-each/i-rev bytearray-s56-andmap bytearray-s56-ormap
+          bytearray-s56-fold-left bytearray-s56-fold-left/i bytearray-s56-fold-right bytearray-s56-fold-right/i
+          bytearray-s56-sorted? bytearray-s56-sort bytearray-s56-sort! bytearray-s56->list
+          bytearray-s56->iter bytearray-s56->bytevector bytearray-s56-iota bytearray-s56-nums
+          bytearray-S56-add! bytearray-S56-add*! bytearray-S56-delete! bytearray-S56-slice
+          bytearray-S56-slice! bytearray-S56-copy bytearray-S56-copy! bytearray-S56-push!
+          bytearray-S56-pop! bytearray-S56-push-back! bytearray-S56-pop-back! bytearray-S56-filter
+          bytearray-S56-filter! bytearray-S56-partition bytearray-S56-contains? bytearray-S56-contains/p?
+          bytearray-S56-index-of bytearray-S56-find-index bytearray-S56-search bytearray-S56-search*
+          bytearray-S56-append bytearray-S56-append! bytearray-S56-reverse bytearray-S56-reverse!
+          bytearray-S56-map bytearray-S56-map/i bytearray-S56-map! bytearray-S56-map/i!
+          bytearray-S56-for-each bytearray-S56-for-each/i bytearray-S56-map-rev bytearray-S56-map/i-rev
+          bytearray-S56-for-each-rev bytearray-S56-for-each/i-rev bytearray-S56-andmap bytearray-S56-ormap
+          bytearray-S56-fold-left bytearray-S56-fold-left/i bytearray-S56-fold-right bytearray-S56-fold-right/i
+          bytearray-S56-sorted? bytearray-S56-sort bytearray-S56-sort! bytearray-S56->list
+          bytearray-S56->iter bytearray-S56->bytevector bytearray-S56-iota bytearray-S56-nums
+          bytearray-u64-add! bytearray-u64-add*! bytearray-u64-delete! bytearray-u64-slice
+          bytearray-u64-slice! bytearray-u64-copy bytearray-u64-copy! bytearray-u64-push!
+          bytearray-u64-pop! bytearray-u64-push-back! bytearray-u64-pop-back! bytearray-u64-filter
+          bytearray-u64-filter! bytearray-u64-partition bytearray-u64-contains? bytearray-u64-contains/p?
+          bytearray-u64-index-of bytearray-u64-find-index bytearray-u64-search bytearray-u64-search*
+          bytearray-u64-append bytearray-u64-append! bytearray-u64-reverse bytearray-u64-reverse!
+          bytearray-u64-map bytearray-u64-map/i bytearray-u64-map! bytearray-u64-map/i!
+          bytearray-u64-for-each bytearray-u64-for-each/i bytearray-u64-map-rev bytearray-u64-map/i-rev
+          bytearray-u64-for-each-rev bytearray-u64-for-each/i-rev bytearray-u64-andmap bytearray-u64-ormap
+          bytearray-u64-fold-left bytearray-u64-fold-left/i bytearray-u64-fold-right bytearray-u64-fold-right/i
+          bytearray-u64-sorted? bytearray-u64-sort bytearray-u64-sort! bytearray-u64->list
+          bytearray-u64->iter bytearray-u64->bytevector bytearray-u64-iota bytearray-u64-nums
+          bytearray-U64-add! bytearray-U64-add*! bytearray-U64-delete! bytearray-U64-slice
+          bytearray-U64-slice! bytearray-U64-copy bytearray-U64-copy! bytearray-U64-push!
+          bytearray-U64-pop! bytearray-U64-push-back! bytearray-U64-pop-back! bytearray-U64-filter
+          bytearray-U64-filter! bytearray-U64-partition bytearray-U64-contains? bytearray-U64-contains/p?
+          bytearray-U64-index-of bytearray-U64-find-index bytearray-U64-search bytearray-U64-search*
+          bytearray-U64-append bytearray-U64-append! bytearray-U64-reverse bytearray-U64-reverse!
+          bytearray-U64-map bytearray-U64-map/i bytearray-U64-map! bytearray-U64-map/i!
+          bytearray-U64-for-each bytearray-U64-for-each/i bytearray-U64-map-rev bytearray-U64-map/i-rev
+          bytearray-U64-for-each-rev bytearray-U64-for-each/i-rev bytearray-U64-andmap bytearray-U64-ormap
+          bytearray-U64-fold-left bytearray-U64-fold-left/i bytearray-U64-fold-right bytearray-U64-fold-right/i
+          bytearray-U64-sorted? bytearray-U64-sort bytearray-U64-sort! bytearray-U64->list
+          bytearray-U64->iter bytearray-U64->bytevector bytearray-U64-iota bytearray-U64-nums
+          bytearray-s64-add! bytearray-s64-add*! bytearray-s64-delete! bytearray-s64-slice
+          bytearray-s64-slice! bytearray-s64-copy bytearray-s64-copy! bytearray-s64-push!
+          bytearray-s64-pop! bytearray-s64-push-back! bytearray-s64-pop-back! bytearray-s64-filter
+          bytearray-s64-filter! bytearray-s64-partition bytearray-s64-contains? bytearray-s64-contains/p?
+          bytearray-s64-index-of bytearray-s64-find-index bytearray-s64-search bytearray-s64-search*
+          bytearray-s64-append bytearray-s64-append! bytearray-s64-reverse bytearray-s64-reverse!
+          bytearray-s64-map bytearray-s64-map/i bytearray-s64-map! bytearray-s64-map/i!
+          bytearray-s64-for-each bytearray-s64-for-each/i bytearray-s64-map-rev bytearray-s64-map/i-rev
+          bytearray-s64-for-each-rev bytearray-s64-for-each/i-rev bytearray-s64-andmap bytearray-s64-ormap
+          bytearray-s64-fold-left bytearray-s64-fold-left/i bytearray-s64-fold-right bytearray-s64-fold-right/i
+          bytearray-s64-sorted? bytearray-s64-sort bytearray-s64-sort! bytearray-s64->list
+          bytearray-s64->iter bytearray-s64->bytevector bytearray-s64-iota bytearray-s64-nums
+          bytearray-S64-add! bytearray-S64-add*! bytearray-S64-delete! bytearray-S64-slice
+          bytearray-S64-slice! bytearray-S64-copy bytearray-S64-copy! bytearray-S64-push!
+          bytearray-S64-pop! bytearray-S64-push-back! bytearray-S64-pop-back! bytearray-S64-filter
+          bytearray-S64-filter! bytearray-S64-partition bytearray-S64-contains? bytearray-S64-contains/p?
+          bytearray-S64-index-of bytearray-S64-find-index bytearray-S64-search bytearray-S64-search*
+          bytearray-S64-append bytearray-S64-append! bytearray-S64-reverse bytearray-S64-reverse!
+          bytearray-S64-map bytearray-S64-map/i bytearray-S64-map! bytearray-S64-map/i!
+          bytearray-S64-for-each bytearray-S64-for-each/i bytearray-S64-map-rev bytearray-S64-map/i-rev
+          bytearray-S64-for-each-rev bytearray-S64-for-each/i-rev bytearray-S64-andmap bytearray-S64-ormap
+          bytearray-S64-fold-left bytearray-S64-fold-left/i bytearray-S64-fold-right bytearray-S64-fold-right/i
+          bytearray-S64-sorted? bytearray-S64-sort bytearray-S64-sort! bytearray-S64->list
+          bytearray-S64->iter bytearray-S64->bytevector bytearray-S64-iota bytearray-S64-nums
+          bytearray-fp32-add! bytearray-fp32-add*! bytearray-fp32-delete! bytearray-fp32-slice
+          bytearray-fp32-slice! bytearray-fp32-copy bytearray-fp32-copy! bytearray-fp32-push!
+          bytearray-fp32-pop! bytearray-fp32-push-back! bytearray-fp32-pop-back! bytearray-fp32-filter
+          bytearray-fp32-filter! bytearray-fp32-partition bytearray-fp32-contains? bytearray-fp32-contains/p?
+          bytearray-fp32-index-of bytearray-fp32-find-index bytearray-fp32-search bytearray-fp32-search*
+          bytearray-fp32-append bytearray-fp32-append! bytearray-fp32-reverse bytearray-fp32-reverse!
+          bytearray-fp32-map bytearray-fp32-map/i bytearray-fp32-map! bytearray-fp32-map/i!
+          bytearray-fp32-for-each bytearray-fp32-for-each/i bytearray-fp32-map-rev bytearray-fp32-map/i-rev
+          bytearray-fp32-for-each-rev bytearray-fp32-for-each/i-rev bytearray-fp32-andmap bytearray-fp32-ormap
+          bytearray-fp32-fold-left bytearray-fp32-fold-left/i bytearray-fp32-fold-right bytearray-fp32-fold-right/i
+          bytearray-fp32-sorted? bytearray-fp32-sort bytearray-fp32-sort! bytearray-fp32->list
+          bytearray-fp32->iter bytearray-fp32->bytevector bytearray-fp32-iota bytearray-fp32-nums
+          bytearray-FP32-add! bytearray-FP32-add*! bytearray-FP32-delete! bytearray-FP32-slice
+          bytearray-FP32-slice! bytearray-FP32-copy bytearray-FP32-copy! bytearray-FP32-push!
+          bytearray-FP32-pop! bytearray-FP32-push-back! bytearray-FP32-pop-back! bytearray-FP32-filter
+          bytearray-FP32-filter! bytearray-FP32-partition bytearray-FP32-contains? bytearray-FP32-contains/p?
+          bytearray-FP32-index-of bytearray-FP32-find-index bytearray-FP32-search bytearray-FP32-search*
+          bytearray-FP32-append bytearray-FP32-append! bytearray-FP32-reverse bytearray-FP32-reverse!
+          bytearray-FP32-map bytearray-FP32-map/i bytearray-FP32-map! bytearray-FP32-map/i!
+          bytearray-FP32-for-each bytearray-FP32-for-each/i bytearray-FP32-map-rev bytearray-FP32-map/i-rev
+          bytearray-FP32-for-each-rev bytearray-FP32-for-each/i-rev bytearray-FP32-andmap bytearray-FP32-ormap
+          bytearray-FP32-fold-left bytearray-FP32-fold-left/i bytearray-FP32-fold-right bytearray-FP32-fold-right/i
+          bytearray-FP32-sorted? bytearray-FP32-sort bytearray-FP32-sort! bytearray-FP32->list
+          bytearray-FP32->iter bytearray-FP32->bytevector bytearray-FP32-iota bytearray-FP32-nums
+          bytearray-fp64-add! bytearray-fp64-add*! bytearray-fp64-delete! bytearray-fp64-slice
+          bytearray-fp64-slice! bytearray-fp64-copy bytearray-fp64-copy! bytearray-fp64-push!
+          bytearray-fp64-pop! bytearray-fp64-push-back! bytearray-fp64-pop-back! bytearray-fp64-filter
+          bytearray-fp64-filter! bytearray-fp64-partition bytearray-fp64-contains? bytearray-fp64-contains/p?
+          bytearray-fp64-index-of bytearray-fp64-find-index bytearray-fp64-search bytearray-fp64-search*
+          bytearray-fp64-append bytearray-fp64-append! bytearray-fp64-reverse bytearray-fp64-reverse!
+          bytearray-fp64-map bytearray-fp64-map/i bytearray-fp64-map! bytearray-fp64-map/i!
+          bytearray-fp64-for-each bytearray-fp64-for-each/i bytearray-fp64-map-rev bytearray-fp64-map/i-rev
+          bytearray-fp64-for-each-rev bytearray-fp64-for-each/i-rev bytearray-fp64-andmap bytearray-fp64-ormap
+          bytearray-fp64-fold-left bytearray-fp64-fold-left/i bytearray-fp64-fold-right bytearray-fp64-fold-right/i
+          bytearray-fp64-sorted? bytearray-fp64-sort bytearray-fp64-sort! bytearray-fp64->list
+          bytearray-fp64->iter bytearray-fp64->bytevector bytearray-fp64-iota bytearray-fp64-nums
+          bytearray-FP64-add! bytearray-FP64-add*! bytearray-FP64-delete! bytearray-FP64-slice
+          bytearray-FP64-slice! bytearray-FP64-copy bytearray-FP64-copy! bytearray-FP64-push!
+          bytearray-FP64-pop! bytearray-FP64-push-back! bytearray-FP64-pop-back! bytearray-FP64-filter
+          bytearray-FP64-filter! bytearray-FP64-partition bytearray-FP64-contains? bytearray-FP64-contains/p?
+          bytearray-FP64-index-of bytearray-FP64-find-index bytearray-FP64-search bytearray-FP64-search*
+          bytearray-FP64-append bytearray-FP64-append! bytearray-FP64-reverse bytearray-FP64-reverse!
+          bytearray-FP64-map bytearray-FP64-map/i bytearray-FP64-map! bytearray-FP64-map/i!
+          bytearray-FP64-for-each bytearray-FP64-for-each/i bytearray-FP64-map-rev bytearray-FP64-map/i-rev
+          bytearray-FP64-for-each-rev bytearray-FP64-for-each/i-rev bytearray-FP64-andmap bytearray-FP64-ormap
+          bytearray-FP64-fold-left bytearray-FP64-fold-left/i bytearray-FP64-fold-right bytearray-FP64-fold-right/i
+          bytearray-FP64-sorted? bytearray-FP64-sort bytearray-FP64-sort! bytearray-FP64->list
+          bytearray-FP64->iter bytearray-FP64->bytevector bytearray-FP64-iota bytearray-FP64-nums
 
           array->list fxarray->list bytearray->list
           array->iter fxarray->iter bytearray->iter
@@ -2312,83 +2740,422 @@
   (define-bytearray-width bytearray-fp64-ref bytearray-fp64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness little))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness little))) 8 flonum?)
   (define-bytearray-width bytearray-FP64-ref bytearray-FP64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness big))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness big))) 8 flonum?)
 
-  #|proc:bytearray-u16-add!
-  Add a logical unsigned 16-bit value to bytearray `arr`.
-  |#
-  (define-who bytearray-u16-add!
-    (case-lambda
-      [(arr v) (bytearray-u16-add! arr (fx/ (bytearray-size arr) 2) v)]
-      [(arr i v)
-       (pcheck ([bytearray? arr] [natural? i])
-               (let* ([old (bytearray->bytevector arr)] [n (bytevector-length old)]
-                      [nv (make-bytevector (fx+ n 2) 0)])
-                 (bytevector-copy! old 0 nv 0 (fx* i 2))
-                 (bytevector-u16-set! nv (fx* i 2) v (endianness little))
-                 (bytevector-copy! old (fx* i 2) nv (fx* (fx1+ i) 2) (fx- n (fx* i 2)))
-                 (bytearray-clear! arr)
-                 (let loop ([j 0])
-                   (when (fx< j (bytevector-length nv))
-                     (bytearray-add! arr (bytevector-u8-ref nv j))
-                     (loop (fx1+ j))))))]))
-  (define bytearray-U16-add! bytearray-u16-add!)
-  #|proc:bytearray-u16-delete!
-  Delete the logical unsigned 16-bit value at index `i` from `arr`.
-  |#
-  (define-who bytearray-u16-delete!
-    (lambda (arr i)
-      (pcheck ([bytearray? arr] [natural? i])
-              (let* ([old (bytearray->bytevector arr)] [n (bytevector-length old)]
-                     [nv (make-bytevector (fx- n 2) 0)])
-                (bytevector-copy! old 0 nv 0 (fx* i 2))
-                (bytevector-copy! old (fx* (fx1+ i) 2) nv (fx* i 2) (fx- n (fx* (fx1+ i) 2)))
-                (bytearray-clear! arr)
-                (let loop ([j 0])
-                  (when (fx< j (bytevector-length nv))
-                    (bytearray-add! arr (bytevector-u8-ref nv j))
-                    (loop (fx1+ j))))))))
-  (define bytearray-U16-delete! bytearray-u16-delete!)
-  #|proc:bytearray-u16->list
-  Convert logical unsigned 16-bit values in bytearray `arr` to a list.
-  |#
-  (define bytearray-u16->list
-    (lambda (arr) (pcheck ([bytearray? arr]) (let loop ([i 0] [r '()])
-      (if (fx= i (fx/ (bytearray-size arr) 2)) (reverse r)
-          (loop (fx1+ i) (cons (bytearray-u16-ref arr i) r)))))))
-  (define bytearray-U16->list bytearray-u16->list)
-  #|proc:bytearray-u16-map
-  Map `proc` over logical little-endian 16-bit values in bytearray `arr`.
-  |#
-  (define bytearray-u16-map
-    (lambda (proc arr)
-      (pcheck ([procedure? proc] [bytearray? arr])
-              (let* ([n (bytearray-size arr)] [out (make-bytevector n 0)])
-                (when (not (fx= 0 (modulo n 2))) (errorf 'bytearray-u16-map "unaligned bytearray"))
-                (let loop ([i 0])
-                  (if (fx= i n) (bytevector->bytearray out)
-                      (begin (bytevector-u16-set! out i (proc (bytevector-u16-ref (array-vec arr) i (endianness little))) (endianness little))
-                             (loop (fx+ i 2)))))))))
-  (define bytearray-U16-map bytearray-u16-map)
-  #|proc:bytearray-u16-for-each
-  Call `proc` for each logical little-endian 16-bit value in bytearray `arr`.
-  |#
-  (define bytearray-u16-for-each
-    (lambda (proc arr)
-      (pcheck ([procedure? proc] [bytearray? arr])
-              (let ([n (bytearray-size arr)])
-                (when (not (fx= 0 (modulo n 2))) (errorf 'bytearray-u16-for-each "unaligned bytearray"))
-                (let loop ([i 0])
-                  (unless (fx= i n)
-                    (proc (bytevector-u16-ref (array-vec arr) i (endianness little)))
-                    (loop (fx+ i 2))))))))
-  (define bytearray-U16-for-each bytearray-u16-for-each)
-  #|proc:bytearray-u16->iter
-  Return an iterator over logical little-endian 16-bit values in `arr`.
-  |#
-  (define bytearray-u16->iter
-    (make-indexed-iter 'bytearray-u16->iter bytearray?
-      (lambda (arr) (fx/ (bytearray-size arr) 2)) bytearray-u16-ref))
-  (define bytearray-U16->iter bytearray-u16->iter)
+  (define $bytearray-width-length
+    (lambda (who arr width)
+      (pcheck ([bytearray? arr])
+              (let ([bytes (bytearray-size arr)])
+                (unless (fx= 0 (modulo bytes width))
+                  (errorf who "bytearray length ~a is not aligned to width ~a" bytes width))
+                (fx/ bytes width)))))
 
+  (define $bytearray-width-list
+    (lambda (who arr width ref)
+      (let ([len ($bytearray-width-length who arr width)])
+        (let loop ([i 0] [result '()])
+          (if (fx= i len)
+              (reverse result)
+              (loop (fx1+ i) (cons (ref arr i) result)))))))
+
+  (define $bytearray-width-build
+    (lambda (who values width set value?)
+      (for-each (lambda (value)
+                  (unless (value? value)
+                    (errorf who "value is invalid for the selected width: ~a" value)))
+                values)
+      (let ([arr (make-bytearray (fx* width (length values)) 0)])
+        (let loop ([i 0] [rest values])
+          (unless (null? rest)
+            (set arr i (car rest))
+            (loop (fx1+ i) (cdr rest))))
+        arr)))
+
+  (define $bytearray-width-replace!
+    (lambda (target source)
+      (array-vec-set! target (bytearray->bytevector source))
+      ($array-size-set! target (bytearray-size source))
+      target))
+
+  (define $list-insert-values
+    (lambda (values index inserted)
+      (let loop ([i 0] [rest values] [prefix '()])
+        (if (fx= i index)
+            (append (reverse prefix) inserted rest)
+            (loop (fx1+ i) (cdr rest) (cons (car rest) prefix))))))
+
+  (define $list-delete-index
+    (lambda (values index)
+      (let loop ([i 0] [rest values] [prefix '()])
+        (if (fx= i index)
+            (append (reverse prefix) (cdr rest))
+            (loop (fx1+ i) (cdr rest) (cons (car rest) prefix))))))
+
+  (define $list-slice-values
+    (lambda (values start stop step)
+      (let* ([len (length values)]
+             [start (if (fx< start 0) (fx+ len start) start)]
+             [stop (if (fx< stop 0) (fx+ len stop) stop)])
+        (let loop ([i start] [result '()])
+          (if (if (fx> step 0) (fx>= i stop) (fx<= i stop))
+              (reverse result)
+              (loop (fx+ i step) (cons (list-ref values i) result)))))))
+
+  (define $make-bytearray-width-operations
+    (lambda (who width ref set value?)
+      (define items
+        (lambda (arr) ($bytearray-width-list who arr width ref)))
+      (define build
+        (lambda (value*) ($bytearray-width-build who value* width set value?)))
+      (define replace!
+        (lambda (arr value*) ($bytearray-width-replace! arr (build value*))))
+      (define add!
+        (case-lambda
+          [(arr value) (add! arr ($bytearray-width-length who arr width) value)]
+          [(arr index value)
+           (pcheck ([bytearray? arr] [natural? index])
+                   (let ([len ($bytearray-width-length who arr width)])
+                     (when (fx> index len) (errorf who "index ~a out of range ~a" index len))
+                     (replace! arr ($list-insert-values (items arr) index (list value)))))]))
+      (define add*!
+        (lambda (arr first . rest)
+          (pcheck ([bytearray? arr])
+                  (let ([len ($bytearray-width-length who arr width)])
+                    (if (and (pair? rest) (natural? first) (fx<= first len))
+                        (replace! arr ($list-insert-values (items arr) first rest))
+                        (replace! arr (append (items arr) (cons first rest))))))))
+      (define delete!
+        (lambda (arr index)
+          (pcheck ([bytearray? arr] [natural? index])
+                  (let ([len ($bytearray-width-length who arr width)])
+                    (when (fx>= index len) (errorf who "index ~a out of range ~a" index len))
+                    (replace! arr ($list-delete-index (items arr) index))))))
+      (define slice
+        (case-lambda
+          [(arr stop) (slice arr 0 stop 1)]
+          [(arr start stop) (slice arr start stop 1)]
+          [(arr start stop step)
+           (pcheck ([bytearray? arr] [fixnum? start stop step])
+                   (when (fx= step 0) (errorf who "step cannot be zero"))
+                   (build ($list-slice-values (items arr) start stop step)))]))
+      (define slice!
+        (case-lambda
+          [(arr stop) (slice! arr 0 stop 1)]
+          [(arr start stop) (slice! arr start stop 1)]
+          [(arr start stop step) ($bytearray-width-replace! arr (slice arr start stop step))]))
+      (define copy (lambda (arr) (build (items arr))))
+      (define copy!
+        (lambda (src src-start target target-start count)
+          (pcheck ([bytearray? src target] [natural? src-start target-start count])
+                  (let ([snapshot (items src)]
+                        [target-items (items target)])
+                    (when (fx> (fx+ src-start count) (length snapshot))
+                      (errorf who "source range is too large"))
+                    (when (fx> (fx+ target-start count) (length target-items))
+                      (errorf who "target range is too large"))
+                    (let ([replacement (list->vector target-items)])
+                      (let loop ([i 0])
+                        (unless (fx= i count)
+                          (vector-set! replacement (fx+ target-start i)
+                                       (list-ref snapshot (fx+ src-start i)))
+                          (loop (fx1+ i))))
+                      (replace! target (vector->list replacement)))))))
+      (define push! (lambda (arr value) (add! arr 0 value)))
+      (define pop!
+        (lambda (arr)
+          (let ([value (ref arr 0)]) (delete! arr 0) value)))
+      (define push-back! (lambda (arr value) (add! arr value)))
+      (define pop-back!
+        (lambda (arr)
+          (let* ([len ($bytearray-width-length who arr width)] [value (ref arr (fx1- len))])
+            (delete! arr (fx1- len)) value)))
+      (define filter
+        (lambda (pred arr)
+          (pcheck ([procedure? pred])
+                  (let loop ([rest (items arr)] [result '()])
+                    (if (null? rest)
+                        (build (reverse result))
+                        (loop (cdr rest)
+                              (if (pred (car rest))
+                                  (cons (car rest) result)
+                                  result)))))))
+      (define filter!
+        (lambda (pred arr) ($bytearray-width-replace! arr (filter pred arr))))
+      (define partition
+        (lambda (pred arr)
+          (pcheck ([procedure? pred])
+                  (let loop ([rest (items arr)] [yes '()] [no '()])
+                    (if (null? rest)
+                        (values (build (reverse yes)) (build (reverse no)))
+                        (if (pred (car rest))
+                            (loop (cdr rest) (cons (car rest) yes) no)
+                            (loop (cdr rest) yes (cons (car rest) no))))))))
+      (define contains? (lambda (arr value) (and (member value (items arr)) #t)))
+      (define contains/p? (lambda (arr pred) (exists pred (items arr))))
+      (define index-of
+        (lambda (arr value)
+          (let loop ([i 0] [rest (items arr)])
+            (cond [(null? rest) #f] [(equal? value (car rest)) i]
+                  [else (loop (fx1+ i) (cdr rest))]))))
+      (define find-index
+        (lambda (arr pred)
+          (pcheck ([procedure? pred])
+                  (let loop ([i 0] [rest (items arr)])
+                    (cond [(null? rest) #f] [(pred (car rest)) i]
+                          [else (loop (fx1+ i) (cdr rest))])))))
+      (define search
+        (lambda (arr pred)
+          (let ([index (find-index arr pred)]) (and index (ref arr index)))))
+      (define search*
+        (case-lambda
+          [(arr pred) (items (filter pred arr))]
+          [(arr pred collect) (for-each (lambda (value) (when (pred value) (collect value)))
+                                        (items arr))]))
+      (define append-arrays
+        (lambda arrays
+          (pcheck ([all-bytearrays? arrays])
+                  (build (apply append (map items arrays))))))
+      (define append-arrays!
+        (lambda (arr . arrays)
+          (pcheck ([bytearray? arr] [all-bytearrays? arrays])
+                  (replace! arr (apply append (items arr) (map items arrays))))))
+      (define reverse-array (lambda (arr) (build (reverse (items arr)))))
+      (define reverse-array! (lambda (arr) (replace! arr (reverse (items arr)))))
+      (define map-array
+        (lambda (proc arr . arrays)
+          (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                  (let ([list* (map items (cons arr arrays))])
+                    (unless (apply = (map length list*)) (errorf who "arrays differ in length"))
+                    (build (apply map proc list*))))))
+      (define map/i
+        (lambda (proc arr)
+          (pcheck ([procedure? proc] [bytearray? arr])
+                  (let loop ([i 0] [rest (items arr)] [result '()])
+                    (if (null? rest) (build (reverse result))
+                        (loop (fx1+ i) (cdr rest) (cons (proc i (car rest)) result)))))))
+      (define map! (lambda (proc arr . arrays) (replace! arr (items (apply map-array proc arr arrays)))))
+      (define map/i! (lambda (proc arr) ($bytearray-width-replace! arr (map/i proc arr))))
+      (define each
+        (lambda (proc arr . arrays)
+          (apply for-each proc (map items (cons arr arrays)))))
+      (define each/i
+        (lambda (proc arr)
+          (let loop ([i 0] [rest (items arr)])
+            (unless (null? rest) (proc i (car rest)) (loop (fx1+ i) (cdr rest))))))
+      (define map-rev (lambda (proc arr) (build (map proc (reverse (items arr))))))
+      (define map/i-rev
+        (lambda (proc arr)
+          (let loop ([i (fx1- (length (items arr)))] [rest (reverse (items arr))] [result '()])
+            (if (null? rest) (build (reverse result))
+                (loop (fx1- i) (cdr rest) (cons (proc i (car rest)) result))))))
+      (define each-rev (lambda (proc arr) (for-each proc (reverse (items arr)))))
+      (define each/i-rev
+        (lambda (proc arr)
+          (let loop ([i (fx1- (length (items arr)))] [rest (reverse (items arr))])
+            (unless (null? rest) (proc i (car rest)) (loop (fx1- i) (cdr rest))))))
+      (define andmap-array (lambda (proc arr) (andmap proc (items arr))))
+      (define ormap-array (lambda (proc arr) (ormap proc (items arr))))
+      (define fold-left
+        (lambda (proc init arr)
+          (let loop ([acc init] [rest (items arr)])
+            (if (null? rest) acc
+                (loop (proc acc (car rest)) (cdr rest))))))
+      (define fold-left/i
+        (lambda (proc init arr)
+          (let loop ([i 0] [acc init] [rest (items arr)])
+            (if (null? rest) acc (loop (fx1+ i) (proc i acc (car rest)) (cdr rest))))))
+      (define fold-right
+        (lambda (proc init arr)
+          (let loop ([rest (reverse (items arr))] [acc init])
+            (if (null? rest) acc
+                (loop (cdr rest) (proc (car rest) acc))))))
+      (define fold-right/i
+        (lambda (proc init arr)
+          (let loop ([i (fx1- (length (items arr)))] [rest (reverse (items arr))] [acc init])
+            (if (null? rest) acc (loop (fx1- i) (cdr rest) (proc i (car rest) acc))))))
+      (define sorted?
+        (lambda (less? arr)
+          (let loop ([rest (items arr)])
+            (or (null? rest) (null? (cdr rest))
+                (and (not (less? (cadr rest) (car rest))) (loop (cdr rest)))))))
+      (define sort-array
+        (lambda (less? arr) (build (vector->list (vsort less? (list->vector (items arr)))))))
+      (define sort-array! (lambda (less? arr) ($bytearray-width-replace! arr (sort-array less? arr))))
+      (define to-list (lambda (arr) (items arr)))
+      (define to-iter
+        (make-indexed-iter who bytearray?
+                           (lambda (arr) ($bytearray-width-length who arr width)) ref))
+      (define to-bytevector (lambda (arr) (bytearray->bytevector arr)))
+      (define iota-array
+        (lambda (count)
+          (pcheck ([natural? count])
+                  (let loop ([i 0] [result '()])
+                    (if (fx= i count) (build (reverse result))
+                        (loop (fx1+ i) (cons i result)))))))
+      (define nums
+        (case-lambda
+          [(stop) (nums 0 stop 1)] [(start stop) (nums start stop 1)]
+          [(start stop step)
+           (pcheck ([number? start stop step])
+                   (let loop ([value start] [result '()])
+                     (if (if (> step 0) (>= value stop) (<= value stop))
+                         (build (reverse result))
+                         (loop (+ value step) (cons value result)))))]))
+      (vector add! add*! delete! slice slice! copy copy! push! pop! push-back! pop-back!
+              filter filter! partition contains? contains/p? index-of find-index search search*
+              append-arrays append-arrays! reverse-array reverse-array! map-array map/i map! map/i!
+              each each/i map-rev map/i-rev each-rev each/i-rev andmap-array ormap-array
+              fold-left fold-left/i fold-right fold-right/i sorted? sort-array sort-array!
+              to-list to-iter to-bytevector iota-array nums)))
+
+
+  #|macro:define-bytearray-procedure
+  Define the width-qualified bytearray operation family for descriptor `width`.
+  The `ref` and `set` procedures access one logical value, and `value?`
+  validates values stored by generated procedures.
+  |#
+  (define-syntax define-bytearray-procedure
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ width width-size ref set value?)
+         (let ([name (symbol->string (syntax->datum #'width))])
+           (with-syntax
+               ([operations ($construct-name #'width "$bytearray-" name "-operations")]
+                     [n0 ($construct-name #'width "bytearray-" name "-add!")]
+                     [n1 ($construct-name #'width "bytearray-" name "-add*!")]
+                     [n2 ($construct-name #'width "bytearray-" name "-delete!")]
+                     [n3 ($construct-name #'width "bytearray-" name "-slice")]
+                     [n4 ($construct-name #'width "bytearray-" name "-slice!")]
+                     [n5 ($construct-name #'width "bytearray-" name "-copy")]
+                     [n6 ($construct-name #'width "bytearray-" name "-copy!")]
+                     [n7 ($construct-name #'width "bytearray-" name "-push!")]
+                     [n8 ($construct-name #'width "bytearray-" name "-pop!")]
+                     [n9 ($construct-name #'width "bytearray-" name "-push-back!")]
+                     [n10 ($construct-name #'width "bytearray-" name "-pop-back!")]
+                     [n11 ($construct-name #'width "bytearray-" name "-filter")]
+                     [n12 ($construct-name #'width "bytearray-" name "-filter!")]
+                     [n13 ($construct-name #'width "bytearray-" name "-partition")]
+                     [n14 ($construct-name #'width "bytearray-" name "-contains?")]
+                     [n15 ($construct-name #'width "bytearray-" name "-contains/p?")]
+                     [n16 ($construct-name #'width "bytearray-" name "-index-of")]
+                     [n17 ($construct-name #'width "bytearray-" name "-find-index")]
+                     [n18 ($construct-name #'width "bytearray-" name "-search")]
+                     [n19 ($construct-name #'width "bytearray-" name "-search*")]
+                     [n20 ($construct-name #'width "bytearray-" name "-append")]
+                     [n21 ($construct-name #'width "bytearray-" name "-append!")]
+                     [n22 ($construct-name #'width "bytearray-" name "-reverse")]
+                     [n23 ($construct-name #'width "bytearray-" name "-reverse!")]
+                     [n24 ($construct-name #'width "bytearray-" name "-map")]
+                     [n25 ($construct-name #'width "bytearray-" name "-map/i")]
+                     [n26 ($construct-name #'width "bytearray-" name "-map!")]
+                     [n27 ($construct-name #'width "bytearray-" name "-map/i!")]
+                     [n28 ($construct-name #'width "bytearray-" name "-for-each")]
+                     [n29 ($construct-name #'width "bytearray-" name "-for-each/i")]
+                     [n30 ($construct-name #'width "bytearray-" name "-map-rev")]
+                     [n31 ($construct-name #'width "bytearray-" name "-map/i-rev")]
+                     [n32 ($construct-name #'width "bytearray-" name "-for-each-rev")]
+                     [n33 ($construct-name #'width "bytearray-" name "-for-each/i-rev")]
+                     [n34 ($construct-name #'width "bytearray-" name "-andmap")]
+                     [n35 ($construct-name #'width "bytearray-" name "-ormap")]
+                     [n36 ($construct-name #'width "bytearray-" name "-fold-left")]
+                     [n37 ($construct-name #'width "bytearray-" name "-fold-left/i")]
+                     [n38 ($construct-name #'width "bytearray-" name "-fold-right")]
+                     [n39 ($construct-name #'width "bytearray-" name "-fold-right/i")]
+                     [n40 ($construct-name #'width "bytearray-" name "-sorted?")]
+                     [n41 ($construct-name #'width "bytearray-" name "-sort")]
+                     [n42 ($construct-name #'width "bytearray-" name "-sort!")]
+                     [n43 ($construct-name #'width "bytearray-" name "->list")]
+                     [n44 ($construct-name #'width "bytearray-" name "->iter")]
+                     [n45 ($construct-name #'width "bytearray-" name "->bytevector")]
+                     [n46 ($construct-name #'width "bytearray-" name "-iota")]
+                     [n47 ($construct-name #'width "bytearray-" name "-nums")])
+             #'(begin
+                (define operations
+                  ($make-bytearray-width-operations 'width width-size ref set value?))
+                (define n0 (vector-ref operations 0))
+                (define n1 (vector-ref operations 1))
+                (define n2 (vector-ref operations 2))
+                (define n3 (vector-ref operations 3))
+                (define n4 (vector-ref operations 4))
+                (define n5 (vector-ref operations 5))
+                (define n6 (vector-ref operations 6))
+                (define n7 (vector-ref operations 7))
+                (define n8 (vector-ref operations 8))
+                (define n9 (vector-ref operations 9))
+                (define n10 (vector-ref operations 10))
+                (define n11 (vector-ref operations 11))
+                (define n12 (vector-ref operations 12))
+                (define n13 (vector-ref operations 13))
+                (define n14 (vector-ref operations 14))
+                (define n15 (vector-ref operations 15))
+                (define n16 (vector-ref operations 16))
+                (define n17 (vector-ref operations 17))
+                (define n18 (vector-ref operations 18))
+                (define n19 (vector-ref operations 19))
+                (define n20 (vector-ref operations 20))
+                (define n21 (vector-ref operations 21))
+                (define n22 (vector-ref operations 22))
+                (define n23 (vector-ref operations 23))
+                (define n24 (vector-ref operations 24))
+                (define n25 (vector-ref operations 25))
+                (define n26 (vector-ref operations 26))
+                (define n27 (vector-ref operations 27))
+                (define n28 (vector-ref operations 28))
+                (define n29 (vector-ref operations 29))
+                (define n30 (vector-ref operations 30))
+                (define n31 (vector-ref operations 31))
+                (define n32 (vector-ref operations 32))
+                (define n33 (vector-ref operations 33))
+                (define n34 (vector-ref operations 34))
+                (define n35 (vector-ref operations 35))
+                (define n36 (vector-ref operations 36))
+                (define n37 (vector-ref operations 37))
+                (define n38 (vector-ref operations 38))
+                (define n39 (vector-ref operations 39))
+                (define n40 (vector-ref operations 40))
+                (define n41 (vector-ref operations 41))
+                (define n42 (vector-ref operations 42))
+                (define n43 (vector-ref operations 43))
+                (define n44 (vector-ref operations 44))
+                (define n45 (vector-ref operations 45))
+                (define n46 (vector-ref operations 46))
+                (define n47 (vector-ref operations 47)))))])))
+
+
+  (define-bytearray-procedure u8 1 bytearray-u8-ref bytearray-u8-set! bytearray-u8-value?)
+  (define-bytearray-procedure U8 1 bytearray-U8-ref bytearray-U8-set! bytearray-u8-value?)
+  (define-bytearray-procedure s8 1 bytearray-s8-ref bytearray-s8-set! bytearray-s8-value?)
+  (define-bytearray-procedure S8 1 bytearray-S8-ref bytearray-S8-set! bytearray-s8-value?)
+  (define-bytearray-procedure u16 2 bytearray-u16-ref bytearray-u16-set! bytearray-u16-value?)
+  (define-bytearray-procedure U16 2 bytearray-U16-ref bytearray-U16-set! bytearray-u16-value?)
+  (define-bytearray-procedure s16 2 bytearray-s16-ref bytearray-s16-set! bytearray-s16-value?)
+  (define-bytearray-procedure S16 2 bytearray-S16-ref bytearray-S16-set! bytearray-s16-value?)
+  (define-bytearray-procedure u24 3 bytearray-u24-ref bytearray-u24-set! bytearray-u24-value?)
+  (define-bytearray-procedure U24 3 bytearray-U24-ref bytearray-U24-set! bytearray-u24-value?)
+  (define-bytearray-procedure s24 3 bytearray-s24-ref bytearray-s24-set! bytearray-s24-value?)
+  (define-bytearray-procedure S24 3 bytearray-S24-ref bytearray-S24-set! bytearray-s24-value?)
+  (define-bytearray-procedure u32 4 bytearray-u32-ref bytearray-u32-set! bytearray-u32-value?)
+  (define-bytearray-procedure U32 4 bytearray-U32-ref bytearray-U32-set! bytearray-u32-value?)
+  (define-bytearray-procedure s32 4 bytearray-s32-ref bytearray-s32-set! bytearray-s32-value?)
+  (define-bytearray-procedure S32 4 bytearray-S32-ref bytearray-S32-set! bytearray-s32-value?)
+  (define-bytearray-procedure u40 5 bytearray-u40-ref bytearray-u40-set! bytearray-u40-value?)
+  (define-bytearray-procedure U40 5 bytearray-U40-ref bytearray-U40-set! bytearray-u40-value?)
+  (define-bytearray-procedure s40 5 bytearray-s40-ref bytearray-s40-set! bytearray-s40-value?)
+  (define-bytearray-procedure S40 5 bytearray-S40-ref bytearray-S40-set! bytearray-s40-value?)
+  (define-bytearray-procedure u48 6 bytearray-u48-ref bytearray-u48-set! bytearray-u48-value?)
+  (define-bytearray-procedure U48 6 bytearray-U48-ref bytearray-U48-set! bytearray-u48-value?)
+  (define-bytearray-procedure s48 6 bytearray-s48-ref bytearray-s48-set! bytearray-s48-value?)
+  (define-bytearray-procedure S48 6 bytearray-S48-ref bytearray-S48-set! bytearray-s48-value?)
+  (define-bytearray-procedure u56 7 bytearray-u56-ref bytearray-u56-set! bytearray-u56-value?)
+  (define-bytearray-procedure U56 7 bytearray-U56-ref bytearray-U56-set! bytearray-u56-value?)
+  (define-bytearray-procedure s56 7 bytearray-s56-ref bytearray-s56-set! bytearray-s56-value?)
+  (define-bytearray-procedure S56 7 bytearray-S56-ref bytearray-S56-set! bytearray-s56-value?)
+  (define-bytearray-procedure u64 8 bytearray-u64-ref bytearray-u64-set! bytearray-u64-value?)
+  (define-bytearray-procedure U64 8 bytearray-U64-ref bytearray-U64-set! bytearray-u64-value?)
+  (define-bytearray-procedure s64 8 bytearray-s64-ref bytearray-s64-set! bytearray-s64-value?)
+  (define-bytearray-procedure S64 8 bytearray-S64-ref bytearray-S64-set! bytearray-s64-value?)
+  (define-bytearray-procedure fp32 4 bytearray-fp32-ref bytearray-fp32-set! flonum?)
+  (define-bytearray-procedure FP32 4 bytearray-FP32-ref bytearray-FP32-set! flonum?)
+  (define-bytearray-procedure fp64 8 bytearray-fp64-ref bytearray-fp64-set! flonum?)
+  (define-bytearray-procedure FP64 8 bytearray-FP64-ref bytearray-FP64-set! flonum?)
 
   (define-syntax gen-array-record-writer
     (syntax-rules ()
