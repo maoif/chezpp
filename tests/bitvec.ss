@@ -7,6 +7,38 @@
 (define n-1e5-even n-1e5-2)
 (define n-1e5-odd  (nums 1 #e1e5 2))
 
+(mat bitvec-copy-ranges
+     (let ([bits (bitvec 0 2)] [before '(0 2)])
+       (bitvec-copy! bits 0 bits 0 0)
+       (equal? before (bitvec->list bits)))
+
+     (let ([source (make-bitvec 61)] [target (make-bitvec 61)])
+       (for-each (lambda (index) (bitvec-set! source index)) '(0 1 59 60))
+       (bitvec-copy! source 0 target 0 61)
+       (equal? '(0 1 59 60) (bitvec->list target)))
+
+     (let ([source (make-bitvec 60)] [target (make-bitvec 61)])
+       (for-each (lambda (index) (bitvec-set! source index)) '(0 2 58 59))
+       (bitvec-copy! source 0 target 1 60)
+       (equal? '(1 3 59 60) (bitvec->list target)))
+
+     (let ([bits (make-bitvec 61)])
+       (for-each (lambda (index) (bitvec-set! bits index)) '(0 2 4))
+       (bitvec-copy! bits 0 bits 1 5)
+       (equal? '(0 1 3 5) (bitvec->list bits)))
+
+     (let ([bits (make-bitvec 61)])
+       (for-each (lambda (index) (bitvec-set! bits index)) '(1 3 5))
+       (bitvec-copy! bits 1 bits 0 5)
+       (equal? '(0 2 4 5) (bitvec->list bits)))
+
+     ;; The source range exceeds its logical bit bound.
+     (error? (bitvec-copy! (make-bitvec 59) 58 (make-bitvec 61) 0 2))
+
+     ;; The target range exceeds its logical bit bound.
+     (error? (bitvec-copy! (make-bitvec 61) 0 (make-bitvec 59) 58 2))
+     )
+
 (mat bitvec
 
      (error? (make-bitvec))

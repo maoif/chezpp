@@ -1397,7 +1397,7 @@
                     [newarr (amake len)]     [newvec (array-vec newarr)])
                (let loop ([i 0] [j (fx1- len)])
                  (unless (fx= i len)
-                   (vset! newvec j (vref i vec))
+                   (vset! newvec j (vref vec i))
                    (loop (fx1+ i) (fx1- j))))
                ($array-size-set! newarr len))))
 
@@ -1717,6 +1717,23 @@
             (and (<? (vref vec i) (vref vec (fx1+ i)))
                  (loop (fx1+ i)))))))
 
+  (define $bytevector-sort!
+    (case-lambda
+      [(less? bytes) ($bytevector-sort! less? bytes 0 (bytevector-length bytes))]
+      [(less? bytes start stop)
+       (let loop ([i (fx1+ start)])
+         (unless (fx>= i stop)
+           (let ([value (bytevector-u8-ref bytes i)])
+             (let insert ([j i])
+               (if (and (fx> j start)
+                        (less? value (bytevector-u8-ref bytes (fx1- j))))
+                   (begin
+                     (bytevector-u8-set! bytes j (bytevector-u8-ref bytes (fx1- j)))
+                     (insert (fx1- j)))
+                   (begin
+                     (bytevector-u8-set! bytes j value)
+                     (loop (fx1+ i))))))))]))
+
 
   #|doc
   Check whether the array is sorted according to the comparison procedure `<?`.
@@ -1772,7 +1789,7 @@
                           (errorf who "start index ~a greater than stop index ~a" start stop))
                         (let* ([vsort! (cond [(fxarray? arr) fxvsort!]
                                              [(flarray? arr) flvsort!]
-                                             [(bytearray? arr) (todo who)]
+                                             [(bytearray? arr) $bytevector-sort!]
                                              [else vsort!])]
                                [acopy! (cond [(fxarray? arr) fxarray-copy!]
                                              [(flarray? arr) flarray-copy!]
@@ -1811,7 +1828,7 @@
                           (errorf who "start index ~a greater than stop index ~a" start stop))
                         (let ([vsort! (cond [(fxarray? arr) fxvsort!]
                                             [(flarray? arr) flvsort!]
-                                            [(bytearray? arr) (todo who)]
+                                            [(bytearray? arr) $bytevector-sort!]
                                             [else vsort!])]
                               [vec (array-vec arr)])
                           (vsort! <? vec start stop)))))])

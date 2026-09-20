@@ -1,7 +1,7 @@
 (library (chezpp bitvec)
   (export bitvec make-bitvec make-full-bitvec bitvec? bitvec-size bitvec-bound bitvec-empty?
           bitvec-set! bitvec-unset! bitvec-flip!
-          bitvec-set? bitvec-clear! bitvec-copy
+          bitvec-set? bitvec-clear! bitvec-copy bitvec-copy!
 
           bitvec-or bitvec-and bitvec-xor bitvec-not
 

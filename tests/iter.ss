@@ -16,6 +16,40 @@
              (iter-reset! iter)
              (equal? expected (collect-iter iter)))))))
 
+(mat iterator-combinator-expansion
+     (equal? '(1 2 3 4)
+             (iter->list (iter-concat (range 1 3) (range 3 5))))
+
+     ;; At least one source iterator is required.
+     (error? (iter-concat))
+
+     (equal? '(1 2 3)
+             (iter->list (iter-distinct equal? (list->iter '(1 2 1 3 2)))))
+
+     (equal? '(1 2 3)
+             (iter->list (iter-sorted < (list->iter '(3 1 2)))))
+
+     (equal? '#(1 2 3) (iter->vector (list->iter '(1 2 3))))
+
+     ;; Conversion rejects non-iterators.
+     (error? (iter->vector 42))
+
+     (let ([iter (iter-concat (range 1 3) (range 3 5))])
+       (and (equal? '(1 2 3 4) (collect-iter iter))
+            (begin (iter-reset! iter)
+                   (equal? '(1 2 3 4) (collect-iter iter)))))
+
+     (let ([iter (iter-distinct equal? (list->iter '(1 2 1 3 2)))])
+       (and (equal? '(1 2 3) (collect-iter iter))
+            (begin (iter-reset! iter)
+                   (equal? '(1 2 3) (collect-iter iter)))))
+
+     (let ([iter (iter-sorted < (list->iter '(3 1 2)))])
+       (and (equal? '(1 2 3) (collect-iter iter))
+            (begin (iter-reset! iter)
+                   (equal? '(1 2 3) (collect-iter iter)))))
+     )
+
 
 (mat registered-source-iterators
 
