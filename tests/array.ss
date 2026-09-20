@@ -60,6 +60,27 @@
        (equal? '(4.0) (flarray->list a)))
      )
 
+(mat array-add*!
+     (let ([a (array 1 4)])
+       (array-add*! a 1 2 3)
+       (equal? '(1 2 3 4) (array->list a)))
+
+     (let ([a (fxarray 1 4)])
+       (fxarray-add*! a 1 2 3)
+       (equal? '(1 2 3 4) (fxarray->list a)))
+
+     ;; A bad value is rejected before any mutation occurs.
+     (let ([a (fxarray 1 2)])
+       (and (guard (condition [else #t])
+              (fxarray-add*! a 3 4 'bad 5)
+              #f)
+            (equal? '(1 2) (fxarray->list a))))
+
+     (let ([a (bytearray 1 4)])
+       (bytearray-add*! a 1 2 3)
+       (equal? '(1 2 3 4) (bytearray->list a)))
+     )
+
 
 (mat array-add!
 

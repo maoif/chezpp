@@ -674,30 +674,44 @@
   (define-array-add! fxarray-add! fxarray? fixnum?         fxvector-length   fxvector-set!      fxvcopy!)
   (define-array-add! u8array-add! u8array? u8?             bytevector-length bytevector-u8-set! u8vcopy!)
 
+  (define $array-add-values!
+    (lambda (who arr i values value-check vector-make vector-length vector-set vector-copy!)
+      (let* ([len ($array-size arr)] [count (length values)] [newlen (fx+ len count)]
+             [old (array-vec arr)] [capacity (vector-length old)])
+        (when (fx> i len)
+          (errorf who "index ~a out of range ~a" i len))
+        (for-each value-check values)
+        (if (fx>= capacity newlen)
+            (when (fx< i len)
+              (vector-copy! old i old (fx+ i count) (fx- len i)))
+            (let capacity-loop ([new-capacity (if (fx= capacity 0) *mincap* capacity)])
+              (if (fx>= new-capacity newlen)
+                  (let ([new (vector-make new-capacity 0)])
+                    (vector-copy! old 0 new 0 i)
+                    (when (fx< i len)
+                      (vector-copy! old i new (fx+ i count) (fx- len i)))
+                    (array-vec-set! arr new))
+                  (capacity-loop (fx* new-capacity (array-incr-factor arr))))))
+        (let ([vec (array-vec arr)])
+          (let write ([j i] [rest values])
+            (unless (null? rest)
+              (vector-set vec j (car rest))
+              (write (fx1+ j) (cdr rest)))))
+        ($array-size-set! arr newlen))))
+
 
   #|doc
   Add multiple values either to the end of the array `arr` or at a specified index.
   This is faster than `array-add!` when adding multiple values.
   |#
   (define-array-procedure (a fxa u8a) add*!
-    [(arr v . v*)
+    [(arr first . rest)
      (apcheck (arr)
-              (let ([vals (cons v v*)])
-                (for-each aval? vals)
-                (for-each (lambda (x) (aadd! arr x)) vals)))]
-    [(arr i v . v*)
-     (apcheck (arr)
-              (pcheck ([natural? i])
-                      (let ([len (asize arr)] [vec (array-vec arr)])
-                        (cond
-                         [(fx<= i len)
-                          (let ([vals (cons v v*)])
-                            (for-each aval? vals)
-                            (let loop ([j i] [xs vals])
-                              (unless (null? xs)
-                                (aadd! arr j (car xs))
-                                (loop (fx1+ j) (cdr xs)))))]
-                         [else (errorf who "index ~a out of range ~a" i len)]))))])
+              (if (and (pair? rest) (natural? first) (fx<= first (asize arr)))
+                  ($array-add-values! who arr first rest aval?
+                                      vmake vlength vset! vcopy!)
+                  ($array-add-values! who arr (asize arr) (cons first rest) aval?
+                                      vmake vlength vset! vcopy!)))])
 
 
   #|doc
