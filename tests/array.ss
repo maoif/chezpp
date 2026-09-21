@@ -114,6 +114,27 @@
        (bytearray-u16-copy! a 0 a 1 4)
        (equal? '(0 0 1 2 3) (bytearray-u16->list a)))
 
+     ;; Typed bulk insertion validates all values before changing storage.
+     (let ([a (bytearray-u16-iota 2)])
+       (and (guard (condition [else #t])
+              (bytearray-u16-add*! a 1 3 'bad)
+              #f)
+            (equal? '(0 1) (bytearray-u16->list a))))
+
+     (let ([a (bytearray-u16-iota 2)])
+       (bytearray-u16-add*! a)
+       (equal? '(0 1) (bytearray-u16->list a)))
+
+     (equal? '(2 3)
+             (bytearray-u16->list
+              (bytearray-u16-slice (bytearray-u16-iota 4) -2 99)))
+
+     ;; Numeric constructors reject zero and direction-inconsistent steps.
+     (error? (bytearray-u16-nums 0 3 0))
+     (error? (bytearray-u16-nums 0 3 -1))
+     (equal? '(1.0 2.0)
+             (bytearray-fp32->list (bytearray-fp32-nums 1.0 3.0)))
+
      (let ([seen '()])
        (bytearray-u16-for-each
         (lambda (value) (set! seen (cons value seen)))
@@ -153,6 +174,13 @@
        (equal? '(1.0 2.0 3.0 4.0) (flarray->list a)))
 
      (equal? (flarray 1.0 2.0) (flarray 1.0 2.0))
+
+     (let ([a (make-flarray 0)])
+       (flarray-push-back! a 1.0)
+       (equal? '(1.0) (flarray->list a)))
+
+     (equal? '(3.0 2.0 1.0)
+             (flarray->list (flarray-reverse (flarray 1.0 2.0 3.0))))
      )
 
 (mat array-add*!

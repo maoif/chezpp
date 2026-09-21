@@ -39,6 +39,10 @@
             (begin (iter-reset! iter)
                    (equal? '(1 2 3 4) (collect-iter iter)))))
 
+     (let* ([source (list->iter '(1 2))]
+            [iter (iter-concat source source)])
+       (equal? '(1 2) (collect-iter iter)))
+
      (let ([iter (iter-distinct equal? (list->iter '(1 2 1 3 2)))])
        (and (equal? '(1 2 3) (collect-iter iter))
             (begin (iter-reset! iter)

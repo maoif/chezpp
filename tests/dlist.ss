@@ -90,6 +90,24 @@
             (equal? '(-1 0 -2 1 -3 2 3 4 5) (dlist->list dl))))
      )
 
+(mat dlist-add*!
+     (let ([dl (dlist)])
+       (dlist-add*! dl)
+       (dlist-empty? dl))
+
+     (let ([dl (dlist 10 20)])
+       (dlist-add*! dl 1 30 40)
+       (equal? '(10 30 40 20) (dlist->list dl)))
+
+     (let ([dl (dlist 10 20)])
+       (dlist-add*! dl 30 40)
+       (equal? '(10 20 30 40) (dlist->list dl)))
+
+     (let ([dl (dlist 10 20)])
+       (dlist-add*! dl 0 30 40)
+       (equal? '(30 40 10 20) (dlist->list dl)))
+     )
+
 
 (mat dlist-set!
 

@@ -644,20 +644,19 @@
   (define iter-concat
     (lambda (iter . iter*)
       (pcheck ([$iter? iter] [all-iters? iter*])
-              (let ([sources (cons iter iter*)] [current iter])
+              (let ([sources (cons iter iter*)] [remaining (cons iter iter*)])
                 (mk-$iter
                  (lambda ()
                    (let loop ()
-                     (let ([x (iter-next! current)])
-                       (if (iter-end? x)
-                           (let ([rest (memq current sources)])
-                             (if (and rest (pair? (cdr rest)))
-                                 (begin (set! current (cadr rest)) (loop))
-                                 iter-end))
-                           x))))
+                     (if (null? remaining)
+                         iter-end
+                         (let ([x (iter-next! (car remaining))])
+                           (if (iter-end? x)
+                               (begin (set! remaining (cdr remaining)) (loop))
+                               x)))))
                  (lambda ()
                    (for-each iter-reset! sources)
-                   (set! current iter)))))))
+                   (set! remaining sources)))))))
   #|proc:iter-distinct
   Return an iterator that emits the first value from `iter` for each equivalence
   class according to binary procedure `equal?`.

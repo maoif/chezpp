@@ -18,6 +18,10 @@
 
      (let ([floats (bvnums-fp32 1.0 3.0 1.0)])
        (= (bvsum-fp32 floats) 3.0))
+     (equal? '#vu8(0 0 0 0 0 0 128 63)
+             (bvnums-fp32 0.0 2.0))
+     (error? (bvnums-u16 0 3 0))
+     (error? (bvnums-u16 0 3 -1))
 
      (equal? '#vu8(2 3 4) (bvmap-u8 add1 '#vu8(1 2 3)))
      (let ([bytes (bytevector-copy '#vu8(1 2 3))])
@@ -42,6 +46,28 @@
      (= (bvfold-left-u16 + 0 (bvnums-u16 0 4 1)) 6)
      (equal? '#vu8(0 1 3)
              (bvscan-left-ex-u8 + 0 '#vu8(1 2 3)))
+
+     ;; Right scans retain the vector API's left-to-right result order.
+     (equal? '#vu8(0 3 5)
+             (bvscan-right-ex-u8 + 0 '#vu8(1 2 3)))
+     (equal? '#vu8(3 5 6)
+             (bvscan-right-in-u8 + 0 '#vu8(1 2 3)))
+
+     ;; Indexed and fold operations accept the same multiple-source arities as vectors.
+     (equal? '#vu8(11 23)
+             (bvmap/i-u8 (lambda (i x y) (+ i x y)) '#vu8(1 2) '#vu8(10 20)))
+     (= 33
+        (bvfold-left-u8 (lambda (acc x y) (+ acc x y)) 0
+                        '#vu8(1 2) '#vu8(10 20)))
+     (equal? '#vu8(11 33)
+             (bvscan-left-in-u8 (lambda (acc x y) (+ acc x y)) 0
+                                '#vu8(1 2) '#vu8(10 20)))
+
+     ;; Width slices normalize negative and out-of-range endpoints.
+     (equal? '#vu8(2 3)
+             (bvslice-u8 '#vu8(0 1 2 3) -2 99))
+     (equal? '#vu8(3 2)
+             (bvslice-u8 '#vu8(0 1 2 3) 99 -3 -1))
 
      (equal? '#vu8(3 2 1) (bvreverse-u8 '#vu8(1 2 3)))
      (equal? '#((1 4) (2 5)) (bvzip-u8 '#vu8(1 2) '#vu8(4 5)))

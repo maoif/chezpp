@@ -195,19 +195,56 @@
   Add multiple values to `dl`, either at the end or before the item at index `i`.
   All values are collected before any mutation occurs.
   |#
+  (define $dlist-add-values!
+    (lambda (who dl index values)
+      (let ([length ($dlist-size dl)] [count (length values)])
+        (when (fx> index length)
+          (errorf who "index ~a out of range ~a" index length))
+        (unless (null? values)
+          (let* ([first-new (make-dnode (car values) null-dnode null-dnode)]
+                 [last-new
+                  (let build ([rest (cdr values)] [last first-new])
+                    (if (null? rest)
+                        last
+                        (let ([next (make-dnode (car rest) last null-dnode)])
+                          (dnode-right-set! last next)
+                          (build (cdr rest) next))))])
+            (cond
+             [(fx= length 0)
+              (dlist-first-set! dl first-new)
+              (dlist-last-set! dl last-new)]
+             [(fx= index 0)
+              (let ([old-first (dlist-first dl)])
+                (dnode-right-set! last-new old-first)
+                (dnode-left-set! old-first last-new)
+                (dlist-first-set! dl first-new))]
+             [(fx= index length)
+              (let ([old-last (dlist-last dl)])
+                (dnode-left-set! first-new old-last)
+                (dnode-right-set! old-last first-new)
+                (dlist-last-set! dl last-new))]
+             [else
+              (let find ([remaining index] [right (dlist-first dl)])
+                (if (fx= remaining 0)
+                    (let ([left (dnode-left right)])
+                      (dnode-left-set! first-new left)
+                      (dnode-right-set! left first-new)
+                      (dnode-right-set! last-new right)
+                      (dnode-left-set! right last-new))
+                    (find (fx1- remaining) (dnode-right right))))])
+            ($dlist-size-set! dl (fx+ length count))))
+        dl)))
+
   (define-who dlist-add*!
-    (case-lambda
-      [(dl v . vs)
-       (pcheck ([dlist? dl])
-               (for-each (lambda (x) (dlist-add! dl x)) (cons v vs)))]
-      [(dl i v . vs)
-       (pcheck ([dlist? dl] [natural? i])
-               (let ([vals (cons v vs)] [len ($dlist-size dl)])
-                 (when (fx> i len) (errorf who "index ~a out of range ~a" i len))
-                 (let loop ([j 0] [xs vals])
-                   (unless (null? xs)
-                     (dlist-add! dl (fx+ i j) (car xs))
-                     (loop (fx1+ j) (cdr xs))))))]))
+    (lambda (dl . arguments)
+      (pcheck ([dlist? dl])
+              (let ([length ($dlist-size dl)])
+                (if (and (pair? arguments)
+                         (pair? (cdr arguments))
+                         (natural? (car arguments))
+                         (fx<= (car arguments) length))
+                    ($dlist-add-values! who dl (car arguments) (cdr arguments))
+                    ($dlist-add-values! who dl length arguments))))))
 
 
   #|proc:dlist-delete!

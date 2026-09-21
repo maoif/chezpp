@@ -1051,17 +1051,22 @@
   Add multiple flonum values to `arr` in order.
   |#
   (define-who flarray-add*!
-    (lambda (arr first . rest)
+    (lambda (arr . arguments)
       (pcheck ([flarray? arr])
-              (let ([check (lambda (x)
-                             (unless (flonum? x)
-                               (errorf who "not a flonum: ~a" x)))])
-                (if (and (pair? rest) (natural? first) (fx<= first ($array-size arr)))
-                    ($array-add-values! who arr first rest check make-flvector
-                                        flvector-length flvector-set! flvcopy! 0.0)
-                    ($array-add-values! who arr ($array-size arr) (cons first rest) check
-                                        make-flvector flvector-length flvector-set!
-                                        flvcopy! 0.0))))))
+              (if (null? arguments)
+                  arr
+                  (let ([first (car arguments)] [rest (cdr arguments)]
+                        [check (lambda (x)
+                                 (unless (flonum? x)
+                                   (errorf who "not a flonum: ~a" x)))])
+                    (if (and (pair? rest) (natural? first)
+                             (fx<= first ($array-size arr)))
+                        ($array-add-values! who arr first rest check make-flvector
+                                            flvector-length flvector-set! flvcopy! 0.0)
+                        ($array-add-values! who arr ($array-size arr)
+                                            (cons first rest) check make-flvector
+                                            flvector-length flvector-set!
+                                            flvcopy! 0.0)))))))
   #|proc:flarray-delete!
   Remove the flonum at index `i` from `arr`.
   |#
@@ -1152,7 +1157,10 @@
                            [(bytevector? vec) bytevector-copy!]
                            [else (assert-unreachable)])]
              [cap (vlength vec)]
-             [newvec (vmake (fx* (if (fx= cap 0) *mincap* cap) (array-incr-factor arr)) 0)])
+             [fill (if (flvector? vec) 0.0 0)]
+             [newvec (vmake (fx* (if (fx= cap 0) *mincap* cap)
+                                  (array-incr-factor arr))
+                            fill)])
         ;;(printf "growing array from ~a to ~a~n" cap (vlength newvec))
         (vcopy! vec 0 newvec 0 len)
         (array-vec-set! arr newvec))))
@@ -1212,6 +1220,7 @@
   This is faster than `array-add!` when adding multiple values.
   |#
   (define-array-procedure (a fxa u8a) add*!
+    [(arr) (apcheck (arr) arr)]
     [(arr first . rest)
      (apcheck (arr)
               (if (and (pair? rest) (natural? first) (fx<= first (asize arr)))
@@ -1399,7 +1408,8 @@
                  (unless (fx= i len)
                    (vset! newvec j (vref vec i))
                    (loop (fx1+ i) (fx1- j))))
-               ($array-size-set! newarr len))))
+               ($array-size-set! newarr len)
+               newarr)))
 
 
   #|doc
@@ -2809,36 +2819,83 @@
   (define $list-slice-values
     (lambda (values start stop step)
       (let* ([len (length values)]
-             [start (if (fx< start 0) (fx+ len start) start)]
-             [stop (if (fx< stop 0) (fx+ len stop) stop)])
-        (let loop ([i start] [result '()])
-          (if (if (fx> step 0) (fx>= i stop) (fx<= i stop))
-              (reverse result)
-              (loop (fx+ i step) (cons (list-ref values i) result)))))))
+             [start0 (if (fx>= start 0) start (fx+ len start))]
+             [start (cond [(fx< start0 0) 0]
+                          [(fx> start0 len) (fx1- len)]
+                          [else start0])]
+             [stop0 (if (fx>= stop 0) stop (fx+ len stop))]
+             [stop (cond [(fx<= stop0 -1) -1]
+                         [(fx>= stop0 len) len]
+                         [else stop0])])
+        (if (fx= len 0)
+            '()
+            (let loop ([i start] [result '()])
+              (if (if (fx> step 0) (fx>= i stop) (fx<= i stop))
+                  (reverse result)
+                  (loop (fx+ i step) (cons (list-ref values i) result))))))))
 
   (define $make-bytearray-width-operations
     (lambda (who width ref set value?)
+      (define zero (if (value? 0) 0 0.0))
+      (define one (if (value? 1) 1 1.0))
       (define items
         (lambda (arr) ($bytearray-width-list who arr width ref)))
       (define build
         (lambda (value*) ($bytearray-width-build who value* width set value?)))
       (define replace!
         (lambda (arr value*) ($bytearray-width-replace! arr (build value*))))
+      (define add-values!
+        (lambda (arr index values)
+          (let* ([len ($bytearray-width-length who arr width)]
+                 [count (length values)]
+                 [old-bytes (bytearray-size arr)]
+                 [insert-byte (fx* index width)]
+                 [count-bytes (fx* count width)]
+                 [new-bytes (fx+ old-bytes count-bytes)]
+                 [old (array-vec arr)]
+                 [capacity (bytevector-length old)])
+            (when (fx> index len)
+              (errorf who "index ~a out of range ~a" index len))
+            (for-each
+             (lambda (value)
+               (unless (value? value)
+                 (errorf who "value is invalid for the selected width: ~a" value)))
+             values)
+            (when (fx< capacity new-bytes)
+              (let* ([grown (if (fx= capacity 0)
+                                *mincap*
+                                (fx* capacity (array-incr-factor arr)))]
+                     [new-capacity (if (fx>= grown new-bytes) grown new-bytes)]
+                     [new (make-bytevector new-capacity 0)])
+                (bytevector-copy! old 0 new 0 old-bytes)
+                (array-vec-set! arr new)))
+            (let ([storage (array-vec arr)])
+              (when (fx< insert-byte old-bytes)
+                (bytevector-copy! storage insert-byte storage
+                                  (fx+ insert-byte count-bytes)
+                                  (fx- old-bytes insert-byte)))
+              (let loop ([i 0] [rest values])
+                (unless (null? rest)
+                  (set arr (fx+ index i) (car rest))
+                  (loop (fx1+ i) (cdr rest))))
+              ($array-size-set! arr new-bytes)
+              arr))))
       (define add!
         (case-lambda
-          [(arr value) (add! arr ($bytearray-width-length who arr width) value)]
+          [(arr value) (add-values! arr ($bytearray-width-length who arr width) (list value))]
           [(arr index value)
            (pcheck ([bytearray? arr] [natural? index])
-                   (let ([len ($bytearray-width-length who arr width)])
-                     (when (fx> index len) (errorf who "index ~a out of range ~a" index len))
-                     (replace! arr ($list-insert-values (items arr) index (list value)))))]))
+                   (add-values! arr index (list value)))]))
       (define add*!
-        (lambda (arr first . rest)
+        (lambda (arr . arguments)
           (pcheck ([bytearray? arr])
-                  (let ([len ($bytearray-width-length who arr width)])
-                    (if (and (pair? rest) (natural? first) (fx<= first len))
-                        (replace! arr ($list-insert-values (items arr) first rest))
-                        (replace! arr (append (items arr) (cons first rest))))))))
+                  (if (null? arguments)
+                      arr
+                      (let ([first (car arguments)] [rest (cdr arguments)]
+                            [len ($bytearray-width-length who arr width)])
+                        (if (and (pair? rest) (natural? first) (fx<= first len))
+                            (add-values! arr first rest)
+                            (add-values! arr len arguments)))))))
       (define delete!
         (lambda (arr index)
           (pcheck ([bytearray? arr] [natural? index])
@@ -3006,12 +3063,17 @@
           (pcheck ([natural? count])
                   (let loop ([i 0] [result '()])
                     (if (fx= i count) (build (reverse result))
-                        (loop (fx1+ i) (cons i result)))))))
+                        (loop (fx1+ i)
+                              (cons (if (value? i) i (inexact i)) result)))))))
       (define nums
         (case-lambda
-          [(stop) (nums 0 stop 1)] [(start stop) (nums start stop 1)]
+          [(stop) (nums zero stop one)] [(start stop) (nums start stop one)]
           [(start stop step)
            (pcheck ([number? start stop step])
+                   (unless (or (and (< start stop) (> step 0))
+                               (and (> start stop) (< step 0))
+                               (= start stop))
+                     (errorf who "invalid range: ~a, ~a, ~a" start stop step))
                    (let loop ([value start] [result '()])
                      (if (if (> step 0) (>= value stop) (<= value stop))
                          (build (reverse result))
