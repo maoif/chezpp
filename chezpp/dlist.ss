@@ -191,10 +191,6 @@
                          (next (fx1- i) (dnode-right n))))]
                   [else (errorf who "index ~a out of range ~a" i len)])))]))
 
-  #|proc:dlist-add*!
-  Add multiple values to `dl`, either at the end or before the item at index `i`.
-  All values are collected before any mutation occurs.
-  |#
   (define $dlist-add-values!
     (lambda (who dl index values)
       (let ([length ($dlist-size dl)] [count (length values)])
@@ -235,6 +231,10 @@
             ($dlist-size-set! dl (fx+ length count))))
         dl)))
 
+  #|proc:dlist-add*!
+  Add multiple values to `dl`, either at the end or before the item at index `i`.
+  All values are collected before any mutation occurs.
+  |#
   (define-who dlist-add*!
     (lambda (dl . arguments)
       (pcheck ([dlist? dl])
