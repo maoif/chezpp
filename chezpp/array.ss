@@ -91,6 +91,7 @@
           bytearray-s64-ref bytearray-S64-ref bytearray-s64-set! bytearray-S64-set!
           bytearray-fp32-ref bytearray-FP32-ref bytearray-fp32-set! bytearray-FP32-set!
           bytearray-fp64-ref bytearray-FP64-ref bytearray-fp64-set! bytearray-FP64-set!
+
           bytearray-u8-add! bytearray-u8-add*! bytearray-u8-delete! bytearray-u8-slice
           bytearray-u8-slice! bytearray-u8-copy bytearray-u8-copy! bytearray-u8-push!
           bytearray-u8-pop! bytearray-u8-push-back! bytearray-u8-pop-back! bytearray-u8-filter
@@ -115,6 +116,7 @@
           bytearray-U8-fold-left bytearray-U8-fold-left/i bytearray-U8-fold-right bytearray-U8-fold-right/i
           bytearray-U8-sorted? bytearray-U8-sort bytearray-U8-sort! bytearray-U8->list
           bytearray-U8->iter bytearray-U8->bytevector bytearray-U8-iota bytearray-U8-nums
+
           bytearray-s8-add! bytearray-s8-add*! bytearray-s8-delete! bytearray-s8-slice
           bytearray-s8-slice! bytearray-s8-copy bytearray-s8-copy! bytearray-s8-push!
           bytearray-s8-pop! bytearray-s8-push-back! bytearray-s8-pop-back! bytearray-s8-filter
@@ -127,6 +129,7 @@
           bytearray-s8-fold-left bytearray-s8-fold-left/i bytearray-s8-fold-right bytearray-s8-fold-right/i
           bytearray-s8-sorted? bytearray-s8-sort bytearray-s8-sort! bytearray-s8->list
           bytearray-s8->iter bytearray-s8->bytevector bytearray-s8-iota bytearray-s8-nums
+
           bytearray-S8-add! bytearray-S8-add*! bytearray-S8-delete! bytearray-S8-slice
           bytearray-S8-slice! bytearray-S8-copy bytearray-S8-copy! bytearray-S8-push!
           bytearray-S8-pop! bytearray-S8-push-back! bytearray-S8-pop-back! bytearray-S8-filter
@@ -139,6 +142,7 @@
           bytearray-S8-fold-left bytearray-S8-fold-left/i bytearray-S8-fold-right bytearray-S8-fold-right/i
           bytearray-S8-sorted? bytearray-S8-sort bytearray-S8-sort! bytearray-S8->list
           bytearray-S8->iter bytearray-S8->bytevector bytearray-S8-iota bytearray-S8-nums
+
           bytearray-u16-add! bytearray-u16-add*! bytearray-u16-delete! bytearray-u16-slice
           bytearray-u16-slice! bytearray-u16-copy bytearray-u16-copy! bytearray-u16-push!
           bytearray-u16-pop! bytearray-u16-push-back! bytearray-u16-pop-back! bytearray-u16-filter
@@ -151,6 +155,7 @@
           bytearray-u16-fold-left bytearray-u16-fold-left/i bytearray-u16-fold-right bytearray-u16-fold-right/i
           bytearray-u16-sorted? bytearray-u16-sort bytearray-u16-sort! bytearray-u16->list
           bytearray-u16->iter bytearray-u16->bytevector bytearray-u16-iota bytearray-u16-nums
+
           bytearray-U16-add! bytearray-U16-add*! bytearray-U16-delete! bytearray-U16-slice
           bytearray-U16-slice! bytearray-U16-copy bytearray-U16-copy! bytearray-U16-push!
           bytearray-U16-pop! bytearray-U16-push-back! bytearray-U16-pop-back! bytearray-U16-filter
@@ -163,6 +168,7 @@
           bytearray-U16-fold-left bytearray-U16-fold-left/i bytearray-U16-fold-right bytearray-U16-fold-right/i
           bytearray-U16-sorted? bytearray-U16-sort bytearray-U16-sort! bytearray-U16->list
           bytearray-U16->iter bytearray-U16->bytevector bytearray-U16-iota bytearray-U16-nums
+
           bytearray-s16-add! bytearray-s16-add*! bytearray-s16-delete! bytearray-s16-slice
           bytearray-s16-slice! bytearray-s16-copy bytearray-s16-copy! bytearray-s16-push!
           bytearray-s16-pop! bytearray-s16-push-back! bytearray-s16-pop-back! bytearray-s16-filter
@@ -175,6 +181,7 @@
           bytearray-s16-fold-left bytearray-s16-fold-left/i bytearray-s16-fold-right bytearray-s16-fold-right/i
           bytearray-s16-sorted? bytearray-s16-sort bytearray-s16-sort! bytearray-s16->list
           bytearray-s16->iter bytearray-s16->bytevector bytearray-s16-iota bytearray-s16-nums
+
           bytearray-S16-add! bytearray-S16-add*! bytearray-S16-delete! bytearray-S16-slice
           bytearray-S16-slice! bytearray-S16-copy bytearray-S16-copy! bytearray-S16-push!
           bytearray-S16-pop! bytearray-S16-push-back! bytearray-S16-pop-back! bytearray-S16-filter
@@ -187,6 +194,7 @@
           bytearray-S16-fold-left bytearray-S16-fold-left/i bytearray-S16-fold-right bytearray-S16-fold-right/i
           bytearray-S16-sorted? bytearray-S16-sort bytearray-S16-sort! bytearray-S16->list
           bytearray-S16->iter bytearray-S16->bytevector bytearray-S16-iota bytearray-S16-nums
+
           bytearray-u24-add! bytearray-u24-add*! bytearray-u24-delete! bytearray-u24-slice
           bytearray-u24-slice! bytearray-u24-copy bytearray-u24-copy! bytearray-u24-push!
           bytearray-u24-pop! bytearray-u24-push-back! bytearray-u24-pop-back! bytearray-u24-filter
@@ -199,6 +207,7 @@
           bytearray-u24-fold-left bytearray-u24-fold-left/i bytearray-u24-fold-right bytearray-u24-fold-right/i
           bytearray-u24-sorted? bytearray-u24-sort bytearray-u24-sort! bytearray-u24->list
           bytearray-u24->iter bytearray-u24->bytevector bytearray-u24-iota bytearray-u24-nums
+
           bytearray-U24-add! bytearray-U24-add*! bytearray-U24-delete! bytearray-U24-slice
           bytearray-U24-slice! bytearray-U24-copy bytearray-U24-copy! bytearray-U24-push!
           bytearray-U24-pop! bytearray-U24-push-back! bytearray-U24-pop-back! bytearray-U24-filter
@@ -211,6 +220,7 @@
           bytearray-U24-fold-left bytearray-U24-fold-left/i bytearray-U24-fold-right bytearray-U24-fold-right/i
           bytearray-U24-sorted? bytearray-U24-sort bytearray-U24-sort! bytearray-U24->list
           bytearray-U24->iter bytearray-U24->bytevector bytearray-U24-iota bytearray-U24-nums
+
           bytearray-s24-add! bytearray-s24-add*! bytearray-s24-delete! bytearray-s24-slice
           bytearray-s24-slice! bytearray-s24-copy bytearray-s24-copy! bytearray-s24-push!
           bytearray-s24-pop! bytearray-s24-push-back! bytearray-s24-pop-back! bytearray-s24-filter
@@ -223,6 +233,7 @@
           bytearray-s24-fold-left bytearray-s24-fold-left/i bytearray-s24-fold-right bytearray-s24-fold-right/i
           bytearray-s24-sorted? bytearray-s24-sort bytearray-s24-sort! bytearray-s24->list
           bytearray-s24->iter bytearray-s24->bytevector bytearray-s24-iota bytearray-s24-nums
+
           bytearray-S24-add! bytearray-S24-add*! bytearray-S24-delete! bytearray-S24-slice
           bytearray-S24-slice! bytearray-S24-copy bytearray-S24-copy! bytearray-S24-push!
           bytearray-S24-pop! bytearray-S24-push-back! bytearray-S24-pop-back! bytearray-S24-filter
@@ -235,6 +246,7 @@
           bytearray-S24-fold-left bytearray-S24-fold-left/i bytearray-S24-fold-right bytearray-S24-fold-right/i
           bytearray-S24-sorted? bytearray-S24-sort bytearray-S24-sort! bytearray-S24->list
           bytearray-S24->iter bytearray-S24->bytevector bytearray-S24-iota bytearray-S24-nums
+
           bytearray-u32-add! bytearray-u32-add*! bytearray-u32-delete! bytearray-u32-slice
           bytearray-u32-slice! bytearray-u32-copy bytearray-u32-copy! bytearray-u32-push!
           bytearray-u32-pop! bytearray-u32-push-back! bytearray-u32-pop-back! bytearray-u32-filter
@@ -247,6 +259,7 @@
           bytearray-u32-fold-left bytearray-u32-fold-left/i bytearray-u32-fold-right bytearray-u32-fold-right/i
           bytearray-u32-sorted? bytearray-u32-sort bytearray-u32-sort! bytearray-u32->list
           bytearray-u32->iter bytearray-u32->bytevector bytearray-u32-iota bytearray-u32-nums
+
           bytearray-U32-add! bytearray-U32-add*! bytearray-U32-delete! bytearray-U32-slice
           bytearray-U32-slice! bytearray-U32-copy bytearray-U32-copy! bytearray-U32-push!
           bytearray-U32-pop! bytearray-U32-push-back! bytearray-U32-pop-back! bytearray-U32-filter
@@ -259,6 +272,7 @@
           bytearray-U32-fold-left bytearray-U32-fold-left/i bytearray-U32-fold-right bytearray-U32-fold-right/i
           bytearray-U32-sorted? bytearray-U32-sort bytearray-U32-sort! bytearray-U32->list
           bytearray-U32->iter bytearray-U32->bytevector bytearray-U32-iota bytearray-U32-nums
+
           bytearray-s32-add! bytearray-s32-add*! bytearray-s32-delete! bytearray-s32-slice
           bytearray-s32-slice! bytearray-s32-copy bytearray-s32-copy! bytearray-s32-push!
           bytearray-s32-pop! bytearray-s32-push-back! bytearray-s32-pop-back! bytearray-s32-filter
@@ -271,6 +285,7 @@
           bytearray-s32-fold-left bytearray-s32-fold-left/i bytearray-s32-fold-right bytearray-s32-fold-right/i
           bytearray-s32-sorted? bytearray-s32-sort bytearray-s32-sort! bytearray-s32->list
           bytearray-s32->iter bytearray-s32->bytevector bytearray-s32-iota bytearray-s32-nums
+
           bytearray-S32-add! bytearray-S32-add*! bytearray-S32-delete! bytearray-S32-slice
           bytearray-S32-slice! bytearray-S32-copy bytearray-S32-copy! bytearray-S32-push!
           bytearray-S32-pop! bytearray-S32-push-back! bytearray-S32-pop-back! bytearray-S32-filter
@@ -283,6 +298,7 @@
           bytearray-S32-fold-left bytearray-S32-fold-left/i bytearray-S32-fold-right bytearray-S32-fold-right/i
           bytearray-S32-sorted? bytearray-S32-sort bytearray-S32-sort! bytearray-S32->list
           bytearray-S32->iter bytearray-S32->bytevector bytearray-S32-iota bytearray-S32-nums
+
           bytearray-u40-add! bytearray-u40-add*! bytearray-u40-delete! bytearray-u40-slice
           bytearray-u40-slice! bytearray-u40-copy bytearray-u40-copy! bytearray-u40-push!
           bytearray-u40-pop! bytearray-u40-push-back! bytearray-u40-pop-back! bytearray-u40-filter
@@ -295,6 +311,7 @@
           bytearray-u40-fold-left bytearray-u40-fold-left/i bytearray-u40-fold-right bytearray-u40-fold-right/i
           bytearray-u40-sorted? bytearray-u40-sort bytearray-u40-sort! bytearray-u40->list
           bytearray-u40->iter bytearray-u40->bytevector bytearray-u40-iota bytearray-u40-nums
+
           bytearray-U40-add! bytearray-U40-add*! bytearray-U40-delete! bytearray-U40-slice
           bytearray-U40-slice! bytearray-U40-copy bytearray-U40-copy! bytearray-U40-push!
           bytearray-U40-pop! bytearray-U40-push-back! bytearray-U40-pop-back! bytearray-U40-filter
@@ -307,6 +324,7 @@
           bytearray-U40-fold-left bytearray-U40-fold-left/i bytearray-U40-fold-right bytearray-U40-fold-right/i
           bytearray-U40-sorted? bytearray-U40-sort bytearray-U40-sort! bytearray-U40->list
           bytearray-U40->iter bytearray-U40->bytevector bytearray-U40-iota bytearray-U40-nums
+
           bytearray-s40-add! bytearray-s40-add*! bytearray-s40-delete! bytearray-s40-slice
           bytearray-s40-slice! bytearray-s40-copy bytearray-s40-copy! bytearray-s40-push!
           bytearray-s40-pop! bytearray-s40-push-back! bytearray-s40-pop-back! bytearray-s40-filter
@@ -319,6 +337,7 @@
           bytearray-s40-fold-left bytearray-s40-fold-left/i bytearray-s40-fold-right bytearray-s40-fold-right/i
           bytearray-s40-sorted? bytearray-s40-sort bytearray-s40-sort! bytearray-s40->list
           bytearray-s40->iter bytearray-s40->bytevector bytearray-s40-iota bytearray-s40-nums
+
           bytearray-S40-add! bytearray-S40-add*! bytearray-S40-delete! bytearray-S40-slice
           bytearray-S40-slice! bytearray-S40-copy bytearray-S40-copy! bytearray-S40-push!
           bytearray-S40-pop! bytearray-S40-push-back! bytearray-S40-pop-back! bytearray-S40-filter
@@ -331,6 +350,7 @@
           bytearray-S40-fold-left bytearray-S40-fold-left/i bytearray-S40-fold-right bytearray-S40-fold-right/i
           bytearray-S40-sorted? bytearray-S40-sort bytearray-S40-sort! bytearray-S40->list
           bytearray-S40->iter bytearray-S40->bytevector bytearray-S40-iota bytearray-S40-nums
+
           bytearray-u48-add! bytearray-u48-add*! bytearray-u48-delete! bytearray-u48-slice
           bytearray-u48-slice! bytearray-u48-copy bytearray-u48-copy! bytearray-u48-push!
           bytearray-u48-pop! bytearray-u48-push-back! bytearray-u48-pop-back! bytearray-u48-filter
@@ -343,6 +363,7 @@
           bytearray-u48-fold-left bytearray-u48-fold-left/i bytearray-u48-fold-right bytearray-u48-fold-right/i
           bytearray-u48-sorted? bytearray-u48-sort bytearray-u48-sort! bytearray-u48->list
           bytearray-u48->iter bytearray-u48->bytevector bytearray-u48-iota bytearray-u48-nums
+
           bytearray-U48-add! bytearray-U48-add*! bytearray-U48-delete! bytearray-U48-slice
           bytearray-U48-slice! bytearray-U48-copy bytearray-U48-copy! bytearray-U48-push!
           bytearray-U48-pop! bytearray-U48-push-back! bytearray-U48-pop-back! bytearray-U48-filter
@@ -355,6 +376,7 @@
           bytearray-U48-fold-left bytearray-U48-fold-left/i bytearray-U48-fold-right bytearray-U48-fold-right/i
           bytearray-U48-sorted? bytearray-U48-sort bytearray-U48-sort! bytearray-U48->list
           bytearray-U48->iter bytearray-U48->bytevector bytearray-U48-iota bytearray-U48-nums
+
           bytearray-s48-add! bytearray-s48-add*! bytearray-s48-delete! bytearray-s48-slice
           bytearray-s48-slice! bytearray-s48-copy bytearray-s48-copy! bytearray-s48-push!
           bytearray-s48-pop! bytearray-s48-push-back! bytearray-s48-pop-back! bytearray-s48-filter
@@ -367,6 +389,7 @@
           bytearray-s48-fold-left bytearray-s48-fold-left/i bytearray-s48-fold-right bytearray-s48-fold-right/i
           bytearray-s48-sorted? bytearray-s48-sort bytearray-s48-sort! bytearray-s48->list
           bytearray-s48->iter bytearray-s48->bytevector bytearray-s48-iota bytearray-s48-nums
+
           bytearray-S48-add! bytearray-S48-add*! bytearray-S48-delete! bytearray-S48-slice
           bytearray-S48-slice! bytearray-S48-copy bytearray-S48-copy! bytearray-S48-push!
           bytearray-S48-pop! bytearray-S48-push-back! bytearray-S48-pop-back! bytearray-S48-filter
@@ -379,6 +402,7 @@
           bytearray-S48-fold-left bytearray-S48-fold-left/i bytearray-S48-fold-right bytearray-S48-fold-right/i
           bytearray-S48-sorted? bytearray-S48-sort bytearray-S48-sort! bytearray-S48->list
           bytearray-S48->iter bytearray-S48->bytevector bytearray-S48-iota bytearray-S48-nums
+
           bytearray-u56-add! bytearray-u56-add*! bytearray-u56-delete! bytearray-u56-slice
           bytearray-u56-slice! bytearray-u56-copy bytearray-u56-copy! bytearray-u56-push!
           bytearray-u56-pop! bytearray-u56-push-back! bytearray-u56-pop-back! bytearray-u56-filter
@@ -391,6 +415,7 @@
           bytearray-u56-fold-left bytearray-u56-fold-left/i bytearray-u56-fold-right bytearray-u56-fold-right/i
           bytearray-u56-sorted? bytearray-u56-sort bytearray-u56-sort! bytearray-u56->list
           bytearray-u56->iter bytearray-u56->bytevector bytearray-u56-iota bytearray-u56-nums
+
           bytearray-U56-add! bytearray-U56-add*! bytearray-U56-delete! bytearray-U56-slice
           bytearray-U56-slice! bytearray-U56-copy bytearray-U56-copy! bytearray-U56-push!
           bytearray-U56-pop! bytearray-U56-push-back! bytearray-U56-pop-back! bytearray-U56-filter
@@ -403,6 +428,7 @@
           bytearray-U56-fold-left bytearray-U56-fold-left/i bytearray-U56-fold-right bytearray-U56-fold-right/i
           bytearray-U56-sorted? bytearray-U56-sort bytearray-U56-sort! bytearray-U56->list
           bytearray-U56->iter bytearray-U56->bytevector bytearray-U56-iota bytearray-U56-nums
+
           bytearray-s56-add! bytearray-s56-add*! bytearray-s56-delete! bytearray-s56-slice
           bytearray-s56-slice! bytearray-s56-copy bytearray-s56-copy! bytearray-s56-push!
           bytearray-s56-pop! bytearray-s56-push-back! bytearray-s56-pop-back! bytearray-s56-filter
@@ -415,6 +441,7 @@
           bytearray-s56-fold-left bytearray-s56-fold-left/i bytearray-s56-fold-right bytearray-s56-fold-right/i
           bytearray-s56-sorted? bytearray-s56-sort bytearray-s56-sort! bytearray-s56->list
           bytearray-s56->iter bytearray-s56->bytevector bytearray-s56-iota bytearray-s56-nums
+
           bytearray-S56-add! bytearray-S56-add*! bytearray-S56-delete! bytearray-S56-slice
           bytearray-S56-slice! bytearray-S56-copy bytearray-S56-copy! bytearray-S56-push!
           bytearray-S56-pop! bytearray-S56-push-back! bytearray-S56-pop-back! bytearray-S56-filter
@@ -427,6 +454,7 @@
           bytearray-S56-fold-left bytearray-S56-fold-left/i bytearray-S56-fold-right bytearray-S56-fold-right/i
           bytearray-S56-sorted? bytearray-S56-sort bytearray-S56-sort! bytearray-S56->list
           bytearray-S56->iter bytearray-S56->bytevector bytearray-S56-iota bytearray-S56-nums
+
           bytearray-u64-add! bytearray-u64-add*! bytearray-u64-delete! bytearray-u64-slice
           bytearray-u64-slice! bytearray-u64-copy bytearray-u64-copy! bytearray-u64-push!
           bytearray-u64-pop! bytearray-u64-push-back! bytearray-u64-pop-back! bytearray-u64-filter
@@ -439,6 +467,7 @@
           bytearray-u64-fold-left bytearray-u64-fold-left/i bytearray-u64-fold-right bytearray-u64-fold-right/i
           bytearray-u64-sorted? bytearray-u64-sort bytearray-u64-sort! bytearray-u64->list
           bytearray-u64->iter bytearray-u64->bytevector bytearray-u64-iota bytearray-u64-nums
+
           bytearray-U64-add! bytearray-U64-add*! bytearray-U64-delete! bytearray-U64-slice
           bytearray-U64-slice! bytearray-U64-copy bytearray-U64-copy! bytearray-U64-push!
           bytearray-U64-pop! bytearray-U64-push-back! bytearray-U64-pop-back! bytearray-U64-filter
@@ -451,6 +480,7 @@
           bytearray-U64-fold-left bytearray-U64-fold-left/i bytearray-U64-fold-right bytearray-U64-fold-right/i
           bytearray-U64-sorted? bytearray-U64-sort bytearray-U64-sort! bytearray-U64->list
           bytearray-U64->iter bytearray-U64->bytevector bytearray-U64-iota bytearray-U64-nums
+
           bytearray-s64-add! bytearray-s64-add*! bytearray-s64-delete! bytearray-s64-slice
           bytearray-s64-slice! bytearray-s64-copy bytearray-s64-copy! bytearray-s64-push!
           bytearray-s64-pop! bytearray-s64-push-back! bytearray-s64-pop-back! bytearray-s64-filter
@@ -463,6 +493,7 @@
           bytearray-s64-fold-left bytearray-s64-fold-left/i bytearray-s64-fold-right bytearray-s64-fold-right/i
           bytearray-s64-sorted? bytearray-s64-sort bytearray-s64-sort! bytearray-s64->list
           bytearray-s64->iter bytearray-s64->bytevector bytearray-s64-iota bytearray-s64-nums
+
           bytearray-S64-add! bytearray-S64-add*! bytearray-S64-delete! bytearray-S64-slice
           bytearray-S64-slice! bytearray-S64-copy bytearray-S64-copy! bytearray-S64-push!
           bytearray-S64-pop! bytearray-S64-push-back! bytearray-S64-pop-back! bytearray-S64-filter
@@ -475,6 +506,7 @@
           bytearray-S64-fold-left bytearray-S64-fold-left/i bytearray-S64-fold-right bytearray-S64-fold-right/i
           bytearray-S64-sorted? bytearray-S64-sort bytearray-S64-sort! bytearray-S64->list
           bytearray-S64->iter bytearray-S64->bytevector bytearray-S64-iota bytearray-S64-nums
+
           bytearray-fp32-add! bytearray-fp32-add*! bytearray-fp32-delete! bytearray-fp32-slice
           bytearray-fp32-slice! bytearray-fp32-copy bytearray-fp32-copy! bytearray-fp32-push!
           bytearray-fp32-pop! bytearray-fp32-push-back! bytearray-fp32-pop-back! bytearray-fp32-filter
@@ -487,6 +519,7 @@
           bytearray-fp32-fold-left bytearray-fp32-fold-left/i bytearray-fp32-fold-right bytearray-fp32-fold-right/i
           bytearray-fp32-sorted? bytearray-fp32-sort bytearray-fp32-sort! bytearray-fp32->list
           bytearray-fp32->iter bytearray-fp32->bytevector bytearray-fp32-iota bytearray-fp32-nums
+
           bytearray-FP32-add! bytearray-FP32-add*! bytearray-FP32-delete! bytearray-FP32-slice
           bytearray-FP32-slice! bytearray-FP32-copy bytearray-FP32-copy! bytearray-FP32-push!
           bytearray-FP32-pop! bytearray-FP32-push-back! bytearray-FP32-pop-back! bytearray-FP32-filter
@@ -499,6 +532,7 @@
           bytearray-FP32-fold-left bytearray-FP32-fold-left/i bytearray-FP32-fold-right bytearray-FP32-fold-right/i
           bytearray-FP32-sorted? bytearray-FP32-sort bytearray-FP32-sort! bytearray-FP32->list
           bytearray-FP32->iter bytearray-FP32->bytevector bytearray-FP32-iota bytearray-FP32-nums
+
           bytearray-fp64-add! bytearray-fp64-add*! bytearray-fp64-delete! bytearray-fp64-slice
           bytearray-fp64-slice! bytearray-fp64-copy bytearray-fp64-copy! bytearray-fp64-push!
           bytearray-fp64-pop! bytearray-fp64-push-back! bytearray-fp64-pop-back! bytearray-fp64-filter
@@ -511,6 +545,7 @@
           bytearray-fp64-fold-left bytearray-fp64-fold-left/i bytearray-fp64-fold-right bytearray-fp64-fold-right/i
           bytearray-fp64-sorted? bytearray-fp64-sort bytearray-fp64-sort! bytearray-fp64->list
           bytearray-fp64->iter bytearray-fp64->bytevector bytearray-fp64-iota bytearray-fp64-nums
+
           bytearray-FP64-add! bytearray-FP64-add*! bytearray-FP64-delete! bytearray-FP64-slice
           bytearray-FP64-slice! bytearray-FP64-copy bytearray-FP64-copy! bytearray-FP64-push!
           bytearray-FP64-pop! bytearray-FP64-push-back! bytearray-FP64-pop-back! bytearray-FP64-filter
