@@ -142,13 +142,91 @@
        (equal? '(2 1 0) seen))
      )
 
+(mat bytearray-direct-large
+     (let* ([left (bytearray-u16-iota 1000)]
+            [right (bytearray-u16-nums 1000 2000)]
+            [mapped (bytearray-u16-map + left right)]
+            [indexed (bytearray-u16-map/i (lambda (i value) (+ i value)) left)]
+            [seen 0])
+       (bytearray-u16-for-each (lambda (a b) (set! seen (+ seen a b))) left right)
+       (and (= (bytearray-size mapped) 2000)
+            (equal? (bytearray-u16->list mapped) (map + (iota 1000) (nums 1000 2000)))
+            (equal? (bytearray-u16->list indexed) (map (lambda (i) (* 2 i)) (iota 1000)))
+            (= seen (apply + (map + (iota 1000) (nums 1000 2000))))))
+
+     (let-values ([(even odd)
+                   (bytearray-u16-partition even? (bytearray-u16-iota 1000))])
+       (let ([filtered (bytearray-u16-filter even? (bytearray-u16-iota 1000))])
+         (and (= (bytearray-size even) 1000)
+            (= (bytearray-size odd) 1000)
+            (= (bytearray-size filtered) 1000)
+            (equal? (bytearray-u16->list even) (filter even? (iota 1000)))
+            (equal? (bytearray-u16->list odd) (filter odd? (iota 1000)))
+            (equal? (bytearray-u16->list filtered) (filter even? (iota 1000))))))
+
+     (let ([values (bytearray-u8-iota 100)])
+       (and (bytearray-u8-andmap (lambda (value) (< value 100)) values)
+            (bytearray-u8-ormap (lambda (value) (= value 99)) values)
+            (= (bytearray-u8-fold-left + 0 values) (apply + (iota 100)))
+            (= (bytearray-u8-fold-right - 0 values)
+               (fold-right - 0 (iota 100)))
+            (equal? (bytearray-u8->list
+                     (bytearray-u8-map-rev (lambda (value) value) values))
+                    (reverse (iota 100)))))
+
+     (let* ([values (bytearray-fp32-iota 100)]
+            [reversed (bytearray-fp32-map-rev (lambda (value) value) values)]
+            [joined (bytearray-fp32-append values reversed)])
+       (and (= (bytearray-size values) 400)
+            (= (bytearray-size joined) 800)
+            (equal? (bytearray-fp32->list reversed)
+                    (reverse (map inexact (iota 100))))))
+
+     (let* ([descending (bytearray-u16-nums 1000 0 -1)]
+            [sorted (bytearray-u16-sort < descending)])
+       (and (= (bytearray-size sorted) 2000)
+            (equal? (bytearray-u16->list sorted) (nums 1 1001))))
+
+     (let ([values (bytearray-u16-nums 1000 0 -1)])
+       (and (eq? values (bytearray-u16-sort! < values))
+            (= (bytearray-size values) 2000)
+            (equal? (bytearray-u16->list values) (nums 1 1001))))
+     )
+
 (mat flarray
      (let ([a (flarray 1.0 2.0 3.0)])
        (and (= (flarray-size a) 3)
+            (not (flarray-empty? a))
             (= (flarray-ref a 1) 2.0)))
+     (let ([a (make-flarray)])
+       (and (flarray-empty? a)
+            (flarray-set! (flarray 1.0) 0 2.0)
+            #t))
+     ;; Flarray mutation rejects non-flonum values.
+     (error? (flarray-set! (flarray 1.0) 0 1))
      (let ([a (make-flarray)])
        (flarray-add! a 4.0)
        (equal? '(4.0) (flarray->list a)))
+     (let ([a (flarray 1.0 3.0)])
+       (flarray-add! a 1 2.0)
+       (equal? '(1.0 2.0 3.0) (flarray->list a)))
+     (let ([a (flarray 1.0 2.0)])
+       (and (begin (flarray-add*! a) #t)
+            (begin (flarray-add*! a 3.0) #t)
+            (begin (flarray-add*! a 4.0 5.0) #t)
+            (equal? '(1.0 2.0 3.0 4.0 5.0) (flarray->list a))))
+     ;; Bulk insertion validates every value before changing the array.
+     (let ([a (flarray 1.0 2.0)])
+       (and (guard (condition [else #t])
+              (flarray-add*! a 1 3.0 'bad)
+              #f)
+            (equal? '(1.0 2.0) (flarray->list a))))
+     (let ([a (flarray 1.0 2.0 3.0)])
+       (flarray-delete! a 1)
+       (equal? '(1.0 3.0) (flarray->list a)))
+     (let ([a (flarray 1.0 2.0)])
+       (flarray-clear! a)
+       (flarray-empty? a))
 
      (equal? '(2.0 4.0 6.0)
              (flarray->list (flarray-map (lambda (x) (fl* x 2.0))
