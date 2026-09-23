@@ -95,6 +95,59 @@
      (error? (bvmap-u16 add1 '#vu8(1 0) (endianness little)))
      )
 
+(mat bvector-large-direct
+     (let* ([left (bvnums-u8 0 100)]
+            [right (bvnums-u8 100 0 -1)]
+            [mapped (bvmap-u8 (lambda (x y) (fx+ x y)) left right)]
+            [indexed (bvmap/i-u8 (lambda (i x y) (fx/ (fx+ i x y) 2)) left right)])
+       (and (fx= 100 (bytevector-length mapped))
+            (fx= 100 (bytevector-length indexed))
+            (fx= 100 (bytevector-u8-ref mapped 0))
+            (fx= 100 (bytevector-u8-ref mapped 99))
+            (fx= 50 (bytevector-u8-ref indexed 0))
+            (fx= 99 (bytevector-u8-ref indexed 99))))
+
+     (let ([source (bvnums-u8 0 100)] [count 0] [total 0])
+       (bvfor-each-u8
+        (lambda (value) (set! count (fx1+ count)) (set! total (fx+ total value)))
+        source)
+       (let-values ([(even odd) (bvpartition-u8 even? source)])
+         (and (fx= count 100)
+              (fx= total 4950)
+              (fx= 50 (bytevector-length (bvfilter-u8 even? source)))
+              (fx= 50 (bytevector-length even))
+              (fx= 50 (bytevector-length odd))
+              (bvandmap-u8 (lambda (value) (fx< value 100)) source)
+              (bvormap-u8 (lambda (value) (fx= value 99)) source))))
+
+     (let* ([source (bvnums-U16 1000 0 -1)]
+            [sorted (bvsort-U16 < source)]
+            [mutated (bytevector-copy source)])
+       (bvsort!-U16 < mutated)
+       (and (fx= 2000 (bytevector-length source))
+            (fx= 1 (bytevector-u16-ref sorted 0 (endianness big)))
+            (fx= 1000 (bytevector-u16-ref sorted 1998 (endianness big)))
+            (equal? sorted mutated)
+            (bvsorted?-U16 < sorted)
+            (fx= 1000 (bytevector-u16-ref (bvreverse-U16 sorted) 0
+                                          (endianness big)))))
+
+     (let* ([source (bvnums-fp32 0.0 1000.0 1.0)]
+            [ones (bvnums-fp32 1.0 1001.0 1.0)]
+            [scanned (bvscan-left-in-fp32 + 0.0 source ones)]
+            [right (bvscan-right-ex-fp32 + 0.0 source)]
+            [zipped (bvzip-fp32 source ones)]
+            [shuffled (bvshuffle-fp32 source)])
+       (and (fx= 4000 (bytevector-length scanned))
+            (fx= 1000 (vector-length zipped))
+            (= 1.0 (bytevector-ieee-single-ref scanned 0 (endianness little)))
+            (= 0.0 (bytevector-ieee-single-ref right 0 (endianness little)))
+            (fx= 4000 (bytevector-length shuffled))
+            (bvsorted?-fp32 < (bvsort-fp32 < shuffled))))
+
+     ;; A byte count not divisible by the selected width is invalid.
+     (error? (bvfold-left-U16 + 0 (make-bytevector 1999 0))))
+
 
 (mat iterations
 

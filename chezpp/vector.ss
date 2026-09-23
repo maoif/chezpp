@@ -2252,43 +2252,73 @@
                   (errorf who "bytevector length ~a is not aligned to width ~a" length width))
                 (fx/ length width)))))
 
-  (define $bvector-items
-    (lambda (who bytes width ref)
-      (let ([length ($bvector-length who bytes width)])
-        (let loop ([i 0] [result '()])
-          (if (fx= i length)
-              (reverse result)
-              (loop (fx1+ i) (cons (ref bytes (fx* i width)) result)))))))
-
-  (define $bvector-build
-    (lambda (who items width set value?)
-      (for-each (lambda (item)
-                  (unless (value? item)
-                    (errorf who "value is invalid for the selected width: ~a" item)))
-                items)
-      (let ([bytes (make-bytevector (fx* width (length items)) 0)])
-        (let loop ([i 0] [rest items])
-          (unless (null? rest)
-            (set bytes (fx* i width) (car rest))
-            (loop (fx1+ i) (cdr rest))))
+  (define $bvector-merge-sort!
+    (lambda (less? bytes start stop width ref set)
+      (let ([scratch (make-bytevector (fx* width (fx- stop start)) 0)])
+        (define copy-value!
+          (lambda (from to)
+            (set scratch (fx* (fx- to start) width)
+                 (ref bytes (fx* from width)))))
+        (define merge!
+          (lambda (left middle right)
+            (let loop ([i left] [j middle] [k left])
+              (cond
+                [(and (fx< i middle) (fx< j right))
+                 (if (less? (ref bytes (fx* j width))
+                            (ref bytes (fx* i width)))
+                     (begin (copy-value! j k) (loop i (fx1+ j) (fx1+ k)))
+                     (begin (copy-value! i k) (loop (fx1+ i) j (fx1+ k))))]
+                [(fx< i middle)
+                 (copy-value! i k)
+                 (loop (fx1+ i) j (fx1+ k))]
+                [(fx< j right)
+                 (copy-value! j k)
+                 (loop i (fx1+ j) (fx1+ k))]
+                [else
+                 (let loop-back ([n left])
+                   (unless (fx= n right)
+                     (set bytes (fx* n width)
+                          (ref scratch (fx* (fx- n start) width)))
+                     (loop-back (fx1+ n))))]))))
+        (define sort-range!
+          (lambda (left right)
+            (when (fx< (fx1+ left) right)
+              (let ([middle (fx/ (fx+ left right) 2)])
+                (sort-range! left middle)
+                (sort-range! middle right)
+                (merge! left middle right)))))
+        (sort-range! start stop)
         bytes)))
 
   (define $make-bvector-operations
     (lambda (who width ref set value?)
       (define zero (if (value? 0) 0 0.0))
       (define one (if (value? 1) 1 1.0))
-      (define items (lambda (bytes) ($bvector-items who bytes width ref)))
-      (define build (lambda (item*) ($bvector-build who item* width set value?)))
+      (define length-of (lambda (bytes) ($bvector-length who bytes width)))
+      (define make-result
+        (lambda (length) (make-bytevector (fx* width length) 0)))
+      (define value-at
+        (lambda (bytes index) (ref bytes (fx* index width))))
+      (define store!
+        (lambda (bytes index value)
+          (unless (value? value)
+            (errorf who "value is invalid for the selected width: ~a" value))
+          (set bytes (fx* index width) value)))
       (define all-bytevectors?
         (lambda (values) (andmap bytevector? values)))
-      (define source-items
+      (define source-length
         (lambda (bytes . rest)
           (pcheck ([bytevector? bytes] [all-bytevectors? rest])
-                  (let ([sources (cons bytes rest)])
-                    (let ([item-list* (map items sources)])
-                      (unless (apply = (map length item-list*))
-                        (errorf who "bytevectors differ in logical length"))
-                      item-list*)))))
+                  (let ([length (length-of bytes)])
+                    (for-each
+                     (lambda (source)
+                       (unless (fx= length (length-of source))
+                         (errorf who "bytevectors differ in logical length")))
+                     rest)
+                    length))))
+      (define values-at
+        (lambda (index sources)
+          (map (lambda (source) (value-at source index)) sources)))
       (define replace!
         (lambda (target source)
           (unless (fx= (bytevector-length target) (bytevector-length source))
@@ -2297,41 +2327,53 @@
           target))
       (define map-values
         (lambda (proc bytes . bytevectors)
-          (pcheck ([procedure? proc])
-                  (let ([item-list* (apply source-items bytes bytevectors)])
-                    (build (apply map proc item-list*))))))
+          (pcheck ([procedure? proc] [bytevector? bytes] [all-bytevectors? bytevectors])
+                  (let* ([sources (cons bytes bytevectors)]
+                         [length (apply source-length bytes bytevectors)]
+                         [result (make-result length)])
+                    (let loop ([i 0])
+                      (if (fx= i length) result
+                          (begin (store! result i (apply proc (values-at i sources)))
+                                 (loop (fx1+ i)))))))))
       (define map/i
         (lambda (proc bytes . bytevectors)
-          (pcheck ([procedure? proc])
-                  (let ([item-list* (apply source-items bytes bytevectors)])
-                    (let loop ([i 0] [rest item-list*] [result '()])
-                      (if (null? (car rest))
-                          (build (reverse result))
-                          (loop (fx1+ i) (map cdr rest)
-                                (cons (apply proc i (map car rest)) result))))))))
+          (pcheck ([procedure? proc] [bytevector? bytes] [all-bytevectors? bytevectors])
+                  (let* ([sources (cons bytes bytevectors)]
+                         [length (apply source-length bytes bytevectors)]
+                         [result (make-result length)])
+                    (let loop ([i 0])
+                      (if (fx= i length) result
+                          (begin (store! result i (apply proc i (values-at i sources)))
+                                 (loop (fx1+ i)))))))))
       (define map! (lambda (proc bytes . rest) (replace! bytes (apply map-values proc bytes rest))))
       (define map!/i
         (lambda (proc bytes . rest) (replace! bytes (apply map/i proc bytes rest))))
       (define each
         (lambda (proc bytes . rest)
-          (pcheck ([procedure? proc] [bytevector? bytes])
-                  (apply for-each proc (map items (cons bytes rest))))))
+          (pcheck ([procedure? proc] [bytevector? bytes] [all-bytevectors? rest])
+                  (let* ([sources (cons bytes rest)]
+                         [length (apply source-length bytes rest)])
+                    (let loop ([i 0])
+                      (unless (fx= i length)
+                        (apply proc (values-at i sources))
+                        (loop (fx1+ i))))))))
       (define each/i
         (lambda (proc bytes . bytevectors)
-          (pcheck ([procedure? proc])
-                  (let ([item-list* (apply source-items bytes bytevectors)])
-                    (let loop ([i 0] [rest item-list*])
-                      (unless (null? (car rest))
-                        (apply proc i (map car rest))
-                        (loop (fx1+ i) (map cdr rest))))))))
+          (pcheck ([procedure? proc] [bytevector? bytes] [all-bytevectors? bytevectors])
+                  (let* ([sources (cons bytes bytevectors)]
+                         [length (apply source-length bytes bytevectors)])
+                    (let loop ([i 0])
+                      (unless (fx= i length)
+                        (apply proc i (values-at i sources))
+                        (loop (fx1+ i))))))))
       (define slice
         (case-lambda
           [(bytes stop) (slice bytes 0 stop 1)]
           [(bytes start stop) (slice bytes start stop 1)]
-          [(bytes start stop step)
+          ((bytes start stop step)
            (pcheck ([bytevector? bytes] [fixnum? start stop step])
                    (when (fx= step 0) (errorf who "step cannot be zero"))
-                   (let* ([values (items bytes)] [len (length values)]
+                   (let* ([len (length-of bytes)]
                           [s0 (if (fx>= start 0) start (fx+ len start))]
                           [s (cond [(fx< s0 0) 0]
                                    [(fx> s0 len) (fx1- len)]
@@ -2341,193 +2383,281 @@
                                    [(fx>= e0 len) len]
                                    [else e0])])
                      (if (fx= len 0)
-                         (build '())
-                         (let loop ([i s] [result '()])
-                           (if (if (fx> step 0) (fx>= i e) (fx<= i e))
-                               (build (reverse result))
-                               (loop (fx+ i step) (cons (list-ref values i) result)))))))]))
+                         (make-result 0)
+                         (let* ([count (let count ([i s] [n 0])
+                                         (if (if (fx> step 0) (fx>= i e) (fx<= i e))
+                                             n
+                                             (count (fx+ i step) (fx1+ n))))]
+                                [result (make-result count)])
+                           (let loop ([i s] [output 0])
+                             (if (fx= output count) result
+                                 (begin (store! result output (value-at bytes i))
+                                        (loop (fx+ i step) (fx1+ output))))))))))))
       (define filter-values
         (lambda (pred bytes)
           (pcheck ([procedure? pred] [bytevector? bytes])
-                  (let loop ([rest (items bytes)] [result '()])
-                    (if (null? rest) (build (reverse result))
-                        (loop (cdr rest) (if (pred (car rest))
-                                             (cons (car rest) result) result)))))))
+                  (let* ([length (length-of bytes)] [temporary (make-result length)])
+                    (let loop ([i 0] [output 0])
+                      (if (fx= i length)
+                          (let ([result (make-result output)])
+                            (bytevector-copy! temporary 0 result 0 (bytevector-length result))
+                            result)
+                          (let ([value (value-at bytes i)])
+                            (if (pred value)
+                                (begin (store! temporary output value)
+                                       (loop (fx1+ i) (fx1+ output)))
+                                (loop (fx1+ i) output)))))))))
       (define partition
         (lambda (pred bytes)
           (pcheck ([procedure? pred] [bytevector? bytes])
-                  (let loop ([rest (items bytes)] [yes '()] [no '()])
-                    (if (null? rest)
-                        (values (build (reverse yes)) (build (reverse no)))
-                        (if (pred (car rest))
-                            (loop (cdr rest) (cons (car rest) yes) no)
-                            (loop (cdr rest) yes (cons (car rest) no))))))))
-      (define or-values (lambda (pred bytes) (ormap pred (items bytes))))
-      (define and-values (lambda (pred bytes) (andmap pred (items bytes))))
+                  (let* ([length (length-of bytes)]
+                         [yes-temp (make-result length)] [no-temp (make-result length)])
+                    (let loop ([i 0] [yes-count 0] [no-count 0])
+                      (if (fx= i length)
+                          (let ([yes (make-result yes-count)] [no (make-result no-count)])
+                            (bytevector-copy! yes-temp 0 yes 0 (bytevector-length yes))
+                            (bytevector-copy! no-temp 0 no 0 (bytevector-length no))
+                            (values yes no))
+                          (let ([value (value-at bytes i)])
+                            (if (pred value)
+                                (begin (store! yes-temp yes-count value)
+                                       (loop (fx1+ i) (fx1+ yes-count) no-count))
+                                (begin (store! no-temp no-count value)
+                                       (loop (fx1+ i) yes-count (fx1+ no-count)))))))))))
+      (define or-values
+        (lambda (pred bytes)
+          (let ([length (length-of bytes)])
+            (let loop ([i 0])
+              (and (fx< i length)
+                   (or (pred (value-at bytes i)) (loop (fx1+ i))))))))
+      (define and-values
+        (lambda (pred bytes)
+          (let ([length (length-of bytes)])
+            (let loop ([i 0])
+              (or (fx= i length)
+                  (and (pred (value-at bytes i)) (loop (fx1+ i))))))))
       (define memp
         (lambda (pred bytes)
           (pcheck ([procedure? pred] [bytevector? bytes])
-                  (let loop ([i 0] [rest (items bytes)])
-                    (cond [(null? rest) #f] [(pred (car rest)) i]
-                          [else (loop (fx1+ i) (cdr rest))])))))
+                  (let ([length (length-of bytes)])
+                    (let loop ([i 0])
+                      (cond [(fx= i length) #f]
+                            [(pred (value-at bytes i)) i]
+                            [else (loop (fx1+ i))]))))))
       (define member-value (lambda (value bytes) (memp (lambda (item) (equal? value item)) bytes)))
       (define memq-value (lambda (value bytes) (memp (lambda (item) (eq? value item)) bytes)))
       (define memv-value (lambda (value bytes) (memp (lambda (item) (eqv? value item)) bytes)))
       (define fold-left-values
         (lambda (proc init bytes . bytevectors)
-          (let ([item-list* (apply source-items bytes bytevectors)])
-            (let loop ([acc init] [rest item-list*])
-              (if (null? (car rest)) acc
-                  (loop (apply proc acc (map car rest)) (map cdr rest)))))))
+          (let* ([sources (cons bytes bytevectors)]
+                 [length (apply source-length bytes bytevectors)])
+            (let loop ([i 0] [acc init])
+              (if (fx= i length) acc
+                  (loop (fx1+ i) (apply proc acc (values-at i sources))))))))
       (define fold-right-values
         (lambda (proc init bytes . bytevectors)
-          (let ([item-list* (map reverse (apply source-items bytes bytevectors))])
-            (let loop ([rest item-list*] [acc init])
-              (if (null? (car rest)) acc
-                  (loop (map cdr rest) (apply proc (append (map car rest) (list acc)))))))))
+          (let* ([sources (cons bytes bytevectors)]
+                 [length (apply source-length bytes bytevectors)])
+            (let loop ([i (fx1- length)] [acc init])
+              (if (fx< i 0) acc
+                  (loop (fx1- i) (apply proc (append (values-at i sources) (list acc)))))))))
       (define fold-left/i
         (lambda (proc init bytes . bytevectors)
-          (let ([item-list* (apply source-items bytes bytevectors)])
-            (let loop ([i 0] [acc init] [rest item-list*])
-              (if (null? (car rest)) acc
-                  (loop (fx1+ i) (apply proc i acc (map car rest)) (map cdr rest)))))))
+          (let* ([sources (cons bytes bytevectors)]
+                 [length (apply source-length bytes bytevectors)])
+            (let loop ([i 0] [acc init])
+              (if (fx= i length) acc
+                  (loop (fx1+ i) (apply proc i acc (values-at i sources))))))))
       (define fold-right/i
         (lambda (proc init bytes . bytevectors)
-          (let* ([item-list* (map reverse (apply source-items bytes bytevectors))]
-                 [last (fx1- (length (car item-list*)))])
-            (let loop ([i last] [rest item-list*] [acc init])
-              (if (null? (car rest)) acc
-                  (loop (fx1- i) (map cdr rest)
-                        (apply proc i (append (map car rest) (list acc)))))))))
+          (let* ([sources (cons bytes bytevectors)]
+                 [length (apply source-length bytes bytevectors)])
+            (let loop ([i (fx1- length)] [acc init])
+              (if (fx< i 0) acc
+                  (loop (fx1- i)
+                        (apply proc i (append (values-at i sources) (list acc)))))))))
       (define scan-left-ex
         (lambda (proc init bytes . bytevectors)
-          (let ([item-list* (apply source-items bytes bytevectors)])
-            (let loop ([acc init] [rest item-list*] [result '()])
-              (if (null? (car rest)) (build (reverse result))
-                  (loop (apply proc acc (map car rest)) (map cdr rest)
-                        (cons acc result)))))))
+          (let* ([sources (cons bytes bytevectors)]
+                 [length (apply source-length bytes bytevectors)] [result (make-result length)])
+            (let loop ([i 0] [acc init])
+              (if (fx= i length) result
+                  (begin (store! result i acc)
+                         (loop (fx1+ i) (apply proc acc (values-at i sources)))))))))
       (define scan-left-in
         (lambda (proc init bytes . bytevectors)
-          (let ([item-list* (apply source-items bytes bytevectors)])
-            (let loop ([acc init] [rest item-list*] [result '()])
-              (if (null? (car rest)) (build (reverse result))
-                  (let ([next (apply proc acc (map car rest))])
-                    (loop next (map cdr rest) (cons next result))))))))
+          (let* ([sources (cons bytes bytevectors)]
+                 [length (apply source-length bytes bytevectors)] [result (make-result length)])
+            (let loop ([i 0] [acc init])
+              (if (fx= i length) result
+                  (let ([next (apply proc acc (values-at i sources))])
+                    (store! result i next)
+                    (loop (fx1+ i) next)))))))
       (define scan-right-ex
         (lambda (proc init bytes . bytevectors)
-          (let* ([item-list* (apply source-items bytes bytevectors)]
-                 [reversed (map reverse item-list*)]
-                 [remaining (length (car reversed))])
-            (let loop ([acc init] [rest reversed] [remaining remaining]
-                       [result (list init)])
-              (if (fx<= remaining 1)
-                  (build (reverse result))
-                  (let ([next (apply proc (append (map car rest) (list acc)))])
-                    (loop next (map cdr rest) (fx1- remaining) (cons next result))))))))
+          (let* ([sources (cons bytes bytevectors)]
+                 [length (apply source-length bytes bytevectors)] [result (make-result length)])
+            (when (fx> length 0) (store! result 0 init))
+            (let loop ([i (fx1- length)] [output 1] [acc init])
+              (if (fx<= i 0) result
+                  (let ([next (apply proc (append (values-at i sources) (list acc)))])
+                    (store! result output next)
+                    (loop (fx1- i) (fx1+ output) next)))))))
       (define scan-right-in
         (lambda (proc init bytes . bytevectors)
-          (let* ([item-list* (apply source-items bytes bytevectors)]
-                 [reversed (map reverse item-list*)]
-                 [remaining (length (car reversed))])
-            (let loop ([acc init] [rest reversed] [remaining remaining] [result '()])
-              (if (fx= remaining 0)
-                  (build (reverse result))
-                  (let ([next (apply proc (append (map car rest) (list acc)))])
-                    (loop next (map cdr rest) (fx1- remaining) (cons next result))))))))
-      (define reverse-values (lambda (bytes) (build (reverse (items bytes)))))
+          (let* ([sources (cons bytes bytevectors)]
+                 [length (apply source-length bytes bytevectors)] [result (make-result length)])
+            (let loop ([i (fx1- length)] [output 0] [acc init])
+              (if (fx< i 0) result
+                  (let ([next (apply proc (append (values-at i sources) (list acc)))])
+                    (store! result output next)
+                    (loop (fx1- i) (fx1+ output) next)))))))
+      (define reverse-values
+        (lambda (bytes)
+          (let* ([length (length-of bytes)] [result (make-result length)])
+            (let loop ([i 0])
+              (if (fx= i length) result
+                  (begin (store! result i (value-at bytes (fx- length i 1)))
+                         (loop (fx1+ i))))))))
       (define reverse-values! (lambda (bytes) (replace! bytes (reverse-values bytes))))
       (define zip
         (lambda (bytes . rest)
           (pcheck ([bytevector? bytes] [all-bytevectors? rest])
                   (when (null? rest) (errorf who "zip requires at least two bytevectors"))
-          (let ([item-list* (apply source-items bytes rest)])
-            (list->vector (apply map list item-list*))))))
+                  (let* ([sources (cons bytes rest)]
+                         [length (apply source-length bytes rest)]
+                         [result (make-vector length)])
+                    (let loop ([i 0])
+                      (if (fx= i length) result
+                          (begin (vector-set! result i (values-at i sources))
+                                 (loop (fx1+ i)))))))))
       (define zipv
         (lambda (bytes . rest)
           (pcheck ([bytevector? bytes] [all-bytevectors? rest])
                   (when (null? rest) (errorf who "zipv requires at least two bytevectors"))
-          (let ([item-list* (apply source-items bytes rest)])
-            (list->vector (map build (apply map list item-list*)))))))
+                  (let* ([sources (cons bytes rest)]
+                         [length (apply source-length bytes rest)]
+                         [result (make-vector length)])
+                    (let loop ([i 0])
+                      (if (fx= i length) result
+                          (let* ([values (values-at i sources)]
+                                 [row (make-result (length values))])
+                            (let fill ([j 0] [values values])
+                              (unless (null? values)
+                                (store! row j (car values))
+                                (fill (fx1+ j) (cdr values))))
+                            (vector-set! result i row)
+                            (loop (fx1+ i)))))))))
       (define shuffle
         (lambda (bytes)
-          (let ([vector (list->vector (items bytes))])
-            (let loop ([i (fx1- (vector-length vector))])
+          (let ([result (make-bytevector (bytevector-length bytes) 0)])
+            (bytevector-copy! bytes 0 result 0 (bytevector-length bytes))
+            (let loop ([i (fx1- (length-of result))])
               (when (fx> i 0)
-                (let* ([j (random (fx1+ i))] [left (vector-ref vector i)])
-                  (vector-set! vector i (vector-ref vector j))
-                  (vector-set! vector j left)
+                (let* ([j (random (fx1+ i))] [left (value-at result i)])
+                  (store! result i (value-at result j))
+                  (store! result j left)
                   (loop (fx1- i)))))
-            (build (vector->list vector)))))
+            result)))
       (define shuffle! (lambda (bytes) (replace! bytes (shuffle bytes))))
-      (define sort-values
+      (define sort-direct
         (case-lambda
           [(less? bytes)
            (pcheck ([procedure? less?] [bytevector? bytes])
-                   (build (vector->list (vsort less? (list->vector (items bytes))))))]
+                   (let ([result (make-bytevector (bytevector-length bytes) 0)])
+                     (bytevector-copy! bytes 0 result 0 (bytevector-length bytes))
+                     ($bvector-merge-sort! less? result 0
+                                            ($bvector-length who result width)
+                                            width ref set)
+                     result))]
           [(less? bytes stop)
-           (sort-values less? bytes 0 stop)]
+           (sort-direct less? bytes 0 stop)]
           [(less? bytes start stop)
            (pcheck ([procedure? less?] [bytevector? bytes] [natural? start stop])
-                   (let ([values (items bytes)])
-                     (when (fx> stop (length values))
-                       (errorf who "stop index ~a out of bound ~a" stop (length values)))
+                   (let ([length ($bvector-length who bytes width)])
+                     (when (fx> stop length)
+                       (errorf who "stop index ~a out of bound ~a" stop length))
                      (when (fx> start stop)
                        (errorf who "start index ~a greater than stop index ~a" start stop))
-                     (build (vector->list
-                             (vsort less? (list->vector (list-tail (list-head values stop) start)))))))]))
-      (define sort-values!
+                     (let ([result (make-bytevector (fx* width (fx- stop start)) 0)])
+                       (let loop ([i start])
+                         (unless (fx= i stop)
+                           (set result (fx* (fx- i start) width)
+                                (ref bytes (fx* i width)))
+                           (loop (fx1+ i))))
+                       ($bvector-merge-sort! less? result 0 (fx- stop start)
+                                              width ref set)
+                       result)))]))
+      (define sort-direct!
         (case-lambda
-          [(less? bytes) (replace! bytes (sort-values less? bytes))]
-          [(less? bytes stop) (sort-values! less? bytes 0 stop)]
+          [(less? bytes) ($bvector-merge-sort! less? bytes 0
+                                                ($bvector-length who bytes width)
+                                                width ref set)]
+          [(less? bytes stop) (sort-direct! less? bytes 0 stop)]
           [(less? bytes start stop)
            (pcheck ([procedure? less?] [bytevector? bytes] [natural? start stop])
-                   (let ([sorted (sort-values less? bytes start stop)]
-                         [values (items bytes)])
-                     (let loop ([i 0] [rest (items sorted)])
-                       (unless (null? rest)
-                         (set bytes (fx* (fx+ start i) width) (car rest))
-                         (loop (fx1+ i) (cdr rest))))
+                   (let ([length ($bvector-length who bytes width)])
+                     (when (fx> stop length)
+                       (errorf who "stop index ~a out of bound ~a" stop length))
+                     (when (fx> start stop)
+                       (errorf who "start index ~a greater than stop index ~a" start stop))
+                     ($bvector-merge-sort! less? bytes start stop width ref set)
                      bytes))]))
       (define sorted?
         (case-lambda
-          [(less? bytes) (sorted? less? bytes 0 (length (items bytes)))]
+          [(less? bytes) (sorted? less? bytes 0 (length-of bytes))]
           [(less? bytes stop) (sorted? less? bytes 0 stop)]
           [(less? bytes start stop)
            (pcheck ([procedure? less?] [bytevector? bytes] [natural? start stop])
-                   (let ([values (items bytes)])
-                     (when (fx> stop (length values))
-                       (errorf who "stop index ~a out of bound ~a" stop (length values)))
+                   (let ([length (length-of bytes)])
+                     (when (fx> stop length)
+                       (errorf who "stop index ~a out of bound ~a" stop length))
                      (when (fx> start stop)
                        (errorf who "start index ~a greater than stop index ~a" start stop))
-                     (let ([rest (list-tail (list-head values stop) start)])
-                       (or (null? rest) (null? (cdr rest))
-                           (let loop ([rest rest])
-                             (or (null? (cdr rest))
-                                 (and (not (less? (cadr rest) (car rest)))
-                                      (loop (cdr rest)))))))))]))
-      (define copy (lambda (bytes) (build (items bytes))))
+                     (let loop ([i (fx1+ start)])
+                       (or (fx>= i stop)
+                           (and (not (less? (value-at bytes i)
+                                            (value-at bytes (fx1- i))))
+                                (loop (fx1+ i)))))))]))
+      (define copy
+        (lambda (bytes)
+          (pcheck ([bytevector? bytes])
+                  (length-of bytes)
+                  (let ([result (make-bytevector (bytevector-length bytes) 0)])
+                    (bytevector-copy! bytes 0 result 0 (bytevector-length bytes))
+                    result))))
       (define copy!
         (lambda (src src-start target target-start count)
           (pcheck ([bytevector? src target] [natural? src-start target-start count])
-                  (let ([source (items src)])
-                    (when (fx> (fx+ src-start count) (length source))
+                  (let ([source-length (length-of src)])
+                    (when (fx> (fx+ src-start count) source-length)
                       (errorf who "source range is too large"))
-                    (when (fx> (fx+ target-start count) ($bvector-length who target width))
+                    (when (fx> (fx+ target-start count) (length-of target))
                       (errorf who "target range is too large"))
-                    (let loop ([i 0])
-                      (unless (fx= i count)
-                        (set target (fx* (fx+ target-start i) width)
-                             (list-ref source (fx+ src-start i)))
-                        (loop (fx1+ i))))
+                    (bytevector-copy! src (fx* src-start width)
+                                      target (fx* target-start width)
+                                      (fx* count width))
                     target))))
-      (define sum (lambda (bytes) (apply + (items bytes))))
-      (define product (lambda (bytes) (apply * (items bytes))))
+      (define sum
+        (lambda (bytes)
+          (let ([length (length-of bytes)])
+            (let loop ([i 0] [answer zero])
+              (if (fx= i length) answer
+                  (loop (fx1+ i) (+ answer (value-at bytes i))))))))
+      (define product
+        (lambda (bytes)
+          (let ([length (length-of bytes)])
+            (let loop ([i 0] [answer one])
+              (if (fx= i length) answer
+                  (loop (fx1+ i) (* answer (value-at bytes i))))))))
       (define extreme
         (lambda (better? bytes)
-          (let ([item* (items bytes)])
-            (and (pair? item*)
-                 (fold-left-values (lambda (best item) (if (better? item best) item best))
-                                   (car item*) (build (cdr item*)))))))
+          (let ([length (length-of bytes)])
+            (and (fx> length 0)
+                 (let loop ([i 1] [best (value-at bytes 0)])
+                   (if (fx= i length) best
+                       (let ([value (value-at bytes i)])
+                         (loop (fx1+ i) (if (better? value best) value best)))))))))
       (define maximum (lambda (bytes) (extreme > bytes)))
       (define minimum (lambda (bytes) (extreme < bytes)))
       (define average
@@ -2543,15 +2673,20 @@
                                (and (> start stop) (< step 0))
                                (= start stop))
                      (errorf who "invalid range: ~a, ~a, ~a" start stop step))
-                   (let loop ([value start] [result '()])
-                     (if (if (> step 0) (>= value stop) (<= value stop))
-                         (build (reverse result))
-                         (loop (+ value step) (cons value result)))))]))
+                   (let ([length (let count ([value start] [n 0])
+                                   (if (if (> step 0) (>= value stop) (<= value stop))
+                                       n
+                                       (count (+ value step) (fx1+ n))))])
+                     (let ([result (make-result length)])
+                       (let loop ([value start] [i 0])
+                         (if (fx= i length) result
+                             (begin (store! result i value)
+                                    (loop (+ value step) (fx1+ i))))))))]))
       (vector map-values map/i map! map!/i each each/i slice filter-values partition
               or-values and-values or-values and-values memp member-value memq-value memv-value
               fold-left-values fold-right-values fold-left/i fold-right/i
               scan-left-ex scan-left-in scan-right-ex scan-right-in reverse-values reverse-values!
-              zip zipv shuffle shuffle! sort-values sort-values! sorted? copy copy!
+              zip zipv shuffle shuffle! sort-direct sort-direct! sorted? copy copy!
               sum product extreme maximum minimum average nums)))
 
   (define bvector-u8-value? (lambda (value) (and (and (integer? value) (exact? value)) (<= 0 value 255))))
