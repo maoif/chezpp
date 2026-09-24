@@ -2547,10 +2547,11 @@
                       (begin (bytevector-u8-set! vec i (bytearray-ref arr i))
                              (loop (fx1+ i)))))))))
 
-  (define-syntax define-bytearray-width
+  (define-syntax define-bytearray-accessors
     (syntax-rules ()
       [(_ ref-name set-name width-ref width-set width)
-       (define-bytearray-width ref-name set-name width-ref width-set width (lambda (v) #t))]
+       (define-bytearray-accessors
+         ref-name set-name width-ref width-set width (lambda (value) #t))]
       [(_ ref-name set-name width-ref width-set width pred)
        (begin
          (define-who ref-name
@@ -2588,64 +2589,64 @@
   (define bytearray-s56-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -36028797018963968 v 36028797018963967))))
   (define bytearray-u64-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 18446744073709551615))))
   (define bytearray-s64-value? (lambda (v) (and (and (integer? v) (exact? v)) (<= -9223372036854775808 v 9223372036854775807))))
-  (define-bytearray-width bytearray-u16-ref bytearray-u16-set!
+  (define-bytearray-accessors bytearray-u16-ref bytearray-u16-set!
     (lambda (bv i) (bytevector-u16-ref bv i (endianness little)))
     (lambda (bv i v) (bytevector-u16-set! bv i v (endianness little))) 2
     (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 65535))))
-  (define-bytearray-width bytearray-U16-ref bytearray-U16-set!
+  (define-bytearray-accessors bytearray-U16-ref bytearray-U16-set!
     (lambda (bv i) (bytevector-u16-ref bv i (endianness big)))
     (lambda (bv i v) (bytevector-u16-set! bv i v (endianness big))) 2
     (lambda (v) (and (and (integer? v) (exact? v)) (<= 0 v 65535))))
-  (define-bytearray-width bytearray-s16-ref bytearray-s16-set!
+  (define-bytearray-accessors bytearray-s16-ref bytearray-s16-set!
     (lambda (bv i) (bytevector-s16-ref bv i (endianness little)))
     (lambda (bv i v) (bytevector-s16-set! bv i v (endianness little))) 2)
-  (define-bytearray-width bytearray-S16-ref bytearray-S16-set!
+  (define-bytearray-accessors bytearray-S16-ref bytearray-S16-set!
     (lambda (bv i) (bytevector-s16-ref bv i (endianness big)))
     (lambda (bv i v) (bytevector-s16-set! bv i v (endianness big))) 2)
-  (define-bytearray-width bytearray-fp32-ref bytearray-fp32-set!
+  (define-bytearray-accessors bytearray-fp32-ref bytearray-fp32-set!
     (lambda (bv i) (bytevector-ieee-single-ref bv i (endianness little)))
     (lambda (bv i v) (bytevector-ieee-single-set! bv i v (endianness little))) 4)
-  (define-bytearray-width bytearray-FP32-ref bytearray-FP32-set!
+  (define-bytearray-accessors bytearray-FP32-ref bytearray-FP32-set!
     (lambda (bv i) (bytevector-ieee-single-ref bv i (endianness big)))
     (lambda (bv i v) (bytevector-ieee-single-set! bv i v (endianness big))) 4)
-  (define-bytearray-width bytearray-u8-ref bytearray-u8-set!
+  (define-bytearray-accessors bytearray-u8-ref bytearray-u8-set!
     (lambda (bv i) (bytevector-u8-ref bv i))
     (lambda (bv i v) (bytevector-u8-set! bv i v)) 1 bytearray-u8-value?)
-  (define-bytearray-width bytearray-U8-ref bytearray-U8-set!
+  (define-bytearray-accessors bytearray-U8-ref bytearray-U8-set!
     (lambda (bv i) (bytevector-u8-ref bv i))
     (lambda (bv i v) (bytevector-u8-set! bv i v)) 1 bytearray-u8-value?)
-  (define-bytearray-width bytearray-s8-ref bytearray-s8-set!
+  (define-bytearray-accessors bytearray-s8-ref bytearray-s8-set!
     (lambda (bv i) (bytevector-s8-ref bv i))
     (lambda (bv i v) (bytevector-s8-set! bv i v)) 1 bytearray-s8-value?)
-  (define-bytearray-width bytearray-S8-ref bytearray-S8-set!
+  (define-bytearray-accessors bytearray-S8-ref bytearray-S8-set!
     (lambda (bv i) (bytevector-s8-ref bv i))
     (lambda (bv i v) (bytevector-s8-set! bv i v)) 1 bytearray-s8-value?)
-  (define-bytearray-width bytearray-u24-ref bytearray-u24-set! (lambda (bv i) (bytevector-u24-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u24-set! bv i v (endianness little))) 3 bytearray-u24-value?)
-  (define-bytearray-width bytearray-U24-ref bytearray-U24-set! (lambda (bv i) (bytevector-u24-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u24-set! bv i v (endianness big))) 3 bytearray-u24-value?)
-  (define-bytearray-width bytearray-s24-ref bytearray-s24-set! (lambda (bv i) (bytevector-s24-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s24-set! bv i v (endianness little))) 3 bytearray-s24-value?)
-  (define-bytearray-width bytearray-S24-ref bytearray-S24-set! (lambda (bv i) (bytevector-s24-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s24-set! bv i v (endianness big))) 3 bytearray-s24-value?)
-  (define-bytearray-width bytearray-u32-ref bytearray-u32-set! (lambda (bv i) (bytevector-u32-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u32-set! bv i v (endianness little))) 4 bytearray-u32-value?)
-  (define-bytearray-width bytearray-U32-ref bytearray-U32-set! (lambda (bv i) (bytevector-u32-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u32-set! bv i v (endianness big))) 4 bytearray-u32-value?)
-  (define-bytearray-width bytearray-s32-ref bytearray-s32-set! (lambda (bv i) (bytevector-s32-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s32-set! bv i v (endianness little))) 4 bytearray-s32-value?)
-  (define-bytearray-width bytearray-S32-ref bytearray-S32-set! (lambda (bv i) (bytevector-s32-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s32-set! bv i v (endianness big))) 4 bytearray-s32-value?)
-  (define-bytearray-width bytearray-u40-ref bytearray-u40-set! (lambda (bv i) (bytevector-u40-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u40-set! bv i v (endianness little))) 5 bytearray-u40-value?)
-  (define-bytearray-width bytearray-U40-ref bytearray-U40-set! (lambda (bv i) (bytevector-u40-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u40-set! bv i v (endianness big))) 5 bytearray-u40-value?)
-  (define-bytearray-width bytearray-s40-ref bytearray-s40-set! (lambda (bv i) (bytevector-s40-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s40-set! bv i v (endianness little))) 5 bytearray-s40-value?)
-  (define-bytearray-width bytearray-S40-ref bytearray-S40-set! (lambda (bv i) (bytevector-s40-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s40-set! bv i v (endianness big))) 5 bytearray-s40-value?)
-  (define-bytearray-width bytearray-u48-ref bytearray-u48-set! (lambda (bv i) (bytevector-u48-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u48-set! bv i v (endianness little))) 6 bytearray-u48-value?)
-  (define-bytearray-width bytearray-U48-ref bytearray-U48-set! (lambda (bv i) (bytevector-u48-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u48-set! bv i v (endianness big))) 6 bytearray-u48-value?)
-  (define-bytearray-width bytearray-s48-ref bytearray-s48-set! (lambda (bv i) (bytevector-s48-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s48-set! bv i v (endianness little))) 6 bytearray-s48-value?)
-  (define-bytearray-width bytearray-S48-ref bytearray-S48-set! (lambda (bv i) (bytevector-s48-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s48-set! bv i v (endianness big))) 6 bytearray-s48-value?)
-  (define-bytearray-width bytearray-u56-ref bytearray-u56-set! (lambda (bv i) (bytevector-u56-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u56-set! bv i v (endianness little))) 7 bytearray-u56-value?)
-  (define-bytearray-width bytearray-U56-ref bytearray-U56-set! (lambda (bv i) (bytevector-u56-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u56-set! bv i v (endianness big))) 7 bytearray-u56-value?)
-  (define-bytearray-width bytearray-s56-ref bytearray-s56-set! (lambda (bv i) (bytevector-s56-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s56-set! bv i v (endianness little))) 7 bytearray-s56-value?)
-  (define-bytearray-width bytearray-S56-ref bytearray-S56-set! (lambda (bv i) (bytevector-s56-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s56-set! bv i v (endianness big))) 7 bytearray-s56-value?)
-  (define-bytearray-width bytearray-u64-ref bytearray-u64-set! (lambda (bv i) (bytevector-u64-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u64-set! bv i v (endianness little))) 8 bytearray-u64-value?)
-  (define-bytearray-width bytearray-U64-ref bytearray-U64-set! (lambda (bv i) (bytevector-u64-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u64-set! bv i v (endianness big))) 8 bytearray-u64-value?)
-  (define-bytearray-width bytearray-s64-ref bytearray-s64-set! (lambda (bv i) (bytevector-s64-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s64-set! bv i v (endianness little))) 8 bytearray-s64-value?)
-  (define-bytearray-width bytearray-S64-ref bytearray-S64-set! (lambda (bv i) (bytevector-s64-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s64-set! bv i v (endianness big))) 8 bytearray-s64-value?)
-  (define-bytearray-width bytearray-fp64-ref bytearray-fp64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness little))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness little))) 8 flonum?)
-  (define-bytearray-width bytearray-FP64-ref bytearray-FP64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness big))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness big))) 8 flonum?)
+  (define-bytearray-accessors bytearray-u24-ref bytearray-u24-set! (lambda (bv i) (bytevector-u24-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u24-set! bv i v (endianness little))) 3 bytearray-u24-value?)
+  (define-bytearray-accessors bytearray-U24-ref bytearray-U24-set! (lambda (bv i) (bytevector-u24-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u24-set! bv i v (endianness big))) 3 bytearray-u24-value?)
+  (define-bytearray-accessors bytearray-s24-ref bytearray-s24-set! (lambda (bv i) (bytevector-s24-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s24-set! bv i v (endianness little))) 3 bytearray-s24-value?)
+  (define-bytearray-accessors bytearray-S24-ref bytearray-S24-set! (lambda (bv i) (bytevector-s24-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s24-set! bv i v (endianness big))) 3 bytearray-s24-value?)
+  (define-bytearray-accessors bytearray-u32-ref bytearray-u32-set! (lambda (bv i) (bytevector-u32-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u32-set! bv i v (endianness little))) 4 bytearray-u32-value?)
+  (define-bytearray-accessors bytearray-U32-ref bytearray-U32-set! (lambda (bv i) (bytevector-u32-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u32-set! bv i v (endianness big))) 4 bytearray-u32-value?)
+  (define-bytearray-accessors bytearray-s32-ref bytearray-s32-set! (lambda (bv i) (bytevector-s32-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s32-set! bv i v (endianness little))) 4 bytearray-s32-value?)
+  (define-bytearray-accessors bytearray-S32-ref bytearray-S32-set! (lambda (bv i) (bytevector-s32-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s32-set! bv i v (endianness big))) 4 bytearray-s32-value?)
+  (define-bytearray-accessors bytearray-u40-ref bytearray-u40-set! (lambda (bv i) (bytevector-u40-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u40-set! bv i v (endianness little))) 5 bytearray-u40-value?)
+  (define-bytearray-accessors bytearray-U40-ref bytearray-U40-set! (lambda (bv i) (bytevector-u40-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u40-set! bv i v (endianness big))) 5 bytearray-u40-value?)
+  (define-bytearray-accessors bytearray-s40-ref bytearray-s40-set! (lambda (bv i) (bytevector-s40-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s40-set! bv i v (endianness little))) 5 bytearray-s40-value?)
+  (define-bytearray-accessors bytearray-S40-ref bytearray-S40-set! (lambda (bv i) (bytevector-s40-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s40-set! bv i v (endianness big))) 5 bytearray-s40-value?)
+  (define-bytearray-accessors bytearray-u48-ref bytearray-u48-set! (lambda (bv i) (bytevector-u48-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u48-set! bv i v (endianness little))) 6 bytearray-u48-value?)
+  (define-bytearray-accessors bytearray-U48-ref bytearray-U48-set! (lambda (bv i) (bytevector-u48-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u48-set! bv i v (endianness big))) 6 bytearray-u48-value?)
+  (define-bytearray-accessors bytearray-s48-ref bytearray-s48-set! (lambda (bv i) (bytevector-s48-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s48-set! bv i v (endianness little))) 6 bytearray-s48-value?)
+  (define-bytearray-accessors bytearray-S48-ref bytearray-S48-set! (lambda (bv i) (bytevector-s48-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s48-set! bv i v (endianness big))) 6 bytearray-s48-value?)
+  (define-bytearray-accessors bytearray-u56-ref bytearray-u56-set! (lambda (bv i) (bytevector-u56-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u56-set! bv i v (endianness little))) 7 bytearray-u56-value?)
+  (define-bytearray-accessors bytearray-U56-ref bytearray-U56-set! (lambda (bv i) (bytevector-u56-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u56-set! bv i v (endianness big))) 7 bytearray-u56-value?)
+  (define-bytearray-accessors bytearray-s56-ref bytearray-s56-set! (lambda (bv i) (bytevector-s56-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s56-set! bv i v (endianness little))) 7 bytearray-s56-value?)
+  (define-bytearray-accessors bytearray-S56-ref bytearray-S56-set! (lambda (bv i) (bytevector-s56-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s56-set! bv i v (endianness big))) 7 bytearray-s56-value?)
+  (define-bytearray-accessors bytearray-u64-ref bytearray-u64-set! (lambda (bv i) (bytevector-u64-ref bv i (endianness little))) (lambda (bv i v) (bytevector-u64-set! bv i v (endianness little))) 8 bytearray-u64-value?)
+  (define-bytearray-accessors bytearray-U64-ref bytearray-U64-set! (lambda (bv i) (bytevector-u64-ref bv i (endianness big))) (lambda (bv i v) (bytevector-u64-set! bv i v (endianness big))) 8 bytearray-u64-value?)
+  (define-bytearray-accessors bytearray-s64-ref bytearray-s64-set! (lambda (bv i) (bytevector-s64-ref bv i (endianness little))) (lambda (bv i v) (bytevector-s64-set! bv i v (endianness little))) 8 bytearray-s64-value?)
+  (define-bytearray-accessors bytearray-S64-ref bytearray-S64-set! (lambda (bv i) (bytevector-s64-ref bv i (endianness big))) (lambda (bv i v) (bytevector-s64-set! bv i v (endianness big))) 8 bytearray-s64-value?)
+  (define-bytearray-accessors bytearray-fp64-ref bytearray-fp64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness little))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness little))) 8 flonum?)
+  (define-bytearray-accessors bytearray-FP64-ref bytearray-FP64-set! (lambda (bv i) (bytevector-ieee-double-ref bv i (endianness big))) (lambda (bv i v) (bytevector-ieee-double-set! bv i v (endianness big))) 8 flonum?)
 
   (define $bytearray-width-length
     (lambda (who arr width)
@@ -2952,95 +2953,390 @@
                   (begin (set result i (ref arr (fx- len i 1))) (loop (fx1+ i))))))))
       (define reverse-array! (lambda (arr) (replace! arr (reverse-array arr))))
       (define map-array
-        (lambda (proc arr . arrays)
-          (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
-                  (let* ([sources (cons arr arrays)] [len (source-length arr arrays)]
-                         [result (make-result len)])
-                    (let loop ([i 0])
-                      (if (fx= i len) result
-                          (begin (set result i (apply proc (values-at i sources)))
-                                 (loop (fx1+ i)))))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let* ([len (length-of arr)] [result (make-result len)])
+                     (let loop ([i 0])
+                       (if (fx= i len) result
+                           (begin (set result i (proc (ref arr i)))
+                                  (loop (fx1+ i)))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let* ([len (source-length arr (list other))]
+                          [result (make-result len)])
+                     (let loop ([i 0])
+                       (if (fx= i len) result
+                           (begin (set result i (proc (ref arr i) (ref other i)))
+                                  (loop (fx1+ i)))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)]
+                            [len (source-length arr arrays)]
+                            [result (make-result len)])
+                       (let loop ([i 0])
+                         (if (fx= i len) result
+                             (begin (set result i (apply proc (values-at i sources)))
+                                    (loop (fx1+ i))))))))]))
       (define map/i
-        (lambda (proc arr . arrays)
-          (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
-                  (let* ([sources (cons arr arrays)] [len (source-length arr arrays)]
-                         [result (make-result len)])
-                    (let loop ([i 0])
-                      (if (fx= i len) result
-                          (begin (set result i (apply proc i (values-at i sources)))
-                                 (loop (fx1+ i)))))))))
-      (define map! (lambda (proc arr . arrays) (replace! arr (apply map-array proc arr arrays))))
-      (define map/i! (lambda (proc arr . arrays) (replace! arr (apply map/i proc arr arrays))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let* ([len (length-of arr)] [result (make-result len)])
+                     (let loop ([i 0])
+                       (if (fx= i len) result
+                           (begin (set result i (proc i (ref arr i)))
+                                  (loop (fx1+ i)))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let* ([len (source-length arr (list other))]
+                          [result (make-result len)])
+                     (let loop ([i 0])
+                       (if (fx= i len) result
+                           (begin (set result i (proc i (ref arr i) (ref other i)))
+                                  (loop (fx1+ i)))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)]
+                            [len (source-length arr arrays)]
+                            [result (make-result len)])
+                       (let loop ([i 0])
+                         (if (fx= i len) result
+                             (begin (set result i (apply proc i (values-at i sources)))
+                                    (loop (fx1+ i))))))))]))
+      (define map!
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let ([len (length-of arr)])
+                     (let loop ([i 0])
+                       (if (fx= i len) arr
+                           (begin
+                             (set arr i (proc (ref arr i)))
+                             (loop (fx1+ i)))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let ([len (source-length arr (list other))])
+                     (let loop ([i 0])
+                       (if (fx= i len) arr
+                           (begin
+                             (set arr i (proc (ref arr i) (ref other i)))
+                             (loop (fx1+ i)))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)]
+                            [len (source-length arr arrays)])
+                       (let loop ([i 0])
+                         (if (fx= i len) arr
+                             (begin
+                               (set arr i (apply proc (values-at i sources)))
+                               (loop (fx1+ i))))))))]))
+      (define map/i!
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let ([len (length-of arr)])
+                     (let loop ([i 0])
+                       (if (fx= i len) arr
+                           (begin
+                             (set arr i (proc i (ref arr i)))
+                             (loop (fx1+ i)))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let ([len (source-length arr (list other))])
+                     (let loop ([i 0])
+                       (if (fx= i len) arr
+                           (begin
+                             (set arr i (proc i (ref arr i) (ref other i)))
+                             (loop (fx1+ i)))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)]
+                            [len (source-length arr arrays)])
+                       (let loop ([i 0])
+                         (if (fx= i len) arr
+                             (begin
+                               (set arr i (apply proc i (values-at i sources)))
+                               (loop (fx1+ i))))))))]))
       (define each
-        (lambda (proc arr . arrays)
-          (pcheck ([procedure? proc])
-                  (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
-                    (let loop ([i 0])
-                      (unless (fx= i len)
-                        (apply proc (values-at i sources))
-                        (loop (fx1+ i))))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let ([len (length-of arr)])
+                     (let loop ([i 0])
+                       (unless (fx= i len)
+                         (proc (ref arr i))
+                         (loop (fx1+ i))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let ([len (source-length arr (list other))])
+                     (let loop ([i 0])
+                       (unless (fx= i len)
+                         (proc (ref arr i) (ref other i))
+                         (loop (fx1+ i))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
+                       (let loop ([i 0])
+                         (unless (fx= i len)
+                           (apply proc (values-at i sources))
+                           (loop (fx1+ i)))))))]))
       (define each/i
-        (lambda (proc arr . arrays)
-          (pcheck ([procedure? proc])
-                  (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
-                    (let loop ([i 0])
-                      (unless (fx= i len)
-                        (apply proc i (values-at i sources))
-                        (loop (fx1+ i))))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let ([len (length-of arr)])
+                     (let loop ([i 0])
+                       (unless (fx= i len)
+                         (proc i (ref arr i))
+                         (loop (fx1+ i))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let ([len (source-length arr (list other))])
+                     (let loop ([i 0])
+                       (unless (fx= i len)
+                         (proc i (ref arr i) (ref other i))
+                         (loop (fx1+ i))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
+                       (let loop ([i 0])
+                         (unless (fx= i len)
+                           (apply proc i (values-at i sources))
+                           (loop (fx1+ i)))))))]))
       (define map-rev
-        (lambda (proc arr)
-          (let* ([len (length-of arr)] [result (make-result len)])
-            (let loop ([i (fx1- len)] [output 0])
-              (if (fx< i 0) result
-                  (begin (set result output (proc (ref arr i)))
-                         (loop (fx1- i) (fx1+ output))))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let* ([len (length-of arr)] [result (make-result len)])
+                     (let loop ([i (fx1- len)] [output 0])
+                       (if (fx< i 0) result
+                           (begin (set result output (proc (ref arr i)))
+                                  (loop (fx1- i) (fx1+ output)))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let* ([len (source-length arr (list other))]
+                          [result (make-result len)])
+                     (let loop ([i (fx1- len)] [output 0])
+                       (if (fx< i 0) result
+                           (begin (set result output (proc (ref arr i) (ref other i)))
+                                  (loop (fx1- i) (fx1+ output)))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)] [len (source-length arr arrays)]
+                            [result (make-result len)])
+                       (let loop ([i (fx1- len)] [output 0])
+                         (if (fx< i 0) result
+                             (begin (set result output (apply proc (values-at i sources)))
+                                    (loop (fx1- i) (fx1+ output))))))))]))
       (define map/i-rev
-        (lambda (proc arr)
-          (let* ([len (length-of arr)] [result (make-result len)])
-            (let loop ([i (fx1- len)] [output 0])
-              (if (fx< i 0) result
-                  (begin (set result output (proc i (ref arr i)))
-                         (loop (fx1- i) (fx1+ output))))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let* ([len (length-of arr)] [result (make-result len)])
+                     (let loop ([i (fx1- len)] [output 0])
+                       (if (fx< i 0) result
+                           (begin (set result output (proc i (ref arr i)))
+                                  (loop (fx1- i) (fx1+ output)))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let* ([len (source-length arr (list other))]
+                          [result (make-result len)])
+                     (let loop ([i (fx1- len)] [output 0])
+                       (if (fx< i 0) result
+                           (begin
+                             (set result output (proc i (ref arr i) (ref other i)))
+                             (loop (fx1- i) (fx1+ output)))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)] [len (source-length arr arrays)]
+                            [result (make-result len)])
+                       (let loop ([i (fx1- len)] [output 0])
+                         (if (fx< i 0) result
+                             (begin
+                               (set result output (apply proc i (values-at i sources)))
+                               (loop (fx1- i) (fx1+ output))))))))]))
       (define each-rev
-        (lambda (proc arr)
-          (let ([len (length-of arr)])
-            (let loop ([i (fx1- len)])
-              (unless (fx< i 0) (proc (ref arr i)) (loop (fx1- i)))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let loop ([i (fx1- (length-of arr))])
+                     (unless (fx< i 0) (proc (ref arr i)) (loop (fx1- i)))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let loop ([i (fx1- (source-length arr (list other)))])
+                     (unless (fx< i 0)
+                       (proc (ref arr i) (ref other i))
+                       (loop (fx1- i)))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let ([sources (cons arr arrays)])
+                       (let loop ([i (fx1- (source-length arr arrays))])
+                         (unless (fx< i 0)
+                           (apply proc (values-at i sources))
+                           (loop (fx1- i)))))))]))
       (define each/i-rev
-        (lambda (proc arr)
-          (let ([len (length-of arr)])
-            (let loop ([i (fx1- len)])
-              (unless (fx< i 0) (proc i (ref arr i)) (loop (fx1- i)))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let loop ([i (fx1- (length-of arr))])
+                     (unless (fx< i 0) (proc i (ref arr i)) (loop (fx1- i)))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let loop ([i (fx1- (source-length arr (list other)))])
+                     (unless (fx< i 0)
+                       (proc i (ref arr i) (ref other i))
+                       (loop (fx1- i)))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let ([sources (cons arr arrays)])
+                       (let loop ([i (fx1- (source-length arr arrays))])
+                         (unless (fx< i 0)
+                           (apply proc i (values-at i sources))
+                           (loop (fx1- i)))))))]))
       (define andmap-array
-        (lambda (proc arr . arrays)
-          (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
-            (let loop ([i 0])
-              (or (fx= i len)
-                  (and (apply proc (values-at i sources)) (loop (fx1+ i))))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let ([len (length-of arr)])
+                     (let loop ([i 0])
+                       (or (fx= i len) (and (proc (ref arr i)) (loop (fx1+ i)))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let ([len (source-length arr (list other))])
+                     (let loop ([i 0])
+                       (or (fx= i len)
+                           (and (proc (ref arr i) (ref other i))
+                                (loop (fx1+ i)))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
+                       (let loop ([i 0])
+                         (or (fx= i len)
+                             (and (apply proc (values-at i sources))
+                                  (loop (fx1+ i))))))))]))
       (define ormap-array
-        (lambda (proc arr . arrays)
-          (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
-            (let loop ([i 0])
-              (and (fx< i len)
-                   (or (apply proc (values-at i sources)) (loop (fx1+ i))))))))
+        (case-lambda
+          [(proc arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let ([len (length-of arr)])
+                     (let loop ([i 0])
+                       (and (fx< i len) (or (proc (ref arr i)) (loop (fx1+ i)))))))]
+          [(proc arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let ([len (source-length arr (list other))])
+                     (let loop ([i 0])
+                       (and (fx< i len)
+                            (or (proc (ref arr i) (ref other i))
+                                (loop (fx1+ i)))))))]
+          [(proc arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
+                       (let loop ([i 0])
+                         (and (fx< i len)
+                              (or (apply proc (values-at i sources))
+                                  (loop (fx1+ i))))))))]))
       (define fold-left
-        (lambda (proc init arr)
-          (let ([len (length-of arr)])
-            (let loop ([i 0] [acc init])
-              (if (fx= i len) acc (loop (fx1+ i) (proc acc (ref arr i))))))))
+        (case-lambda
+          [(proc init arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let ([len (length-of arr)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i len) acc
+                           (loop (fx1+ i) (proc acc (ref arr i)))))))]
+          [(proc init arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let ([len (source-length arr (list other))])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i len) acc
+                           (loop (fx1+ i) (proc acc (ref arr i) (ref other i)))))))]
+          [(proc init arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
+                       (let loop ([i 0] [acc init])
+                         (if (fx= i len) acc
+                             (loop (fx1+ i)
+                                   (apply proc acc (values-at i sources))))))))]))
       (define fold-left/i
-        (lambda (proc init arr)
-          (let ([len (length-of arr)])
-            (let loop ([i 0] [acc init])
-              (if (fx= i len) acc (loop (fx1+ i) (proc i acc (ref arr i))))))))
+        (case-lambda
+          [(proc init arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let ([len (length-of arr)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i len) acc
+                           (loop (fx1+ i) (proc i acc (ref arr i)))))))]
+          [(proc init arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let ([len (source-length arr (list other))])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i len) acc
+                           (loop (fx1+ i)
+                                 (proc i acc (ref arr i) (ref other i)))))))]
+          [(proc init arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let* ([sources (cons arr arrays)] [len (source-length arr arrays)])
+                       (let loop ([i 0] [acc init])
+                         (if (fx= i len) acc
+                             (loop (fx1+ i)
+                                   (apply proc i acc (values-at i sources))))))))]))
       (define fold-right
-        (lambda (proc init arr)
-          (let loop ([i (fx1- (length-of arr))] [acc init])
-            (if (fx< i 0) acc (loop (fx1- i) (proc (ref arr i) acc))))))
+        (case-lambda
+          [(proc init arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let loop ([i (fx1- (length-of arr))] [acc init])
+                     (if (fx< i 0) acc (loop (fx1- i) (proc (ref arr i) acc)))))]
+          [(proc init arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let loop ([i (fx1- (source-length arr (list other)))] [acc init])
+                     (if (fx< i 0) acc
+                         (loop (fx1- i) (proc (ref arr i) (ref other i) acc)))))]
+          [(proc init arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let ([sources (cons arr arrays)])
+                       (let loop ([i (fx1- (source-length arr arrays))] [acc init])
+                         (if (fx< i 0) acc
+                             (loop (fx1- i)
+                                   (apply proc
+                                          (append (values-at i sources)
+                                                  (list acc)))))))))]))
       (define fold-right/i
-        (lambda (proc init arr)
-          (let loop ([i (fx1- (length-of arr))] [acc init])
-            (if (fx< i 0) acc (loop (fx1- i) (proc i (ref arr i) acc))))))
+        (case-lambda
+          [(proc init arr)
+           (pcheck ([procedure? proc] [bytearray? arr])
+                   (let loop ([i (fx1- (length-of arr))] [acc init])
+                     (if (fx< i 0) acc
+                         (loop (fx1- i) (proc i (ref arr i) acc)))))]
+          [(proc init arr other)
+           (pcheck ([procedure? proc] [bytearray? arr other])
+                   (let loop ([i (fx1- (source-length arr (list other)))] [acc init])
+                     (if (fx< i 0) acc
+                         (loop (fx1- i)
+                               (proc i (ref arr i) (ref other i) acc)))))]
+          [(proc init arr second third . rest)
+           (let ([arrays (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytearray? arr] [all-bytearrays? arrays])
+                     (let ([sources (cons arr arrays)])
+                       (let loop ([i (fx1- (source-length arr arrays))] [acc init])
+                         (if (fx< i 0) acc
+                             (loop (fx1- i)
+                                   (apply proc i
+                                          (append (values-at i sources)
+                                                  (list acc)))))))))]))
       (define sorted?
         (case-lambda
           [(less? arr) (sorted? less? arr 0 (length-of arr))]
@@ -3137,8 +3433,21 @@
 
   #|macro:define-bytearray-procedure
   Define the width-qualified bytearray operation family for descriptor `width`.
-  The `ref` and `set` procedures access one logical value, and `value?`
-  validates values stored by generated procedures.
+  The `width-size` value is the number of bytes per logical value. The `ref` and `set`
+  procedures have signatures `(bytearray index) -> value` and
+  `(bytearray index value) -> unspecified`. Predicate `value?` has signature
+  `(value) -> boolean` and validates stored values.
+
+  Generated map and iteration procedures take a procedure and one or more equal-length
+  bytearrays. A non-indexed procedure has signature `(value ...) -> value`; an indexed
+  procedure has signature `(index value ...) -> value`. Iteration return values are
+  unspecified. Maps return a new bytearray, except mutating maps store results directly
+  in and return the first bytearray. Reverse variants visit values from the last logical
+  index to the first.
+
+  Generated predicate traversals use signature `(value ...) -> any` and short-circuit.
+  Left folds use `(accumulator value ...) -> accumulator`, while right folds use
+  `(value ... accumulator) -> accumulator`. Indexed folds receive `index` first.
   |#
   (define-syntax define-bytearray-procedure
     (lambda (stx)
@@ -3340,21 +3649,87 @@
   (define bytearray-append! bytearray-u8-append!)
   (define bytearray-reverse bytearray-u8-reverse)
   (define bytearray-reverse! bytearray-u8-reverse!)
+  #|proc:bytearray-map
+  Apply `proc` with signature `(byte ...) -> byte` to equal-length bytearrays `arr ...`.
+  Return a new bytearray containing the results.
+  |#
   (define bytearray-map bytearray-u8-map)
+  #|proc:bytearray-map/i
+  Apply `proc` with signature `(index byte ...) -> byte` to equal-length bytearrays
+  `arr ...`. Return a new bytearray containing the results.
+  |#
   (define bytearray-map/i bytearray-u8-map/i)
+  #|proc:bytearray-map!
+  Apply `proc` with signature `(byte ...) -> byte` to equal-length bytearrays `arr ...`.
+  Store results directly in the first bytearray and return it.
+  |#
   (define bytearray-map! bytearray-u8-map!)
+  #|proc:bytearray-map/i!
+  Apply `proc` with signature `(index byte ...) -> byte` to equal-length bytearrays
+  `arr ...`. Store results directly in the first bytearray and return it.
+  |#
   (define bytearray-map/i! bytearray-u8-map/i!)
+  #|proc:bytearray-for-each
+  Call `proc` with signature `(byte ...) -> any` for equal-length bytearrays `arr ...`.
+  Return unspecified values.
+  |#
   (define bytearray-for-each bytearray-u8-for-each)
+  #|proc:bytearray-for-each/i
+  Call `proc` with signature `(index byte ...) -> any` for equal-length bytearrays
+  `arr ...`. Return unspecified values.
+  |#
   (define bytearray-for-each/i bytearray-u8-for-each/i)
+  #|proc:bytearray-map-rev
+  Apply `proc` with signature `(byte ...) -> byte` in reverse to equal-length bytearrays
+  `arr ...`. Return a new bytearray in visitation order.
+  |#
   (define bytearray-map-rev bytearray-u8-map-rev)
+  #|proc:bytearray-map/i-rev
+  Apply `proc` with signature `(index byte ...) -> byte` in reverse to equal-length
+  bytearrays `arr ...`. Return a new bytearray in visitation order.
+  |#
   (define bytearray-map/i-rev bytearray-u8-map/i-rev)
+  #|proc:bytearray-for-each-rev
+  Call `proc` with signature `(byte ...) -> any` in reverse for equal-length bytearrays
+  `arr ...`. Return unspecified values.
+  |#
   (define bytearray-for-each-rev bytearray-u8-for-each-rev)
+  #|proc:bytearray-for-each/i-rev
+  Call `proc` with signature `(index byte ...) -> any` in reverse for equal-length
+  bytearrays `arr ...`. Return unspecified values.
+  |#
   (define bytearray-for-each/i-rev bytearray-u8-for-each/i-rev)
+  #|proc:bytearray-andmap
+  Apply `proc` with signature `(byte ...) -> any` to equal-length bytearrays `arr ...`.
+  Return `#f` at the first false result, or `#t` when all results are true.
+  |#
   (define bytearray-andmap bytearray-u8-andmap)
+  #|proc:bytearray-ormap
+  Apply `proc` with signature `(byte ...) -> any` to equal-length bytearrays `arr ...`.
+  Return the first true result, or `#f` when all results are false.
+  |#
   (define bytearray-ormap bytearray-u8-ormap)
+  #|proc:bytearray-fold-left
+  Fold equal-length bytearrays `arr ...` from left to right with initial value `init`.
+  Procedure `proc` has signature `(accumulator byte ...) -> accumulator`; return the result.
+  |#
   (define bytearray-fold-left bytearray-u8-fold-left)
+  #|proc:bytearray-fold-left/i
+  Fold equal-length bytearrays `arr ...` from left to right with initial value `init`.
+  Procedure `proc` has signature `(index accumulator byte ...) -> accumulator`.
+  Return the final accumulator.
+  |#
   (define bytearray-fold-left/i bytearray-u8-fold-left/i)
+  #|proc:bytearray-fold-right
+  Fold equal-length bytearrays `arr ...` from right to left with initial value `init`.
+  Procedure `proc` has signature `(byte ... accumulator) -> accumulator`; return the result.
+  |#
   (define bytearray-fold-right bytearray-u8-fold-right)
+  #|proc:bytearray-fold-right/i
+  Fold equal-length bytearrays `arr ...` from right to left with initial value `init`.
+  Procedure `proc` has signature `(index byte ... accumulator) -> accumulator`.
+  Return the final accumulator.
+  |#
   (define bytearray-fold-right/i bytearray-u8-fold-right/i)
   (define bytearray-sorted? bytearray-u8-sorted?)
   (define bytearray-sort bytearray-u8-sort)

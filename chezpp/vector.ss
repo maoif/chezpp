@@ -2326,46 +2326,178 @@
           (bytevector-copy! source 0 target 0 (bytevector-length source))
           target))
       (define map-values
-        (lambda (proc bytes . bytevectors)
-          (pcheck ([procedure? proc] [bytevector? bytes] [all-bytevectors? bytevectors])
-                  (let* ([sources (cons bytes bytevectors)]
-                         [length (apply source-length bytes bytevectors)]
-                         [result (make-result length)])
-                    (let loop ([i 0])
-                      (if (fx= i length) result
-                          (begin (store! result i (apply proc (values-at i sources)))
-                                 (loop (fx1+ i)))))))))
+        (case-lambda
+          [(proc bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let* ([length (length-of bytes)] [result (make-result length)])
+                     (let loop ([i 0])
+                       (if (fx= i length) result
+                           (begin (store! result i (proc (value-at bytes i)))
+                                  (loop (fx1+ i)))))))]
+          [(proc bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let* ([length (source-length bytes other)]
+                          [result (make-result length)])
+                     (let loop ([i 0])
+                       (if (fx= i length) result
+                           (begin
+                             (store! result i
+                                     (proc (value-at bytes i) (value-at other i)))
+                             (loop (fx1+ i)))))))]
+          [(proc bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)]
+                            [result (make-result length)])
+                       (let loop ([i 0])
+                         (if (fx= i length) result
+                             (begin (store! result i (apply proc (values-at i sources)))
+                                    (loop (fx1+ i))))))))]))
       (define map/i
-        (lambda (proc bytes . bytevectors)
-          (pcheck ([procedure? proc] [bytevector? bytes] [all-bytevectors? bytevectors])
-                  (let* ([sources (cons bytes bytevectors)]
-                         [length (apply source-length bytes bytevectors)]
-                         [result (make-result length)])
-                    (let loop ([i 0])
-                      (if (fx= i length) result
-                          (begin (store! result i (apply proc i (values-at i sources)))
-                                 (loop (fx1+ i)))))))))
-      (define map! (lambda (proc bytes . rest) (replace! bytes (apply map-values proc bytes rest))))
+        (case-lambda
+          [(proc bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let* ([length (length-of bytes)] [result (make-result length)])
+                     (let loop ([i 0])
+                       (if (fx= i length) result
+                           (begin (store! result i (proc i (value-at bytes i)))
+                                  (loop (fx1+ i)))))))]
+          [(proc bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let* ([length (source-length bytes other)]
+                          [result (make-result length)])
+                     (let loop ([i 0])
+                       (if (fx= i length) result
+                           (begin
+                             (store! result i
+                                     (proc i (value-at bytes i) (value-at other i)))
+                             (loop (fx1+ i)))))))]
+          [(proc bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)]
+                            [result (make-result length)])
+                       (let loop ([i 0])
+                         (if (fx= i length) result
+                             (begin
+                               (store! result i (apply proc i (values-at i sources)))
+                               (loop (fx1+ i))))))))]))
+      (define map!
+        (case-lambda
+          [(proc bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let ([length (length-of bytes)])
+                     (let loop ([i 0])
+                       (if (fx= i length) bytes
+                           (begin
+                             (store! bytes i (proc (value-at bytes i)))
+                             (loop (fx1+ i)))))))]
+          [(proc bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let ([length (source-length bytes other)])
+                     (let loop ([i 0])
+                       (if (fx= i length) bytes
+                           (begin
+                             (store! bytes i
+                                     (proc (value-at bytes i) (value-at other i)))
+                             (loop (fx1+ i)))))))]
+          [(proc bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)])
+                       (let loop ([i 0])
+                         (if (fx= i length) bytes
+                             (begin
+                               (store! bytes i (apply proc (values-at i sources)))
+                               (loop (fx1+ i))))))))]))
       (define map!/i
-        (lambda (proc bytes . rest) (replace! bytes (apply map/i proc bytes rest))))
+        (case-lambda
+          [(proc bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let ([length (length-of bytes)])
+                     (let loop ([i 0])
+                       (if (fx= i length) bytes
+                           (begin
+                             (store! bytes i (proc i (value-at bytes i)))
+                             (loop (fx1+ i)))))))]
+          [(proc bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let ([length (source-length bytes other)])
+                     (let loop ([i 0])
+                       (if (fx= i length) bytes
+                           (begin
+                             (store! bytes i
+                                     (proc i (value-at bytes i) (value-at other i)))
+                             (loop (fx1+ i)))))))]
+          [(proc bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)])
+                       (let loop ([i 0])
+                         (if (fx= i length) bytes
+                             (begin
+                               (store! bytes i (apply proc i (values-at i sources)))
+                               (loop (fx1+ i))))))))]))
       (define each
-        (lambda (proc bytes . rest)
-          (pcheck ([procedure? proc] [bytevector? bytes] [all-bytevectors? rest])
-                  (let* ([sources (cons bytes rest)]
-                         [length (apply source-length bytes rest)])
-                    (let loop ([i 0])
-                      (unless (fx= i length)
-                        (apply proc (values-at i sources))
-                        (loop (fx1+ i))))))))
+        (case-lambda
+          [(proc bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let ([length (length-of bytes)])
+                     (let loop ([i 0])
+                       (unless (fx= i length)
+                         (proc (value-at bytes i))
+                         (loop (fx1+ i))))))]
+          [(proc bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let ([length (source-length bytes other)])
+                     (let loop ([i 0])
+                       (unless (fx= i length)
+                         (proc (value-at bytes i) (value-at other i))
+                         (loop (fx1+ i))))))]
+          [(proc bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)])
+                       (let loop ([i 0])
+                         (unless (fx= i length)
+                           (apply proc (values-at i sources))
+                           (loop (fx1+ i)))))))]))
       (define each/i
-        (lambda (proc bytes . bytevectors)
-          (pcheck ([procedure? proc] [bytevector? bytes] [all-bytevectors? bytevectors])
-                  (let* ([sources (cons bytes bytevectors)]
-                         [length (apply source-length bytes bytevectors)])
-                    (let loop ([i 0])
-                      (unless (fx= i length)
-                        (apply proc i (values-at i sources))
-                        (loop (fx1+ i))))))))
+        (case-lambda
+          [(proc bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let ([length (length-of bytes)])
+                     (let loop ([i 0])
+                       (unless (fx= i length)
+                         (proc i (value-at bytes i))
+                         (loop (fx1+ i))))))]
+          [(proc bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let ([length (source-length bytes other)])
+                     (let loop ([i 0])
+                       (unless (fx= i length)
+                         (proc i (value-at bytes i) (value-at other i))
+                         (loop (fx1+ i))))))]
+          [(proc bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)])
+                       (let loop ([i 0])
+                         (unless (fx= i length)
+                           (apply proc i (values-at i sources))
+                           (loop (fx1+ i)))))))]))
       (define slice
         (case-lambda
           [(bytes stop) (slice bytes 0 stop 1)]
@@ -2425,17 +2557,55 @@
                                 (begin (store! no-temp no-count value)
                                        (loop (fx1+ i) yes-count (fx1+ no-count)))))))))))
       (define or-values
-        (lambda (pred bytes)
-          (let ([length (length-of bytes)])
-            (let loop ([i 0])
-              (and (fx< i length)
-                   (or (pred (value-at bytes i)) (loop (fx1+ i))))))))
+        (case-lambda
+          [(pred bytes)
+           (pcheck ([procedure? pred] [bytevector? bytes])
+                   (let ([length (length-of bytes)])
+                     (let loop ([i 0])
+                       (and (fx< i length)
+                            (or (pred (value-at bytes i)) (loop (fx1+ i)))))))]
+          [(pred bytes other)
+           (pcheck ([procedure? pred] [bytevector? bytes other])
+                   (let ([length (source-length bytes other)])
+                     (let loop ([i 0])
+                       (and (fx< i length)
+                            (or (pred (value-at bytes i) (value-at other i))
+                                (loop (fx1+ i)))))))]
+          [(pred bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? pred] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)])
+                       (let loop ([i 0])
+                         (and (fx< i length)
+                              (or (apply pred (values-at i sources))
+                                  (loop (fx1+ i))))))))]))
       (define and-values
-        (lambda (pred bytes)
-          (let ([length (length-of bytes)])
-            (let loop ([i 0])
-              (or (fx= i length)
-                  (and (pred (value-at bytes i)) (loop (fx1+ i))))))))
+        (case-lambda
+          [(pred bytes)
+           (pcheck ([procedure? pred] [bytevector? bytes])
+                   (let ([length (length-of bytes)])
+                     (let loop ([i 0])
+                       (or (fx= i length)
+                           (and (pred (value-at bytes i)) (loop (fx1+ i)))))))]
+          [(pred bytes other)
+           (pcheck ([procedure? pred] [bytevector? bytes other])
+                   (let ([length (source-length bytes other)])
+                     (let loop ([i 0])
+                       (or (fx= i length)
+                           (and (pred (value-at bytes i) (value-at other i))
+                                (loop (fx1+ i)))))))]
+          [(pred bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? pred] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)])
+                       (let loop ([i 0])
+                         (or (fx= i length)
+                             (and (apply pred (values-at i sources))
+                                  (loop (fx1+ i))))))))]))
       (define memp
         (lambda (pred bytes)
           (pcheck ([procedure? pred] [bytevector? bytes])
@@ -2448,70 +2618,245 @@
       (define memq-value (lambda (value bytes) (memp (lambda (item) (eq? value item)) bytes)))
       (define memv-value (lambda (value bytes) (memp (lambda (item) (eqv? value item)) bytes)))
       (define fold-left-values
-        (lambda (proc init bytes . bytevectors)
-          (let* ([sources (cons bytes bytevectors)]
-                 [length (apply source-length bytes bytevectors)])
-            (let loop ([i 0] [acc init])
-              (if (fx= i length) acc
-                  (loop (fx1+ i) (apply proc acc (values-at i sources))))))))
+        (case-lambda
+          [(proc init bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let ([length (length-of bytes)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i length) acc
+                           (loop (fx1+ i) (proc acc (value-at bytes i)))))))]
+          [(proc init bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let ([length (source-length bytes other)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i length) acc
+                           (loop (fx1+ i)
+                                 (proc acc (value-at bytes i) (value-at other i)))))))]
+          [(proc init bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)])
+                       (let loop ([i 0] [acc init])
+                         (if (fx= i length) acc
+                             (loop (fx1+ i)
+                                   (apply proc acc (values-at i sources))))))))]))
       (define fold-right-values
-        (lambda (proc init bytes . bytevectors)
-          (let* ([sources (cons bytes bytevectors)]
-                 [length (apply source-length bytes bytevectors)])
-            (let loop ([i (fx1- length)] [acc init])
-              (if (fx< i 0) acc
-                  (loop (fx1- i) (apply proc (append (values-at i sources) (list acc)))))))))
+        (case-lambda
+          [(proc init bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let loop ([i (fx1- (length-of bytes))] [acc init])
+                     (if (fx< i 0) acc
+                         (loop (fx1- i) (proc (value-at bytes i) acc)))))]
+          [(proc init bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let loop ([i (fx1- (source-length bytes other))] [acc init])
+                     (if (fx< i 0) acc
+                         (loop (fx1- i)
+                               (proc (value-at bytes i) (value-at other i) acc)))))]
+          [(proc init bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let ([sources (cons bytes bytevectors)])
+                       (let loop ([i (fx1- (apply source-length bytes bytevectors))]
+                                  [acc init])
+                         (if (fx< i 0) acc
+                             (loop (fx1- i)
+                                   (apply proc
+                                          (append (values-at i sources)
+                                                  (list acc)))))))))]))
       (define fold-left/i
-        (lambda (proc init bytes . bytevectors)
-          (let* ([sources (cons bytes bytevectors)]
-                 [length (apply source-length bytes bytevectors)])
-            (let loop ([i 0] [acc init])
-              (if (fx= i length) acc
-                  (loop (fx1+ i) (apply proc i acc (values-at i sources))))))))
+        (case-lambda
+          [(proc init bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let ([length (length-of bytes)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i length) acc
+                           (loop (fx1+ i) (proc i acc (value-at bytes i)))))))]
+          [(proc init bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let ([length (source-length bytes other)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i length) acc
+                           (loop (fx1+ i)
+                                 (proc i acc (value-at bytes i)
+                                       (value-at other i)))))))]
+          [(proc init bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)])
+                       (let loop ([i 0] [acc init])
+                         (if (fx= i length) acc
+                             (loop (fx1+ i)
+                                   (apply proc i acc (values-at i sources))))))))]))
       (define fold-right/i
-        (lambda (proc init bytes . bytevectors)
-          (let* ([sources (cons bytes bytevectors)]
-                 [length (apply source-length bytes bytevectors)])
-            (let loop ([i (fx1- length)] [acc init])
-              (if (fx< i 0) acc
-                  (loop (fx1- i)
-                        (apply proc i (append (values-at i sources) (list acc)))))))))
+        (case-lambda
+          [(proc init bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let loop ([i (fx1- (length-of bytes))] [acc init])
+                     (if (fx< i 0) acc
+                         (loop (fx1- i) (proc i (value-at bytes i) acc)))))]
+          [(proc init bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let loop ([i (fx1- (source-length bytes other))] [acc init])
+                     (if (fx< i 0) acc
+                         (loop (fx1- i)
+                               (proc i (value-at bytes i) (value-at other i) acc)))))]
+          [(proc init bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let ([sources (cons bytes bytevectors)])
+                       (let loop ([i (fx1- (apply source-length bytes bytevectors))]
+                                  [acc init])
+                         (if (fx< i 0) acc
+                             (loop (fx1- i)
+                                   (apply proc i
+                                          (append (values-at i sources)
+                                                  (list acc)))))))))]))
       (define scan-left-ex
-        (lambda (proc init bytes . bytevectors)
-          (let* ([sources (cons bytes bytevectors)]
-                 [length (apply source-length bytes bytevectors)] [result (make-result length)])
-            (let loop ([i 0] [acc init])
-              (if (fx= i length) result
-                  (begin (store! result i acc)
-                         (loop (fx1+ i) (apply proc acc (values-at i sources)))))))))
+        (case-lambda
+          [(proc init bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let* ([length (length-of bytes)] [result (make-result length)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i length) result
+                           (begin (store! result i acc)
+                                  (loop (fx1+ i)
+                                        (proc acc (value-at bytes i))))))))]
+          [(proc init bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let* ([length (source-length bytes other)]
+                          [result (make-result length)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i length) result
+                           (begin
+                             (store! result i acc)
+                             (loop (fx1+ i)
+                                   (proc acc (value-at bytes i)
+                                         (value-at other i))))))))]
+          [(proc init bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)]
+                            [result (make-result length)])
+                       (let loop ([i 0] [acc init])
+                         (if (fx= i length) result
+                             (begin
+                               (store! result i acc)
+                               (loop (fx1+ i)
+                                     (apply proc acc (values-at i sources)))))))))]))
       (define scan-left-in
-        (lambda (proc init bytes . bytevectors)
-          (let* ([sources (cons bytes bytevectors)]
-                 [length (apply source-length bytes bytevectors)] [result (make-result length)])
-            (let loop ([i 0] [acc init])
-              (if (fx= i length) result
-                  (let ([next (apply proc acc (values-at i sources))])
-                    (store! result i next)
-                    (loop (fx1+ i) next)))))))
+        (case-lambda
+          [(proc init bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let* ([length (length-of bytes)] [result (make-result length)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i length) result
+                           (let ([next (proc acc (value-at bytes i))])
+                             (store! result i next)
+                             (loop (fx1+ i) next))))))]
+          [(proc init bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let* ([length (source-length bytes other)]
+                          [result (make-result length)])
+                     (let loop ([i 0] [acc init])
+                       (if (fx= i length) result
+                           (let ([next (proc acc (value-at bytes i)
+                                             (value-at other i))])
+                             (store! result i next)
+                             (loop (fx1+ i) next))))))]
+          [(proc init bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)]
+                            [result (make-result length)])
+                       (let loop ([i 0] [acc init])
+                         (if (fx= i length) result
+                             (let ([next (apply proc acc (values-at i sources))])
+                               (store! result i next)
+                               (loop (fx1+ i) next)))))))]))
       (define scan-right-ex
-        (lambda (proc init bytes . bytevectors)
-          (let* ([sources (cons bytes bytevectors)]
-                 [length (apply source-length bytes bytevectors)] [result (make-result length)])
-            (when (fx> length 0) (store! result 0 init))
-            (let loop ([i (fx1- length)] [output 1] [acc init])
-              (if (fx<= i 0) result
-                  (let ([next (apply proc (append (values-at i sources) (list acc)))])
-                    (store! result output next)
-                    (loop (fx1- i) (fx1+ output) next)))))))
+        (case-lambda
+          [(proc init bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let* ([length (length-of bytes)] [result (make-result length)])
+                     (when (fx> length 0) (store! result 0 init))
+                     (let loop ([i (fx1- length)] [output 1] [acc init])
+                       (if (fx<= i 0) result
+                           (let ([next (proc (value-at bytes i) acc)])
+                             (store! result output next)
+                             (loop (fx1- i) (fx1+ output) next))))))]
+          [(proc init bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let* ([length (source-length bytes other)]
+                          [result (make-result length)])
+                     (when (fx> length 0) (store! result 0 init))
+                     (let loop ([i (fx1- length)] [output 1] [acc init])
+                       (if (fx<= i 0) result
+                           (let ([next (proc (value-at bytes i)
+                                             (value-at other i) acc)])
+                             (store! result output next)
+                             (loop (fx1- i) (fx1+ output) next))))))]
+          [(proc init bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)]
+                            [result (make-result length)])
+                       (when (fx> length 0) (store! result 0 init))
+                       (let loop ([i (fx1- length)] [output 1] [acc init])
+                         (if (fx<= i 0) result
+                             (let ([next
+                                    (apply proc
+                                           (append (values-at i sources)
+                                                   (list acc)))])
+                               (store! result output next)
+                               (loop (fx1- i) (fx1+ output) next)))))))]))
       (define scan-right-in
-        (lambda (proc init bytes . bytevectors)
-          (let* ([sources (cons bytes bytevectors)]
-                 [length (apply source-length bytes bytevectors)] [result (make-result length)])
-            (let loop ([i (fx1- length)] [output 0] [acc init])
-              (if (fx< i 0) result
-                  (let ([next (apply proc (append (values-at i sources) (list acc)))])
-                    (store! result output next)
-                    (loop (fx1- i) (fx1+ output) next)))))))
+        (case-lambda
+          [(proc init bytes)
+           (pcheck ([procedure? proc] [bytevector? bytes])
+                   (let* ([length (length-of bytes)] [result (make-result length)])
+                     (let loop ([i (fx1- length)] [output 0] [acc init])
+                       (if (fx< i 0) result
+                           (let ([next (proc (value-at bytes i) acc)])
+                             (store! result output next)
+                             (loop (fx1- i) (fx1+ output) next))))))]
+          [(proc init bytes other)
+           (pcheck ([procedure? proc] [bytevector? bytes other])
+                   (let* ([length (source-length bytes other)]
+                          [result (make-result length)])
+                     (let loop ([i (fx1- length)] [output 0] [acc init])
+                       (if (fx< i 0) result
+                           (let ([next (proc (value-at bytes i)
+                                             (value-at other i) acc)])
+                             (store! result output next)
+                             (loop (fx1- i) (fx1+ output) next))))))]
+          [(proc init bytes second third . rest)
+           (let ([bytevectors (cons second (cons third rest))])
+             (pcheck ([procedure? proc] [bytevector? bytes]
+                      [all-bytevectors? bytevectors])
+                     (let* ([sources (cons bytes bytevectors)]
+                            [length (apply source-length bytes bytevectors)]
+                            [result (make-result length)])
+                       (let loop ([i (fx1- length)] [output 0] [acc init])
+                         (if (fx< i 0) result
+                             (let ([next
+                                    (apply proc
+                                           (append (values-at i sources)
+                                                   (list acc)))])
+                               (store! result output next)
+                               (loop (fx1- i) (fx1+ output) next)))))))]))
       (define reverse-values
         (lambda (bytes)
           (let* ([length (length-of bytes)] [result (make-result length)])
@@ -2708,8 +3053,21 @@
 
   #|macro:define-bvector-procedure
   Define the fixed-width bytevector operation family for descriptor `width`.
-  The `ref` and `set` procedures access byte offsets, and `value?`
-  validates values produced by generated procedures.
+  The `width-size` value is the number of bytes per logical value. The `ref` and `set`
+  procedures have signatures `(bytevector byte-offset) -> value` and
+  `(bytevector byte-offset value) -> unspecified`. Predicate `value?` has signature
+  `(value) -> boolean` and validates produced values.
+
+  Generated map and iteration procedures take a procedure and one or more equal-length
+  bytevectors. A non-indexed procedure has signature `(value ...) -> value`; an indexed
+  procedure has signature `(index value ...) -> value`. Iteration return values are
+  unspecified. Maps return a new bytevector, except mutating maps store results directly
+  in and return the first bytevector. Predicate traversals use `(value ...) -> any` and
+  short-circuit.
+
+  Left folds and scans use `(accumulator value ...) -> accumulator`. Right folds and scans
+  use `(value ... accumulator) -> accumulator`. Indexed folds receive `index` first. Folds
+  return the final accumulator, and scans return a bytevector of intermediate accumulators.
   |#
   (define-syntax define-bvector-procedure
     (lambda (stx)

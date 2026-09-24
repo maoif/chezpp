@@ -63,6 +63,79 @@
              (bvscan-left-in-u8 (lambda (acc x y) (+ acc x y)) 0
                                 '#vu8(1 2) '#vu8(10 20)))
 
+     (equal? '#vu8(111 222)
+             (bvmap-u8 + '#vu8(1 2) '#vu8(10 20) '#vu8(100 200)))
+     (equal? '#vu8(111 223)
+             (bvmap/i-u8 (lambda (i x y z) (+ i x y z))
+                          '#vu8(1 2) '#vu8(10 20) '#vu8(100 200)))
+     (let ([target (bytevector-copy '#vu8(1 2))])
+       (bvmap!-u8 + target '#vu8(10 20))
+       (equal? '#vu8(11 22) target))
+
+     ;; A callback error leaves the prefix already written by direct bvmap!.
+     (let ([target (bytevector-copy '#vu8(1 2 3))])
+       (and (guard (condition [else #t])
+              (bvmap!-u8
+               (lambda (value other third)
+                 (if (= value 3)
+                     (error 'bvmap!-u8 "stop")
+                     (+ value other third)))
+               target '#vu8(10 20 30) '#vu8(100 100 100))
+              #f)
+            (equal? '#vu8(111 122 3) target)))
+
+     ;; A callback error leaves the prefix already written by direct bvmap!/i.
+     (let ([target (bytevector-copy '#vu8(1 2 3))])
+       (and (guard (condition [else #t])
+              (bvmap!/i-u8
+               (lambda (index value)
+                 (if (= index 2)
+                     (error 'bvmap!/i-u8 "stop")
+                     (+ 10 index value)))
+               target)
+              #f)
+            (equal? '#vu8(11 13 3) target)))
+
+     (let ([seen '()])
+       (bvfor-each/i-u8
+        (lambda (i x y z) (set! seen (cons (list i x y z) seen)))
+        '#vu8(1 2) '#vu8(10 20) '#vu8(100 200))
+       (equal? '((1 2 20 200) (0 1 10 100)) seen))
+
+     ;; Predicate traversals and aliases accept multiple sources and short-circuit.
+     (let ([calls 0])
+       (and (bvandmap-u8 = '#vu8(1 2 3) '#vu8(1 2 3))
+            (bvfor-all-u8 = '#vu8(1 2 3) '#vu8(1 2 3))
+            (bvormap-u8 = '#vu8(1 2 3) '#vu8(0 2 0))
+            (bvexists-u8 = '#vu8(1 2 3) '#vu8(0 2 0))
+            (bvormap-u8
+             (lambda (x y z)
+               (set! calls (fx1+ calls))
+               (= (+ x y) z))
+             '#vu8(1 2 3) '#vu8(10 20 30) '#vu8(0 22 0))
+            (= calls 2)))
+
+     ;; Three-source folds and scans retain their callback argument order.
+     (= 333
+        (bvfold-right-u8
+         (lambda (x y z acc) (+ x y z acc)) 0
+         '#vu8(1 2) '#vu8(10 20) '#vu8(100 200)))
+     (= 34
+        (bvfold-left/i-u8
+         (lambda (i acc x y) (+ i acc x y)) 0
+         '#vu8(1 2) '#vu8(10 20)))
+     (equal? '#vu8(0 11)
+             (bvscan-left-ex-u8 + 0 '#vu8(1 2) '#vu8(10 20)))
+     (equal? '#vu8(0 22)
+             (bvscan-right-ex-u8 + 0 '#vu8(1 2) '#vu8(10 20)))
+     (equal? '#vu8(222 77)
+             (bvscan-right-in-u8
+              (lambda (x y z acc) (modulo (+ x y z acc) 256)) 0
+              '#vu8(1 2) '#vu8(10 20) '#vu8(100 200)))
+
+     ;; Multi-input traversal rejects unequal logical lengths.
+     (error? (bvandmap-u8 = '#vu8(1) '#vu8(1 2)))
+
      ;; Width slices normalize negative and out-of-range endpoints.
      (equal? '#vu8(2 3)
              (bvslice-u8 '#vu8(0 1 2 3) -2 99))

@@ -174,6 +174,58 @@
                      (bytearray-u8-map-rev (lambda (value) value) values))
                     (reverse (iota 100)))))
 
+     ;; Reverse traversal accepts multiple bytearrays and preserves source order.
+     (let* ([left (bytearray 1 2 3)]
+            [right (bytearray 10 20 30)]
+            [third (bytearray 100 100 100)]
+            [seen '()])
+       (bytearray-for-each/i-rev
+        (lambda (index x y) (set! seen (cons (list index x y) seen)))
+        left right)
+       (and (equal? '(133 122 111)
+                    (bytearray->list (bytearray-map-rev + left right third)))
+            (equal? '((0 1 10) (1 2 20) (2 3 30)) seen)))
+
+     ;; Folds accept multiple bytearrays with the documented accumulator positions.
+     (let ([left (bytearray 1 2 3)]
+           [right (bytearray 10 20 30)]
+           [third (bytearray 100 200 255)])
+       (and (= 66 (bytearray-fold-left
+                   (lambda (acc x y) (+ acc x y)) 0 left right))
+            (= 624 (bytearray-fold-left/i
+                    (lambda (index acc x y z) (+ index acc x y z))
+                    0 left right third))
+            (equal? '((1 10) (2 20) (3 30))
+                    (bytearray-fold-right
+                     (lambda (x y acc) (cons (list x y) acc))
+                     '() left right))))
+
+     ;; Multi-input traversal rejects unequal logical lengths.
+     (error? (bytearray-map-rev + (bytearray 1) (bytearray 2 3)))
+     (error? (bytearray-fold-left + 0 (bytearray 1) (bytearray 2 3)))
+
+     ;; A callback error leaves the prefix already written by direct bytearray-map!.
+     (let ([values (bytearray 1 2 3)])
+       (and (guard (condition [else #t])
+              (bytearray-map!
+               (lambda (value)
+                 (if (= value 3) (error 'bytearray-map! "stop") (add1 value)))
+               values)
+              #f)
+            (equal? '(2 3 3) (bytearray->list values))))
+
+     ;; A callback error leaves the prefix already written by direct bytearray-map/i!.
+     (let ([values (bytearray 1 2 3)])
+       (and (guard (condition [else #t])
+              (bytearray-map/i!
+               (lambda (index value other third)
+                 (if (= index 2)
+                     (error 'bytearray-map/i! "stop")
+                     (+ index value other third)))
+               values (bytearray 10 20 30) (bytearray 100 100 100))
+              #f)
+            (equal? '(111 123 3) (bytearray->list values))))
+
      (let* ([values (bytearray-fp32-iota 100)]
             [reversed (bytearray-fp32-map-rev (lambda (value) value) values)]
             [joined (bytearray-fp32-append values reversed)])
