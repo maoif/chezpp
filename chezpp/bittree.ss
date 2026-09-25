@@ -77,8 +77,8 @@
                      [v (rbtree-ref who rbt k #f)])
                 (if v
                     (unless (logbit? off v)
-                      (rbtree-set! who rbt k (fxlogbit1 off v)))
-                    (rbtree-set! who rbt k (fxlogbit1 off 0)))))))
+                      (rbtree-set! who rbt (rbtree-fixnum? rbt) k (fxlogbit1 off v)))
+                    (rbtree-set! who rbt (rbtree-fixnum? rbt) k (fxlogbit1 off 0)))))))
 
 
   #|proc:bittree-unset!
@@ -95,8 +95,8 @@
                 (when (and v (fxlogbit? off v))
                   (let ([v (fxlogbit0 off v)])
                     (if (fx= v 0)
-                        (rbtree-delete! who rbt k)
-                        (rbtree-set! who rbt k v))))))))
+                        (rbtree-delete! who rbt (rbtree-fixnum? rbt) k)
+                        (rbtree-set! who rbt (rbtree-fixnum? rbt) k v))))))))
 
 
   #|proc:bittree-flip!
@@ -113,10 +113,10 @@
                     (if (fxlogbit? off v)
                         (let ([v (fxlogbit0 off v)])
                           (if (fx= v 0)
-                              (rbtree-delete! who rbt k)
-                              (rbtree-set! who rbt k v)))
-                        (rbtree-set! who rbt k (fxlogbit1 off v)))
-                    (rbtree-set! who rbt k (fxlogbit1 off 0)))))))
+                              (rbtree-delete! who rbt (rbtree-fixnum? rbt) k)
+                              (rbtree-set! who rbt (rbtree-fixnum? rbt) k v)))
+                        (rbtree-set! who rbt (rbtree-fixnum? rbt) k (fxlogbit1 off v)))
+                    (rbtree-set! who rbt (rbtree-fixnum? rbt) k (fxlogbit1 off 0)))))))
 
 
   #|proc:bittree-set?
@@ -173,7 +173,7 @@
                      [newrbt (bittree-rbt newbt)])
                 (rbtree-for-each who
                                  (lambda (k v)
-                                   (rbtree-set! who newrbt k v))
+                                   (rbtree-set! who newrbt (rbtree-fixnum? newrbt) k v))
                                  rbt)
                 newbt))))
 
@@ -196,7 +196,7 @@
                     (rbtree-for-each
                      who
                      (lambda (k v)
-                       (rbtree-set! who newrbt k
+                       (rbtree-set! who newrbt (rbtree-fixnum? newrbt) k
                                     (fxlogior v (rbtree-ref who newrbt k v))))
                      rbt))
                   rbt*)

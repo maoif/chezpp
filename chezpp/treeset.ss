@@ -1,5 +1,5 @@
 (library (chezpp treeset)
-  (export make-treeset make-fixnum-treeset fixnum-treeset fixnum-treeset? treeset treeset? treeset-empty? treeset-size
+  (export make-treeset make-fxtreeset fxtreeset fxtreeset? treeset treeset? treeset-empty? treeset-size
           treeset-add! treeset-delete! treeset-clear!
 
           treeset-contains? treeset-contains/p?
@@ -20,7 +20,7 @@
 
           treeset->list list->treeset
           treeset->vector vector->treeset
-          list->fixnum-treeset vector->fixnum-treeset)
+          list->fxtreeset vector->fxtreeset)
   (import (chezpp chez)
           (chezpp list)
           (chezpp internal)
@@ -34,38 +34,33 @@
     (parent rbtree) (nongenerative) (opaque #t)
     (protocol (lambda (pnew)
                 (lambda (=? <? size)
-                  ((pnew =? <? size #f #f))))))
+                  ((pnew =? <? size #f))))))
 
-  #|proc:fixnum-treeset?
+  #|proc:fxtreeset?
   Return whether `object` is a fixnum treeset. Any object may be tested.
   |#
-  #|record:$fixnum-treeset
+  #|record:$fxtreeset
   Ordered set record restricted to fixnum members.
   |#
-  (define-record-type ($fixnum-treeset mk-fixnum-treeset fixnum-treeset?)
+  (define-record-type ($fxtreeset mk-fxtreeset fxtreeset?)
     (parent rbtree) (nongenerative) (opaque #t)
-    (protocol (lambda (pnew) (lambda (=? <? size) ((pnew =? <? size #t #f))))))
+    (protocol (lambda (pnew) (lambda (=? <? size) ((pnew =? <? size #t))))))
   #|proc:treeset?
   Return whether `object` is a generic or fixnum treeset. Any object may be tested.
   |#
-  (define treeset? (lambda (object) (or (treeset-record? object) (fixnum-treeset? object))))
+  (define treeset? (lambda (object) (or (treeset-record? object) (fxtreeset? object))))
 
-  #|proc:make-fixnum-treeset
+  #|proc:make-fxtreeset
   Construct a treeset whose items are exact fixnums.
   `=?` compares items for equality and `<?` orders items. Returns an empty treeset.
   |#
-  (define make-fixnum-treeset
+  (define make-fxtreeset
     (lambda (=? <?)
-      (pcheck ([procedure? =? <?]) (mk-fixnum-treeset =? <? 0))))
-
-  ;; dummy value for all keys
-  (define V #f)
-
-
+      (pcheck ([procedure? =? <?]) (mk-fxtreeset =? <? 0))))
 
   (define make-treeset-like
     (lambda (source)
-      ((if (fixnum-treeset? source) make-fixnum-treeset make-treeset)
+      ((if (fxtreeset? source) make-fxtreeset make-treeset)
        (rbtree-=? source) (rbtree-<? source))))
 
   #|proc:make-treeset
@@ -88,17 +83,17 @@
     (lambda (=? <? . args)
       (pcheck ([procedure? =? <?])
               (let ([ts (make-treeset =? <?)])
-                (for-each (lambda (x) (rbtree-set! who ts x V)) args)
+                (for-each (lambda (x) (rbtree-set! who ts #f x *dummy-v*)) args)
                 ts))))
 
-  #|proc:fixnum-treeset
+  #|proc:fxtreeset
   Create a fixnum-key treeset initialized with the supplied fixnums.
   `=?` compares items and `<?` orders items. Returns the populated treeset.
   |#
-  (define-who fixnum-treeset
+  (define-who fxtreeset
     (lambda (=? <? . args)
       (pcheck ([procedure? =? <?])
-              (let ([ts (make-fixnum-treeset =? <?)])
+              (let ([ts (make-fxtreeset =? <?)])
                 (for-each (lambda (x)
                             (unless (fixnum? x)
                               (errorf who "not a fixnum treeset item: ~a" x))
@@ -122,9 +117,9 @@
   (define-who treeset-add!
     (lambda (ts v)
       (pcheck ([treeset? ts])
-              (when (and (fixnum-treeset? ts) (not (fixnum? v)))
+              (when (and (fxtreeset? ts) (not (fixnum? v)))
                 (errorf who "fixnum treeset item is not a fixnum: ~a" v))
-              (rbtree-set! who ts v V))))
+              (rbtree-set! who ts (fxtreeset? ts) v *dummy-v*))))
 
 
   #|proc:treeset-delete!
@@ -135,7 +130,7 @@
     (lambda (ts v)
       (pcheck ([treeset? ts])
               (when (rbtree-contains? who ts v)
-                (rbtree-delete! who ts v)))))
+                (rbtree-delete! who ts (fxtreeset? ts) v)))))
 
 
   #|proc:treeset-clear!
@@ -261,7 +256,7 @@
     (lambda (pred ts)
       (pcheck ([procedure? pred] [treeset? ts])
               (let ([newts (make-treeset-like ts)])
-                (rbtree-visit who (lambda (k v) (when (pred k) (rbtree-set! who newts k V))) ts)
+                (rbtree-visit who (lambda (k v) (when (pred k) (rbtree-set! who newts (fxtreeset? newts) k *dummy-v*))) ts)
                 newts))))
 
 
@@ -276,7 +271,7 @@
                 (rbtree-visit who (lambda (k v) (lb k)) ts)
                 (for-each (lambda (v)
                             (unless (pred v)
-                              (rbtree-delete! who ts v)))
+                              (rbtree-delete! who ts (fxtreeset? ts) v)))
                           (lb))
                 ts))))
 
@@ -292,8 +287,8 @@
               (let ([T (make-treeset-like ts)]
                     [F (make-treeset-like ts)])
                 (rbtree-visit who (lambda (k v) (if (pred k)
-                                                    (rbtree-set! who T k V)
-                                                    (rbtree-set! who F k V)))
+                                                    (rbtree-set! who T (fxtreeset? T) k *dummy-v*)
+                                                    (rbtree-set! who F (fxtreeset? F) k *dummy-v*)))
                               ts)
                 (values T F)))))
 
@@ -322,7 +317,7 @@
                             (for-each (lambda (ts)
                                         (rbtree-visit who
                                                       (lambda (k v)
-                                                        (rbtree-set! who newts k V))
+                                                        (rbtree-set! who newts (fxtreeset? newts) k *dummy-v*))
                                                       ts))
                                       (cons ts ts*))
                             newts))))))
@@ -342,12 +337,12 @@
                   ts
                   (pcheck ([all-treesets? ts*])
                           (let ([newts (make-treeset-like ts)])
-                            (rbtree-visit who (lambda (k v) (rbtree-set! who newts k V)) ts)
+                            (rbtree-visit who (lambda (k v) (rbtree-set! who newts (fxtreeset? newts) k *dummy-v*)) ts)
                             (for-each (lambda (ts)
                                         (rbtree-visit who
                                                       (lambda (k v)
                                                         (when (rbtree-contains? who newts k)
-                                                          (rbtree-delete! who newts k)))
+                                                          (rbtree-delete! who newts (fxtreeset? newts) k)))
                                                       ts))
                                       ts*)
                             newts))))))
@@ -373,7 +368,7 @@
                                                             (cons ts ts*))
                                               (lb k)))
                                           newts)
-                            (for-each (lambda (k) (rbtree-delete! who newts k)) (lb))
+                            (for-each (lambda (k) (rbtree-delete! who newts (fxtreeset? newts) k)) (lb))
                             newts))))))
 
 
@@ -395,7 +390,7 @@
                     (for-each (lambda (ts)
                                 (rbtree-visit who
                                               (lambda (k v)
-                                                (rbtree-set! who newts k V))
+                                                (rbtree-set! who newts (fxtreeset? newts) k *dummy-v*))
                                               ts))
                               (cons ts ts*))
                     ;; intersect
@@ -406,7 +401,7 @@
                                       (lb k)))
                                   newts)
                     ;; diff
-                    (for-each (lambda (k) (rbtree-delete! who newts k)) (lb))
+                    (for-each (lambda (k) (rbtree-delete! who newts (fxtreeset? newts) k)) (lb))
                     newts)))))
 
 
@@ -780,27 +775,27 @@
 
 
 
-  #|proc:list->fixnum-treeset
+  #|proc:list->fxtreeset
   Return a new fixnum treeset containing the fixnums in list `items`.
   Equality predicate `equal?` and ordering predicate `less?` each take two fixnum items.
   Duplicate items are stored once.
   |#
-  (define list->fixnum-treeset
+  (define list->fxtreeset
     (lambda (equal? less? items)
       (pcheck ([procedure? equal? less?] [list? items])
-              (let ([result (make-fixnum-treeset equal? less?)])
+              (let ([result (make-fxtreeset equal? less?)])
                 (for-each (lambda (item) (treeset-add! result item)) items)
                 result))))
 
-  #|proc:vector->fixnum-treeset
+  #|proc:vector->fxtreeset
   Return a new fixnum treeset containing the fixnums in vector `items`.
   Equality predicate `equal?` and ordering predicate `less?` each take two fixnum items.
   Duplicate items are stored once.
   |#
-  (define vector->fixnum-treeset
+  (define vector->fxtreeset
     (lambda (equal? less? items)
       (pcheck ([procedure? equal? less?] [vector? items])
-              (let ([result (make-fixnum-treeset equal? less?)])
+              (let ([result (make-fxtreeset equal? less?)])
                 (vector-for-each (lambda (item) (treeset-add! result item)) items)
                 result))))
 
@@ -860,6 +855,6 @@
      ts))
 
   (record-writer (type-descriptor $treeset) write-treeset)
-  (record-writer (type-descriptor $fixnum-treeset) write-treeset)
+  (record-writer (type-descriptor $fxtreeset) write-treeset)
 
   )

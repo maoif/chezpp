@@ -5,15 +5,15 @@
 (define v10000  (fxvshuffle! (fxviota 10000)))
 (define v100000 (fxvshuffle! (fxviota 100000)))
 
-(mat fixnum-treeset-constructor
-     (let ([ts (make-fixnum-treeset fx= fx<)])
+(mat fxtreeset-constructor
+     (let ([ts (make-fxtreeset fx= fx<)])
        (treeset-add! ts 1)
-       (and (fixnum-treeset? ts)
+       (and (fxtreeset? ts)
             (treeset? ts)
             (treeset-contains? ts 1))))
 
-(mat fixnum-treeset-populate
-     (= 2 (treeset-size (fixnum-treeset fx= fx< 1 2))))
+(mat fxtreeset-populate
+     (= 2 (treeset-size (fxtreeset fx= fx< 1 2))))
 
 (mat treeset-mutating-algebra
      (let ([set (treeset = < 1 2 3)])
@@ -34,9 +34,9 @@
             (equal? set expected))))
 
 ;; Error case: fixnum treesets reject non-fixnum items.
-(mat fixnum-treeset-key-validation
+(mat fxtreeset-key-validation
      (guard (c [(error? c) #t] [else #f])
-       (treeset-add! (make-fixnum-treeset fx= fx<) 'x)
+       (treeset-add! (make-fxtreeset fx= fx<) 'x)
        #f))
 
 

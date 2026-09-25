@@ -1,5 +1,5 @@
 (library (chezpp treemap)
-  (export make-treemap make-fixnum-treemap fixnum-treemap fixnum-treemap? treemap treemap? treemap-empty?
+  (export make-treemap make-fxtreemap fxtreemap fxtreemap? treemap treemap? treemap-empty?
           treemap-set! treemap-ref treemap-size
           treemap-delete! treemap-clear!
 
@@ -17,7 +17,7 @@
           treemap-fold-left treemap-fold-left/i
           treemap-fold-right treemap-fold-right/i
 
-          treemap->list hashtable->treemap hashtable->fixnum-treemap
+          treemap->list hashtable->treemap hashtable->fxtreemap
 
           $rbtree-verify)
   (import (chezpp chez)
@@ -39,32 +39,32 @@
   Return whether `object` is a generic or fixnum treemap. Any object may be tested.
   |#
   (define treemap?
-    (lambda (x) (or (treemap-record? x) (fixnum-treemap? x))))
+    (lambda (x) (or (treemap-record? x) (fxtreemap? x))))
 
-  #|proc:fixnum-treemap?
+  #|proc:fxtreemap?
   Return whether `object` is a treemap restricted to fixnum keys and values.
   Any object may be tested.
   |#
-  #|record:$fixnum-treemap
+  #|record:$fxtreemap
   Ordered map record restricted to fixnum keys and values.
   |#
-  (define-record-type ($fixnum-treemap mk-fixnum-treemap fixnum-treemap?)
+  (define-record-type ($fxtreemap mk-fxtreemap fxtreemap?)
     (parent rbtree) (nongenerative) (opaque #t)
     (protocol (lambda (pnew)
                 (lambda (=? <? size) ((pnew =? <? size #t))))))
 
-  #|proc:make-fixnum-treemap
+  #|proc:make-fxtreemap
   Construct a treemap whose keys and values must be exact fixnums.
   `=?` compares keys for equality and `<?` orders keys. Returns an empty treemap.
   |#
-  (define make-fixnum-treemap
+  (define make-fxtreemap
     (lambda (=? <?)
-      (pcheck ([procedure? =? <?]) (mk-fixnum-treemap =? <? 0))))
+      (pcheck ([procedure? =? <?]) (mk-fxtreemap =? <? 0))))
 
 
   (define make-treemap-like
     (lambda (source)
-      ((if (fixnum-treemap? source) make-fixnum-treemap make-treemap)
+      ((if (fxtreemap? source) make-fxtreemap make-treemap)
        (rbtree-=? source) (rbtree-<? source))))
 
   #|proc:make-treemap
@@ -91,18 +91,18 @@
     (lambda (=? <? . args)
       (let ([tm (make-treemap =? <?)])
         (for-each (lambda (x) (unless (pair? x) (errorf who "not a pair: ~a" x))) args)
-        (for-each (lambda (x) (rbtree-set! who tm (car x) (cdr x))) args)
+        (for-each (lambda (x) (rbtree-set! who tm #f (car x) (cdr x))) args)
         tm)))
 
-  #|proc:fixnum-treemap
+  #|proc:fxtreemap
   Create a fixnum treemap and initialize it from fixnum key/value pairs.
   `=?` and `<?` compare and order fixnum keys; each argument is a pair of fixnums.
   Returns the populated treemap.
   |#
-  (define-who fixnum-treemap
+  (define-who fxtreemap
     (lambda (=? <? . args)
       (pcheck ([procedure? =? <?])
-              (let ([tm (make-fixnum-treemap =? <?)])
+              (let ([tm (make-fxtreemap =? <?)])
                 (for-each (lambda (x)
                             (unless (and (pair? x) (fixnum? (car x)) (fixnum? (cdr x)))
                               (errorf who "not a fixnum key/value pair: ~a" x))
@@ -128,9 +128,9 @@
   (define-who treemap-set!
     (lambda (tm k v)
       (pcheck ([treemap? tm])
-              (when (and (fixnum-treemap? tm) (not (fixnum? k)))
+              (when (and (fxtreemap? tm) (not (fixnum? k)))
                 (errorf who "fixnum treemap key is not a fixnum: ~a" k))
-              (rbtree-set! who tm k v))))
+              (rbtree-set! who tm (fxtreemap? tm) k v))))
 
 
   #|proc:treemap-ref
@@ -143,12 +143,12 @@
     (case-lambda
       [(tm k)
        (pcheck ([treemap? tm])
-               (when (and (fixnum-treemap? tm) (not (fixnum? k)))
+               (when (and (fxtreemap? tm) (not (fixnum? k)))
                  (errorf who "fixnum treemap key is not a fixnum: ~a" k))
                (rbtree-ref who tm k))]
       [(tm k default)
        (pcheck ([treemap? tm])
-               (when (and (fixnum-treemap? tm) (not (fixnum? k)))
+               (when (and (fxtreemap? tm) (not (fixnum? k)))
                  (errorf who "fixnum treemap key is not a fixnum: ~a" k))
                (rbtree-ref who tm k default))]))
 
@@ -161,7 +161,7 @@
     (lambda (tm k)
       (pcheck ([treemap? tm])
               (when (rbtree-contains? who tm k)
-                (rbtree-delete! who tm k)))))
+                (rbtree-delete! who tm (fxtreemap? tm) k)))))
 
 
   #|proc:treemap-clear!
@@ -337,7 +337,7 @@
     (lambda (pred tm)
       (pcheck ([procedure? pred] [treemap? tm])
               (let ([newtm (make-treemap-like tm)])
-                (rbtree-visit who (lambda (k v) (when (pred k v) (rbtree-set! who newtm k v))) tm)
+                (rbtree-visit who (lambda (k v) (when (pred k v) (rbtree-set! who newtm (fxtreemap? newtm) k v))) tm)
                 newtm))))
 
 
@@ -353,7 +353,7 @@
                 (for-each (lambda (kv)
                             (let ([k (car kv)])
                               (unless (pred k (cdr kv))
-                                (rbtree-delete! who tm k))))
+                                (rbtree-delete! who tm (fxtreemap? tm) k))))
                           (lb))
                 tm))))
 
@@ -369,8 +369,8 @@
               (let ([T (make-treemap-like tm)]
                     [F (make-treemap-like tm)])
                 (rbtree-visit who (lambda (k v) (if (pred k v)
-                                                    (rbtree-set! who T k v)
-                                                    (rbtree-set! who F k v)))
+                                                    (rbtree-set! who T (fxtreemap? T) k v)
+                                                    (rbtree-set! who F (fxtreemap? F) k v)))
                               tm)
                 (values T F)))))
 
@@ -701,20 +701,20 @@
     (lambda (=? <? ht)
       (pcheck ([hashtable? ht] [procedure? =? <?])
               (let ([tm (make-treemap =? <?)])
-                (vector-for-each (lambda (kv) (rbtree-set! who tm (car kv) (cdr kv)))
+                (vector-for-each (lambda (kv) (rbtree-set! who tm (fxtreemap? tm) (car kv) (cdr kv)))
                                  (hashtable-cells ht))
                 tm))))
 
 
-  #|proc:hashtable->fixnum-treemap
+  #|proc:hashtable->fxtreemap
   Return a new fixnum treemap containing the entries of hashtable `table`.
   Equality predicate `equal?` and ordering predicate `less?` each take two fixnum keys.
   All keys and values in `table` must be fixnums.
   |#
-  (define hashtable->fixnum-treemap
+  (define hashtable->fxtreemap
     (lambda (equal? less? table)
       (pcheck ([procedure? equal? less?] [hashtable? table])
-              (let ([result (make-fixnum-treemap equal? less?)])
+              (let ([result (make-fxtreemap equal? less?)])
                 (vector-for-each
                   (lambda (cell) (treemap-set! result (car cell) (cdr cell)))
                   (hashtable-cells table))
@@ -780,6 +780,6 @@
    treemap->list)
 
   (record-writer (type-descriptor $treemap) write-treemap)
-  (record-writer (type-descriptor $fixnum-treemap) write-treemap)
+  (record-writer (type-descriptor $fxtreemap) write-treemap)
 
   )

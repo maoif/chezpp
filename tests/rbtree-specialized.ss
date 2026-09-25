@@ -1,4 +1,28 @@
-(import (chezpp) (only (chezpp private rbtree) $rbtree-verify))
+(import (chezpp)
+        (only (chezpp private rbtree) $rbtree-verify *dummy-v* rbtree-visit))
+
+;; Regression: key-only nodes must be traversable without reading a value slot.
+(mat rbtree-key-only-node-accessors
+     (let ([set (treeset fx= fx< 3 1 2)])
+       (and (equal? '(1 2 3) (treeset->list set))
+            (= 2 (treeset-successor set 1))
+            (= 1 (treeset-min set))
+            (= 3 (treeset-max set)))))
+
+(mat rbtree-set-traversal-sentinel
+     (let ([set (treeset fx= fx< 1 2)] [sentinel? #t])
+       (rbtree-visit 'rbtree-set-traversal-sentinel
+                     (lambda (key value)
+                       (set! sentinel? (and sentinel? (eq? value *dummy-v*))))
+                     set)
+       sentinel?))
+
+(mat rbtree-map-successor-value
+     (let ([map (treemap equal? < '(4 . root) '(2 . left) '(6 . right)
+                         '(5 . successor) '(7 . last))])
+       (treemap-delete! map 4)
+       (and (not (treemap-contains? map 4))
+            (eq? 'successor (treemap-ref map 5)))))
 
 ;; Exercise rotations and deletion repair on the actual public treeset backend.
 (mat rbtree-balanced-mutations
@@ -19,12 +43,12 @@
             (equal? '(2 . b) (treeset-successor set '(1 . a))))))
 
 (mat fixnum-backend-derived-results
-     (let* ([set (fixnum-treeset fx= fx< 3 1 2)]
-            [map (fixnum-treemap fx= fx< '(3 . 30) '(1 . 10) '(2 . 20))])
-       (and (fixnum-treeset? (treeset-filter odd? set))
-            (fixnum-treeset? (treeset-map fx1+ set))
-            (fixnum-treemap? (treemap-filter (lambda (key value) (odd? key)) map))
-            (fixnum-treemap? (treemap-map (lambda (key value) (values key value)) map))
+     (let* ([set (fxtreeset fx= fx< 3 1 2)]
+            [map (fxtreemap fx= fx< '(3 . 30) '(1 . 10) '(2 . 20))])
+       (and (fxtreeset? (treeset-filter odd? set))
+            (fxtreeset? (treeset-map fx1+ set))
+            (fxtreemap? (treemap-filter (lambda (key value) (odd? key)) map))
+            (fxtreemap? (treemap-map (lambda (key value) (values key value)) map))
             (begin
               (treeset-delete! set 2)
               (treemap-delete! map 2)
@@ -32,19 +56,19 @@
 
 ;; Error cases: empty specialized trees and callback-generated keys must be checked.
 (mat fixnum-backend-validation
-     (error? (treeset-contains? (make-fixnum-treeset fx= fx<) 'bad))
+     (error? (treeset-contains? (make-fxtreeset fx= fx<) 'bad))
 
-     (error? (treemap-contains? (make-fixnum-treemap fx= fx<) 'bad))
+     (error? (treemap-contains? (make-fxtreemap fx= fx<) 'bad))
 
-     (error? (treeset-map (lambda (item) 'bad) (fixnum-treeset fx= fx< 1)))
+     (error? (treeset-map (lambda (item) 'bad) (fxtreeset fx= fx< 1)))
 
      (error? (treemap-map (lambda (key value) (values 'bad value))
-                          (fixnum-treemap fx= fx< '(1 . 10)))))
+                          (fxtreemap fx= fx< '(1 . 10)))))
 
 (mat fixnum-backend-balanced-mutations
      (let ([items (fxvshuffle! (fxviota 500))]
-           [set (make-fixnum-treeset fx= fx<)]
-           [map (make-fixnum-treemap fx= fx<)])
+           [set (make-fxtreeset fx= fx<)]
+           [map (make-fxtreemap fx= fx<)])
        (fxvfor-each
          (lambda (item)
            (treeset-add! set item)
@@ -62,24 +86,24 @@
        (and (treeset-empty? set) (treemap-empty? map))))
 
 (mat fixnum-boundaries-and-mixed-folds
-     (let ([set (fixnum-treeset fx= fx> (most-negative-fixnum) 0 (most-positive-fixnum))]
-           [one (fixnum-treeset fx= fx< 1 2)]
+     (let ([set (fxtreeset fx= fx> (most-negative-fixnum) 0 (most-positive-fixnum))]
+           [one (fxtreeset fx= fx< 1 2)]
            [two (treeset fx= fx< 3 4)]
-           [three (fixnum-treeset fx= fx< 5 6)])
+           [three (fxtreeset fx= fx< 5 6)])
        (and ($rbtree-verify set)
             (= (most-positive-fixnum) (treeset-min set))
             (= 21 (treeset-fold-left + 0 one two three))
             (= 21 (treeset-fold-right + 0 one two three))
-            (fixnum-treeset? (treeset+ one two three)))))
+            (fxtreeset? (treeset+ one two three)))))
 
 (mat fixnum-conversions-and-writers
      (let ([table (make-eqv-hashtable)])
        (hashtable-set! table 1 10)
-       (let ([map (hashtable->fixnum-treemap fx= fx< table)]
-             [set (vector->fixnum-treeset fx= fx< '#(3 1 2 2))])
-         (and (fixnum-treemap? map)
-              (fixnum-treeset? set)
-              (equal? set (list->fixnum-treeset fx= fx< '(1 2 3)))
+       (let ([map (hashtable->fxtreemap fx= fx< table)]
+             [set (vector->fxtreeset fx= fx< '#(3 1 2 2))])
+         (and (fxtreemap? map)
+              (fxtreeset? set)
+              (equal? set (list->fxtreeset fx= fx< '(1 2 3)))
               (equal? '#(1 2 3) (treeset->vector set))
               (equal? (format "~s" map) (format "~s" (treemap fx= fx< '(1 . 10))))
               (equal? (format "~s" set) (format "~s" (treeset fx= fx< 1 2 3)))))))
