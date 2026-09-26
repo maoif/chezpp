@@ -98,15 +98,15 @@
 
      (begin (datatype Term Term?
                       [Var
-                       (var symbol?)]
+                       (var :predicate symbol?)]
                       [Const
-                       (const number?)]
+                       (const :predicate number?)]
                       [Abs
-                       (binder symbol?)
-                       (body Term?)]
+                       (binder :predicate symbol?)
+                       (body :predicate Term?)]
                       [App
-                       (rator Term?)
-                       (rand  Term?)])
+                       (rator :predicate Term?)
+                       (rand :predicate Term?)])
             #t)
      (error? (Var 42))
      (error? (Const 'bla))
@@ -134,15 +134,15 @@
 
      (begin (datatype Term Term?
                       [Var
-                       (mutable var symbol?)]
+                       (var :mutable :predicate symbol?)]
                       [Const
-                       (mutable const number?)]
+                       (const :mutable :predicate number?)]
                       [Abs
-                       (immutable binder symbol?)
-                       (immutable body Term?)]
+                       (binder :immutable :predicate symbol?)
+                       (body :immutable :predicate Term?)]
                       [App
-                       (immutable rator Term?)
-                       (immutable rand  Term?)])
+                       (rator :immutable :predicate Term?)
+                       (rand :immutable :predicate Term?)])
             #t)
      (error? (Var 42))
      (error? (Const 'bla))
@@ -246,6 +246,18 @@
      (error? (eval '(datatype BadUnknownOption
                       [Bad (value :unknown)])))
 
+     ;; Positional predicate syntax is no longer supported.
+     (error? (eval '(datatype BadPositionalPredicate
+                      [Bad (value number?)])))
+
+     ;; Prefix mutable syntax is no longer supported.
+     (error? (eval '(datatype BadPrefixMutable
+                      [Bad (mutable value number?)])))
+
+     ;; Prefix immutable syntax is no longer supported.
+     (error? (eval '(datatype BadPrefixImmutable
+                      [Bad (immutable value number?)])))
+
      )
 
 
@@ -285,7 +297,9 @@
 (mat match-datatype
 
      (begin
-       (datatype Tree [Nil] [Node val (left Tree?) (right Tree?)])
+       (datatype Tree
+         [Nil]
+         [Node val (left :predicate Tree?) (right :predicate Tree?)])
        #t)
 
      ;; match by position

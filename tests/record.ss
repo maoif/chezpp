@@ -30,7 +30,9 @@
      (A-Dog? (Dog "Furry" 3 'male))
      (not (A-Dog? #f))
 
-     (begin (record Dog A-Dog? ([name string?] [age natural?] sex))
+     (begin (record Dog A-Dog? ([name :predicate string?]
+                                [age :predicate natural?]
+                                sex))
             #t)
      (A-Dog? (Dog "Furry" 3 'male))
      (not (A-Dog? #f))
@@ -42,10 +44,10 @@
 
      (begin (define sex? (lambda (x) (or (eq? x 'male) (eq? x 'female))))
             (record Person
-                    ([name   string?]
-                     [height natural?]
-                     [sex    sex?]
-                     [age    natural?]))
+                    ([name :predicate string?]
+                     [height :predicate natural?]
+                     [sex :predicate sex?]
+                     [age :predicate natural?]))
             #t)
      (error? (Person 'Jack 170 'male 19))
      (error? (Person "Jack" -170 'male 19))
@@ -62,10 +64,10 @@
 
      (begin (define sex? (lambda (x) (or (eq? x 'male) (eq? x 'female))))
             (record Person
-                    ([mutable   name   string?]
-                     [mutable   height natural?]
-                     [immutable sex    sex?]
-                     [immutable age    natural?]))
+                    ([name :mutable :predicate string?]
+                     [height :mutable :predicate natural?]
+                     [sex :immutable :predicate sex?]
+                     [age :immutable :predicate natural?]))
             #t)
      (error? (Person 'Jack 170 'male 19))
      (error? (Person "Jack" -170 'male 19))
@@ -150,6 +152,18 @@
      ;; Unknown field options are invalid.
      (error? (eval '(record BadUnknownOption
                            ([value :wat]))))
+
+     ;; Positional predicate syntax is no longer supported.
+     (error? (eval '(record BadPositionalPredicate
+                           ([value number?]))))
+
+     ;; Prefix mutable syntax is no longer supported.
+     (error? (eval '(record BadPrefixMutable
+                           ([mutable value number?]))))
+
+     ;; Prefix immutable syntax is no longer supported.
+     (error? (eval '(record BadPrefixImmutable
+                           ([immutable value number?]))))
 
      )
 

@@ -14,9 +14,13 @@
   An option list uses `[name :predicate pred :mutable]`; options may appear in either order.
   `pred` is a one-argument predicate checked during construction and before mutable assignment.
   Fields default to immutable; `:mutable` and `:immutable` are mutually exclusive.
-  Legacy `(name pred)`, `(mutable name pred)`, and `(immutable name pred)` forms are supported.
   Expansion defines the type predicate, constructors, variant predicates, accessors, and setters.
   |#
+  ;; Syntax:
+  ;; (datatype type predicate? [variant field ...] ...)
+  ;; (datatype type [variant field ...] ...)
+  ;; field := name | (name field-option ...)
+  ;; field-option := :predicate predicate | :mutable | :immutable
   (define-syntax datatype
     (lambda (stx)
       (define construct-datatype-name
@@ -55,15 +59,20 @@
       (define gen-dtuid
         (lambda (dt variants)
           (let* ([dtname (symbol->string (syntax->datum dt))]
-                 ;; transform variant defs like `[variant (f0 mutable) (f1 pred mutable) f2]`
-                 ;; to `variantf0f1f2`
-                 [variant->string (lambda (variant)
-                                    (apply string-append
-                                           (map (lambda (v)
-                                                  (symbol->string (get-vname v)))
-                                                variant)))]
+                 [field->string
+                  (lambda (field)
+                    (string-append
+                     (symbol->string (syntax->datum (field-identifier field)))
+                     (if (eq? (car (field-info field)) 'mutable) "mutable" "")))]
+                 [variant->string
+                  (lambda (variant)
+                    (syntax-case variant ()
+                      [(vname field ...)
+                       (apply string-append
+                              (symbol->string (syntax->datum #'vname))
+                              (map field->string #'(field ...)))]))]
                  [bigname (apply string-append dtname
-                                 (map variant->string (syntax->datum variants)))]
+                                 (map variant->string (syntax->list variants)))]
                  [h (string-hash bigname)])
             (datum->syntax dt (string->symbol (string-append bigname "-" (number->string h)))))))
       (define gen-vuids
@@ -124,20 +133,10 @@
                     [else (syntax-error option "unknown datatype field option:")]))))))
       (define field-info
         (lambda (field)
-          (syntax-case field (mutable immutable :predicate :mutable :immutable)
+          (syntax-case field (:predicate :mutable :immutable)
             [fid
              (identifier? #'fid)
              '(immutable #f)]
-            [(fid pred)
-             (and (identifier? #'fid) (identifier? #'pred)
-                  (not (keyword-token? #'pred)))
-             (list 'immutable #'pred)]
-            [(immutable fid pred)
-             (and (identifier? #'fid) (identifier? #'pred))
-             (list 'immutable #'pred)]
-            [(mutable fid pred)
-             (and (identifier? #'fid) (identifier? #'pred))
-             (list 'mutable #'pred)]
             [(fid option ...)
              (and (identifier? #'fid)
                   (not (null? (syntax->list #'(option ...)))))
@@ -147,10 +146,7 @@
         (lambda (field)
           (if (identifier? field)
               field
-              (let ([parts (syntax->list field)])
-                (if (memq (syntax->datum (car parts)) '(mutable immutable))
-                    (cadr parts)
-                    (car parts))))))
+              (car (syntax->list field)))))
       (define handle-vfields
         (lambda (dt variants)
           (map
@@ -344,9 +340,13 @@
   Options may appear in either order; a field defaults to immutable when neither mutability option
   is given. `:mutable` and `:immutable` are mutually exclusive options.
   `pred` is a one-argument predicate checked during construction and before mutable assignment.
-  Legacy `(name pred)`, `(mutable name pred)`, and `(immutable name pred)` forms are supported.
   Expansion defines the constructor, type predicate, accessors, and setters for mutable fields.
   |#
+  ;; Syntax:
+  ;; (record type predicate? (field ...))
+  ;; (record type (field ...))
+  ;; field := name | (name field-option ...)
+  ;; field-option := :predicate predicate | :mutable | :immutable
   (define-syntax record
     (lambda (stx)
       (define keyword-token?
@@ -385,20 +385,10 @@
                     [else (syntax-error option "unknown record field option:")]))))))
       (define field-info
         (lambda (field)
-          (syntax-case field (mutable immutable :predicate :mutable :immutable)
+          (syntax-case field (:predicate :mutable :immutable)
             [fid
              (identifier? #'fid)
              '(immutable #f)]
-            [(fid pred)
-             (and (identifier? #'fid) (identifier? #'pred)
-                  (not (keyword-token? #'pred)))
-             (list 'immutable #'pred)]
-            [(immutable fid pred)
-             (and (identifier? #'fid) (identifier? #'pred))
-             (list 'immutable #'pred)]
-            [(mutable fid pred)
-             (and (identifier? #'fid) (identifier? #'pred))
-             (list 'mutable #'pred)]
             [(fid option ...)
              (and (identifier? #'fid)
                   (not (null? (syntax->list #'(option ...)))))
@@ -409,21 +399,20 @@
         (lambda (field)
           (if (identifier? field)
               field
-              (let ([parts (syntax->list field)])
-                (if (memq (syntax->datum (car parts)) '(mutable immutable))
-                    (cadr parts)
-                    (car parts))))))
+              (car (syntax->list field)))))
       (define gen-uid
         (lambda (dt field*)
           (let* ([t dt]
                  [dt (syntax->datum dt)]
-                 [field* (syntax->datum field*)]
+                 [field* (syntax->list field*)]
+                 [field->string
+                  (lambda (field)
+                    (string-append
+                     (symbol->string (syntax->datum (field-identifier field)))
+                     (if (eq? (car (field-info field)) 'mutable) "mutable" "")))]
                  [bigname (string-append (symbol->string dt)
                                          (apply string-append
-                                                (map (lambda (f)
-                                                       (symbol->string
-                                                        (if (symbol? f) f (car f))))
-                                                     field*)))]
+                                                (map field->string field*)))]
                  [h (string-hash bigname)])
             (datum->syntax t
                            (string->symbol (string-append bigname "-" (number->string h)))))))

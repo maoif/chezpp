@@ -6,10 +6,10 @@
 
 **Goal:** Add keyword-based predicate and mutability options to `record` and `datatype` fields.
 
-**Architecture:** Extend the field grammars in `chezpp/adt.ss` and normalize both keyword and
-legacy forms into the existing internal field representation before generating record types,
-constructor checks, getters, or setters. The keyword form uses `:predicate pred` and at most one
-of `:mutable` or `:immutable`; omission of both mutability options means immutable.
+**Architecture:** Extend the field grammars in `chezpp/adt.ss` and normalize keyword options into
+the existing internal field representation before generating record types, constructor checks,
+getters, or setters. The option form uses `:predicate pred` and at most one of `:mutable` or
+`:immutable`; omission of both mutability options means immutable.
 
 **Tech Stack:** ChezScheme `syntax-case` macros, `mat` tests, `make -C tests test-some`, and the
 project build via `make clean && make`.
@@ -19,7 +19,7 @@ project build via `make clean && make`.
 
 ## Global Constraints
 
-- Keep old positional field forms working as compatibility syntax.
+- Keep bare fields, but reject positional predicate and prefix mutability forms.
 - Accept keyword options in either order after the field name.
 - Reject duplicate `:predicate`, duplicate mutability options, `:mutable` plus `:immutable`,
   missing option values, and unknown options at macro expansion time.
@@ -45,8 +45,7 @@ project build via `make clean && make`.
   - `[sex :immutable :predicate sex?]` for an explicitly immutable field with a predicate.
   - `[note :mutable]` for a mutable field without a predicate.
   - `id` and `[id :predicate symbol?]` are immutable by default.
-- Preserves legacy forms `name`, `(name pred)`, `(mutable name pred)`, and
-  `(immutable name pred)`.
+- Rejects `(name pred)`, `(mutable name pred)`, and `(immutable name pred)`.
 - Constructor validation and generated setter validation continue to use the selected predicate.
 
 - [x] **Step 1: Add failing `record` tests for keyword field forms.** Extend
@@ -67,8 +66,7 @@ Expected: FAIL during macro expansion because keyword field forms are not yet re
   `record` transformer, add a parser for keyword tails following a field identifier. Normalize
   each field to the existing internal shape `(mutability field getter [raw-setter])` and retain
   its optional predicate for constructor and setter generation. Parse options in either order;
-  initialize mutability to immutable and predicate to absent. Keep legacy patterns as a distinct
-  compatibility path rather than reinterpreting their positional predicate as an option.
+  initialize mutability to immutable and predicate to absent. Reject every non-keyword option.
 
 - [x] **Step 4: Validate malformed record options during expansion.** Reject a repeated
   `:predicate`, repeated `:mutable` or `:immutable`, a combination of `:mutable` and
@@ -80,7 +78,7 @@ Expected: FAIL during macro expansion because keyword field forms are not yet re
 
 Run: `make -C tests test-some TEST='record'`
 
-Expected: PASS with no diagnostics; existing legacy record cases and new keyword cases both pass.
+Expected: PASS; bare and keyword record cases pass and positional annotated forms are rejected.
 
 ### Task 2: Add keyword options to `datatype` variant fields
 
@@ -91,8 +89,7 @@ Expected: PASS with no diagnostics; existing legacy record cases and new keyword
 **Interfaces:**
 - Produces the same keyword field grammar and immutable default for fields inside datatype
   variants, for example `[Var (var :predicate symbol? :mutable)]`.
-- Preserves legacy variant fields `field`, `(field pred)`, `(mutable field pred)`, and
-  `(immutable field pred)`.
+- Keeps bare `field` and rejects positional predicate and prefix mutability forms.
 - Generated constructor checks, variant getters, mutable setters, and setter predicate checks
   retain their existing names and behavior.
 
@@ -110,8 +107,8 @@ Expected: FAIL during expansion of a keyword-form variant field.
 - [x] **Step 3: Normalize datatype variant fields using the same option rules as `record`.**
   Extend `handle-vfields` to translate keyword fields into its established `immutable`/`mutable`
   internal shapes and predicate representation. Ensure `gen-protocols`,
-  `gen-setter-wrappers`, `get-getters`, and `get-setters` consume normalized fields without
-  special-casing source syntax. Keep legacy field forms unchanged.
+  `gen-setter-wrappers`, `get-getters`, and `get-setters` consume parsed field metadata without
+  special-casing source syntax.
 
 - [x] **Step 4: Validate malformed datatype field options.** Apply the same duplicate, conflict,
   missing-value, and unknown-option checks as for `record`. Add negative tests with a comment
@@ -120,8 +117,8 @@ Expected: FAIL during expansion of a keyword-form variant field.
 
 - [x] **Step 5: Document both public macros next to their implementations.** Add `#|macro:record`
   and `#|macro:datatype` Markdown blocks above their definitions. Describe the accepted field
-  option grammar, legacy compatibility, immutable default, and generated constructor/accessor/
-  setter behavior. Keep every documentation line at or below 100 characters.
+  option grammar, keyword-only annotations, immutable default, and generated constructor,
+  accessor, and setter behavior. Keep every documentation line at or below 100 characters.
 
 - [x] **Step 6: Run the focused ADT tests and verify parentheses.**
 
@@ -145,7 +142,7 @@ Expected: successful clean build with no Scheme syntax or macro-expansion errors
 
 Run: `make -C tests test-some TEST='record datatype'`
 
-Expected: all ADT tests pass, including legacy compatibility, keyword parsing, predicates,
+Expected: all ADT tests pass, including keyword parsing, positional rejection, predicates,
 mutability defaults, and negative syntax diagnostics.
 
 - [x] **Step 3: Review the final diff.** Confirm only `chezpp/adt.ss`, `tests/record.ss`,
