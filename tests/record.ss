@@ -30,7 +30,9 @@
      (A-Dog? (Dog "Furry" 3 'male))
      (not (A-Dog? #f))
 
-     (begin (record Dog A-Dog? ([name string?] [age natural?] sex))
+     (begin (record Dog A-Dog? ([name :predicate string?]
+                                [age :predicate natural?]
+                                sex))
             #t)
      (A-Dog? (Dog "Furry" 3 'male))
      (not (A-Dog? #f))
@@ -42,10 +44,10 @@
 
      (begin (define sex? (lambda (x) (or (eq? x 'male) (eq? x 'female))))
             (record Person
-                    ([name   string?]
-                     [height natural?]
-                     [sex    sex?]
-                     [age    natural?]))
+                    ([name :predicate string?]
+                     [height :predicate natural?]
+                     [sex :predicate sex?]
+                     [age :predicate natural?]))
             #t)
      (error? (Person 'Jack 170 'male 19))
      (error? (Person "Jack" -170 'male 19))
@@ -62,10 +64,10 @@
 
      (begin (define sex? (lambda (x) (or (eq? x 'male) (eq? x 'female))))
             (record Person
-                    ([mutable   name   string?]
-                     [mutable   height natural?]
-                     [immutable sex    sex?]
-                     [immutable age    natural?]))
+                    ([name :mutable :predicate string?]
+                     [height :mutable :predicate natural?]
+                     [sex :immutable :predicate sex?]
+                     [age :immutable :predicate natural?]))
             #t)
      (error? (Person 'Jack 170 'male 19))
      (error? (Person "Jack" -170 'male 19))
@@ -86,6 +88,82 @@
      (let ([p (Person "Jack" 170 'male 19)])
        (Person-height-set! p 60)
        (= (Person-height p) 60))
+
+     )
+
+
+(mat record-with-keyword-field-options
+
+     (begin (define sex? (lambda (x) (memq x '(male female))))
+            (record KeywordPerson
+                     ([name :predicate string?]
+                      [age :predicate natural? :mutable]
+                      [sex :immutable :predicate sex?]
+                      [tag :mutable]
+                      id))
+            #t)
+
+     (KeywordPerson? (KeywordPerson "Jack" 19 'male 'new 42))
+
+     ;; The name predicate rejects non-strings.
+     (error? (KeywordPerson 42 19 'male 'new 42))
+
+     ;; The age predicate rejects negative integers.
+     (error? (KeywordPerson "Jack" -19 'male 'new 42))
+
+     ;; The sex predicate rejects values outside its accepted set.
+     (error? (KeywordPerson "Jack" 19 'other 'new 42))
+
+     (let ([p (KeywordPerson "Jack" 19 'male 'new 42)])
+       (KeywordPerson-age-set! p 20)
+       (KeywordPerson-tag-set! p 'updated)
+       (and (= 20 (KeywordPerson-age p))
+            (eq? 'updated (KeywordPerson-tag p))))
+
+     ;; The mutable age setter applies its predicate.
+     (error? (let ([p (KeywordPerson "Jack" 19 'male 'new 42)])
+               (KeywordPerson-age-set! p -1)))
+
+     ;; Default-immutable fields do not generate setters.
+     (error? (eval 'KeywordPerson-name-set!))
+
+     ;; Explicitly immutable fields do not generate setters.
+     (error? (eval 'KeywordPerson-sex-set!))
+
+     ;; Bare fields remain immutable by default.
+     (error? (eval 'KeywordPerson-id-set!))
+
+     ;; Duplicate :predicate option is invalid.
+     (error? (eval '(record BadDuplicatePredicate
+                           ([value :predicate number? :predicate integer?]))))
+
+     ;; Duplicate :mutable option is invalid.
+     (error? (eval '(record BadDuplicateMutable
+                           ([value :mutable :mutable]))))
+
+     ;; :mutable and :immutable conflict.
+     (error? (eval '(record BadConflictingMutability
+                           ([value :mutable :immutable]))))
+
+     ;; :predicate requires a predicate identifier.
+     (error? (eval '(record BadMissingPredicate
+                           ([value :predicate]))))
+
+     ;; Unknown field options are invalid.
+     (error? (eval '(record BadUnknownOption
+                           ([value :wat]))))
+
+     ;; Positional predicate syntax is no longer supported.
+     (error? (eval '(record BadPositionalPredicate
+                           ([value number?]))))
+
+     ;; Prefix mutable syntax is no longer supported.
+     (error? (eval '(record BadPrefixMutable
+                           ([mutable value number?]))))
+
+     ;; Prefix immutable syntax is no longer supported.
+     (error? (eval '(record BadPrefixImmutable
+                           ([immutable value number?]))))
 
      )
 
