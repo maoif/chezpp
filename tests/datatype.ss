@@ -175,6 +175,80 @@
      )
 
 
+(mat datatype-with-keyword-field-options
+
+     (begin (datatype KeywordTerm KeywordTerm?
+                      [KVar
+                       (name :predicate symbol? :mutable)]
+                      [KConst
+                       (value :mutable :predicate number?)]
+                      [KAbs
+                       (binder :immutable :predicate symbol?)
+                       (body :predicate KeywordTerm?)]
+                      [KCell
+                       (value :mutable)])
+            #t)
+
+     (KeywordTerm? (KVar 'x))
+     (KeywordTerm? (KConst 42))
+
+     ;; The name predicate rejects non-symbol values.
+     (error? (KVar 42))
+
+     ;; The value predicate rejects non-numeric values.
+     (error? (KConst 'bad))
+
+     ;; The binder predicate rejects non-symbol values.
+     (error? (KAbs 42 (KVar 'x)))
+
+     ;; The body predicate rejects values outside the datatype.
+     (error? (KAbs 'x 'bad))
+
+     (let ([v (KVar 'x)])
+       (KeywordTerm-KVar-name-set! v 'y)
+       (eq? 'y (KeywordTerm-KVar-name v)))
+
+     ;; The mutable name setter applies its predicate.
+     (error? (let ([v (KVar 'x)])
+               (KeywordTerm-KVar-name-set! v 42)))
+
+     (let ([v (KConst 42)])
+       (KeywordTerm-KConst-value-set! v 24)
+       (= 24 (KeywordTerm-KConst-value v)))
+
+     (let ([v (KCell 'first)])
+       (KeywordTerm-KCell-value-set! v 42)
+       (= 42 (KeywordTerm-KCell-value v)))
+
+     ;; Explicitly immutable fields do not generate setters.
+     (error? (eval 'KeywordTerm-KAbs-binder-set!))
+
+     ;; Fields with no mutability option are immutable by default.
+     (error? (eval 'KeywordTerm-KAbs-body-set!))
+
+     ;; Duplicate :predicate option is invalid.
+     (error? (eval '(datatype BadDuplicatePredicate
+                      [Bad (value :predicate number? :predicate integer?)])))
+
+     ;; Duplicate :immutable option is invalid.
+     (error? (eval '(datatype BadDuplicateImmutable
+                      [Bad (value :immutable :immutable)])))
+
+     ;; :mutable and :immutable conflict.
+     (error? (eval '(datatype BadConflictingMutability
+                      [Bad (value :mutable :immutable)])))
+
+     ;; :predicate requires a predicate identifier.
+     (error? (eval '(datatype BadMissingPredicate
+                      [Bad (value :predicate)])))
+
+     ;; Unknown field options are invalid.
+     (error? (eval '(datatype BadUnknownOption
+                      [Bad (value :unknown)])))
+
+     )
+
+
 (mat match-datatype-singleton
 
      (begin (datatype Color [R] [G] [B])

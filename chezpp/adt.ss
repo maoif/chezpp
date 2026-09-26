@@ -7,6 +7,16 @@
           (chezpp internal))
 
 
+  #|macro:datatype
+  Defines a sum type `dt` with variant constructors, variant predicates, and field accessors.
+  `dt` names the parent type and `dt?` names its predicate; omitting `dt?` defaults to `dt?`.
+  Each `[Variant field ...]` defines a variant; a field may be a bare name or an option list.
+  An option list uses `[name :predicate pred :mutable]`; options may appear in either order.
+  `pred` is a one-argument predicate checked during construction and before mutable assignment.
+  Fields default to immutable; `:mutable` and `:immutable` are mutually exclusive.
+  Legacy `(name pred)`, `(mutable name pred)`, and `(immutable name pred)` forms are supported.
+  Expansion defines the type predicate, constructors, variant predicates, accessors, and setters.
+  |#
   (define-syntax datatype
     (lambda (stx)
       (define construct-datatype-name
@@ -78,6 +88,69 @@
            (lambda (vname)
              (construct-datatype-name dt dt "-" vname "?"))
            (map get-vname (syntax->datum variants)))))
+      (define keyword-token?
+        (lambda (form)
+          (and (identifier? form)
+               (let ([name (symbol->string (syntax->datum form))])
+                 (and (> (string-length name) 0)
+                      (char=? (string-ref name 0) #\:))))))
+      (define parse-field-options
+        (lambda (field fid options)
+          (let loop ([options (syntax->list options)]
+                     [predicate #f]
+                     [predicate-seen? #f]
+                     [mutability 'default])
+            (if (null? options)
+                (list (if (eq? mutability 'default) 'immutable mutability)
+                      predicate)
+                (let ([option (car options)])
+                  (case (syntax->datum option)
+                    [(:predicate)
+                     (when predicate-seen?
+                       (syntax-error option "duplicate :predicate option:"))
+                     (when (null? (cdr options))
+                       (syntax-error field ":predicate requires a predicate identifier:"))
+                     (let ([pred (cadr options)])
+                       (unless (and (identifier? pred) (not (keyword-token? pred)))
+                         (syntax-error pred ":predicate requires an identifier:"))
+                       (loop (cddr options) pred #t mutability))]
+                    [(:mutable :immutable)
+                     (when (not (eq? mutability 'default))
+                       (syntax-error option "duplicate or conflicting mutability option:"))
+                     (loop (cdr options) predicate predicate-seen?
+                           (if (eq? (syntax->datum option) ':mutable)
+                               'mutable
+                               'immutable))]
+                    [else (syntax-error option "unknown datatype field option:")]))))))
+      (define field-info
+        (lambda (field)
+          (syntax-case field (mutable immutable :predicate :mutable :immutable)
+            [fid
+             (identifier? #'fid)
+             '(immutable #f)]
+            [(fid pred)
+             (and (identifier? #'fid) (identifier? #'pred)
+                  (not (keyword-token? #'pred)))
+             (list 'immutable #'pred)]
+            [(immutable fid pred)
+             (and (identifier? #'fid) (identifier? #'pred))
+             (list 'immutable #'pred)]
+            [(mutable fid pred)
+             (and (identifier? #'fid) (identifier? #'pred))
+             (list 'mutable #'pred)]
+            [(fid option ...)
+             (and (identifier? #'fid)
+                  (not (null? (syntax->list #'(option ...)))))
+             (parse-field-options field #'fid #'(option ...))]
+            [_ (syntax-error field "invalid datatype field definition:")])))
+      (define field-identifier
+        (lambda (field)
+          (if (identifier? field)
+              field
+              (let ([parts (syntax->list field)])
+                (if (memq (syntax->datum (car parts)) '(mutable immutable))
+                    (cadr parts)
+                    (car parts))))))
       (define handle-vfields
         (lambda (dt variants)
           (map
@@ -88,31 +161,20 @@
                 (let f ([vfields #'(vfields ...)] [field* '()])
                   (if (null? vfields)
                       (reverse field*)
-                      (syntax-case (car vfields) (mutable immutable)
-                        [fid
-                         (identifier? #'fid)
-                         (f (cdr vfields)
-                            (cons #`(immutable fid #,($construct-name dt dt "-" #'vname "-" #'fid))
-                                  field*))]
-                        [(fid pred) ;; TODO check more about pred
-                         (and (identifier? #'fid) (identifier? #'pred)
-                              (not (eq? 'mutable (datum fid))) (not (eq? 'immutable (datum fid))))
-                         (f (cdr vfields)
-                            (cons #`(immutable fid #,($construct-name dt dt "-" #'vname "-" #'fid))
-                                  field*))]
-                        [(immutable fid pred)
-                         (and (identifier? #'fid) (identifier? #'pred))
-                         (f (cdr vfields)
-                            (cons #`(immutable fid #,($construct-name dt dt "-" #'vname "-" #'fid))
-                                  field*))]
-                        [(mutable fid pred)
-                         (and (identifier? #'fid) (identifier? #'pred))
-                         (f (cdr vfields)
-                            (cons #`(mutable fid
-                                             #,($construct-name dt dt "-" #'vname "-" #'fid)
-                                             #,($construct-name dt dt "-" #'vname "-" #'fid "-set!-raw"))
-                                  field*))]
-                        [_ (syntax-error variant "invalid data variant definition:")])))]))
+                      (let* ([field (car vfields)]
+                             [info (field-info field)]
+                             [fid (field-identifier field)]
+                             [field-def
+                              (case (car info)
+                                [(mutable)
+                                 #`(mutable #,fid
+                                            #,($construct-name dt dt "-" #'vname "-" fid)
+                                            #,($construct-name dt dt "-" #'vname "-" fid
+                                                               "-set!-raw"))]
+                                [else
+                                 #`(immutable #,fid
+                                              #,($construct-name dt dt "-" #'vname "-" fid))])])
+                        (f (cdr vfields) (cons field-def field*)))))]))
            variants)))
       (define gen-protocols
         (lambda (variants)
@@ -127,26 +189,18 @@
                           #,(let f ([vfields #'(vfields ...)] [a* #'(args ...)])
                               (if (null? vfields)
                                   #'(vcon args ...)
-                                  (let ([field (car vfields)] [arg (car a*)])
-                                    (syntax-case field (mutable immutable)
-                                      [(fid mutable)
-                                       (f (cdr vfields) (cdr a*))]
-                                      [(fid pred)
-                                       #`(if (pred #,arg)
-                                             #,(f (cdr vfields) (cdr a*))
-                                             (errorf 'vname "wrong argument type for field ~a: ~a"
-                                                     'fid #,arg))]
-                                      [(mutable fid pred)
-                                       #`(if (pred #,arg)
-                                             #,(f (cdr vfields) (cdr a*))
-                                             (errorf 'vname "wrong argument type for field ~a: ~a"
-                                                     'fid #,arg))]
-                                      [(immutable fid pred)
-                                       #`(if (pred #,arg)
-                                             #,(f (cdr vfields) (cdr a*))
-                                             (errorf 'vname "wrong argument type for field ~a: ~a"
-                                                     'fid #,arg))]
-                                      [_ (f (cdr vfields) (cdr a*))]))))))))]))
+                                  (let* ([field (car vfields)]
+                                         [arg (car a*)]
+                                         [predicate (cadr (field-info field))]
+                                         [fid (field-identifier field)]
+                                         [next (f (cdr vfields) (cdr a*))])
+                                    (if predicate
+                                        #`(if (#,predicate #,arg)
+                                              #,next
+                                              (errorf 'vname
+                                                      "wrong argument type for field ~a: ~a"
+                                                      '#,fid #,arg))
+                                        next))))))))]))
            variants)))
       ;; make sure setters also have type checking, if given
       (define gen-setter-wrappers
@@ -156,18 +210,24 @@
                         (syntax-case variant ()
                           [(vname vflds ...)
                            (fold-left (lambda (wrappers vfld vfield)
-                                        (syntax-case vfield (mutable)
+                                       (syntax-case vfield (mutable)
                                           [(mutable fid getter raw-setter)
-                                           (syntax-case vfld ()
-                                             [(mutable fid pred)
-                                              (let ([setter ($construct-name dt dt "-" #'vname "-" #'fid "-set!")])
-                                                (cons #`(define #,setter
-                                                          (lambda (r v)
-                                                            (if (pred v)
-                                                                (raw-setter r v)
-                                                                (errorf '#,setter "wrong argument type for field ~a: ~a"
-                                                                        'fid v))))
-                                                      wrappers))])]
+                                           (let* ([info (field-info vfld)]
+                                                  [predicate (cadr info)]
+                                                  [field-name (field-identifier vfld)]
+                                                  [setter ($construct-name dt dt "-" #'vname "-"
+                                                                           field-name "-set!")]
+                                                  [body (if predicate
+                                                            #`(if (#,predicate v)
+                                                                  (raw-setter r v)
+                                                                  (errorf
+                                                                   '#,setter
+                                                                   "wrong field ~a value: ~a"
+                                                                   '#,field-name v))
+                                                            #'(raw-setter r v))])
+                                             (cons #`(define #,setter
+                                                       (lambda (r v) #,body))
+                                                   wrappers))]
                                           [_ wrappers]))
                                       '() #'(vflds ...) vfields)]))
                       variants* vfields*)])
@@ -190,10 +250,11 @@
                         (syntax-case variant ()
                           [(vname vflds ...)
                            (fold-left (lambda (res vfld)
-                                        (syntax-case vfld (mutable immutable)
-                                          ;; checks here omitted
-                                          [(mutable fid _) (cons ($construct-name dt dt "-" #'vname "-" #'fid "-set!") res)]
-                                          [_ res]))
+                                        (if (eq? (car (field-info vfld)) 'mutable)
+                                            (cons ($construct-name dt dt "-" #'vname "-"
+                                                                   (field-identifier vfld) "-set!")
+                                                  res)
+                                            res))
                                       '() #'(vflds ...))]))
                       variants))))
       (define classify-variants
@@ -238,7 +299,9 @@
                          ;; setter: dt-variant-field-set!
                          [((vfields ...) ...) (handle-vfields #'dt #'(mvariants ...))]
                          [(protocols ...) (gen-protocols #'(mvariants ...))])
-             (with-syntax ([(setter-wrappers ...) (gen-setter-wrappers #'dt #'(mvariants ...) #'((vfields ...) ...))]
+             (with-syntax ([(setter-wrappers ...)
+                            (gen-setter-wrappers
+                             #'dt #'(mvariants ...) #'((vfields ...) ...))]
                            [(getters ...) (get-getters #'((vfields ...) ...))]
                            [(setters ...) (get-setters #'dt #'(mvariants ...))])
                #`(module (dt dt? mnames ... snames ...
@@ -274,8 +337,82 @@
   ;; TODO parent?
   ;; check if record def has a parent of datatype (just mask datatype names?)
   ;; or check if the name starts with "$datatype"
+  #|macro:record
+  Defines a record type `dt` with constructor `dt`, a type predicate, and field accessors.
+  `(record dt (field ...))` uses `dt?` as its predicate; `(record dt pred (field ...))` uses `pred`.
+  Fields may be bare names or option lists such as `[name :predicate string? :mutable]`.
+  Options may appear in either order; a field defaults to immutable when neither mutability option
+  is given. `:mutable` and `:immutable` are mutually exclusive options.
+  `pred` is a one-argument predicate checked during construction and before mutable assignment.
+  Legacy `(name pred)`, `(mutable name pred)`, and `(immutable name pred)` forms are supported.
+  Expansion defines the constructor, type predicate, accessors, and setters for mutable fields.
+  |#
   (define-syntax record
     (lambda (stx)
+      (define keyword-token?
+        (lambda (form)
+          (and (identifier? form)
+               (let ([name (symbol->string (syntax->datum form))])
+                 (and (> (string-length name) 0)
+                      (char=? (string-ref name 0) #\:))))))
+      (define parse-field-options
+        (lambda (field fid options)
+          (let loop ([options (syntax->list options)]
+                     [predicate #f]
+                     [predicate-seen? #f]
+                     [mutability 'default])
+            (if (null? options)
+                (list (if (eq? mutability 'default) 'immutable mutability)
+                      predicate)
+                (let ([option (car options)])
+                  (case (syntax->datum option)
+                    [(:predicate)
+                     (when predicate-seen?
+                       (syntax-error option "duplicate :predicate option:"))
+                     (when (null? (cdr options))
+                       (syntax-error field ":predicate requires a predicate identifier:"))
+                     (let ([pred (cadr options)])
+                       (unless (and (identifier? pred) (not (keyword-token? pred)))
+                         (syntax-error pred ":predicate requires an identifier:"))
+                       (loop (cddr options) pred #t mutability))]
+                    [(:mutable :immutable)
+                     (when (not (eq? mutability 'default))
+                       (syntax-error option "duplicate or conflicting mutability option:"))
+                     (loop (cdr options) predicate predicate-seen?
+                           (if (eq? (syntax->datum option) ':mutable)
+                               'mutable
+                               'immutable))]
+                    [else (syntax-error option "unknown record field option:")]))))))
+      (define field-info
+        (lambda (field)
+          (syntax-case field (mutable immutable :predicate :mutable :immutable)
+            [fid
+             (identifier? #'fid)
+             '(immutable #f)]
+            [(fid pred)
+             (and (identifier? #'fid) (identifier? #'pred)
+                  (not (keyword-token? #'pred)))
+             (list 'immutable #'pred)]
+            [(immutable fid pred)
+             (and (identifier? #'fid) (identifier? #'pred))
+             (list 'immutable #'pred)]
+            [(mutable fid pred)
+             (and (identifier? #'fid) (identifier? #'pred))
+             (list 'mutable #'pred)]
+            [(fid option ...)
+             (and (identifier? #'fid)
+                  (not (null? (syntax->list #'(option ...)))))
+             (parse-field-options field #'fid #'(option ...))]
+            [_ (syntax-error field "invalid record field definition:")]
+            )))
+      (define field-identifier
+        (lambda (field)
+          (if (identifier? field)
+              field
+              (let ([parts (syntax->list field)])
+                (if (memq (syntax->datum (car parts)) '(mutable immutable))
+                    (cadr parts)
+                    (car parts))))))
       (define gen-uid
         (lambda (dt field*)
           (let* ([t dt]
@@ -283,7 +420,9 @@
                  [field* (syntax->datum field*)]
                  [bigname (string-append (symbol->string dt)
                                          (apply string-append
-                                                (map (lambda (f) (symbol->string (if (symbol? f) f (car f))))
+                                                (map (lambda (f)
+                                                       (symbol->string
+                                                        (if (symbol? f) f (car f))))
                                                      field*)))]
                  [h (string-hash bigname)])
             (datum->syntax t
@@ -292,26 +431,16 @@
         (lambda (dt fields)
           (map
            (lambda (field)
-             (syntax-case field (mutable immutable)
-               [fid
-                (identifier? #'fid)
-                #`(immutable fid
-                             #,($construct-name dt dt "-" #'fid))]
-               [(fid pred) ;; TODO check more about pred
-                (and (identifier? #'fid) (identifier? #'pred)
-                     (not (eq? 'mutable (datum fid))) (not (eq? 'immutable (datum fid))))
-                #`(immutable fid
-                             #,($construct-name dt dt "-" #'fid))]
-               [(immutable fid pred)
-                (and (identifier? #'fid) (identifier? #'pred))
-                #`(immutable fid
-                             #,($construct-name dt dt "-" #'fid))]
-               [(mutable fid pred)
-                (and (identifier? #'fid) (identifier? #'pred))
-                #`(mutable fid
-                           #,($construct-name dt dt "-" #'fid)
-                           #,($construct-name dt dt "-" #'fid "-set!-raw"))]
-               [_ (syntax-error field "invalid record field definition:")]))
+             (let* ([info (field-info field)]
+                    [fid (field-identifier field)])
+               (case (car info)
+                 [(mutable)
+                  #`(mutable #,fid
+                             #,($construct-name dt dt "-" fid)
+                             #,($construct-name dt dt "-" fid "-set!-raw"))]
+                 [else
+                  #`(immutable #,fid
+                               #,($construct-name dt dt "-" fid))])))
            fields)))
       (define gen-protocol
         (lambda (dt fields)
@@ -321,41 +450,40 @@
                   #,(let f ([fields fields] [a* #'(args ...)])
                       (if (null? fields)
                           #'(vcon args ...)
-                          (let ([field (car fields)] [arg (car a*)])
-                            (syntax-case field (mutable immutable)
-                              ;; no guards below as it's checked in handle-fields
-                              [(fid pred)
-                               #`(if (pred #,arg)
-                                     #,(f (cdr fields) (cdr a*))
-                                     (errorf '#,dt "wrong argument type for field ~a: ~a"
-                                             'fid #,arg))]
-                              [(mutable fid pred)
-                               #`(if (pred #,arg)
-                                     #,(f (cdr fields) (cdr a*))
-                                     (errorf '#,dt "wrong argument type for field ~a: ~a"
-                                             'fid #,arg))]
-                              [(immutable fid pred)
-                               #`(if (pred #,arg)
-                                     #,(f (cdr fields) (cdr a*))
-                                     (errorf '#,dt "wrong argument type for field ~a: ~a"
-                                             'fid #,arg))]
-                              [_ (f (cdr fields) (cdr a*))])))))))))
+                          (let* ([field (car fields)]
+                                 [arg (car a*)]
+                                 [predicate (cadr (field-info field))]
+                                 [fid (field-identifier field)]
+                                 [next (f (cdr fields) (cdr a*))])
+                            (if predicate
+                                #`(if (#,predicate #,arg)
+                                      #,next
+                                      (errorf '#,dt "wrong argument type for field ~a: ~a"
+                                              '#,fid #,arg))
+                                next)))))))))
       ;; make sure setters also have type checking, if given
       (define gen-setter-wrappers
         (lambda (dt fields flds)
           (let loop ([fields fields] [flds flds] [wrappers '()])
             (if (null? fields)
                 wrappers
-                (let ([w (syntax-case (car fields) (mutable)
-                           [(mutable fid getter raw-setter)
-                            (let ([setter ($construct-name dt dt "-" #'fid "-set!")])
+                (let ([w
+                       (syntax-case (car fields) (mutable)
+                         [(mutable fid getter raw-setter)
+                          (let* ([info (field-info (car flds))]
+                                 [predicate (cadr info)])
+                            (let ([setter ($construct-name dt dt "-" #'fid "-set!")]
+                                  [field-name (field-identifier (car flds))])
                               #`(define #,setter
                                   (lambda (r v)
-                                    (if (#,(syntax-case (car flds) () [(_ _ pred) #'pred]) v)
-                                        (raw-setter r v)
-                                        (errorf '#,setter "wrong argument type for field ~a: ~a"
-                                                'fid v)))))]
-                           [_ #f])])
+                                    #,(if predicate
+                                          #`(if (#,predicate v)
+                                                (raw-setter r v)
+                                                (errorf '#,setter
+                                                        "wrong argument type for field ~a: ~a"
+                                                        '#,field-name v))
+                                          #'(raw-setter r v))))))]
+                         [_ #f])])
                   (if w
                       (loop (cdr fields) (cdr flds) (cons w wrappers))
                       (loop (cdr fields) (cdr flds) wrappers)))))))
@@ -382,7 +510,8 @@
                        [uid        (gen-uid #'dt #'(fld fld* ...))]
                        [(flds ...) (handle-fields #'dt #'(fld fld* ...))]
                        [proto      (gen-protocol #'dt #'(fld fld* ...))])
-           (with-syntax ([(setter-wrappers ...) (gen-setter-wrappers #'dt #'(flds ...) #'(fld fld* ...))]
+           (with-syntax ([(setter-wrappers ...)
+                          (gen-setter-wrappers #'dt #'(flds ...) #'(fld fld* ...))]
                          [(getters ...) (get-getters #'(flds ...))]
                          [(setters ...) (get-setters #'dt #'(flds ...))])
              #`(module (dtname mkdt pred getters ... setters ... dt-expander)
