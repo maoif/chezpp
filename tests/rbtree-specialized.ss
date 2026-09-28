@@ -83,23 +83,23 @@
             [map (fxtreemap fx= fx< '(3 . 30) '(1 . 10) '(2 . 20))])
        (and (fxtreeset? (treeset-filter odd? set))
             (fxtreeset? (treeset-map fx1+ set))
-            (fxtreemap? (treemap-filter (lambda (key value) (odd? key)) map))
-            (fxtreemap? (treemap-map (lambda (key value) (values key value)) map))
+            (fxtreemap? (fxtreemap-filter (lambda (key value) (odd? key)) map))
+            (fxtreemap? (fxtreemap-map (lambda (key value) (values key value)) map))
             (begin
               (treeset-delete! set 2)
-              (treemap-delete! map 2)
+              (fxtreemap-delete! map 2)
               (and ($rbtree-verify set) ($rbtree-verify map))))))
 
 ;; Error cases: empty specialized trees and callback-generated keys must be checked.
 (mat fixnum-backend-validation
      (error? (treeset-contains? (make-fxtreeset fx= fx<) 'bad))
 
-     (error? (treemap-contains? (make-fxtreemap fx= fx<) 'bad))
+     (error? (fxtreemap-contains? (make-fxtreemap fx= fx<) 'bad))
 
      (error? (treeset-map (lambda (item) 'bad) (fxtreeset fx= fx< 1)))
 
-     (error? (treemap-map (lambda (key value) (values 'bad value))
-                          (fxtreemap fx= fx< '(1 . 10)))))
+     (error? (fxtreemap-map (lambda (key value) (values 'bad value))
+                            (fxtreemap fx= fx< '(1 . 10)))))
 
 (mat fixnum-backend-balanced-mutations
      (let ([items (fxvshuffle! (fxviota 500))]
@@ -108,18 +108,18 @@
        (fxvfor-each
          (lambda (item)
            (treeset-add! set item)
-           (treemap-set! map item item)
+           (fxtreemap-set! map item item)
            ($rbtree-verify set)
            ($rbtree-verify map))
          items)
        (fxvfor-each
          (lambda (item)
            (treeset-delete! set item)
-           (treemap-delete! map item)
+           (fxtreemap-delete! map item)
            ($rbtree-verify set)
            ($rbtree-verify map))
          items)
-       (and (treeset-empty? set) (treemap-empty? map))))
+       (and (treeset-empty? set) (fxtreemap-empty? map))))
 
 (mat fixnum-boundaries-and-mixed-folds
      (let ([set (fxtreeset fx= fx> (most-negative-fixnum) 0 (most-positive-fixnum))]
