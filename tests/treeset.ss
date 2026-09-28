@@ -7,13 +7,18 @@
 
 (mat fxtreeset-constructor
      (let ([ts (make-fxtreeset fx= fx<)])
-       (treeset-add! ts 1)
+       (fxtreeset-add! ts 1)
        (and (fxtreeset? ts)
-            (treeset? ts)
-            (treeset-contains? ts 1))))
+            (not (treeset? ts))
+            (fxtreeset-contains? ts 1))))
 
 (mat fxtreeset-populate
-     (= 2 (treeset-size (fxtreeset fx= fx< 1 2))))
+     (= 2 (fxtreeset-size (fxtreeset fx= fx< 1 2))))
+
+;; Error cases: each public family rejects the other record type.
+(mat treeset-family-rejection
+     (error? (treeset-contains? (fxtreeset fx= fx< 1) 1))
+     (error? (fxtreeset-contains? (treeset = < 1) 1)))
 
 (mat treeset-mutating-algebra
      (let ([set (treeset = < 1 2 3)])
@@ -36,7 +41,7 @@
 ;; Error case: fixnum treesets reject non-fixnum items.
 (mat fxtreeset-key-validation
      (guard (c [(error? c) #t] [else #f])
-       (treeset-add! (make-fxtreeset fx= fx<) 'x)
+       (fxtreeset-add! (make-fxtreeset fx= fx<) 'x)
        #f))
 
 
