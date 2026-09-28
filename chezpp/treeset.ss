@@ -118,7 +118,7 @@
                 (for-each (lambda (x)
                             (unless (fixnum? x)
                               (errorf who "not a fixnum treeset item: ~a" x))
-                            (treeset-add! ts x))
+                            (fxtreeset-add! ts x))
                           args)
                 ts))))
 
@@ -1487,10 +1487,10 @@
   (define write-treeset
                  (lambda (r p wr)
                    (display "#[treeset (" p)
-                   (if (treeset-empty? r)
+                   (if (fx= 0 (rbtree-size r))
                        (display ")]" p)
                        (begin
-                         (let ([n (treeset-size r)] [i 0])
+                         (let ([n (rbtree-size r)] [i 0])
                            (rbtree-visit 'treeset-writer
                                          (lambda (k v)
                                            (if (fx= i (fx1- n))
