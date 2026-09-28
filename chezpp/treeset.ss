@@ -78,6 +78,12 @@
       ((if (fxtreeset? source) make-fxtreeset make-treeset)
        (rbtree-=? source) (rbtree-<? source))))
 
+  (define check-fxtreeset-map-proc
+    (lambda (who proc)
+      (lambda args
+        (let ([item (apply proc args)])
+          (pcheck ([fixnum? item]) item)))))
+
   #|proc:make-treeset
   Construct a treeset object.
   `=?` is used by the treeset internally to do equality comparison of items;
@@ -842,7 +848,7 @@
   |#
   (define-who fxtreeset-add!
     (lambda (ts v)
-      (pcheck ([fxtreeset? ts])
+      (pcheck ([fxtreeset? ts] [fixnum? v])
               (rbtree-set! who ts #t v *dummy-v*))))
 
 
@@ -852,9 +858,9 @@
   |#
   (define-who fxtreeset-delete!
     (lambda (ts v)
-      (pcheck ([fxtreeset? ts])
+      (pcheck ([fxtreeset? ts] [fixnum? v])
               (when (rbtree-contains? who ts v)
-                (rbtree-delete! who ts #f v)))))
+                (rbtree-delete! who ts #t v)))))
 
 
   #|proc:fxtreeset-clear!
@@ -880,7 +886,7 @@
   |#
   (define-who fxtreeset-contains?
     (lambda (ts v)
-      (pcheck ([fxtreeset? ts])
+      (pcheck ([fxtreeset? ts] [fixnum? v])
               (rbtree-contains? who ts v))))
 
 
@@ -940,7 +946,7 @@
     (case-lambda
       [(ts v) (fxtreeset-successor ts v #f)]
       [(ts v default)
-       (pcheck ([fxtreeset? ts])
+       (pcheck ([fxtreeset? ts] [fixnum? v])
                (call-with-values (lambda () (rbtree-successor who ts v))
                  (lambda (k value) (if (eq? k *dummy-v*) default k))))]))
 
@@ -954,7 +960,7 @@
     (case-lambda
       [(ts v) (fxtreeset-predecessor ts v #f)]
       [(ts v default)
-       (pcheck ([fxtreeset? ts])
+       (pcheck ([fxtreeset? ts] [fixnum? v])
                (call-with-values (lambda () (rbtree-predecessor who ts v))
                  (lambda (k value) (if (eq? k *dummy-v*) default k))))]))
 
@@ -1120,7 +1126,7 @@
   |#
   (define-who fxtreeset^
     (lambda (ts . ts*)
-      (pcheck ([fxtreeset? ts])
+      (pcheck ([fxtreeset? ts] [all-fxtreesets? ts*])
               (if (null? ts*)
                   ts
                   (let ([newts (make-fxtreeset-like ts)]
@@ -1277,15 +1283,18 @@
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [fxtreeset? ts0])
-               (rbtree-map1 who proc (make-fxtreeset-like ts0) ts0))]
+               (rbtree-map1 who (check-fxtreeset-map-proc who proc)
+                            (make-fxtreeset-like ts0) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [fxtreeset? ts0 ts1])
                (fx-check-size who ts0 ts1)
-               (rbtree-map1 who proc (make-fxtreeset-like ts0) ts0 ts1))]
+               (rbtree-map1 who (check-fxtreeset-map-proc who proc)
+                            (make-fxtreeset-like ts0) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [fxtreeset? ts0] [all-fxtreesets? ts*])
                (apply fx-check-size who ts0 ts*)
-               (apply rbtree-map1 who proc (make-fxtreeset-like ts0) ts0 ts*))]))
+               (apply rbtree-map1 who (check-fxtreeset-map-proc who proc)
+                      (make-fxtreeset-like ts0) ts0 ts*))]))
 
 
   #|proc:fxtreeset-map/i
@@ -1299,15 +1308,18 @@
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [fxtreeset? ts0])
-               (rbtree-map/i1 who proc (make-fxtreeset-like ts0) ts0))]
+               (rbtree-map/i1 who (check-fxtreeset-map-proc who proc)
+                              (make-fxtreeset-like ts0) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [fxtreeset? ts0 ts1])
                (fx-check-size who ts0 ts1)
-               (rbtree-map/i1 who proc (make-fxtreeset-like ts0) ts0 ts1))]
+               (rbtree-map/i1 who (check-fxtreeset-map-proc who proc)
+                              (make-fxtreeset-like ts0) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [fxtreeset? ts0] [all-fxtreesets? ts*])
                (apply fx-check-size who ts0 ts*)
-               (apply rbtree-map/i1 who proc (make-fxtreeset-like ts0) ts0 ts*))]))
+               (apply rbtree-map/i1 who (check-fxtreeset-map-proc who proc)
+                      (make-fxtreeset-like ts0) ts0 ts*))]))
 
 
   #|proc:fxtreeset-for-each
