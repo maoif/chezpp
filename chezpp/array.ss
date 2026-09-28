@@ -1416,27 +1416,27 @@
 
 
   #|proc:array-search
-  Return the first item satisfying `pred`, or #f if no item matches.
+  Return the first item satisfying `pred`, or `default` if no item matches.
+  `default` defaults to #f; supply a unique value when #f is a valid item.
   |#
   #|proc:fxarray-search
-  Return the first item satisfying `pred`, or #f if no item matches.
+  Return the first item satisfying `pred`, or `default` if no item matches.
   |#
   #|proc:bytearray-search
   Return the first item in the array that satisfies the predicate `pred`.
-  If no such item is found, #f is returned.
+  If no such item is found, `default` is returned.
   |#
-  (define-array-procedure (a fxa fla)
-    (search arr pred)
-    (apcheck (arr)
-             (pcheck ([procedure? pred])
-                     (let ([len ($array-size arr)] [vec (array-vec arr)])
-                       (let loop ([i 0])
-                         (if (fx= i len)
-                             #f
-                             (let ([v (vref vec i)])
-                               (if (pred v)
-                                   v
-                                   (loop (fx1+ i))))))))))
+  (define-array-procedure (a fxa fla) search
+    [(arr pred) (thisproc arr pred #f)]
+    [(arr pred default)
+     (apcheck (arr)
+              (pcheck ([procedure? pred])
+                      (let ([len ($array-size arr)] [vec (array-vec arr)])
+                        (let loop ([i 0])
+                          (if (fx= i len)
+                              default
+                              (let ([v (vref vec i)])
+                                (if (pred v) v (loop (fx1+ i)))))))))])
 
 
   #|doc

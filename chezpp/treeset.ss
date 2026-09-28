@@ -175,12 +175,16 @@
 
   #|proc:treeset-search
   Return the 1st item in the treeset `ts` that satisfies the predicate `pred`.
-  If no such item exists, #f is returned.
+  If no such item exists, `default` is returned; it defaults to #f. Supply a
+  unique default when #f is a valid item.
   |#
   (define-who treeset-search
-    (lambda (ts pred)
-      (pcheck ([treeset? ts] [procedure? pred])
-              (K? (rbtree-search who ts (lambda (k v) (pred k)))))))
+    (case-lambda
+      [(ts pred) (treeset-search ts pred #f)]
+      [(ts pred default)
+       (pcheck ([treeset? ts] [procedure? pred])
+               (call-with-values (lambda () (rbtree-search who ts (lambda (k v) (pred k))))
+                 (lambda (k v) (if (eq? k *dummy-v*) default k))))]))
 
 
   #|proc:treeset-search*
@@ -207,45 +211,57 @@
   #|proc:treeset-successor
   Return the successor of `v` in the treeset `ts`.
 
-  If the successor of `v` does not exist, #f is returned.
+  If the successor of `v` does not exist, `default` is returned; it defaults to #f.
   |#
   (define-who treeset-successor
-    (lambda (ts v)
-      (pcheck ([treeset? ts])
-              (K? (rbtree-successor who ts v)))))
+    (case-lambda
+      [(ts v) (treeset-successor ts v #f)]
+      [(ts v default)
+       (pcheck ([treeset? ts])
+               (call-with-values (lambda () (rbtree-successor who ts v))
+                 (lambda (k value) (if (eq? k *dummy-v*) default k))))]))
 
 
   #|proc:treeset-predecessor
   Return the predecessor of `v` in the treeset `ts`.
 
-  If the predecessor of `v` does not exist, #f is returned.
+  If the predecessor of `v` does not exist, `default` is returned; it defaults to #f.
   |#
   (define-who treeset-predecessor
-    (lambda (ts v)
-      (pcheck ([treeset? ts])
-              (K? (rbtree-predecessor who ts v)))))
+    (case-lambda
+      [(ts v) (treeset-predecessor ts v #f)]
+      [(ts v default)
+       (pcheck ([treeset? ts])
+               (call-with-values (lambda () (rbtree-predecessor who ts v))
+                 (lambda (k value) (if (eq? k *dummy-v*) default k))))]))
 
 
   #|proc:treeset-min
   Return the minimum value in the treeset `ts`.
 
-  If the treeset is empty, #f is returned.
+  If the treeset is empty, `default` is returned; it defaults to #f.
   |#
   (define-who treeset-min
-    (lambda (ts)
-      (pcheck ([treeset? ts])
-              (K? (rbtree-min who ts)))))
+    (case-lambda
+      [(ts) (treeset-min ts #f)]
+      [(ts default)
+       (pcheck ([treeset? ts])
+               (call-with-values (lambda () (rbtree-min who ts))
+                 (lambda (k value) (if (eq? k *dummy-v*) default k))))]))
 
 
   #|proc:treeset-max
   Return the maximum value in the treeset `ts`.
 
-  If the treeset is empty, #f is returned.
+  If the treeset is empty, `default` is returned; it defaults to #f.
   |#
   (define-who treeset-max
-    (lambda (ts)
-      (pcheck ([treeset? ts])
-              (K? (rbtree-max who ts)))))
+    (case-lambda
+      [(ts) (treeset-max ts #f)]
+      [(ts default)
+       (pcheck ([treeset? ts])
+               (call-with-values (lambda () (rbtree-max who ts))
+                 (lambda (k value) (if (eq? k *dummy-v*) default k))))]))
 
 
   #|proc:treeset-filter
@@ -827,8 +843,9 @@
      (let ([cursor (rbtree-inorder-cursor ts)])
        (make-iter
         (lambda ()
-          (let ([entry (cursor)])
-            (if entry (car entry) iter-end)))
+          (call-with-values cursor
+            (lambda (key value)
+              (if (eq? key *dummy-v*) iter-end key))))
         (lambda () (set! cursor (rbtree-inorder-cursor ts)))))))
 
 ;;;;===----------------------------------------------------------------------===

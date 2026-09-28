@@ -492,18 +492,19 @@
 
   #|proc:dlist-search
   Return the first item in the dlist that satisfies the predicate `pred`.
-  If no such item is found, #f is returned.
+  If no such item is found, `default` is returned; it defaults to #f. Supply a
+  unique default when #f is a valid item.
   |#
   (define-who dlist-search
-    (lambda (dl pred)
-      (pcheck ([dlist? dl] [procedure? pred])
-              (let loop ([n (dlist-first dl)])
-                (if (null-dnode? n)
-                    #f
-                    (let ([v (dnode-value n)])
-                      (if (pred v)
-                          v
-                          (loop (dnode-right n)))))))))
+    (case-lambda
+      [(dl pred) (dlist-search dl pred #f)]
+      [(dl pred default)
+       (pcheck ([dlist? dl] [procedure? pred])
+               (let loop ([n (dlist-first dl)])
+                 (if (null-dnode? n)
+                     default
+                     (let ([v (dnode-value n)])
+                       (if (pred v) v (loop (dnode-right n)))))))]))
 
 
   #|proc:dlist-search*

@@ -425,14 +425,15 @@
                          (fx+ base current)
                          (loop)))]
                   [else
-                   (let ([entry (cursor)])
-                     (if entry
-                         (begin
-                           (set! base (key->index (car entry)))
-                           (set! bits (cdr entry))
-                           (set! offset 0)
-                           (loop))
-                         iter-end))])))
+                   (call-with-values cursor
+                     (lambda (key value)
+                       (if (eq? key *dummy-v*)
+                           iter-end
+                           (begin
+                             (set! base (key->index key))
+                             (set! bits value)
+                             (set! offset 0)
+                             (loop)))))])))
         (lambda ()
           (set! cursor (rbtree-inorder-cursor (bittree-rbt bt)))
           (set! offset *num-bits*))))))

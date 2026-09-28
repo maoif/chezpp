@@ -220,6 +220,28 @@
 
      )
 
+(mat treemap-query-defaults
+     (let ([tm (treemap = < '(1 . a))]
+           [absent (vector 'absent)])
+       (and (equal? '(1 . a) (treemap-min tm))
+            (eq? absent (treemap-search tm (lambda (k v) #f) absent))
+            (eq? absent (treemap-successor tm 1 absent))
+            (eq? absent (treemap-predecessor tm 1 absent))
+            (eq? absent (treemap-min (treemap = <) absent))
+            (eq? absent (treemap-max (treemap = <) absent))))
+
+     (error? (treemap-successor (treemap = < '(1 . a)) 2)))
+
+(mat treemap-false-key-default
+     (let* ([cmp (lambda (a b)
+                   (and (number? a) (number? b) (< a b)))]
+            [tm (treemap eq? cmp '(#f . present))]
+            [absent (vector 'absent)])
+       (and (equal? '(#f . present) (treemap-search tm (lambda (key value) (not key)) absent))
+            (equal? '(#f . present) (treemap-min tm absent))
+            (eq? absent (treemap-search tm (lambda (key value) key) absent))
+            (not (treemap-search tm (lambda (key value) key))))))
+
 
 (mat treemap-search*
 

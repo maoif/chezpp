@@ -1,5 +1,41 @@
 (import (chezpp)
-        (only (chezpp private rbtree) $rbtree-verify *dummy-v* rbtree-visit))
+        (only (chezpp private rbtree) $rbtree-verify *dummy-v* rbtree-visit
+              rbtree-search rbtree-successor rbtree-predecessor
+              rbtree-min rbtree-max rbtree-inorder-cursor))
+
+(mat rbtree-query-two-values
+     (let ([tm (treemap = < '(1 . a) '(2 . b))])
+       (and (call-with-values (lambda () (rbtree-search 'test tm (lambda (k v) (= k 2))))
+              (lambda (k v) (and (= k 2) (eq? v 'b))))
+            (call-with-values (lambda () (rbtree-successor 'test tm 1))
+              (lambda (k v) (and (= k 2) (eq? v 'b))))
+            (call-with-values (lambda () (rbtree-predecessor 'test tm 2))
+              (lambda (k v) (and (= k 1) (eq? v 'a))))
+            (call-with-values (lambda () (rbtree-min 'test tm))
+              (lambda (k v) (and (= k 1) (eq? v 'a))))
+            (call-with-values (lambda () (rbtree-max 'test tm))
+              (lambda (k v) (and (= k 2) (eq? v 'b)))))))
+
+(mat rbtree-query-sentinel-values
+     (let ([tm (treemap = < '(1 . a))])
+       (and (call-with-values (lambda () (rbtree-search 'test tm (lambda (k v) #f)))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (call-with-values (lambda () (rbtree-successor 'test tm 1))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (call-with-values (lambda () (rbtree-predecessor 'test tm 1))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (call-with-values (lambda () (rbtree-min 'test (treemap = <)))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (call-with-values (lambda () (rbtree-max 'test (treemap = <)))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (let ([cursor (rbtree-inorder-cursor tm)])
+              (call-with-values cursor
+                (lambda (k v)
+                  (and (= k 1)
+                       (eq? v 'a)
+                       (call-with-values cursor
+                         (lambda (k v)
+                           (and (eq? k *dummy-v*) (eq? v *dummy-v*)))))))))))
 
 ;; Regression: key-only nodes must be traversable without reading a value slot.
 (mat rbtree-key-only-node-accessors

@@ -128,6 +128,29 @@
 
      )
 
+(mat treeset-query-defaults
+     (let ([ts (treeset = < 1)]
+           [absent (vector 'absent)])
+       (and (= 1 (treeset-min ts))
+            (eq? absent (treeset-search ts (lambda (x) #f) absent))
+            (eq? absent (treeset-successor ts 1 absent))
+            (eq? absent (treeset-predecessor ts 1 absent))
+            (eq? absent (treeset-min (treeset = <) absent))
+            (eq? absent (treeset-max (treeset = <) absent))))
+
+     (error? (treeset-successor (treeset = < 1) 2)))
+
+(mat treeset-false-item-default
+     (let* ([cmp (lambda (a b)
+                   (or (and (not a) (not b))
+                       (and a b (< a b))))]
+            [ts (treeset eq? cmp #f)]
+            [absent (vector 'absent)])
+       (and (eq? #f (treeset-search ts (lambda (item) (not item))))
+            (eq? #f (treeset-min ts))
+            (eq? absent (treeset-search ts (lambda (item) item) absent))
+            (not (treeset-search ts (lambda (item) item))))))
+
 
 (mat treeset-search*
 

@@ -204,12 +204,15 @@
 
   #|proc:treemap-search
   Return a pair consisting of the 1st key and value in the treemap such that (pred key value)
-  returns #t.
+  returns #t. If no pair matches, return `default`, which defaults to #f.
   |#
   (define-who treemap-search
-    (lambda (tm pred)
-      (pcheck ([treemap? tm] [procedure? pred])
-              (rbtree-search who tm pred))))
+    (case-lambda
+      [(tm pred) (treemap-search tm pred #f)]
+      [(tm pred default)
+       (pcheck ([treemap? tm] [procedure? pred])
+               (call-with-values (lambda () (rbtree-search who tm pred))
+                 (lambda (k v) (if (eq? k *dummy-v*) default (cons k v)))))]))
 
 
   #|proc:treemap-search*
@@ -286,46 +289,58 @@
   Return a pair consisting of a key and its value,
   where the key is the successor of `k` in the treemap `tm`.
 
-  If the successor of `k` does not exist, #f is returned.
+  If the successor of `k` does not exist, `default` is returned; it defaults to #f.
   |#
   (define-who treemap-successor
-    (lambda (tm k)
-      (pcheck ([treemap? tm])
-              (rbtree-successor who tm k))))
+    (case-lambda
+      [(tm k) (treemap-successor tm k #f)]
+      [(tm k default)
+       (pcheck ([treemap? tm])
+               (call-with-values (lambda () (rbtree-successor who tm k))
+                 (lambda (key value) (if (eq? key *dummy-v*) default (cons key value)))))]))
 
 
   #|proc:treemap-predecessor
   Return a pair consisting of a key and its value,
   where the key is the predecessor of `k` in the treemap `tm`.
 
-  If the predecessor of `k` does not exist, #f is returned.
+  If the predecessor of `k` does not exist, `default` is returned; it defaults to #f.
   |#
   (define-who treemap-predecessor
-    (lambda (tm k)
-      (pcheck ([treemap? tm])
-              (rbtree-predecessor who tm k))))
+    (case-lambda
+      [(tm k) (treemap-predecessor tm k #f)]
+      [(tm k default)
+       (pcheck ([treemap? tm])
+               (call-with-values (lambda () (rbtree-predecessor who tm k))
+                 (lambda (key value) (if (eq? key *dummy-v*) default (cons key value)))))]))
 
 
   #|proc:treemap-min
   Return a pair consisting of the minimum (leftmost) key and its value in the treemap `tm`.
 
-  If the treemap is empty, #f is returned.
+  If the treemap is empty, `default` is returned; it defaults to #f.
   |#
   (define-who treemap-min
-    (lambda (tm)
-      (pcheck ([treemap? tm])
-              (rbtree-min who tm))))
+    (case-lambda
+      [(tm) (treemap-min tm #f)]
+      [(tm default)
+       (pcheck ([treemap? tm])
+               (call-with-values (lambda () (rbtree-min who tm))
+                 (lambda (key value) (if (eq? key *dummy-v*) default (cons key value)))))]))
 
 
   #|proc:treemap-max
   Return a pair consisting of the maximum (rightmost) key and its value in the treemap `tm`.
 
-  If the treemap is empty, #f is returned.
+  If the treemap is empty, `default` is returned; it defaults to #f.
   |#
   (define-who treemap-max
-    (lambda (tm)
-      (pcheck ([treemap? tm])
-              (rbtree-max who tm))))
+    (case-lambda
+      [(tm) (treemap-max tm #f)]
+      [(tm default)
+       (pcheck ([treemap? tm])
+               (call-with-values (lambda () (rbtree-max who tm))
+                 (lambda (key value) (if (eq? key *dummy-v*) default (cons key value)))))]))
 
 
   #|proc:treemap-filter
@@ -747,8 +762,9 @@
      (let ([cursor (rbtree-inorder-cursor tm)])
        (make-iter
         (lambda ()
-          (let ([entry (cursor)])
-            (if entry entry iter-end)))
+          (call-with-values cursor
+            (lambda (key value)
+              (if (eq? key *dummy-v*) iter-end (cons key value)))))
         (lambda () (set! cursor (rbtree-inorder-cursor tm)))))))
 
 ;;;;===----------------------------------------------------------------------===

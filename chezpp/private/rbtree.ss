@@ -405,11 +405,15 @@
     (lambda (who rbt pred)
       (let loop ([n (rbtree-root rbt)])
         (if (null-rbnode? n)
-            #f
-            (or (let ([k (K n)] [v (V n)])
-                  (if (pred k v) (cons k v) #f))
-                (loop (L n))
-                (loop (R n)))))))
+            (values *dummy-v* *dummy-v*)
+            (let ([k (K n)] [v (V n)])
+              (if (pred k v)
+                  (values k v)
+                  (call-with-values (lambda () (loop (L n)))
+                    (lambda (lk lv)
+                      (if (eq? lk *dummy-v*)
+                          (loop (R n))
+                          (values lk lv))))))))))
 
 
   (define rbtree-successor
@@ -431,7 +435,8 @@
           (if (null-rbnode? n)
               (errorf who "key not found: ~a" k)
               (cond [(=? k (K n)) (let ([n (successor n)])
-                                    (if n (cons (K n) (V n)) n))]
+                                    (if n (values (K n) (V n))
+                                        (values *dummy-v* *dummy-v*)))]
                     [(<? k (K n)) (loop (L n))]
                     [else  (loop (R n))]))))))
 
@@ -455,7 +460,8 @@
           (if (null-rbnode? n)
               (errorf who "key not found: ~a" k)
               (cond [(=? k (K n)) (let ([n (predecessor n)])
-                                    (if n (cons (K n) (V n)) n))]
+                                    (if n (values (K n) (V n))
+                                        (values *dummy-v* *dummy-v*)))]
                     [(<? k (K n)) (loop (L n))]
                     [else  (loop (R n))]))))))
 
@@ -464,18 +470,18 @@
     (lambda (who rbt)
       (let ([root (rbtree-root rbt)])
         (if (null-rbnode? root)
-            #f
+            (values *dummy-v* *dummy-v*)
             (let ([n (minimum root)])
-              (cons (K n) (V n)))))))
+              (values (K n) (V n)))))))
 
 
   (define rbtree-max
     (lambda (who rbt)
       (let ([root (rbtree-root rbt)])
         (if (null-rbnode? root)
-            #f
+            (values *dummy-v* *dummy-v*)
             (let ([n (maximum root)])
-              (cons (K n) (V n)))))))
+              (values (K n) (V n)))))))
 
 
 
@@ -565,7 +571,8 @@
 
   #|proc:rbtree-inorder-cursor
   Return a procedure that traverses `rbt` in ascending key order. Each call
-  returns a `(key . value)` pair, or `#f` after all nodes have been visited.
+  returns `(values key value)`, or `(values *dummy-v* *dummy-v*)` after all
+  nodes have been visited.
   |#
   (define rbtree-inorder-cursor
     (lambda (rbt)
@@ -573,7 +580,9 @@
               (let ([next-node (single-step-rbtree-left rbt)])
                 (lambda ()
                   (let ([node (next-node)])
-                    (and node (cons (K node) (V node)))))))))
+                    (if node
+                        (values (K node) (V node))
+                        (values *dummy-v* *dummy-v*))))))))
 
   ;; symmetric case: walk the tree from the rightmost node
   (define single-step-rbtree-right
