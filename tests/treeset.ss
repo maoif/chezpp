@@ -44,6 +44,14 @@
        (fxtreeset-add! (make-fxtreeset fx= fx<) 'x)
        #f))
 
+;; Error case: fixnum treeset deletion and navigation validate before backend access.
+(mat fxtreeset-key-query-validation
+     (error? (fxtreeset-delete! (make-fxtreeset fx= fx<) 'bad))
+
+     (error? (fxtreeset-successor (fxtreeset fx= fx< 1) 'bad))
+
+     (error? (fxtreeset-predecessor (make-fxtreeset fx= fx<) 'bad)))
+
 
 (mat treeset-equal?
 

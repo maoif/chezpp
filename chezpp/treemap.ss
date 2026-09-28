@@ -538,15 +538,15 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
-               (rbtree-map! who proc tm0))]
+               (rbtree-map! who proc #f tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [treemap? tm0 tm1])
                (check-size who tm0 tm1)
-               (rbtree-map! who proc tm0 tm1))]
+               (rbtree-map! who proc #f tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
                (apply check-size who tm0 tm*)
-               (apply rbtree-map! who proc tm0 tm*))]))
+               (apply rbtree-map! who proc #f tm0 tm*))]))
 
 
   #|proc:treemap-map/i!
@@ -559,15 +559,15 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
-               (rbtree-map/i! who proc tm0))]
+               (rbtree-map/i! who proc #f tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [treemap? tm0 tm1])
                (check-size who tm0 tm1)
-               (rbtree-map/i! who proc tm0 tm1))]
+               (rbtree-map/i! who proc #f tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [treemap? tm0] [all-treemaps? tm*])
                (apply check-size who tm0 tm*)
-               (apply rbtree-map/i! who proc tm0 tm*))]))
+               (apply rbtree-map/i! who proc #f tm0 tm*))]))
 
 
   #|proc:treemap-for-each
@@ -1114,15 +1114,15 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [fxtreemap? tm0])
-               (rbtree-map! who (check-fxtreemap-value-proc who proc) tm0))]
+               (rbtree-map! who (check-fxtreemap-value-proc who proc) #t tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [fxtreemap? tm0 tm1])
                (check-fxtree-size who tm0 tm1)
-               (rbtree-map! who (check-fxtreemap-value-proc who proc) tm0 tm1))]
+               (rbtree-map! who (check-fxtreemap-value-proc who proc) #t tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [fxtreemap? tm0] [all-fxtreemaps? tm*])
                (apply check-fxtree-size who tm0 tm*)
-               (apply rbtree-map! who (check-fxtreemap-value-proc who proc) tm0 tm*))]))
+               (apply rbtree-map! who (check-fxtreemap-value-proc who proc) #t tm0 tm*))]))
 
 
   #|proc:%fxtreemap-map/i!
@@ -1135,15 +1135,15 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [fxtreemap? tm0])
-               (rbtree-map/i! who (check-fxtreemap-value-proc who proc) tm0))]
+               (rbtree-map/i! who (check-fxtreemap-value-proc who proc) #t tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [fxtreemap? tm0 tm1])
                (check-fxtree-size who tm0 tm1)
-               (rbtree-map/i! who (check-fxtreemap-value-proc who proc) tm0 tm1))]
+               (rbtree-map/i! who (check-fxtreemap-value-proc who proc) #t tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [fxtreemap? tm0] [all-fxtreemaps? tm*])
                (apply check-fxtree-size who tm0 tm*)
-               (apply rbtree-map/i! who (check-fxtreemap-value-proc who proc) tm0 tm*))]))
+               (apply rbtree-map/i! who (check-fxtreemap-value-proc who proc) #t tm0 tm*))]))
 
 
   #|proc:%fxtreemap-for-each

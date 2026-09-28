@@ -755,24 +755,27 @@
 
   (define rbtree-map!
     (case-lambda
-      [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
-         (unless (null-rbnode? n)
-           (loop (L n))
-           (let ([value (proc (K n) (V n))])
-             (V! n value))
-           (loop (R n))))
+      [(who proc fx? rbt0)
+       (let ([V! (if fx? FXV! V!)])
+         (let loop ([n (rbtree-root rbt0)])
+           (unless (null-rbnode? n)
+             (loop (L n))
+             (let ([value (proc (K n) (V n))])
+               (V! n value))
+             (loop (R n)))))
        rbt0]
-      [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+      [(who proc fx? rbt0 rbt1)
+       (let ([V! (if fx? FXV! V!)]
+             [iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (let ([v (proc (K n0) (V n0) (K n1) (V n1))])
                (V! n0 v)
                (loop (iter0) (iter1))))))
        rbt0]
-      [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+      [(who proc fx? rbt0 . rbt*)
+       (let ([V! (if fx? FXV! V!)]
+             [iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (let ([v (apply proc (K n0) (V n0) (kv* n*))])
@@ -783,25 +786,28 @@
 
   (define rbtree-map/i!
     (case-lambda
-      [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [i 0])
-         (if (null-rbnode? n)
-             i
-             (let ([i (loop (L n) i)])
-               (let ([value (proc i (K n) (V n))])
-                 (V! n value))
-               (loop (R n) (fx1+ i)))))
+      [(who proc fx? rbt0)
+       (let ([V! (if fx? FXV! V!)])
+         (let loop ([n (rbtree-root rbt0)] [i 0])
+           (if (null-rbnode? n)
+               i
+               (let ([i (loop (L n) i)])
+                 (let ([value (proc i (K n) (V n))])
+                   (V! n value))
+                 (loop (R n) (fx1+ i))))))
        rbt0]
-      [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+      [(who proc fx? rbt0 rbt1)
+       (let ([V! (if fx? FXV! V!)]
+             [iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
          (let loop ([i 0] [n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (let ([v (proc i (K n0) (V n0) (K n1) (V n1))])
                (V! n0 v)
                (loop (fx1+ i) (iter0) (iter1))))))
        rbt0]
-      [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+      [(who proc fx? rbt0 . rbt*)
+       (let ([V! (if fx? FXV! V!)]
+             [iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
          (let loop ([i 0] [n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (let ([v (apply proc i (K n0) (V n0) (kv* n*))])

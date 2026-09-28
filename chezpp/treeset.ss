@@ -1016,7 +1016,7 @@
                 (rbtree-visit who (lambda (k v) (lb k)) ts)
                 (for-each (lambda (v)
                             (unless (pred v)
-                              (rbtree-delete! who ts #f v)))
+                              (rbtree-delete! who ts #t v)))
                           (lb))
                 ts))))
 

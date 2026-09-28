@@ -67,6 +67,18 @@
        (fxtreemap-set! (make-fxtreemap fx= fx<) 'x 1)
        #f))
 
+;; Error case: fixnum treemap key queries and deletion validate before backend access.
+(mat fxtreemap-key-query-validation
+     (error? (fxtreemap-ref (make-fxtreemap fx= fx<) 'bad))
+
+     (error? (fxtreemap-ref (fxtreemap fx= fx< '(1 . 10)) 'bad #f))
+
+     (error? (fxtreemap-delete! (make-fxtreemap fx= fx<) 'bad))
+
+     (error? (fxtreemap-successor (fxtreemap fx= fx< '(1 . 10)) 'bad))
+
+     (error? (fxtreemap-predecessor (make-fxtreemap fx= fx<) 'bad)))
+
 ;; Error case: fixnum treemaps reject non-fixnum values passed to fxtreemap-set!.
 (mat fxtreemap-set-value-validation
      (error? (fxtreemap-set! (make-fxtreemap fx= fx<) 1 'bad)))
