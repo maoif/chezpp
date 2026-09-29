@@ -52,6 +52,13 @@
     (syntax-rules ()
       [(_ (name fxname)
           (predicate fxpredicate)
+          (generic-form)
+          (fx-form))
+       (begin
+         (define-who name generic-form)
+         (define-who fxname fx-form))]
+      [(_ (name fxname)
+          (predicate fxpredicate)
           (constructor fxconstructor)
           ((ts arg ...) body ...)
           ((fts farg ...) fxbody ...))
