@@ -147,7 +147,7 @@
   #|proc:treemap-empty?
   Return whether the treemap is empty.
   |#
-  (define-who treemap-empty?
+  (define-who %treemap-empty?
     (lambda (tm)
       (pcheck ([treemap? tm])
               (fx= 0 (rbtree-size tm)))))
@@ -158,7 +158,7 @@
   Both `k` and `v` must be fixnums when `tm` is a fixnum treemap.
   If `k` already exists, its original value is replaced by `v`.
   |#
-  (define-who treemap-set!
+  (define-who %treemap-set!
     (lambda (tm k v)
       (pcheck ([treemap? tm])
               (rbtree-set! who tm #f k v))))
@@ -170,7 +170,7 @@
   If `default` is given and `k` does not exist in the treemap, `default` is returned.
   If `default` is not given and `k` does not exist, an error is raised.
   |#
-  (define-who treemap-ref
+  (define-who %treemap-ref
     (case-lambda
       [(tm k)
        (pcheck ([treemap? tm])
@@ -184,7 +184,7 @@
   Remove the key `k` along with its value from the treemap `tm`.
   If `k` is absent, the treemap is unchanged.
   |#
-  (define-who treemap-delete!
+  (define-who %treemap-delete!
     (lambda (tm k)
       (pcheck ([treemap? tm])
               (when (rbtree-contains? who tm k)
@@ -194,7 +194,7 @@
   #|proc:treemap-clear!
   Remove all keys and values from the treemap `tm`.
   |#
-  (define-who treemap-clear!
+  (define-who %treemap-clear!
     (lambda (tm)
       (pcheck ([treemap? tm])
               (rbtree-clear! who tm))))
@@ -203,7 +203,7 @@
   #|proc:treemap-size
   Return the number of keys in the treemap `tm`.
   |#
-  (define-who treemap-size
+  (define-who %treemap-size
     (lambda (tm)
       (pcheck ([treemap? tm])
               (rbtree-size tm))))
@@ -213,7 +213,7 @@
   Return whether the treemap `tm` contains the key `k`.
   Comparison is performed using `=` pass to `make-treemap`.
   |#
-  (define-who treemap-contains?
+  (define-who %treemap-contains?
     (lambda (tm k)
       (pcheck ([treemap? tm])
               (rbtree-contains? who tm k))))
@@ -223,7 +223,7 @@
   Return whether treemap `tm` contains at least one key/value pair such that
   (pred key value) returns true.
   |#
-  (define-who treemap-contains/p?
+  (define-who %treemap-contains/p?
     (lambda (tm pred)
       (pcheck ([treemap? tm] [procedure? pred])
               (rbtree-contains/p? who tm pred))))
@@ -233,7 +233,7 @@
   Return a pair consisting of the 1st key and value in the treemap such that (pred key value)
   returns #t. If no pair matches, return `default`, which defaults to #f.
   |#
-  (define-who treemap-search
+  (define-who %treemap-search
     (case-lambda
       [(tm pred) (treemap-search tm pred #f)]
       [(tm pred default)
@@ -252,7 +252,7 @@
   in the treemap. This is useful when collecting the desired key and value pairs in custom
   data structures.
   |#
-  (define-who treemap-search*
+  (define-who %treemap-search*
     (case-lambda
       [(tm pred)
        (pcheck ([treemap? tm] [procedure? pred])
@@ -267,7 +267,7 @@
   #|proc:treemap-keys
   Return all keys in the treemap in a vector.
   |#
-  (define-who treemap-keys
+  (define-who %treemap-keys
     (case-lambda
       [(tm)
        (pcheck ([treemap? tm])
@@ -282,7 +282,7 @@
   Return all values in the treemap in a vector,
   or the values are collected using a custom collector procedure.
   |#
-  (define-who treemap-values
+  (define-who %treemap-values
     (case-lambda
       [(tm)
        (pcheck ([treemap? tm])
@@ -300,7 +300,7 @@
 
   Mutating the returned key-value pairs has no effect on the treemap.
   |#
-  (define-who treemap-cells
+  (define-who %treemap-cells
     (case-lambda
       [(tm)
        (pcheck ([treemap? tm])
@@ -318,7 +318,7 @@
 
   If the successor of `k` does not exist, `default` is returned; it defaults to #f.
   |#
-  (define-who treemap-successor
+  (define-who %treemap-successor
     (case-lambda
       [(tm k) (treemap-successor tm k #f)]
       [(tm k default)
@@ -333,7 +333,7 @@
 
   If the predecessor of `k` does not exist, `default` is returned; it defaults to #f.
   |#
-  (define-who treemap-predecessor
+  (define-who %treemap-predecessor
     (case-lambda
       [(tm k) (treemap-predecessor tm k #f)]
       [(tm k default)
@@ -347,7 +347,7 @@
 
   If the treemap is empty, `default` is returned; it defaults to #f.
   |#
-  (define-who treemap-min
+  (define-who %treemap-min
     (case-lambda
       [(tm) (treemap-min tm #f)]
       [(tm default)
@@ -361,7 +361,7 @@
 
   If the treemap is empty, `default` is returned; it defaults to #f.
   |#
-  (define-who treemap-max
+  (define-who %treemap-max
     (case-lambda
       [(tm) (treemap-max tm #f)]
       [(tm default)
@@ -375,7 +375,7 @@
   if the result is #t, the respective key and value are added to a new
   treemap. Then the new treemap is returned.
   |#
-  (define-who treemap-filter
+  (define-who %treemap-filter
     (lambda (pred tm)
       (pcheck ([procedure? pred] [treemap? tm])
               (let ([newtm (make-treemap-like tm)])
@@ -387,7 +387,7 @@
   Apply `pred` to each pair of keys and values in the treemap `tm`,
   if the result is #f, the respective key and value are removed from the treemap.
   |#
-  (define-who treemap-filter!
+  (define-who %treemap-filter!
     (lambda (pred tm)
       (pcheck ([procedure? pred] [treemap? tm])
               (let ([lb (make-list-builder)])
@@ -405,7 +405,7 @@
   the first one a treemap of the keys/values of `tm` for which `(pred k v)` returns #t,
   the second one a treemap of the keys/values of `tm` for which `(pred k v)` returns #f.
   |#
-  (define-who treemap-partition
+  (define-who %treemap-partition
     (lambda (pred tm)
       (pcheck ([procedure? pred] [treemap? tm])
               (let ([T (make-treemap-like tm)]
@@ -1381,6 +1381,28 @@
              (define public
                (lambda args
                  (apply private args))) ...)])))
+
+  (define-treemap-procedure treemap? make-treemap-like #f
+    ((treemap-empty? %treemap-empty?)
+     (treemap-set! %treemap-set!)
+     (treemap-ref %treemap-ref)
+     (treemap-size %treemap-size)
+     (treemap-delete! %treemap-delete!)
+     (treemap-clear! %treemap-clear!)
+     (treemap-keys %treemap-keys)
+     (treemap-values %treemap-values)
+     (treemap-cells %treemap-cells)
+     (treemap-search %treemap-search)
+     (treemap-search* %treemap-search*)
+     (treemap-contains? %treemap-contains?)
+     (treemap-contains/p? %treemap-contains/p?)
+     (treemap-filter %treemap-filter)
+     (treemap-filter! %treemap-filter!)
+     (treemap-partition %treemap-partition)
+     (treemap-successor %treemap-successor)
+     (treemap-predecessor %treemap-predecessor)
+     (treemap-min %treemap-min)
+     (treemap-max %treemap-max)))
 
   (define-treemap-procedure fxtreemap? %make-fxtreemap-like #t
     ((fxtreemap-empty? %fxtreemap-empty?)
