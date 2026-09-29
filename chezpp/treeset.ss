@@ -156,7 +156,7 @@
   #|proc:treeset-add!
   Add the new value `v` to the treeset `ts`.
   |#
-  (define-who treeset-add!
+  (define-who %treeset-add!
     (lambda (ts v)
       (pcheck ([treeset? ts])
               (rbtree-set! who ts #f v *dummy-v*))))
@@ -166,7 +166,7 @@
   Remove the value `v` from the treeset `ts`.
   If `v` is absent, the treeset is unchanged.
   |#
-  (define-who treeset-delete!
+  (define-who %treeset-delete!
     (lambda (ts v)
       (pcheck ([treeset? ts])
               (when (rbtree-contains? who ts v)
@@ -176,7 +176,7 @@
   #|proc:treeset-clear!
   Remove all items from the treeset `ts`.
   |#
-  (define-who treeset-clear!
+  (define-who %treeset-clear!
     (lambda (ts)
       (pcheck ([treeset? ts])
               (rbtree-clear! who ts))))
@@ -194,7 +194,7 @@
   #|proc:treeset-contains?
   Return whether the treeset `ts` contains the value `v`.
   |#
-  (define-who treeset-contains?
+  (define-who %treeset-contains?
     (lambda (ts v)
       (pcheck ([treeset? ts])
               (rbtree-contains? who ts v))))
@@ -867,7 +867,7 @@
   #|proc:fxtreeset-add!
   Add the new value `v` to the treeset `ts`.
   |#
-  (define-who fxtreeset-add!
+  (define-who %fxtreeset-add!
     (lambda (ts v)
       (pcheck ([fxtreeset? ts] [fixnum? v])
               (rbtree-set! who ts #t v *dummy-v*))))
@@ -877,7 +877,7 @@
   Remove the value `v` from the treeset `ts`.
   If `v` is absent, the treeset is unchanged.
   |#
-  (define-who fxtreeset-delete!
+  (define-who %fxtreeset-delete!
     (lambda (ts v)
       (pcheck ([fxtreeset? ts] [fixnum? v])
               (when (rbtree-contains? who ts v)
@@ -887,7 +887,7 @@
   #|proc:fxtreeset-clear!
   Remove all items from the treeset `ts`.
   |#
-  (define-who fxtreeset-clear!
+  (define-who %fxtreeset-clear!
     (lambda (ts)
       (pcheck ([fxtreeset? ts])
               (rbtree-clear! who ts))))
@@ -905,7 +905,7 @@
   #|proc:fxtreeset-contains?
   Return whether the treeset `ts` contains the value `v`.
   |#
-  (define-who fxtreeset-contains?
+  (define-who %fxtreeset-contains?
     (lambda (ts v)
       (pcheck ([fxtreeset? ts] [fixnum? v])
               (rbtree-contains? who ts v))))
@@ -1546,6 +1546,15 @@
     ((ts) (%treeset-size ts))
     ((ts) (%fxtreeset-size ts)))
 
+
+  (define-treeset-procedure (treeset-add! fxtreeset-add!) (treeset? fxtreeset?) (make-treeset make-fxtreeset)
+    ((ts v) (%treeset-add! ts v)) ((ts v) (%fxtreeset-add! ts v)))
+  (define-treeset-procedure (treeset-delete! fxtreeset-delete!) (treeset? fxtreeset?) (make-treeset make-fxtreeset)
+    ((ts v) (%treeset-delete! ts v)) ((ts v) (%fxtreeset-delete! ts v)))
+  (define-treeset-procedure (treeset-clear! fxtreeset-clear!) (treeset? fxtreeset?) (make-treeset make-fxtreeset)
+    ((ts) (%treeset-clear! ts)) ((ts) (%fxtreeset-clear! ts)))
+  (define-treeset-procedure (treeset-contains? fxtreeset-contains?) (treeset? fxtreeset?) (make-treeset make-fxtreeset)
+    ((ts v) (%treeset-contains? ts v)) ((ts v) (%fxtreeset-contains? ts v)))
 
 ;;;; Iterator extension registration
 ;;;;===----------------------------------------------------------------------===
