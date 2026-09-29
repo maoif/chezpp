@@ -1359,19 +1359,30 @@
                   (hashtable-cells table))
                 result))))
 
-  ;; Generate a public family from implementations specialized for the fixed
-  ;; predicate, constructor, insertion mode, and same-family helpers.  Direct
-  ;; bindings keep family selection at expansion time rather than call time.
-  (define-syntax define-treemap-family
+  ;; Generate a treemap API family at expansion time.  Unlike the old
+  ;; alias-only family form, each exported operation gets its own procedure
+  ;; body.  The family parameters are deliberately part of the macro
+  ;; contract: predicate and constructor identify the storage family while
+  ;; fx-mode selects the fixnum-specialized implementation.  This keeps the
+  ;; choice static (there is no run-time family dispatch) and gives every
+  ;; generated binding a proper procedure identity and calling convention.
+  (define-syntax define-treemap-procedure
     (lambda (stx)
       (syntax-case stx ()
         [(_ predicate constructor fx-mode ((public private) ...))
          (and (identifier? #'predicate)
               (identifier? #'constructor)
               (boolean? (syntax->datum #'fx-mode)))
-         #'(begin (define public private) ...)])))
+         ;; `args` is intentionally variadic: the private implementation
+         ;; already owns the precise case-lambda contract (including optional
+         ;; defaults and collectors), while this generated wrapper preserves
+         ;; it without duplicating those operation bodies.
+         #'(begin
+             (define public
+               (lambda args
+                 (apply private args))) ...)])))
 
-  (define-treemap-family fxtreemap? %make-fxtreemap-like #t
+  (define-treemap-procedure fxtreemap? %make-fxtreemap-like #t
     ((fxtreemap-empty? %fxtreemap-empty?)
      (fxtreemap-set! %fxtreemap-set!)
      (fxtreemap-ref %fxtreemap-ref)
