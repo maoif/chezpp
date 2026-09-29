@@ -147,7 +147,7 @@
   #|proc:treeset-empty?
   Return whether the treeset is empty.
   |#
-  (define-who treeset-empty?
+  (define-who %treeset-empty?
     (lambda (ts)
       (pcheck ([treeset? ts])
               (fx= 0 (rbtree-size ts)))))
@@ -185,7 +185,7 @@
   #|proc:treeset-size
   Return the number of items in the treeset `ts`.
   |#
-  (define-who treeset-size
+  (define-who %treeset-size
     (lambda (ts)
       (pcheck ([treeset? ts])
               (rbtree-size ts))))
@@ -858,7 +858,7 @@
   #|proc:fxtreeset-empty?
   Return whether the treeset is empty.
   |#
-  (define-who fxtreeset-empty?
+  (define-who %fxtreeset-empty?
     (lambda (ts)
       (pcheck ([fxtreeset? ts])
               (fx= 0 (rbtree-size ts)))))
@@ -896,7 +896,7 @@
   #|proc:fxtreeset-size
   Return the number of items in the treeset `ts`.
   |#
-  (define-who fxtreeset-size
+  (define-who %fxtreeset-size
     (lambda (ts)
       (pcheck ([fxtreeset? ts])
               (rbtree-size ts))))
@@ -1528,19 +1528,19 @@
   ;; implementations are retained as private workers so the generated
   ;; procedures share one expansion shape while preserving their exact
   ;; validation and behavior.
-  (define %treeset-empty? treeset-empty?)
-  (define %fxtreeset-empty? fxtreeset-empty?)
+  
+  
   (define-treeset-procedure
-    (treeset-empty/generated fxtreeset-empty/generated)
+    (treeset-empty? fxtreeset-empty?)
     (treeset? fxtreeset?)
     (make-treeset make-fxtreeset)
     ((ts) (%treeset-empty? ts))
     ((ts) (%fxtreeset-empty? ts)))
 
-  (define %treeset-size treeset-size)
-  (define %fxtreeset-size fxtreeset-size)
+  
+  
   (define-treeset-procedure
-    (treeset-size/generated fxtreeset-size/generated)
+    (treeset-size fxtreeset-size)
     (treeset? fxtreeset?)
     (make-treeset make-fxtreeset)
     ((ts) (%treeset-size ts))
