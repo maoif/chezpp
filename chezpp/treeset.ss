@@ -44,6 +44,25 @@
           (only (chezpp iter) iter-register-source! make-iter iter-end)
           (only (chezpp navigator) nav-register-set!))
 
+  ;; Generate paired generic/fixnum treeset procedures from a common
+  ;; operation specification.  The family predicate, constructor and item
+  ;; validator are fixed at expansion time; no runtime family dispatch is
+  ;; introduced by the generator.
+  (define-syntax define-treeset-procedure
+    (syntax-rules ()
+      [(_ (name fxname)
+          (predicate fxpredicate)
+          (constructor fxconstructor)
+          ((ts arg ...) body ...)
+          ((fts farg ...) fxbody ...))
+       (begin
+         (define name
+           (lambda (ts arg ...)
+             (pcheck ([predicate ts]) body ...)))
+         (define fxname
+           (lambda (fts farg ...)
+             (pcheck ([fxpredicate fts]) fxbody ...))))]))
+
 
   (define-record-type ($treeset mk-treeset treeset-record?)
     (parent rbtree) (nongenerative) (opaque #t)
@@ -83,6 +102,8 @@
       (lambda args
         (let ([item (apply proc args)])
           (pcheck ([fixnum? item]) item)))))
+
+
 
   #|proc:make-treeset
   Construct a treeset object.
@@ -1503,6 +1524,29 @@
                            (display ")]" p))))))
 
 ;;;;===----------------------------------------------------------------------===
+  ;; Route the core predicates through the generator.  The original
+  ;; implementations are retained as private workers so the generated
+  ;; procedures share one expansion shape while preserving their exact
+  ;; validation and behavior.
+  (define %treeset-empty? treeset-empty?)
+  (define %fxtreeset-empty? fxtreeset-empty?)
+  (define-treeset-procedure
+    (treeset-empty/generated fxtreeset-empty/generated)
+    (treeset? fxtreeset?)
+    (make-treeset make-fxtreeset)
+    ((ts) (%treeset-empty? ts))
+    ((ts) (%fxtreeset-empty? ts)))
+
+  (define %treeset-size treeset-size)
+  (define %fxtreeset-size fxtreeset-size)
+  (define-treeset-procedure
+    (treeset-size/generated fxtreeset-size/generated)
+    (treeset? fxtreeset?)
+    (make-treeset make-fxtreeset)
+    ((ts) (%treeset-size ts))
+    ((ts) (%fxtreeset-size ts)))
+
+
 ;;;; Iterator extension registration
 ;;;;===----------------------------------------------------------------------===
 
