@@ -447,7 +447,7 @@
   Input collections must have equal size.
   Return #f at the first false callback result; otherwise return #t.
   |#
-  (define-who treemap-andmap
+  (define-who %treemap-andmap
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -468,7 +468,7 @@
   Input collections must have equal size.
   Return the first true callback result, or #f if no result is true.
   |#
-  (define-who treemap-ormap
+  (define-who %treemap-ormap
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -490,7 +490,7 @@
   Return a new treemap using the first input's comparators and backend.
   The callback returns two values: the new key and value.
   |#
-  (define-who treemap-map
+  (define-who %treemap-map
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -512,7 +512,7 @@
   Return a new treemap using the first input's comparators and backend.
   The callback returns two values: the new key and value.
   |#
-  (define-who treemap-map/i
+  (define-who %treemap-map/i
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -534,7 +534,7 @@
   Input collections must have equal size.
   Update values only; `proc` returns one replacement value. Return an unspecified value.
   |#
-  (define-who treemap-map!
+  (define-who %treemap-map!
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -555,7 +555,7 @@
   Input collections must have equal size. Indices are zero-based inorder positions.
   Update values only; `proc` returns one replacement value. Return an unspecified value.
   |#
-  (define-who treemap-map/i!
+  (define-who %treemap-map/i!
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -576,7 +576,7 @@
   Input collections must have equal size.
   Return an unspecified value.
   |#
-  (define-who treemap-for-each
+  (define-who %treemap-for-each
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -597,7 +597,7 @@
   Input collections must have equal size. Indices are zero-based inorder positions.
   Return an unspecified value.
   |#
-  (define-who treemap-for-each/i
+  (define-who %treemap-for-each/i
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -624,7 +624,7 @@
   Input collections must have equal size.
   Return the accumulated value; `acc` is its initial value.
   |#
-  (define-who treemap-fold-left
+  (define-who %treemap-fold-left
     (case-lambda
       [(proc acc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -646,7 +646,7 @@
   Input collections must have equal size. Indices are zero-based inorder positions.
   Return the accumulated value; `acc` is its initial value.
   |#
-  (define-who treemap-fold-left/i
+  (define-who %treemap-fold-left/i
     (case-lambda
       [(proc acc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -667,7 +667,7 @@
   Input collections must have equal size.
   Return the accumulated value; `acc` is its initial value.
   |#
-  (define-who treemap-fold-right
+  (define-who %treemap-fold-right
     (case-lambda
       [(proc acc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -689,7 +689,7 @@
   Input collections must have equal size. Indices are zero-based inorder positions.
   Return the accumulated value; `acc` is its initial value.
   |#
-  (define-who treemap-fold-right/i
+  (define-who %treemap-fold-right/i
     (case-lambda
       [(proc acc tm0)
        (pcheck ([procedure? proc] [treemap? tm0])
@@ -1317,7 +1317,7 @@
   `order` can be 'in, 'pre or 'post, so the items are collected in
   in-order, pre- and post-order, respectively.
   |#
-  (define-who treemap->list
+  (define-who %treemap->list
     (case-lambda
       [(tm)
        (treemap->list tm 'in)]
@@ -1402,7 +1402,20 @@
      (treemap-successor %treemap-successor)
      (treemap-predecessor %treemap-predecessor)
      (treemap-min %treemap-min)
-     (treemap-max %treemap-max)))
+     (treemap-max %treemap-max)
+     (treemap-andmap %treemap-andmap)
+     (treemap-ormap %treemap-ormap)
+     (treemap-map %treemap-map)
+     (treemap-map/i %treemap-map/i)
+     (treemap-map! %treemap-map!)
+     (treemap-map/i! %treemap-map/i!)
+     (treemap-for-each %treemap-for-each)
+     (treemap-for-each/i %treemap-for-each/i)
+     (treemap-fold-left %treemap-fold-left)
+     (treemap-fold-left/i %treemap-fold-left/i)
+     (treemap-fold-right %treemap-fold-right)
+     (treemap-fold-right/i %treemap-fold-right/i)
+     (treemap->list %treemap->list)))
 
   (define-treemap-procedure fxtreemap? %make-fxtreemap-like #t
     ((fxtreemap-empty? %fxtreemap-empty?)
