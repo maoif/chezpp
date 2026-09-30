@@ -46,10 +46,10 @@
 
   #|macro:define-treeset-procedure
   `(define-treeset-procedure (name fxname) implementation)` defines the generic `name` and fixnum
-  `fxname` procedures from one lambda or case-lambda `implementation`. `tree?`, `tree-like`, `fx-
-  mode`, and `checked` supply the fixed family predicate, constructor, storage mode, and item
+  `fxname` procedures from one lambda or case-lambda `implementation`. `tree?`, `tree-like`, `fx-`
+  `mode`, and `checked` supply the fixed family predicate, constructor, storage mode, and item
   validation. `tree-who` names the procedure and `tree-self` refers to it. `all-family?` and
-  `check-family-size` check multiple inputs; `checked-map-proc` validates callback results before
+  `check-family-size` check multiple inputs; arity-specific map checkers validate callback results before
   specialized writes. `tree-size`, `tree-add!`, `tree-clear!`, `tree-list`, and the four algebra
   helpers name same-family APIs.
   |#
@@ -58,7 +58,8 @@
       (syntax-case stx ()
         [(k (name fxname) implementation)
          (with-implicit (k tree? tree-like fx-mode checked tree-who tree-self
-                           all-family? check-family-size checked-map-proc tree-size
+                           all-family? check-family-size checked-map-proc1 checked-map-proc2
+                           checked-map-proc* tree-size
                            tree-add! tree-clear! tree-list tree-union tree-difference
                            tree-intersection tree-symmetric-difference)
            #'(begin
@@ -72,7 +73,9 @@
                       [tree-self (identifier-syntax name)]
                       [all-family? (identifier-syntax all-treesets?)]
                       [check-family-size (identifier-syntax check-size)]
-                      [checked-map-proc (identifier-syntax (lambda (who proc) proc))]
+                      [checked-map-proc1 (identifier-syntax (lambda (who proc) proc))]
+                      [checked-map-proc2 (identifier-syntax (lambda (who proc) proc))]
+                      [checked-map-proc* (identifier-syntax (lambda (who proc) proc))]
                       [tree-size (identifier-syntax treeset-size)]
                       [tree-add! (identifier-syntax treeset-add!)]
                       [tree-clear! (identifier-syntax treeset-clear!)]
@@ -93,7 +96,9 @@
                       [tree-self (identifier-syntax fxname)]
                       [all-family? (identifier-syntax all-fxtreesets?)]
                       [check-family-size (identifier-syntax fx-check-size)]
-                      [checked-map-proc (identifier-syntax check-fxtreeset-map-proc)]
+                      [checked-map-proc1 (identifier-syntax check-fxtreeset-map-proc1)]
+                      [checked-map-proc2 (identifier-syntax check-fxtreeset-map-proc2)]
+                      [checked-map-proc* (identifier-syntax check-fxtreeset-map-proc*)]
                       [tree-size (identifier-syntax fxtreeset-size)]
                       [tree-add! (identifier-syntax fxtreeset-add!)]
                       [tree-clear! (identifier-syntax fxtreeset-clear!)]
@@ -151,11 +156,23 @@
     (lambda (source)
       (make-treeset (rbtree-=? source) (rbtree-<? source))))
 
-  (define check-fxtreeset-map-proc
+  (define check-fxtreeset-map-proc1
+    (lambda (who proc)
+      (lambda (item)
+        (let ([new-item (proc item)])
+          (pcheck ([fixnum? new-item]) new-item)))))
+
+  (define check-fxtreeset-map-proc2
+    (lambda (who proc)
+      (lambda (item0 item1)
+        (let ([new-item (proc item0 item1)])
+          (pcheck ([fixnum? new-item]) new-item)))))
+
+  (define check-fxtreeset-map-proc*
     (lambda (who proc)
       (lambda args
-        (let ([item (apply proc args)])
-          (pcheck ([fixnum? item]) item)))))
+        (let ([new-item (apply proc args)])
+          (pcheck ([fixnum? new-item]) new-item)))))
 
 
   #|proc:make-treeset
@@ -567,15 +584,15 @@
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [tree? ts0])
-               (rbtree-map1 tree-who (checked-map-proc tree-who proc) (tree-like ts0) ts0))]
+               (rbtree-map1 tree-who (checked-map-proc1 tree-who proc) (tree-like ts0) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [tree? ts0 ts1])
                (check-family-size tree-who ts0 ts1)
-               (rbtree-map1 tree-who (checked-map-proc tree-who proc) (tree-like ts0) ts0 ts1))]
+               (rbtree-map1 tree-who (checked-map-proc2 tree-who proc) (tree-like ts0) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [tree? ts0] [all-family? ts*])
                (apply check-family-size tree-who ts0 ts*)
-               (apply rbtree-map1 tree-who (checked-map-proc tree-who proc) (tree-like ts0) ts0 ts*))]))
+               (apply rbtree-map1 tree-who (checked-map-proc* tree-who proc) (tree-like ts0) ts0 ts*))]))
 
 
   #|proc:treeset-map/i
@@ -596,15 +613,15 @@
     (case-lambda
       [(proc ts0)
        (pcheck ([procedure? proc] [tree? ts0])
-               (rbtree-map/i1 tree-who (checked-map-proc tree-who proc) (tree-like ts0) ts0))]
+               (rbtree-map/i1 tree-who (checked-map-proc1 tree-who proc) (tree-like ts0) ts0))]
       [(proc ts0 ts1)
        (pcheck ([procedure? proc] [tree? ts0 ts1])
                (check-family-size tree-who ts0 ts1)
-               (rbtree-map/i1 tree-who (checked-map-proc tree-who proc) (tree-like ts0) ts0 ts1))]
+               (rbtree-map/i1 tree-who (checked-map-proc2 tree-who proc) (tree-like ts0) ts0 ts1))]
       [(proc ts0 . ts*)
        (pcheck ([procedure? proc] [tree? ts0] [all-family? ts*])
                (apply check-family-size tree-who ts0 ts*)
-               (apply rbtree-map/i1 tree-who (checked-map-proc tree-who proc) (tree-like ts0) ts0 ts*))]))
+               (apply rbtree-map/i1 tree-who (checked-map-proc* tree-who proc) (tree-like ts0) ts0 ts*))]))
 
 
   #|proc:treeset-for-each

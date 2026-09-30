@@ -57,6 +57,7 @@
   (define null-rbnode  '())
   (define null-rbnode? null?)
 
+  ;; Unique marker used for key-only set nodes, absent query results, and cursor end.
   (define *dummy-v* (vector #f))
 
   (define rbnode-key    (lambda (n) (vector-ref n 0)))

@@ -86,27 +86,55 @@
     (lambda (source)
       (make-fxtreemap (rbtree-=? source) (rbtree-<? source))))
 
-  (define check-fxtreemap-map-proc
+  (define check-fxtreemap-map-proc1
+    (lambda (who proc)
+      (lambda (key value)
+        (call-with-values (lambda () (proc key value))
+          (lambda (new-key new-value)
+            (pcheck ([fixnum? new-key new-value])
+                    (values new-key new-value)))))))
+
+  (define check-fxtreemap-map-proc2
+    (lambda (who proc)
+      (lambda (key0 value0 key1 value1)
+        (call-with-values (lambda () (proc key0 value0 key1 value1))
+          (lambda (new-key new-value)
+            (pcheck ([fixnum? new-key new-value])
+                    (values new-key new-value)))))))
+
+  (define check-fxtreemap-map-proc*
     (lambda (who proc)
       (lambda args
         (call-with-values (lambda () (apply proc args))
-          (lambda (key value)
-            (pcheck ([fixnum? key value])
-                    (values key value)))))))
+          (lambda (new-key new-value)
+            (pcheck ([fixnum? new-key new-value])
+                    (values new-key new-value)))))))
 
-  (define check-fxtreemap-value-proc
+  (define check-fxtreemap-value-proc1
+    (lambda (who proc)
+      (lambda (key value)
+        (let ([new-value (proc key value)])
+          (pcheck ([fixnum? new-value]) new-value)))))
+
+  (define check-fxtreemap-value-proc2
+    (lambda (who proc)
+      (lambda (key0 value0 key1 value1)
+        (let ([new-value (proc key0 value0 key1 value1)])
+          (pcheck ([fixnum? new-value]) new-value)))))
+
+  (define check-fxtreemap-value-proc*
     (lambda (who proc)
       (lambda args
-        (let ([value (apply proc args)])
-          (pcheck ([fixnum? value]) value)))))
+        (let ([new-value (apply proc args)])
+          (pcheck ([fixnum? new-value]) new-value)))))
 
   #|macro:define-treemap-procedure
   `(define-treemap-procedure suffix implementation)` defines `treemap-suffix` and
   `fxtreemap-suffix` from one lambda or case-lambda expression, `implementation`.
   The body uses `tm?`, `tm-like`, `fx-mode`, `family-key?`, and `family-value?` for
   fixed family checks, construction, storage mode, and input validation. `all-family?`
-  and `check-family-size` validate multiple maps; `checked-map-proc` and
-  `checked-value-proc` validate callback results before specialized writes.
+  and `check-family-size` validate multiple maps; arity-specific callback
+  checkers validate results before specialized writes.
   `who` names the generated procedure and `thisproc` refers to that same procedure.
   |#
   (define-syntax define-treemap-procedure
@@ -116,7 +144,8 @@
          (identifier? #'suffix)
          (with-implicit (k who tm? tm-like fx-mode thisproc family-key?
                            family-value? all-family? check-family-size
-                           checked-map-proc checked-value-proc)
+                           checked-map-proc1 checked-map-proc2 checked-map-proc*
+                           checked-value-proc1 checked-value-proc2 checked-value-proc*)
            (with-syntax ([generic-name ($construct-name #'suffix "treemap-" #'suffix)]
                          [fixnum-name ($construct-name #'suffix "fxtreemap-" #'suffix)])
              #'(begin
@@ -132,8 +161,12 @@
                        (unless (null? x*)
                          (unless (apply fx= (treemap-size x0) (map treemap-size x*))
                            (errorf who "treemaps are not of the same size")))))
-                   (define checked-map-proc (lambda (who proc) proc))
-                   (define checked-value-proc (lambda (who proc) proc))
+                   (define checked-map-proc1 (lambda (who proc) proc))
+                   (define checked-map-proc2 (lambda (who proc) proc))
+                   (define checked-map-proc* (lambda (who proc) proc))
+                   (define checked-value-proc1 (lambda (who proc) proc))
+                   (define checked-value-proc2 (lambda (who proc) proc))
+                   (define checked-value-proc* (lambda (who proc) proc))
                    (define who 'generic-name)
                    (define generic-name implementation)
                    (define thisproc generic-name))
@@ -149,8 +182,12 @@
                        (unless (null? x*)
                          (unless (apply fx= (fxtreemap-size x0) (map fxtreemap-size x*))
                            (errorf who "treemaps are not of the same size")))))
-                   (define checked-map-proc check-fxtreemap-map-proc)
-                   (define checked-value-proc check-fxtreemap-value-proc)
+                   (define checked-map-proc1 check-fxtreemap-map-proc1)
+                   (define checked-map-proc2 check-fxtreemap-map-proc2)
+                   (define checked-map-proc* check-fxtreemap-map-proc*)
+                   (define checked-value-proc1 check-fxtreemap-value-proc1)
+                   (define checked-value-proc2 check-fxtreemap-value-proc2)
+                   (define checked-value-proc* check-fxtreemap-value-proc*)
                    (define who 'fixnum-name)
                    (define fixnum-name implementation)
                    (define thisproc fixnum-name)))))])))
@@ -675,15 +712,15 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [tm? tm0])
-               (rbtree-map who (checked-map-proc who proc) (tm-like tm0) tm0))]
+               (rbtree-map who (checked-map-proc1 who proc) (tm-like tm0) tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [tm? tm0 tm1])
                (check-family-size who tm0 tm1)
-               (rbtree-map who (checked-map-proc who proc) (tm-like tm0) tm0 tm1))]
+               (rbtree-map who (checked-map-proc2 who proc) (tm-like tm0) tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [tm? tm0] [all-family? tm*])
                (apply check-family-size who tm0 tm*)
-               (apply rbtree-map who (checked-map-proc who proc) (tm-like tm0) tm0 tm*))]))
+               (apply rbtree-map who (checked-map-proc* who proc) (tm-like tm0) tm0 tm*))]))
 
 
   #|proc:treemap-map/i
@@ -705,15 +742,15 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [tm? tm0])
-               (rbtree-map/i who (checked-map-proc who proc) (tm-like tm0) tm0))]
+               (rbtree-map/i who (checked-map-proc1 who proc) (tm-like tm0) tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [tm? tm0 tm1])
                (check-family-size who tm0 tm1)
-               (rbtree-map/i who (checked-map-proc who proc) (tm-like tm0) tm0 tm1))]
+               (rbtree-map/i who (checked-map-proc2 who proc) (tm-like tm0) tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [tm? tm0] [all-family? tm*])
                (apply check-family-size who tm0 tm*)
-               (apply rbtree-map/i who (checked-map-proc who proc) (tm-like tm0) tm0 tm*))]))
+               (apply rbtree-map/i who (checked-map-proc* who proc) (tm-like tm0) tm0 tm*))]))
 
 
   ;; `proc` in in-place maps should return only one value
@@ -734,15 +771,15 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [tm? tm0])
-               (rbtree-map! who (checked-value-proc who proc) fx-mode tm0))]
+               (rbtree-map! who (checked-value-proc1 who proc) fx-mode tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [tm? tm0 tm1])
                (check-family-size who tm0 tm1)
-               (rbtree-map! who (checked-value-proc who proc) fx-mode tm0 tm1))]
+               (rbtree-map! who (checked-value-proc2 who proc) fx-mode tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [tm? tm0] [all-family? tm*])
                (apply check-family-size who tm0 tm*)
-               (apply rbtree-map! who (checked-value-proc who proc) fx-mode tm0 tm*))]))
+               (apply rbtree-map! who (checked-value-proc* who proc) fx-mode tm0 tm*))]))
 
 
   #|proc:treemap-map/i!
@@ -762,15 +799,15 @@
     (case-lambda
       [(proc tm0)
        (pcheck ([procedure? proc] [tm? tm0])
-               (rbtree-map/i! who (checked-value-proc who proc) fx-mode tm0))]
+               (rbtree-map/i! who (checked-value-proc1 who proc) fx-mode tm0))]
       [(proc tm0 tm1)
        (pcheck ([procedure? proc] [tm? tm0 tm1])
                (check-family-size who tm0 tm1)
-               (rbtree-map/i! who (checked-value-proc who proc) fx-mode tm0 tm1))]
+               (rbtree-map/i! who (checked-value-proc2 who proc) fx-mode tm0 tm1))]
       [(proc tm0 . tm*)
        (pcheck ([procedure? proc] [tm? tm0] [all-family? tm*])
                (apply check-family-size who tm0 tm*)
-               (apply rbtree-map/i! who (checked-value-proc who proc) fx-mode tm0 tm*))]))
+               (apply rbtree-map/i! who (checked-value-proc* who proc) fx-mode tm0 tm*))]))
 
 
   #|proc:treemap-for-each
