@@ -67,6 +67,8 @@
      (reset-sequence? '(1 2 3) (treeset = < 3 1 2))
      (reset-sequence? '((1 . a) (2 . b))
                       (treemap = < '(2 . b) '(1 . a)))
+     (reset-sequence? '((1 . 10) (2 . 20))
+                      (fxtreemap fx= fx< '(2 . 20) '(1 . 10)))
      (reset-sequence? '(1 3 5) (bitvec 5 1 3))
      (reset-sequence? '(1 3 5) (bittree 5 1 3))
      (reset-sequence? '(0 1 2 3) (make-dset 4))

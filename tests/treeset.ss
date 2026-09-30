@@ -7,13 +7,18 @@
 
 (mat fxtreeset-constructor
      (let ([ts (make-fxtreeset fx= fx<)])
-       (treeset-add! ts 1)
+       (fxtreeset-add! ts 1)
        (and (fxtreeset? ts)
-            (treeset? ts)
-            (treeset-contains? ts 1))))
+            (not (treeset? ts))
+            (fxtreeset-contains? ts 1))))
 
 (mat fxtreeset-populate
-     (= 2 (treeset-size (fxtreeset fx= fx< 1 2))))
+     (= 2 (fxtreeset-size (fxtreeset fx= fx< 1 2))))
+
+;; Error cases: each public family rejects the other record type.
+(mat treeset-family-rejection
+     (error? (treeset-contains? (fxtreeset fx= fx< 1) 1))
+     (error? (fxtreeset-contains? (treeset = < 1) 1)))
 
 (mat treeset-mutating-algebra
      (let ([set (treeset = < 1 2 3)])
@@ -36,8 +41,16 @@
 ;; Error case: fixnum treesets reject non-fixnum items.
 (mat fxtreeset-key-validation
      (guard (c [(error? c) #t] [else #f])
-       (treeset-add! (make-fxtreeset fx= fx<) 'x)
+       (fxtreeset-add! (make-fxtreeset fx= fx<) 'x)
        #f))
+
+;; Error case: fixnum treeset deletion and navigation validate before backend access.
+(mat fxtreeset-key-query-validation
+     (error? (fxtreeset-delete! (make-fxtreeset fx= fx<) 'bad))
+
+     (error? (fxtreeset-successor (fxtreeset fx= fx< 1) 'bad))
+
+     (error? (fxtreeset-predecessor (make-fxtreeset fx= fx<) 'bad)))
 
 
 (mat treeset-equal?
@@ -127,6 +140,29 @@
        (not (treeset-search ts1 odd?)))
 
      )
+
+(mat treeset-query-defaults
+     (let ([ts (treeset = < 1)]
+           [absent (vector 'absent)])
+       (and (= 1 (treeset-min ts))
+            (eq? absent (treeset-search ts (lambda (x) #f) absent))
+            (eq? absent (treeset-successor ts 1 absent))
+            (eq? absent (treeset-predecessor ts 1 absent))
+            (eq? absent (treeset-min (treeset = <) absent))
+            (eq? absent (treeset-max (treeset = <) absent))))
+
+     (error? (treeset-successor (treeset = < 1) 2)))
+
+(mat treeset-false-item-default
+     (let* ([cmp (lambda (a b)
+                   (or (and (not a) (not b))
+                       (and a b (< a b))))]
+            [ts (treeset eq? cmp #f)]
+            [absent (vector 'absent)])
+       (and (eq? #f (treeset-search ts (lambda (item) (not item))))
+            (eq? #f (treeset-min ts))
+            (eq? absent (treeset-search ts (lambda (item) item) absent))
+            (not (treeset-search ts (lambda (item) item))))))
 
 
 (mat treeset-search*

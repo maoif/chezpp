@@ -16,52 +16,109 @@
 
 (mat fxtreemap-constructor
      (let ([tm (make-fxtreemap fx= fx<)])
-       (treemap-set! tm 1 10)
+       (fxtreemap-set! tm 1 10)
        (and (fxtreemap? tm)
-            (treemap? tm)
-            (fx= 10 (treemap-ref tm 1)))))
+            (not (treemap? tm))
+            (fx= 10 (fxtreemap-ref tm 1)))))
 
 (mat fxtreemap-populate
-     (= 2 (treemap-size (fxtreemap fx= fx< (cons 1 10) (cons 2 20)))))
+     (= 2 (fxtreemap-size (fxtreemap fx= fx< (cons 1 10) (cons 2 20)))))
+
+;; Error case: generic operations reject a fixnum treemap, including an empty one.
+(mat treemap-family-rejection
+     (error? (treemap-set! (make-fxtreemap fx= fx<) 1 10))
+     (error? (treemap-ref (make-fxtreemap fx= fx<) 1 #f))
+     (error? (treemap-search (make-fxtreemap fx= fx<) (lambda (key value) #t)))
+     (error? (treemap-fold-left (lambda (acc key value) acc) 0 (make-fxtreemap fx= fx<)))
+     (error? (treemap-map (lambda (key value) (values key value)) (make-fxtreemap fx= fx<)))
+     (error? (treemap-filter (lambda (key value) #t) (make-fxtreemap fx= fx<))))
+
+;; Error case: specialized operations reject a generic treemap, including an empty one.
+(mat fxtreemap-family-rejection
+     (error? (fxtreemap-set! (make-treemap fx= fx<) 1 10))
+     (error? (fxtreemap-ref (make-treemap fx= fx<) 1 #f))
+     (error? (fxtreemap-search (make-treemap fx= fx<) (lambda (key value) #t)))
+     (error? (fxtreemap-fold-left (lambda (acc key value) acc) 0 (make-treemap fx= fx<)))
+     (error? (fxtreemap-map (lambda (key value) (values key value)) (make-treemap fx= fx<)))
+     (error? (fxtreemap-filter (lambda (key value) #t) (make-treemap fx= fx<))))
+
+;; Error case: multi-map traversals reject mixed families.
+(mat treemap-mixed-family-rejection
+     (error? (treemap-map (lambda args (values 1 1))
+                          (make-treemap fx= fx<) (make-fxtreemap fx= fx<)))
+     (error? (fxtreemap-fold-right (lambda args 0) 0
+                                   (make-fxtreemap fx= fx<) (make-treemap fx= fx<))))
+
+(mat treemap-derived-family
+     (let ([generic (treemap fx= fx< '(1 . 10))]
+           [specialized (fxtreemap fx= fx< '(1 . 10))])
+       (let-values ([(generic-yes generic-no)
+                     (treemap-partition (lambda (key value) #t) generic)]
+                    [(specialized-yes specialized-no)
+                     (fxtreemap-partition (lambda (key value) #t) specialized)])
+         (and (treemap? (treemap-filter (lambda (key value) #t) generic))
+              (fxtreemap? (fxtreemap-filter (lambda (key value) #t) specialized))
+              (treemap? generic-yes) (treemap? generic-no)
+              (fxtreemap? specialized-yes) (fxtreemap? specialized-no)))))
 
 ;; Error case: fixnum treemaps reject non-fixnum keys.
 (mat fxtreemap-key-validation
      (guard (c [(error? c) #t] [else #f])
-       (treemap-set! (make-fxtreemap fx= fx<) 'x 1)
+       (fxtreemap-set! (make-fxtreemap fx= fx<) 'x 1)
        #f))
 
-;; Error case: fixnum treemaps reject non-fixnum values passed to treemap-set!.
+;; Error case: fixnum treemap key queries and deletion validate before backend access.
+(mat fxtreemap-key-query-validation
+     (error? (fxtreemap-ref (make-fxtreemap fx= fx<) 'bad))
+
+     (error? (fxtreemap-ref (fxtreemap fx= fx< '(1 . 10)) 'bad #f))
+
+     (error? (fxtreemap-delete! (make-fxtreemap fx= fx<) 'bad))
+
+     (error? (fxtreemap-successor (fxtreemap fx= fx< '(1 . 10)) 'bad))
+
+     (error? (fxtreemap-predecessor (make-fxtreemap fx= fx<) 'bad)))
+
+;; Error case: fixnum treemaps reject non-fixnum values passed to fxtreemap-set!.
 (mat fxtreemap-set-value-validation
-     (error? (treemap-set! (make-fxtreemap fx= fx<) 1 'bad)))
+     (error? (fxtreemap-set! (make-fxtreemap fx= fx<) 1 'bad)))
 
 ;; Error case: the fxtreemap constructor rejects non-fixnum values.
 (mat fxtreemap-constructor-value-validation
      (error? (fxtreemap fx= fx< '(1 . bad))))
 
-;; Error case: treemap-map rejects a non-fixnum value produced for a fixnum treemap.
+;; Error case: fxtreemap-map rejects a callback-produced non-fixnum value.
 (mat fxtreemap-map-value-validation
-     (error? (treemap-map (lambda (key value) (values key 'bad))
-                          (fxtreemap fx= fx< '(1 . 10)))))
-
-;; Error case: treemap-map/i rejects a non-fixnum value produced for a fixnum treemap.
-(mat fxtreemap-map/i-value-validation
-     (error? (treemap-map/i (lambda (index key value) (values key 'bad))
+     (error? (fxtreemap-map (lambda (key value) (values key 'bad))
                             (fxtreemap fx= fx< '(1 . 10)))))
 
-;; Error case: treemap-map! rejects a non-fixnum value produced for a fixnum treemap.
-(mat fxtreemap-map!-value-validation
-     (error? (treemap-map! (lambda (key value) 'bad)
-                           (fxtreemap fx= fx< '(1 . 10)))))
+;; Error case: fxtreemap-map/i rejects a callback-produced non-fixnum value.
+(mat fxtreemap-map/i-value-validation
+     (error? (fxtreemap-map/i (lambda (index key value) (values key 'bad))
+                              (fxtreemap fx= fx< '(1 . 10)))))
 
-;; Error case: treemap-map/i! rejects a non-fixnum value produced for a fixnum treemap.
-(mat fxtreemap-map/i!-value-validation
-     (error? (treemap-map/i! (lambda (index key value) 'bad)
+;; Error case: fxtreemap-map! rejects a callback-produced non-fixnum value.
+(mat fxtreemap-map!-value-validation
+     (error? (fxtreemap-map! (lambda (key value) 'bad)
                              (fxtreemap fx= fx< '(1 . 10)))))
+
+;; Error case: fxtreemap-map/i! rejects a callback-produced non-fixnum value.
+(mat fxtreemap-map/i!-value-validation
+     (error? (fxtreemap-map/i! (lambda (index key value) 'bad)
+                               (fxtreemap fx= fx< '(1 . 10)))))
 
 ;; Error case: hashtable conversion rejects non-fixnum values for a fixnum treemap.
 (mat hashtable->fxtreemap-value-validation
      (let ([table (make-eqv-hashtable)])
        (hashtable-set! table 1 'bad)
+       (guard (c [(error? c) #t] [else #f])
+         (hashtable->fxtreemap fx= fx< table)
+         #f)))
+
+;; Error case: hashtable conversion rejects non-fixnum keys for a fixnum treemap.
+(mat hashtable->fxtreemap-key-validation
+     (let ([table (make-eq-hashtable)])
+       (hashtable-set! table 'bad 1)
        (guard (c [(error? c) #t] [else #f])
          (hashtable->fxtreemap fx= fx< table)
          #f)))
@@ -219,6 +276,28 @@
                (cons 7 7)))
 
      )
+
+(mat treemap-query-defaults
+     (let ([tm (treemap = < '(1 . a))]
+           [absent (vector 'absent)])
+       (and (equal? '(1 . a) (treemap-min tm))
+            (eq? absent (treemap-search tm (lambda (k v) #f) absent))
+            (eq? absent (treemap-successor tm 1 absent))
+            (eq? absent (treemap-predecessor tm 1 absent))
+            (eq? absent (treemap-min (treemap = <) absent))
+            (eq? absent (treemap-max (treemap = <) absent))))
+
+     (error? (treemap-successor (treemap = < '(1 . a)) 2)))
+
+(mat treemap-false-key-default
+     (let* ([cmp (lambda (a b)
+                   (and (number? a) (number? b) (< a b)))]
+            [tm (treemap eq? cmp '(#f . present))]
+            [absent (vector 'absent)])
+       (and (equal? '(#f . present) (treemap-search tm (lambda (key value) (not key)) absent))
+            (equal? '(#f . present) (treemap-min tm absent))
+            (eq? absent (treemap-search tm (lambda (key value) key) absent))
+            (not (treemap-search tm (lambda (key value) key))))))
 
 
 (mat treemap-search*

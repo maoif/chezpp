@@ -538,6 +538,12 @@
 
      )
 
+(mat array-search-default
+     (let ([absent (vector 'absent)])
+       (and (eq? absent (array-search (array 1 2) (lambda (x) (> x 2)) absent))
+            (= 1 (array-search (array 1 2) odd? absent))
+            (not (array-search (array 1 2) (lambda (x) (> x 2)))))))
+
 
 (mat array-search*
 

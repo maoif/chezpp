@@ -1,5 +1,41 @@
 (import (chezpp)
-        (only (chezpp private rbtree) $rbtree-verify *dummy-v* rbtree-visit))
+        (only (chezpp private rbtree) $rbtree-verify *dummy-v* rbtree-visit
+              rbtree-search rbtree-successor rbtree-predecessor
+              rbtree-min rbtree-max rbtree-inorder-cursor))
+
+(mat rbtree-query-two-values
+     (let ([tm (treemap = < '(1 . a) '(2 . b))])
+       (and (call-with-values (lambda () (rbtree-search 'test tm (lambda (k v) (= k 2))))
+              (lambda (k v) (and (= k 2) (eq? v 'b))))
+            (call-with-values (lambda () (rbtree-successor 'test tm 1))
+              (lambda (k v) (and (= k 2) (eq? v 'b))))
+            (call-with-values (lambda () (rbtree-predecessor 'test tm 2))
+              (lambda (k v) (and (= k 1) (eq? v 'a))))
+            (call-with-values (lambda () (rbtree-min 'test tm))
+              (lambda (k v) (and (= k 1) (eq? v 'a))))
+            (call-with-values (lambda () (rbtree-max 'test tm))
+              (lambda (k v) (and (= k 2) (eq? v 'b)))))))
+
+(mat rbtree-query-sentinel-values
+     (let ([tm (treemap = < '(1 . a))])
+       (and (call-with-values (lambda () (rbtree-search 'test tm (lambda (k v) #f)))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (call-with-values (lambda () (rbtree-successor 'test tm 1))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (call-with-values (lambda () (rbtree-predecessor 'test tm 1))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (call-with-values (lambda () (rbtree-min 'test (treemap = <)))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (call-with-values (lambda () (rbtree-max 'test (treemap = <)))
+              (lambda (k v) (and (eq? k *dummy-v*) (eq? v *dummy-v*))))
+            (let ([cursor (rbtree-inorder-cursor tm)])
+              (call-with-values cursor
+                (lambda (k v)
+                  (and (= k 1)
+                       (eq? v 'a)
+                       (call-with-values cursor
+                         (lambda (k v)
+                           (and (eq? k *dummy-v*) (eq? v *dummy-v*)))))))))))
 
 ;; Regression: key-only nodes must be traversable without reading a value slot.
 (mat rbtree-key-only-node-accessors
@@ -45,25 +81,25 @@
 (mat fixnum-backend-derived-results
      (let* ([set (fxtreeset fx= fx< 3 1 2)]
             [map (fxtreemap fx= fx< '(3 . 30) '(1 . 10) '(2 . 20))])
-       (and (fxtreeset? (treeset-filter odd? set))
-            (fxtreeset? (treeset-map fx1+ set))
-            (fxtreemap? (treemap-filter (lambda (key value) (odd? key)) map))
-            (fxtreemap? (treemap-map (lambda (key value) (values key value)) map))
+       (and (fxtreeset? (fxtreeset-filter odd? set))
+            (fxtreeset? (fxtreeset-map fx1+ set))
+            (fxtreemap? (fxtreemap-filter (lambda (key value) (odd? key)) map))
+            (fxtreemap? (fxtreemap-map (lambda (key value) (values key value)) map))
             (begin
-              (treeset-delete! set 2)
-              (treemap-delete! map 2)
+              (fxtreeset-delete! set 2)
+              (fxtreemap-delete! map 2)
               (and ($rbtree-verify set) ($rbtree-verify map))))))
 
 ;; Error cases: empty specialized trees and callback-generated keys must be checked.
 (mat fixnum-backend-validation
-     (error? (treeset-contains? (make-fxtreeset fx= fx<) 'bad))
+     (error? (fxtreeset-contains? (make-fxtreeset fx= fx<) 'bad))
 
-     (error? (treemap-contains? (make-fxtreemap fx= fx<) 'bad))
+     (error? (fxtreemap-contains? (make-fxtreemap fx= fx<) 'bad))
 
-     (error? (treeset-map (lambda (item) 'bad) (fxtreeset fx= fx< 1)))
+     (error? (fxtreeset-map (lambda (item) 'bad) (fxtreeset fx= fx< 1)))
 
-     (error? (treemap-map (lambda (key value) (values 'bad value))
-                          (fxtreemap fx= fx< '(1 . 10)))))
+     (error? (fxtreemap-map (lambda (key value) (values 'bad value))
+                            (fxtreemap fx= fx< '(1 . 10)))))
 
 (mat fixnum-backend-balanced-mutations
      (let ([items (fxvshuffle! (fxviota 500))]
@@ -71,30 +107,35 @@
            [map (make-fxtreemap fx= fx<)])
        (fxvfor-each
          (lambda (item)
-           (treeset-add! set item)
-           (treemap-set! map item item)
+           (fxtreeset-add! set item)
+           (fxtreemap-set! map item item)
            ($rbtree-verify set)
            ($rbtree-verify map))
          items)
        (fxvfor-each
          (lambda (item)
-           (treeset-delete! set item)
-           (treemap-delete! map item)
+           (fxtreeset-delete! set item)
+           (fxtreemap-delete! map item)
            ($rbtree-verify set)
            ($rbtree-verify map))
          items)
-       (and (treeset-empty? set) (treemap-empty? map))))
+       (and (fxtreeset-empty? set) (fxtreemap-empty? map))))
 
 (mat fixnum-boundaries-and-mixed-folds
      (let ([set (fxtreeset fx= fx> (most-negative-fixnum) 0 (most-positive-fixnum))]
            [one (fxtreeset fx= fx< 1 2)]
-           [two (treeset fx= fx< 3 4)]
+           [two (fxtreeset fx= fx< 3 4)]
            [three (fxtreeset fx= fx< 5 6)])
        (and ($rbtree-verify set)
-            (= (most-positive-fixnum) (treeset-min set))
-            (= 21 (treeset-fold-left + 0 one two three))
-            (= 21 (treeset-fold-right + 0 one two three))
-            (fxtreeset? (treeset+ one two three)))))
+            (= (most-positive-fixnum) (fxtreeset-min set))
+            (= 21 (fxtreeset-fold-left + 0 one two three))
+            (= 21 (fxtreeset-fold-right + 0 one two three))
+            (fxtreeset? (fxtreeset+ one two three)))))
+
+;; Error cases: multi-set operations reject mixed generic/fixnum operands.
+(mat fxtreeset-mixed-family-rejection
+     (error? (fxtreeset+ (fxtreeset fx= fx< 1) (treeset = < 2)))
+     (error? (treeset+ (treeset = < 1) (fxtreeset fx= fx< 2))))
 
 (mat fixnum-conversions-and-writers
      (let ([table (make-eqv-hashtable)])
@@ -104,6 +145,6 @@
          (and (fxtreemap? map)
               (fxtreeset? set)
               (equal? set (list->fxtreeset fx= fx< '(1 2 3)))
-              (equal? '#(1 2 3) (treeset->vector set))
+              (equal? '#(1 2 3) (fxtreeset->vector set))
               (equal? (format "~s" map) (format "~s" (treemap fx= fx< '(1 . 10))))
               (equal? (format "~s" set) (format "~s" (treeset fx= fx< 1 2 3)))))))

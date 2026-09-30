@@ -57,6 +57,7 @@
   (define null-rbnode  '())
   (define null-rbnode? null?)
 
+  ;; Unique marker used for key-only set nodes, absent query results, and cursor end.
   (define *dummy-v* (vector #f))
 
   (define rbnode-key    (lambda (n) (vector-ref n 0)))
@@ -168,7 +169,6 @@
   (define rbtree-ref
     (case-lambda
       [(who rbt k)
-       (rbtree-check-key who rbt k)
        (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
          (let loop ([n (rbtree-root rbt)])
            (if (null-rbnode? n)
@@ -177,7 +177,6 @@
                      [(<? k (K n)) (loop (L n))]
                      [else  (loop (R n))]))))]
       [(who rbt k default)
-       (rbtree-check-key who rbt k)
        (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
          (let loop ([n (rbtree-root rbt)])
            (if (null-rbnode? n)
@@ -187,22 +186,8 @@
                      [else  (loop (R n))]))))]))
 
 
-  (define rbtree-check-key
-    (lambda (who tree key)
-      (when (rbtree-fixnum? tree)
-        (pcheck ([fixnum? key]) (void)))))
-
-  (define rbtree-check-value
-    (lambda (who tree value)
-      (when (and (rbtree-fixnum? tree) (not (eq? value *dummy-v*)))
-        (pcheck ([fixnum? value]) (void)))))
-
   (define rbtree-set!
     (lambda (who tree fx? key value)
-      (when fx?
-        (pcheck ([fixnum? key])
-                (unless (eq? value *dummy-v*)
-                  (pcheck ([fixnum? value]) (void)))))
       (let ([K! (if fx? FXK! K!)]
             [V! (if fx? FXV! V!)])
       (define fix!
@@ -265,7 +250,6 @@
 
   (define rbtree-delete!
     (lambda (who tree fx? key)
-      (when fx? (pcheck ([fixnum? key]) (void)))
       (let ([K! (if fx? FXK! K!)]
             [V! (if fx? FXV! V!)])
         (rbtree-delete-core! who tree key K! V!))))
@@ -380,7 +364,6 @@
 
   (define rbtree-contains?
     (lambda (who rbt k)
-      (rbtree-check-key who rbt k)
       (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
         (let loop ([n (rbtree-root rbt)])
           (if (null-rbnode? n)
@@ -405,11 +388,15 @@
     (lambda (who rbt pred)
       (let loop ([n (rbtree-root rbt)])
         (if (null-rbnode? n)
-            #f
-            (or (let ([k (K n)] [v (V n)])
-                  (if (pred k v) (cons k v) #f))
-                (loop (L n))
-                (loop (R n)))))))
+            (values *dummy-v* *dummy-v*)
+            (let ([k (K n)] [v (V n)])
+              (if (pred k v)
+                  (values k v)
+                  (call-with-values (lambda () (loop (L n)))
+                    (lambda (lk lv)
+                      (if (eq? lk *dummy-v*)
+                          (loop (R n))
+                          (values lk lv))))))))))
 
 
   (define rbtree-successor
@@ -425,13 +412,13 @@
                         [(eq? x (R xP))    (loop xP (P xP))]
                         [else              xP]))
                 (minimum r)))))
-      (rbtree-check-key who rbt k)
       (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
         (let loop ([n (rbtree-root rbt)])
           (if (null-rbnode? n)
               (errorf who "key not found: ~a" k)
               (cond [(=? k (K n)) (let ([n (successor n)])
-                                    (if n (cons (K n) (V n)) n))]
+                                    (if n (values (K n) (V n))
+                                        (values *dummy-v* *dummy-v*)))]
                     [(<? k (K n)) (loop (L n))]
                     [else  (loop (R n))]))))))
 
@@ -449,13 +436,13 @@
                         [(eq? x (L xP))    (loop xP (P xP))]
                         [else              xP]))
                 (maximum l)))))
-      (rbtree-check-key who rbt k)
       (let ([=? (rbtree-=? rbt)] [<? (rbtree-<? rbt)])
         (let loop ([n (rbtree-root rbt)])
           (if (null-rbnode? n)
               (errorf who "key not found: ~a" k)
               (cond [(=? k (K n)) (let ([n (predecessor n)])
-                                    (if n (cons (K n) (V n)) n))]
+                                    (if n (values (K n) (V n))
+                                        (values *dummy-v* *dummy-v*)))]
                     [(<? k (K n)) (loop (L n))]
                     [else  (loop (R n))]))))))
 
@@ -464,18 +451,18 @@
     (lambda (who rbt)
       (let ([root (rbtree-root rbt)])
         (if (null-rbnode? root)
-            #f
+            (values *dummy-v* *dummy-v*)
             (let ([n (minimum root)])
-              (cons (K n) (V n)))))))
+              (values (K n) (V n)))))))
 
 
   (define rbtree-max
     (lambda (who rbt)
       (let ([root (rbtree-root rbt)])
         (if (null-rbnode? root)
-            #f
+            (values *dummy-v* *dummy-v*)
             (let ([n (maximum root)])
-              (cons (K n) (V n)))))))
+              (values (K n) (V n)))))))
 
 
 
@@ -565,15 +552,17 @@
 
   #|proc:rbtree-inorder-cursor
   Return a procedure that traverses `rbt` in ascending key order. Each call
-  returns a `(key . value)` pair, or `#f` after all nodes have been visited.
+  returns `(values key value)`, or `(values *dummy-v* *dummy-v*)` after all
+  nodes have been visited.
   |#
   (define rbtree-inorder-cursor
     (lambda (rbt)
-      (pcheck ([rbtree? rbt])
-              (let ([next-node (single-step-rbtree-left rbt)])
-                (lambda ()
-                  (let ([node (next-node)])
-                    (and node (cons (K node) (V node)))))))))
+      (let ([next-node (single-step-rbtree-left rbt)])
+        (lambda ()
+          (let ([node (next-node)])
+            (if node
+                (values (K node) (V node))
+                (values *dummy-v* *dummy-v*)))))))
 
   ;; symmetric case: walk the tree from the rightmost node
   (define single-step-rbtree-right
@@ -767,30 +756,30 @@
 
   (define rbtree-map!
     (case-lambda
-      [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)])
-         (unless (null-rbnode? n)
-           (loop (L n))
-           (let ([value (proc (K n) (V n))])
-             (rbtree-check-value who rbt0 value)
-             (V! n value))
-           (loop (R n))))
+      [(who proc fx? rbt0)
+       (let ([V! (if fx? FXV! V!)])
+         (let loop ([n (rbtree-root rbt0)])
+           (unless (null-rbnode? n)
+             (loop (L n))
+             (let ([value (proc (K n) (V n))])
+               (V! n value))
+             (loop (R n)))))
        rbt0]
-      [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+      [(who proc fx? rbt0 rbt1)
+       (let ([V! (if fx? FXV! V!)]
+             [iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
          (let loop ([n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (let ([v (proc (K n0) (V n0) (K n1) (V n1))])
-               (rbtree-check-value who rbt0 v)
                (V! n0 v)
                (loop (iter0) (iter1))))))
        rbt0]
-      [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+      [(who proc fx? rbt0 . rbt*)
+       (let ([V! (if fx? FXV! V!)]
+             [iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
          (let loop ([n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (let ([v (apply proc (K n0) (V n0) (kv* n*))])
-               (rbtree-check-value who rbt0 v)
                (V! n0 v)
                (loop (iter0) (map exe iter*))))))
        rbt0]))
@@ -798,31 +787,31 @@
 
   (define rbtree-map/i!
     (case-lambda
-      [(who proc rbt0)
-       (let loop ([n (rbtree-root rbt0)] [i 0])
-         (if (null-rbnode? n)
-             i
-             (let ([i (loop (L n) i)])
-               (let ([value (proc i (K n) (V n))])
-                 (rbtree-check-value who rbt0 value)
-                 (V! n value))
-               (loop (R n) (fx1+ i)))))
+      [(who proc fx? rbt0)
+       (let ([V! (if fx? FXV! V!)])
+         (let loop ([n (rbtree-root rbt0)] [i 0])
+           (if (null-rbnode? n)
+               i
+               (let ([i (loop (L n) i)])
+                 (let ([value (proc i (K n) (V n))])
+                   (V! n value))
+                 (loop (R n) (fx1+ i))))))
        rbt0]
-      [(who proc rbt0 rbt1)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
+      [(who proc fx? rbt0 rbt1)
+       (let ([V! (if fx? FXV! V!)]
+             [iter0 (single-step-rbtree-left rbt0)] [iter1 (single-step-rbtree-left rbt1)])
          (let loop ([i 0] [n0 (iter0)] [n1 (iter1)])
            (unless (not (or n0 n1))
              (let ([v (proc i (K n0) (V n0) (K n1) (V n1))])
-               (rbtree-check-value who rbt0 v)
                (V! n0 v)
                (loop (fx1+ i) (iter0) (iter1))))))
        rbt0]
-      [(who proc rbt0 . rbt*)
-       (let ([iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
+      [(who proc fx? rbt0 . rbt*)
+       (let ([V! (if fx? FXV! V!)]
+             [iter0 (single-step-rbtree-left rbt0)] [iter* (map single-step-rbtree-left rbt*)])
          (let loop ([i 0] [n0 (iter0)] [n* (map exe iter*)])
            (unless (not (or n0 (ormap id n*)))
              (let ([v (apply proc i (K n0) (V n0) (kv* n*))])
-               (rbtree-check-value who rbt0 v)
                (V! n0 v)
                (loop (fx1+ i) (iter0) (map exe iter*))))))
        rbt0]))

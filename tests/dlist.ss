@@ -412,6 +412,12 @@
 
      )
 
+(mat dlist-search-default
+     (let ([absent (vector 'absent)])
+       (and (eq? absent (dlist-search (dlist 1 2) (lambda (x) (> x 2)) absent))
+            (= 1 (dlist-search (dlist 1 2) odd? absent))
+            (not (dlist-search (dlist 1 2) (lambda (x) (> x 2)))))))
+
 
 (mat dlist-search*
 
