@@ -1,3 +1,5 @@
+include build-options.mk
+
 SCHEME := scheme
 SCHEME_SCRIPT := $(or $(shell command -v $(SCHEME) 2>/dev/null),$(SCHEME))
 SCHEME_EXE := $(realpath $(SCHEME_SCRIPT))
@@ -15,7 +17,40 @@ LDLIBS := -luuid -ldl
 
 chezpplibs = chezpp.lib
 chezppwpos = chezpp.wpo
-chezppdeps = ${chezpplibs} ${chezppwpos}
+chezppdeps = ${chezpplibs}
+
+.PHONY: all release debug coverage prepare-build print-build-options test
+
+all: chez++
+
+release:
+	@$(MAKE) --no-print-directory VARIANT=$(if $(filter command line,$(origin VARIANT)),$(VARIANT),release) all
+debug:
+	@$(MAKE) --no-print-directory VARIANT=$(if $(filter command line,$(origin VARIANT)),$(VARIANT),debug) all
+coverage:
+	@$(MAKE) --no-print-directory VARIANT=$(if $(filter command line,$(origin VARIANT)),$(VARIANT),coverage) all
+
+print-build-options:
+	$(print-build-options)
+
+prepare-build:
+	$(call print-build-options)
+	@if [ -f "$(BUILD_OPTIONS_SIGNATURE_FILE)" ]; then \
+		old=$$(cat "$(BUILD_OPTIONS_SIGNATURE_FILE)"); \
+		if [ "$$old" != "$(BUILD_OPTIONS_SIGNATURE)" ]; then \
+			printf '%s\n' 'build options changed; running make clean'; \
+			$(MAKE) --no-print-directory clean; \
+		fi; \
+	else \
+		if [ -e chezpp.lib ] || [ -e libchezpp.so ] || find chezpp tests -name '*.so' -print -quit | grep -q .; then \
+			printf '%s\n' 'build options signature missing; running make clean'; \
+			$(MAKE) --no-print-directory clean; \
+		fi; \
+	fi
+
+test: chez++
+	@$(MAKE) --no-print-directory -C tests test \
+		VARIANT='$(VARIANT)' GENCOV='$(GENCOV)' $(BUILD_OPTION_FORWARD_VARS)
 
 define generate_chezpp_launcher
 	@rm -f $(1)
@@ -27,9 +62,6 @@ define generate_chezpp_launcher
 	      chez++.in > $(1)
 	@chmod +x $(1)
 endef
-
-.PHONY: all
-all: chez++
 
 .PHONY: run
 run: chez++
@@ -61,20 +93,25 @@ check-scheme-header:
 	  exit 1; \
 	fi
 
-libchezpp.so: check-scheme-header
+libchezpp.so: ${SRCS_C} | check-scheme-header prepare-build
 	$(CC) $(CFLAGS) -o $@ $(SRCS_C) $(LDLIBS)
 
-${chezppdeps}: chezpp.ss ${SRCS_CHEZPP} libchezpp.so
-	@echo '(optimize-level 1)' \
-	      '(compile-imported-libraries #t) (generate-inspector-information #t) (generate-procedure-source-information #t)'\
-	      '(generate-wpo-files #t)' \
-	      '(time (compile-file "chezpp.ss"))' \
-	      '(unless (null? (compile-whole-library "chezpp.wpo" "chezpp.lib"))' \
-	      '  (errorf "chezpp.lib" "dependency has to be null"))' \
+chezpp.lib: Makefile build-options.mk chezpp.ss ${SRCS_CHEZPP} libchezpp.so | prepare-build
+	@printf '%s\n' '$(CHEZ_COMPILER_FORMS) (compile-imported-libraries #t)' \
+	      '(define old-handler (compile-library-handler))' \
+	      '(define (compile-with-options thunk)' \
+	      '  (parameterize ($(CHEZ_BUILD_COMPILER_FORMS)) (thunk)))' \
+	      '(parameterize ([compile-library-handler' \
+	      '  (lambda args (compile-with-options (lambda () (apply old-handler args))))])' \
+	      '  $(CHEZ_LIBRARY_BUILD_FORMS))' \
 	      | ${SCHEME} --script /dev/stdin
 	@rm -f chezpp.so
+	@if [ "$(wpo)" != t ]; then rm -f chezpp.wpo; fi
+	@tmp="$(BUILD_OPTIONS_SIGNATURE_FILE).tmp"; \
+	printf '%s\n' '$(BUILD_OPTIONS_SIGNATURE)' > "$$tmp"; \
+	mv "$$tmp" "$(BUILD_OPTIONS_SIGNATURE_FILE)"
 
-chez++: ${chezppdeps} chez++.in Makefile
+chez++: prepare-build ${chezppdeps} chez++.in Makefile
 	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib),)
 
 .PHONY: chez++.exe
@@ -84,7 +121,7 @@ installdeps: ${chezppdeps}
 	install -d $(PREFIX)/bin $(PREFIX)/lib
 	install libchezpp.so  $(PREFIX)/lib
 	install ${chezpplibs} $(PREFIX)/lib
-	install ${chezppwpos} $(PREFIX)/lib
+	@if [ -f $(chezppwpos) ]; then install $(chezppwpos) $(PREFIX)/lib; fi
 
 .PHONY: install
 install: chez++ installdeps
@@ -93,10 +130,13 @@ install: chez++ installdeps
 
 .PHONY: clean
 clean:
-	@rm -f chezpp.lib chezpp.wpo chez++ chez++.ss libchezpp.so
+	@rm -f chezpp.lib chezpp.wpo chez++ chez++.ss libchezpp.so \
+		"$(BUILD_OPTIONS_SIGNATURE_FILE)" "$(BUILD_OPTIONS_SIGNATURE_FILE).tmp"
 	@find chezpp/ -name '*.so'  -delete
 	@find tests/  -name '*.so'  -delete
 	@find chezpp/ -name '*.wpo' -delete
+	@find chezpp/ tests/ \( -name '*.covin' -o -name '*.covout' \) -delete
+	@rm -f *.covin *.covout
 
 .PHONY: dump
 dump:

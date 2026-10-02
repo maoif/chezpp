@@ -1,0 +1,21 @@
+(load "mat.so")
+
+(define args (command-line-arguments))
+(unless (>= (length args) 3)
+  (errorf 'coverage-report "expected input count, output path, and coverage files"))
+
+(define covin-count (string->number (car args)))
+(define covout (cadr args))
+(define files (cddr args))
+(define covin* (let loop ([n covin-count] [files files] [result '()])
+                 (if (= n 0) (reverse result)
+                     (loop (sub1 n) (cdr files) (cons (car files) result)))))
+(define covout* (list-tail files covin-count))
+(combine-coverage-files covout covout*)
+(for-each
+  (lambda (covin)
+    (let ([total (source-table-size (load-coverage-files covin))])
+      (if (= total 0)
+          (printf "~a: covered 0 of 0 source expressions (0%)~n" covin)
+          (coverage-percent covout covin))))
+  covin*)
