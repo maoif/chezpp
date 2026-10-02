@@ -28,6 +28,7 @@
                   (chezpp io)
                   (chezpp file)
                   (chezpp path)
+                  (chezpp glob)
                   (chezpp navigator)
                   (chezpp system)
 

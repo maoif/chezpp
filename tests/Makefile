@@ -10,7 +10,7 @@ NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss n
 NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss \
                     net-lws-fixture.ss
 
-SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss navigator.ss \
+SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss glob.ss navigator.ss \
              list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
              hashset.ss treemap.ss treeset.ss rbtree-specialized.ss \
              bittree.ss bitvec.ss dset.ss \
