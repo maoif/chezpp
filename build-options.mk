@@ -42,6 +42,7 @@ _variant_o := 0
 _variant_d := 3
 endif
 ifeq ($(VARIANT),coverage)
+_variant_o := 0
 _variant_c := t
 endif
 
@@ -57,7 +58,7 @@ _release_signature := VARIANT=release o=3 d=0 cl= i=t cp0= fc= xf= xl= \
 _debug_signature := VARIANT=debug o=0 d=3 cl= i=t cp0= fc= xf= xl= \
   p= xp= bp= xbp= c=f loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
   pdhtml= gac= gic= pps= psi=t wpo=t
-_coverage_signature := VARIANT=coverage o=3 d=0 cl= i=t cp0= fc= xf= xl= \
+_coverage_signature := VARIANT=coverage o=0 d=0 cl= i=t cp0= fc= xf= xl= \
   p= xp= bp= xbp= c=t loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
   pdhtml= gac= gic= pps= psi=t wpo=t
 
