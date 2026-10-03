@@ -2,16 +2,28 @@
 
 ROOT_DIR := ..
 
-ifeq ($(strip $(BUILD_VARIANT)),)
-$(error tests/Makefile must be invoked by the root Makefile with resolved build options)
+ROOT_OPTIONS_FILE := $(ROOT_DIR)/.chezpp-build-options
+ifeq ($(wildcard $(ROOT_OPTIONS_FILE)),)
+$(error root build options are missing; run make from the repository root first)
 endif
+
+ROOT_OPTIONS := $(shell cat "$(ROOT_OPTIONS_FILE)")
+define root_option
+$(strip $(patsubst $(1)=%,%,$(filter $(1)=%,$(ROOT_OPTIONS))))
+endef
+
+BUILD_VARIANT := $(call root_option,VARIANT)
+BUILD_o := $(call root_option,o)
+BUILD_d := $(call root_option,d)
+BUILD_c := $(call root_option,c)
+BUILD_wpo := $(call root_option,wpo)
 
 .PHONY: prepare-chezpp
 
 prepare-chezpp:
 	@$(MAKE) --no-print-directory -C $(ROOT_DIR) chez++ \
-		VARIANT='$(BUILD_VARIANT)' \
-		o='$(BUILD_o)' d='$(BUILD_d)' i='t' psi='t' c='$(if $(filter coverage,$(BUILD_VARIANT)),t,f)' wpo='t'
+		VARIANT='$(BUILD_VARIANT)' o='$(BUILD_o)' d='$(BUILD_d)' \
+		i='t' psi='t' c='$(BUILD_c)' wpo='$(BUILD_wpo)'
 
 BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
                       loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
