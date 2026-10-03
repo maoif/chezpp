@@ -50,7 +50,9 @@ prepare-build:
 
 test: chez++
 	@$(MAKE) --no-print-directory -C tests test \
-		VARIANT='$(VARIANT)' GENCOV='$(GENCOV)' $(BUILD_OPTION_FORWARD_VARS)
+		BUILD_VARIANT='$(VARIANT)' \
+		$(foreach option,$(BUILD_OPTION_NAMES),BUILD_$(option)='$($(option))') \
+		TEST='$(TEST)'
 
 define generate_chezpp_launcher
 	@rm -f $(1)

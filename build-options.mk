@@ -5,7 +5,7 @@ BUILD_OPTIONS_SIGNATURE_FILE ?= $(BUILD_ROOT)/.chezpp-build-options
 
 BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
                       loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
-BUILD_SIGNATURE_NAMES := VARIANT GENCOV $(BUILD_OPTION_NAMES)
+BUILD_SIGNATURE_NAMES := VARIANT $(BUILD_OPTION_NAMES)
 
 VARIANT ?= release
 ifeq ($(filter $(VARIANT),release debug coverage),)
@@ -36,7 +36,6 @@ _variant_gic :=
 _variant_pps :=
 _variant_psi := t
 _variant_wpo := t
-_variant_gencov :=
 
 ifeq ($(VARIANT),debug)
 _variant_o := 0
@@ -44,24 +43,21 @@ _variant_d := 3
 endif
 ifeq ($(VARIANT),coverage)
 _variant_c := t
-_variant_gencov := 1
 endif
 
 # Command-line and environment values remain authoritative over profile defaults.
 $(foreach option,$(BUILD_OPTION_NAMES),$(eval $(option) ?= $(_variant_$(option))))
-GENCOV ?= $(_variant_gencov)
-
 BUILD_TEST_COVERAGE := f
 BUILD_TEST_OPTIMIZE_LEVEL ?= $(if $(filter 0,$(o)),0,2)
 BUILD_OPTIONS_SIGNATURE := $(foreach option,$(BUILD_SIGNATURE_NAMES),$(option)=$($(option)))
 
-_release_signature := VARIANT=release GENCOV= o=3 d=0 cl= i=t cp0= fc= xf= xl= \
+_release_signature := VARIANT=release o=3 d=0 cl= i=t cp0= fc= xf= xl= \
   p= xp= bp= xbp= c=f loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
   pdhtml= gac= gic= pps= psi=t wpo=t
-_debug_signature := VARIANT=debug GENCOV= o=0 d=3 cl= i=t cp0= fc= xf= xl= \
+_debug_signature := VARIANT=debug o=0 d=3 cl= i=t cp0= fc= xf= xl= \
   p= xp= bp= xbp= c=f loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
   pdhtml= gac= gic= pps= psi=t wpo=t
-_coverage_signature := VARIANT=coverage GENCOV=1 o=3 d=0 cl= i=t cp0= fc= xf= xl= \
+_coverage_signature := VARIANT=coverage o=3 d=0 cl= i=t cp0= fc= xf= xl= \
   p= xp= bp= xbp= c=t loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
   pdhtml= gac= gic= pps= psi=t wpo=t
 
@@ -126,5 +122,3 @@ CHEZ_BUILD_COMPILER_FORMS := $(subst (generate-wpo-files $(_scheme_false)),,$(CH
 endif
 CHEZ_LIBRARY_BUILD_FORMS := (compile-with-options (lambda () (time (compile-file "chezpp.ss")))) \
                             $(CHEZ_WHOLE_LIBRARY_FORM)
-
-BUILD_OPTION_FORWARD_VARS := $(foreach option,$(BUILD_OPTION_NAMES),$(option)=$($(option)))

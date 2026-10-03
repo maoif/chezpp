@@ -1,18 +1,31 @@
 .ONESHELL:
 
-include ../build-options.mk
-
 ROOT_DIR := ..
-COVIN_FILES := $(shell find ../chezpp -type f -name '*.covin' -print)
 
-.PHONY: print-build-options prepare-chezpp
+ifeq ($(strip $(BUILD_VARIANT)),)
+$(error tests/Makefile must be invoked by the root Makefile with resolved build options)
+endif
 
-print-build-options:
-	$(print-build-options)
+.PHONY: prepare-chezpp
 
 prepare-chezpp:
 	@$(MAKE) --no-print-directory -C $(ROOT_DIR) chez++ \
-		VARIANT='$(VARIANT)' GENCOV='$(GENCOV)' $(BUILD_OPTION_FORWARD_VARS)
+		VARIANT='$(BUILD_VARIANT)' \
+		o='$(BUILD_o)' d='$(BUILD_d)' i='t' psi='t' c='$(if $(filter coverage,$(BUILD_VARIANT)),t,f)' wpo='t'
+
+BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
+                      loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
+VARIANT := $(BUILD_VARIANT)
+o := $(BUILD_o)
+d := $(BUILD_d)
+BUILD_TEST_OPTIMIZE_LEVEL := $(if $(filter 0,$(o)),0,2)
+_scheme_true := $(shell printf '\043t')
+_scheme_false := $(shell printf '\043f')
+CHEZ_TEST_COMPILER_FORMS := (optimize-level $(BUILD_TEST_OPTIMIZE_LEVEL)) (debug-level $(d)) \
+                            (generate-inspector-information $(_scheme_true)) \
+                            (generate-procedure-source-information $(_scheme_true)) \
+                            (generate-covin-files $(_scheme_false)) (generate-wpo-files $(_scheme_false))
+COVERAGE_ENABLED := $(if $(filter coverage,$(BUILD_VARIANT)),1,)
 
 NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss net-lws-reactor.ss \
              net-lws-http2.ss \
@@ -88,7 +101,7 @@ test-all: prepare-chezpp mat.so $(OBJS_TEST)
 	  stdout="$$item.stdout"; stderr="$$item.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$item =="; \
-	  if [ -n "$(GENCOV)" ]; then \
+	  if [ -n "$(COVERAGE_ENABLED)" ]; then \
 	    covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
 	    ../chez++ --script coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
 	  else \
@@ -100,7 +113,7 @@ test-all: prepare-chezpp mat.so $(OBJS_TEST)
 	  if [ $$code -ne 0 ]; then status=1; fi; \
 	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
 	 done; \
-	 if [ -n "$(GENCOV)" ]; then \
+	 if [ -n "$(COVERAGE_ENABLED)" ]; then \
 	   covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
 	   covout_files=$$(find . -maxdepth 1 -type f -name '*.covout' -print); \
 	   set -- $$covin_files; covin_count=$$#; \
@@ -133,7 +146,7 @@ test-some: prepare-chezpp mat.so $(TEST_OBJS)
 	  stdout="$$base.stdout"; stderr="$$base.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$base.so =="; \
-	  if [ -n "$(GENCOV)" ]; then \
+	  if [ -n "$(COVERAGE_ENABLED)" ]; then \
 	    covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
 	    ../chez++ --script coverage-init.ss "$$base.so" "$$base.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
 	  else \
@@ -145,7 +158,7 @@ test-some: prepare-chezpp mat.so $(TEST_OBJS)
 	  if [ $$code -ne 0 ]; then status=1; fi; \
 	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
 	 done; \
-	 if [ -n "$(GENCOV)" ]; then \
+	 if [ -n "$(COVERAGE_ENABLED)" ]; then \
 	   covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
 	   covout_files=$$(find . -maxdepth 1 -type f -name '*.covout' -print); \
 	   set -- $$covin_files; covin_count=$$#; \
