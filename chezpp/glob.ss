@@ -1,8 +1,11 @@
 #!chezscheme
-
 (library (chezpp glob)
   (export make-glob glob? glob-match? glob glob* glob->iter)
-  (import (chezpp chez) (chezpp path) (chezpp regex) (chezpp utils) (chezpp list)
+  (import (chezpp chez)
+          (chezpp path)
+          (chezpp regex)
+          (chezpp utils)
+          (chezpp list)
           (chezpp iter))
 
   (define-record-type ($glob %make-glob %glob?)
