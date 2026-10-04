@@ -44,6 +44,8 @@ endif
 ifeq ($(VARIANT),coverage)
 _variant_o := 0
 _variant_c := t
+_variant_psi := t
+_variant_p := t
 endif
 
 # Command-line and environment values remain authoritative over profile defaults.
