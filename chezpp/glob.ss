@@ -312,11 +312,21 @@
             (let ([tasks stack] [failure #f])
               (set! stack '())
               (for-each (lambda (task)
-                          (when (eq? (vector-ref task 0) 'scan)
+                            (when (eq? (task-kind task) 'scan)
                             (guard (condition
                                     [else (unless failure (set! failure condition))])
                               (fs-close-directory (vector-ref task 5))))) tasks)
               (when failure (raise failure)))))
+        ;; Tasks are six/seven-slot vectors kept private to this iterator. These
+        ;; accessors make the two task layouts explicit at their use sites.
+        (define task-kind (lambda (task) (vector-ref task 0)))
+        (define task-logical (lambda (task) (vector-ref task 1)))
+        (define task-physical (lambda (task) (vector-ref task 2)))
+        (define task-components (lambda (task) (vector-ref task 3)))
+        (define task-ancestors (lambda (task) (vector-ref task 4)))
+        (define task-separator (lambda (task) (vector-ref task 5)))
+        (define scan-directory (lambda (task) (vector-ref task 5)))
+        (define scan-separator (lambda (task) (vector-ref task 6)))
         (define begin-branch
           (lambda (branch)
             (let* ([parsed (branch-path branch)]
@@ -383,14 +393,14 @@
                           (let ([branch (car branches)])
                             (set! branches (cdr branches)) (begin-branch branch) (loop)))]
                      [else
-                      (let* ([task (car stack)] [kind (vector-ref task 0)]
-                             [p (vector-ref task 1)] [physical (vector-ref task 2)]
-                             [cs (vector-ref task 3)]
-                             [ancestors (vector-ref task 4)])
+                        (let* ([task (car stack)] [kind (task-kind task)]
+                               [p (task-logical task)] [physical (task-physical task)]
+                               [cs (task-components task)]
+                               [ancestors (task-ancestors task)])
                         (case kind
                           [(node)
                            (set! stack (cdr stack))
-                           (let ([separator (vector-ref task 5)] [name ($physical physical)])
+                           (let ([separator (task-separator task)] [name ($physical physical)])
                              (cond [(null? cs)
                                     (let* ([rendered (path-render p separator)]
                                            [result (if (string=? rendered "") "." rendered)])
@@ -422,10 +432,10 @@
                                     (loop)]
                                    [else (open-scan p physical cs ancestors separator #f) (loop)]))]
                           [(scan)
-                           (let* ([physical (vector-ref task 2)]
-                                  [cs (vector-ref task 3)]
-                                  [directory (vector-ref task 5)]
-                                  [separator (vector-ref task 6)]
+                           (let* ([physical (task-physical task)]
+                                  [cs (task-components task)]
+                                  [directory (scan-directory task)]
+                                  [separator (scan-separator task)]
                                   [entry (fs-read-directory directory)])
                              (cond [(not entry)
                                     (fs-close-directory directory)
