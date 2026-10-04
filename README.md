@@ -1,110 +1,112 @@
-# chezpp: ChezScheme Enhancements (Work-in-Progress)
+# chezpp
 
-Functionalities:
+Chezpp is a collection of ChezScheme libraries and a Make-based build that produces the
+`chez++` launcher. The public umbrella library is `(chezpp)`; individual libraries can be
+imported when a smaller dependency set is useful.
 
-- adt: algebraic datatype, plus simpler record syntax
-- comprehension: powerful comprehensions and reductions for list, vector, hashtable, etc., in for-loop style
-- control: various control features
-- file: rich file and IO utilites, filesystem watcher
-- irregex: regex support
-- iter: iterator support (eliminating intermediate data structures when processing data through a series of procedures)
-- transducer: source-independent, composable algorithmic transformations
-- list: more list operations
-- match: powerful pattern matching
-- net: sockets, DNS, TLS, HTTP/HTTPS, FTP/FTPS, SSH/SFTP/SCP, WebSocket, and gRPC
-- os: OS utilities
-- string: more string operations
-- utils: miscellaneous useful procedures like type checking and random data generator
-- vector: more vector/fxvector/flvector operations
-- data structures:
-  - array: dynamic vector
-  - dlist: doubly-linked list
-  - hashset: unordered set using hash function
-  - treemap: ordered map based on reb-black tree
-  - treeset: ordered set based on reb-black tree
-  - stack: Last-In-First-Out container
-  - queue: First-In-First-Out container
-  - heap: binary heap/priority queue
-- parser combinators:
-  - support both textual and binary parsers
-  - context-sensitive parsing using monadic `<bind>`
-  - simple csv, json5, xml parsers
+## ✨ Features
 
-# Installation and Usage
+- **Language tools:** algebraic data types and records, pattern matching, comprehensions,
+  `for` loops, iterators, transducers, data navigator, control helpers, and list, string, and vector utilities.
+- **Collections:** arrays, bit vectors, bit trees, doubly linked lists, sets, heaps, queues,
+  stacks, and ordered maps and sets.
+- **Parsing and formats:** parser combinators, CSV, JSON5, TOML, XML, Scheme, ELF, WebAssembly,
+  and Protocol Buffers.
+- **Files and system APIs:** file and port helpers, paths, globbing, processes,
+  signals, filesystem and user information, UUIDs, hashes, digests, and optional-library probes.
+- **Networking:** sockets, IP and DNS helpers, URIs, TLS, HTTP/HTTPS, FTP/FTPS, SSH, SFTP, SCP,
+  WebSocket, and gRPC APIs.
+- **Cryptography:** random data, hashes, encodings, MACs, KDFs, AEAD, ciphers, keys, signatures,
+  key agreement, passwords, envelopes, and certificates.
+- **Application support:** command-line parsing, logging, terminal rendering, benchmarking, and
+  test helpers.
+- **Concurrency:** threads, thread pools, atomic boxes, spinlocks, futures, and fiber libraries.
+  Fibers and fiber-aware network operations are available as `(chezpp concurrency fiber)` and
+  `(chezpp concurrency fiber-net)`.
+
+Some networking, cryptography, hashing, and compression features use native libraries loaded at
+runtime. `(chezpp optional-library)` reports which optional libraries are available.
+
+## 🔧 Build
 
 Build requirements:
 
-- gcc/clang
-- make
-- ChezScheme
+- ChezScheme and its matching development headers
+- GNU Make
+- GCC or Clang
+- `libuuid` development headers and library
 
-Build:
+Build the library and launcher:
 
-```
+```sh
 git clone --depth=1 https://github.com/maoif/chezpp.git
 cd chezpp
-make
+make clean && make
 ```
 
-`gcc` is used by default. To use clang, set the `CC` variable:
+Use a different compiler or ChezScheme executable when needed:
 
-```
+```sh
 make CC=clang
+make SCHEME=/path/to/scheme
 ```
 
-Run:
+The build checks that the ChezScheme executable and development headers have the same version.
 
-```
+## ▶️ Use
+
+Start a Chezpp REPL:
+
+```sh
 make run
 ```
 
-Or launch `chez++` directly:
+The generated `chez++` launcher also runs scripts:
 
-```
-./chez++
-```
-
-
-## Customize `scheme` executable path
-
-By default, the build system assumes ChezScheme is installed and the `scheme` command is available.
-If it is not the case, you have to provide the path to the `scheme` command when building chezpp:
-
-```
-make SCHEME=path/to/scheme/executable
+```sh
+./chez++ --script path/to/program.ss
 ```
 
+For example:
 
-## Install
+```scheme
+(import (chezpp))
 
-Other than running the `chez++` command directly after `make`, you can install chezpp to a given location
-by setting the `PREFIX` variable:
-
-```
-make install PREFIX=$PWD/install
-```
-
-The command above installs chezpp files under `install/`.
-You can run `chez++` by invoking `$PWD/install/bin/chez++`.
-The path given *must* be absolute.
-
-
-
-# Test
-
-To test chezpp, make sure the library is already built, then `cd tests`.
-
-Run test of all libraries:
-
-```
-make test-all
+(displayln
+  (into 'list
+        (tmap string-upcase)
+        '("chez" "scheme")))
 ```
 
-Run test of some libraries by specifying the file name under `tests/`:
+This prints:
 
+```text
+(CHEZ SCHEME)
 ```
-make test-some TEST=treemap
 
-# alternatively, you can specify more libraries
-make test-some TEST='treemap treeset'
+## 📦 Install
+
+Install the compiled library and launcher under an absolute prefix:
+
+```sh
+make install PREFIX=/absolute/path/to/install
 ```
+
+The launcher is installed at `<prefix>/bin/chez++`.
+
+## 🧪 Test
+
+Build first, then run all test suites:
+
+```sh
+make clean && make
+make -C tests test-all
+```
+
+Run selected suites by their test names:
+
+```sh
+make -C tests test-some TEST='array vector cli rich'
+make -C tests test-some TEST='net-http net-lws-http2 net-lws-server'
+```
+
