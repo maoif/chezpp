@@ -2129,8 +2129,21 @@
   (define vmap!/i vector-map!/i)
   ;;(define vsort   vector-sort)
   ;;(define vsort!  vector-sort!)
-  ;; TODO add wrapper check
-  (define vfor-each   vector-for-each)
+  #|proc:vfor-each
+  Apply `proc` to corresponding elements of one or more vectors.
+  The vectors must have equal lengths; return an unspecified value.
+  |#
+  (define vfor-each
+    (case-lambda
+      [(proc vec0)
+       (pcheck ([procedure? proc] [vector? vec0])
+               (vector-for-each proc vec0))]
+      [(proc vec0 vec1)
+       (pcheck ([procedure? proc] [vector? vec0] [vector? vec1])
+               (check-length 'vfor-each vec0 vec1)
+               (vector-for-each proc vec0 vec1))]
+      [(proc vec0 . vecs)
+       (apply vector-for-each proc vec0 vecs)]))
   (define vfor-each/i vector-for-each/i)
 
   (define fxvmap    fxvector-map)
