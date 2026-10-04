@@ -1,5 +1,11 @@
 (import (chezpp) (chezpp glob))
 
+(mat glob-default-flavor
+     ;; The one-argument API follows the host OS path syntax.
+     (if (eq? (system-platform) 'windows)
+         (glob-match? (make-glob "src\\*.ss") "src\\file.ss")
+         (glob-match? (make-glob "src/*.ss") "src/file.ss")))
+
 (mat glob-literals-and-wildcards
      (glob-match? (make-glob "foo.txt") "foo.txt")
      (not (glob-match? (make-glob "foo.txt") "bar.txt"))

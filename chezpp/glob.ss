@@ -7,16 +7,35 @@
           (chezpp iter)
           (chezpp regex)
           (chezpp utils)
-          (chezpp list))
+          (chezpp list)
+          (chezpp system platform))
 
+  #|record:$glob
+  An opaque compiled glob. `flavor` is the path flavor used to parse and match
+  every branch; `patterns` is the immutable ordered list of compiled branches.
+  |#
   (define-record-type ($glob %make-glob %glob?)
     (opaque #t) (sealed #t)
     (fields (immutable flavor glob-flavor) (immutable patterns glob-patterns)))
+
+  #|record:$component
+  An internal path-component matcher. `regex` matches one complete component;
+  `literal` is the original text when the component has no wildcard syntax.
+  |#
   (define-record-type ($component %component component?)
     (fields (immutable regex component-regex) (immutable literal component-literal)))
+
+  #|record:$branch
+  An internal expanded pattern branch. `path` stores its parsed root and
+  components; `components` stores matchers; `separator` preserves output spelling.
+  |#
   (define-record-type ($branch %branch branch?)
     (fields (immutable path branch-path) (immutable components branch-components)
             (immutable separator branch-separator)))
+
+  ;; Path syntax follows the host OS when callers omit an explicit flavor.
+  (define $default-flavor
+    (if (eq? (system-platform) 'windows) 'windows 'unix))
   (define $error (lambda (message . args) (apply errorf 'make-glob message args)))
   (define $prefix?
     (lambda (prefix s)
@@ -235,13 +254,14 @@
 
   #|proc:make-glob
   Compile string `pattern` and return an immutable, opaque glob object.
-  Optional `flavor` is `'unix` (the default) or `'windows`. Brace alternatives
+  Optional `flavor` follows the host OS: `'windows` on Windows, `'unix`
+  elsewhere. Brace alternatives
   form an ordered union; numeric ranges and a leading current-user tilde expand
   before component compilation. Malformed syntax raises an error.
   |#
   (define make-glob
     (case-lambda
-      [(pattern) (make-glob 'unix pattern)]
+      [(pattern) (make-glob $default-flavor pattern)]
       [(flavor pattern)
        (pcheck ([path-flavor? flavor] [string? pattern])
                (let ([separator (if (or (eq? flavor 'unix)
@@ -269,8 +289,20 @@
               [(char=? (string-ref s 0) #\~) (string-append (current-directory) "/" s)]
               [else s]))))
 
-  ;; Node tasks hold a candidate and remaining components. Scan tasks hold one
-  ;; live stream. The stack is the only traversal state; no subtree is collected.
+  #|proc:$expansion-iterator
+  Build the lazy traversal iterator shared by `glob`, `glob*`, and `glob->iter`.
+  `compiled` supplies expanded branches; `follow-link?` controls symlink descent;
+  `include-directories?` controls whether matching directories are yielded.
+
+  The iterator's `stack` contains task vectors. A `node` task is
+  `(kind logical-path physical-path remaining-components ancestors separator)`:
+  `logical-path` is the spelling returned to the caller, `physical-path` is the
+  case-correct path used for filesystem calls, `remaining-components` is the
+  matcher suffix, `ancestors` records followed directory identities, and
+  `separator` preserves the branch's slash style. A `scan` task replaces the
+  physical path with an open directory stream and reads one entry per advance.
+  Tasks are pushed and popped depth-first, so no complete subtree is collected.
+  |#
   (define $expansion-iterator
     (lambda (compiled follow-link? include-directories?)
       (let ([branches (glob-patterns compiled)] [stack '()]
@@ -444,14 +476,15 @@
   |#
   (define glob
     (case-lambda
-      [(pattern) (glob 'unix pattern)]
+      [(pattern) (glob $default-flavor pattern)]
       [(flavor pattern)
        (pcheck ([path-flavor? flavor] [string? pattern])
                ($glob-expand flavor pattern #f #f 'empty))]))
 
   #|proc:glob*
   Expand string `pattern` and return sorted, duplicate-free matching path
-  strings. Optional `flavor` is `'unix` (the default) or `'windows`.
+  strings. Optional `flavor` follows the host OS: `'windows` on Windows, `'unix`
+  elsewhere.
   Boolean `follow-link?` permits descending into symlinked directories with
   cycle detection. Boolean `include-directories?` includes matching directories;
   files and symlinks are always eligible. `unmatched` is `'empty` to return `()`
@@ -460,7 +493,7 @@
   (define glob*
     (case-lambda
       [(pattern follow-link? include-directories? unmatched)
-       (glob* 'unix pattern follow-link? include-directories? unmatched)]
+       (glob* $default-flavor pattern follow-link? include-directories? unmatched)]
       [(flavor pattern follow-link? include-directories? unmatched)
        (pcheck ([path-flavor? flavor] [string? pattern]
                 [boolean? follow-link? include-directories?]
@@ -469,7 +502,8 @@
 
   #|proc:glob->iter
   Expand string `pattern` lazily and return an iterator of matching path strings
-  in filesystem order. Optional `flavor` is `'unix` (the default) or `'windows`.
+  in filesystem order. Optional `flavor` follows the host OS: `'windows` on
+  Windows, `'unix` elsewhere.
   The iterator uses the default `glob` policies and yields `iter-end` when
   exhausted. Streams open on advancement and close on exhaustion, reset,
   finalization, or error. `iter-reset!` begins a new pass over the current tree;
@@ -477,7 +511,7 @@
   |#
   (define glob->iter
     (case-lambda
-      [(pattern) (glob->iter 'unix pattern)]
+      [(pattern) (glob->iter $default-flavor pattern)]
       [(flavor pattern)
        (pcheck ([path-flavor? flavor] [string? pattern])
                ($expansion-iterator (make-glob flavor pattern) #f #f))]))
