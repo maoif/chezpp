@@ -1,5 +1,44 @@
 .ONESHELL:
 
+ROOT_DIR := ..
+
+ROOT_OPTIONS_FILE := $(ROOT_DIR)/.chezpp-build-options
+ifeq ($(wildcard $(ROOT_OPTIONS_FILE)),)
+$(error root build options are missing; run make from the repository root first)
+endif
+
+ROOT_OPTIONS := $(shell cat "$(ROOT_OPTIONS_FILE)")
+define root_option
+$(strip $(patsubst $(1)=%,%,$(filter $(1)=%,$(ROOT_OPTIONS))))
+endef
+
+BUILD_VARIANT := $(call root_option,VARIANT)
+BUILD_o := $(call root_option,o)
+BUILD_d := $(call root_option,d)
+BUILD_c := $(call root_option,c)
+BUILD_wpo := $(call root_option,wpo)
+
+.PHONY: prepare-chezpp
+
+prepare-chezpp:
+	@$(MAKE) --no-print-directory -C $(ROOT_DIR) chez++ \
+		VARIANT='$(BUILD_VARIANT)' o='$(BUILD_o)' d='$(BUILD_d)' \
+		i='t' psi='t' c='$(BUILD_c)' wpo='$(BUILD_wpo)'
+
+BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
+                      loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
+VARIANT := $(BUILD_VARIANT)
+o := $(BUILD_o)
+d := $(BUILD_d)
+BUILD_TEST_OPTIMIZE_LEVEL := $(if $(filter 0,$(o)),0,2)
+_scheme_true := $(shell printf '\043t')
+_scheme_false := $(shell printf '\043f')
+CHEZ_TEST_COMPILER_FORMS := (optimize-level $(BUILD_TEST_OPTIMIZE_LEVEL)) (debug-level $(d)) \
+                            (generate-inspector-information $(_scheme_true)) \
+                            (generate-procedure-source-information $(_scheme_true)) \
+                            (generate-covin-files $(_scheme_false)) (generate-wpo-files $(_scheme_false))
+COVERAGE_ENABLED := $(if $(filter coverage,$(BUILD_VARIANT)),1,)
+
 NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss net-lws-reactor.ss \
              net-lws-http2.ss \
              net-lws-server.ss \
@@ -36,29 +75,29 @@ net-lws-http2.so net-http-fiber.so: lws-http2-fixture
 .PHONY: test
 test: test-all
 
-mat.so: mat.sls
+mat.so: mat.sls | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' "== compiling mat.sls =="; \
-	echo '(optimize-level 3)(compile-file "mat.sls")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	printf '%s\n' '$(CHEZ_TEST_COMPILER_FORMS) (compile-file "mat.sls")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
-$(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++
+$(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++ | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
-	echo '(optimize-level 2)(load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	printf '%s\n' '$(CHEZ_TEST_COMPILER_FORMS) (load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
 .PHONY: test-all
-test-all: mat.so $(OBJS_TEST)
+test-all: prepare-chezpp mat.so $(OBJS_TEST)
 	@cleanup() { \
-	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
+	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr *.covout coverage.covout; \
 	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
 	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
 	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
@@ -74,19 +113,31 @@ test-all: mat.so $(OBJS_TEST)
 	  stdout="$$item.stdout"; stderr="$$item.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$item =="; \
-	  echo '(load "mat.so")(load "'"$$item"'")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	  if [ -n "$(COVERAGE_ENABLED)" ]; then \
+	    covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
+	    ../chez++ --script coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
+	  else \
+	    echo '(load "mat.so")(load "'"$$item"'")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	  fi; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	  if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	  if [ $$code -ne 0 ]; then status=1; fi; \
 	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
-	done; \
-	exit $$status
+	 done; \
+	 if [ -n "$(COVERAGE_ENABLED)" ]; then \
+	   covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
+	   covout_files=$$(find . -maxdepth 1 -type f -name '*.covout' -print); \
+	   set -- $$covin_files; covin_count=$$#; \
+	   ../chez++ --script coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
+	   report_code=$$?; if [ $$report_code -ne 0 ]; then status=1; fi; \
+	 fi; \
+	 exit $$status
 
 .PHONY: test-some
-test-some: mat.so $(TEST_OBJS)
+test-some: prepare-chezpp mat.so $(TEST_OBJS)
 	@cleanup() { \
-	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
+	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr *.covout coverage.covout; \
 	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
 	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
 	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
@@ -107,17 +158,29 @@ test-some: mat.so $(TEST_OBJS)
 	  stdout="$$base.stdout"; stderr="$$base.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$base.so =="; \
-	  echo '(load "mat.so")(load "'"$$base"'.so")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	  if [ -n "$(COVERAGE_ENABLED)" ]; then \
+	    covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
+	    ../chez++ --script coverage-init.ss "$$base.so" "$$base.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
+	  else \
+	    echo '(load "mat.so")(load "'"$$base"'.so")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	  fi; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	  if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	  if [ $$code -ne 0 ]; then status=1; fi; \
 	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
-	done; \
-	exit $$status
+	 done; \
+	 if [ -n "$(COVERAGE_ENABLED)" ]; then \
+	   covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
+	   covout_files=$$(find . -maxdepth 1 -type f -name '*.covout' -print); \
+	   set -- $$covin_files; covin_count=$$#; \
+	   ../chez++ --script coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
+	   report_code=$$?; if [ $$report_code -ne 0 ]; then status=1; fi; \
+	 fi; \
+	 exit $$status
 
 .PHONY: test-http-error-soak
-test-http-error-soak: mat.so $(HTTP_ERROR_SOAK_OBJS)
+test-http-error-soak: prepare-chezpp mat.so $(HTTP_ERROR_SOAK_OBJS)
 	@case "$(HTTP_ERROR_SOAK_SECONDS)" in \
 	  ''|*[!0-9]*) \
 	    printf '%s\n' "HTTP_ERROR_SOAK_SECONDS must be a positive integer" >&2; exit 2 ;; \

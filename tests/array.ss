@@ -30,6 +30,11 @@
      (let ([arr (apply array (iota 10))])
        (fx= (array-size arr) 10))
 
+     (and (array? (array 1))
+          (not (array? (fxarray 1)))
+          (not (array? (flarray 1.0)))
+          (not (array? (bytearray 1))))
+
      (let ([arr (apply fxarray (iota 10))])
        (fx= (fxarray-size arr) 10))
 
@@ -1397,16 +1402,16 @@
      (error? (fxarray-map odd? (array 1)))
 
      (array-empty? (array-map   + (array)))
-     (array-empty? (fxarray-map + (fxarray)))
-     (array-empty? (bytearray-map + (bytearray)))
+     (fxarray-empty? (fxarray-map + (fxarray)))
+     (bytearray-empty? (bytearray-map + (bytearray)))
 
      (array-empty? (array-map   + (array) (array)))
-     (array-empty? (fxarray-map + (fxarray) (fxarray)))
-     (array-empty? (bytearray-map + (bytearray) (bytearray)))
+     (fxarray-empty? (fxarray-map + (fxarray) (fxarray)))
+     (bytearray-empty? (bytearray-map + (bytearray) (bytearray)))
 
      (array-empty? (array-map   + (array) (array) (array) (array) (array)))
-     (array-empty? (fxarray-map + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (array-empty? (bytearray-map + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
+     (fxarray-empty? (fxarray-map + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (bytearray-empty? (bytearray-map + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      ;; length not equal
      (error? (array-map   + (array) (array 1)))
@@ -1461,16 +1466,16 @@
      (error? (fxarray-map/i odd? (fxarray 1)))
 
      (array-empty? (array-map/i   + (array)))
-     (array-empty? (fxarray-map/i + (fxarray)))
-     (array-empty? (bytearray-map/i + (bytearray)))
+     (fxarray-empty? (fxarray-map/i + (fxarray)))
+     (bytearray-empty? (bytearray-map/i + (bytearray)))
 
      (array-empty? (array-map/i   + (array) (array)))
-     (array-empty? (fxarray-map/i + (fxarray) (fxarray)))
-     (array-empty? (bytearray-map/i + (bytearray) (bytearray)))
+     (fxarray-empty? (fxarray-map/i + (fxarray) (fxarray)))
+     (bytearray-empty? (bytearray-map/i + (bytearray) (bytearray)))
 
      (array-empty? (array-map/i   + (array) (array) (array) (array) (array)))
-     (array-empty? (fxarray-map/i + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (array-empty? (bytearray-map/i + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
+     (fxarray-empty? (fxarray-map/i + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (bytearray-empty? (bytearray-map/i + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      ;; length not equal
      (error? (array-map/i   + (array) (array 1)))
@@ -1529,16 +1534,16 @@
      (error? (fxarray-map! odd? (array 1)))
 
      (array-empty? (array-map!   + (array)))
-     (array-empty? (fxarray-map! + (fxarray)))
-     (array-empty? (bytearray-map! + (bytearray)))
+     (fxarray-empty? (fxarray-map! + (fxarray)))
+     (bytearray-empty? (bytearray-map! + (bytearray)))
 
      (array-empty? (array-map!   + (array) (array)))
-     (array-empty? (fxarray-map! + (fxarray) (fxarray)))
-     (array-empty? (bytearray-map! + (bytearray) (bytearray)))
+     (fxarray-empty? (fxarray-map! + (fxarray) (fxarray)))
+     (bytearray-empty? (bytearray-map! + (bytearray) (bytearray)))
 
      (array-empty? (array-map!   + (array) (array) (array) (array) (array)))
-     (array-empty? (fxarray-map! + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (array-empty? (bytearray-map! + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
+     (fxarray-empty? (fxarray-map! + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (bytearray-empty? (bytearray-map! + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      ;; length not equal
      (error? (array-map!   + (array) (array 1)))
@@ -1600,16 +1605,16 @@
      (error? (fxarray-map/i! odd? (fxarray 1)))
 
      (array-empty? (array-map/i!   + (array)))
-     (array-empty? (fxarray-map/i! + (fxarray)))
-     (array-empty? (bytearray-map/i! + (bytearray)))
+     (fxarray-empty? (fxarray-map/i! + (fxarray)))
+     (bytearray-empty? (bytearray-map/i! + (bytearray)))
 
      (array-empty? (array-map/i!   + (array) (array)))
-     (array-empty? (fxarray-map/i! + (fxarray) (fxarray)))
-     (array-empty? (bytearray-map/i! + (bytearray) (bytearray)))
+     (fxarray-empty? (fxarray-map/i! + (fxarray) (fxarray)))
+     (bytearray-empty? (bytearray-map/i! + (bytearray) (bytearray)))
 
      (array-empty? (array-map/i!   + (array) (array) (array) (array) (array)))
-     (array-empty? (fxarray-map/i! + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
-     (array-empty? (bytearray-map/i! + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
+     (fxarray-empty? (fxarray-map/i! + (fxarray) (fxarray) (fxarray) (fxarray) (fxarray)))
+     (bytearray-empty? (bytearray-map/i! + (bytearray) (bytearray) (bytearray) (bytearray) (bytearray)))
 
      ;; length not equal
      (error? (array-map/i!   + (array) (array 1)))

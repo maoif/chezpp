@@ -574,10 +574,10 @@
   ;; TODO allow change incr-factor?
   ;; TODO shrink the array when memory is low?
 
-  #|record:$array
-  Mutable array storage shared by generic, fixnum, and byte arrays.
+  #|record:$array-storage
+  Shared mutable storage used by generic and typed arrays.
   |#
-  (define-record-type ($array mk-array array?)
+  (define-record-type ($array-storage make-array-storage array-storage?)
     (nongenerative)
     (fields
      ;; the backing vector, whose length is the capacity
@@ -586,29 +586,31 @@
      ;; the actual number of items in vec
      (mutable size $array-size $array-size-set!)))
 
+  #|record:$array
+  Mutable generic array with its own public type identity.
+  |#
+  (define-record-type ($array mk-array array?)
+    (nongenerative)
+    (parent $array-storage))
+
   #|record:$fxarray
-  Mutable fixnum-array record derived from `$array`.
+  Mutable fixnum-array record sharing storage with `$array`.
   |#
   (define-record-type ($fxarray mk-fxarray fxarray?)
-    (parent $array))
+    (nongenerative)
+    (parent $array-storage))
   #|record:$flarray
-  Mutable flonum-array record derived from `$array`.
+  Mutable flonum-array record sharing storage with `$array`.
   |#
   (define-record-type ($flarray mk-flarray flarray?)
-    (parent $array))
+    (nongenerative)
+    (parent $array-storage))
   #|record:$bytearray
-  Mutable unsigned-byte-array record derived from `$array`.
+  Mutable unsigned-byte-array record sharing storage with `$array`.
   |#
   (define-record-type ($bytearray mk-bytearray bytearray?)
-    (parent $array))
-
-  #|proc:array-size
-  Return the number of items in the array.
-  |#
-  (define-who array-size
-    (lambda (arr)
-      (pcheck ([array? arr])
-              ($array-size arr))))
+    (nongenerative)
+    (parent $array-storage))
 
   (define u8? (lambda (x) (and (fixnum? x) (fx<= 0 x 255))))
   ;; default min capacity
@@ -1014,13 +1016,16 @@
                        (loop (fx1+ i) (cdr args)))))))))
 
 
+  #|proc:array-size
+  Return the number of items in the generic array `arr`.
+  |#
   #|proc:fxarray-size
   Return the number of items in the fxarray.
   |#
   #|proc:flarray-size
   Return the number of items in flarray `arr`.
   |#
-  (define-array-procedure (fxa fla)
+  (define-array-procedure (a fxa fla)
     (size arr)
     (apcheck (arr)
              ($array-size arr)))

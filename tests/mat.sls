@@ -14,8 +14,6 @@
 ;;; limitations under the License.
 
 ;(eval-when (compile load eval) (current-expand sc-expand))
-(eval-when (compile) (optimize-level 2))
-
 (eval-when (load eval)
   (define-syntax mat
     (lambda (x)
