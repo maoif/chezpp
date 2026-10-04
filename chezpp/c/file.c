@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <sys/inotify.h>
 #include <fcntl.h>
+#include <dirent.h>
 
 
 
@@ -26,6 +27,37 @@ ptr chezpp_fswatcher_close(int fsw);
 ptr chezpp_fswatcher_add(int fsw, const char *path, int mask);
 ptr chezpp_fswatcher_remove(int fsw, int id);
 ptr chezpp_fswatcher_next(int fsw);
+uptr chezpp_fs_open_directory(const char *path);
+ptr chezpp_fs_read_directory(uptr directory);
+ptr chezpp_fs_close_directory(uptr directory);
+
+uptr chezpp_fs_open_directory(const char *path) {
+  char *p = expand_pathname(path);
+  DIR *directory = opendir(p);
+  free(p);
+  if (directory == NULL) return 0;
+  return (uptr)directory;
+}
+
+ptr chezpp_fs_read_directory(uptr value) {
+  DIR *directory = (DIR *)TO_VOIDP(value);
+  struct dirent *entry;
+  if (directory == NULL) return Sstring("directory is closed");
+  errno = 0;
+  entry = readdir(directory);
+  if (entry == NULL) {
+    if (errno != 0) return errno_str();
+    return Sfalse;
+  }
+  return Scons(Sstring_utf8(entry->d_name, (iptr)strlen(entry->d_name)), Sfixnum(entry->d_type));
+}
+
+ptr chezpp_fs_close_directory(uptr value) {
+  DIR *directory = (DIR *)TO_VOIDP(value);
+  if (directory == NULL) return Strue;
+  if (closedir(directory) == -1) return errno_str();
+  return Strue;
+}
 
 
 ptr chezpp_statx(const char *path, int follow_link) {

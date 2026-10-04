@@ -14,7 +14,7 @@
 
           make-path
 
-          file-stat file-type file-mode file-size file-size-h
+          file-stat file-type file-type->symbol file-mode file-size file-size-h
           file-access-time file-modification-time file-change-time file-creation-time
           file-inode file-blocks file-nlinks file-owner file-group
           file-dev-major file-dev-minor
@@ -29,6 +29,9 @@
           file-touch file-touch-atime file-touch-mtime
 
           walk-files file-find file-find-all file-map file-for-each print-file-tree
+          fs-open-directory fs-read-directory fs-close-directory
+          fs-directory? fs-directory-closed?
+          fs->iter FT_unknown
 
           file-copymode file-copymeta copy-port file-copy file-copy!
           file-copytree file-move file-removetree
@@ -45,6 +48,7 @@
           (chezpp internal)
           (chezpp utils)
           (chezpp list)
+          (chezpp iter)
           (chezpp io))
 
 
@@ -975,18 +979,206 @@
             (immutable change-time       file-stat-change-time)
             (immutable creation-time     file-stat-creation-time)))
 
+  #|FT_unknown
+  The symbol identifying unavailable or unrecognized filesystem entry types.
+  |#
+  (define FT_unknown 'FT_unknown)
+
   (define *file-types* '((#o140000 . FT_socket)
                          (#o120000 . FT_symlink)
                          (#o100000 . FT_regular)
                          (#o60000  . FT_block)
                          (#o40000  . FT_dir)
                          (#o20000  . FT_chardev)
-                         (#o10000  . FT_fifo)))
+                         (#o10000  . FT_fifo)
+                         (#f        . FT_unknown)))
 
+  #|proc:file-type->symbol
+  Convert numeric `type` from stat metadata to its `FT_*` symbol. A missing
+  type (`#f`) or an unrecognized integer returns `FT_unknown`.
+  |#
   (define-who file-type->symbol
-    (lambda (t)
-      (let ([s (assoc t *file-types*)])
-        (if s (cdr s) (errorf who "invalid file type: ~a" t)))))
+    (lambda (type)
+      (pcheck ([(lambda (value) (or (eq? value #f) (integer? value))) type])
+              (let ([entry (assoc type *file-types*)])
+                (if entry (cdr entry) 'FT_unknown)))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Lazy Linux directory streams and filesystem traversal
+;;;;===----------------------------------------------------------------------===
+
+  (define-record-type ($fs-directory %make-fs-directory $fs-directory?)
+    (fields (mutable handle fs-directory-handle fs-directory-handle-set!)
+            (immutable path fs-directory-path)
+            (mutable closed? $fs-directory-closed? fs-directory-closed?-set!))
+    (opaque #t)
+    (sealed #t))
+
+  (define $fs-ensure-linux
+    (lambda (who)
+      (let* ([name (symbol->string (machine-type))] [length (string-length name)])
+        (unless (and (fx>= length 2)
+                     (string=? "le" (substring name (fx- length 2) length)))
+          (errorf who "local directory iteration is unsupported on this platform")))))
+
+  #|proc:fs-directory?
+  Return `#t` when `object` is a local directory stream, including closed streams;
+  return `#f` for other objects.
+  |#
+  (define fs-directory?
+    (lambda (object)
+      (pcheck () ($fs-directory? object))))
+
+  #|proc:fs-directory-closed?
+  Return `#t` when directory stream `directory` has been closed, otherwise `#f`.
+  |#
+  (define fs-directory-closed?
+    (lambda (directory)
+      (pcheck ([fs-directory? directory]) ($fs-directory-closed? directory))))
+
+  #|proc:fs-open-directory
+  Open local directory named by string `path` and return an opaque directory stream.
+  Linux is required. A missing or inaccessible directory raises an error.
+  |#
+  (define fs-open-directory
+    (lambda (path)
+      (pcheck ([string? path])
+              ($fs-ensure-linux 'fs-open-directory)
+              (let* ([open (foreign-procedure "chezpp_fs_open_directory" (string) uptr)]
+                     [handle (open path)])
+                (if (= handle 0)
+                    ($err-file 'fs-open-directory path "cannot open directory")
+                    (%make-fs-directory handle path #f))))))
+
+  #|proc:fs-read-directory
+  Read one entry from open stream `directory`. Return `(entry-name . entry-type)`,
+  or `#f` at EOF. Types are `FT_*` symbols; unrecognized types are `FT_unknown`.
+  Entries include `.` and `..`, as returned by Linux `readdir`.
+  Reading a closed stream raises an error.
+  |#
+  (define fs-read-directory
+    (lambda (directory)
+      (pcheck ([fs-directory? directory])
+              ($fs-ensure-linux 'fs-read-directory)
+              (if (fs-directory-closed? directory)
+                  (errorf 'fs-read-directory "directory is closed")
+                  (let* ([read (foreign-procedure "chezpp_fs_read_directory" (uptr) scheme-object)]
+                         [value (read (fs-directory-handle directory))])
+                    (cond [(eq? value #f) #f]
+                          [(string? value) ($err-file 'fs-read-directory
+                                                     (fs-directory-path directory) value)]
+                          [else
+                           (cons (car value)
+                                 (case (cdr value)
+                                   [(4) 'FT_dir] [(8) 'FT_regular]
+                                   [(10) 'FT_symlink] [(6) 'FT_block]
+                                   [(2) 'FT_chardev] [(1) 'FT_fifo]
+                                   [(12) 'FT_socket] [else 'FT_unknown]))]))))))
+
+  #|proc:fs-close-directory
+  Close stream `directory` and return the same object. Closing an already closed
+  stream is harmless. Linux is required.
+  |#
+  (define fs-close-directory
+    (lambda (directory)
+      (pcheck ([fs-directory? directory])
+              ($fs-ensure-linux 'fs-close-directory)
+              (unless (fs-directory-closed? directory)
+                (let* ([close (foreign-procedure "chezpp_fs_close_directory" (uptr) scheme-object)]
+                       [result (close (fs-directory-handle directory))])
+                  ;; closedir consumes the stream even if closing its descriptor fails.
+                  (fs-directory-handle-set! directory #f)
+                  (fs-directory-closed?-set! directory #t)
+                  (when (string? result)
+                    ($err-file 'fs-close-directory (fs-directory-path directory) result))))
+              directory)))
+
+  (define $fs-entry-directory?
+    (lambda (path type follow-link?)
+      (or (eq? type 'FT_dir)
+          (and (eq? type 'FT_unknown) (file-directory? path follow-link?))
+          (and (eq? type 'FT_symlink) follow-link? (file-directory? path #t)))))
+
+  #|proc:fs->iter
+  Return an iterator lazily traversing directory `path`, including the root itself.
+  `follow-link?` (default `#f`) enables symlink descent with directory cycle detection.
+  `top-down?` (default `#t`) yields directories before children; `#f` yields them after.
+  Results are unsorted path strings, with each entry yielded once. Directory handles
+  open on demand and close on exhaustion, reset, errors, or `iter-finalize!`.
+  Reset starts a fresh pass over the current filesystem. Linux is required.
+  |#
+  (define fs->iter
+    (case-lambda
+      [(path) (fs->iter path #f #t)]
+      [(path follow-link?) (fs->iter path follow-link? #t)]
+      [(path follow-link? top-down?)
+       (pcheck ([string? path] [boolean? follow-link? top-down?])
+               ($fs-ensure-linux 'fs->iter)
+               ;; Frames hold the directory path and its lazily opened stream.
+               (let ([stack (list (vector path #f))]
+                     [visited (make-hashtable equal-hash equal?)]
+                     [finished? #f])
+                 (define close-all
+                   (lambda ()
+                     (let ([frames stack] [failure #f])
+                       (set! stack '())
+                       (for-each
+                        (lambda (frame)
+                          (let ([directory (vector-ref frame 1)])
+                            (when directory
+                              (guard (condition [else (unless failure (set! failure condition))])
+                                (fs-close-directory directory)))))
+                        frames)
+                       (when failure (raise failure)))))
+                 (define unseen-directory?
+                   (lambda (directory)
+                     (if (not follow-link?) #t
+                         (let* ([stat (file-stat directory)]
+                                [identity (list (file-stat-dev-major stat)
+                                                (file-stat-dev-minor stat)
+                                                (file-stat-inode stat))])
+                           (if (hashtable-contains? visited identity) #f
+                               (begin (hashtable-set! visited identity #t) #t))))))
+                 (make-iter
+                  (lambda ()
+                    (guard (condition
+                            [else
+                             (set! finished? #t)
+                             (guard (cleanup-condition [else (void)]) (close-all))
+                             (raise condition)])
+                      (let loop ()
+                        (if (or finished? (null? stack))
+                            (begin (set! finished? #t) iter-end)
+                            (let* ([frame (car stack)]
+                                   [root (vector-ref frame 0)]
+                                   [directory (vector-ref frame 1)])
+                              (if (not directory)
+                                  (begin
+                                    (unseen-directory? root)
+                                    (vector-set! frame 1 (fs-open-directory root))
+                                    (if top-down? root (loop)))
+                                  (let ([entry (fs-read-directory directory)])
+                                    (cond
+                                     [(not entry)
+                                      (fs-close-directory directory)
+                                      (set! stack (cdr stack))
+                                      (if top-down? (loop) root)]
+                                     [(member (car entry) '("." "..")) (loop)]
+                                     [else
+                                      (let* ([child (path-build root (car entry))]
+                                             [directory? ($fs-entry-directory?
+                                                          child (cdr entry) follow-link?)])
+                                        (if (and directory? (unseen-directory? child))
+                                            (begin
+                                              (set! stack (cons (vector child #f) stack))
+                                              (loop))
+                                            child))]))))))))
+                  (lambda ()
+                    (close-all)
+                    (hashtable-clear! visited)
+                    (set! stack (list (vector path #f)))
+                    (set! finished? #f))
+                  close-all)))]))
 
   (define $statx
     (let ([ffi-statx (foreign-procedure "chezpp_statx" (string boolean) scheme-object)])

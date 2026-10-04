@@ -5,6 +5,181 @@
 (define $random-file (lambda () (format "testfile_~a_~a" (random 9999) (time-nanosecond (current-time)))))
 (define $rand-sign (lambda () (if (= 1 (mod (random 100) 2)) -1 1)))
 
+(define $with-fs-fixture
+  (lambda (proc)
+    (let ([root ($random-file)])
+      (dynamic-wind
+        (lambda ()
+          (mkdir root)
+          (mkdir (path-build root "sub"))
+          (file-touch (path-build root "top.txt"))
+          (file-touch (path-build (path-build root "sub") "nested.txt")))
+        (lambda () (proc root))
+        (lambda () (when (file-directory? root #f) (file-removetree root)))))))
+
+;; Bounded collection catches accidental dot-entry recursion without hanging.
+(define $fs-take-pass
+  (lambda (iterator)
+    (let ([out (make-list-builder)])
+      (let loop ([remaining 16])
+        (let ([value (iter-next! iterator)])
+          (cond [(eq? value iter-end) (out)]
+                [(zero? remaining) #f]
+                [else (out value) (loop (- remaining 1))]))))))
+
+(define $fs-path-index
+  (lambda (paths path)
+    (let loop ([paths paths] [index 0])
+      (if (string=? (car paths) path) index (loop (cdr paths) (+ index 1))))))
+
+(mat fs-directory-stream
+     ($with-fs-fixture
+      (lambda (root)
+        (let ([directory (fs-open-directory root)] [out (make-list-builder)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (let loop ()
+                (let ([entry (fs-read-directory directory)])
+                  (when entry (out entry) (loop))))
+              (let ([entries (out)])
+                (and (fs-directory? directory)
+                     (not (fs-directory-closed? directory))
+                     (equal? '("sub" . FT_dir) (assoc "sub" entries))
+                     (equal? '("top.txt" . FT_regular) (assoc "top.txt" entries))
+                     (not (fs-read-directory directory))
+                     (eq? directory (fs-close-directory directory))
+                     (fs-directory-closed? directory)
+                     (eq? directory (fs-close-directory directory)))))
+            (lambda () (fs-close-directory directory)))))))
+
+(mat fs-directory-utf8-entry
+     (let* ([name (string (integer->char 233) #\. #\t #\x #\t)]
+            [root ($random-file)]
+            [path (path-build root name)])
+       (dynamic-wind
+         (lambda () (mkdir root) (file-touch path))
+         (lambda ()
+           (let ([directory (fs-open-directory root)] [found #f])
+             (let loop ([entry (fs-read-directory directory)])
+               (when entry
+                 (when (string=? name (car entry)) (set! found #t))
+                 (loop (fs-read-directory directory))))
+             (fs-close-directory directory)
+             found))
+         (lambda () (file-removetree root)))))
+
+(mat fs-directory-type-mapping
+     (eq? 'FT_regular (file-type->symbol #o100000))
+     (eq? 'FT_dir (file-type->symbol #o40000))
+     (eq? FT_unknown (file-type->symbol #f)))
+
+(mat fs-directory-iterator-order-and-reset
+     ($with-fs-fixture
+      (lambda (root)
+        (let ([iterator (fs->iter root)]
+              [want (sort string<? (list root (path-build root "sub")
+                                        (path-build (path-build root "sub") "nested.txt")
+                                        (path-build root "top.txt")))])
+          (dynamic-wind
+            void
+            (lambda ()
+              (let ([first ($fs-take-pass iterator)])
+                (and first
+                     (equal? want (sort string<? first))
+                     (string=? root (car first))
+                     (< ($fs-path-index first (path-build root "sub"))
+                        ($fs-path-index first (path-build (path-build root "sub") "nested.txt")))
+                     (eq? iter-end (iter-next! iterator))
+                     (begin (iter-reset! iterator) #t)
+                     (equal? first ($fs-take-pass iterator)))))
+            (lambda () (iter-finalize! iterator))))))
+     ($with-fs-fixture
+      (lambda (root)
+        (let ([iterator (fs->iter root #f #f)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (let ([paths ($fs-take-pass iterator)])
+                (and paths (= 4 (length paths))
+                     (string=? root (car (reverse paths)))
+                     (< ($fs-path-index paths (path-build (path-build root "sub") "nested.txt"))
+                        ($fs-path-index paths (path-build root "sub"))))))
+            (lambda () (iter-finalize! iterator)))))))
+
+(mat fs-directory-iterator-links
+     ($with-fs-fixture
+      (lambda (root)
+        ;; A link to the ancestor must be yielded, but never recursively revisited.
+        (file-symlink ".." (path-build (path-build root "sub") "back"))
+        (let ([plain (fs->iter root #f)] [followed (fs->iter root #t)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (let ([paths ($fs-take-pass plain)] [followed-paths ($fs-take-pass followed)])
+                (and paths followed-paths
+                     (= 5 (length paths)) (= 5 (length followed-paths))
+                     (member (path-build (path-build root "sub") "back") followed-paths)
+                     #t)))
+            (lambda () (iter-finalize! plain) (iter-finalize! followed)))))))
+
+(mat fs-directory-iterator-lifetime
+     ($with-fs-fixture
+      (lambda (root)
+        (let* ([baseline (length (directory-list "/proc/self/fd"))]
+               [iterator (fs->iter root)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (and (= baseline (length (directory-list "/proc/self/fd")))
+                   (string=? root (iter-next! iterator))
+                   (let loop ([entry (iter-next! iterator)])
+                     (and (not (eq? entry iter-end))
+                          (or (string=? entry (path-build root "sub"))
+                              (loop (iter-next! iterator)))))
+                   (>= (length (directory-list "/proc/self/fd")) (+ baseline 2))
+                   (begin (iter-reset! iterator) #t)
+                   (= baseline (length (directory-list "/proc/self/fd")))
+                   (string=? root (iter-next! iterator))
+                   (begin (iter-finalize! iterator) #t)
+                   (= baseline (length (directory-list "/proc/self/fd")))))
+            (lambda ()
+              (unless (iter-finalized? iterator) (iter-finalize! iterator))))))))
+
+(mat fs-directory-iterator-fresh-reset
+     ($with-fs-fixture
+      (lambda (root)
+        (let ([iterator (fs->iter root)])
+          (dynamic-wind
+            void
+            (lambda ()
+              (iter-next! iterator)
+              (file-touch (path-build root "added.txt"))
+              (iter-reset! iterator)
+              (let ([paths ($fs-take-pass iterator)])
+                (and paths (= 5 (length paths))
+                     (member (path-build root "added.txt") paths) #t)))
+            (lambda () (iter-finalize! iterator)))))))
+
+(mat fs-directory-errors
+     ;; Opening a missing directory must raise an error.
+     (error? (fs-open-directory "__chezpp_missing_directory__"))
+
+     ;; The root is opened lazily; removal before the first next raises then.
+     (error? ($with-fs-fixture
+              (lambda (root)
+                (let ([iterator (fs->iter root)])
+                  (file-removetree root)
+                  (dynamic-wind
+                    void
+                    (lambda () (iter-next! iterator))
+                    (lambda () (iter-finalize! iterator)))))))
+
+     ;; Reading a closed stream must raise an error.
+     (error? (let ([directory (fs-open-directory ".")])
+               (fs-close-directory directory)
+               (fs-read-directory directory))))
+
 
 (mat simple-read/write
 

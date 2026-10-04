@@ -8,6 +8,12 @@ reuse `(chezpp path)` for lexical path parsing/rendering, `(chezpp regex)` for
 compiled component matching, and `(chezpp file)` for filesystem conventions,
 then be re-exported by `(chezpp)`.
 
+The lazy filesystem layer adds `fs-*` APIs to `(chezpp file)`, backed by Linux
+`opendir`/`readdir`/`closedir`. Directory reads return two values,
+`(values entry-name entry-type)`, to avoid allocating an entry record per read.
+The existing `FT_*` file-type symbols are reused, with `FT_unknown` added for
+`DT_UNKNOWN` entries.
+
 ## Scope and syntax
 
 The first release supports:
@@ -123,6 +129,34 @@ Return a `(chezpp iter)` iterator that lazily enumerates the same matches as
 and are closed when exhausted or finalized. Filesystem errors other than a
 missing/inaccessible candidate raise the underlying Chez condition.
 
+The lazy iterator variant may omit deterministic sorting: it yields entries in
+filesystem order and never materializes the complete tree.
+
+## Filesystem iterator API in `(chezpp file)`
+
+```scheme
+(fs-open-directory path)
+(fs-read-directory directory)
+(fs-close-directory directory)
+(fs-directory? object)
+(fs-directory-closed? directory)
+(fs->iter path)
+(fs->iter path follow-link?)
+(fs->iter path follow-link? top-down?)
+```
+
+`chezpp_fs_read_directory` returns a pair `(entry-name . d-type)` from C, or
+`#f` at end of stream. The `(chezpp file)` wrapper returns the pair
+`(entry-name . entry-type)` directly, or `#f`. `entry-type`
+reuses the existing `FT_*` symbols and adds `FT_unknown` for `DT_UNKNOWN`. Unknown
+entries are stat'ed only when traversal needs to determine whether they are
+directories. `fs-close-directory` is idempotent.
+
+`fs->iter` uses Linux `opendir`/`readdir`/`closedir` and an explicit stack of
+open streams. `follow-link?` controls symlink descent. `top-down?` follows the
+same meaning as `walk-files`: directories are yielded before children when true
+and after children when false.
+
 ## Architecture
 
 `glob.ss` contains three layers. The parser turns a pattern into immutable
@@ -134,6 +168,9 @@ before parsing. The matcher compiles each ordinary component to a reusable
 whose next component can match, using `directory-list` and the existing path
 constructors. It does not call `walk-files`, because pruning non-matching
 branches is essential for glob performance; it follows the same symlink policy.
+
+The eager expander sorts its final list. The lazy iterator does not sort and
+does not materialize the whole tree.
 
 The expander preserves the input root (relative, absolute, drive-relative,
 drive-absolute, or UNC) and renders results through `path-render`. Directory
@@ -154,6 +191,8 @@ entries are sorted before traversal, making list and iterator output stable.
   eligible under `include-directories?`.
 - Symlink loops are avoided when `follow-link?` is true by tracking visited
   directory identities from `file-stat`; the default does not follow links.
+- The local lazy directory backend is Linux-specific initially. Unsupported
+  platforms raise an explicit unsupported-operation error.
 
 ## Testing
 
