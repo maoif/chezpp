@@ -1,7 +1,30 @@
+/*
+ * LWS features used by this adapter (libwebsockets.so.21, runtime >= 4.3.0;
+ * verified with 4.5.8):
+ *
+ * - LWS_ROLE_H1 and LWS_ROLE_WS with LWS_WITH_CLIENT and LWS_WITH_SERVER:
+ *   HTTP Upgrade, subprotocol negotiation, text / binary messages, continuation
+ *   frames, ping / pong, and close status / reason handling.
+ * - LWS_WITH_EXTERNAL_POLL: ADD / CHANGE_MODE / DEL_POLL_FD callbacks supply
+ *   Scheme readiness snapshots. lws_service_tsi(context, -1, 0) makes one
+ *   nonblocking service pass; lws_service_adjust_timeout detects forced work.
+ *   LWS owns scheduled timeouts and buffered input; native callbacks never call
+ *   Scheme. Context lifetimes and service are serialized by context_list_mutex.
+ * - Optional LWS_WITH_TLS with the OpenSSL backend: WSS reuses caller-owned
+ *   client SSL_CTX and copies server credentials through the vhost callback.
+ *
+ * No WebSocket extensions are configured or negotiated. In particular,
+ * permessage-deflate and LWS extension callbacks are unsupported; a runtime
+ * built with LWS_WITHOUT_EXTENSIONS is sufficient. HTTP/2 and alternative
+ * event-loop backends (libuv / libev / libevent) are not used by this adapter.
+ * All LWS symbols are dynamically loaded; libchezpp.so does not link to LWS.
+ */
+
 #include "../common.h"
 #include "../optional_library.h"
 
 #include <libwebsockets.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -23,6 +46,8 @@ struct chezpp_ws_poll_fd {
 
 typedef struct {
   chezpp_ws_poll_fd *head;
+  int wakeup_pipe[2];
+  int forced_pending;
 } chezpp_ws_poll_state;
 
 struct chezpp_ws_message {
@@ -49,7 +74,6 @@ struct chezpp_ws_server {
   char *protocol_name;
   int port;
   int closed;
-  int compression;
   uptr tls_context_handle;
   int live_count;
   char *error;
@@ -71,7 +95,6 @@ struct chezpp_ws_connection {
   int closed;
   int failed;
   int client_side;
-  int compression;
   int handed_out;
   int fragment_open;
   unsigned long pong_count;
@@ -96,7 +119,8 @@ struct chezpp_ws_context_node {
 typedef struct lws_context *(*lws_create_context_fn)(const struct lws_context_creation_info *);
 typedef void (*lws_context_destroy_fn)(struct lws_context *);
 typedef struct lws *(*lws_client_connect_via_info_fn)(const struct lws_client_connect_info *);
-typedef int (*lws_service_fn)(struct lws_context *, int);
+typedef int (*lws_service_tsi_fn)(struct lws_context *, int, int);
+typedef int (*lws_service_adjust_timeout_fn)(struct lws_context *, int, int);
 typedef void (*lws_set_log_level_fn)(int, lws_log_emit_t);
 typedef struct lws_context *(*lws_get_context_fn)(const struct lws *);
 typedef void *(*lws_context_user_fn)(struct lws_context *);
@@ -113,9 +137,9 @@ typedef struct lws_vhost *(*lws_get_vhost_by_name_fn)(struct lws_context *, cons
 typedef int (*lws_get_vhost_listen_port_fn)(struct lws_vhost *);
 typedef const char *(*lws_get_library_version_fn)(void);
 typedef const struct lws_protocols *(*lws_get_protocol_fn)(struct lws *);
-typedef const struct lws_extension *(*lws_get_internal_extensions_fn)(void);
 typedef void *(*lws_vhost_user_fn)(struct lws_vhost *);
 typedef int (*lws_hdr_copy_fn)(struct lws *, char *, int, enum lws_token_indexes);
+typedef int (*lws_hdr_total_length_fn)(struct lws *, enum lws_token_indexes);
 
 extern void *chezpp_net_tls_context_native(uptr handle);
 extern int chezpp_net_tls_context_copy_credentials(uptr handle, void *destination);
@@ -135,7 +159,8 @@ static pthread_mutex_t context_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 static lws_create_context_fn p_lws_create_context = NULL;
 static lws_context_destroy_fn p_lws_context_destroy = NULL;
 static lws_client_connect_via_info_fn p_lws_client_connect_via_info = NULL;
-static lws_service_fn p_lws_service = NULL;
+static lws_service_tsi_fn p_lws_service_tsi = NULL;
+static lws_service_adjust_timeout_fn p_lws_service_adjust_timeout = NULL;
 static lws_set_log_level_fn p_lws_set_log_level = NULL;
 static lws_get_context_fn p_lws_get_context = NULL;
 static lws_context_user_fn p_lws_context_user = NULL;
@@ -151,11 +176,9 @@ static lws_set_timeout_fn p_lws_set_timeout = NULL;
 static lws_get_vhost_by_name_fn p_lws_get_vhost_by_name = NULL;
 static lws_get_vhost_listen_port_fn p_lws_get_vhost_listen_port = NULL;
 static lws_get_protocol_fn p_lws_get_protocol = NULL;
-static lws_get_internal_extensions_fn p_lws_get_internal_extensions = NULL;
 static lws_vhost_user_fn p_lws_vhost_user = NULL;
 static lws_hdr_copy_fn p_lws_hdr_copy = NULL;
-static lws_extension_callback_function *p_lws_extension_callback_pm_deflate = NULL;
-static struct lws_extension websocket_extensions[2];
+static lws_hdr_total_length_fn p_lws_hdr_total_length = NULL;
 static chezpp_ws_context_node *context_list = NULL;
 static atomic_int ws_trace_flag = -1;
 
@@ -192,6 +215,7 @@ enum {
 static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
                               void *user, void *in, size_t len);
 
+
 #define CHEZPP_WS_DEFAULT_PROTOCOL "chezpp-websocket"
 #define CHEZPP_WS_SERVICE_STEP_MS 10
 #define CHEZPP_WS_NONBLOCK_SERVICE_MS 1
@@ -213,6 +237,12 @@ static ptr make_would_block_status(chezpp_ws_poll_state *state, int requested_ev
   ptr detail;
   ptr events = Snil;
 
+  if (state != NULL && state->forced_pending) {
+    detail = Smake_vector(2, Sfalse);
+    Svector_set(detail, 0, Sfixnum(state->wakeup_pipe[0]));
+    Svector_set(detail, 1, Scons(Sstring_to_symbol("read"), Snil));
+    return make_status("would-block", detail);
+  }
   while (entry != NULL &&
          ((entry->events & requested_events) == 0 ||
           (wsi != NULL && entry->wsi != wsi) ||
@@ -421,7 +451,8 @@ static void initialize_websocket_library(void) {
   if (!load_symbol((void **)&p_lws_create_context, "lws_create_context") ||
       !load_symbol((void **)&p_lws_context_destroy, "lws_context_destroy") ||
       !load_symbol((void **)&p_lws_client_connect_via_info, "lws_client_connect_via_info") ||
-      !load_symbol((void **)&p_lws_service, "lws_service") ||
+      !load_symbol((void **)&p_lws_service_tsi, "lws_service_tsi") ||
+      !load_symbol((void **)&p_lws_service_adjust_timeout, "lws_service_adjust_timeout") ||
       !load_symbol((void **)&p_lws_set_log_level, "lws_set_log_level") ||
       !load_symbol((void **)&p_lws_get_context, "lws_get_context") ||
       !load_symbol((void **)&p_lws_context_user, "lws_context_user") ||
@@ -438,10 +469,8 @@ static void initialize_websocket_library(void) {
       !load_symbol((void **)&p_lws_get_vhost_listen_port, "lws_get_vhost_listen_port") ||
       !load_symbol((void **)&p_lws_get_protocol, "lws_get_protocol") ||
       !load_symbol((void **)&p_lws_vhost_user, "lws_vhost_user") ||
-      !load_symbol((void **)&p_lws_hdr_copy, "lws_hdr_copy")) return;
-  (void)chezpp_optional_library_probe_symbol(
-      &websocket_library, "lws_get_internal_extensions",
-      (void **)&p_lws_get_internal_extensions);
+      !load_symbol((void **)&p_lws_hdr_copy, "lws_hdr_copy") ||
+      !load_symbol((void **)&p_lws_hdr_total_length, "lws_hdr_total_length")) return;
 
   {
     void *symbol = NULL;
@@ -450,17 +479,6 @@ static void initialize_websocket_library(void) {
             &websocket_library, "lws_init_vhost_client_ssl",
             &symbol))
       websocket_capabilities |= 1U;
-    if (chezpp_optional_library_probe_symbol(
-            &websocket_library, "lws_extension_callback_pm_deflate", &symbol))
-      {
-        websocket_capabilities |= 2U;
-        p_lws_extension_callback_pm_deflate =
-            (lws_extension_callback_function *)symbol;
-        websocket_extensions[0].name = "permessage-deflate";
-        websocket_extensions[0].callback = p_lws_extension_callback_pm_deflate;
-        websocket_extensions[0].client_offer =
-            "permessage-deflate; client_no_context_takeover; client_max_window_bits";
-      }
     if (level != NULL && *level != 0)
       p_lws_set_log_level((int)strtol(level, NULL, 0), NULL);
     else
@@ -543,13 +561,34 @@ static int context_registered_unlocked(struct lws_context *context) {
 static struct lws_context *create_registered_context(
     const struct lws_context_creation_info *info) {
   chezpp_ws_context_node *node = (chezpp_ws_context_node *)calloc(1, sizeof(chezpp_ws_context_node));
+  chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)info->user;
   struct lws_context *context;
+  int index;
 
   if (node == NULL) return NULL;
+  if (pipe(state->wakeup_pipe) != 0) {
+    free(node);
+    return NULL;
+  }
+  for (index = 0; index < 2; index++) {
+    int fd = state->wakeup_pipe[index];
+    int flags = fcntl(fd, F_GETFL, 0);
+    int fd_flags = fcntl(fd, F_GETFD, 0);
+    if (flags < 0 || fd_flags < 0 ||
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 ||
+        fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC) < 0) {
+      close(state->wakeup_pipe[0]);
+      close(state->wakeup_pipe[1]);
+      free(node);
+      return NULL;
+    }
+  }
   pthread_mutex_lock(&context_list_mutex);
   context = p_lws_create_context(info);
   if (context == NULL) {
     pthread_mutex_unlock(&context_list_mutex);
+    close(state->wakeup_pipe[0]);
+    close(state->wakeup_pipe[1]);
     free(node);
     return NULL;
   }
@@ -567,9 +606,13 @@ static void destroy_registered_context(struct lws_context *context) {
   while (*pp != NULL) {
     if ((*pp)->context == context) {
       chezpp_ws_context_node *node = *pp;
+      chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)p_lws_context_user(context);
       *pp = node->next;
       free(node);
       p_lws_context_destroy(context);
+      close(state->wakeup_pipe[0]);
+      close(state->wakeup_pipe[1]);
+      state->forced_pending = 0;
       pthread_mutex_unlock(&context_list_mutex);
       return;
     }
@@ -578,10 +621,57 @@ static void destroy_registered_context(struct lws_context *context) {
   pthread_mutex_unlock(&context_list_mutex);
 }
 
+static void service_context_ready_locked(struct lws_context *context) {
+  chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)p_lws_context_user(context);
+  unsigned char byte = 1;
+  unsigned char bytes[64];
+  /* Unlike timeout 0 (ignored since LWS 3.2), -1 never waits. LWS services
+   * scheduled timers and its live descriptor table, including TLS bytes
+   * buffered without socket readiness. Leave a readable continuation
+   * signal if forced work remains, so one call stays bounded and Scheme won't
+   * sleep on a drained socket before advancing again. */
+  while (read(state->wakeup_pipe[0], bytes, sizeof(bytes)) > 0) {}
+  (void)p_lws_service_tsi(context, -1, 0);
+  state->forced_pending = p_lws_service_adjust_timeout(context, 1, 0) == 0;
+  if (state->forced_pending) (void)write(state->wakeup_pipe[1], &byte, 1);
+}
+
+static void service_context_locked(struct lws_context *context, int timeout_ms) {
+  chezpp_ws_poll_state *state;
+  chezpp_ws_poll_fd *entry;
+  struct pollfd *pollfds = NULL;
+  int count = 0;
+  int index = 0;
+
+  if (context == NULL || !context_registered_unlocked(context)) return;
+  service_context_ready_locked(context);
+  if (timeout_ms <= 0) return;
+  state = (chezpp_ws_poll_state *)p_lws_context_user(context);
+  if (state == NULL) return;
+  if (state->forced_pending) return;
+  for (entry = state->head; entry != NULL; entry = entry->next) {
+    if (entry->fd >= 0 && entry->events != 0) count += 1;
+  }
+  if (count == 0) return;
+  pollfds = (struct pollfd *)calloc((size_t)count, sizeof(struct pollfd));
+  if (pollfds == NULL) return;
+  for (entry = state->head; entry != NULL; entry = entry->next) {
+    if (entry->fd >= 0 && entry->events != 0) {
+      pollfds[index].fd = entry->fd;
+      pollfds[index].events = (short)entry->events;
+      index += 1;
+    }
+  }
+  /* The snapshot is only for waiting; LWS dispatches its current table itself.
+   * Never dispatch stale entries after a callback closes or replaces a WSI. */
+  (void)poll(pollfds, (nfds_t)count, timeout_ms);
+  free(pollfds);
+  service_context_ready_locked(context);
+}
+
 static void service_context(struct lws_context *primary, int timeout_ms) {
   pthread_mutex_lock(&context_list_mutex);
-  if (primary != NULL && context_registered_unlocked(primary))
-    p_lws_service(primary, timeout_ms);
+  service_context_locked(primary, timeout_ms);
   pthread_mutex_unlock(&context_list_mutex);
 }
 
@@ -594,7 +684,7 @@ static void service_registered(struct lws_context *primary, int timeout_ms) {
   while (node != NULL) {
     struct lws_context *context = node->context;
     int step = (context == primary && !used_primary) ? timeout_ms : 0;
-    p_lws_service(context, step);
+    service_context_locked(context, step);
     if (context == primary) used_primary = 1;
     node = node->next;
   }
@@ -684,6 +774,7 @@ static void clear_rx(chezpp_ws_connection *conn) {
 static void set_negotiated_protocol(chezpp_ws_connection *conn, struct lws *wsi) {
   const struct lws_protocols *protocol;
   if (conn == NULL || wsi == NULL || p_lws_get_protocol == NULL) return;
+  if (p_lws_hdr_total_length(wsi, WSI_TOKEN_PROTOCOL) <= 0) return;
   protocol = p_lws_get_protocol(wsi);
   if (protocol != NULL && protocol->name != NULL) {
     if (conn->negotiated_protocol != NULL) free(conn->negotiated_protocol);
@@ -700,13 +791,6 @@ static void copy_handshake_value(char **slot, struct lws *wsi,
   if (length <= 0) return;
   if (*slot != NULL) free(*slot);
   *slot = ws_strdup(buffer);
-}
-
-static const struct lws_extension *configured_extensions(int compression) {
-  if (!compression) return NULL;
-  if (p_lws_get_internal_extensions != NULL)
-    return p_lws_get_internal_extensions();
-  return p_lws_extension_callback_pm_deflate == NULL ? NULL : websocket_extensions;
 }
 
 static void set_error(char **slot, const char *msg) {
@@ -888,7 +972,6 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     accepted->server = server;
     accepted->established = 1;
     accepted->client_side = 0;
-    accepted->compression = server->compression;
     accepted->close_code = LWS_CLOSE_STATUS_NOSTATUS;
     set_negotiated_protocol(accepted, wsi);
     server->live_count += 1;
@@ -908,7 +991,6 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
       conn->wsi = wsi;
       conn->established = 1;
       conn->close_code = LWS_CLOSE_STATUS_NOSTATUS;
-      set_negotiated_protocol(conn, wsi);
       assign_poll_connection(&conn->poll_state, wsi, conn);
       ws_tracef("client established conn=%p", (void *)conn);
     }
@@ -917,13 +999,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     if (conn != NULL) {
       copy_handshake_value(&conn->negotiated_protocol, wsi,
                            WSI_TOKEN_PROTOCOL);
-      {
-        char extensions[512];
-        int length = p_lws_hdr_copy(wsi, extensions, (int)sizeof(extensions),
-                                    WSI_TOKEN_EXTENSIONS);
-        if (length > 0)
-          conn->compression = strstr(extensions, "permessage-deflate") != NULL;
-      }
+
     }
     return 0;
   case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -940,6 +1016,8 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
   case LWS_CALLBACK_RECEIVE:
   case LWS_CALLBACK_CLIENT_RECEIVE:
     if (conn == NULL) return 0;
+    ws_tracef("receive conn=%p len=%zu final=%d remaining=%zu", (void *)conn, len,
+              p_lws_is_final_fragment(wsi), p_lws_remaining_packet_payload(wsi));
     if (conn->rx_len == 0)
       conn->rx_type = p_lws_frame_is_binary(wsi) ? CHEZPP_WS_BINARY : CHEZPP_WS_TEXT;
     if (!ensure_rx_capacity(conn, len)) {
@@ -1058,7 +1136,7 @@ static ptr connection_error_status(chezpp_ws_connection *conn, const char *fallb
 }
 
 ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol_name,
-                                const char *offered_protocols, int compression,
+                                const char *offered_protocols,
                                 uptr tls_context_handle) {
   chezpp_ws_server *server;
   struct lws_context_creation_info info;
@@ -1083,14 +1161,12 @@ ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol
     free(server);
     return make_status("error", errno_str());
   }
-  server->compression = compression ? 1 : 0;
   server->tls_context_handle = tls_context_handle;
 
   memset(&info, 0, sizeof(info));
   info.port = port;
   info.iface = (host != NULL && *host != 0) ? host : NULL;
   info.protocols = server->protocols;
-  info.extensions = configured_extensions(compression);
   info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
   if (tls_context_handle != 0)
     info.options |= LWS_SERVER_OPTION_CREATE_VHOST_SSL_CTX;
@@ -1159,7 +1235,7 @@ ptr chezpp_net_websocket_accept(uptr handle, int nonblocking, int timeout_ms) {
 
 ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
                                  const char *protocol_name, const char *offered_protocols,
-                                 int secure, int compression, uptr tls_context_handle,
+                                 int secure, uptr tls_context_handle,
                                  int timeout_ms) {
   chezpp_ws_connection *conn;
   struct lws_context_creation_info info;
@@ -1179,7 +1255,6 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   if (conn == NULL) return make_status("error", errno_str());
   conn->owns_context = 1;
   conn->client_side = 1;
-  conn->compression = compression ? 1 : 0;
   conn->protocol_name = ws_strdup(protocol);
   if (conn->protocol_name == NULL) {
     free(conn);
@@ -1194,7 +1269,6 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
   conn->protocols[1] = (struct lws_protocols)LWS_PROTOCOL_LIST_TERM;
   info.port = CONTEXT_PORT_NO_LISTEN;
   info.protocols = conn->protocols;
-  info.extensions = configured_extensions(compression);
   info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
   if (tls_context_handle != 0)
     info.provided_client_ssl_ctx =
@@ -1273,6 +1347,45 @@ ptr chezpp_net_websocket_connect_step(uptr handle) {
                                  conn->wsi, 0);
 }
 
+ptr chezpp_net_websocket_poll_targets(uptr handle, int server_handle) {
+  struct lws_context *context;
+  chezpp_ws_poll_state *state;
+  chezpp_ws_poll_fd *entry;
+  ptr targets;
+  int count = 1;
+  int index = 0;
+
+  if (handle == 0) return make_error_status_message("invalid websocket context");
+  context = server_handle
+      ? ((chezpp_ws_server *)TO_VOIDP(handle))->context
+      : ((chezpp_ws_connection *)TO_VOIDP(handle))->context;
+  pthread_mutex_lock(&context_list_mutex);
+  if (context == NULL || !context_registered_unlocked(context)) {
+    pthread_mutex_unlock(&context_list_mutex);
+    return make_error_status_message("invalid websocket context");
+  }
+  state = (chezpp_ws_poll_state *)p_lws_context_user(context);
+  for (entry = state->head; entry != NULL; entry = entry->next)
+    if (entry->fd >= 0 && entry->events != 0) count++;
+  targets = Smake_vector(count, Sfalse);
+  for (entry = state->head; entry != NULL; entry = entry->next) {
+    ptr item;
+    if (entry->fd < 0 || entry->events == 0) continue;
+    item = Smake_vector(2, Sfalse);
+    Svector_set(item, 0, Sfixnum(entry->fd));
+    Svector_set(item, 1, Sfixnum(entry->events));
+    Svector_set(targets, index++, item);
+  }
+  {
+    ptr item = Smake_vector(2, Sfalse);
+    Svector_set(item, 0, Sfixnum(state->wakeup_pipe[0]));
+    Svector_set(item, 1, Sfixnum(POLLIN));
+    Svector_set(targets, index, item);
+  }
+  pthread_mutex_unlock(&context_list_mutex);
+  return targets;
+}
+
 static ptr websocket_close_with_reason(uptr handle, int code,
                                        const unsigned char *reason, size_t reason_len) {
   chezpp_ws_connection *conn = (chezpp_ws_connection *)TO_VOIDP(handle);
@@ -1319,15 +1432,14 @@ ptr chezpp_net_websocket_state(uptr handle) {
   ptr state;
   if (conn == NULL) return make_error_status_message("invalid websocket connection");
   if (!conn->closed && conn->context != NULL) service_context(conn->context, 0);
-  state = Smake_vector(5, Sfalse);
+  state = Smake_vector(4, Sfalse);
   Svector_set(state, 0, conn->negotiated_protocol == NULL
                             ? Sfalse : Sstring(conn->negotiated_protocol));
-  Svector_set(state, 1, conn->compression ? Strue : Sfalse);
-  Svector_set(state, 2, conn->close_code == LWS_CLOSE_STATUS_NOSTATUS
+  Svector_set(state, 1, conn->close_code == LWS_CLOSE_STATUS_NOSTATUS
                             ? Sfalse : Sfixnum(conn->close_code));
-  Svector_set(state, 3, conn->close_reason == NULL
+  Svector_set(state, 2, conn->close_reason == NULL
                             ? Sstring("") : Sstring(conn->close_reason));
-  Svector_set(state, 4, Sunsigned(conn->pong_count));
+  Svector_set(state, 3, Sunsigned(conn->pong_count));
   return state;
 }
 

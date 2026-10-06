@@ -422,6 +422,33 @@
            (and (null? (poll-target-ready-events (car before)))
                 (not (not (memq 'read (poll-target-ready-events (car after))))))))))
 
+(mat net-poll-allows-collection
+     ;; A waiting foreign thread must not prevent collection in the peer that supplies readiness.
+     (let* ([receiver (open-socket 'inet 'datagram)]
+            [sender (open-socket 'inet 'datagram)]
+            [worker #f]
+            [failure #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (socket-bind! receiver (make-socket-address 'inet "127.0.0.1" 0))
+           (let ([address (socket-local-address receiver)])
+             (set! worker
+               (fork-thread
+                (lambda ()
+                  (guard (condition [else (set! failure condition)])
+                    (milisleep 50)
+                    (collect)
+                    (socket-send-to sender #vu8(1) address)))))
+             (let ([ready (poll (list (make-poll-target receiver '(read))) 1000)])
+               (thread-join worker)
+               (and (not failure)
+                    (not (not (memq 'read (poll-target-ready-events (car ready)))))))))
+         (lambda ()
+           (when worker (thread-join worker))
+           (close-socket receiver)
+           (close-socket sender)))))
+
 (mat net-poll-resources
      (let ([listener (open-socket 'inet 'stream)])
        (dynamic-wind

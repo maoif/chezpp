@@ -1,3 +1,24 @@
+/*
+ * LWS features used by the HTTP adapter (libwebsockets.so.21, runtime >= 4.3.0;
+ * verified with 4.5.8):
+ *
+ * - LWS_ROLE_H1, LWS_WITH_CLIENT, and LWS_WITH_SERVER: HTTP client requests and
+ *   server transactions, header APIs, writable callbacks, and bounded bodies.
+ * - LWS_ROLE_H2 when available: cleartext prior knowledge, TLS ALPN, concurrent
+ *   child streams, flow control, and LWS-owned SETTINGS / GOAWAY handling.
+ * - LWS_WITH_EXTERNAL_POLL: descriptor callbacks, lws_service_fd, nonblocking
+ *   lws_service_tsi(-1), forced-service adjustment, and lws_cancel_service.
+ *   One Scheme reactor owns service; callbacks copy events and never call Scheme.
+ * - Optional LWS_WITH_TLS with OpenSSL: caller-provided client SSL_CTX and
+ *   server vhost credentials. HTTP proxy settings use LWS's HTTP client API.
+ *
+ * This adapter configures no WebSocket extensions or LWS compression features;
+ * HTTP content decoding is handled by Chezpp's body layer. It uses the poll
+ * backend, not libuv / libev / libevent. LWS is dynamically loaded and does not
+ * become a direct dependency of libchezpp.so. Capability probes live in
+ * lws_loader.c; exported symbols alone do not prove every build option is enabled.
+ */
+
 #include "lws_http.h"
 
 #include "lws_loader.h"

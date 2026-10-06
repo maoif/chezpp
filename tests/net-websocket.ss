@@ -3,6 +3,12 @@
 
 (load "net-common.ss")
 
+(define websocket-test-monotonic-ms
+  (lambda ()
+    (let ([time (current-time 'time-monotonic)])
+      (+ (* (time-second time) 1000)
+         (quotient (time-nanosecond time) 1000000)))))
+
 (define websocket-net-error-message?
   (lambda (message thunk)
     (guard (c [else
@@ -415,10 +421,24 @@
                                     (net-would-block-events answer)))
             100))))
 
-(mat net-websocket-phase4-features
+(mat net-websocket-options
+     (let ([options (make-websocket-options #f '("chezpp.v2" "chezpp.v1") 65536 #f 500)])
+       (and (websocket-options? options)
+            (not (websocket-options-tls-context options))
+            (equal? '("chezpp.v2" "chezpp.v1") (websocket-options-subprotocols options))
+            (= 65536 (websocket-options-fragment-size options))
+            (not (websocket-options-ping-interval-ms options))
+            (= 500 (websocket-options-pong-timeout-ms options))))
+
+     ;; Error case: the removed compression parameter is no longer an accepted argument.
+     (guard (condition [else #t])
+       (apply make-websocket-options (list #f '("chezpp-websocket") #t 65536 #f 500))
+       #f))
+
+(mat net-websocket-subprotocols-fragments-and-close
      (let* ([port (reserve-loopback-port)]
             [options (make-websocket-options #f '("chezpp.v2" "chezpp.v1")
-                                             #t 65536 #f 500)]
+                                             65536 #f 500)]
             [server (websocket-listen "127.0.0.1" port options)]
             [uri (format "ws://127.0.0.1:~a/features" port)]
             [client #f]
@@ -435,33 +455,117 @@
                (let ([third (websocket-finish-message/nonblocking client "three")])
                  (wait-websocket-write third))))
            (let ([message (websocket-recv accepted)])
-             (let ([pong-thread
-                    (fork-thread
-                     (lambda ()
-                       (guard (condition [else #f])
-                         (let ([ping (websocket-recv accepted 500)])
-                           (when (websocket-message? ping)
-                             (websocket-send-pong accepted #vu8(1 2 3) 500))))))])
              (and (websocket-message? message)
                   (eq? (websocket-message-type message) 'text)
                   (equal? (websocket-message-data message) "one-two-three")
                   (equal? (websocket-negotiated-subprotocol client) "chezpp.v2")
                   (equal? (websocket-negotiated-subprotocol accepted) "chezpp.v2")
-                  (eq? (websocket-compression client) 'permessage-deflate)
-                  (eq? (websocket-compression accepted) 'permessage-deflate)
-                  (let ([result
-                         (net-operation-wait
-                          (websocket-ping-operation client #vu8(1 2 3) 500))])
-                    (thread-join pong-thread)
-                    result)
+                  (= (websocket-send-ping client #vu8(1 2 3) 500) 3)
                   (begin
-                    (websocket-close client 1000 "phase4 complete")
+                    (websocket-close client 1000 "message complete")
                     (= (websocket-close-code client) 1000))
-                  (equal? (websocket-close-reason client) "phase4 complete")))))
+                  (equal? (websocket-close-reason client) "message complete"))))
          (lambda ()
            (when (and accepted (not (eof-object? accepted)))
              (websocket-close accepted))
            (when client (websocket-close client))
+           (websocket-server-close server)))))
+
+(mat net-websocket-negotiated-subprotocol
+     (let* ([port (reserve-loopback-port)]
+            [server-options (make-websocket-options #f '("selected") 65536 #f 500)]
+            [client-options (make-websocket-options #f '("local" "selected") 65536 #f 500)]
+            [server (websocket-listen "127.0.0.1" port server-options)]
+            [client #f]
+            [accepted #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (set! client (websocket-connect (format "ws://127.0.0.1:~a/selected" port)
+                                           client-options 1000))
+           (set! accepted (websocket-accept server 1000))
+           (and (equal? "selected" (websocket-negotiated-subprotocol client))
+                (equal? "selected" (websocket-negotiated-subprotocol accepted))))
+         (lambda ()
+           (when accepted (websocket-close accepted))
+           (when client (websocket-close client))
+           (websocket-server-close server)))))
+
+(mat net-websocket-unnegotiated-state
+     ;; A peer that offers no subprotocol must not inherit the local handler name.
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [socket (open-socket 'inet 'stream)]
+            [accepted #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (socket-connect! socket (make-socket-address 'inet "127.0.0.1" port))
+           (socket-send-all socket
+             (string->utf8
+              "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"))
+           (set! accepted (websocket-accept server 1000))
+           (not (websocket-negotiated-subprotocol accepted)))
+         (lambda ()
+           (when accepted (websocket-close accepted))
+           (close-socket socket)
+           (websocket-server-close server)))))
+
+(mat net-websocket-accept-after-partial-handshake
+     ;; A stalled handshake must not hide readiness on the listener for a later client.
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [partial (open-socket 'inet 'stream)]
+            [ready (open-socket 'inet 'stream)]
+            [accepted #f]
+            [worker #f]
+            [failure #f])
+       (dynamic-wind
+         void
+         (lambda ()
+           (socket-connect! partial (make-socket-address 'inet "127.0.0.1" port))
+           (socket-send-all partial (string->utf8 "GET / HTTP/1.1\r\n"))
+           (websocket-accept/nonblocking server)
+           (websocket-accept/nonblocking server)
+           (set! worker
+             (fork-thread
+              (lambda ()
+                (guard (condition [else (set! failure condition)])
+                  (milisleep 50)
+                  (socket-connect! ready (make-socket-address 'inet "127.0.0.1" port))
+                  (socket-send-all ready
+                    (string->utf8
+                     "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: chezpp-websocket\r\n\r\n"))))))
+           (set! accepted (websocket-accept server 1000))
+           (thread-join worker)
+           (and (not failure) (websocket-connection? accepted)))
+         (lambda ()
+           (when worker (thread-join worker))
+           (when accepted (websocket-close accepted))
+           (close-socket ready)
+           (close-socket partial)
+           (websocket-server-close server)))))
+
+(mat net-websocket-idle-handshake-timer
+     ;; Error case: an incomplete Upgrade must expire even without another socket event.
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [socket (open-socket 'inet 'stream)]
+            [deadline (+ (websocket-test-monotonic-ms) 15000)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (socket-connect! socket (make-socket-address 'inet "127.0.0.1" port))
+           (socket-send-all socket
+             (string->utf8 "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"))
+           (let loop ()
+             (websocket-accept/nonblocking server)
+             (cond
+              [(eof-object? (socket-recv/nonblocking socket 1024)) #t]
+              [(>= (websocket-test-monotonic-ms) deadline) #f]
+              [else (milisleep 10) (loop)])))
+         (lambda ()
+           (close-socket socket)
            (websocket-server-close server)))))
 
 (mat net-websocket-pong-timeout
@@ -480,10 +584,84 @@
              "websocket pong timed out"
              (lambda ()
                (net-operation-wait
-                (websocket-ping-operation client #vu8(9) 20))))
+                (websocket-ping-operation client #vu8(9) 50))))
             (= (websocket-close-code client) 1001)
             (equal? (websocket-close-reason client) "pong timeout")))
          (lambda ()
+           (when accepted (websocket-close accepted))
+           (when client (websocket-close client))
+           (websocket-server-close server)))))
+
+(mat net-websocket-ping-operation-waits-for-pong
+     (let* ([port (reserve-loopback-port)]
+            [server (websocket-listen "127.0.0.1" port)]
+            [client #f]
+            [accepted #f]
+            [stop? (abox #f)]
+            [text-sent? (abox #f)]
+            [resume-peer? (abox #f)]
+            [worker-failure (abox #f)]
+            [worker #f]
+            [text* (map (lambda (index) (format "unrelated-~a" index)) (iota 32))])
+       (dynamic-wind
+         void
+         (lambda ()
+           (set! client
+                 (websocket-connect (format "ws://127.0.0.1:~a/ping-operation" port)))
+           (set! accepted (websocket-accept server))
+           (set! worker
+             (fork-thread
+              (lambda ()
+                (guard (failure [else (abox-set! worker-failure failure)])
+                  (for-each (lambda (text) (websocket-send-text accepted text 1000)) text*)
+                  (abox-set! text-sent? #t)
+                  (let ([deadline (+ (websocket-test-monotonic-ms) 2000)])
+                    (let wait-for-release ()
+                      (unless (or (unabox resume-peer?) (unabox stop?))
+                        (when (>= (websocket-test-monotonic-ms) deadline)
+                          (errorf 'ping-peer "release gate timed out"))
+                        (milisleep 1)
+                        (wait-for-release))))
+                  (let loop ()
+                    (unless (unabox stop?)
+                      (let ([answer (websocket-recv/nonblocking accepted)])
+                        (when (net-would-block? answer)
+                          (poll (list (make-poll-target
+                                       (net-would-block-resource answer)
+                                       (net-would-block-events answer))) 10)))
+                      (loop)))))))
+           (let ([deadline (+ (websocket-test-monotonic-ms) 2000)])
+             (let wait-for-text ()
+               (cond
+                [(unabox worker-failure) (raise (unabox worker-failure))]
+                [(unabox text-sent?) (void)]
+                [(>= (websocket-test-monotonic-ms) deadline)
+                 (errorf 'ping-peer "text send timed out")]
+                [else (milisleep 1) (wait-for-text)])))
+           (let ([operation (websocket-ping-operation client #vu8(9) 1000)])
+             (net-operation-step! operation)
+             ;; The peer cannot pong before release. A pending step must expose readiness
+             ;; or an immediate continuation, so queued text cannot hide the pong until expiry.
+             (let ([pending? (eq? 'pending (net-operation-state operation))]
+                   [runnable? (or (pair? (net-operation-poll-targets operation))
+                                  (zero? (net-operation-remaining-timeout-ms operation)))])
+               (abox-set! resume-peer? #t)
+               (let* ([result (net-operation-wait operation)]
+                      [received
+                       (let read-text ([remaining text*] [messages '()])
+                         (if (null? remaining) (reverse messages)
+                             (let ([message (websocket-recv client 1000)])
+                               (read-text (cdr remaining)
+                                          (cons (websocket-message-data message) messages)))))])
+                 (abox-set! stop? #t)
+                 (thread-join worker)
+                 (and pending? runnable? (eq? result #t)
+                      (equal? text* received)
+                      (not (unabox worker-failure)))))))
+         (lambda ()
+           (abox-set! stop? #t)
+           (abox-set! resume-peer? #t)
+           (when worker (thread-join worker))
            (when accepted (websocket-close accepted))
            (when client (websocket-close client))
            (websocket-server-close server)))))
@@ -509,10 +687,10 @@
                                         "/tmp/chezpp-net-test-san-cert.pem")
              (set! server-options
                    (make-websocket-options server-context '("chezpp-wss")
-                                           #f 65536 #f 500))
+                                           65536 #f 500))
              (set! client-options
                    (make-websocket-options client-context '("chezpp-wss")
-                                           #f 65536 #f 500))
+                                           65536 #f 500))
              (set! server (websocket-listen "127.0.0.1" port server-options)))
            (lambda ()
              (set! client

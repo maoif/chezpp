@@ -20,12 +20,8 @@ static ptr capability_list(const char *name, unsigned bits) {
   ptr result = Snil;
   if (strcmp(name, "ssh") == 0 && (bits & 1U) != 0)
     result = Scons(Sstring_to_symbol("sftp-aio"), result);
-  if (strcmp(name, "websockets") == 0) {
-    if ((bits & 1U) != 0)
-      result = Scons(Sstring_to_symbol("tls"), result);
-    if ((bits & 2U) != 0)
-      result = Scons(Sstring_to_symbol("compression"), result);
-  }
+  if (strcmp(name, "websockets") == 0 && (bits & 1U) != 0)
+    result = Scons(Sstring_to_symbol("tls"), result);
   if (strcmp(name, "grpc") == 0) {
     if ((bits & 1U) != 0)
       result = Scons(Sstring_to_symbol("tls"), result);
