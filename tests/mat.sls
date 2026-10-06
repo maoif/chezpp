@@ -1,12 +1,12 @@
 ;;; mat.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
-;;; 
+;;;
 ;;; Licensed under the Apache License, Version 2.0 (the "License");
 ;;; you may not use this file except in compliance with the License.
 ;;; You may obtain a copy of the License at
-;;; 
+;;;
 ;;; http://www.apache.org/licenses/LICENSE-2.0
-;;; 
+;;;
 ;;; Unless required by applicable law or agreed to in writing, software
 ;;; distributed under the License is distributed on an "AS IS" BASIS,
 ;;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,7 +14,32 @@
 ;;; limitations under the License.
 
 ;(eval-when (compile load eval) (current-expand sc-expand))
+(import (only (chezpp optional-library) optional-library-info optional-library-available?)
+        (only (chezpp utils) pcheck natural?))
+
 (eval-when (load eval)
+  (define mat-requires-transform
+    (lambda (clause)
+      (syntax-case clause (mat-requires)
+        [(mat-requires (library more ...) expression)
+         (for-all identifier? #'(library more ...))
+         #'(mat-requires-clause (library more ...) expression)]
+        [(mat-requires . rest)
+         (syntax-violation 'mat-requires
+                           "expected one or more library symbols and one expression" clause)]
+        [_ clause])))
+
+  #|macro:mat-requires
+  The `mat-requires` macro marks a mat clause as requiring the optional `library` symbols.
+  At least one library symbol and exactly one `expression` are required. The tagged clause
+  preserves `expression`, including expected-condition forms. The runner validates every name
+  with `optional-library-info` and skips the clause without evaluating it if any are disabled.
+  |#
+  (define-syntax mat-requires
+    (lambda (clause)
+      (with-syntax ([tag (mat-requires-transform clause)])
+        #'(quote tag))))
+
   (define-syntax mat
     (lambda (x)
       (syntax-case x (parameters)
@@ -29,12 +54,13 @@
                          (f (cdr p*) (cdr v**))))
                      (car v**)))))]
         [(_ x e ...)
-         (with-syntax ([(source ...)
+         (with-syntax ([(clause ...) (map mat-requires-transform #'(e ...))]
+                       [(source ...)
                         (map (lambda (clause)
                                (let ([a (syntax->annotation clause)])
                                  (and (annotation? a) (annotation-source a))))
                              #'(e ...))])
-           #'(mat-run 'x '(e source) ...))]))))
+           #'(mat-run 'x '(clause source) ...))]))))
 
 (define enable-cp0 (make-parameter #f))
 
@@ -53,6 +79,13 @@
 
 (define mat-output (make-parameter (current-output-port)))
 (define mat-verbose (make-parameter #f))
+
+#|proc:mat-skipped
+The `mat-skipped` parameter returns the number of skipped clauses in the current test run.
+An optional natural-number `count` sets the counter; parameterize it to isolate a nested run.
+|#
+(define mat-skipped
+  (make-parameter 0 (lambda (count) (pcheck ([natural? count]) count))))
 
 (let ()
 
@@ -300,7 +333,18 @@
      (do ([clauses clauses (cdr clauses)]
           [count 1 (+ count 1)])
        ((null? clauses) 'done)
-       (let ([clause (caar clauses)] [source (cadar clauses)])
+       (let* ([raw-clause (caar clauses)]
+              [source (cadar clauses)]
+              [requires? (and (list? raw-clause) (= (length raw-clause) 3)
+                              (eq? (car raw-clause) 'mat-requires-clause))]
+              [clause (if requires? (caddr raw-clause) raw-clause)]
+              [missing
+               (if requires?
+                   (filter
+                    (lambda (library)
+                      (not (optional-library-available? (optional-library-info library))))
+                    (cadr raw-clause))
+                   '())])
          (with-exception-handler
            (lambda (c)
              (if (warning? c)
@@ -313,7 +357,13 @@
              (when (mat-verbose)
                (pretty-print clause (mat-output))
                (flush-output-port (mat-output)))))
-         (if (and (list? clause)
+         (if (pair? missing)
+             (begin
+               (mat-skipped (fx1+ (mat-skipped)))
+               (fprintf (mat-output)
+                        "Skipped mat ~s clause ~s: requires optional library ~s~%"
+                        name count missing))
+             (if (and (list? clause)
                   (= (length clause) 2)
                   (memq (car clause) '(sanitized-error? error? warning?)))
              (let ([expect (case (car clause) [(sanitized-error? error?) 'error] [(warning?) 'warning])])
@@ -345,7 +395,7 @@
                   (mat-error source
                     "Bug (nonboolean, nonstring return value) in mat ~s clause ~s"
                     name
-                    count)])))))]))
+                    count)]))))))]))
 
  );let
 

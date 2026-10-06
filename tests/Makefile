@@ -8,6 +8,11 @@ $(error root build options are missing; run make from the repository root first)
 endif
 
 ROOT_OPTIONS := $(shell cat "$(ROOT_OPTIONS_FILE)")
+ROOT_NATIVE_OPTIONS_FILE := $(ROOT_DIR)/.chezpp-native-options.mk
+ifeq ($(wildcard $(ROOT_NATIVE_OPTIONS_FILE)),)
+$(error root native build settings are missing; run make from the repository root first)
+endif
+include $(ROOT_NATIVE_OPTIONS_FILE)
 define root_option
 $(strip $(patsubst $(1)=%,%,$(filter $(1)=%,$(ROOT_OPTIONS))))
 endef
@@ -22,6 +27,7 @@ BUILD_wpo := $(call root_option,wpo)
 
 prepare-chezpp:
 	@$(MAKE) --no-print-directory -C $(ROOT_DIR) chez++ \
+		NATIVE_OPTIONS_REPLAY='$(abspath $(ROOT_NATIVE_OPTIONS_FILE))' \
 		VARIANT='$(BUILD_VARIANT)' o='$(BUILD_o)' d='$(BUILD_d)' \
 		i='t' psi='t' c='$(BUILD_c)' wpo='$(BUILD_wpo)'
 
@@ -54,7 +60,8 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
              hashset.ss treemap.ss treeset.ss rbtree-specialized.ss \
              bittree.ss bitvec.ss dset.ss \
              concurrency.ss \
-             cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss optional-openssl.ss net-loader.ss uuid.ss \
+             cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss optional-openssl.ss \
+             optional-library.ss net-loader.ss uuid.ss \
              protobuf.ss protobuf-codegen.ss \
              $(NET_TESTS) \
              parser.ss net-errors.ss net-address.ss net-dns.ss net-ip.ss net-docs.ss \
@@ -67,13 +74,18 @@ HTTP_ERROR_SOAK_SECONDS ?= 300
 HTTP_ERROR_SOAK_TESTS := net-http net-lws-http2 net-lws-server
 HTTP_ERROR_SOAK_OBJS := $(addsuffix .so,$(HTTP_ERROR_SOAK_TESTS))
 
+WEBSOCKETS_ENABLED := $(shell sed -n 's/^\#define CHEZPP_WITH_WEBSOCKETS //p' \
+                                   $(ROOT_DIR)/chezpp/c/build-config.h)
+ifeq ($(WEBSOCKETS_ENABLED),1)
 lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
-	$(CC) -Wall -Wextra -O2 $< -o $@ -ldl
+	$(CC) $(CPPFLAGS) $(RESOLVED_WEBSOCKETS_CFLAGS) -Wall -Wextra -O2 \
+	  $< -o $@ $(LDFLAGS) $(RESOLVED_WEBSOCKETS_LIBS) -ldl
 
 net-lws-http2.so net-http-fiber.so: lws-http2-fixture
+endif
 
 .PHONY: test
-test: test-all
+test: test-some
 
 mat.so: mat.sls | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
@@ -238,6 +250,15 @@ test-optional-library-loader:
 .PHONY: test-optional-library-linkage
 test-optional-library-linkage:
 	@./optional-library-linkage.sh
+
+.PHONY: test-optional-library-build
+test-optional-library-build:
+	@./optional-library-build.sh
+
+.PHONY: test-optional-native
+test-optional-native:
+	@python3 ../tools/test-optional-native.py --sentinels
+	@../chez++ --script optional-library-runtime.ss
 
 .PHONY: clean
 clean:

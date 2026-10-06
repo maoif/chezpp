@@ -5,12 +5,13 @@
 
 (mat net-operation-waiter-reuse-stress
      ;; Stress case: repeated fiber waits return pooled waiters without retaining operations.
-     (let ([before (lws-reactor-pool-metrics (make-lws-reactor 4 64 4))])
-       (do ([i 0 (fx1+ i)]) ((fx= i 200))
-         (run-fibers
-          (lambda ()
-            (eq? 'ok
-                 (net-operation-wait
-                  (make-net-operation 'stress
-                    (lambda () (net-operation-completed 'ok)) void))))))
-       #t))
+     (mat-requires (websockets)
+       (let ([before (lws-reactor-pool-metrics (make-lws-reactor 4 64 4))])
+         (do ([i 0 (fx1+ i)]) ((fx= i 200))
+           (run-fibers
+            (lambda ()
+              (eq? 'ok
+                   (net-operation-wait
+                    (make-net-operation 'stress
+                      (lambda () (net-operation-completed 'ok)) void))))))
+         #t)))

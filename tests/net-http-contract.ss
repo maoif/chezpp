@@ -124,17 +124,19 @@
             #f)))
 
 (mat net-http-version-policy-contract
-     (let ([client (http-open)])
-       (and (eq? (http-client-version-set! client 'h2) client)
-            (eq? (http-client-version-set! client 'http/1.1) client)
-            (eq? (http-client-version-set! client 'auto) client)
-            (guard (condition [else #t])
-              (http-client-version-set! client 'bogus)
-              #f))))
+     (mat-requires (websockets)
+       (let ([client (http-open)])
+         (and (eq? (http-client-version-set! client 'h2) client)
+              (eq? (http-client-version-set! client 'http/1.1) client)
+              (eq? (http-client-version-set! client 'auto) client)
+              (guard (condition [else #t])
+                (http-client-version-set! client 'bogus)
+                #f)))))
 
 (mat net-http-cancel-pending-clears-active-contract
      ;; Cancellation must snapshot and remove pending operations before callbacks run.
-     (let ([client (http-open)])
-       (http-cancel-pending! client)
-       (http-close client)
-       #t))
+     (mat-requires (websockets)
+       (let ([client (http-open)])
+         (http-cancel-pending! client)
+         (http-close client)
+         #t)))

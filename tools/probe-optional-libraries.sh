@@ -2,6 +2,42 @@
 # Resolve optional dependencies with the same compiler and flags used by the build.
 set -eu
 
+if [ "${1-}" = replay ]; then
+    destination=$2
+    temporary=$(mktemp "${destination}.tmp.XXXXXX")
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    replay_assignment() {
+        printf '%s := ' "$1"
+        printf '%s\n' "$2" | sed 's/\$/$$/g; s/#/\\#/g'
+    }
+    {
+        printf '%s\n' '# Generated native build settings for test-runner recursion.'
+        for name in CC CPPFLAGS CFLAGS LDFLAGS LDLIBS PKG_CONFIG; do
+            eval 'value=${'"$name"'-}'
+            replay_assignment "$name" "$value"
+        done
+        for name in CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH BLAKE3; do
+            eval 'value=${WITH_'"$name"'}'
+            replay_assignment "WITH_$name" "$value"
+            eval 'value=${RESOLVED_WITH_'"$name"'-0}'
+            replay_assignment "RESOLVED_WITH_$name" "$value"
+            for side in CFLAGS LIBS; do
+                eval 'value=${RESOLVED_'"$name"'_'"$side"'-}'
+                replay_assignment "RESOLVED_${name}_$side" "$value"
+                eval 'supplied=${'"$name"'_'"$side"'_SUPPLIED}'
+                if [ "$supplied" = 1 ]; then
+                    eval 'value=${'"$name"'_'"$side"'}'
+                    replay_assignment "${name}_$side" "$value"
+                fi
+            done
+        done
+    } > "$temporary"
+    if ! cmp -s "$temporary" "$destination"; then
+        mv -f "$temporary" "$destination"
+    fi
+    exit 0
+fi
+
 if [ "${1-}" = header ]; then
     destination=$2
     shift 2

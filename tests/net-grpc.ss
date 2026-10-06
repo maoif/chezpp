@@ -306,15 +306,16 @@
             (eq? (grpc-call-options-compression options) 'gzip)
             (equal? (grpc-call-options-metadata options) '(("x-test" . "value")))))
 
-     (let ([capabilities (grpc-capabilities)])
-       (and (grpc-capabilities? capabilities)
-            (boolean? (grpc-capabilities-tls? capabilities))
-            (boolean? (grpc-capabilities-compression? capabilities))
-            (memq 'identity (grpc-capabilities-compression-algorithms capabilities))
-            (grpc-capabilities-deadlines? capabilities)
-            (grpc-capabilities-cancellation? capabilities)
-            (grpc-capabilities-status-details? capabilities)
-            (grpc-capabilities-reflection? capabilities)))
+     (mat-requires (grpc)
+       (let ([capabilities (grpc-capabilities)])
+         (and (grpc-capabilities? capabilities)
+              (boolean? (grpc-capabilities-tls? capabilities))
+              (boolean? (grpc-capabilities-compression? capabilities))
+              (memq 'identity (grpc-capabilities-compression-algorithms capabilities))
+              (grpc-capabilities-deadlines? capabilities)
+              (grpc-capabilities-cancellation? capabilities)
+              (grpc-capabilities-status-details? capabilities)
+              (grpc-capabilities-reflection? capabilities))))
 
      (let ([registry (make-grpc-reflection-registry)])
        (and (grpc-reflection-registry? registry)
@@ -370,444 +371,454 @@
        #f))
 
 (mat net-grpc-reflection
-     (with-grpc-env
-      (lambda ()
-        (let* ([dependency
-                (protobuf-encode-message (list (list 1 'string "dependency.proto")))]
-               [extension
-                (protobuf-encode-message
-                 (list (list 1 'string "extra")
-                       (list 2 'string ".chezpp.test.Base")
-                       (list 3 'uint32 100)))]
-               [root
-                (protobuf-encode-message
-                 (list (list 1 'string "root.proto")
-                       (list 2 'string "chezpp.test")
-                       (list 3 'string "dependency.proto")
-                       (list 7 'message extension)))]
-               [registry (make-grpc-reflection-registry)])
-          (grpc-reflection-register-file!
-           registry "dependency.proto" dependency '("chezpp.test.Base") '())
-          (grpc-reflection-register-file!
-           registry "root.proto" root '("chezpp.test.Root") '())
-          (call-with-grpc-peer
-           1
-           (lambda (server) (grpc-register-reflection! server registry))
-           (lambda (server client)
-             (let ([stream
-                    (grpc-call/bidi-stream
-                     client
-                     "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"
-                     '()
-                     2000)])
-               (grpc-stream-send
-                stream
-                (protobuf-encode-message (list (list 4 'string "chezpp.test.Root"))))
-               (let ([symbol-descriptor*
-                      (grpc-reflection-descriptor* (grpc-stream-recv stream))])
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
+          (let* ([dependency
+                  (protobuf-encode-message (list (list 1 'string "dependency.proto")))]
+                 [extension
+                  (protobuf-encode-message
+                   (list (list 1 'string "extra")
+                         (list 2 'string ".chezpp.test.Base")
+                         (list 3 'uint32 100)))]
+                 [root
+                  (protobuf-encode-message
+                   (list (list 1 'string "root.proto")
+                         (list 2 'string "chezpp.test")
+                         (list 3 'string "dependency.proto")
+                         (list 7 'message extension)))]
+                 [registry (make-grpc-reflection-registry)])
+            (grpc-reflection-register-file!
+             registry "dependency.proto" dependency '("chezpp.test.Base") '())
+            (grpc-reflection-register-file!
+             registry "root.proto" root '("chezpp.test.Root") '())
+            (call-with-grpc-peer
+             1
+             (lambda (server) (grpc-register-reflection! server registry))
+             (lambda (server client)
+               (let ([stream
+                      (grpc-call/bidi-stream
+                       client
+                       "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"
+                       '()
+                       2000)])
                  (grpc-stream-send
                   stream
-                  (protobuf-encode-message
-                   (list
-                    (list 5 'message
-                          (protobuf-encode-message
-                           (list (list 1 'string "chezpp.test.Base")
-                                 (list 2 'uint32 100)))))))
-                 (let ([extension-descriptor*
+                  (protobuf-encode-message (list (list 4 'string "chezpp.test.Root"))))
+                 (let ([symbol-descriptor*
                         (grpc-reflection-descriptor* (grpc-stream-recv stream))])
-                   (grpc-stream-close-send stream)
-                   (let ([done (grpc-stream-recv stream)])
-                     (grpc-stream-close stream)
-                     (and (equal? symbol-descriptor* (list root dependency))
-                          (equal? extension-descriptor* (list root dependency))
-                          (eof-object? done))))))))))))
+                   (grpc-stream-send
+                    stream
+                    (protobuf-encode-message
+                     (list
+                      (list 5 'message
+                            (protobuf-encode-message
+                             (list (list 1 'string "chezpp.test.Base")
+                                   (list 2 'uint32 100)))))))
+                   (let ([extension-descriptor*
+                          (grpc-reflection-descriptor* (grpc-stream-recv stream))])
+                     (grpc-stream-close-send stream)
+                     (let ([done (grpc-stream-recv stream)])
+                       (grpc-stream-close stream)
+                       (and (equal? symbol-descriptor* (list root dependency))
+                            (equal? extension-descriptor* (list root dependency))
+                            (eof-object? done)))))))))))))
 
 (mat net-grpc-unary
-     (with-grpc-env
-      (lambda ()
-        (let ([seen '()])
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
+          (let ([seen '()])
+            (call-with-grpc-peer
+             4
+             (lambda (server)
+               (grpc-register-service!
+                server
+                "/chezpp.test.Echo/Unary"
+                (lambda (req)
+                  (set! seen (cons (grpc-metadata-ref req "x-mode" #f) seen))
+                  (grpc-response
+                   (grpc-request-payload req)
+                   '(("x-reply" . "ok"))
+                   0
+                   ""))))
+             (lambda (server client)
+               (and
+               (grpc-channel? server)
+               (grpc-channel? client)
+                (let ([resp (grpc-call client
+                                       "/chezpp.test.Echo/Unary"
+                                       "hello grpc"
+                                       '(("x-mode" . "blocking"))
+                                       2000)])
+                  (and
+                   (grpc-response? resp)
+                   (= (grpc-status-code resp) 0)
+                   (equal? (grpc-status-message resp) "")
+                   (equal? (utf8->string (grpc-response-payload resp)) "hello grpc")
+                   (equal? (grpc-metadata-ref resp "x-reply") "ok")))
+                (let ([resp (wait-grpc-call/nonblocking
+                             client
+                             "/chezpp.test.Echo/Unary"
+                             #vu8(1 2 3 4)
+                             '(("x-mode" . "nonblocking"))
+                             2000)])
+                  (and
+                   (grpc-response? resp)
+                   (= (grpc-status-code resp) 0)
+                   (equal? (grpc-response-payload resp) #vu8(1 2 3 4))
+                   (equal? (grpc-metadata-ref resp "x-reply") "ok")))
+                (let ([resp
+                       (grpc-call
+                        client "/chezpp.test.Echo/Unary" "compressed"
+                        (make-grpc-call-options '(("x-mode" . "gzip")) 2000 'gzip))])
+                  (and
+                   (equal? (utf8->string (grpc-response-payload resp)) "compressed")
+                   (equal? (grpc-metadata-ref resp "grpc-encoding") "gzip")))
+                (let ([resp (grpc-call client
+                                       "/chezpp.test.Echo/Missing"
+                                       #f
+                                       '()
+                                       2000)])
+                  (and
+                   (grpc-response? resp)
+                   (= (grpc-status-code resp) 12)
+                   (equal? (grpc-status-message resp) "unimplemented")
+                   (not (grpc-response-payload resp))))
+                (equal? (reverse seen) '("blocking" "nonblocking" "gzip"))))))))))
+
+(mat net-grpc-streams
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
           (call-with-grpc-peer
-           4
+           6
            (lambda (server)
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/Unary"
-              (lambda (req)
-                (set! seen (cons (grpc-metadata-ref req "x-mode" #f) seen))
-                (grpc-response
-                 (grpc-request-payload req)
-                 '(("x-reply" . "ok"))
-                 0
-                 ""))))
+              "/chezpp.test.Echo/ServerStream"
+              'server
+              (lambda (stream)
+                (let ([payload (grpc-stream-recv stream)])
+                  (when (bytevector? payload)
+                    (let ([text (utf8->string payload)])
+                      (grpc-stream-send stream (string-append text ":0"))
+                      (grpc-stream-send stream (string-append text ":1"))))
+                  #f)))
+             (grpc-register-service!
+              server
+              "/chezpp.test.Echo/ClientStream"
+              'client
+              (lambda (stream)
+                (let loop ([parts '()])
+                  (let ([payload (grpc-stream-recv stream)])
+                    (if (eof-object? payload)
+                        (string-append "sum:"
+                                       (number->string
+                                        (apply +
+                                               (map string->number
+                                                    (reverse parts)))))
+                        (loop (cons (utf8->string payload) parts)))))))
+             (grpc-register-service!
+              server
+              "/chezpp.test.Echo/Bidi"
+              'bidi
+              (lambda (stream)
+                (let loop ()
+                  (let ([payload (grpc-stream-recv stream)])
+                    (unless (eof-object? payload)
+                      (grpc-stream-send
+                       stream
+                       (string-append "echo:" (utf8->string payload)))
+                      (loop))))
+                #f)))
            (lambda (server client)
              (and
              (grpc-channel? server)
              (grpc-channel? client)
-              (let ([resp (grpc-call client
-                                     "/chezpp.test.Echo/Unary"
-                                     "hello grpc"
-                                     '(("x-mode" . "blocking"))
-                                     2000)])
-                (and
-                 (grpc-response? resp)
-                 (= (grpc-status-code resp) 0)
-                 (equal? (grpc-status-message resp) "")
-                 (equal? (utf8->string (grpc-response-payload resp)) "hello grpc")
-                 (equal? (grpc-metadata-ref resp "x-reply") "ok")))
-              (let ([resp (wait-grpc-call/nonblocking
-                           client
-                           "/chezpp.test.Echo/Unary"
-                           #vu8(1 2 3 4)
-                           '(("x-mode" . "nonblocking"))
-                           2000)])
-                (and
-                 (grpc-response? resp)
-                 (= (grpc-status-code resp) 0)
-                 (equal? (grpc-response-payload resp) #vu8(1 2 3 4))
-                 (equal? (grpc-metadata-ref resp "x-reply") "ok")))
-              (let ([resp
-                     (grpc-call
-                      client "/chezpp.test.Echo/Unary" "compressed"
-                      (make-grpc-call-options '(("x-mode" . "gzip")) 2000 'gzip))])
-                (and
-                 (equal? (utf8->string (grpc-response-payload resp)) "compressed")
-                 (equal? (grpc-metadata-ref resp "grpc-encoding") "gzip")))
-              (let ([resp (grpc-call client
-                                     "/chezpp.test.Echo/Missing"
-                                     #f
-                                     '()
-                                     2000)])
-                (and
-                 (grpc-response? resp)
-                 (= (grpc-status-code resp) 12)
-                 (equal? (grpc-status-message resp) "unimplemented")
-                 (not (grpc-response-payload resp))))
-              (equal? (reverse seen) '("blocking" "nonblocking" "gzip")))))))))
-
-(mat net-grpc-streams
-     (with-grpc-env
-      (lambda ()
-        (call-with-grpc-peer
-         6
-         (lambda (server)
-           (grpc-register-service!
-            server
-            "/chezpp.test.Echo/ServerStream"
-            'server
-            (lambda (stream)
-              (let ([payload (grpc-stream-recv stream)])
-                (when (bytevector? payload)
-                  (let ([text (utf8->string payload)])
-                    (grpc-stream-send stream (string-append text ":0"))
-                    (grpc-stream-send stream (string-append text ":1"))))
-                #f)))
-           (grpc-register-service!
-            server
-            "/chezpp.test.Echo/ClientStream"
-            'client
-            (lambda (stream)
-              (let loop ([parts '()])
-                (let ([payload (grpc-stream-recv stream)])
-                  (if (eof-object? payload)
-                      (string-append "sum:"
-                                     (number->string
-                                      (apply +
-                                             (map string->number
-                                                  (reverse parts)))))
-                      (loop (cons (utf8->string payload) parts)))))))
-           (grpc-register-service!
-            server
-            "/chezpp.test.Echo/Bidi"
-            'bidi
-            (lambda (stream)
-              (let loop ()
-                (let ([payload (grpc-stream-recv stream)])
-                  (unless (eof-object? payload)
-                    (grpc-stream-send
-                     stream
-                     (string-append "echo:" (utf8->string payload)))
-                    (loop))))
-              #f)))
-         (lambda (server client)
-           (and
-           (grpc-channel? server)
-           (grpc-channel? client)
-            (grpc-server-stream-ok? client)
-            (grpc-client-stream-ok? client)
-            (grpc-bidi-stream-ok? client)
-            (grpc-server-stream-nonblocking-ok? client)
-            (grpc-client-stream-nonblocking-ok? client)
-            (grpc-bidi-stream-nonblocking-ok? client)))))))
+              (grpc-server-stream-ok? client)
+              (grpc-client-stream-ok? client)
+              (grpc-bidi-stream-ok? client)
+              (grpc-server-stream-nonblocking-ok? client)
+              (grpc-client-stream-nonblocking-ok? client)
+              (grpc-bidi-stream-nonblocking-ok? client))))))))
 
 (mat net-grpc-errors
-     (with-grpc-env
-      (lambda ()
-        (call-with-grpc-peer
-         #f
-         (lambda (server)
-           (grpc-register-service!
-            server
-            "/chezpp.test.Echo/UnarySlow"
-            (lambda (req)
-              (when (equal? (utf8->string (grpc-request-payload req)) "slow")
-                (milisleep 100))
-              (grpc-response (grpc-request-payload req) '() 0 "")))
-           (grpc-register-service!
-            server
-            "/chezpp.test.Echo/ServerStream"
-            'server
-            (lambda (stream)
-              (let ([payload (grpc-stream-recv stream)])
-                (when (bytevector? payload)
-                  (grpc-stream-send
-                   stream
-                   (string-append (utf8->string payload) ":0")))
-                #f)))
-           (grpc-register-service!
-            server
-            "/chezpp.test.Echo/ClientStream"
-            'client
-            (lambda (stream)
-              (let loop ([total 0])
-                (let ([payload (grpc-stream-recv stream)])
-                  (if (eof-object? payload)
-                      (string-append "sum:" (number->string total))
-                      (loop (+ total (string->number (utf8->string payload))))))))))
-         (lambda (server client)
-           (and
-            (grpc-channel? server)
-            (grpc-channel? client)
-            (eq? (grpc-cancel-pending! client) client)
-            (net-operation? (grpc-call/nonblocking
-                  client
-                  "/chezpp.test.Echo/UnarySlow"
-                  "slow"
-                  '()
-                  500))
-            (eq? (grpc-cancel-pending! client) client)
-            (let ([resp (grpc-call
-                         client
-                         "/chezpp.test.Echo/UnarySlow"
-                         "fast"
-                         '()
-                         500)])
-              (and (grpc-response? resp)
-                   (equal? (utf8->string (grpc-response-payload resp)) "fast")))
-            (let ([slow (grpc-call/nonblocking
-                         client "/chezpp.test.Echo/UnarySlow" "slow" '() 500)]
-                  [fast (grpc-call/nonblocking
-                         client "/chezpp.test.Echo/UnarySlow" "fast" '() 500)])
-              (and (net-operation? slow)
-                   (net-operation? fast)
-                   (let ([slow-response (net-operation-wait slow)]
-                         [fast-response (net-operation-wait fast)])
-                     (and (equal? (utf8->string
-                                   (grpc-response-payload slow-response)) "slow")
-                          (equal? (utf8->string
-                                   (grpc-response-payload fast-response)) "fast")))))
-            (let ([stream (grpc-call/client-stream
-                           client
-                           "/chezpp.test.Echo/ClientStream"
-                           '()
-                           5000)])
-              (let ([ok-stream?
-                     (and
-                      (grpc-stream? stream)
-                      (eq? (grpc-stream-close-send stream) stream)
-                      (grpc-net-error-message?
-                       "gRPC stream send side is closed"
-                       (lambda ()
-                         (grpc-stream-send stream "1")))
-                      (equal? (utf8->string (grpc-stream-recv stream)) "sum:0")
-                      (eof-object? (grpc-stream-recv stream))
-                      (eq? (grpc-stream-close stream) stream)
-                      (eq? (grpc-stream-close stream) stream)
-                      (grpc-net-error-message?
-                       "gRPC stream is closed"
-                       (lambda ()
-                         (grpc-stream-recv stream))))])
-                ok-stream?))
-            (let ([stream (grpc-call/server-stream
-                           client
-                           "/chezpp.test.Echo/ServerStream"
-                           "watch"
-                           '()
-                           5000)])
-              (let ([ok-stream?
-                     (and
-                      (grpc-net-error-message?
-                       "gRPC stream does not support sending"
-                       (lambda ()
-                         (grpc-stream-send stream "bad")))
-                      (equal? (utf8->string (grpc-stream-recv stream)) "watch:0")
-                      (eof-object? (grpc-stream-recv stream)))])
-                (grpc-stream-close stream)
-                ok-stream?))))))))
-
-(mat net-grpc-stream-cancel
-     (with-grpc-env
-      (lambda ()
-        (let ([port (reserve-loopback-port)])
-          (let ([client (grpc-open-channel "127.0.0.1" port)])
-            (dynamic-wind
-              void
-              (lambda ()
-                (and
-                 (net-operation? (grpc-call/server-stream/nonblocking
-                       client
-                       "/chezpp.test.Echo/ServerStream"
-                       "x"
-                       '()
-                       100))
-                 (eq? (grpc-cancel-pending! client) client)
-                 (net-operation? (grpc-call/server-stream/nonblocking
-                                  client
-                                  "/chezpp.test.Echo/ServerStream"
-                                  "x" '() 100))
-                 (net-operation? (grpc-call/bidi-stream/nonblocking
-                                  client "/chezpp.test.Echo/Bidi" '() 100))
-                 (eq? (grpc-cancel-pending! client) client)))
-              (lambda ()
-                (guard (c [else #f])
-                  (grpc-close-channel client)))))
-          (let ([client (grpc-open-channel "127.0.0.1" port)])
-            (dynamic-wind
-              void
-              (lambda ()
-                (and
-                 (net-operation? (grpc-call/server-stream/nonblocking
-                       client
-                       "/chezpp.test.Echo/ServerStream"
-                       "x"
-                       '()
-                       100))
-                 (eq? (grpc-close-channel client) client)
-                 (grpc-net-error-message?
-                  "gRPC channel is closed"
-                  (lambda ()
-                    (grpc-call client
-                               "/chezpp.test.Echo/Unary"
-                               "x"
-                               '()
-                               100)))))
-              (lambda ()
-                (guard (c [else #f])
-                  (grpc-close-channel client)))))))))
-
-(mat net-grpc-shared-completion-driver
-     (with-grpc-env
-      (lambda ()
-        (call-with-grpc-peer
-           100
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
+          (call-with-grpc-peer
+           #f
            (lambda (server)
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/UnaryMany"
-              (lambda (request)
-                (grpc-response (grpc-request-payload request)))))
+              "/chezpp.test.Echo/UnarySlow"
+              (lambda (req)
+                (when (equal? (utf8->string (grpc-request-payload req)) "slow")
+                  (milisleep 100))
+                (grpc-response (grpc-request-payload req) '() 0 "")))
+             (grpc-register-service!
+              server
+              "/chezpp.test.Echo/ServerStream"
+              'server
+              (lambda (stream)
+                (let ([payload (grpc-stream-recv stream)])
+                  (when (bytevector? payload)
+                    (grpc-stream-send
+                     stream
+                     (string-append (utf8->string payload) ":0")))
+                  #f)))
+             (grpc-register-service!
+              server
+              "/chezpp.test.Echo/ClientStream"
+              'client
+              (lambda (stream)
+                (let loop ([total 0])
+                  (let ([payload (grpc-stream-recv stream)])
+                    (if (eof-object? payload)
+                        (string-append "sum:" (number->string total))
+                        (loop (+ total (string->number (utf8->string payload))))))))))
            (lambda (server client)
-             (let ([before (grpc-thread-count)]
-                   [operation*
-                    (let loop ([i 0] [out '()])
-                      (if (= i 100)
-                          (reverse out)
-                          (loop
-                           (+ i 1)
-                           (cons
-                            (grpc-call/nonblocking
+             (and
+              (grpc-channel? server)
+              (grpc-channel? client)
+              (eq? (grpc-cancel-pending! client) client)
+              (net-operation? (grpc-call/nonblocking
+                    client
+                    "/chezpp.test.Echo/UnarySlow"
+                    "slow"
+                    '()
+                    500))
+              (eq? (grpc-cancel-pending! client) client)
+              (let ([resp (grpc-call
+                           client
+                           "/chezpp.test.Echo/UnarySlow"
+                           "fast"
+                           '()
+                           500)])
+                (and (grpc-response? resp)
+                     (equal? (utf8->string (grpc-response-payload resp)) "fast")))
+              (let ([slow (grpc-call/nonblocking
+                           client "/chezpp.test.Echo/UnarySlow" "slow" '() 500)]
+                    [fast (grpc-call/nonblocking
+                           client "/chezpp.test.Echo/UnarySlow" "fast" '() 500)])
+                (and (net-operation? slow)
+                     (net-operation? fast)
+                     (let ([slow-response (net-operation-wait slow)]
+                           [fast-response (net-operation-wait fast)])
+                       (and (equal? (utf8->string
+                                     (grpc-response-payload slow-response)) "slow")
+                            (equal? (utf8->string
+                                     (grpc-response-payload fast-response)) "fast")))))
+              (let ([stream (grpc-call/client-stream
                              client
-                             "/chezpp.test.Echo/UnaryMany"
-                             (number->string i)
+                             "/chezpp.test.Echo/ClientStream"
                              '()
-                             5000)
-                            out))))])
-               (for-each net-operation-step! operation*)
-               (let* ([fd*
-                       (map
-                        (lambda (operation)
-                          (poll-target-fd
-                           (car (net-operation-poll-targets operation))))
-                        (filter
-                         (lambda (operation)
-                           (eq? 'pending (net-operation-state operation)))
-                         operation*))]
-                      [response* (map net-operation-wait operation*)])
-                 (and (pair? fd*)
-                      (andmap (lambda (fd) (= fd (car fd*))) (cdr fd*))
-                      (= (length response*) 100)
-                      (<= (- (grpc-thread-count) before) 1)))))))))
+                             5000)])
+                (let ([ok-stream?
+                       (and
+                        (grpc-stream? stream)
+                        (eq? (grpc-stream-close-send stream) stream)
+                        (grpc-net-error-message?
+                         "gRPC stream send side is closed"
+                         (lambda ()
+                           (grpc-stream-send stream "1")))
+                        (equal? (utf8->string (grpc-stream-recv stream)) "sum:0")
+                        (eof-object? (grpc-stream-recv stream))
+                        (eq? (grpc-stream-close stream) stream)
+                        (eq? (grpc-stream-close stream) stream)
+                        (grpc-net-error-message?
+                         "gRPC stream is closed"
+                         (lambda ()
+                           (grpc-stream-recv stream))))])
+                  ok-stream?))
+              (let ([stream (grpc-call/server-stream
+                             client
+                             "/chezpp.test.Echo/ServerStream"
+                             "watch"
+                             '()
+                             5000)])
+                (let ([ok-stream?
+                       (and
+                        (grpc-net-error-message?
+                         "gRPC stream does not support sending"
+                         (lambda ()
+                           (grpc-stream-send stream "bad")))
+                        (equal? (utf8->string (grpc-stream-recv stream)) "watch:0")
+                        (eof-object? (grpc-stream-recv stream)))])
+                  (grpc-stream-close stream)
+                  ok-stream?)))))))))
+
+(mat net-grpc-stream-cancel
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
+          (let ([port (reserve-loopback-port)])
+            (let ([client (grpc-open-channel "127.0.0.1" port)])
+              (dynamic-wind
+                void
+                (lambda ()
+                  (and
+                   (net-operation? (grpc-call/server-stream/nonblocking
+                         client
+                         "/chezpp.test.Echo/ServerStream"
+                         "x"
+                         '()
+                         100))
+                   (eq? (grpc-cancel-pending! client) client)
+                   (net-operation? (grpc-call/server-stream/nonblocking
+                                    client
+                                    "/chezpp.test.Echo/ServerStream"
+                                    "x" '() 100))
+                   (net-operation? (grpc-call/bidi-stream/nonblocking
+                                    client "/chezpp.test.Echo/Bidi" '() 100))
+                   (eq? (grpc-cancel-pending! client) client)))
+                (lambda ()
+                  (guard (c [else #f])
+                    (grpc-close-channel client)))))
+            (let ([client (grpc-open-channel "127.0.0.1" port)])
+              (dynamic-wind
+                void
+                (lambda ()
+                  (and
+                   (net-operation? (grpc-call/server-stream/nonblocking
+                         client
+                         "/chezpp.test.Echo/ServerStream"
+                         "x"
+                         '()
+                         100))
+                   (eq? (grpc-close-channel client) client)
+                   (grpc-net-error-message?
+                    "gRPC channel is closed"
+                    (lambda ()
+                      (grpc-call client
+                                 "/chezpp.test.Echo/Unary"
+                                 "x"
+                                 '()
+                                 100)))))
+                (lambda ()
+                  (guard (c [else #f])
+                    (grpc-close-channel client))))))))))
+
+(mat net-grpc-shared-completion-driver
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
+          (call-with-grpc-peer
+             100
+             (lambda (server)
+               (grpc-register-service!
+                server
+                "/chezpp.test.Echo/UnaryMany"
+                (lambda (request)
+                  (grpc-response (grpc-request-payload request)))))
+             (lambda (server client)
+               (let ([before (grpc-thread-count)]
+                     [operation*
+                      (let loop ([i 0] [out '()])
+                        (if (= i 100)
+                            (reverse out)
+                            (loop
+                             (+ i 1)
+                             (cons
+                              (grpc-call/nonblocking
+                               client
+                               "/chezpp.test.Echo/UnaryMany"
+                               (number->string i)
+                               '()
+                               5000)
+                              out))))])
+                 (for-each net-operation-step! operation*)
+                 (let* ([fd*
+                         (map
+                          (lambda (operation)
+                            (poll-target-fd
+                             (car (net-operation-poll-targets operation))))
+                          (filter
+                           (lambda (operation)
+                             (eq? 'pending (net-operation-state operation)))
+                           operation*))]
+                        [response* (map net-operation-wait operation*)])
+                   (and (pair? fd*)
+                        (andmap (lambda (fd) (= fd (car fd*))) (cdr fd*))
+                        (= (length response*) 100)
+                        (<= (- (grpc-thread-count) before) 1))))))))))
 
 (mat net-grpc-timeout-validation
-     (with-grpc-env
-      (lambda ()
-        (call-with-grpc-peer
-         0
-         (lambda (server) #t)
-         (lambda (server client)
-           (and
-            (grpc-error-message-contains?
-             "timeout must be non-negative"
-             (lambda ()
-               (grpc-call client "/chezpp.test.Echo/Unary" "x" '() -1)))
-            (grpc-error-message-contains?
-             "timeout must be non-negative"
-             (lambda ()
-               (grpc-call/nonblocking client "/chezpp.test.Echo/Unary" "x" '() -1)))
-            (grpc-error-message-contains?
-             "timeout must be non-negative"
-             (lambda ()
-               (grpc-call/server-stream client "/chezpp.test.Echo/ServerStream" "x" '() -1)))
-            (grpc-error-message-contains?
-             "timeout must be non-negative"
-             (lambda ()
-               (grpc-call/client-stream client "/chezpp.test.Echo/ClientStream" '() -1)))
-            (grpc-error-message-contains?
-             "timeout must be non-negative"
-             (lambda ()
-               (grpc-call/bidi-stream/nonblocking client "/chezpp.test.Echo/Bidi" '() -1)))))))))
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
+          (call-with-grpc-peer
+           0
+           (lambda (server) #t)
+           (lambda (server client)
+             (and
+              (grpc-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (grpc-call client "/chezpp.test.Echo/Unary" "x" '() -1)))
+              (grpc-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (grpc-call/nonblocking client "/chezpp.test.Echo/Unary" "x" '() -1)))
+              (grpc-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (grpc-call/server-stream client "/chezpp.test.Echo/ServerStream" "x" '() -1)))
+              (grpc-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (grpc-call/client-stream client "/chezpp.test.Echo/ClientStream" '() -1)))
+              (grpc-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (grpc-call/bidi-stream/nonblocking client "/chezpp.test.Echo/Bidi" '() -1))))))))))
 
 (mat net-grpc-port-validation
-     (and
-      (grpc-error-message-contains?
-       "port must be between 0 and 65535"
-       (lambda ()
-         (grpc-open-channel "127.0.0.1" -1)))
-      (grpc-error-message-contains?
-       "port must be between 0 and 65535"
-       (lambda ()
-         (grpc-open-channel 'server "127.0.0.1" 70000)))))
+     (mat-requires (grpc)
+       (and
+        (grpc-error-message-contains?
+         "port must be between 0 and 65535"
+         (lambda ()
+           (grpc-open-channel "127.0.0.1" -1)))
+        (grpc-error-message-contains?
+         "port must be between 0 and 65535"
+         (lambda ()
+           (grpc-open-channel 'server "127.0.0.1" 70000))))))
 
 (mat net-grpc-tls
      ;; Trusted TLS credentials must protect a unary gRPC call and verify localhost.
-     (with-grpc-env
-      (lambda ()
-        (call-with-grpc-tls-peer
-         (lambda (server)
-           (grpc-register-service!
-            server
-            "/chezpp.test.Echo/Unary"
-            (lambda (request)
-              (grpc-response (grpc-request-payload request)))))
-         (lambda (server client)
-           (let ([response (grpc-call client "/chezpp.test.Echo/Unary" "tls-ok" '() 3000)])
-             (and (grpc-response? response)
-                  (= (grpc-status-code response) 0)
-                  (equal? (utf8->string (grpc-response-payload response)) "tls-ok")))))))
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
+          (call-with-grpc-tls-peer
+           (lambda (server)
+             (grpc-register-service!
+              server
+              "/chezpp.test.Echo/Unary"
+              (lambda (request)
+                (grpc-response (grpc-request-payload request)))))
+           (lambda (server client)
+             (let ([response (grpc-call client "/chezpp.test.Echo/Unary" "tls-ok" '() 3000)])
+               (and (grpc-response? response)
+                    (= (grpc-status-code response) 0)
+                    (equal? (utf8->string (grpc-response-payload response)) "tls-ok"))))))))
 
      ;; A server configured with trust roots requires and verifies a client certificate.
-     (with-grpc-env
-      (lambda ()
-        (call-with-grpc-mutual-tls-peer
-         (lambda (server)
-           (grpc-register-service!
-            server
-            "/chezpp.test.Echo/MutualTLS"
-            (lambda (request)
-              (grpc-response (grpc-request-payload request)))))
-         (lambda (server client)
-           (let ([response
-                  (grpc-call client "/chezpp.test.Echo/MutualTLS" "mtls-ok" '() 3000)])
-             (and (grpc-response? response)
-                  (= (grpc-status-code response) 0)
-                  (equal? (utf8->string (grpc-response-payload response))
-                          "mtls-ok"))))))))
+     (mat-requires (grpc)
+       (with-grpc-env
+        (lambda ()
+          (call-with-grpc-mutual-tls-peer
+           (lambda (server)
+             (grpc-register-service!
+              server
+              "/chezpp.test.Echo/MutualTLS"
+              (lambda (request)
+                (grpc-response (grpc-request-payload request)))))
+           (lambda (server client)
+             (let ([response
+                    (grpc-call client "/chezpp.test.Echo/MutualTLS" "mtls-ok" '() 3000)])
+               (and (grpc-response? response)
+                    (= (grpc-status-code response) 0)
+                    (equal? (utf8->string (grpc-response-payload response))
+                            "mtls-ok")))))))))

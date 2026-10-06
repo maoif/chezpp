@@ -1,6 +1,9 @@
 (import (chezpp)
         (chezpp test))
 
+(mat test-legacy-optional-requirements
+  (begin (load "mat-requires-fixture.ss") #t))
+
 (define test-string-contains?
   (lambda (string needle)
     (let ([string-length (string-length string)]

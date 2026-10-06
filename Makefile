@@ -1,5 +1,9 @@
 .DEFAULT_GOAL := all
 
+ifneq ($(strip $(NATIVE_OPTIONS_REPLAY)),)
+include $(NATIVE_OPTIONS_REPLAY)
+endif
+
 include build-options.mk
 
 SCHEME := scheme
@@ -12,10 +16,12 @@ SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
 SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
 SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c' ! -name '*_unavailable.c')
 
+ifeq ($(origin CC),default)
 CC := gcc
-CFLAGS := -fPIC -Wall -Wextra -O2 -pthread
-CFLAGS += -I$(SCHEME_INCLUDE_DIR)
-LDLIBS :=
+endif
+CC ?= gcc
+CFLAGS ?= -fPIC -Wall -Wextra -O2 -pthread
+LDLIBS ?=
 
 include optional-libraries.mk
 
@@ -101,7 +107,8 @@ check-scheme-header:
 	fi
 
 libchezpp.so: ${SRCS_C} chezpp/c/build-config.h | check-scheme-header prepare-build
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(OPTIONAL_CFLAGS) -include chezpp/c/build-config.h \
+	$(CC) $(CPPFLAGS) -I$(SCHEME_INCLUDE_DIR) $(CFLAGS) $(OPTIONAL_CFLAGS) \
+	  -include chezpp/c/build-config.h \
 	  -shared $(LDFLAGS) -o $@ $(SRCS_C) $(LDLIBS) $(OPTIONAL_LIBS)
 
 chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} libchezpp.so | prepare-build
@@ -119,7 +126,7 @@ chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional
 	printf '%s\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)) > "$$tmp"; \
 	mv "$$tmp" "$(BUILD_OPTIONS_SIGNATURE_FILE)"
 
-chez++: prepare-build ${chezppdeps} chez++.in Makefile
+chez++: prepare-build ${chezppdeps} $(NATIVE_OPTIONS_FILE) chez++.in Makefile
 	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib),)
 
 .PHONY: chez++.exe
@@ -140,6 +147,7 @@ install: chez++ installdeps
 clean:
 	@rm -f chezpp.lib chezpp.wpo chez++ chez++.ss libchezpp.so \
 		"$(BUILD_OPTIONS_SIGNATURE_FILE)" "$(BUILD_OPTIONS_SIGNATURE_FILE).tmp" \
+		"$(NATIVE_OPTIONS_FILE)" "$(NATIVE_OPTIONS_FILE)".tmp.* \
 		chezpp/c/build-config.h chezpp/c/build-config.h.tmp.*
 	@find chezpp/ -name '*.so'  -delete
 	@find tests/  -name '*.so'  -delete

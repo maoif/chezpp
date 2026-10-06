@@ -1,5 +1,6 @@
 # Native dependency resolution is shared by all root build targets.
 PKG_CONFIG ?= pkg-config
+NATIVE_OPTIONS_FILE := $(BUILD_ROOT)/.chezpp-native-options.mk
 OPTIONAL_DEPENDENCY_NAMES := CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL \
                              UUID XXHASH BLAKE3
 
@@ -71,3 +72,20 @@ $(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),\
 chezpp/c/build-config.h: force-build-config | prepare-build
 	@sh tools/probe-optional-libraries.sh header $@ \
 	  $(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),$(name)=$(RESOLVED_WITH_$(name)))
+
+# Tests replay the requested settings, retaining empty versus absent manual overrides.
+$(NATIVE_OPTIONS_FILE): chezpp.lib Makefile tools/probe-optional-libraries.sh | prepare-build
+	@env CC=$(call build-shell-quote,$(CC)) \
+	  CPPFLAGS=$(call build-shell-quote,$(CPPFLAGS)) CFLAGS=$(call build-shell-quote,$(CFLAGS)) \
+	  LDFLAGS=$(call build-shell-quote,$(LDFLAGS)) LDLIBS=$(call build-shell-quote,$(LDLIBS)) \
+	  PKG_CONFIG=$(call build-shell-quote,$(PKG_CONFIG)) \
+	  $(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),\
+	    WITH_$(name)=$(call build-shell-quote,$(strip $(WITH_$(name)))) \
+	    $(name)_CFLAGS=$(call build-shell-quote,$($(name)_CFLAGS)) \
+	    $(name)_LIBS=$(call build-shell-quote,$($(name)_LIBS)) \
+	    $(name)_CFLAGS_SUPPLIED=$($(name)_CFLAGS_SUPPLIED) \
+	    $(name)_LIBS_SUPPLIED=$($(name)_LIBS_SUPPLIED) \
+	    RESOLVED_WITH_$(name)=$(RESOLVED_WITH_$(name)) \
+	    RESOLVED_$(name)_CFLAGS=$(call build-shell-quote,$(RESOLVED_$(name)_CFLAGS)) \
+	    RESOLVED_$(name)_LIBS=$(call build-shell-quote,$(RESOLVED_$(name)_LIBS))) \
+	  sh tools/probe-optional-libraries.sh replay $@

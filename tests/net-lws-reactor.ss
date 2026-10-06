@@ -30,190 +30,201 @@
         (lambda () (lws-context-close context))))))
 
 (mat net-lws-context-lifecycle
-     (call-with-lws-context
-      (lambda (context)
-        (and (positive? context)
-             (fixnum? (lws-context-wakeup-fd context))
-             (vector? (lws-context-poll-snapshot context))
-             (memv (lws-context-timeout-ms context 1000) '(0 1000))
-             (begin
-               (lws-context-wakeup context)
-               (lws-context-service-fd context (lws-context-wakeup-fd context) 1)
-               #t)))))
-
-(mat net-lws-copied-event-order
-     (call-with-lws-context
-      (lambda (context)
-        (lws-context-inject-event! context 'headers 10 11 3 200 #vu8(1 2))
-        (lws-context-inject-event! context 'readable 10 11 3 0 #vu8(3 4 5))
-        (lws-context-inject-event! context 'complete 10 11 3 0 #vu8())
-        (let* ([headers (lws-context-next-event context)]
-               [readable (lws-context-next-event context)]
-               [_ (lws-body-consumed context 10 11 3 3)]
-               [complete (lws-context-next-event context)])
-          (and (eq? (vector-ref headers 0) 'headers)
-               (positive? (vector-ref headers 1))
-               (= (vector-ref headers 2) 10)
-               (= (vector-ref headers 3) 11)
-               (= (vector-ref headers 4) 3)
-               (= (vector-ref headers 5) 200)
-               (equal? (vector-ref headers 6) #vu8(1 2))
-               (eq? (vector-ref readable 0) 'readable)
-               (equal? (vector-ref readable 6) #vu8(3 4 5))
-               (eq? (vector-ref complete 0) 'complete)
-               (not (lws-context-next-event context)))))))
-
-(mat net-lws-terminal-waits-for-readable-consumption
-     (call-with-lws-context
-      (lambda (context)
-        (and (lws-context-inject-event! context 'headers 12 13 4 200 #vu8(1))
-             (lws-context-inject-event! context 'readable 12 13 4 0 #vu8(2 3 4))
-             (lws-context-inject-event! context 'headers 12 13 4 -1 #vu8(5))
-             (lws-context-inject-event! context 'complete 12 13 4 0 #vu8())
-             (eq? (vector-ref (lws-context-next-event context) 0) 'headers)
-             (eq? (vector-ref (lws-context-next-event context) 0) 'readable)
-             (eq? (vector-ref (lws-context-next-event context) 0) 'headers)
-             (not (lws-context-next-event context))
-             (lws-body-consumed context 12 13 4 3)
-             (eq? (vector-ref (lws-context-next-event context) 0) 'complete)
-             (not (lws-context-next-event context))))))
-
-(mat net-lws-fake-callback-tags
-     (call-with-lws-context
-      (lambda (context)
-        (let ([tags '(connected headers writable closed failed reset goaway)])
-          (let inject ([pending tags] [stream-id 21])
-            (unless (null? pending)
-              (lws-context-inject-event!
-               context (car pending) 20 stream-id 7 0 #vu8(9))
-              (inject (cdr pending) (+ stream-id 1))))
-          (let loop ([expected tags] [stream-id 21])
-            (if (null? expected)
-                (not (lws-context-next-event context))
-                (let ([event (lws-context-next-event context)])
-                  (and (eq? (vector-ref event 0) (car expected))
-                       (= (vector-ref event 2) 20)
-                       (= (vector-ref event 3) stream-id)
-                       (= (vector-ref event 4) 7)
-                       (loop (cdr expected) (+ stream-id 1))))))))))
-
-(mat net-lws-observed-transport-metadata
-     (guard (condition [else #f])
+     (mat-requires (websockets)
        (call-with-lws-context
         (lambda (context)
-          (and (lws-context-inject-event!
-                context 'connected 24 25 1 200 #vu8() 'http2 #f 37 #t 'none)
-               (lws-context-inject-event!
-                context 'complete 26 27 1 0 #vu8() 'http1 #t 0 #f 'stream)
-               (lws-context-inject-event!
-                context 'reset 28 29 1 8 #vu8() 'http2 #f 37 #t 'stream)
-               (lws-context-inject-event!
-                context 'goaway 30 31 1 11 #vu8() 'http2 #f 37 #t 'connection)
-               (equal? (vector-ref (lws-context-next-event context) 7)
-                       '#(http2 #f 37 none))
-               (equal? (vector-ref (lws-context-next-event context) 7)
-                       '#(http1 #t #f stream))
-               (equal? (vector-ref (lws-context-next-event context) 7)
-                       '#(http2 #f 37 stream))
-               (equal? (vector-ref (lws-context-next-event context) 7)
-                       '#(http2 #f 37 connection)))))))
+          (and (positive? context)
+               (fixnum? (lws-context-wakeup-fd context))
+               (vector? (lws-context-poll-snapshot context))
+               (memv (lws-context-timeout-ms context 1000) '(0 1000))
+               (begin
+                 (lws-context-wakeup context)
+                 (lws-context-service-fd context (lws-context-wakeup-fd context) 1)
+                 #t))))))
+
+(mat net-lws-copied-event-order
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (lws-context-inject-event! context 'headers 10 11 3 200 #vu8(1 2))
+          (lws-context-inject-event! context 'readable 10 11 3 0 #vu8(3 4 5))
+          (lws-context-inject-event! context 'complete 10 11 3 0 #vu8())
+          (let* ([headers (lws-context-next-event context)]
+                 [readable (lws-context-next-event context)]
+                 [_ (lws-body-consumed context 10 11 3 3)]
+                 [complete (lws-context-next-event context)])
+            (and (eq? (vector-ref headers 0) 'headers)
+                 (positive? (vector-ref headers 1))
+                 (= (vector-ref headers 2) 10)
+                 (= (vector-ref headers 3) 11)
+                 (= (vector-ref headers 4) 3)
+                 (= (vector-ref headers 5) 200)
+                 (equal? (vector-ref headers 6) #vu8(1 2))
+                 (eq? (vector-ref readable 0) 'readable)
+                 (equal? (vector-ref readable 6) #vu8(3 4 5))
+                 (eq? (vector-ref complete 0) 'complete)
+                 (not (lws-context-next-event context))))))))
+
+(mat net-lws-terminal-waits-for-readable-consumption
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (and (lws-context-inject-event! context 'headers 12 13 4 200 #vu8(1))
+               (lws-context-inject-event! context 'readable 12 13 4 0 #vu8(2 3 4))
+               (lws-context-inject-event! context 'headers 12 13 4 -1 #vu8(5))
+               (lws-context-inject-event! context 'complete 12 13 4 0 #vu8())
+               (eq? (vector-ref (lws-context-next-event context) 0) 'headers)
+               (eq? (vector-ref (lws-context-next-event context) 0) 'readable)
+               (eq? (vector-ref (lws-context-next-event context) 0) 'headers)
+               (not (lws-context-next-event context))
+               (lws-body-consumed context 12 13 4 3)
+               (eq? (vector-ref (lws-context-next-event context) 0) 'complete)
+               (not (lws-context-next-event context)))))))
+
+(mat net-lws-fake-callback-tags
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (let ([tags '(connected headers writable closed failed reset goaway)])
+            (let inject ([pending tags] [stream-id 21])
+              (unless (null? pending)
+                (lws-context-inject-event!
+                 context (car pending) 20 stream-id 7 0 #vu8(9))
+                (inject (cdr pending) (+ stream-id 1))))
+            (let loop ([expected tags] [stream-id 21])
+              (if (null? expected)
+                  (not (lws-context-next-event context))
+                  (let ([event (lws-context-next-event context)])
+                    (and (eq? (vector-ref event 0) (car expected))
+                         (= (vector-ref event 2) 20)
+                         (= (vector-ref event 3) stream-id)
+                         (= (vector-ref event 4) 7)
+                         (loop (cdr expected) (+ stream-id 1)))))))))))
+
+(mat net-lws-observed-transport-metadata
+     (mat-requires (websockets)
+       (guard (condition [else #f])
+         (call-with-lws-context
+          (lambda (context)
+            (and (lws-context-inject-event!
+                  context 'connected 24 25 1 200 #vu8() 'http2 #f 37 #t 'none)
+                 (lws-context-inject-event!
+                  context 'complete 26 27 1 0 #vu8() 'http1 #t 0 #f 'stream)
+                 (lws-context-inject-event!
+                  context 'reset 28 29 1 8 #vu8() 'http2 #f 37 #t 'stream)
+                 (lws-context-inject-event!
+                  context 'goaway 30 31 1 11 #vu8() 'http2 #f 37 #t 'connection)
+                 (equal? (vector-ref (lws-context-next-event context) 7)
+                         '#(http2 #f 37 none))
+                 (equal? (vector-ref (lws-context-next-event context) 7)
+                         '#(http1 #t #f stream))
+                 (equal? (vector-ref (lws-context-next-event context) 7)
+                         '#(http2 #f 37 stream))
+                 (equal? (vector-ref (lws-context-next-event context) 7)
+                         '#(http2 #f 37 connection))))))))
 
 (mat net-lws-poll-change-seam
-     (call-with-lws-context
-      (lambda (context)
-        (and (let loop ([descriptor 101])
-               (if (> descriptor 200)
-                   #t
-                   (and (lws-context-inject-poll! context 'add descriptor 1)
-                        (lws-context-inject-poll! context 'change descriptor 5)
-                        (lws-context-inject-poll! context 'delete descriptor 0)
-                        (begin
-                          (lws-context-next-event context)
-                          (lws-context-next-event context)
-                          (lws-context-next-event context)
-                          (loop (+ descriptor 1))))))
-             (lws-context-inject-poll! context 'add 101 1)
-             (lws-context-inject-poll! context 'change 101 5)
-             (= (vector-length (lws-context-poll-snapshot context)) 1)
-             (= (vector-ref (vector-ref (lws-context-poll-snapshot context) 0) 0) 101)
-             (= (vector-ref (vector-ref (lws-context-poll-snapshot context) 0) 1) 5)
-             (lws-context-inject-poll! context 'delete 101 0)
-             (zero? (vector-length (lws-context-poll-snapshot context)))
-             (equal? (map (lambda (ignored)
-                            (vector-ref (lws-context-next-event context) 0))
-                          '(1 2 3))
-                     '(poll-add poll-change poll-delete))))))
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (and (let loop ([descriptor 101])
+                 (if (> descriptor 200)
+                     #t
+                     (and (lws-context-inject-poll! context 'add descriptor 1)
+                          (lws-context-inject-poll! context 'change descriptor 5)
+                          (lws-context-inject-poll! context 'delete descriptor 0)
+                          (begin
+                            (lws-context-next-event context)
+                            (lws-context-next-event context)
+                            (lws-context-next-event context)
+                            (loop (+ descriptor 1))))))
+               (lws-context-inject-poll! context 'add 101 1)
+               (lws-context-inject-poll! context 'change 101 5)
+               (= (vector-length (lws-context-poll-snapshot context)) 1)
+               (= (vector-ref (vector-ref (lws-context-poll-snapshot context) 0) 0) 101)
+               (= (vector-ref (vector-ref (lws-context-poll-snapshot context) 0) 1) 5)
+               (lws-context-inject-poll! context 'delete 101 0)
+               (zero? (vector-length (lws-context-poll-snapshot context)))
+               (equal? (map (lambda (ignored)
+                              (vector-ref (lws-context-next-event context) 0))
+                            '(1 2 3))
+                       '(poll-add poll-change poll-delete)))))))
 
 (mat net-lws-stream-exhaustion-releases-connection
      ;; Error case: acquiring a connection before stream exhaustion must not leak the connection.
-     (let ([context (lws-context-open 2 4)])
-       (dynamic-wind
-         void
-         (lambda ()
-           (and (lws-context-inject-event! context 'writable 1 1 1 0 #vu8())
-                (begin (lws-context-next-event context) #t)
-                (lws-context-inject-event! context 'writable 1 2 1 0 #vu8())
-                (begin (lws-context-next-event context) #t)
-                (not (lws-context-inject-event! context 'writable 2 3 1 0 #vu8()))
-                (lws-context-inject-event! context 'complete 1 1 1 0 #vu8())
-                (begin (lws-context-next-event context) #t)
-                (lws-context-inject-event! context 'complete 1 2 1 0 #vu8())
-                (begin (lws-context-next-event context) #t)
-                (zero? (vector-ref (lws-context-pool-metrics context) 8))))
-         (lambda () (lws-context-close context)))))
+     (mat-requires (websockets)
+       (let ([context (lws-context-open 2 4)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (lws-context-inject-event! context 'writable 1 1 1 0 #vu8())
+                  (begin (lws-context-next-event context) #t)
+                  (lws-context-inject-event! context 'writable 1 2 1 0 #vu8())
+                  (begin (lws-context-next-event context) #t)
+                  (not (lws-context-inject-event! context 'writable 2 3 1 0 #vu8()))
+                  (lws-context-inject-event! context 'complete 1 1 1 0 #vu8())
+                  (begin (lws-context-next-event context) #t)
+                  (lws-context-inject-event! context 'complete 1 2 1 0 #vu8())
+                  (begin (lws-context-next-event context) #t)
+                  (zero? (vector-ref (lws-context-pool-metrics context) 8))))
+           (lambda () (lws-context-close context))))))
 
 (mat net-lws-body-flow-control
-     (call-with-lws-context
-      (lambda (context)
-        (and (lws-context-inject-event! context 'readable 30 31 2 0 #vu8(1 2 3))
-             (not (lws-context-inject-event! context 'readable 30 31 2 0 #vu8(4)))
-             (begin (lws-context-next-event context) #t)
-             (lws-body-consumed context 30 31 2 3)
-             (lws-context-inject-event! context 'readable 30 31 2 0 #vu8(4))
-             (begin (lws-context-next-event context) #t)
-             (lws-body-consumed context 30 31 2 1)))))
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (and (lws-context-inject-event! context 'readable 30 31 2 0 #vu8(1 2 3))
+               (not (lws-context-inject-event! context 'readable 30 31 2 0 #vu8(4)))
+               (begin (lws-context-next-event context) #t)
+               (lws-body-consumed context 30 31 2 3)
+               (lws-context-inject-event! context 'readable 30 31 2 0 #vu8(4))
+               (begin (lws-context-next-event context) #t)
+               (lws-body-consumed context 30 31 2 1))))))
 
 (mat net-lws-generation-filtering
-     (call-with-lws-context
-      (lambda (context)
-        (and (lws-context-inject-event! context 'writable 40 41 9 0 #vu8())
-             (not (lws-context-inject-event! context 'writable 40 41 8 0 #vu8()))
-             (begin (lws-context-next-event context) #t)
-             (lws-context-inject-event! context 'reset 40 41 9 1 #vu8())
-             (begin (lws-context-next-event context) #t)
-             (not (lws-context-inject-event! context 'writable 40 41 8 0 #vu8()))
-             (lws-context-inject-event! context 'writable 40 41 10 0 #vu8())
-             (begin (lws-context-next-event context) #t)))))
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (and (lws-context-inject-event! context 'writable 40 41 9 0 #vu8())
+               (not (lws-context-inject-event! context 'writable 40 41 8 0 #vu8()))
+               (begin (lws-context-next-event context) #t)
+               (lws-context-inject-event! context 'reset 40 41 9 1 #vu8())
+               (begin (lws-context-next-event context) #t)
+               (not (lws-context-inject-event! context 'writable 40 41 8 0 #vu8()))
+               (lws-context-inject-event! context 'writable 40 41 10 0 #vu8())
+               (begin (lws-context-next-event context) #t))))))
 
 (mat net-lws-bounded-event-pool
      ;; Error case: a full callback queue must fail deterministically instead of growing.
-     (let ([context (lws-context-open 2 4)])
-       (dynamic-wind
-         void
-         (lambda ()
-           (and (lws-context-inject-event! context 'writable 1 1 1 0 #vu8(1 2 3 4))
-                (lws-context-inject-event! context 'complete 1 1 1 0 #vu8())
-                (not (lws-context-inject-event! context 'writable 1 1 2 0 #vu8()))
-                (let ([metrics (lws-context-pool-metrics context)])
-                  (and (= (vector-ref metrics 0) 2)
-                       (= (vector-ref metrics 1) 2)
-                       (= (vector-ref metrics 2) 2)
-                       (positive? (vector-ref metrics 4))))))
-         (lambda () (lws-context-close context)))))
+     (mat-requires (websockets)
+       (let ([context (lws-context-open 2 4)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (lws-context-inject-event! context 'writable 1 1 1 0 #vu8(1 2 3 4))
+                  (lws-context-inject-event! context 'complete 1 1 1 0 #vu8())
+                  (not (lws-context-inject-event! context 'writable 1 1 2 0 #vu8()))
+                  (let ([metrics (lws-context-pool-metrics context)])
+                    (and (= (vector-ref metrics 0) 2)
+                         (= (vector-ref metrics 1) 2)
+                         (= (vector-ref metrics 2) 2)
+                         (positive? (vector-ref metrics 4))))))
+           (lambda () (lws-context-close context))))))
 
 (mat net-lws-pool-reuse
-     (call-with-lws-context
-      (lambda (context)
-        (let loop ([generation 1])
-          (if (> generation 100)
-              (let ([metrics (lws-context-pool-metrics context)])
-                (and (= (vector-ref metrics 1) 0)
-                     (= (vector-ref metrics 2) 1)
-                     (zero? (vector-ref metrics 4))))
-              (and (lws-context-inject-event!
-                    context 'complete 50 51 generation 0 #vu8())
-                   (vector? (lws-context-next-event context))
-                   (loop (+ generation 1))))))))
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (let loop ([generation 1])
+            (if (> generation 100)
+                (let ([metrics (lws-context-pool-metrics context)])
+                  (and (= (vector-ref metrics 1) 0)
+                       (= (vector-ref metrics 2) 1)
+                       (zero? (vector-ref metrics 4))))
+                (and (lws-context-inject-event!
+                      context 'complete 50 51 generation 0 #vu8())
+                     (vector? (lws-context-next-event context))
+                     (loop (+ generation 1)))))))))
 
 (mat net-lws-private-operation-boundary
      (and (procedure? lws-client-start)
@@ -225,264 +236,279 @@
           (procedure? lws-body-consumed)))
 
 (mat net-lws-reactor-lifecycle
-     (let ([reactor (make-lws-reactor 16 16 8)])
-       (and (lws-reactor? reactor)
-            (eq? 'created (lws-reactor-state reactor))
-            (lws-reactor-start! reactor)
-            (wait-until (lambda () (eq? 'running (lws-reactor-state reactor))))
-            (positive? (lws-reactor-owner-id reactor))
-            (fixnum? (lws-reactor-wakeup-fd reactor))
-            (eq? reactor (lws-reactor-shutdown! reactor))
-            (eq? 'stopped (lws-reactor-state reactor))
-            (eq? reactor (lws-reactor-shutdown! reactor)))))
+     (mat-requires (websockets)
+       (let ([reactor (make-lws-reactor 16 16 8)])
+         (and (lws-reactor? reactor)
+              (eq? 'created (lws-reactor-state reactor))
+              (lws-reactor-start! reactor)
+              (wait-until (lambda () (eq? 'running (lws-reactor-state reactor))))
+              (positive? (lws-reactor-owner-id reactor))
+              (fixnum? (lws-reactor-wakeup-fd reactor))
+              (eq? reactor (lws-reactor-shutdown! reactor))
+              (eq? 'stopped (lws-reactor-state reactor))
+              (eq? reactor (lws-reactor-shutdown! reactor))))))
 
 (mat net-lws-reactor-enforces-deadline
      ;; Error case: a pending native operation must fail once its absolute deadline expires.
-     (let* ([reactor (make-lws-reactor 8 64 8)]
-            [operation (make-lws-reactor-operation reactor 'http2 1 1 1 0)])
-       (dynamic-wind
-         void
-         (lambda ()
-           (net-operation-step! operation)
-           (and (eq? 'failed (net-operation-state operation))
-                (net-error? (net-operation-condition operation))
-                (eq? 'timeout (net-error-kind (net-operation-condition operation)))))
-         (lambda () (lws-reactor-shutdown! reactor)))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 8 64 8)]
+              [operation (make-lws-reactor-operation reactor 'http2 1 1 1 0)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (net-operation-step! operation)
+             (and (eq? 'failed (net-operation-state operation))
+                  (net-error? (net-operation-condition operation))
+                  (eq? 'timeout (net-error-kind (net-operation-condition operation)))))
+           (lambda () (lws-reactor-shutdown! reactor))))))
 
 (mat net-lws-reactor-completion-fanout
-     (let* ([reactor (make-lws-reactor 16 16 8)]
-            [first (make-lws-reactor-operation reactor 'first 1 11 1 #f)]
-            [second (make-lws-reactor-operation reactor 'second 1 12 1 #f)]
-            [notifications '()])
-       (lws-reactor-register-waiter!
-        reactor first (lambda (operation) (set! notifications (cons operation notifications))))
-       (lws-reactor-register-waiter!
-        reactor second (lambda (operation) (set! notifications (cons operation notifications))))
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-event! reactor 'complete 1 12 1 0 #vu8(2))
-       (lws-reactor-inject-event! reactor 'complete 1 11 1 0 #vu8(1))
-       (let ([ready?
-              (wait-until
-               (lambda ()
-                 (and (pair? (lws-reactor-operation-events reactor first))
-                      (pair? (lws-reactor-operation-events reactor second)))))])
-         (net-operation-step! second)
-         (net-operation-step! first)
-         (lws-reactor-shutdown! reactor)
-         (and ready?
-              (eq? 'completed (net-operation-state first))
-              (eq? 'completed (net-operation-state second))
-              (equal? (vector-ref (net-operation-result first) 6) #vu8(1))
-              (equal? (vector-ref (net-operation-result second) 6) #vu8(2))
-              (= (length notifications) 2)))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 8)]
+              [first (make-lws-reactor-operation reactor 'first 1 11 1 #f)]
+              [second (make-lws-reactor-operation reactor 'second 1 12 1 #f)]
+              [notifications '()])
+         (lws-reactor-register-waiter!
+          reactor first (lambda (operation) (set! notifications (cons operation notifications))))
+         (lws-reactor-register-waiter!
+          reactor second (lambda (operation) (set! notifications (cons operation notifications))))
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 1 12 1 0 #vu8(2))
+         (lws-reactor-inject-event! reactor 'complete 1 11 1 0 #vu8(1))
+         (let ([ready?
+                (wait-until
+                 (lambda ()
+                   (and (pair? (lws-reactor-operation-events reactor first))
+                        (pair? (lws-reactor-operation-events reactor second)))))])
+           (net-operation-step! second)
+           (net-operation-step! first)
+           (lws-reactor-shutdown! reactor)
+           (and ready?
+                (eq? 'completed (net-operation-state first))
+                (eq? 'completed (net-operation-state second))
+                (equal? (vector-ref (net-operation-result first) 6) #vu8(1))
+                (equal? (vector-ref (net-operation-result second) 6) #vu8(2))
+                (= (length notifications) 2))))))
 
 (mat net-lws-reactor-sequential-connection-reuse
      ;; Two terminal transactions may reuse one physical connection identity.
-     (let* ([reactor (make-lws-reactor 16 16 8)]
-            [first (make-lws-reactor-operation reactor 'first 71 1 1 #f)]
-            [second (make-lws-reactor-operation reactor 'second 71 2 2 #f)])
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-event! reactor 'complete 71 1 1 0 #vu8(1))
-       (let ([first-ready?
-              (wait-until (lambda ()
-                            (eq? 'completed (lws-reactor-operation-lifecycle reactor first))))])
-         (let* ([first-event (car (lws-reactor-operation-events reactor first))]
-                [_ (lws-reactor-inject-event! reactor 'complete 71 2 2 0 #vu8(2))]
-                [second-ready? (wait-until (lambda ()
-                                             (eq? 'completed (lws-reactor-operation-lifecycle reactor second))))]
-                [second-event (car (lws-reactor-operation-events reactor second))])
-           (net-operation-step! first)
-           (net-operation-step! second)
-           (lws-reactor-shutdown! reactor)
-           (and first-ready? second-ready?
-                (= (vector-ref first-event 2) 71)
-                (= (vector-ref second-event 2) 71))))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 8)]
+              [first (make-lws-reactor-operation reactor 'first 71 1 1 #f)]
+              [second (make-lws-reactor-operation reactor 'second 71 2 2 #f)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 71 1 1 0 #vu8(1))
+         (let ([first-ready?
+                (wait-until (lambda ()
+                              (eq? 'completed (lws-reactor-operation-lifecycle reactor first))))])
+           (let* ([first-event (car (lws-reactor-operation-events reactor first))]
+                  [_ (lws-reactor-inject-event! reactor 'complete 71 2 2 0 #vu8(2))]
+                  [second-ready? (wait-until (lambda ()
+                                               (eq? 'completed (lws-reactor-operation-lifecycle reactor second))))]
+                  [second-event (car (lws-reactor-operation-events reactor second))])
+             (net-operation-step! first)
+             (net-operation-step! second)
+             (lws-reactor-shutdown! reactor)
+             (and first-ready? second-ready?
+                  (= (vector-ref first-event 2) 71)
+                  (= (vector-ref second-event 2) 71)))))))
 
 (mat net-lws-reactor-multiplexed-stream-identities
      ;; Distinct logical streams route independently over one physical connection.
-     (let* ([reactor (make-lws-reactor 16 16 8)]
-            [first (make-lws-reactor-operation reactor 'h2-a 72 3 1 #f)]
-            [second (make-lws-reactor-operation reactor 'h2-b 72 5 1 #f)])
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-event! reactor 'complete 72 5 1 0 #vu8(5))
-       (lws-reactor-inject-event! reactor 'complete 72 3 1 0 #vu8(3))
-       (let ([ready?
-              (wait-until (lambda ()
-                            (and (eq? 'completed (lws-reactor-operation-lifecycle reactor first))
-                                 (eq? 'completed (lws-reactor-operation-lifecycle reactor second)))))])
-         (let* ([first-event (car (lws-reactor-operation-events reactor first))]
-                [second-event (car (lws-reactor-operation-events reactor second))])
-           (net-operation-step! first)
-           (net-operation-step! second)
-           (lws-reactor-shutdown! reactor)
-           (and ready?
-                (= (vector-ref first-event 3) 3)
-                (= (vector-ref second-event 3) 5))))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 8)]
+              [first (make-lws-reactor-operation reactor 'h2-a 72 3 1 #f)]
+              [second (make-lws-reactor-operation reactor 'h2-b 72 5 1 #f)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 72 5 1 0 #vu8(5))
+         (lws-reactor-inject-event! reactor 'complete 72 3 1 0 #vu8(3))
+         (let ([ready?
+                (wait-until (lambda ()
+                              (and (eq? 'completed (lws-reactor-operation-lifecycle reactor first))
+                                   (eq? 'completed (lws-reactor-operation-lifecycle reactor second)))))])
+           (let* ([first-event (car (lws-reactor-operation-events reactor first))]
+                  [second-event (car (lws-reactor-operation-events reactor second))])
+             (net-operation-step! first)
+             (net-operation-step! second)
+             (lws-reactor-shutdown! reactor)
+             (and ready?
+                  (= (vector-ref first-event 3) 3)
+                  (= (vector-ref second-event 3) 5)))))))
 
 (mat net-lws-reactor-stale-generation-after-release
      ;; Events for a released generation must not reach a later operation.
-     (let* ([reactor (make-lws-reactor 16 16 8)]
-            [old (make-lws-reactor-operation reactor 'old 73 7 1 #f #t)])
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-event! reactor 'complete 73 7 1 0 #vu8())
-       (let ([ready? (wait-until (lambda ()
-                                  (pair? (lws-reactor-operation-events reactor old))))])
-         (net-operation-step! old)
-         (lws-reactor-release-operation! reactor old)
-         (let ([new (make-lws-reactor-operation reactor 'new 73 7 2 #f)])
-           (lws-reactor-inject-event! reactor 'complete 73 7 1 0 #vu8(9))
-           (let ([stale? (wait-until (lambda ()
-                                      (pair? (lws-reactor-operation-events reactor new))))])
-             (lws-reactor-shutdown! reactor)
-             (and ready? (not stale?)
-                  (null? (lws-reactor-operation-events reactor new))))))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 8)]
+              [old (make-lws-reactor-operation reactor 'old 73 7 1 #f #t)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 73 7 1 0 #vu8())
+         (let ([ready? (wait-until (lambda ()
+                                    (pair? (lws-reactor-operation-events reactor old))))])
+           (net-operation-step! old)
+           (lws-reactor-release-operation! reactor old)
+           (let ([new (make-lws-reactor-operation reactor 'new 73 7 2 #f)])
+             (lws-reactor-inject-event! reactor 'complete 73 7 1 0 #vu8(9))
+             (let ([stale? (wait-until (lambda ()
+                                        (pair? (lws-reactor-operation-events reactor new))))])
+               (lws-reactor-shutdown! reactor)
+               (and ready? (not stale?)
+                    (null? (lws-reactor-operation-events reactor new)))))))))
 
 (mat net-lws-reactor-completed-operation-releases-signal
      ;; Completed operations must return their signal to the bounded native pool.
-     (let ([reactor (make-lws-reactor 2 16 4)])
-       (lws-reactor-start! reactor)
-       (let loop ([identity 1])
-         (if (> identity 4)
-             (begin
-               (lws-reactor-shutdown! reactor)
-               #t)
-             (let ([operation
-                    (make-lws-reactor-operation reactor 'signal identity identity 1 #f)])
-               (lws-reactor-inject-event! reactor 'complete identity identity 1 0 #vu8())
-               (and (wait-until
-                     (lambda ()
-                       (pair? (lws-reactor-operation-events reactor operation))))
-                    (begin
-                      (net-operation-step! operation)
-                      (eq? 'completed (net-operation-state operation)))
-                    (loop (+ identity 1))))))))
+     (mat-requires (websockets)
+       (let ([reactor (make-lws-reactor 2 16 4)])
+         (lws-reactor-start! reactor)
+         (let loop ([identity 1])
+           (if (> identity 4)
+               (begin
+                 (lws-reactor-shutdown! reactor)
+                 #t)
+               (let ([operation
+                      (make-lws-reactor-operation reactor 'signal identity identity 1 #f)])
+                 (lws-reactor-inject-event! reactor 'complete identity identity 1 0 #vu8())
+                 (and (wait-until
+                       (lambda ()
+                         (pair? (lws-reactor-operation-events reactor operation))))
+                      (begin
+                        (net-operation-step! operation)
+                        (eq? 'completed (net-operation-state operation)))
+                      (loop (+ identity 1)))))))))
 
 (mat net-lws-reactor-cancellation
-     (let* ([reactor (make-lws-reactor 16 16 8)]
-            [operation (make-lws-reactor-operation reactor 'cancel 2 21 3 #f)]
-            [unregister (lws-reactor-register-waiter! reactor operation void)])
-       (lws-reactor-start! reactor)
-       (net-operation-cancel! operation)
-       (let ([cancelled?
-              (wait-until
-               (lambda ()
-                 (zero? (vector-ref (lws-reactor-pool-metrics reactor) 1))))])
-         (lws-reactor-shutdown! reactor)
-         (and cancelled?
-              (zero? (vector-ref (lws-reactor-pool-metrics reactor) 6))
-              (eq? 'cancelled (net-operation-state operation))))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 8)]
+              [operation (make-lws-reactor-operation reactor 'cancel 2 21 3 #f)]
+              [unregister (lws-reactor-register-waiter! reactor operation void)])
+         (lws-reactor-start! reactor)
+         (net-operation-cancel! operation)
+         (let ([cancelled?
+                (wait-until
+                 (lambda ()
+                   (zero? (vector-ref (lws-reactor-pool-metrics reactor) 1))))])
+           (lws-reactor-shutdown! reactor)
+           (and cancelled?
+                (zero? (vector-ref (lws-reactor-pool-metrics reactor) 6))
+                (eq? 'cancelled (net-operation-state operation)))))))
 
 (mat net-lws-reactor-waiter-unregister
-     (let* ([reactor (make-lws-reactor 16 16 4)]
-            [operation (make-lws-reactor-operation reactor 'waiter 4 41 1 #f)]
-            [notification-count 0]
-            [unregister
-             (lws-reactor-register-waiter!
-              reactor operation
-              (lambda (ignored) (set! notification-count (+ notification-count 1))))])
-       (unregister)
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-event! reactor 'complete 4 41 1 0 #vu8())
-       (let ([ready?
-              (wait-until
-               (lambda ()
-                 (pair? (lws-reactor-operation-events reactor operation))))])
-         (net-operation-step! operation)
-         (lws-reactor-shutdown! reactor)
-         (and ready?
-              (zero? notification-count)
-              (zero? (vector-ref (lws-reactor-pool-metrics reactor) 6))))))
-
-(mat net-lws-reactor-late-waiter
-     (let* ([reactor (make-lws-reactor 16 16 4)]
-            [operation (make-lws-reactor-operation reactor 'late-waiter 4 42 1 #f)]
-            [notification-count 0])
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-event! reactor 'complete 4 42 1 0 #vu8())
-       (let ([ready?
-              (wait-until
-               (lambda ()
-                 (pair? (lws-reactor-operation-events reactor operation))))])
-         (let ([unregister
-                (lws-reactor-register-waiter!
-                 reactor operation
-                 (lambda (ignored)
-                   (set! notification-count (+ notification-count 1))))])
-           (unregister)
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 4)]
+              [operation (make-lws-reactor-operation reactor 'waiter 4 41 1 #f)]
+              [notification-count 0]
+              [unregister
+               (lws-reactor-register-waiter!
+                reactor operation
+                (lambda (ignored) (set! notification-count (+ notification-count 1))))])
+         (unregister)
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 4 41 1 0 #vu8())
+         (let ([ready?
+                (wait-until
+                 (lambda ()
+                   (pair? (lws-reactor-operation-events reactor operation))))])
            (net-operation-step! operation)
            (lws-reactor-shutdown! reactor)
            (and ready?
-                (= notification-count 1)
+                (zero? notification-count)
                 (zero? (vector-ref (lws-reactor-pool-metrics reactor) 6)))))))
 
-(mat net-lws-reactor-poll-updates
-     (let ([reactor (make-lws-reactor 16 16 8)])
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-poll! reactor 'add 301 1)
-       (lws-reactor-inject-poll! reactor 'change 301 5)
-       (let ([changed?
-              (wait-until
-               (lambda ()
-                 (let ([entry (poll-snapshot-find
-                               (lws-reactor-poll-snapshot reactor) 301)])
-                   (and entry (= (vector-ref entry 1) 5)))))])
-         (lws-reactor-inject-poll! reactor 'delete 301 0)
-         (let ([deleted?
+(mat net-lws-reactor-late-waiter
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 4)]
+              [operation (make-lws-reactor-operation reactor 'late-waiter 4 42 1 #f)]
+              [notification-count 0])
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 4 42 1 0 #vu8())
+         (let ([ready?
                 (wait-until
                  (lambda ()
-                   (not (poll-snapshot-find
-                         (lws-reactor-poll-snapshot reactor) 301))))])
-           (lws-reactor-shutdown! reactor)
-           (and changed? deleted?)))))
+                   (pair? (lws-reactor-operation-events reactor operation))))])
+           (let ([unregister
+                  (lws-reactor-register-waiter!
+                   reactor operation
+                   (lambda (ignored)
+                     (set! notification-count (+ notification-count 1))))])
+             (unregister)
+             (net-operation-step! operation)
+             (lws-reactor-shutdown! reactor)
+             (and ready?
+                  (= notification-count 1)
+                  (zero? (vector-ref (lws-reactor-pool-metrics reactor) 6))))))))
+
+(mat net-lws-reactor-poll-updates
+     (mat-requires (websockets)
+       (let ([reactor (make-lws-reactor 16 16 8)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-poll! reactor 'add 301 1)
+         (lws-reactor-inject-poll! reactor 'change 301 5)
+         (let ([changed?
+                (wait-until
+                 (lambda ()
+                   (let ([entry (poll-snapshot-find
+                                 (lws-reactor-poll-snapshot reactor) 301)])
+                     (and entry (= (vector-ref entry 1) 5)))))])
+           (lws-reactor-inject-poll! reactor 'delete 301 0)
+           (let ([deleted?
+                  (wait-until
+                   (lambda ()
+                     (not (poll-snapshot-find
+                           (lws-reactor-poll-snapshot reactor) 301))))])
+             (lws-reactor-shutdown! reactor)
+             (and changed? deleted?))))))
 
 (mat net-lws-reactor-shutdown-fails-pending
-     (let* ([reactor (make-lws-reactor 16 16 4)]
-            [operation (make-lws-reactor-operation reactor 'pending 5 51 1 #f)])
-       (lws-reactor-start! reactor)
-       (lws-reactor-shutdown! reactor)
-       (net-operation-step! operation)
-       (and (eq? 'failed (net-operation-state operation))
-            (condition? (net-operation-condition operation)))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 4)]
+              [operation (make-lws-reactor-operation reactor 'pending 5 51 1 #f)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-shutdown! reactor)
+         (net-operation-step! operation)
+         (and (eq? 'failed (net-operation-state operation))
+              (condition? (net-operation-condition operation))))))
 
 (mat net-lws-reactor-failure-event
-     (let* ([reactor (make-lws-reactor 16 16 4)]
-            [operation (make-lws-reactor-operation reactor 'failure 6 61 1 #f)])
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-event! reactor 'failed 6 61 1 111 #vu8())
-       (let ([ready?
-              (wait-until
-               (lambda ()
-                 (pair? (lws-reactor-operation-events reactor operation))))])
-         (net-operation-step! operation)
-         (lws-reactor-shutdown! reactor)
-         (and ready?
-              (eq? 'failed (net-operation-state operation))
-              (condition? (net-operation-condition operation))))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 16 4)]
+              [operation (make-lws-reactor-operation reactor 'failure 6 61 1 #f)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'failed 6 61 1 111 #vu8())
+         (let ([ready?
+                (wait-until
+                 (lambda ()
+                   (pair? (lws-reactor-operation-events reactor operation))))])
+           (net-operation-step! operation)
+           (lws-reactor-shutdown! reactor)
+           (and ready?
+                (eq? 'failed (net-operation-state operation))
+                (condition? (net-operation-condition operation)))))))
 
 (mat net-lws-reactor-rejects-after-shutdown
      ;; Error case: a stopped reactor must reject new commands and operations.
-     (let ([reactor (make-lws-reactor 16 16 4)])
-       (lws-reactor-shutdown! reactor)
-       (and (not (lws-reactor-inject-event! reactor 'writable 7 71 1 0 #vu8()))
-            (guard (failure [else (condition? failure)])
-              (make-lws-reactor-operation reactor 'late 7 71 1 #f)
-              #f))))
+     (mat-requires (websockets)
+       (let ([reactor (make-lws-reactor 16 16 4)])
+         (lws-reactor-shutdown! reactor)
+         (and (not (lws-reactor-inject-event! reactor 'writable 7 71 1 0 #vu8()))
+              (guard (failure [else (condition? failure)])
+                (make-lws-reactor-operation reactor 'late 7 71 1 #f)
+                #f)))))
 
 (mat net-lws-reactor-command-pool
      ;; Error case: commands beyond the configured pool fail without growing the pool.
-     (let ([reactor (make-lws-reactor 16 16 2)])
-       (and (lws-reactor-inject-event! reactor 'writable 3 31 1 0 #vu8())
-            (lws-reactor-inject-event! reactor 'writable 3 32 1 0 #vu8())
-            (not (lws-reactor-inject-event! reactor 'writable 3 33 1 0 #vu8()))
-            (let ([metrics (lws-reactor-pool-metrics reactor)])
-              (and (= (vector-ref metrics 0) 2)
-                   (= (vector-ref metrics 1) 2)
-                   (= (vector-ref metrics 2) 2)
-                   (positive? (vector-ref metrics 4))))
-            (lws-reactor-start! reactor)
-            (wait-until (lambda () (zero? (vector-ref (lws-reactor-pool-metrics reactor) 1))))
-            (lws-reactor-inject-event! reactor 'writable 3 34 1 0 #vu8())
-            (begin (lws-reactor-shutdown! reactor) #t))))
+     (mat-requires (websockets)
+       (let ([reactor (make-lws-reactor 16 16 2)])
+         (and (lws-reactor-inject-event! reactor 'writable 3 31 1 0 #vu8())
+              (lws-reactor-inject-event! reactor 'writable 3 32 1 0 #vu8())
+              (not (lws-reactor-inject-event! reactor 'writable 3 33 1 0 #vu8()))
+              (let ([metrics (lws-reactor-pool-metrics reactor)])
+                (and (= (vector-ref metrics 0) 2)
+                     (= (vector-ref metrics 1) 2)
+                     (= (vector-ref metrics 2) 2)
+                     (positive? (vector-ref metrics 4))))
+              (lws-reactor-start! reactor)
+              (wait-until (lambda () (zero? (vector-ref (lws-reactor-pool-metrics reactor) 1))))
+              (lws-reactor-inject-event! reactor 'writable 3 34 1 0 #vu8())
+              (begin (lws-reactor-shutdown! reactor) #t)))))
 
 (mat net-lws-reactor-command-boundary
      (and (procedure? lws-reactor-client-start!)
@@ -492,72 +518,76 @@
 
 (mat net-lws-reactor-drain-operation-events-is-destructive
      ;; Draining copied events must remove them so retained payloads do not grow unbounded.
-     (let* ([reactor (make-lws-reactor 8 8 4)]
-            [operation (make-lws-reactor-operation reactor 'drain 81 82 1 #f)])
-       (lws-reactor-start! reactor)
-       (lws-reactor-inject-event! reactor 'complete 81 82 1 0 #vu8(7))
-       (let ([ready? (wait-until
-                      (lambda ()
-                        (eq? 'completed
-                             (lws-reactor-operation-lifecycle reactor operation))))]
-             [events (begin
-                       (wait-until
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 8 8 4)]
+              [operation (make-lws-reactor-operation reactor 'drain 81 82 1 #f)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 81 82 1 0 #vu8(7))
+         (let ([ready? (wait-until
                         (lambda ()
-                          (pair? (lws-reactor-operation-events reactor operation))))
-                       (lws-reactor-drain-operation-events! reactor operation))])
-         (lws-reactor-shutdown! reactor)
-         (and ready?
-              (= (length events) 1)
-              (null? (lws-reactor-drain-operation-events! reactor operation))))))
+                          (eq? 'completed
+                               (lws-reactor-operation-lifecycle reactor operation))))]
+               [events (begin
+                         (wait-until
+                          (lambda ()
+                            (pair? (lws-reactor-operation-events reactor operation))))
+                         (lws-reactor-drain-operation-events! reactor operation))])
+           (lws-reactor-shutdown! reactor)
+           (and ready?
+                (= (length events) 1)
+                (null? (lws-reactor-drain-operation-events! reactor operation)))))))
 
 (mat net-lws-reactor-command-rejection-publishes-terminal
      ;; A native command rejected after enqueue must still terminate its owning operation.
-     (let* ([reactor (make-lws-reactor 8 8 4)]
-            [operation (make-lws-reactor-operation reactor 'reject 91 92 1 #f)])
-       (lws-reactor-start! reactor)
-       ;; No native stream exists, so release is deterministically rejected.
-       (lws-reactor-client-release! reactor 91 92 1)
-       (let ([failed? (wait-until
-                       (lambda ()
-                         (eq? 'failed
-                              (lws-reactor-operation-lifecycle reactor operation))))]
-             [events (begin
-                       (wait-until
-                        (lambda ()
-                          (pair? (lws-reactor-operation-events reactor operation))))
-                       (lws-reactor-drain-operation-events! reactor operation))])
-         (lws-reactor-shutdown! reactor)
-         (and failed?
-              (= (length events) 1)
-              (eq? 'failed (vector-ref (car events) 0))))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 8 8 4)]
+              [operation (make-lws-reactor-operation reactor 'reject 91 92 1 #f)])
+         (lws-reactor-start! reactor)
+         ;; No native stream exists, so release is deterministically rejected.
+         (lws-reactor-client-release! reactor 91 92 1)
+         (let ([failed? (wait-until
+                         (lambda ()
+                           (eq? 'failed
+                                (lws-reactor-operation-lifecycle reactor operation))))]
+               [events (begin
+                         (wait-until
+                          (lambda ()
+                            (pair? (lws-reactor-operation-events reactor operation))))
+                         (lws-reactor-drain-operation-events! reactor operation))])
+           (lws-reactor-shutdown! reactor)
+           (and failed?
+                (= (length events) 1)
+                (eq? 'failed (vector-ref (car events) 0)))))))
 
 (mat net-lws-native-rejects-oversized-request-metadata
      ;; Error case: headers and initial body larger than native payload storage are rejected.
-     (call-with-lws-context
-      (lambda (context)
-        (let ([metrics-before (lws-context-pool-metrics context)]
-              [oversized (make-bytevector 17 1)])
-          (and (not (lws-client-start context 101 102 1 "127.0.0.1" 1 #f
-                                      "GET" "example.test" "/"
-                                      oversized #vu8() #f))
-               (not (lws-client-start context 103 104 1 "127.0.0.1" 1 #f
-                                      "POST" "example.test" "/"
-                                      #vu8() oversized #t))
-               (= (vector-ref (lws-context-pool-metrics context) 8)
-                  (vector-ref metrics-before 8))
-               (not (lws-context-next-event context)))))))
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (let ([metrics-before (lws-context-pool-metrics context)]
+                [oversized (make-bytevector 17 1)])
+            (and (not (lws-client-start context 101 102 1 "127.0.0.1" 1 #f
+                                        "GET" "example.test" "/"
+                                        oversized #vu8() #f))
+                 (not (lws-client-start context 103 104 1 "127.0.0.1" 1 #f
+                                        "POST" "example.test" "/"
+                                        #vu8() oversized #t))
+                 (= (vector-ref (lws-context-pool-metrics context) 8)
+                    (vector-ref metrics-before 8))
+                 (not (lws-context-next-event context))))))))
 
 (mat net-lws-reactor-timeout-cancellation-ordering
      ;; Error case: an expired operation reports timeout before a later cancellation is inert.
-     (let* ([reactor (make-lws-reactor 8 8 8)]
-            [operation (make-lws-reactor-operation reactor 'timeout-order 201 202 1 0)])
-       (dynamic-wind
-         void
-         (lambda ()
-           (net-operation-step! operation)
-           (let ([condition-before (net-operation-condition operation)])
-             (net-operation-cancel! operation)
-             (and (eq? 'failed (net-operation-state operation))
-                  (eq? 'timeout (net-error-kind condition-before))
-                  (eq? condition-before (net-operation-condition operation)))))
-         (lambda () (lws-reactor-shutdown! reactor)))))
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 8 8 8)]
+              [operation (make-lws-reactor-operation reactor 'timeout-order 201 202 1 0)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (net-operation-step! operation)
+             (let ([condition-before (net-operation-condition operation)])
+               (net-operation-cancel! operation)
+               (and (eq? 'failed (net-operation-state operation))
+                    (eq? 'timeout (net-error-kind condition-before))
+                    (eq? condition-before (net-operation-condition operation)))))
+           (lambda () (lws-reactor-shutdown! reactor))))))

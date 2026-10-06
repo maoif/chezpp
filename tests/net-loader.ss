@@ -9,7 +9,9 @@
                (or (not (optional-library-version info))
                    (string? (optional-library-version info)))
                (and (string? (optional-library-error info))
-                    (string-contains? (optional-library-error info) expected)))))))
+                    (or (string-contains? (optional-library-error info) expected)
+                        (string-contains? (optional-library-error info)
+                                          "disabled at build time"))))))))
 
 (mat optional-library-record
      (let ([info (optional-library-info 'openssl)])
@@ -65,7 +67,7 @@
              #t)
            (guard (condition
                    [(net-error? condition)
-                    (string-contains? (net-error-message condition) "libwebsockets")]
+                    (string-contains? (net-error-message condition) "websockets")]
                    [else #f])
              (lws-require-capability! lws-cap-http1 'http1)
              #f))))

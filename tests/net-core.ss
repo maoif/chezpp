@@ -193,11 +193,12 @@
      (let ([addrs (resolve-addresses "localhost" 80)])
        (and (pair? addrs)
             (andmap socket-address? addrs)))
-     (let ([res (dns-resolve "localhost")])
-       (and (dns-result? res)
-            (pair? (dns-result-addresses res))
-            (or (not (dns-result-canonname res))
-                (string? (dns-result-canonname res)))))
+     (mat-requires (cares)
+       (let ([res (dns-resolve "localhost")])
+         (and (dns-result? res)
+              (pair? (dns-result-addresses res))
+              (or (not (dns-result-canonname res))
+                  (string? (dns-result-canonname res))))))
      (let ([name (dns-reverse-resolve (make-socket-address 'inet "127.0.0.1" 80))])
        (string? name)))
 
@@ -525,494 +526,510 @@
            (close-socket sock)))))
 
 (mat net-tls
-     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)])
-         (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-         (tls-context-set-verify! ctx #t)
-         (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-         (let ([session (tls-connect ctx client "localhost")]
-               [payload (string->utf8 "tls")])
-           (and (tls-session? session)
-                (tls-verified? session)
-                (certificate? (tls-peer-certificate session))
-                (list? (tls-peer-certificate-chain session))
-                (string? (tls-protocol-version session))
-                (not (tls-negotiated-alpn session))
-                (string? (tls-cipher-name session))
-                (tls-write-all session payload)
-                (equal? (tls-read session 32) payload)
-                (begin
-                  (close-tls-session session)
-                  (close-tls-context ctx)
-                  (close-socket client)
-                  (thread-join th)
-                  #t)))))
-     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)])
-         (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-         (tls-context-set-verify! ctx #t)
-         (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-         (let ([session (tls-connect ctx client "localhost")])
-           (and
-            (call-with-tls-ports
-             session
-             (lambda (ip op)
-               (put-bytevector op (string->utf8 "port"))
-               (flush-output-port op)
-               (equal? (get-bytevector-n ip 4) (string->utf8 "port"))))
-            (begin
-              (close-tls-session session)
-              (close-tls-context ctx)
-              (close-socket client)
-              (thread-join th)
-              #t)))))
-     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)])
-         (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-         (tls-context-set-verify! ctx #t)
-         (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-         (let ([session (tls-connect ctx client "localhost")]
-               [buf (make-bytevector 8 0)])
-           (socket-set-blocking! client #f)
-           (let ([idle (tls-read/nonblocking session 8)]
-                 [write-ready (poll (list (make-poll-target client '(write))) 100)])
-             (let ([sent (tls-write/nonblocking session (string->utf8 "nb"))]
-                   [read-target (make-poll-target client '(read))])
-               (let loop ([attempt 8])
-                 (let ([n (tls-read!/nonblocking session buf 0 2)])
-                   (if (net-would-block? n)
-                       (if (fx= attempt 0)
-                           (begin
-                             (close-tls-session session)
-                             (close-tls-context ctx)
-                             (close-socket client)
-                             (thread-join th)
-                             #f)
-                           (begin
-                             (poll (list read-target) 100)
-                             (loop (fx1- attempt))))
-                       (begin
-                         (close-tls-session session)
-                         (close-tls-context ctx)
-                         (close-socket client)
-                         (thread-join th)
-                         (and (net-would-block? idle)
-                              (equal? '(read) (net-would-block-events idle))
-                              (eq? client (net-would-block-resource idle))
-                              (memq 'write (poll-target-ready-events (car write-ready)))
-                              sent
-                              (= n 2)
-                              (equal? (slice-bytevector buf 0 2) (string->utf8 "nb")))))))))))))
+     (mat-requires (openssl)
+       (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)])
+           (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+           (tls-context-set-verify! ctx #t)
+           (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+           (let ([session (tls-connect ctx client "localhost")]
+                 [payload (string->utf8 "tls")])
+             (and (tls-session? session)
+                  (tls-verified? session)
+                  (certificate? (tls-peer-certificate session))
+                  (list? (tls-peer-certificate-chain session))
+                  (string? (tls-protocol-version session))
+                  (not (tls-negotiated-alpn session))
+                  (string? (tls-cipher-name session))
+                  (tls-write-all session payload)
+                  (equal? (tls-read session 32) payload)
+                  (begin
+                    (close-tls-session session)
+                    (close-tls-context ctx)
+                    (close-socket client)
+                    (thread-join th)
+                    #t))))))
+     (mat-requires (openssl)
+       (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)])
+           (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+           (tls-context-set-verify! ctx #t)
+           (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+           (let ([session (tls-connect ctx client "localhost")])
+             (and
+              (call-with-tls-ports
+               session
+               (lambda (ip op)
+                 (put-bytevector op (string->utf8 "port"))
+                 (flush-output-port op)
+                 (equal? (get-bytevector-n ip 4) (string->utf8 "port"))))
+              (begin
+                (close-tls-session session)
+                (close-tls-context ctx)
+                (close-socket client)
+                (thread-join th)
+                #t))))))
+     (mat-requires (openssl)
+       (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)])
+           (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+           (tls-context-set-verify! ctx #t)
+           (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+           (let ([session (tls-connect ctx client "localhost")]
+                 [buf (make-bytevector 8 0)])
+             (socket-set-blocking! client #f)
+             (let ([idle (tls-read/nonblocking session 8)]
+                   [write-ready (poll (list (make-poll-target client '(write))) 100)])
+               (let ([sent (tls-write/nonblocking session (string->utf8 "nb"))]
+                     [read-target (make-poll-target client '(read))])
+                 (let loop ([attempt 8])
+                   (let ([n (tls-read!/nonblocking session buf 0 2)])
+                     (if (net-would-block? n)
+                         (if (fx= attempt 0)
+                             (begin
+                               (close-tls-session session)
+                               (close-tls-context ctx)
+                               (close-socket client)
+                               (thread-join th)
+                               #f)
+                             (begin
+                               (poll (list read-target) 100)
+                               (loop (fx1- attempt))))
+                         (begin
+                           (close-tls-session session)
+                           (close-tls-context ctx)
+                           (close-socket client)
+                           (thread-join th)
+                           (and (net-would-block? idle)
+                                (equal? '(read) (net-would-block-events idle))
+                                (eq? client (net-would-block-resource idle))
+                                (memq 'write (poll-target-ready-events (car write-ready)))
+                                sent
+                                (= n 2)
+                                (equal? (slice-bytevector buf 0 2) (string->utf8 "nb"))))))))))))))
 
 (mat net-tls-handshake-readiness
-     (let-values ([(listener port th)
-                   (start-stalled-tls-handshake-server 200)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)]
-             [operation #f])
-         (dynamic-wind
-           void
-           (lambda ()
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (set! operation (tls-connect/nonblocking ctx client #f 100))
-             (net-operation-step! operation)
-             (and (eq? 'pending (net-operation-state operation))
-                  (let ([target* (net-operation-poll-targets operation)])
-                    (and (= (length target*) 1)
-                         (eq? client (poll-target-resource (car target*)))
-                         (not (not
-                               (memq 'read
-                                     (poll-target-events (car target*)))))))
-                  (begin (net-operation-cancel! operation) #t)
-                  (eq? 'cancelled (net-operation-state operation))))
-           (lambda ()
-             (when (and operation
-                        (eq? 'pending (net-operation-state operation)))
-               (net-operation-cancel! operation))
-             (close-tls-context ctx)
-             (guard (c [else #f])
-               (close-socket client))
-             (thread-join th)
-             (guard (c [else #f])
-               (close-socket listener)))))))
+     (mat-requires (openssl)
+       (let-values ([(listener port th)
+                     (start-stalled-tls-handshake-server 200)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)]
+               [operation #f])
+           (dynamic-wind
+             void
+             (lambda ()
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (set! operation (tls-connect/nonblocking ctx client #f 100))
+               (net-operation-step! operation)
+               (and (eq? 'pending (net-operation-state operation))
+                    (let ([target* (net-operation-poll-targets operation)])
+                      (and (= (length target*) 1)
+                           (eq? client (poll-target-resource (car target*)))
+                           (not (not
+                                 (memq 'read
+                                       (poll-target-events (car target*)))))))
+                    (begin (net-operation-cancel! operation) #t)
+                    (eq? 'cancelled (net-operation-state operation))))
+             (lambda ()
+               (when (and operation
+                          (eq? 'pending (net-operation-state operation)))
+                 (net-operation-cancel! operation))
+               (close-tls-context ctx)
+               (guard (c [else #f])
+                 (close-socket client))
+               (thread-join th)
+               (guard (c [else #f])
+                 (close-socket listener))))))))
 
 (mat net-tls-write-all-readiness
-     (let-values ([(listener server-ctx port th release-server)
-                   (start-stalled-tls-reader 10)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)]
-             [session #f]
-             [payload (make-bytevector 65536 65)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (socket-set-option! client 'send-buffer 1024)
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-             (tls-context-set-verify! ctx #t)
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (set! session (tls-connect ctx client "localhost"))
-             (let loop ([attempt 500])
-               (when (fx= attempt 0)
-                 (error 'net-tls-write-all-readiness
-                        "TLS writes did not reach backpressure"))
-               (let ([answer (tls-write/nonblocking session payload)])
-                 (if (net-would-block? answer)
-                     (let ([all-answer
-                            (tls-write-all/nonblocking session payload)])
-                       (and (net-would-block? all-answer)
-                            (eq? client
-                                 (net-would-block-resource all-answer))
-                            (not (not
-                                  (memq
-                                   'write
-                                   (net-would-block-events all-answer))))))
-                     (loop (fx1- attempt))))))
-           (lambda ()
-             (release-server)
-             (when session (close-tls-session session))
-             (close-tls-context ctx)
-             (close-socket client)
-             (thread-join th))))))
+     (mat-requires (openssl)
+       (let-values ([(listener server-ctx port th release-server)
+                     (start-stalled-tls-reader 10)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)]
+               [session #f]
+               [payload (make-bytevector 65536 65)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (socket-set-option! client 'send-buffer 1024)
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-set-verify! ctx #t)
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (set! session (tls-connect ctx client "localhost"))
+               (let loop ([attempt 500])
+                 (when (fx= attempt 0)
+                   (error 'net-tls-write-all-readiness
+                          "TLS writes did not reach backpressure"))
+                 (let ([answer (tls-write/nonblocking session payload)])
+                   (if (net-would-block? answer)
+                       (let ([all-answer
+                              (tls-write-all/nonblocking session payload)])
+                         (and (net-would-block? all-answer)
+                              (eq? client
+                                   (net-would-block-resource all-answer))
+                              (not (not
+                                    (memq
+                                     'write
+                                     (net-would-block-events all-answer))))))
+                       (loop (fx1- attempt))))))
+             (lambda ()
+               (release-server)
+               (when session (close-tls-session session))
+               (close-tls-context ctx)
+               (close-socket client)
+               (thread-join th)))))))
 
 (mat net-tls-timeout
-     (let-values ([(listener port th)
-                   (start-stalled-tls-handshake-server 200)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (tls-net-error-timeout?
-              (lambda ()
-                (call-with-tls-client ctx client 50 tls-session?))))
-           (lambda ()
-             (close-tls-context ctx)
-             (guard (c [else #f])
-               (close-socket client))
-             (thread-join th)
-             (guard (c [else #f])
-               (close-socket listener))))))
-     (let ([listener (open-socket 'inet 'stream)]
-           [server-ctx (make-tls-context 'server)])
-       (write-test-cert-files)
-       (tls-context-load-cert! server-ctx "/tmp/chezpp-net-test-cert.pem")
-       (tls-context-load-private-key! server-ctx "/tmp/chezpp-net-test-key.pem")
-       (socket-set-option! listener 'reuse-address #t)
-       (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
-       (socket-listen! listener 4)
-       (let ([port (socket-address-port (socket-local-address listener))]
-             [client (open-socket 'inet 'stream)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (let-values ([(accepted peer) (socket-accept listener)])
-               (dynamic-wind
-                 void
-                 (lambda ()
-                   (tls-net-error-timeout?
-                    (lambda ()
-                      (call-with-tls-server server-ctx accepted 50 tls-session?))))
-                 (lambda ()
-                   (guard (c [else #f])
-                     (close-socket accepted))))))
-           (lambda ()
-             (close-tls-context server-ctx)
-             (guard (c [else #f])
-               (close-socket client))
-             (guard (c [else #f])
-               (close-socket listener)))))))
-
-(mat net-tls-timeout-validation
-     (let ([client-ctx (make-tls-context 'client)]
-           [server-ctx (make-tls-context 'server)]
-           [sock (open-socket 'inet 'stream)])
-       (dynamic-wind
-         void
-         (lambda ()
-           (and
-            (tls-error-message-contains?
-             "timeout must be non-negative"
+     (mat-requires (openssl)
+       (let-values ([(listener port th)
+                     (start-stalled-tls-handshake-server 200)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)])
+           (dynamic-wind
+             void
              (lambda ()
-               (tls-connect client-ctx sock #f -1)))
-            (tls-error-message-contains?
-             "timeout must be non-negative"
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (tls-net-error-timeout?
+                (lambda ()
+                  (call-with-tls-client ctx client 50 tls-session?))))
              (lambda ()
-               (tls-accept server-ctx sock -1)))
-            (tls-error-message-contains?
-             "timeout must be non-negative"
+               (close-tls-context ctx)
+               (guard (c [else #f])
+                 (close-socket client))
+               (thread-join th)
+               (guard (c [else #f])
+                 (close-socket listener)))))))
+     (mat-requires (openssl)
+       (let ([listener (open-socket 'inet 'stream)]
+             [server-ctx (make-tls-context 'server)])
+         (write-test-cert-files)
+         (tls-context-load-cert! server-ctx "/tmp/chezpp-net-test-cert.pem")
+         (tls-context-load-private-key! server-ctx "/tmp/chezpp-net-test-key.pem")
+         (socket-set-option! listener 'reuse-address #t)
+         (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+         (socket-listen! listener 4)
+         (let ([port (socket-address-port (socket-local-address listener))]
+               [client (open-socket 'inet 'stream)])
+           (dynamic-wind
+             void
              (lambda ()
-               (call-with-tls-client client-ctx sock -1 tls-session?)))
-            (tls-error-message-contains?
-             "timeout must be non-negative"
-             (lambda ()
-               (call-with-tls-server server-ctx sock -1 tls-session?)))))
-         (lambda ()
-           (close-tls-context client-ctx)
-           (close-tls-context server-ctx)
-           (close-socket sock))))
-     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)]
-             [payload (string->utf8 "x")]
-             [buf (make-bytevector 1 0)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-             (tls-context-set-verify! ctx #t)
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (let ([session (tls-connect ctx client "localhost")])
-               (dynamic-wind
-                 void
-                 (lambda ()
-                   (and
-                    (tls-error-message-contains?
-                     "timeout must be non-negative"
-                     (lambda ()
-                       (tls-read session 1 -1)))
-                    (tls-error-message-contains?
-                     "timeout must be non-negative"
-                     (lambda ()
-                       (tls-read! session buf 0 1 -1)))
-                    (tls-error-message-contains?
-                     "timeout must be non-negative"
-                     (lambda ()
-                       (tls-write session payload 0 1 -1)))
-                    (tls-error-message-contains?
-                     "timeout must be non-negative"
-                     (lambda ()
-                       (tls-write-all session payload 0 1 -1)))))
-                 (lambda ()
-                   (close-tls-session session)))))
-           (lambda ()
-             (close-tls-context ctx)
-             (close-socket client)
-             (thread-join th))))))
-
-(mat net-tls-policy
-     (let ([ctx (make-tls-context 'client)]
-           [policy (make-tls-policy 'tls1.2 'tls1.3
-                                    "ECDHE+AESGCM" #f
-                                    '("h2" "http/1.1") 'disabled)])
-       (dynamic-wind
-         void
-         (lambda ()
-           (and (eq? (tls-context-policy-set! ctx policy) policy)
-                (eq? (tls-policy-minimum-version policy) 'tls1.2)
-                (eq? (tls-policy-maximum-version policy) 'tls1.3)
-                (equal? (tls-policy-alpn-protocols policy) '("h2" "http/1.1"))
-                (and (assq 'session-serialization (tls-capabilities)) #t)))
-         (lambda () (close-tls-context ctx)))))
-
-(mat net-tls-chain-records
-     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-             (tls-context-set-verify! ctx #t)
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (let ([session (tls-connect ctx client "localhost")])
-               (dynamic-wind
-                 void
-                 (lambda ()
-                   (let ([record* (tls-peer-certificate-chain-records session)])
-                     (tls-write-all session (string->utf8 "chain"))
-                     (and (equal? (tls-read session 32) (string->utf8 "chain"))
-                          (pair? record*)
-                          (tls-certificate? (car record*))
-                          (zero? (tls-certificate-chain-position (car record*)))
-                          (tls-certificate-verified? (car record*))
-                          (bytevector? (tls-certificate-der (car record*)))
-                          (string? (tls-certificate-subject (car record*)))
-                          (pair? (tls-certificate-public-key-summary (car record*))))))
-                 (lambda () (close-tls-session session)))))
-           (lambda ()
-             (close-tls-context ctx)
-             (close-socket client)
-             (thread-join th))))))
-
-(mat net-tls-required-ocsp
-     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-             (tls-context-set-verify! ctx #t)
-             (tls-context-policy-set!
-              ctx (make-tls-policy 'tls1.2 #f #f #f '() 'required))
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             ;; A required OCSP policy rejects a server that sends no staple.
-             (tls-error-message-contains?
-              "required stapled OCSP response is missing"
-              (lambda () (tls-connect ctx client "localhost" 3000))))
-           (lambda ()
-             (close-tls-context ctx)
-             (close-socket client)
-             (thread-join th))))))
-
-(mat net-tls-session-resumption
-     (let-values ([(server port th) (start-tls-resumption-server)])
-       (let ([ctx (make-tls-context 'client)]
-             [ticket #f]
-             [reused? #f])
-         (dynamic-wind
-           void
-           (lambda ()
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-             (tls-context-set-verify! ctx #t)
-             (do ([i 0 (fx1+ i)])
-                 ((fx= i 2))
-               (let ([client (open-socket 'inet 'stream)])
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (let-values ([(accepted peer) (socket-accept listener)])
                  (dynamic-wind
                    void
                    (lambda ()
-                     (socket-connect!
-                      client (make-socket-address 'inet "127.0.0.1" port))
-                     (let ([session (tls-connect ctx client "localhost" 3000)])
+                     (tls-net-error-timeout?
+                      (lambda ()
+                        (call-with-tls-server server-ctx accepted 50 tls-session?))))
+                   (lambda ()
+                     (guard (c [else #f])
+                       (close-socket accepted))))))
+             (lambda ()
+               (close-tls-context server-ctx)
+               (guard (c [else #f])
+                 (close-socket client))
+               (guard (c [else #f])
+                 (close-socket listener))))))))
+
+(mat net-tls-timeout-validation
+     (mat-requires (openssl)
+       (let ([client-ctx (make-tls-context 'client)]
+             [server-ctx (make-tls-context 'server)]
+             [sock (open-socket 'inet 'stream)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and
+              (tls-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (tls-connect client-ctx sock #f -1)))
+              (tls-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (tls-accept server-ctx sock -1)))
+              (tls-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (call-with-tls-client client-ctx sock -1 tls-session?)))
+              (tls-error-message-contains?
+               "timeout must be non-negative"
+               (lambda ()
+                 (call-with-tls-server server-ctx sock -1 tls-session?)))))
+           (lambda ()
+             (close-tls-context client-ctx)
+             (close-tls-context server-ctx)
+             (close-socket sock)))))
+     (mat-requires (openssl)
+       (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)]
+               [payload (string->utf8 "x")]
+               [buf (make-bytevector 1 0)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-set-verify! ctx #t)
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (let ([session (tls-connect ctx client "localhost")])
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (and
+                      (tls-error-message-contains?
+                       "timeout must be non-negative"
+                       (lambda ()
+                         (tls-read session 1 -1)))
+                      (tls-error-message-contains?
+                       "timeout must be non-negative"
+                       (lambda ()
+                         (tls-read! session buf 0 1 -1)))
+                      (tls-error-message-contains?
+                       "timeout must be non-negative"
+                       (lambda ()
+                         (tls-write session payload 0 1 -1)))
+                      (tls-error-message-contains?
+                       "timeout must be non-negative"
+                       (lambda ()
+                         (tls-write-all session payload 0 1 -1)))))
+                   (lambda ()
+                     (close-tls-session session)))))
+             (lambda ()
+               (close-tls-context ctx)
+               (close-socket client)
+               (thread-join th)))))))
+
+(mat net-tls-policy
+     (mat-requires (openssl)
+       (let ([ctx (make-tls-context 'client)]
+             [policy (make-tls-policy 'tls1.2 'tls1.3
+                                      "ECDHE+AESGCM" #f
+                                      '("h2" "http/1.1") 'disabled)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (eq? (tls-context-policy-set! ctx policy) policy)
+                  (eq? (tls-policy-minimum-version policy) 'tls1.2)
+                  (eq? (tls-policy-maximum-version policy) 'tls1.3)
+                  (equal? (tls-policy-alpn-protocols policy) '("h2" "http/1.1"))
+                  (and (assq 'session-serialization (tls-capabilities)) #t)))
+           (lambda () (close-tls-context ctx))))))
+
+(mat net-tls-chain-records
+     (mat-requires (openssl)
+       (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-set-verify! ctx #t)
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (let ([session (tls-connect ctx client "localhost")])
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (let ([record* (tls-peer-certificate-chain-records session)])
+                       (tls-write-all session (string->utf8 "chain"))
+                       (and (equal? (tls-read session 32) (string->utf8 "chain"))
+                            (pair? record*)
+                            (tls-certificate? (car record*))
+                            (zero? (tls-certificate-chain-position (car record*)))
+                            (tls-certificate-verified? (car record*))
+                            (bytevector? (tls-certificate-der (car record*)))
+                            (string? (tls-certificate-subject (car record*)))
+                            (pair? (tls-certificate-public-key-summary (car record*))))))
+                   (lambda () (close-tls-session session)))))
+             (lambda ()
+               (close-tls-context ctx)
+               (close-socket client)
+               (thread-join th)))))))
+
+(mat net-tls-required-ocsp
+     (mat-requires (openssl)
+       (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-set-verify! ctx #t)
+               (tls-context-policy-set!
+                ctx (make-tls-policy 'tls1.2 #f #f #f '() 'required))
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               ;; A required OCSP policy rejects a server that sends no staple.
+               (tls-error-message-contains?
+                "required stapled OCSP response is missing"
+                (lambda () (tls-connect ctx client "localhost" 3000))))
+             (lambda ()
+               (close-tls-context ctx)
+               (close-socket client)
+               (thread-join th)))))))
+
+(mat net-tls-session-resumption
+     (mat-requires (openssl)
+       (let-values ([(server port th) (start-tls-resumption-server)])
+         (let ([ctx (make-tls-context 'client)]
+               [ticket #f]
+               [reused? #f])
+           (dynamic-wind
+             void
+             (lambda ()
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-set-verify! ctx #t)
+               (do ([i 0 (fx1+ i)])
+                   ((fx= i 2))
+                 (let ([client (open-socket 'inet 'stream)])
+                   (dynamic-wind
+                     void
+                     (lambda ()
+                       (socket-connect!
+                        client (make-socket-address 'inet "127.0.0.1" port))
+                       (let ([session (tls-connect ctx client "localhost" 3000)])
+                         (dynamic-wind
+                           void
+                           (lambda ()
+                             (tls-write-all session (string->utf8 "resume"))
+                             (unless (equal? (tls-read session 32 3000)
+                                             (string->utf8 "resume"))
+                               (error 'net-tls-session-resumption "echo mismatch"))
+                             (if (fx= i 0)
+                                 (begin
+                                   (set! ticket (tls-session-export-ticket session))
+                                   (tls-context-session-ticket-set! ctx ticket))
+                                 (set! reused? (tls-session-reused? session))))
+                           (lambda () (close-tls-session session)))))
+                     (lambda () (close-socket client)))))
+               (and (tls-session-ticket? ticket)
+                    (positive? (bytevector-length (tls-session-ticket-data ticket)))
+                    reused?))
+             (lambda ()
+               (close-tls-context ctx)
+               (thread-join th)))))))
+
+(mat net-tls-sni-selection
+     (mat-requires (openssl)
+       (let-values ([(server port th selected-name) (start-tls-sni-echo-server)])
+         (let ([ctx (make-tls-context 'client)]
+               [client (open-socket 'inet 'stream)]
+               [expected (load-certificate tls-test-san-certificate 'pem)]
+               [peer-cert #f])
+           (dynamic-wind
+             void
+             (lambda ()
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-san-cert.pem")
+               (tls-context-set-verify! ctx #t)
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (let ([session (tls-connect ctx client "localhost" 3000)])
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (set! peer-cert (tls-peer-certificate session))
+                     (tls-write-all session (string->utf8 "sni"))
+                     (and (equal? (tls-read session 32 3000) (string->utf8 "sni"))
+                          (string=? (selected-name) "localhost")
+                          (equal? (certificate-fingerprint peer-cert)
+                                  (certificate-fingerprint expected))))
+                   (lambda () (close-tls-session session)))))
+             (lambda ()
+               (when peer-cert (destroy-certificate! peer-cert))
+               (destroy-certificate! expected)
+               (close-tls-context ctx)
+               (close-socket client)
+               (thread-join th)))))))
+
+(mat net-tls-size-validation
+     (mat-requires (openssl)
+       (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-set-verify! ctx #t)
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (let ([session (tls-connect ctx client "localhost")])
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (and
+                      (tls-error-message-contains?
+                       "size must be non-negative"
+                       (lambda ()
+                         (tls-read session -1)))
+                      (tls-error-message-contains?
+                       "size must be non-negative"
+                       (lambda ()
+                         (tls-read/nonblocking session -1)))))
+                   (lambda ()
+                     (close-tls-session session)))))
+             (lambda ()
+               (close-tls-context ctx)
+               (close-socket client)
+               (thread-join th)))))))
+
+(mat net-tls-port-closed-session
+     (mat-requires (openssl)
+       (let-values ([(server server-ctx port th) (start-tls-echo-server)])
+         (let ([client (open-socket 'inet 'stream)]
+               [ctx (make-tls-context 'client)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-set-verify! ctx #t)
+               (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
+               (let ([session (tls-connect ctx client "localhost")])
+                 (dynamic-wind
+                   void
+                   (lambda ()
+                     (let ([ip (open-tls-input-port session)]
+                           [op (open-tls-output-port session)]
+                           [bp (open-tls-port session)])
                        (dynamic-wind
                          void
                          (lambda ()
-                           (tls-write-all session (string->utf8 "resume"))
-                           (unless (equal? (tls-read session 32 3000)
-                                           (string->utf8 "resume"))
-                             (error 'net-tls-session-resumption "echo mismatch"))
-                           (if (fx= i 0)
-                               (begin
-                                 (set! ticket (tls-session-export-ticket session))
-                                 (tls-context-session-ticket-set! ctx ticket))
-                               (set! reused? (tls-session-reused? session))))
-                         (lambda () (close-tls-session session)))))
-                   (lambda () (close-socket client)))))
-             (and (tls-session-ticket? ticket)
-                  (positive? (bytevector-length (tls-session-ticket-data ticket)))
-                  reused?))
-           (lambda ()
-             (close-tls-context ctx)
-             (thread-join th))))))
-
-(mat net-tls-sni-selection
-     (let-values ([(server port th selected-name) (start-tls-sni-echo-server)])
-       (let ([ctx (make-tls-context 'client)]
-             [client (open-socket 'inet 'stream)]
-             [expected (load-certificate tls-test-san-certificate 'pem)]
-             [peer-cert #f])
-         (dynamic-wind
-           void
-           (lambda ()
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-san-cert.pem")
-             (tls-context-set-verify! ctx #t)
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (let ([session (tls-connect ctx client "localhost" 3000)])
-               (dynamic-wind
-                 void
-                 (lambda ()
-                   (set! peer-cert (tls-peer-certificate session))
-                   (tls-write-all session (string->utf8 "sni"))
-                   (and (equal? (tls-read session 32 3000) (string->utf8 "sni"))
-                        (string=? (selected-name) "localhost")
-                        (equal? (certificate-fingerprint peer-cert)
-                                (certificate-fingerprint expected))))
-                 (lambda () (close-tls-session session)))))
-           (lambda ()
-             (when peer-cert (destroy-certificate! peer-cert))
-             (destroy-certificate! expected)
-             (close-tls-context ctx)
-             (close-socket client)
-             (thread-join th))))))
-
-(mat net-tls-size-validation
-     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-             (tls-context-set-verify! ctx #t)
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (let ([session (tls-connect ctx client "localhost")])
-               (dynamic-wind
-                 void
-                 (lambda ()
-                   (and
-                    (tls-error-message-contains?
-                     "size must be non-negative"
-                     (lambda ()
-                       (tls-read session -1)))
-                    (tls-error-message-contains?
-                     "size must be non-negative"
-                     (lambda ()
-                       (tls-read/nonblocking session -1)))))
-                 (lambda ()
-                   (close-tls-session session)))))
-           (lambda ()
-             (close-tls-context ctx)
-             (close-socket client)
-             (thread-join th))))))
-
-(mat net-tls-port-closed-session
-     (let-values ([(server server-ctx port th) (start-tls-echo-server)])
-       (let ([client (open-socket 'inet 'stream)]
-             [ctx (make-tls-context 'client)])
-         (dynamic-wind
-           void
-           (lambda ()
-             (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-             (tls-context-set-verify! ctx #t)
-             (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
-             (let ([session (tls-connect ctx client "localhost")])
-               (dynamic-wind
-                 void
-                 (lambda ()
-                   (let ([ip (open-tls-input-port session)]
-                         [op (open-tls-output-port session)]
-                         [bp (open-tls-port session)])
-                     (dynamic-wind
-                       void
-                       (lambda ()
-                         (and
-                          (begin
-                            (close-tls-session session)
-                            #t)
-                          (tls-error-message-contains?
-                           "TLS session is closed"
-                           (lambda ()
-                             (get-bytevector-n ip 1)))
-                          (tls-error-message-contains?
-                           "TLS session is closed"
-                           (lambda ()
-                             (put-bytevector op (string->utf8 "x"))
-                             (flush-output-port op)))
-                          (tls-error-message-contains?
-                           "TLS session is closed"
-                           (lambda ()
-                             (put-bytevector bp (string->utf8 "y"))
-                             (flush-output-port bp)))))
-                       (lambda ()
-                         (unless (port-closed? ip)
-                           (guard (c [else #f])
-                             (close-port ip)))
-                         (unless (port-closed? op)
-                           (guard (c [else #f])
-                             (close-port op)))
-                         (unless (port-closed? bp)
-                           (guard (c [else #f])
-                             (close-port bp)))))))
-                 (lambda ()
-                   (guard (c [else #f])
-                     (close-tls-session session))))))
-           (lambda ()
-             (close-tls-context ctx)
-             (close-socket client)
-             (thread-join th))))))
+                           (and
+                            (begin
+                              (close-tls-session session)
+                              #t)
+                            (tls-error-message-contains?
+                             "TLS session is closed"
+                             (lambda ()
+                               (get-bytevector-n ip 1)))
+                            (tls-error-message-contains?
+                             "TLS session is closed"
+                             (lambda ()
+                               (put-bytevector op (string->utf8 "x"))
+                               (flush-output-port op)))
+                            (tls-error-message-contains?
+                             "TLS session is closed"
+                             (lambda ()
+                               (put-bytevector bp (string->utf8 "y"))
+                               (flush-output-port bp)))))
+                         (lambda ()
+                           (unless (port-closed? ip)
+                             (guard (c [else #f])
+                               (close-port ip)))
+                           (unless (port-closed? op)
+                             (guard (c [else #f])
+                               (close-port op)))
+                           (unless (port-closed? bp)
+                             (guard (c [else #f])
+                               (close-port bp)))))))
+                   (lambda ()
+                     (guard (c [else #f])
+                       (close-tls-session session))))))
+             (lambda ()
+               (close-tls-context ctx)
+               (close-socket client)
+               (thread-join th)))))))
