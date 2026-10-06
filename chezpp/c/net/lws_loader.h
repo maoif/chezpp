@@ -7,7 +7,7 @@
 #define CHEZPP_LWS_CAP_SOCKS5 (1U << 3)
 #define CHEZPP_LWS_CAP_EXTERNAL_POLL (1U << 4)
 
-int chezpp_lws_ensure_loaded(void);
+int chezpp_lws_available(void);
 unsigned chezpp_lws_capabilities(void);
 const char *chezpp_lws_error(void);
 const char *chezpp_lws_version(void);

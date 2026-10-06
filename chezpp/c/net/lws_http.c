@@ -1236,7 +1236,7 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
   if (event_capacity == 0 || payload_capacity == 0 ||
       event_capacity > UINT_MAX || payload_capacity > INT_MAX - LWS_PRE ||
       event_capacity > SIZE_MAX / payload_capacity ||
-      !chezpp_lws_ensure_loaded())
+      !chezpp_lws_available())
     return 0;
 
   lws_set_log_level(0, NULL);

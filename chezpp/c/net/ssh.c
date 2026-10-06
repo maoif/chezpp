@@ -166,18 +166,18 @@ static void initialize_ssh(void) {
   ssh_available = 1;
 }
 
-static int ensure_ssh_loaded(void) {
+static int ssh_available(void) {
   pthread_once(&ssh_once, initialize_ssh);
   return ssh_available;
 }
 
 const chezpp_optional_library *chezpp_net_ssh_library(void) {
-  (void)ensure_ssh_loaded();
+  (void)ssh_available();
   return &ssh_library;
 }
 
 unsigned chezpp_net_ssh_capabilities(void) {
-  (void)ensure_ssh_loaded();
+  (void)ssh_available();
   return ssh_aio_available ? 1U : 0U;
 }
 
@@ -871,7 +871,7 @@ ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeou
   long timeout_sec;
   long timeout_usec;
 
-  if (!ensure_ssh_loaded())
+  if (!ssh_available())
     return make_error_status_message(chezpp_optional_library_error(&ssh_library));
 
   session = ssh_new();

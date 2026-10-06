@@ -30,8 +30,6 @@ static ptr make_status(const char *tag, ptr value) {
   return out;
 }
 
-static int load_cares_functions(void) { return chezpp_cares_require(); }
-
 static void dns_callback(void *data, int status, int timeouts,
                          struct ares_addrinfo *result) {
   chezpp_dns_operation *operation = (chezpp_dns_operation *)data;
@@ -166,7 +164,7 @@ uptr chezpp_net_dns_start(const char *name, int family, int timeout_ms) {
   struct ares_options options;
   struct ares_addrinfo_hints hints;
   int status;
-  if (!load_cares_functions()) return 0;
+  if (!chezpp_cares_require()) return 0;
   operation = (chezpp_dns_operation *)calloc(1, sizeof(*operation));
   if (operation == NULL) return 0;
   operation->query_name = strdup(name);

@@ -407,18 +407,18 @@ static void initialize_websocket_library(void) {
   websocket_available = 1;
 }
 
-static int ensure_websocket_loaded(void) {
+static int websocket_available(void) {
   pthread_once(&websocket_once, initialize_websocket_library);
   return websocket_available;
 }
 
 const chezpp_optional_library *chezpp_net_websocket_library(void) {
-  (void)ensure_websocket_loaded();
+  (void)websocket_available();
   return &websocket_library;
 }
 
 unsigned chezpp_net_websocket_capabilities(void) {
-  (void)ensure_websocket_loaded();
+  (void)websocket_available();
   return websocket_capabilities;
 }
 
@@ -1061,7 +1061,7 @@ ptr chezpp_net_websocket_listen(const char *host, int port, const char *protocol
   chezpp_ws_server *server;
   struct lws_context_creation_info info;
 
-  if (!ensure_websocket_loaded())
+  if (!websocket_available())
     return make_error_status_message(
         chezpp_optional_library_error(&websocket_library));
   if (!ensure_websocket_lifetime_context())
@@ -1165,7 +1165,7 @@ ptr chezpp_net_websocket_connect(const char *host, int port, const char *path,
                              : protocol_name;
   char origin[512];
 
-  if (!ensure_websocket_loaded())
+  if (!websocket_available())
     return make_error_status_message(
         chezpp_optional_library_error(&websocket_library));
   if (!ensure_websocket_lifetime_context())

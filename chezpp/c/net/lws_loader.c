@@ -4,7 +4,7 @@
 #if CHEZPP_WITH_WEBSOCKETS
 #include <libwebsockets.h>
 #endif
-int chezpp_lws_ensure_loaded(void) {
+int chezpp_lws_available(void) {
 #if CHEZPP_WITH_WEBSOCKETS
   unsigned major, minor, patch;
   const char *version = lws_get_library_version();
@@ -17,7 +17,7 @@ int chezpp_lws_ensure_loaded(void) {
 unsigned chezpp_lws_capabilities(void) {
   unsigned capabilities = 0;
 #if CHEZPP_WITH_WEBSOCKETS
-  if (!chezpp_lws_ensure_loaded()) return 0;
+  if (!chezpp_lws_available()) return 0;
   capabilities = CHEZPP_LWS_CAP_HTTP1 | CHEZPP_LWS_CAP_EXTERNAL_POLL;
 #if defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2)
   capabilities |= CHEZPP_LWS_CAP_HTTP2;
@@ -33,7 +33,7 @@ unsigned chezpp_lws_capabilities(void) {
 }
 const char *chezpp_lws_error(void) {
 #if CHEZPP_WITH_WEBSOCKETS
-  return chezpp_lws_ensure_loaded() ? "" : "libwebsockets HTTP requires version >= 4.3.0";
+  return chezpp_lws_available() ? "" : "libwebsockets HTTP requires version >= 4.3.0";
 #else
   return "websockets: disabled at build time";
 #endif
@@ -48,7 +48,7 @@ const char *chezpp_lws_version(void) {
 
 ptr chezpp_lws_status(void) {
   ptr result = Smake_vector(4, Sfalse);
-  int available = chezpp_lws_ensure_loaded();
+  int available = chezpp_lws_available();
   const char *version = chezpp_lws_version();
   const char *error = chezpp_lws_error();
 

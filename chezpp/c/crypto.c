@@ -51,14 +51,10 @@ typedef struct {
   char *hostname;
 } chezpp_cert_verify_state;
 
-static int ensure_crypto_init(void) {
-  return chezpp_openssl_require();
-}
-
 ptr crypto_openssl_load_error(void) {
   const char *error;
 
-  if (ensure_crypto_init()) return Sfalse;
+  if (chezpp_openssl_require()) return Sfalse;
   error = chezpp_optional_library_error(
       (chezpp_optional_library *)chezpp_openssl_library());
   return error == NULL || error[0] == '\0' ? Sfalse : Sstring(error);
@@ -144,7 +140,7 @@ static const char *digest_name(ptr which) {
 static EVP_MD *fetch_digest(ptr which) {
   const char *name = digest_name(which);
   if (name == NULL) return NULL;
-  if (!ensure_crypto_init()) return NULL;
+  if (!chezpp_openssl_require()) return NULL;
   return EVP_MD_fetch(NULL, name, NULL);
 }
 
@@ -161,7 +157,7 @@ static const char *cipher_name(ptr which) {
 static EVP_CIPHER *fetch_cipher(ptr which) {
   const char *name = cipher_name(which);
   if (name == NULL) return NULL;
-  if (!ensure_crypto_init()) return NULL;
+  if (!chezpp_openssl_require()) return NULL;
   return EVP_CIPHER_fetch(NULL, name, NULL);
 }
 
@@ -207,12 +203,12 @@ static ptr make_iso_time_string(const ASN1_TIME *t) {
 }
 
 int crypto_random_status() {
-  if (!ensure_crypto_init()) return 0;
+  if (!chezpp_openssl_require()) return 0;
   return RAND_status();
 }
 
 ptr crypto_random_bytevector(uint64_t len) {
-  if (!ensure_crypto_init()) return Sfalse;
+  if (!chezpp_openssl_require()) return Sfalse;
   ptr bv = Smake_bytevector((iptr)len, 0);
   if (rand_bytes_all(Sbytevector_data(bv), len) != 1) {
     return Sfalse;
@@ -221,7 +217,7 @@ ptr crypto_random_bytevector(uint64_t len) {
 }
 
 int crypto_random_fill(ptr bv, uint64_t start, uint64_t stop) {
-  if (!ensure_crypto_init()) return 0;
+  if (!chezpp_openssl_require()) return 0;
   return rand_bytes_all(Sbytevector_data(bv) + (size_t)start, stop - start);
 }
 
@@ -229,7 +225,7 @@ int crypto_constant_time_eq(ptr bv1, uint64_t start1, uint64_t stop1, ptr bv2,
                             uint64_t start2, uint64_t stop2) {
   size_t len1 = slice_len(start1, stop1);
   size_t len2 = slice_len(start2, stop2);
-  if (!ensure_crypto_init()) return 0;
+  if (!chezpp_openssl_require()) return 0;
   if (len1 != len2) return 0;
   return CRYPTO_memcmp(Sbytevector_data(bv1) + (size_t)start1,
                        Sbytevector_data(bv2) + (size_t)start2, len1) == 0;
@@ -375,7 +371,7 @@ void *crypto_hmac_state_create(ptr which, ptr key, uint64_t start, uint64_t stop
   st->digest_name = digest_name(which);
   if (st->digest_name == NULL) goto fail;
 
-  if (!ensure_crypto_init()) goto fail;
+  if (!chezpp_openssl_require()) goto fail;
   st->mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
   if (st->mac == NULL) goto fail;
 
@@ -497,7 +493,7 @@ static ptr hkdf_common(int mode, ptr which, ptr ikm, uint64_t ikm_start,
 
   if (md_name == NULL) return Sfalse;
 
-  if (!ensure_crypto_init()) return Sfalse;
+  if (!chezpp_openssl_require()) return Sfalse;
   kdf = EVP_KDF_fetch(NULL, "HKDF", NULL);
   if (kdf == NULL) goto done;
   ctx = EVP_KDF_CTX_new(kdf);
@@ -596,7 +592,7 @@ ptr crypto_scrypt(ptr password, uint64_t pw_start, uint64_t pw_stop, ptr salt,
   unsigned char *out_buf;
   ptr ans = Sfalse;
 
-  if (!ensure_crypto_init()) return Sfalse;
+  if (!chezpp_openssl_require()) return Sfalse;
   out_buf = malloc(out_len == 0 ? 1 : (size_t)out_len);
   if (out_buf == NULL) return Sfalse;
   if (EVP_PBE_scrypt((const char *)(Sbytevector_data(password) + (size_t)pw_start),
@@ -946,7 +942,7 @@ void *crypto_pkey_generate(ptr alg, int bits, ptr curve) {
   int bits_copy = bits;
 
   if (name == NULL) return NULL;
-  if (!ensure_crypto_init()) return NULL;
+  if (!chezpp_openssl_require()) return NULL;
   ctx = EVP_PKEY_CTX_new_from_name(NULL, name, NULL);
   if (ctx == NULL) goto done;
   if (EVP_PKEY_keygen_init(ctx) != 1) goto done;
@@ -1056,7 +1052,7 @@ done:
 
 void *crypto_pkey_load_private_pem(ptr bv, uint64_t start, uint64_t stop) {
   int len;
-  if (!ensure_crypto_init()) return NULL;
+  if (!chezpp_openssl_require()) return NULL;
   if (!uint64_to_int(stop - start, &len)) return NULL;
   BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
@@ -1068,7 +1064,7 @@ void *crypto_pkey_load_private_pem(ptr bv, uint64_t start, uint64_t stop) {
 
 void *crypto_pkey_load_public_pem(ptr bv, uint64_t start, uint64_t stop) {
   int len;
-  if (!ensure_crypto_init()) return NULL;
+  if (!chezpp_openssl_require()) return NULL;
   if (!uint64_to_int(stop - start, &len)) return NULL;
   BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
@@ -1080,7 +1076,7 @@ void *crypto_pkey_load_public_pem(ptr bv, uint64_t start, uint64_t stop) {
 
 void *crypto_pkey_load_private_der(ptr bv, uint64_t start, uint64_t stop) {
   int len;
-  if (!ensure_crypto_init()) return NULL;
+  if (!chezpp_openssl_require()) return NULL;
   if (!uint64_to_int(stop - start, &len)) return NULL;
   BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
@@ -1092,7 +1088,7 @@ void *crypto_pkey_load_private_der(ptr bv, uint64_t start, uint64_t stop) {
 
 void *crypto_pkey_load_public_der(ptr bv, uint64_t start, uint64_t stop) {
   int len;
-  if (!ensure_crypto_init()) return NULL;
+  if (!chezpp_openssl_require()) return NULL;
   if (!uint64_to_int(stop - start, &len)) return NULL;
   BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
@@ -1244,7 +1240,7 @@ static X509 *load_x509_from_mem(const unsigned char *buf, uint64_t len, int pem)
   BIO *bio = NULL;
   X509 *cert = NULL;
   int bio_len;
-  if (!ensure_crypto_init() || !uint64_to_int(len, &bio_len)) return NULL;
+  if (!chezpp_openssl_require() || !uint64_to_int(len, &bio_len)) return NULL;
   bio = BIO_new_mem_buf(buf, bio_len);
   if (bio == NULL) return NULL;
   cert = pem ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : d2i_X509_bio(bio, NULL);
@@ -1433,7 +1429,7 @@ done:
 
 void *crypto_cert_store_create(int load_defaults) {
   X509_STORE *store;
-  if (!ensure_crypto_init()) return NULL;
+  if (!chezpp_openssl_require()) return NULL;
   store = X509_STORE_new();
   if (store == NULL) return NULL;
   if (load_defaults && X509_STORE_set_default_paths(store) != 1) {

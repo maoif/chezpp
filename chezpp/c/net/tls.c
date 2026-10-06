@@ -73,14 +73,10 @@ static ptr make_error_status_message(const char *msg) { return make_status("erro
 
 static ptr make_errno_status(const char *tag) { return make_status(tag, errno_str()); }
 
-static int ensure_tls_init(void) {
-  return chezpp_openssl_require();
-}
-
 ptr chezpp_net_tls_load_error(void) {
   const char *error;
 
-  if (ensure_tls_init()) return Sfalse;
+  if (chezpp_openssl_require()) return Sfalse;
   error = chezpp_optional_library_error(
       (chezpp_optional_library *)chezpp_openssl_library());
   return error == NULL || error[0] == '\0' ? Sfalse : Sstring(error);
@@ -368,7 +364,7 @@ uptr chezpp_net_tls_context_create(int mode) {
   SSL_CTX *ctx;
   chezpp_tls_context *wrapper;
 
-  if (!ensure_tls_init()) return 0;
+  if (!chezpp_openssl_require()) return 0;
   method = mode == 1 ? TLS_server_method() : TLS_client_method();
   ctx = SSL_CTX_new(method);
   if (ctx == NULL) return 0;

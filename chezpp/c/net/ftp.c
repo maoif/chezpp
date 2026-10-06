@@ -266,13 +266,13 @@ static void initialize_curl(void) {
   curl_available = 1;
 }
 
-static int ensure_curl_loaded(void) {
+static int curl_available(void) {
   pthread_once(&curl_once, initialize_curl);
   return curl_available;
 }
 
 const chezpp_optional_library *chezpp_net_curl_library(void) {
-  (void)ensure_curl_loaded();
+  (void)curl_available();
   return &curl_library;
 }
 
@@ -334,7 +334,7 @@ static ptr perform_fetch(const char *url, const char *user, const char *pass, in
   ptr result;
   memory_buffer buf;
 
-  if (!ensure_curl_loaded())
+  if (!curl_available())
     return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = curl_easy_init();
@@ -396,7 +396,7 @@ ptr chezpp_net_ftp_stat(const char *url, const char *user, const char *pass, int
   struct curl_slist *quote = NULL;
   size_t command_len = strlen(path) + 6;
 
-  if (!ensure_curl_loaded())
+  if (!curl_available())
     return make_error_status_message(chezpp_optional_library_error(&curl_library));
   curl = curl_easy_init();
   command = (char *)malloc(command_len);
@@ -447,7 +447,7 @@ ptr chezpp_net_ftp_download(const char *url, const char *dest, const char *user,
   FILE *fp = NULL;
   ptr result;
 
-  if (!ensure_curl_loaded())
+  if (!curl_available())
     return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = curl_easy_init();
@@ -494,7 +494,7 @@ ptr chezpp_net_ftp_upload(const char *url, const char *src, const char *user, co
   long size;
   ptr result;
 
-  if (!ensure_curl_loaded())
+  if (!curl_available())
     return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = curl_easy_init();
@@ -563,7 +563,7 @@ ptr chezpp_net_ftp_command(const char *url, const char *user, const char *pass, 
   ptr result;
   struct curl_slist *quote = NULL;
 
-  if (!ensure_curl_loaded())
+  if (!curl_available())
     return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = curl_easy_init();
@@ -618,7 +618,7 @@ ptr chezpp_net_ftp_rename(const char *url, const char *user, const char *pass, i
   size_t rnfr_len;
   size_t rnto_len;
 
-  if (!ensure_curl_loaded())
+  if (!curl_available())
     return make_error_status_message(chezpp_optional_library_error(&curl_library));
 
   curl = curl_easy_init();
@@ -750,7 +750,7 @@ ptr chezpp_net_ftp_transfer_start(int kind, const char *url, const char *path,
 
   if (kind < FTP_TRANSFER_LIST || kind > FTP_TRANSFER_UPLOAD)
     return make_error_status_message("invalid FTP transfer kind");
-  if (!ensure_curl_loaded())
+  if (!curl_available())
     return make_error_status_message(chezpp_optional_library_error(&curl_library));
   t = (ftp_transfer *)calloc(1, sizeof(*t));
   if (t == NULL) return make_errno_status();
@@ -974,7 +974,7 @@ static ptr ftp_file_drive(ftp_file *file, ptr ready, int timer_expired) {
 
 ptr chezpp_net_ftp_session_open(void) {
   ftp_session *session;
-  if (!ensure_curl_loaded())
+  if (!curl_available())
     return make_error_status_message(chezpp_optional_library_error(&curl_library));
   session = (ftp_session *)calloc(1, sizeof(*session));
   if (session == NULL) return make_errno_status();

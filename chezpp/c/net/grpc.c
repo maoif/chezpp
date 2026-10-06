@@ -397,25 +397,25 @@ static void initialize_grpc(void) {
   grpc_available = 1;
 }
 
-static int ensure_grpc_loaded(void) {
+static int grpc_available(void) {
   pthread_once(&grpc_once, initialize_grpc);
   return grpc_available;
 }
 
 const chezpp_optional_library *chezpp_net_grpc_library(void) {
-  (void)ensure_grpc_loaded();
+  (void)grpc_available();
   if (grpc_library.error[0] != '\0') return &grpc_library;
   if (gpr_library.error[0] != '\0') return &gpr_library;
   return &grpc_library;
 }
 
 unsigned chezpp_net_grpc_capabilities(void) {
-  (void)ensure_grpc_loaded();
+  (void)grpc_available();
   return grpc_capabilities;
 }
 
 int chezpp_net_grpc_driver_fd(void) {
-  (void)ensure_grpc_loaded();
+  (void)grpc_available();
   return grpc_driver_fd;
 }
 
@@ -1003,7 +1003,7 @@ static ptr start_unary_call(grpc_channel *channel, const char *method, ptr paylo
   const char *metadata_error = NULL;
   size_t nops = 0;
 
-  if (!ensure_grpc_loaded())
+  if (!grpc_available())
     return make_error_status_message(chezpp_optional_library_error(
         (chezpp_optional_library *)chezpp_net_grpc_library()));
   if (channel == NULL) return make_error_status_message("invalid gRPC channel");
@@ -1114,7 +1114,7 @@ ptr chezpp_net_grpc_channel_open(const char *target) {
   grpc_channel_credentials *creds;
   grpc_channel *channel;
 
-  if (!ensure_grpc_loaded())
+  if (!grpc_available())
     return make_error_status_message(chezpp_optional_library_error(
         (chezpp_optional_library *)chezpp_net_grpc_library()));
   creds = grpc_insecure_credentials_create();
@@ -1131,7 +1131,7 @@ ptr chezpp_net_grpc_channel_open_tls(const char *target, const char *root_certs,
   grpc_channel *channel;
   grpc_ssl_pem_key_cert_pair pair;
   grpc_ssl_pem_key_cert_pair *pair_ptr = NULL;
-  if (!ensure_grpc_loaded())
+  if (!grpc_available())
     return make_error_status_message("gRPC TLS credentials are unavailable");
   memset(&pair, 0, sizeof(pair));
   if (certificate_chain != NULL && certificate_chain[0] != '\0' &&
@@ -1164,7 +1164,7 @@ ptr chezpp_net_grpc_server_open(const char *host, int port) {
   int bound_port;
   ptr out;
 
-  if (!ensure_grpc_loaded())
+  if (!grpc_available())
     return make_error_status_message(chezpp_optional_library_error(
         (chezpp_optional_library *)chezpp_net_grpc_library()));
   server = (chezpp_grpc_server *)calloc(1, sizeof(chezpp_grpc_server));
@@ -1212,7 +1212,7 @@ ptr chezpp_net_grpc_server_open_tls(const char *host, int port, const char *root
   char endpoint[256];
   int bound_port;
   ptr out;
-  if (!ensure_grpc_loaded())
+  if (!grpc_available())
     return make_error_status_message("gRPC TLS server credentials are unavailable");
   if (certificate_chain == NULL || certificate_chain[0] == '\0' ||
       private_key == NULL || private_key[0] == '\0')
@@ -1450,7 +1450,7 @@ static ptr start_grpc_stream(uptr handle, const char *method, int shape, ptr pay
   const char *metadata_error = NULL;
   size_t nops = 0;
 
-  if (!ensure_grpc_loaded())
+  if (!grpc_available())
     return make_error_status_message(chezpp_optional_library_error(
         (chezpp_optional_library *)chezpp_net_grpc_library()));
   if (channel == NULL) return make_error_status_message("invalid gRPC channel");
