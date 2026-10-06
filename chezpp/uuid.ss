@@ -11,6 +11,9 @@
           (chezpp internal))
 
 
+  #|record:uuid
+  The `uuid` record stores a UUID as a 16-byte bytevector in its `data` field.
+  |#
   (define-record-type (uuid mk-uuid uuid?)
     (opaque #f)
     (sealed #t)
@@ -230,8 +233,8 @@
                 (and res (mk-uuid res))))))
 
 
-  #|doc
-  Convert the UUID to its 16-byte bytevector representation.
+  #|proc:uuid->bytevector
+  The `uuid->bytevector` procedure returns a copy of UUID `uuid`'s 16-byte representation.
   |#
   (define uuid->bytevector
     (lambda (uuid)
