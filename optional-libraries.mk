@@ -28,7 +28,7 @@ _OPTIONAL_CONFIG_FILE := $(shell env \
   CFLAGS=$(call build-shell-quote,$(CFLAGS)) LDFLAGS=$(call build-shell-quote,$(LDFLAGS)) \
   PKG_CONFIG=$(call build-shell-quote,$(PKG_CONFIG)) \
   $(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),\
-    WITH_$(name)=$(call build-shell-quote,$(WITH_$(name))) \
+    WITH_$(name)=$(call build-shell-quote,$(strip $(WITH_$(name)))) \
     $(name)_CFLAGS=$(call build-shell-quote,$($(name)_CFLAGS)) \
     $(name)_LIBS=$(call build-shell-quote,$($(name)_LIBS)) \
     $(name)_CFLAGS_SUPPLIED=$($(name)_CFLAGS_SUPPLIED) \

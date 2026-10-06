@@ -55,6 +55,25 @@ assert_contains "$result" "CFLAGS=-nostdinc -I$tmp/include"
 assert_contains "$result" "LIBS=$tmp/libfixture.a"
 assert_contains "$result" 'chezpp/c/net/ftp.c'
 
+# Accepted padded switches must retain force-disable and required-enable semantics.
+padding_failures=0
+result=$(run_make show-optional-config 'WITH_CURL= 0 ' \
+    "CURL_CFLAGS=-nostdinc -I$tmp/include" "CURL_LIBS=$tmp/libfixture.a")
+if ! printf '%s\n' "$result" | grep -Fx 'CURL=0' >/dev/null; then
+    printf '%s\n' 'padded WITH_CURL=0 enabled a usable dependency' >&2
+    padding_failures=$((padding_failures + 1))
+fi
+
+# A padded required-enable switch must fail when the required header is unavailable.
+if result=$(run_make show-optional-config 'WITH_CURL= 1 ' \
+    'CURL_CFLAGS=-nostdinc' "CURL_LIBS=$tmp/libfixture.a" 2>&1); then
+    printf '%s\n' 'padded WITH_CURL=1 accepted an unavailable header' >&2
+    padding_failures=$((padding_failures + 1))
+else
+    assert_contains "$result" 'curl/curl.h'
+fi
+[ "$padding_failures" = 0 ] || exit 1
+
 # Missing headers must also retain the compiler diagnostic on explicit enablement.
 if result=$(run_make show-optional-config WITH_CURL=1 \
     'CURL_CFLAGS=-nostdinc' "CURL_LIBS=$tmp/libfixture.a" 2>&1); then
