@@ -49,9 +49,9 @@
   `fxname` procedures from one lambda or case-lambda `implementation`. `tree?`, `tree-like`, `fx-`
   `mode`, and `checked` supply the fixed family predicate, constructor, storage mode, and item
   validation. `tree-who` names the procedure and `tree-self` refers to it. `all-family?` and
-  `check-family-size` check multiple inputs; arity-specific map checkers validate callback results before
-  specialized writes. `tree-size`, `tree-add!`, `tree-clear!`, `tree-list`, and the four algebra
-  helpers name same-family APIs.
+  `check-family-size` check multiple inputs; arity-specific map checkers validate callback results
+  before specialized writes. `tree-size`, `tree-add!`, `tree-clear!`, `tree-list`, and the four
+  algebra helpers name same-family APIs.
   |#
   (define-syntax define-treeset-procedure
     (lambda (stx)
