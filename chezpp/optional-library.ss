@@ -25,12 +25,13 @@ dependency-specific data, and error is a diagnostic string or `#f`.
             (immutable error optional-library-error)))
 
   (define supported-optional-libraries
-    '(openssl xxhash blake3 curl ssh websockets grpc zlib cares idn2))
+    '(openssl xxhash blake3 curl ssh websockets grpc zlib cares idn2 uuid))
 
   #|proc:optional-library-info
-The `optional-library-info` procedure probes the supported native library named by `name`.
-It returns an `optional-library-info` record with availability, version, capabilities, and error.
-|#
+  The `optional-library-info` procedure reports the native dependency named by symbol `name`.
+  It returns a record with build availability, version, capabilities, and an error diagnostic.
+  Disabled libraries report no version or capabilities and identify build-time disablement.
+  |#
   (define-who optional-library-info
     (lambda (name)
       (pcheck ([symbol? name])

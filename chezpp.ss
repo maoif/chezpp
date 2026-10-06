@@ -1,6 +1,7 @@
 (library (chezpp)
   (export)
   (import (chezscheme)
+          (chezpp optional-library-check)
           (chezpp net operation)
           (chezpp net http private)
           (chezpp net lws ffi)

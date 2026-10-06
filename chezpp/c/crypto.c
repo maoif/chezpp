@@ -1,7 +1,9 @@
+#include "build-config.h"
 #include "common.h"
 #include "openssl_loader.h"
 
 #include <arpa/inet.h>
+#if CHEZPP_WITH_OPENSSL
 #include <openssl/core_names.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -14,6 +16,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
+#endif
 #include <limits.h>
 #include <stdint.h>
 #include <time.h>
@@ -84,7 +87,7 @@ static int rand_bytes_all(unsigned char *buf, uint64_t len) {
   while (done < len) {
     uint64_t remaining = len - done;
     int chunk = remaining > (uint64_t)INT_MAX ? INT_MAX : (int)remaining;
-    if (chezpp_openssl_RAND_bytes(buf + (size_t)done, chunk) != 1) return 0;
+    if (RAND_bytes(buf + (size_t)done, chunk) != 1) return 0;
     done += (uint64_t)chunk;
   }
   return 1;
@@ -99,7 +102,7 @@ static int evp_cipher_update_all(EVP_CIPHER_CTX *ctx, unsigned char *out,
     uint64_t remaining = in_len - done;
     int chunk = remaining > (uint64_t)INT_MAX ? INT_MAX : (int)remaining;
     int chunk_out = 0;
-    if (chezpp_openssl_EVP_CipherUpdate(ctx, out == NULL ? NULL : out + written, &chunk_out,
+    if (EVP_CipherUpdate(ctx, out == NULL ? NULL : out + written, &chunk_out,
                          in + (size_t)done, chunk) != 1) {
       return 0;
     }
@@ -142,7 +145,7 @@ static EVP_MD *fetch_digest(ptr which) {
   const char *name = digest_name(which);
   if (name == NULL) return NULL;
   if (!ensure_crypto_init()) return NULL;
-  return chezpp_openssl_EVP_MD_fetch(NULL, name, NULL);
+  return EVP_MD_fetch(NULL, name, NULL);
 }
 
 static const char *cipher_name(ptr which) {
@@ -159,13 +162,13 @@ static EVP_CIPHER *fetch_cipher(ptr which) {
   const char *name = cipher_name(which);
   if (name == NULL) return NULL;
   if (!ensure_crypto_init()) return NULL;
-  return chezpp_openssl_EVP_CIPHER_fetch(NULL, name, NULL);
+  return EVP_CIPHER_fetch(NULL, name, NULL);
 }
 
 static ptr digest_ctx_result(EVP_MD_CTX *ctx) {
   unsigned char out[EVP_MAX_MD_SIZE];
   unsigned int outlen = 0;
-  if (chezpp_openssl_EVP_DigestFinal_ex(ctx, out, &outlen) != 1) {
+  if (EVP_DigestFinal_ex(ctx, out, &outlen) != 1) {
     return Sfalse;
   }
   return make_bytevector_copy(out, outlen);
@@ -182,15 +185,15 @@ static ptr make_x509_name_string(X509_NAME *name) {
   long len;
 
   if (name == NULL) return Sfalse;
-  bio = chezpp_openssl_BIO_new(chezpp_openssl_BIO_s_mem());
+  bio = BIO_new(BIO_s_mem());
   if (bio == NULL) return Sfalse;
-  if (chezpp_openssl_X509_NAME_print_ex(bio, name, 0, XN_FLAG_RFC2253) < 0) goto done;
-  len = chezpp_openssl_BIO_ctrl(bio, BIO_CTRL_INFO, 0, &data);
+  if (X509_NAME_print_ex(bio, name, 0, XN_FLAG_RFC2253) < 0) goto done;
+  len = BIO_ctrl(bio, BIO_CTRL_INFO, 0, &data);
   if (len < 0 || data == NULL) goto done;
   ans = Sstring_utf8(data, (iptr)len);
 
 done:
-  if (bio != NULL) chezpp_openssl_BIO_free(bio);
+  if (bio != NULL) BIO_free(bio);
   return ans;
 }
 
@@ -198,14 +201,14 @@ static ptr make_iso_time_string(const ASN1_TIME *t) {
   struct tm tm_value;
   char buf[32];
   if (t == NULL) return Sfalse;
-  if (chezpp_openssl_ASN1_TIME_to_tm(t, &tm_value) != 1) return Sfalse;
+  if (ASN1_TIME_to_tm(t, &tm_value) != 1) return Sfalse;
   if (strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_value) == 0) return Sfalse;
   return Sstring(buf);
 }
 
 int crypto_random_status() {
   if (!ensure_crypto_init()) return 0;
-  return chezpp_openssl_RAND_status();
+  return RAND_status();
 }
 
 ptr crypto_random_bytevector(uint64_t len) {
@@ -228,7 +231,7 @@ int crypto_constant_time_eq(ptr bv1, uint64_t start1, uint64_t stop1, ptr bv2,
   size_t len2 = slice_len(start2, stop2);
   if (!ensure_crypto_init()) return 0;
   if (len1 != len2) return 0;
-  return chezpp_openssl_CRYPTO_memcmp(Sbytevector_data(bv1) + (size_t)start1,
+  return CRYPTO_memcmp(Sbytevector_data(bv1) + (size_t)start1,
                        Sbytevector_data(bv2) + (size_t)start2, len1) == 0;
 }
 
@@ -238,18 +241,18 @@ ptr crypto_hash_bytevector(ptr which, ptr bv, uint64_t start, uint64_t stop) {
   ptr ans = Sfalse;
 
   if (md == NULL) return Sfalse;
-  ctx = chezpp_openssl_EVP_MD_CTX_new();
+  ctx = EVP_MD_CTX_new();
   if (ctx == NULL) goto done;
-  if (chezpp_openssl_EVP_DigestInit_ex(ctx, md, NULL) != 1) goto done;
-  if (chezpp_openssl_EVP_DigestUpdate(ctx, Sbytevector_data(bv) + (size_t)start,
+  if (EVP_DigestInit_ex(ctx, md, NULL) != 1) goto done;
+  if (EVP_DigestUpdate(ctx, Sbytevector_data(bv) + (size_t)start,
                        slice_len(start, stop)) != 1) {
     goto done;
   }
   ans = digest_ctx_result(ctx);
 
 done:
-  if (ctx != NULL) chezpp_openssl_EVP_MD_CTX_free(ctx);
-  chezpp_openssl_EVP_MD_free(md);
+  if (ctx != NULL) EVP_MD_CTX_free(ctx);
+  EVP_MD_free(md);
   return ans;
 }
 
@@ -262,8 +265,8 @@ int crypto_hash_output_size(ptr which) {
   EVP_MD *md = fetch_digest(which);
   int size = -1;
   if (md != NULL) {
-    size = chezpp_openssl_EVP_MD_get_size(md);
-    chezpp_openssl_EVP_MD_free(md);
+    size = EVP_MD_get_size(md);
+    EVP_MD_free(md);
   }
   return size;
 }
@@ -272,8 +275,8 @@ int crypto_hash_block_size(ptr which) {
   EVP_MD *md = fetch_digest(which);
   int size = -1;
   if (md != NULL) {
-    size = chezpp_openssl_EVP_MD_get_block_size(md);
-    chezpp_openssl_EVP_MD_free(md);
+    size = EVP_MD_get_block_size(md);
+    EVP_MD_free(md);
   }
   return size;
 }
@@ -286,15 +289,15 @@ void *crypto_hash_state_create(ptr which) {
   st->ctx = NULL;
   if (st->md == NULL) goto fail;
 
-  st->ctx = chezpp_openssl_EVP_MD_CTX_new();
+  st->ctx = EVP_MD_CTX_new();
   if (st->ctx == NULL) goto fail;
 
-  if (chezpp_openssl_EVP_DigestInit_ex(st->ctx, st->md, NULL) != 1) goto fail;
+  if (EVP_DigestInit_ex(st->ctx, st->md, NULL) != 1) goto fail;
   return st;
 
 fail:
-  if (st->ctx != NULL) chezpp_openssl_EVP_MD_CTX_free(st->ctx);
-  if (st->md != NULL) chezpp_openssl_EVP_MD_free(st->md);
+  if (st->ctx != NULL) EVP_MD_CTX_free(st->ctx);
+  if (st->md != NULL) EVP_MD_free(st->md);
   free(st);
   return NULL;
 }
@@ -302,8 +305,8 @@ fail:
 void crypto_hash_state_destroy(void *ptr_st) {
   chezpp_hash_state *st = (chezpp_hash_state *)ptr_st;
   if (st == NULL) return;
-  if (st->ctx != NULL) chezpp_openssl_EVP_MD_CTX_free(st->ctx);
-  if (st->md != NULL) chezpp_openssl_EVP_MD_free(st->md);
+  if (st->ctx != NULL) EVP_MD_CTX_free(st->ctx);
+  if (st->md != NULL) EVP_MD_free(st->md);
   free(st);
 }
 
@@ -312,14 +315,14 @@ ptr crypto_hash_state_get(void *ptr_st) {
   EVP_MD_CTX *dup;
   ptr ans;
   if (st == NULL || st->ctx == NULL) return Sfalse;
-  dup = chezpp_openssl_EVP_MD_CTX_new();
+  dup = EVP_MD_CTX_new();
   if (dup == NULL) return Sfalse;
-  if (chezpp_openssl_EVP_MD_CTX_copy_ex(dup, st->ctx) != 1) {
-    chezpp_openssl_EVP_MD_CTX_free(dup);
+  if (EVP_MD_CTX_copy_ex(dup, st->ctx) != 1) {
+    EVP_MD_CTX_free(dup);
     return Sfalse;
   }
   ans = digest_ctx_result(dup);
-  chezpp_openssl_EVP_MD_CTX_free(dup);
+  EVP_MD_CTX_free(dup);
   return ans;
 }
 
@@ -334,15 +337,15 @@ ptr crypto_hash_state_finalize(void *ptr_st) {
 int crypto_hash_state_reset(void *ptr_st) {
   chezpp_hash_state *st = (chezpp_hash_state *)ptr_st;
   if (st == NULL || st->ctx == NULL || st->md == NULL) return 0;
-  if (chezpp_openssl_EVP_MD_CTX_reset(st->ctx) != 1) return 0;
-  return chezpp_openssl_EVP_DigestInit_ex(st->ctx, st->md, NULL);
+  if (EVP_MD_CTX_reset(st->ctx) != 1) return 0;
+  return EVP_DigestInit_ex(st->ctx, st->md, NULL);
 }
 
 int crypto_hash_state_update_bytevector(void *ptr_st, ptr bv, uint64_t start,
                                         uint64_t stop) {
   chezpp_hash_state *st = (chezpp_hash_state *)ptr_st;
   if (st == NULL || st->ctx == NULL) return 0;
-  return chezpp_openssl_EVP_DigestUpdate(st->ctx, Sbytevector_data(bv) + (size_t)start,
+  return EVP_DigestUpdate(st->ctx, Sbytevector_data(bv) + (size_t)start,
                           slice_len(start, stop));
 }
 
@@ -354,10 +357,10 @@ int crypto_hash_state_update_string(void *ptr_st, ptr str, uint64_t start,
 
 static int hmac_init_state(chezpp_hmac_state *st) {
   OSSL_PARAM params[2];
-  params[0] = chezpp_openssl_OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST,
+  params[0] = OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST,
                                                (char *)st->digest_name, 0);
-  params[1] = chezpp_openssl_OSSL_PARAM_construct_end();
-  return chezpp_openssl_EVP_MAC_init(st->ctx, st->key, st->key_len, params);
+  params[1] = OSSL_PARAM_construct_end();
+  return EVP_MAC_init(st->ctx, st->key, st->key_len, params);
 }
 
 void *crypto_hmac_state_create(ptr which, ptr key, uint64_t start, uint64_t stop) {
@@ -373,10 +376,10 @@ void *crypto_hmac_state_create(ptr which, ptr key, uint64_t start, uint64_t stop
   if (st->digest_name == NULL) goto fail;
 
   if (!ensure_crypto_init()) goto fail;
-  st->mac = chezpp_openssl_EVP_MAC_fetch(NULL, "HMAC", NULL);
+  st->mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
   if (st->mac == NULL) goto fail;
 
-  st->ctx = chezpp_openssl_EVP_MAC_CTX_new(st->mac);
+  st->ctx = EVP_MAC_CTX_new(st->mac);
   if (st->ctx == NULL) goto fail;
 
   st->key = malloc(key_len == 0 ? 1 : key_len);
@@ -390,11 +393,11 @@ void *crypto_hmac_state_create(ptr which, ptr key, uint64_t start, uint64_t stop
 
 fail:
   if (st->key != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(st->key, key_len);
+    OPENSSL_cleanse(st->key, key_len);
     free(st->key);
   }
-  if (st->ctx != NULL) chezpp_openssl_EVP_MAC_CTX_free(st->ctx);
-  if (st->mac != NULL) chezpp_openssl_EVP_MAC_free(st->mac);
+  if (st->ctx != NULL) EVP_MAC_CTX_free(st->ctx);
+  if (st->mac != NULL) EVP_MAC_free(st->mac);
   free(st);
   return NULL;
 }
@@ -403,11 +406,11 @@ void crypto_hmac_state_destroy(void *ptr_st) {
   chezpp_hmac_state *st = (chezpp_hmac_state *)ptr_st;
   if (st == NULL) return;
   if (st->key != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(st->key, st->key_len);
+    OPENSSL_cleanse(st->key, st->key_len);
     free(st->key);
   }
-  if (st->ctx != NULL) chezpp_openssl_EVP_MAC_CTX_free(st->ctx);
-  if (st->mac != NULL) chezpp_openssl_EVP_MAC_free(st->mac);
+  if (st->ctx != NULL) EVP_MAC_CTX_free(st->ctx);
+  if (st->mac != NULL) EVP_MAC_free(st->mac);
   free(st);
 }
 
@@ -419,22 +422,22 @@ ptr crypto_hmac_state_get(void *ptr_st) {
   ptr ans;
 
   if (st == NULL || st->ctx == NULL) return Sfalse;
-  dup = chezpp_openssl_EVP_MAC_CTX_dup(st->ctx);
+  dup = EVP_MAC_CTX_dup(st->ctx);
   if (dup == NULL) return Sfalse;
-  out_len = chezpp_openssl_EVP_MAC_CTX_get_mac_size(dup);
+  out_len = EVP_MAC_CTX_get_mac_size(dup);
   out = malloc(out_len == 0 ? 1 : out_len);
   if (out == NULL) {
-    chezpp_openssl_EVP_MAC_CTX_free(dup);
+    EVP_MAC_CTX_free(dup);
     return Sfalse;
   }
-  if (chezpp_openssl_EVP_MAC_final(dup, out, &out_len, out_len) != 1) {
-    chezpp_openssl_EVP_MAC_CTX_free(dup);
+  if (EVP_MAC_final(dup, out, &out_len, out_len) != 1) {
+    EVP_MAC_CTX_free(dup);
     free(out);
     return Sfalse;
   }
   ans = make_bytevector_copy(out, out_len);
-  chezpp_openssl_EVP_MAC_CTX_free(dup);
-  chezpp_openssl_OPENSSL_cleanse(out, out_len);
+  EVP_MAC_CTX_free(dup);
+  OPENSSL_cleanse(out, out_len);
   free(out);
   return ans;
 }
@@ -446,15 +449,15 @@ ptr crypto_hmac_state_finalize(void *ptr_st) {
   ptr ans;
 
   if (st == NULL || st->ctx == NULL) return Sfalse;
-  out_len = chezpp_openssl_EVP_MAC_CTX_get_mac_size(st->ctx);
+  out_len = EVP_MAC_CTX_get_mac_size(st->ctx);
   out = malloc(out_len == 0 ? 1 : out_len);
   if (out == NULL) return Sfalse;
-  if (chezpp_openssl_EVP_MAC_final(st->ctx, out, &out_len, out_len) != 1) {
+  if (EVP_MAC_final(st->ctx, out, &out_len, out_len) != 1) {
     free(out);
     return Sfalse;
   }
   ans = make_bytevector_copy(out, out_len);
-  chezpp_openssl_OPENSSL_cleanse(out, out_len);
+  OPENSSL_cleanse(out, out_len);
   free(out);
   return ans;
 }
@@ -469,7 +472,7 @@ int crypto_hmac_state_update_bytevector(void *ptr_st, ptr bv, uint64_t start,
                                         uint64_t stop) {
   chezpp_hmac_state *st = (chezpp_hmac_state *)ptr_st;
   if (st == NULL || st->ctx == NULL) return 0;
-  return chezpp_openssl_EVP_MAC_update(st->ctx, Sbytevector_data(bv) + (size_t)start,
+  return EVP_MAC_update(st->ctx, Sbytevector_data(bv) + (size_t)start,
                         slice_len(start, stop));
 }
 
@@ -495,37 +498,37 @@ static ptr hkdf_common(int mode, ptr which, ptr ikm, uint64_t ikm_start,
   if (md_name == NULL) return Sfalse;
 
   if (!ensure_crypto_init()) return Sfalse;
-  kdf = chezpp_openssl_EVP_KDF_fetch(NULL, "HKDF", NULL);
+  kdf = EVP_KDF_fetch(NULL, "HKDF", NULL);
   if (kdf == NULL) goto done;
-  ctx = chezpp_openssl_EVP_KDF_CTX_new(kdf);
+  ctx = EVP_KDF_CTX_new(kdf);
   if (ctx == NULL) goto done;
 
   params[idx++] =
-      chezpp_openssl_OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, (char *)md_name, 0);
-  params[idx++] = chezpp_openssl_OSSL_PARAM_construct_int(OSSL_KDF_PARAM_MODE, &mode_copy);
-  params[idx++] = chezpp_openssl_OSSL_PARAM_construct_octet_string(
+      OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, (char *)md_name, 0);
+  params[idx++] = OSSL_PARAM_construct_int(OSSL_KDF_PARAM_MODE, &mode_copy);
+  params[idx++] = OSSL_PARAM_construct_octet_string(
       OSSL_KDF_PARAM_KEY, Sbytevector_data(ikm) + (size_t)ikm_start,
       slice_len(ikm_start, ikm_stop));
-  params[idx++] = chezpp_openssl_OSSL_PARAM_construct_octet_string(
+  params[idx++] = OSSL_PARAM_construct_octet_string(
       OSSL_KDF_PARAM_SALT, Sbytevector_data(salt) + (size_t)salt_start,
       slice_len(salt_start, salt_stop));
-  params[idx++] = chezpp_openssl_OSSL_PARAM_construct_octet_string(
+  params[idx++] = OSSL_PARAM_construct_octet_string(
       OSSL_KDF_PARAM_INFO, Sbytevector_data(info) + (size_t)info_start,
       slice_len(info_start, info_stop));
-  params[idx++] = chezpp_openssl_OSSL_PARAM_construct_end();
+  params[idx++] = OSSL_PARAM_construct_end();
 
   out_buf = malloc(out_len == 0 ? 1 : (size_t)out_len);
   if (out_buf == NULL) goto done;
-  if (chezpp_openssl_EVP_KDF_derive(ctx, out_buf, (size_t)out_len, params) != 1) goto done;
+  if (EVP_KDF_derive(ctx, out_buf, (size_t)out_len, params) != 1) goto done;
   ans = make_bytevector_copy(out_buf, out_len);
 
 done:
   if (out_buf != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(out_buf, (size_t)out_len);
+    OPENSSL_cleanse(out_buf, (size_t)out_len);
     free(out_buf);
   }
-  if (ctx != NULL) chezpp_openssl_EVP_KDF_CTX_free(ctx);
-  if (kdf != NULL) chezpp_openssl_EVP_KDF_free(kdf);
+  if (ctx != NULL) EVP_KDF_CTX_free(ctx);
+  if (kdf != NULL) EVP_KDF_free(kdf);
   return ans;
 }
 
@@ -543,8 +546,8 @@ ptr crypto_hkdf_extract(ptr which, ptr ikm, uint64_t ikm_start, uint64_t ikm_sto
   int out_len;
   ptr ans;
   if (md == NULL) return Sfalse;
-  out_len = chezpp_openssl_EVP_MD_get_size(md);
-  chezpp_openssl_EVP_MD_free(md);
+  out_len = EVP_MD_get_size(md);
+  EVP_MD_free(md);
   ans = hkdf_common(EVP_KDF_HKDF_MODE_EXTRACT_ONLY, which, ikm, ikm_start, ikm_stop,
                     salt, salt_start, salt_stop, Smake_bytevector(0, 0), 0, 0,
                     out_len);
@@ -571,7 +574,7 @@ ptr crypto_pbkdf2(ptr which, ptr password, uint64_t pw_start, uint64_t pw_stop,
   if (!uint64_to_int(salt_stop - salt_start, &salt_len)) goto done;
   out_buf = malloc(out_len == 0 ? 1 : (size_t)out_len);
   if (out_buf == NULL) goto done;
-  if (chezpp_openssl_PKCS5_PBKDF2_HMAC((const char *)(Sbytevector_data(password) + (size_t)pw_start),
+  if (PKCS5_PBKDF2_HMAC((const char *)(Sbytevector_data(password) + (size_t)pw_start),
                         pw_len, Sbytevector_data(salt) + (size_t)salt_start,
                         salt_len, iterations, md, out_len, out_buf) != 1) {
     goto done;
@@ -580,10 +583,10 @@ ptr crypto_pbkdf2(ptr which, ptr password, uint64_t pw_start, uint64_t pw_stop,
 
 done:
   if (out_buf != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(out_buf, (size_t)out_len);
+    OPENSSL_cleanse(out_buf, (size_t)out_len);
     free(out_buf);
   }
-  chezpp_openssl_EVP_MD_free(md);
+  EVP_MD_free(md);
   return ans;
 }
 
@@ -596,7 +599,7 @@ ptr crypto_scrypt(ptr password, uint64_t pw_start, uint64_t pw_stop, ptr salt,
   if (!ensure_crypto_init()) return Sfalse;
   out_buf = malloc(out_len == 0 ? 1 : (size_t)out_len);
   if (out_buf == NULL) return Sfalse;
-  if (chezpp_openssl_EVP_PBE_scrypt((const char *)(Sbytevector_data(password) + (size_t)pw_start),
+  if (EVP_PBE_scrypt((const char *)(Sbytevector_data(password) + (size_t)pw_start),
                      slice_len(pw_start, pw_stop),
                      Sbytevector_data(salt) + (size_t)salt_start,
                      slice_len(salt_start, salt_stop), (uint64_t)n, (uint64_t)r,
@@ -606,7 +609,7 @@ ptr crypto_scrypt(ptr password, uint64_t pw_start, uint64_t pw_stop, ptr salt,
   ans = make_bytevector_copy(out_buf, out_len);
 
 done:
-  chezpp_openssl_OPENSSL_cleanse(out_buf, (size_t)out_len);
+  OPENSSL_cleanse(out_buf, (size_t)out_len);
   free(out_buf);
   return ans;
 }
@@ -637,11 +640,11 @@ ptr crypto_aead_encrypt(ptr which, ptr key, uint64_t key_start, uint64_t key_sto
   (void)key_stop;
   if (cipher == NULL) return Sfalse;
   if (!uint64_to_int(nonce_stop - nonce_start, &nonce_len)) goto done;
-  ctx = chezpp_openssl_EVP_CIPHER_CTX_new();
+  ctx = EVP_CIPHER_CTX_new();
   if (ctx == NULL) goto done;
-  if (chezpp_openssl_EVP_EncryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1) goto done;
-  if (chezpp_openssl_EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, nonce_len, NULL) != 1) goto done;
-  if (chezpp_openssl_EVP_EncryptInit_ex(ctx, NULL, NULL, Sbytevector_data(key) + (size_t)key_start,
+  if (EVP_EncryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1) goto done;
+  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, nonce_len, NULL) != 1) goto done;
+  if (EVP_EncryptInit_ex(ctx, NULL, NULL, Sbytevector_data(key) + (size_t)key_start,
                          Sbytevector_data(nonce) + (size_t)nonce_start) != 1) {
     goto done;
   }
@@ -660,21 +663,21 @@ ptr crypto_aead_encrypt(ptr which, ptr key, uint64_t key_start, uint64_t key_sto
                              pt_stop - pt_start)) {
     goto done;
   }
-  if (chezpp_openssl_EVP_EncryptFinal_ex(ctx, out + out_len, &out2) != 1) goto done;
-  if (chezpp_openssl_EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, tag_len, tag) != 1) goto done;
+  if (EVP_EncryptFinal_ex(ctx, out + out_len, &out2) != 1) goto done;
+  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, tag_len, tag) != 1) goto done;
   ans = make_aead_pair(out, out_len + (size_t)out2, tag, (size_t)tag_len);
 
 done:
   if (out != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(out, pt_len);
+    OPENSSL_cleanse(out, pt_len);
     free(out);
   }
   if (tag != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(tag, (size_t)tag_len);
+    OPENSSL_cleanse(tag, (size_t)tag_len);
     free(tag);
   }
-  if (ctx != NULL) chezpp_openssl_EVP_CIPHER_CTX_free(ctx);
-  if (cipher != NULL) chezpp_openssl_EVP_CIPHER_free(cipher);
+  if (ctx != NULL) EVP_CIPHER_CTX_free(ctx);
+  if (cipher != NULL) EVP_CIPHER_free(cipher);
   return ans;
 }
 
@@ -696,11 +699,11 @@ ptr crypto_aead_decrypt(ptr which, ptr key, uint64_t key_start, uint64_t key_sto
   if (cipher == NULL) return Sfalse;
   if (!uint64_to_int(nonce_stop - nonce_start, &nonce_len)) goto done;
   if (!uint64_to_int(tag_stop - tag_start, &tag_len)) goto done;
-  ctx = chezpp_openssl_EVP_CIPHER_CTX_new();
+  ctx = EVP_CIPHER_CTX_new();
   if (ctx == NULL) goto done;
-  if (chezpp_openssl_EVP_DecryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1) goto done;
-  if (chezpp_openssl_EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, nonce_len, NULL) != 1) goto done;
-  if (chezpp_openssl_EVP_DecryptInit_ex(ctx, NULL, NULL, Sbytevector_data(key) + (size_t)key_start,
+  if (EVP_DecryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1) goto done;
+  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, nonce_len, NULL) != 1) goto done;
+  if (EVP_DecryptInit_ex(ctx, NULL, NULL, Sbytevector_data(key) + (size_t)key_start,
                          Sbytevector_data(nonce) + (size_t)nonce_start) != 1) {
     goto done;
   }
@@ -718,37 +721,37 @@ ptr crypto_aead_decrypt(ptr which, ptr key, uint64_t key_start, uint64_t key_sto
                              ct_stop - ct_start)) {
     goto done;
   }
-  if (chezpp_openssl_EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, tag_len,
+  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, tag_len,
                           Sbytevector_data(tag) + (size_t)tag_start) != 1) {
     goto done;
   }
-  if (chezpp_openssl_EVP_DecryptFinal_ex(ctx, out + out_len, &out2) != 1) goto done;
+  if (EVP_DecryptFinal_ex(ctx, out + out_len, &out2) != 1) goto done;
   ans = make_bytevector_copy(out, out_len + (size_t)out2);
 
 done:
   if (out != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(out, ct_len);
+    OPENSSL_cleanse(out, ct_len);
     free(out);
   }
-  if (ctx != NULL) chezpp_openssl_EVP_CIPHER_CTX_free(ctx);
-  if (cipher != NULL) chezpp_openssl_EVP_CIPHER_free(cipher);
+  if (ctx != NULL) EVP_CIPHER_CTX_free(ctx);
+  if (cipher != NULL) EVP_CIPHER_free(cipher);
   return ans;
 }
 
 static int cipher_state_init(chezpp_cipher_state *st) {
   if (st == NULL || st->ctx == NULL || st->cipher == NULL) return 0;
-  if (chezpp_openssl_EVP_CipherInit_ex(st->ctx, st->cipher, NULL, NULL, NULL, st->encrypt) != 1)
+  if (EVP_CipherInit_ex(st->ctx, st->cipher, NULL, NULL, NULL, st->encrypt) != 1)
     return 0;
-  if (chezpp_openssl_EVP_CIPHER_CTX_set_padding(st->ctx, 0) != 1) return 0;
-  return chezpp_openssl_EVP_CipherInit_ex(st->ctx, NULL, NULL, st->key, st->iv, st->encrypt);
+  if (EVP_CIPHER_CTX_set_padding(st->ctx, 0) != 1) return 0;
+  return EVP_CipherInit_ex(st->ctx, NULL, NULL, st->key, st->iv, st->encrypt);
 }
 
 int crypto_cipher_key_size(ptr which) {
   EVP_CIPHER *cipher = fetch_cipher(which);
   int ans = -1;
   if (cipher != NULL) {
-    ans = chezpp_openssl_EVP_CIPHER_get_key_length(cipher);
-    chezpp_openssl_EVP_CIPHER_free(cipher);
+    ans = EVP_CIPHER_get_key_length(cipher);
+    EVP_CIPHER_free(cipher);
   }
   return ans;
 }
@@ -757,8 +760,8 @@ int crypto_cipher_iv_size(ptr which) {
   EVP_CIPHER *cipher = fetch_cipher(which);
   int ans = -1;
   if (cipher != NULL) {
-    ans = chezpp_openssl_EVP_CIPHER_get_iv_length(cipher);
-    chezpp_openssl_EVP_CIPHER_free(cipher);
+    ans = EVP_CIPHER_get_iv_length(cipher);
+    EVP_CIPHER_free(cipher);
   }
   return ans;
 }
@@ -767,8 +770,8 @@ int crypto_cipher_block_size(ptr which) {
   EVP_CIPHER *cipher = fetch_cipher(which);
   int ans = -1;
   if (cipher != NULL) {
-    ans = chezpp_openssl_EVP_CIPHER_get_block_size(cipher);
-    chezpp_openssl_EVP_CIPHER_free(cipher);
+    ans = EVP_CIPHER_get_block_size(cipher);
+    EVP_CIPHER_free(cipher);
   }
   return ans;
 }
@@ -790,7 +793,7 @@ void *crypto_cipher_state_create(ptr which, int encrypt, ptr key, uint64_t key_s
   st->cipher = fetch_cipher(which);
   if (st->cipher == NULL) goto fail;
 
-  st->ctx = chezpp_openssl_EVP_CIPHER_CTX_new();
+  st->ctx = EVP_CIPHER_CTX_new();
   if (st->ctx == NULL) goto fail;
 
   st->key = malloc(st->key_len == 0 ? 1 : st->key_len);
@@ -808,15 +811,15 @@ void *crypto_cipher_state_create(ptr which, int encrypt, ptr key, uint64_t key_s
 
 fail:
   if (st->key != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(st->key, st->key_len);
+    OPENSSL_cleanse(st->key, st->key_len);
     free(st->key);
   }
   if (st->iv != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(st->iv, st->iv_len);
+    OPENSSL_cleanse(st->iv, st->iv_len);
     free(st->iv);
   }
-  if (st->ctx != NULL) chezpp_openssl_EVP_CIPHER_CTX_free(st->ctx);
-  if (st->cipher != NULL) chezpp_openssl_EVP_CIPHER_free(st->cipher);
+  if (st->ctx != NULL) EVP_CIPHER_CTX_free(st->ctx);
+  if (st->cipher != NULL) EVP_CIPHER_free(st->cipher);
   free(st);
   return NULL;
 }
@@ -825,15 +828,15 @@ void crypto_cipher_state_destroy(void *ptr_st) {
   chezpp_cipher_state *st = (chezpp_cipher_state *)ptr_st;
   if (st == NULL) return;
   if (st->key != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(st->key, st->key_len);
+    OPENSSL_cleanse(st->key, st->key_len);
     free(st->key);
   }
   if (st->iv != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(st->iv, st->iv_len);
+    OPENSSL_cleanse(st->iv, st->iv_len);
     free(st->iv);
   }
-  if (st->ctx != NULL) chezpp_openssl_EVP_CIPHER_CTX_free(st->ctx);
-  if (st->cipher != NULL) chezpp_openssl_EVP_CIPHER_free(st->cipher);
+  if (st->ctx != NULL) EVP_CIPHER_CTX_free(st->ctx);
+  if (st->cipher != NULL) EVP_CIPHER_free(st->cipher);
   free(st);
 }
 
@@ -846,7 +849,7 @@ ptr crypto_cipher_state_update(void *ptr_st, ptr bv, uint64_t start, uint64_t st
   size_t out_cap;
 
   if (st == NULL || st->ctx == NULL) return Sfalse;
-  out_cap = in_len + (size_t)chezpp_openssl_EVP_CIPHER_CTX_get_block_size(st->ctx);
+  out_cap = in_len + (size_t)EVP_CIPHER_CTX_get_block_size(st->ctx);
   out = malloc(out_cap == 0 ? 1 : out_cap);
   if (out == NULL) return Sfalse;
   if (!evp_cipher_update_all(st->ctx, out, &out_len,
@@ -858,7 +861,7 @@ ptr crypto_cipher_state_update(void *ptr_st, ptr bv, uint64_t start, uint64_t st
 
 done:
   if (out != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(out, out_cap);
+    OPENSSL_cleanse(out, out_cap);
     free(out);
   }
   return ans;
@@ -872,15 +875,15 @@ ptr crypto_cipher_state_finalize(void *ptr_st) {
   size_t out_cap;
 
   if (st == NULL || st->ctx == NULL) return Sfalse;
-  out_cap = (size_t)chezpp_openssl_EVP_CIPHER_CTX_get_block_size(st->ctx);
+  out_cap = (size_t)EVP_CIPHER_CTX_get_block_size(st->ctx);
   out = malloc(out_cap == 0 ? 1 : out_cap);
   if (out == NULL) return Sfalse;
-  if (chezpp_openssl_EVP_CipherFinal_ex(st->ctx, out, &out_len) != 1) goto done;
+  if (EVP_CipherFinal_ex(st->ctx, out, &out_len) != 1) goto done;
   ans = make_bytevector_copy(out, (size_t)out_len);
 
 done:
   if (out != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(out, out_cap);
+    OPENSSL_cleanse(out, out_cap);
     free(out);
   }
   return ans;
@@ -889,7 +892,7 @@ done:
 int crypto_cipher_state_reset(void *ptr_st) {
   chezpp_cipher_state *st = (chezpp_cipher_state *)ptr_st;
   if (st == NULL || st->ctx == NULL) return 0;
-  if (chezpp_openssl_EVP_CIPHER_CTX_reset(st->ctx) != 1) return 0;
+  if (EVP_CIPHER_CTX_reset(st->ctx) != 1) return 0;
   return cipher_state_init(st);
 }
 
@@ -911,7 +914,7 @@ static const char *pkey_alg_name(ptr alg) {
 }
 
 static ptr pkey_algorithm_symbol(EVP_PKEY *pkey) {
-  int id = chezpp_openssl_EVP_PKEY_get_base_id(pkey);
+  int id = EVP_PKEY_get_base_id(pkey);
   switch (id) {
   case EVP_PKEY_RSA:
     return Sstring_to_symbol("rsa");
@@ -928,7 +931,7 @@ static ptr pkey_algorithm_symbol(EVP_PKEY *pkey) {
 
 static ptr bio_to_bytevector(BIO *bio) {
   char *data = NULL;
-  long len = chezpp_openssl_BIO_ctrl(bio, BIO_CTRL_INFO, 0, &data);
+  long len = BIO_ctrl(bio, BIO_CTRL_INFO, 0, &data);
   if (len < 0 || data == NULL) return Sfalse;
   return make_bytevector_copy((const unsigned char *)data, (size_t)len);
 }
@@ -944,31 +947,31 @@ void *crypto_pkey_generate(ptr alg, int bits, ptr curve) {
 
   if (name == NULL) return NULL;
   if (!ensure_crypto_init()) return NULL;
-  ctx = chezpp_openssl_EVP_PKEY_CTX_new_from_name(NULL, name, NULL);
+  ctx = EVP_PKEY_CTX_new_from_name(NULL, name, NULL);
   if (ctx == NULL) goto done;
-  if (chezpp_openssl_EVP_PKEY_keygen_init(ctx) != 1) goto done;
+  if (EVP_PKEY_keygen_init(ctx) != 1) goto done;
 
   if (alg == Sstring_to_symbol("rsa")) {
-    params[idx++] = chezpp_openssl_OSSL_PARAM_construct_int(OSSL_PKEY_PARAM_BITS, &bits_copy);
+    params[idx++] = OSSL_PARAM_construct_int(OSSL_PKEY_PARAM_BITS, &bits_copy);
   } else if (alg == Sstring_to_symbol("ecdsa") || alg == Sstring_to_symbol("ecdh")) {
     curve_mut = (char *)curve_name(curve);
     if (curve_mut == NULL) goto done;
     params[idx++] =
-        chezpp_openssl_OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, curve_mut, 0);
+        OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, curve_mut, 0);
   }
   if (idx != 0) {
-    params[idx++] = chezpp_openssl_OSSL_PARAM_construct_end();
-    if (chezpp_openssl_EVP_PKEY_CTX_set_params(ctx, params) != 1) goto done;
+    params[idx++] = OSSL_PARAM_construct_end();
+    if (EVP_PKEY_CTX_set_params(ctx, params) != 1) goto done;
   }
-  if (chezpp_openssl_EVP_PKEY_generate(ctx, &pkey) != 1) goto done;
+  if (EVP_PKEY_generate(ctx, &pkey) != 1) goto done;
 
 done:
-  if (ctx != NULL) chezpp_openssl_EVP_PKEY_CTX_free(ctx);
+  if (ctx != NULL) EVP_PKEY_CTX_free(ctx);
   return pkey;
 }
 
 void crypto_pkey_free(void *ptr_pkey) {
-  if (ptr_pkey != NULL) chezpp_openssl_EVP_PKEY_free((EVP_PKEY *)ptr_pkey);
+  if (ptr_pkey != NULL) EVP_PKEY_free((EVP_PKEY *)ptr_pkey);
 }
 
 ptr crypto_pkey_algorithm(void *ptr_pkey) {
@@ -978,7 +981,7 @@ ptr crypto_pkey_algorithm(void *ptr_pkey) {
 
 int crypto_pkey_bits(void *ptr_pkey) {
   if (ptr_pkey == NULL) return -1;
-  return chezpp_openssl_EVP_PKEY_get_bits((EVP_PKEY *)ptr_pkey);
+  return EVP_PKEY_get_bits((EVP_PKEY *)ptr_pkey);
 }
 
 void *crypto_pkey_public_from_private(void *ptr_pkey) {
@@ -986,12 +989,12 @@ void *crypto_pkey_public_from_private(void *ptr_pkey) {
   BIO *bio = NULL;
   EVP_PKEY *pub = NULL;
   if (pkey == NULL) return NULL;
-  bio = chezpp_openssl_BIO_new(chezpp_openssl_BIO_s_mem());
+  bio = BIO_new(BIO_s_mem());
   if (bio == NULL) goto done;
-  if (chezpp_openssl_PEM_write_bio_PUBKEY(bio, pkey) != 1) goto done;
-  pub = chezpp_openssl_PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+  if (PEM_write_bio_PUBKEY(bio, pkey) != 1) goto done;
+  pub = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
 done:
-  if (bio != NULL) chezpp_openssl_BIO_free(bio);
+  if (bio != NULL) BIO_free(bio);
   return pub;
 }
 
@@ -1000,12 +1003,12 @@ ptr crypto_pkey_store_private_pem(void *ptr_pkey) {
   BIO *bio = NULL;
   ptr ans = Sfalse;
   if (pkey == NULL) return Sfalse;
-  bio = chezpp_openssl_BIO_new(chezpp_openssl_BIO_s_mem());
+  bio = BIO_new(BIO_s_mem());
   if (bio == NULL) goto done;
-  if (chezpp_openssl_PEM_write_bio_PrivateKey(bio, pkey, NULL, NULL, 0, NULL, NULL) != 1) goto done;
+  if (PEM_write_bio_PrivateKey(bio, pkey, NULL, NULL, 0, NULL, NULL) != 1) goto done;
   ans = bio_to_bytevector(bio);
 done:
-  if (bio != NULL) chezpp_openssl_BIO_free(bio);
+  if (bio != NULL) BIO_free(bio);
   return ans;
 }
 
@@ -1014,12 +1017,12 @@ ptr crypto_pkey_store_public_pem(void *ptr_pkey) {
   BIO *bio = NULL;
   ptr ans = Sfalse;
   if (pkey == NULL) return Sfalse;
-  bio = chezpp_openssl_BIO_new(chezpp_openssl_BIO_s_mem());
+  bio = BIO_new(BIO_s_mem());
   if (bio == NULL) goto done;
-  if (chezpp_openssl_PEM_write_bio_PUBKEY(bio, pkey) != 1) goto done;
+  if (PEM_write_bio_PUBKEY(bio, pkey) != 1) goto done;
   ans = bio_to_bytevector(bio);
 done:
-  if (bio != NULL) chezpp_openssl_BIO_free(bio);
+  if (bio != NULL) BIO_free(bio);
   return ans;
 }
 
@@ -1028,12 +1031,12 @@ ptr crypto_pkey_store_private_der(void *ptr_pkey) {
   BIO *bio = NULL;
   ptr ans = Sfalse;
   if (pkey == NULL) return Sfalse;
-  bio = chezpp_openssl_BIO_new(chezpp_openssl_BIO_s_mem());
+  bio = BIO_new(BIO_s_mem());
   if (bio == NULL) goto done;
-  if (chezpp_openssl_i2d_PrivateKey_bio(bio, pkey) != 1) goto done;
+  if (i2d_PrivateKey_bio(bio, pkey) != 1) goto done;
   ans = bio_to_bytevector(bio);
 done:
-  if (bio != NULL) chezpp_openssl_BIO_free(bio);
+  if (bio != NULL) BIO_free(bio);
   return ans;
 }
 
@@ -1042,12 +1045,12 @@ ptr crypto_pkey_store_public_der(void *ptr_pkey) {
   BIO *bio = NULL;
   ptr ans = Sfalse;
   if (pkey == NULL) return Sfalse;
-  bio = chezpp_openssl_BIO_new(chezpp_openssl_BIO_s_mem());
+  bio = BIO_new(BIO_s_mem());
   if (bio == NULL) goto done;
-  if (chezpp_openssl_i2d_PUBKEY_bio(bio, pkey) != 1) goto done;
+  if (i2d_PUBKEY_bio(bio, pkey) != 1) goto done;
   ans = bio_to_bytevector(bio);
 done:
-  if (bio != NULL) chezpp_openssl_BIO_free(bio);
+  if (bio != NULL) BIO_free(bio);
   return ans;
 }
 
@@ -1055,11 +1058,11 @@ void *crypto_pkey_load_private_pem(ptr bv, uint64_t start, uint64_t stop) {
   int len;
   if (!ensure_crypto_init()) return NULL;
   if (!uint64_to_int(stop - start, &len)) return NULL;
-  BIO *bio = chezpp_openssl_BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
+  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
-  pkey = chezpp_openssl_PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
-  chezpp_openssl_BIO_free(bio);
+  pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+  BIO_free(bio);
   return pkey;
 }
 
@@ -1067,11 +1070,11 @@ void *crypto_pkey_load_public_pem(ptr bv, uint64_t start, uint64_t stop) {
   int len;
   if (!ensure_crypto_init()) return NULL;
   if (!uint64_to_int(stop - start, &len)) return NULL;
-  BIO *bio = chezpp_openssl_BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
+  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
-  pkey = chezpp_openssl_PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
-  chezpp_openssl_BIO_free(bio);
+  pkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+  BIO_free(bio);
   return pkey;
 }
 
@@ -1079,11 +1082,11 @@ void *crypto_pkey_load_private_der(ptr bv, uint64_t start, uint64_t stop) {
   int len;
   if (!ensure_crypto_init()) return NULL;
   if (!uint64_to_int(stop - start, &len)) return NULL;
-  BIO *bio = chezpp_openssl_BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
+  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
-  pkey = chezpp_openssl_d2i_PrivateKey_bio(bio, NULL);
-  chezpp_openssl_BIO_free(bio);
+  pkey = d2i_PrivateKey_bio(bio, NULL);
+  BIO_free(bio);
   return pkey;
 }
 
@@ -1091,11 +1094,11 @@ void *crypto_pkey_load_public_der(ptr bv, uint64_t start, uint64_t stop) {
   int len;
   if (!ensure_crypto_init()) return NULL;
   if (!uint64_to_int(stop - start, &len)) return NULL;
-  BIO *bio = chezpp_openssl_BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
+  BIO *bio = BIO_new_mem_buf(Sbytevector_data(bv) + (size_t)start, len);
   EVP_PKEY *pkey = NULL;
   if (bio == NULL) return NULL;
-  pkey = chezpp_openssl_d2i_PUBKEY_bio(bio, NULL);
-  chezpp_openssl_BIO_free(bio);
+  pkey = d2i_PUBKEY_bio(bio, NULL);
+  BIO_free(bio);
   return pkey;
 }
 
@@ -1110,46 +1113,46 @@ ptr crypto_sign_message(ptr alg, ptr digest, void *ptr_pkey, ptr bv, uint64_t st
   unsigned char *sig = NULL;
 
   if (pkey == NULL) return Sfalse;
-  ctx = chezpp_openssl_EVP_MD_CTX_new();
+  ctx = EVP_MD_CTX_new();
   if (ctx == NULL) goto done;
 
   if (alg == Sstring_to_symbol("ed25519")) {
-    if (chezpp_openssl_EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey) != 1) goto done;
-    if (chezpp_openssl_EVP_DigestSign(ctx, NULL, &sig_len, Sbytevector_data(bv) + (size_t)start,
+    if (EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey) != 1) goto done;
+    if (EVP_DigestSign(ctx, NULL, &sig_len, Sbytevector_data(bv) + (size_t)start,
                        slice_len(start, stop)) != 1) {
       goto done;
     }
     sig = malloc(sig_len == 0 ? 1 : sig_len);
     if (sig == NULL) goto done;
-    if (chezpp_openssl_EVP_DigestSign(ctx, sig, &sig_len, Sbytevector_data(bv) + (size_t)start,
+    if (EVP_DigestSign(ctx, sig, &sig_len, Sbytevector_data(bv) + (size_t)start,
                        slice_len(start, stop)) != 1) {
       goto done;
     }
   } else {
     md = fetch_digest(digest);
     if (md == NULL) goto done;
-    if (chezpp_openssl_EVP_DigestSignInit(ctx, &pctx, md, NULL, pkey) != 1) goto done;
+    if (EVP_DigestSignInit(ctx, &pctx, md, NULL, pkey) != 1) goto done;
     if (alg == Sstring_to_symbol("rsa-pss")) {
-      if (chezpp_openssl_EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) != 1) goto done;
-      if (chezpp_openssl_EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, -1) != 1) goto done;
+      if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) != 1) goto done;
+      if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, -1) != 1) goto done;
     }
-    if (chezpp_openssl_EVP_DigestSignUpdate(ctx, Sbytevector_data(bv) + (size_t)start,
+    if (EVP_DigestSignUpdate(ctx, Sbytevector_data(bv) + (size_t)start,
                              slice_len(start, stop)) != 1)
       goto done;
-    if (chezpp_openssl_EVP_DigestSignFinal(ctx, NULL, &sig_len) != 1) goto done;
+    if (EVP_DigestSignFinal(ctx, NULL, &sig_len) != 1) goto done;
     sig = malloc(sig_len == 0 ? 1 : sig_len);
     if (sig == NULL) goto done;
-    if (chezpp_openssl_EVP_DigestSignFinal(ctx, sig, &sig_len) != 1) goto done;
+    if (EVP_DigestSignFinal(ctx, sig, &sig_len) != 1) goto done;
   }
   ans = make_bytevector_copy(sig, sig_len);
 
 done:
   if (sig != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(sig, sig_len);
+    OPENSSL_cleanse(sig, sig_len);
     free(sig);
   }
-  if (md != NULL) chezpp_openssl_EVP_MD_free(md);
-  if (ctx != NULL) chezpp_openssl_EVP_MD_CTX_free(ctx);
+  if (md != NULL) EVP_MD_free(md);
+  if (ctx != NULL) EVP_MD_CTX_free(ctx);
   return ans;
 }
 
@@ -1163,33 +1166,33 @@ int crypto_verify_message(ptr alg, ptr digest, void *ptr_pkey, ptr msg,
   int ok = 0;
 
   if (pkey == NULL) return 0;
-  ctx = chezpp_openssl_EVP_MD_CTX_new();
+  ctx = EVP_MD_CTX_new();
   if (ctx == NULL) goto done;
 
   if (alg == Sstring_to_symbol("ed25519")) {
-    if (chezpp_openssl_EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey) != 1) goto done;
-    ok = chezpp_openssl_EVP_DigestVerify(ctx, Sbytevector_data(sig) + (size_t)sig_start,
+    if (EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey) != 1) goto done;
+    ok = EVP_DigestVerify(ctx, Sbytevector_data(sig) + (size_t)sig_start,
                           slice_len(sig_start, sig_stop),
                           Sbytevector_data(msg) + (size_t)msg_start,
                           slice_len(msg_start, msg_stop)) == 1;
   } else {
     md = fetch_digest(digest);
     if (md == NULL) goto done;
-    if (chezpp_openssl_EVP_DigestVerifyInit(ctx, &pctx, md, NULL, pkey) != 1) goto done;
+    if (EVP_DigestVerifyInit(ctx, &pctx, md, NULL, pkey) != 1) goto done;
     if (alg == Sstring_to_symbol("rsa-pss")) {
-      if (chezpp_openssl_EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) != 1) goto done;
-      if (chezpp_openssl_EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, -1) != 1) goto done;
+      if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) != 1) goto done;
+      if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, -1) != 1) goto done;
     }
-    if (chezpp_openssl_EVP_DigestVerifyUpdate(ctx, Sbytevector_data(msg) + (size_t)msg_start,
+    if (EVP_DigestVerifyUpdate(ctx, Sbytevector_data(msg) + (size_t)msg_start,
                                slice_len(msg_start, msg_stop)) != 1)
       goto done;
-    ok = chezpp_openssl_EVP_DigestVerifyFinal(ctx, Sbytevector_data(sig) + (size_t)sig_start,
+    ok = EVP_DigestVerifyFinal(ctx, Sbytevector_data(sig) + (size_t)sig_start,
                                slice_len(sig_start, sig_stop)) == 1;
   }
 
 done:
-  if (md != NULL) chezpp_openssl_EVP_MD_free(md);
-  if (ctx != NULL) chezpp_openssl_EVP_MD_CTX_free(ctx);
+  if (md != NULL) EVP_MD_free(md);
+  if (ctx != NULL) EVP_MD_CTX_free(ctx);
   return ok;
 }
 
@@ -1204,22 +1207,22 @@ ptr crypto_derive_shared_secret(ptr alg, void *ptr_priv, void *ptr_pub) {
   if (priv == NULL || pub == NULL) return Sfalse;
   if (!(alg == Sstring_to_symbol("x25519") || alg == Sstring_to_symbol("ecdh")))
     return Sfalse;
-  ctx = chezpp_openssl_EVP_PKEY_CTX_new(priv, NULL);
+  ctx = EVP_PKEY_CTX_new(priv, NULL);
   if (ctx == NULL) goto done;
-  if (chezpp_openssl_EVP_PKEY_derive_init(ctx) != 1) goto done;
-  if (chezpp_openssl_EVP_PKEY_derive_set_peer(ctx, pub) != 1) goto done;
-  if (chezpp_openssl_EVP_PKEY_derive(ctx, NULL, &out_len) != 1) goto done;
+  if (EVP_PKEY_derive_init(ctx) != 1) goto done;
+  if (EVP_PKEY_derive_set_peer(ctx, pub) != 1) goto done;
+  if (EVP_PKEY_derive(ctx, NULL, &out_len) != 1) goto done;
   out = malloc(out_len == 0 ? 1 : out_len);
   if (out == NULL) goto done;
-  if (chezpp_openssl_EVP_PKEY_derive(ctx, out, &out_len) != 1) goto done;
+  if (EVP_PKEY_derive(ctx, out, &out_len) != 1) goto done;
   ans = make_bytevector_copy(out, out_len);
 
 done:
   if (out != NULL) {
-    chezpp_openssl_OPENSSL_cleanse(out, out_len);
+    OPENSSL_cleanse(out, out_len);
     free(out);
   }
-  if (ctx != NULL) chezpp_openssl_EVP_PKEY_CTX_free(ctx);
+  if (ctx != NULL) EVP_PKEY_CTX_free(ctx);
   return ans;
 }
 
@@ -1242,10 +1245,10 @@ static X509 *load_x509_from_mem(const unsigned char *buf, uint64_t len, int pem)
   X509 *cert = NULL;
   int bio_len;
   if (!ensure_crypto_init() || !uint64_to_int(len, &bio_len)) return NULL;
-  bio = chezpp_openssl_BIO_new_mem_buf(buf, bio_len);
+  bio = BIO_new_mem_buf(buf, bio_len);
   if (bio == NULL) return NULL;
-  cert = pem ? chezpp_openssl_PEM_read_bio_X509(bio, NULL, NULL, NULL) : chezpp_openssl_d2i_X509_bio(bio, NULL);
-  chezpp_openssl_BIO_free(bio);
+  cert = pem ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : d2i_X509_bio(bio, NULL);
+  BIO_free(bio);
   return cert;
 }
 
@@ -1258,23 +1261,23 @@ static ptr make_general_name_entry(const GENERAL_NAME *name) {
   switch (name->type) {
   case GEN_DNS:
     str = name->d.dNSName;
-    data = chezpp_openssl_ASN1_STRING_get0_data(str);
-    len = chezpp_openssl_ASN1_STRING_length(str);
+    data = ASN1_STRING_get0_data(str);
+    len = ASN1_STRING_length(str);
     return make_symbol_string_pair("dns", Sstring_utf8((const char *)data, (iptr)len));
   case GEN_URI:
     str = name->d.uniformResourceIdentifier;
-    data = chezpp_openssl_ASN1_STRING_get0_data(str);
-    len = chezpp_openssl_ASN1_STRING_length(str);
+    data = ASN1_STRING_get0_data(str);
+    len = ASN1_STRING_length(str);
     return make_symbol_string_pair("uri", Sstring_utf8((const char *)data, (iptr)len));
   case GEN_EMAIL:
     str = name->d.rfc822Name;
-    data = chezpp_openssl_ASN1_STRING_get0_data(str);
-    len = chezpp_openssl_ASN1_STRING_length(str);
+    data = ASN1_STRING_get0_data(str);
+    len = ASN1_STRING_length(str);
     return make_symbol_string_pair("email", Sstring_utf8((const char *)data, (iptr)len));
   case GEN_IPADD:
     str = name->d.iPAddress;
-    data = chezpp_openssl_ASN1_STRING_get0_data(str);
-    len = chezpp_openssl_ASN1_STRING_length(str);
+    data = ASN1_STRING_get0_data(str);
+    len = ASN1_STRING_length(str);
     if (len == 4) {
       if (inet_ntop(AF_INET, data, ipbuf, sizeof(ipbuf)) == NULL) return Sfalse;
       return make_symbol_string_pair("ip", Sstring(ipbuf));
@@ -1298,31 +1301,31 @@ void *crypto_cert_load_der(ptr bv, uint64_t start, uint64_t stop) {
 }
 
 void crypto_cert_free(void *ptr_cert) {
-  if (ptr_cert != NULL) chezpp_openssl_X509_free((X509 *)ptr_cert);
+  if (ptr_cert != NULL) X509_free((X509 *)ptr_cert);
 }
 
 ptr crypto_cert_subject(void *ptr_cert) {
   X509 *cert = (X509 *)ptr_cert;
   if (cert == NULL) return Sfalse;
-  return make_x509_name_string(chezpp_openssl_X509_get_subject_name(cert));
+  return make_x509_name_string(X509_get_subject_name(cert));
 }
 
 ptr crypto_cert_issuer(void *ptr_cert) {
   X509 *cert = (X509 *)ptr_cert;
   if (cert == NULL) return Sfalse;
-  return make_x509_name_string(chezpp_openssl_X509_get_issuer_name(cert));
+  return make_x509_name_string(X509_get_issuer_name(cert));
 }
 
 ptr crypto_cert_not_before(void *ptr_cert) {
   X509 *cert = (X509 *)ptr_cert;
   if (cert == NULL) return Sfalse;
-  return make_iso_time_string(chezpp_openssl_X509_get0_notBefore(cert));
+  return make_iso_time_string(X509_get0_notBefore(cert));
 }
 
 ptr crypto_cert_not_after(void *ptr_cert) {
   X509 *cert = (X509 *)ptr_cert;
   if (cert == NULL) return Sfalse;
-  return make_iso_time_string(chezpp_openssl_X509_get0_notAfter(cert));
+  return make_iso_time_string(X509_get0_notAfter(cert));
 }
 
 ptr crypto_cert_subject_alt_names(void *ptr_cert) {
@@ -1332,14 +1335,14 @@ ptr crypto_cert_subject_alt_names(void *ptr_cert) {
   ptr tail = Snil;
 
   if (cert == NULL) return Sfalse;
-  names = chezpp_openssl_X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
+  names = X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
   if (names == NULL) return Snil;
 
   for (int i = 0;
-       i < chezpp_openssl_OPENSSL_sk_num((const OPENSSL_STACK *)names);
+       i < OPENSSL_sk_num((const OPENSSL_STACK *)names);
        i++) {
     ptr entry = make_general_name_entry(
-        (GENERAL_NAME *)chezpp_openssl_OPENSSL_sk_value(
+        (GENERAL_NAME *)OPENSSL_sk_value(
             (const OPENSSL_STACK *)names, i));
     ptr cell;
     if (entry == Sfalse) continue;
@@ -1352,7 +1355,7 @@ ptr crypto_cert_subject_alt_names(void *ptr_cert) {
       tail = cell;
     }
   }
-  chezpp_openssl_GENERAL_NAMES_free(names);
+  GENERAL_NAMES_free(names);
   return head;
 }
 
@@ -1368,9 +1371,9 @@ int crypto_cert_hostname_matches(void *ptr_cert, ptr hostname) {
   if (host == NULL) return 0;
 
   if (inet_pton(AF_INET, host, &addr4) == 1 || inet_pton(AF_INET6, host, &addr6) == 1) {
-    ok = chezpp_openssl_X509_check_ip_asc(cert, host, 0) == 1;
+    ok = X509_check_ip_asc(cert, host, 0) == 1;
   } else {
-    ok = chezpp_openssl_X509_check_host(cert, host, 0, 0, NULL) == 1;
+    ok = X509_check_host(cert, host, 0, 0, NULL) == 1;
   }
   free(host);
   return ok;
@@ -1383,16 +1386,16 @@ ptr crypto_cert_public_key_der(void *ptr_cert) {
   ptr ans = Sfalse;
 
   if (cert == NULL) return Sfalse;
-  pkey = chezpp_openssl_X509_get_pubkey(cert);
+  pkey = X509_get_pubkey(cert);
   if (pkey == NULL) return Sfalse;
-  bio = chezpp_openssl_BIO_new(chezpp_openssl_BIO_s_mem());
+  bio = BIO_new(BIO_s_mem());
   if (bio == NULL) goto done;
-  if (chezpp_openssl_i2d_PUBKEY_bio(bio, pkey) != 1) goto done;
+  if (i2d_PUBKEY_bio(bio, pkey) != 1) goto done;
   ans = bio_to_bytevector(bio);
 
 done:
-  if (bio != NULL) chezpp_openssl_BIO_free(bio);
-  if (pkey != NULL) chezpp_openssl_EVP_PKEY_free(pkey);
+  if (bio != NULL) BIO_free(bio);
+  if (pkey != NULL) EVP_PKEY_free(pkey);
   return ans;
 }
 
@@ -1403,10 +1406,10 @@ ptr crypto_cert_serial_number(void *ptr_cert) {
   int len;
 
   if (cert == NULL) return Sfalse;
-  serial = chezpp_openssl_X509_get0_serialNumber(cert);
+  serial = X509_get0_serialNumber(cert);
   if (serial == NULL) return Sfalse;
-  data = chezpp_openssl_ASN1_STRING_get0_data((const ASN1_STRING *)serial);
-  len = chezpp_openssl_ASN1_STRING_length((const ASN1_STRING *)serial);
+  data = ASN1_STRING_get0_data((const ASN1_STRING *)serial);
+  len = ASN1_STRING_length((const ASN1_STRING *)serial);
   return make_bytevector_copy(data, (size_t)len);
 }
 
@@ -1420,38 +1423,38 @@ ptr crypto_cert_fingerprint(void *ptr_cert, ptr which) {
   if (cert == NULL) return Sfalse;
   md = fetch_digest(which);
   if (md == NULL) return Sfalse;
-  if (chezpp_openssl_X509_digest(cert, md, out, &out_len) != 1) goto done;
+  if (X509_digest(cert, md, out, &out_len) != 1) goto done;
   ans = make_bytevector_copy(out, (size_t)out_len);
 
 done:
-  chezpp_openssl_EVP_MD_free(md);
+  EVP_MD_free(md);
   return ans;
 }
 
 void *crypto_cert_store_create(int load_defaults) {
   X509_STORE *store;
   if (!ensure_crypto_init()) return NULL;
-  store = chezpp_openssl_X509_STORE_new();
+  store = X509_STORE_new();
   if (store == NULL) return NULL;
-  if (load_defaults && chezpp_openssl_X509_STORE_set_default_paths(store) != 1) {
-    chezpp_openssl_X509_STORE_free(store);
+  if (load_defaults && X509_STORE_set_default_paths(store) != 1) {
+    X509_STORE_free(store);
     return NULL;
   }
   return store;
 }
 
 void crypto_cert_store_destroy(void *ptr_store) {
-  if (ptr_store != NULL) chezpp_openssl_X509_STORE_free((X509_STORE *)ptr_store);
+  if (ptr_store != NULL) X509_STORE_free((X509_STORE *)ptr_store);
 }
 
 int crypto_cert_store_add(void *ptr_store, void *ptr_cert) {
   if (ptr_store == NULL || ptr_cert == NULL) return 0;
-  return chezpp_openssl_X509_STORE_add_cert((X509_STORE *)ptr_store, (X509 *)ptr_cert) == 1;
+  return X509_STORE_add_cert((X509_STORE *)ptr_store, (X509 *)ptr_cert) == 1;
 }
 
 int crypto_cert_store_load_defaults(void *ptr_store) {
   if (ptr_store == NULL) return 0;
-  return chezpp_openssl_X509_STORE_set_default_paths((X509_STORE *)ptr_store) == 1;
+  return X509_STORE_set_default_paths((X509_STORE *)ptr_store) == 1;
 }
 
 void *crypto_cert_verify_state_create(void *ptr_cert, void *ptr_store, ptr hostname) {
@@ -1459,7 +1462,7 @@ void *crypto_cert_verify_state_create(void *ptr_cert, void *ptr_store, ptr hostn
   if (st == NULL) return NULL;
   st->store = (X509_STORE *)ptr_store;
   st->leaf = (X509 *)ptr_cert;
-  st->chain = (STACK_OF(X509) *)chezpp_openssl_OPENSSL_sk_new_null();
+  st->chain = (STACK_OF(X509) *)OPENSSL_sk_new_null();
   st->hostname = NULL;
   if (st->store == NULL || st->leaf == NULL || st->chain == NULL) goto fail;
   if (hostname != Sfalse) {
@@ -1470,7 +1473,7 @@ void *crypto_cert_verify_state_create(void *ptr_cert, void *ptr_store, ptr hostn
 
 fail:
   if (st->chain != NULL)
-    chezpp_openssl_OPENSSL_sk_free((OPENSSL_STACK *)st->chain);
+    OPENSSL_sk_free((OPENSSL_STACK *)st->chain);
   free(st->hostname);
   free(st);
   return NULL;
@@ -1481,9 +1484,9 @@ int crypto_cert_verify_state_add_chain_cert(void *ptr_st, void *ptr_cert) {
   X509 *cert = (X509 *)ptr_cert;
 
   if (st == NULL || st->chain == NULL || cert == NULL) return 0;
-  if (chezpp_openssl_X509_up_ref(cert) != 1) return 0;
-  if (chezpp_openssl_OPENSSL_sk_push((OPENSSL_STACK *)st->chain, cert) == 0) {
-    chezpp_openssl_X509_free(cert);
+  if (X509_up_ref(cert) != 1) return 0;
+  if (OPENSSL_sk_push((OPENSSL_STACK *)st->chain, cert) == 0) {
+    X509_free(cert);
     return 0;
   }
   return 1;
@@ -1498,28 +1501,28 @@ int crypto_cert_verify_state_verify(void *ptr_st) {
   struct in6_addr addr6;
 
   if (st == NULL || st->store == NULL || st->leaf == NULL) return 0;
-  ctx = chezpp_openssl_X509_STORE_CTX_new();
+  ctx = X509_STORE_CTX_new();
   if (ctx == NULL) goto done;
-  if (chezpp_openssl_X509_STORE_CTX_init(ctx, st->store, st->leaf,
-                          chezpp_openssl_OPENSSL_sk_num(
+  if (X509_STORE_CTX_init(ctx, st->store, st->leaf,
+                          OPENSSL_sk_num(
                               (const OPENSSL_STACK *)st->chain) == 0
                               ? NULL
                               : st->chain) != 1) {
     goto done;
   }
-  param = chezpp_openssl_X509_STORE_CTX_get0_param(ctx);
+  param = X509_STORE_CTX_get0_param(ctx);
   if (st->hostname != NULL) {
     if (inet_pton(AF_INET, st->hostname, &addr4) == 1 ||
         inet_pton(AF_INET6, st->hostname, &addr6) == 1) {
-      if (chezpp_openssl_X509_VERIFY_PARAM_set1_ip_asc(param, st->hostname) != 1) goto done;
+      if (X509_VERIFY_PARAM_set1_ip_asc(param, st->hostname) != 1) goto done;
     } else {
-      if (chezpp_openssl_X509_VERIFY_PARAM_set1_host(param, st->hostname, 0) != 1) goto done;
+      if (X509_VERIFY_PARAM_set1_host(param, st->hostname, 0) != 1) goto done;
     }
   }
-  ok = chezpp_openssl_X509_verify_cert(ctx) == 1;
+  ok = X509_verify_cert(ctx) == 1;
 
 done:
-  if (ctx != NULL) chezpp_openssl_X509_STORE_CTX_free(ctx);
+  if (ctx != NULL) X509_STORE_CTX_free(ctx);
   return ok;
 }
 
@@ -1527,9 +1530,9 @@ void crypto_cert_verify_state_destroy(void *ptr_st) {
   chezpp_cert_verify_state *st = (chezpp_cert_verify_state *)ptr_st;
   if (st == NULL) return;
   if (st->chain != NULL)
-    chezpp_openssl_OPENSSL_sk_pop_free(
+    OPENSSL_sk_pop_free(
         (OPENSSL_STACK *)st->chain,
-        (OPENSSL_sk_freefunc)chezpp_openssl_X509_free);
+        (OPENSSL_sk_freefunc)X509_free);
   free(st->hostname);
   free(st);
 }

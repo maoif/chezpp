@@ -6,7 +6,7 @@
           uuid->bytevector bytevector->uuid
           uuid-time
           uuid=? uuid<? uuid<=? uuid>? uuid>=?)
-  (import (chezpp chez)
+  (import (chezpp optional-library-check) (chezpp chez)
           (chezpp utils)
           (chezpp internal))
 
@@ -16,30 +16,134 @@
     (sealed #t)
     (fields data))
 
+  #|proc:ffi-generate-uuid
+  The `ffi-generate-uuid` procedure calls the native uuid operation `chezpp_generate_uuid`.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-generate-uuid
-    (foreign-procedure "chezpp_generate_uuid" () ptr))
+    (let ([native (foreign-procedure "chezpp_generate_uuid" () ptr)])
+      (lambda ()
+        (pcheck ()
+                (require-optional-library 'ffi-generate-uuid 'uuid)
+                (native )))))
+  #|proc:ffi-generate-uuid-time
+  The `ffi-generate-uuid-time` procedure calls the native uuid operation
+  `chezpp_generate_uuid_time`.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-generate-uuid-time
-    (foreign-procedure "chezpp_generate_uuid_time" () ptr))
+    (let ([native (foreign-procedure "chezpp_generate_uuid_time" () ptr)])
+      (lambda ()
+        (pcheck ()
+                (require-optional-library 'ffi-generate-uuid-time 'uuid)
+                (native )))))
+  #|proc:ffi-generate-uuid-md5
+  The `ffi-generate-uuid-md5` procedure calls the native uuid operation
+  `chezpp_generate_uuid_md5`.
+  Parameters `uuid-ns-bv`, `name` are passed to the native operation in that order.
+  `uuid-ns-bv` is the UUID namespace bytevector.
+  `name` is the name to hash in the UUID namespace.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-generate-uuid-md5
-    (foreign-procedure "chezpp_generate_uuid_md5" (ptr string) ptr))
+    (let ([native (foreign-procedure "chezpp_generate_uuid_md5" (ptr string) ptr)])
+      (lambda (uuid-ns-bv name)
+        (pcheck ([string? name])
+                (require-optional-library 'ffi-generate-uuid-md5 'uuid)
+                (native uuid-ns-bv name)))))
+  #|proc:ffi-generate-uuid-sha1
+  The `ffi-generate-uuid-sha1` procedure calls the native uuid operation
+  `chezpp_generate_uuid_sha1`.
+  Parameters `uuid-ns-bv`, `name` are passed to the native operation in that order.
+  `uuid-ns-bv` is the UUID namespace bytevector.
+  `name` is the name to hash in the UUID namespace.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-generate-uuid-sha1
-    (foreign-procedure "chezpp_generate_uuid_sha1" (ptr string) ptr))
+    (let ([native (foreign-procedure "chezpp_generate_uuid_sha1" (ptr string) ptr)])
+      (lambda (uuid-ns-bv name)
+        (pcheck ([string? name])
+                (require-optional-library 'ffi-generate-uuid-sha1 'uuid)
+                (native uuid-ns-bv name)))))
+  #|proc:ffi-uuid-to-string
+  The `ffi-uuid-to-string` procedure calls the native uuid operation `chezpp_uuid_to_string`.
+  Parameters `uuid-bv` are passed to the native operation in that order.
+  `uuid-bv` is the UUID bytevector.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-uuid-to-string
-    (foreign-procedure "chezpp_uuid_to_string" (ptr) ptr))
+    (let ([native (foreign-procedure "chezpp_uuid_to_string" (ptr) ptr)])
+      (lambda (uuid-bv)
+        (pcheck ()
+                (require-optional-library 'ffi-uuid-to-string 'uuid)
+                (native uuid-bv)))))
+  #|proc:ffi-uuid-to-string-upcase
+  The `ffi-uuid-to-string-upcase` procedure calls the native uuid operation
+  `chezpp_uuid_to_string_upcase`.
+  Parameters `uuid-bv` are passed to the native operation in that order.
+  `uuid-bv` is the UUID bytevector.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-uuid-to-string-upcase
-    (foreign-procedure "chezpp_uuid_to_string_upcase" (ptr) ptr))
+    (let ([native (foreign-procedure "chezpp_uuid_to_string_upcase" (ptr) ptr)])
+      (lambda (uuid-bv)
+        (pcheck ()
+                (require-optional-library 'ffi-uuid-to-string-upcase 'uuid)
+                (native uuid-bv)))))
+  #|proc:ffi-uuid-to-string-downcase
+  The `ffi-uuid-to-string-downcase` procedure calls the native uuid operation
+  `chezpp_uuid_to_string_downcase`.
+  Parameters `uuid-bv` are passed to the native operation in that order.
+  `uuid-bv` is the UUID bytevector.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-uuid-to-string-downcase
-    (foreign-procedure "chezpp_uuid_to_string_downcase" (ptr) ptr))
+    (let ([native (foreign-procedure "chezpp_uuid_to_string_downcase" (ptr) ptr)])
+      (lambda (uuid-bv)
+        (pcheck ()
+                (require-optional-library 'ffi-uuid-to-string-downcase 'uuid)
+                (native uuid-bv)))))
+  #|proc:ffi-uuid-compare
+  The `ffi-uuid-compare` procedure calls the native uuid operation `chezpp_uuid_compare`.
+  Parameters `uuid-bv1`, `uuid-bv2` are passed to the native operation in that order.
+  `uuid-bv1` is a Scheme object.
+  `uuid-bv2` is a Scheme object.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-uuid-compare
-    (foreign-procedure "chezpp_uuid_compare" (ptr ptr) int))
+    (let ([native (foreign-procedure "chezpp_uuid_compare" (ptr ptr) int)])
+      (lambda (uuid-bv1 uuid-bv2)
+        (pcheck ()
+                (require-optional-library 'ffi-uuid-compare 'uuid)
+                (native uuid-bv1 uuid-bv2)))))
+  #|proc:ffi-uuid-time
+  The `ffi-uuid-time` procedure calls the native uuid operation `chezpp_uuid_time`.
+  Parameters `uuid-bv` are passed to the native operation in that order.
+  `uuid-bv` is the UUID bytevector.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-uuid-time
-    (foreign-procedure "chezpp_uuid_time" (ptr) ptr))
+    (let ([native (foreign-procedure "chezpp_uuid_time" (ptr) ptr)])
+      (lambda (uuid-bv)
+        (pcheck ()
+                (require-optional-library 'ffi-uuid-time 'uuid)
+                (native uuid-bv)))))
+  #|proc:ffi-string-to-uuid
+  The `ffi-string-to-uuid` procedure calls the native uuid operation `chezpp_string_to_uuid`.
+  Parameters `text` are passed to the native operation in that order.
+  `text` is the input text.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-string-to-uuid
-    (foreign-procedure "chezpp_string_to_uuid" (string) ptr))
+    (let ([native (foreign-procedure "chezpp_string_to_uuid" (string) ptr)])
+      (lambda (text)
+        (pcheck ([string? text])
+                (require-optional-library 'ffi-string-to-uuid 'uuid)
+                (native text)))))
 
 
-  #|doc
-  Generate a new random universally unique identifier (UUID).
+  #|proc:make-uuid
+  The `make-uuid` procedure takes no parameters and returns a random UUID.
   |#
   (define make-uuid
     (case-lambda
@@ -47,12 +151,9 @@
        (mk-uuid (ffi-generate-uuid))]))
 
 
-  #|doc
-  Generate a new universally unique identifier (UUID) the current time and the
-  local ethernet MAC address (if available).
-  This procedure returns two values: the first is a boolean that indicates
-  whether the UUID has been generated in a safe manner, the second is the generated
-  UUID. For more info, see `man uuid_generate`.
+  #|proc:make-uuid-from-time
+  The `make-uuid-from-time` procedure takes no parameters and returns two values: a boolean
+  indicating whether generation was safe, and a time-based UUID.
   |#
   (define make-uuid-from-time
     (case-lambda
@@ -61,29 +162,28 @@
          (values (vector-ref vec 0) (mk-uuid (vector-ref vec 1))))]))
 
 
-  #|doc
-  Generate a MD5-based UUID from the given `uuid` namespace and an arbirary string.
+  #|proc:make-uuid-from-md5
+  The `make-uuid-from-md5` procedure returns an MD5-based UUID using UUID `namespace-uuid`
+  and string `name-string` as the name within that namespace.
   |#
   (define make-uuid-from-md5
-    (case-lambda
-      [(uuid str)
-       (let ([bv (ffi-generate-uuid-md5 (uuid-data uuid) str)])
-         (mk-uuid bv))]))
+    (lambda (namespace-uuid name-string)
+      (pcheck ([uuid? namespace-uuid] [string? name-string])
+              (mk-uuid (ffi-generate-uuid-md5 (uuid-data namespace-uuid) name-string)))))
 
 
-  #|doc
-  Generate a SHA1-based UUID from the given `uuid` namespace and an arbirary string.
+  #|proc:make-uuid-from-sha1
+  The `make-uuid-from-sha1` procedure returns a SHA1-based UUID using UUID `namespace-uuid`
+  and string `name-string` as the name within that namespace.
   |#
   (define make-uuid-from-sha1
-    (case-lambda
-      [(uuid str)
-       (let ([bv (ffi-generate-uuid-sha1 (uuid-data uuid) str)])
-         (mk-uuid bv))]))
+    (lambda (namespace-uuid name-string)
+      (pcheck ([uuid? namespace-uuid] [string? name-string])
+              (mk-uuid (ffi-generate-uuid-sha1 (uuid-data namespace-uuid) name-string)))))
 
 
-  #|doc
-  Convert the given UUID into a 36-char hexidecimal string representation,
-  e.g., "1b4e28ba-2fa1-11d2-883f-0016d3cca427",
+  #|proc:uuid->string
+  The `uuid->string` procedure returns the 36-character hexadecimal representation of UUID `uuid`.
   |#
   (define uuid->string
     (lambda (uuid)
@@ -91,9 +191,8 @@
               (ffi-uuid-to-string (uuid-data uuid)))))
 
 
-  #|doc
-  Convert the given UUID into a 36-char hexidecimal uppercase string representation,
-  e.g., "1B4E28BA-2FA1-11D2-883F-0016D3CCA427".
+  #|proc:uuid->string-upcase
+  The `uuid->string-upcase` procedure returns the uppercase hexadecimal string for UUID `uuid`.
   |#
   (define uuid->string-upcase
     (lambda (uuid)
@@ -101,9 +200,8 @@
               (ffi-uuid-to-string-upcase (uuid-data uuid)))))
 
 
-  #|doc
-  Convert the given UUID into a 36-char hexidecimal lowercase string representation,
-  e.g., "1b4e28ba-2fa1-11d2-883f-0016d3cca427",
+  #|proc:uuid->string-downcase
+  The `uuid->string-downcase` procedure returns the lowercase hexadecimal string for UUID `uuid`.
   |#
   (define uuid->string-downcase
     (lambda (uuid)
@@ -111,9 +209,9 @@
               (ffi-uuid-to-string-downcase (uuid-data uuid)))))
 
 
-  #|doc
-  Convert a string to a UUID object.
-  Upon success, the UUID object is returned; otherwise #f is returned.
+  #|proc:string->uuid
+  The `string->uuid` procedure parses UUID representation string `str` and returns a UUID,
+  or `#f` when the representation is invalid.
   |#
   (define string->uuid
     (lambda (str)
@@ -152,7 +250,7 @@
 
 
   #|proc:uuid-time
-  Return the creation time of the given time-based UUID as a UTC time object.
+  The `uuid-time` procedure returns the creation time of time-based UUID `uuid` as a UTC time.
   |#
   (define uuid-time
     (lambda (uuid)
@@ -163,44 +261,54 @@
                            (bytevector-s64-native-ref bv 0))))))
 
 
-  #|doc
+  #|proc:uuid=?
+  The `uuid=?` procedure compares UUIDs `first-uuid` and `second-uuid` in native UUID order.
+  It returns `#t` when the first UUID is equal to the second UUID, and `#f` otherwise.
   |#
   (define uuid=?
-    (lambda (x y)
-      (pcheck ([uuid? x y])
-              (fx= 0 (ffi-uuid-compare (uuid-data x) (uuid-data y))))))
+    (lambda (first-uuid second-uuid)
+      (pcheck ([uuid? first-uuid second-uuid])
+              (fx= 0 (ffi-uuid-compare (uuid-data first-uuid) (uuid-data second-uuid))))))
 
 
-  #|doc
+  #|proc:uuid<?
+  The `uuid<?` procedure compares UUIDs `first-uuid` and `second-uuid` in native UUID order.
+  It returns `#t` when the first UUID is less to the second UUID, and `#f` otherwise.
   |#
   (define uuid<?
-    (lambda (x y)
-      (pcheck ([uuid? x y])
-              (fx< (ffi-uuid-compare (uuid-data x) (uuid-data y)) 0))))
+    (lambda (first-uuid second-uuid)
+      (pcheck ([uuid? first-uuid second-uuid])
+              (fx< (ffi-uuid-compare (uuid-data first-uuid) (uuid-data second-uuid)) 0))))
 
 
-  #|doc
+  #|proc:uuid<=?
+  The `uuid<=?` procedure compares UUIDs `first-uuid` and `second-uuid` in native UUID order.
+  It returns `#t` when the first UUID is less or equal to the second UUID, and `#f` otherwise.
   |#
   (define uuid<=?
-    (lambda (x y)
-      (pcheck ([uuid? x y])
-              (fx<= (ffi-uuid-compare (uuid-data x) (uuid-data y)) 0))))
+    (lambda (first-uuid second-uuid)
+      (pcheck ([uuid? first-uuid second-uuid])
+              (fx<= (ffi-uuid-compare (uuid-data first-uuid) (uuid-data second-uuid)) 0))))
 
 
-  #|doc
+  #|proc:uuid>?
+  The `uuid>?` procedure compares UUIDs `first-uuid` and `second-uuid` in native UUID order.
+  It returns `#t` when the first UUID is greater to the second UUID, and `#f` otherwise.
   |#
   (define uuid>?
-    (lambda (x y)
-      (pcheck ([uuid? x y])
-              (fx> (ffi-uuid-compare (uuid-data x) (uuid-data y)) 0))))
+    (lambda (first-uuid second-uuid)
+      (pcheck ([uuid? first-uuid second-uuid])
+              (fx> (ffi-uuid-compare (uuid-data first-uuid) (uuid-data second-uuid)) 0))))
 
 
-  #|doc
+  #|proc:uuid>=?
+  The `uuid>=?` procedure compares UUIDs `first-uuid` and `second-uuid` in native UUID order.
+  It returns `#t` when the first UUID is greater or equal to the second UUID, and `#f` otherwise.
   |#
   (define uuid>=?
-    (lambda (x y)
-      (pcheck ([uuid? x y])
-              (fx>= (ffi-uuid-compare (uuid-data x) (uuid-data y)) 0))))
+    (lambda (first-uuid second-uuid)
+      (pcheck ([uuid? first-uuid second-uuid])
+              (fx>= (ffi-uuid-compare (uuid-data first-uuid) (uuid-data second-uuid)) 0))))
 
 
   (record-writer (type-descriptor uuid)

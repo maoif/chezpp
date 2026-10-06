@@ -11,6 +11,5 @@ int chezpp_lws_ensure_loaded(void);
 unsigned chezpp_lws_capabilities(void);
 const char *chezpp_lws_error(void);
 const char *chezpp_lws_version(void);
-void *chezpp_lws_symbol(const char *name);
 
 #endif

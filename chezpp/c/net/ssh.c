@@ -1,3 +1,4 @@
+#include "../build-config.h"
 #include "../common.h"
 #include "../optional_library.h"
 
@@ -5,8 +6,10 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/stat.h>
+#if CHEZPP_WITH_LIBSSH
 #include <libssh/libssh.h>
 #include <libssh/sftp.h>
+#endif
 
 typedef struct {
   ssh_session session;
@@ -25,10 +28,12 @@ typedef struct {
 typedef struct {
   sftp_file file;
   chezpp_sftp_session *owner;
+#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
   sftp_aio pending_read;
   size_t pending_read_len;
   sftp_aio pending_write;
   size_t pending_write_len;
+#endif
 } chezpp_sftp_file;
 
 typedef struct {
@@ -60,204 +65,13 @@ typedef struct {
   unsigned char buffer[65536];
 } chezpp_scp_transfer;
 
-typedef ssh_scp (*ssh_scp_new_fn)(ssh_session, int, const char *);
-typedef int (*ssh_scp_init_fn)(ssh_scp);
-typedef int (*ssh_scp_close_fn)(ssh_scp);
-typedef void (*ssh_scp_free_fn)(ssh_scp);
-typedef int (*ssh_scp_pull_request_fn)(ssh_scp);
-typedef int (*ssh_scp_accept_request_fn)(ssh_scp);
-typedef int (*ssh_scp_deny_request_fn)(ssh_scp, const char *);
-typedef const char *(*ssh_scp_request_get_filename_fn)(ssh_scp);
-typedef int (*ssh_scp_request_get_permissions_fn)(ssh_scp);
-typedef uint64_t (*ssh_scp_request_get_size64_fn)(ssh_scp);
-typedef const char *(*ssh_scp_request_get_warning_fn)(ssh_scp);
-typedef int (*ssh_scp_push_directory_fn)(ssh_scp, const char *, int);
-typedef int (*ssh_scp_leave_directory_fn)(ssh_scp);
-typedef int (*ssh_scp_push_file64_fn)(ssh_scp, const char *, uint64_t, int);
-typedef int (*ssh_scp_read_fn)(ssh_scp, void *, size_t);
-typedef int (*ssh_scp_write_fn)(ssh_scp, const void *, size_t);
 
-typedef ssh_session (*ssh_new_fn)(void);
-typedef void (*ssh_free_fn)(ssh_session);
-typedef int (*ssh_options_set_fn)(ssh_session, enum ssh_options_e, const void *);
-typedef int (*ssh_options_parse_config_fn)(ssh_session, const char *);
-typedef int (*ssh_connect_fn)(ssh_session);
-typedef void (*ssh_disconnect_fn)(ssh_session);
-typedef const char *(*ssh_get_error_fn)(void *);
-typedef enum ssh_known_hosts_e (*ssh_session_is_known_server_fn)(ssh_session);
-typedef int (*ssh_session_update_known_hosts_fn)(ssh_session);
-typedef int (*ssh_userauth_password_fn)(ssh_session, const char *, const char *);
-typedef int (*ssh_userauth_publickey_auto_fn)(ssh_session, const char *, const char *);
-typedef int (*ssh_userauth_agent_fn)(ssh_session, const char *);
-typedef int (*ssh_userauth_try_publickey_fn)(ssh_session, const char *, const ssh_key);
-typedef int (*ssh_userauth_publickey_fn)(ssh_session, const char *, const ssh_key);
-typedef int (*ssh_userauth_kbdint_fn)(ssh_session, const char *, const char *);
-typedef const char *(*ssh_userauth_kbdint_getinstruction_fn)(ssh_session);
-typedef const char *(*ssh_userauth_kbdint_getname_fn)(ssh_session);
-typedef int (*ssh_userauth_kbdint_getnprompts_fn)(ssh_session);
-typedef const char *(*ssh_userauth_kbdint_getprompt_fn)(ssh_session, unsigned int, char *);
-typedef int (*ssh_userauth_kbdint_setanswer_fn)(ssh_session, unsigned int, const char *);
-typedef int (*ssh_pki_import_privkey_file_fn)(const char *, const char *, ssh_auth_callback,
-                                              void *, ssh_key *);
-typedef int (*ssh_pki_import_pubkey_file_fn)(const char *, ssh_key *);
-typedef void (*ssh_key_free_fn)(ssh_key);
-typedef int (*ssh_session_export_known_hosts_entry_fn)(ssh_session, char **);
-typedef int (*ssh_channel_open_forward_fn)(ssh_channel, const char *, int, const char *, int);
-typedef int (*ssh_channel_listen_forward_fn)(ssh_session, const char *, int, int *);
-typedef ssh_channel (*ssh_channel_open_forward_port_fn)(ssh_session, int, int *, char **, int *);
-typedef int (*ssh_channel_cancel_forward_fn)(ssh_session, const char *, int);
-typedef ssh_channel (*ssh_channel_new_fn)(ssh_session);
-typedef void (*ssh_channel_free_fn)(ssh_channel);
-typedef ssh_session (*ssh_channel_get_session_fn)(ssh_channel);
-typedef int (*ssh_channel_open_session_fn)(ssh_channel);
-typedef int (*ssh_channel_request_exec_fn)(ssh_channel, const char *);
-typedef int (*ssh_channel_request_shell_fn)(ssh_channel);
-typedef int (*ssh_channel_request_pty_fn)(ssh_channel);
-typedef int (*ssh_channel_request_env_fn)(ssh_channel, const char *, const char *);
-typedef int (*ssh_channel_request_subsystem_fn)(ssh_channel, const char *);
-typedef int (*ssh_channel_read_fn)(ssh_channel, void *, uint32_t, int);
-typedef int (*ssh_channel_write_fn)(ssh_channel, const void *, uint32_t);
-typedef int (*ssh_channel_send_eof_fn)(ssh_channel);
-typedef int (*ssh_channel_close_fn)(ssh_channel);
-typedef int (*ssh_channel_get_exit_status_fn)(ssh_channel);
-typedef int (*ssh_channel_is_eof_fn)(ssh_channel);
-typedef socket_t (*ssh_get_fd_fn)(ssh_session);
-typedef int (*ssh_get_poll_flags_fn)(ssh_session);
-typedef void (*ssh_set_blocking_fn)(ssh_session, int);
-typedef void (*ssh_string_free_char_fn)(char *);
-typedef sftp_session (*sftp_new_fn)(ssh_session);
-typedef int (*sftp_init_fn)(sftp_session);
-typedef void (*sftp_free_fn)(sftp_session);
-typedef int (*sftp_get_error_fn)(sftp_session);
-typedef sftp_dir (*sftp_opendir_fn)(sftp_session, const char *);
-typedef sftp_attributes (*sftp_readdir_fn)(sftp_session, sftp_dir);
-typedef int (*sftp_dir_eof_fn)(sftp_dir);
-typedef int (*sftp_closedir_fn)(sftp_dir);
-typedef sftp_attributes (*sftp_stat_fn)(sftp_session, const char *);
-typedef int (*sftp_chmod_fn)(sftp_session, const char *, mode_t);
-typedef int (*sftp_chown_fn)(sftp_session, const char *, uid_t, gid_t);
-typedef int (*sftp_utimes_fn)(sftp_session, const char *, const struct timeval *);
-typedef int (*sftp_symlink_fn)(sftp_session, const char *, const char *);
-typedef char *(*sftp_readlink_fn)(sftp_session, const char *);
-typedef int (*sftp_seek64_fn)(sftp_file, uint64_t);
-typedef void (*sftp_attributes_free_fn)(sftp_attributes);
-typedef sftp_file (*sftp_open_fn)(sftp_session, const char *, int, mode_t);
-typedef int (*sftp_close_fn)(sftp_file);
-typedef ssize_t (*sftp_read_fn)(sftp_file, void *, size_t);
-typedef ssize_t (*sftp_write_fn)(sftp_file, const void *, size_t);
-typedef int (*sftp_unlink_fn)(sftp_session, const char *);
-typedef int (*sftp_mkdir_fn)(sftp_session, const char *, mode_t);
-typedef int (*sftp_rmdir_fn)(sftp_session, const char *);
-typedef int (*sftp_rename_fn)(sftp_session, const char *, const char *);
-typedef void (*sftp_file_set_nonblocking_fn)(sftp_file);
-typedef void (*sftp_file_set_blocking_fn)(sftp_file);
-typedef void (*sftp_aio_free_fn)(sftp_aio);
-typedef ssize_t (*sftp_aio_begin_read_fn)(sftp_file, size_t, sftp_aio *);
-typedef ssize_t (*sftp_aio_wait_read_fn)(sftp_aio *, void *, size_t);
-typedef ssize_t (*sftp_aio_begin_write_fn)(sftp_file, const void *, size_t, sftp_aio *);
-typedef ssize_t (*sftp_aio_wait_write_fn)(sftp_aio *);
-typedef const char *(*ssh_version_fn)(int);
 
-static const char *const ssh_names[] = {"libssh.so.4", NULL};
 static chezpp_optional_library ssh_library =
-    CHEZPP_OPTIONAL_LIBRARY_INIT("ssh", ssh_names);
+    CHEZPP_OPTIONAL_LIBRARY_INIT("ssh");
 static pthread_once_t ssh_once = PTHREAD_ONCE_INIT;
 static int ssh_available;
 static int ssh_aio_available;
-static ssh_new_fn p_ssh_new = NULL;
-static ssh_free_fn p_ssh_free = NULL;
-static ssh_options_set_fn p_ssh_options_set = NULL;
-static ssh_options_parse_config_fn p_ssh_options_parse_config = NULL;
-static ssh_connect_fn p_ssh_connect = NULL;
-static ssh_disconnect_fn p_ssh_disconnect = NULL;
-static ssh_get_error_fn p_ssh_get_error = NULL;
-static ssh_session_is_known_server_fn p_ssh_session_is_known_server = NULL;
-static ssh_session_update_known_hosts_fn p_ssh_session_update_known_hosts = NULL;
-static ssh_userauth_password_fn p_ssh_userauth_password = NULL;
-static ssh_userauth_publickey_auto_fn p_ssh_userauth_publickey_auto = NULL;
-static ssh_userauth_agent_fn p_ssh_userauth_agent = NULL;
-static ssh_userauth_try_publickey_fn p_ssh_userauth_try_publickey = NULL;
-static ssh_userauth_publickey_fn p_ssh_userauth_publickey = NULL;
-static ssh_userauth_kbdint_fn p_ssh_userauth_kbdint = NULL;
-static ssh_userauth_kbdint_getinstruction_fn p_ssh_userauth_kbdint_getinstruction = NULL;
-static ssh_userauth_kbdint_getname_fn p_ssh_userauth_kbdint_getname = NULL;
-static ssh_userauth_kbdint_getnprompts_fn p_ssh_userauth_kbdint_getnprompts = NULL;
-static ssh_userauth_kbdint_getprompt_fn p_ssh_userauth_kbdint_getprompt = NULL;
-static ssh_userauth_kbdint_setanswer_fn p_ssh_userauth_kbdint_setanswer = NULL;
-static ssh_pki_import_privkey_file_fn p_ssh_pki_import_privkey_file = NULL;
-static ssh_pki_import_pubkey_file_fn p_ssh_pki_import_pubkey_file = NULL;
-static ssh_key_free_fn p_ssh_key_free = NULL;
-static ssh_session_export_known_hosts_entry_fn p_ssh_session_export_known_hosts_entry = NULL;
-static ssh_channel_new_fn p_ssh_channel_new = NULL;
-static ssh_channel_free_fn p_ssh_channel_free = NULL;
-static ssh_channel_get_session_fn p_ssh_channel_get_session = NULL;
-static ssh_channel_open_session_fn p_ssh_channel_open_session = NULL;
-static ssh_channel_request_exec_fn p_ssh_channel_request_exec = NULL;
-static ssh_channel_request_shell_fn p_ssh_channel_request_shell = NULL;
-static ssh_channel_request_pty_fn p_ssh_channel_request_pty = NULL;
-static ssh_channel_request_env_fn p_ssh_channel_request_env = NULL;
-static ssh_channel_request_subsystem_fn p_ssh_channel_request_subsystem = NULL;
-static ssh_channel_open_forward_fn p_ssh_channel_open_forward = NULL;
-static ssh_channel_listen_forward_fn p_ssh_channel_listen_forward = NULL;
-static ssh_channel_open_forward_port_fn p_ssh_channel_open_forward_port = NULL;
-static ssh_channel_cancel_forward_fn p_ssh_channel_cancel_forward = NULL;
-static ssh_channel_read_fn p_ssh_channel_read = NULL;
-static ssh_channel_write_fn p_ssh_channel_write = NULL;
-static ssh_channel_send_eof_fn p_ssh_channel_send_eof = NULL;
-static ssh_channel_close_fn p_ssh_channel_close = NULL;
-static ssh_channel_get_exit_status_fn p_ssh_channel_get_exit_status = NULL;
-static ssh_channel_is_eof_fn p_ssh_channel_is_eof = NULL;
-static ssh_get_fd_fn p_ssh_get_fd = NULL;
-static ssh_get_poll_flags_fn p_ssh_get_poll_flags = NULL;
-static ssh_set_blocking_fn p_ssh_set_blocking = NULL;
-static ssh_string_free_char_fn p_ssh_string_free_char = NULL;
-static sftp_new_fn p_sftp_new = NULL;
-static sftp_init_fn p_sftp_init = NULL;
-static sftp_free_fn p_sftp_free = NULL;
-static sftp_get_error_fn p_sftp_get_error = NULL;
-static sftp_opendir_fn p_sftp_opendir = NULL;
-static sftp_readdir_fn p_sftp_readdir = NULL;
-static sftp_dir_eof_fn p_sftp_dir_eof = NULL;
-static sftp_closedir_fn p_sftp_closedir = NULL;
-static sftp_stat_fn p_sftp_stat = NULL;
-static sftp_chmod_fn p_sftp_chmod = NULL;
-static sftp_chown_fn p_sftp_chown = NULL;
-static sftp_utimes_fn p_sftp_utimes = NULL;
-static sftp_symlink_fn p_sftp_symlink = NULL;
-static sftp_readlink_fn p_sftp_readlink = NULL;
-static sftp_seek64_fn p_sftp_seek64 = NULL;
-static sftp_attributes_free_fn p_sftp_attributes_free = NULL;
-static sftp_open_fn p_sftp_open = NULL;
-static sftp_close_fn p_sftp_close = NULL;
-static sftp_read_fn p_sftp_read = NULL;
-static sftp_write_fn p_sftp_write = NULL;
-static sftp_unlink_fn p_sftp_unlink = NULL;
-static sftp_mkdir_fn p_sftp_mkdir = NULL;
-static sftp_rmdir_fn p_sftp_rmdir = NULL;
-static sftp_rename_fn p_sftp_rename = NULL;
-static sftp_file_set_nonblocking_fn p_sftp_file_set_nonblocking = NULL;
-static sftp_file_set_blocking_fn p_sftp_file_set_blocking = NULL;
-static sftp_aio_free_fn p_sftp_aio_free = NULL;
-static sftp_aio_begin_read_fn p_sftp_aio_begin_read = NULL;
-static sftp_aio_wait_read_fn p_sftp_aio_wait_read = NULL;
-static sftp_aio_begin_write_fn p_sftp_aio_begin_write = NULL;
-static sftp_aio_wait_write_fn p_sftp_aio_wait_write = NULL;
-static ssh_scp_new_fn p_ssh_scp_new = NULL;
-static ssh_scp_init_fn p_ssh_scp_init = NULL;
-static ssh_scp_close_fn p_ssh_scp_close = NULL;
-static ssh_scp_free_fn p_ssh_scp_free = NULL;
-static ssh_scp_pull_request_fn p_ssh_scp_pull_request = NULL;
-static ssh_scp_accept_request_fn p_ssh_scp_accept_request = NULL;
-static ssh_scp_deny_request_fn p_ssh_scp_deny_request = NULL;
-static ssh_scp_request_get_filename_fn p_ssh_scp_request_get_filename = NULL;
-static ssh_scp_request_get_permissions_fn p_ssh_scp_request_get_permissions = NULL;
-static ssh_scp_request_get_size64_fn p_ssh_scp_request_get_size64 = NULL;
-static ssh_scp_request_get_warning_fn p_ssh_scp_request_get_warning = NULL;
-static ssh_scp_push_directory_fn p_ssh_scp_push_directory = NULL;
-static ssh_scp_leave_directory_fn p_ssh_scp_leave_directory = NULL;
-static ssh_scp_push_file64_fn p_ssh_scp_push_file64 = NULL;
-static ssh_scp_read_fn p_ssh_scp_read = NULL;
-static ssh_scp_write_fn p_ssh_scp_write = NULL;
 
 static ptr make_status(const char *tag, ptr value) {
   ptr v = Smake_vector(2, Sfalse);
@@ -267,7 +81,7 @@ static ptr make_status(const char *tag, ptr value) {
 }
 
 static ptr ssh_would_block_status(ssh_session session, int fallback_flags) {
-  int flags = p_ssh_get_poll_flags == NULL ? 0 : p_ssh_get_poll_flags(session);
+  int flags = ssh_get_poll_flags(session);
   ptr events = Snil;
   if ((flags & SSH_WRITE_PENDING) != 0)
     events = Scons(Sstring_to_symbol("write"), events);
@@ -301,8 +115,8 @@ static int configure_default_ssh_paths(ssh_session session) {
   n = snprintf(known_hosts, sizeof(known_hosts), "%s/known_hosts", ssh_dir);
   if (n <= 0 || (size_t)n >= sizeof(known_hosts)) return 1;
 
-  return p_ssh_options_set(session, SSH_OPTIONS_SSH_DIR, ssh_dir) == SSH_OK &&
-         p_ssh_options_set(session, SSH_OPTIONS_KNOWNHOSTS, known_hosts) == SSH_OK;
+  return ssh_options_set(session, SSH_OPTIONS_SSH_DIR, ssh_dir) == SSH_OK &&
+         ssh_options_set(session, SSH_OPTIONS_KNOWNHOSTS, known_hosts) == SSH_OK;
 }
 
 static int add_default_identities(ssh_session session) {
@@ -317,26 +131,21 @@ static int add_default_identities(ssh_session session) {
     int n = snprintf(path, sizeof(path), "%s/.ssh/%s", home, names[i]);
     if (n <= 0 || (size_t)n >= sizeof(path)) continue;
     if (access(path, R_OK) != 0) continue;
-    if (p_ssh_options_set(session, SSH_OPTIONS_ADD_IDENTITY, path) != SSH_OK) return 0;
+    if (ssh_options_set(session, SSH_OPTIONS_ADD_IDENTITY, path) != SSH_OK) return 0;
   }
 
   return 1;
 }
 
-static int load_symbol(void **out, const char *name) {
-  return chezpp_optional_library_symbol(&ssh_library, name, out);
-}
+
 
 static void initialize_ssh(void) {
-  ssh_version_fn version_fn = NULL;
   const char *version;
   unsigned major;
   unsigned minor;
   unsigned patch;
 
-  if (!chezpp_optional_library_open(&ssh_library)) return;
-  if (!load_symbol((void **)&version_fn, "ssh_version")) return;
-  version = version_fn(SSH_VERSION_INT(0, 10, 0));
+  version = ssh_version(SSH_VERSION_INT(0, 10, 0));
   if (version == NULL || sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3) {
     chezpp_optional_library_fail(
         &ssh_library, "ssh: unable to parse runtime version %s",
@@ -351,115 +160,9 @@ static void initialize_ssh(void) {
     return;
   }
 
-  if (!load_symbol((void **)&p_ssh_new, "ssh_new") ||
-      !load_symbol((void **)&p_ssh_free, "ssh_free") ||
-      !load_symbol((void **)&p_ssh_options_set, "ssh_options_set") ||
-      !load_symbol((void **)&p_ssh_options_parse_config, "ssh_options_parse_config") ||
-      !load_symbol((void **)&p_ssh_connect, "ssh_connect") ||
-      !load_symbol((void **)&p_ssh_disconnect, "ssh_disconnect") ||
-      !load_symbol((void **)&p_ssh_get_error, "ssh_get_error") ||
-      !load_symbol((void **)&p_ssh_session_is_known_server, "ssh_session_is_known_server") ||
-      !load_symbol((void **)&p_ssh_session_update_known_hosts, "ssh_session_update_known_hosts") ||
-      !load_symbol((void **)&p_ssh_userauth_password, "ssh_userauth_password") ||
-      !load_symbol((void **)&p_ssh_userauth_publickey_auto, "ssh_userauth_publickey_auto") ||
-      !load_symbol((void **)&p_ssh_userauth_agent, "ssh_userauth_agent") ||
-      !load_symbol((void **)&p_ssh_userauth_try_publickey, "ssh_userauth_try_publickey") ||
-      !load_symbol((void **)&p_ssh_userauth_publickey, "ssh_userauth_publickey") ||
-      !load_symbol((void **)&p_ssh_userauth_kbdint, "ssh_userauth_kbdint") ||
-      !load_symbol((void **)&p_ssh_userauth_kbdint_getinstruction,
-                   "ssh_userauth_kbdint_getinstruction") ||
-      !load_symbol((void **)&p_ssh_userauth_kbdint_getname, "ssh_userauth_kbdint_getname") ||
-      !load_symbol((void **)&p_ssh_userauth_kbdint_getnprompts,
-                   "ssh_userauth_kbdint_getnprompts") ||
-      !load_symbol((void **)&p_ssh_userauth_kbdint_getprompt,
-                   "ssh_userauth_kbdint_getprompt") ||
-      !load_symbol((void **)&p_ssh_userauth_kbdint_setanswer,
-                   "ssh_userauth_kbdint_setanswer") ||
-      !load_symbol((void **)&p_ssh_pki_import_privkey_file, "ssh_pki_import_privkey_file") ||
-      !load_symbol((void **)&p_ssh_pki_import_pubkey_file, "ssh_pki_import_pubkey_file") ||
-      !load_symbol((void **)&p_ssh_key_free, "ssh_key_free") ||
-      !load_symbol((void **)&p_ssh_session_export_known_hosts_entry,
-                   "ssh_session_export_known_hosts_entry") ||
-      !load_symbol((void **)&p_ssh_channel_new, "ssh_channel_new") ||
-      !load_symbol((void **)&p_ssh_channel_free, "ssh_channel_free") ||
-      !load_symbol((void **)&p_ssh_channel_get_session, "ssh_channel_get_session") ||
-      !load_symbol((void **)&p_ssh_channel_open_session, "ssh_channel_open_session") ||
-      !load_symbol((void **)&p_ssh_channel_request_exec, "ssh_channel_request_exec") ||
-      !load_symbol((void **)&p_ssh_channel_request_shell, "ssh_channel_request_shell") ||
-      !load_symbol((void **)&p_ssh_channel_request_pty, "ssh_channel_request_pty") ||
-      !load_symbol((void **)&p_ssh_channel_request_env, "ssh_channel_request_env") ||
-      !load_symbol((void **)&p_ssh_channel_request_subsystem,
-                   "ssh_channel_request_subsystem") ||
-      !load_symbol((void **)&p_ssh_channel_open_forward, "ssh_channel_open_forward") ||
-      !load_symbol((void **)&p_ssh_channel_listen_forward, "ssh_channel_listen_forward") ||
-      !load_symbol((void **)&p_ssh_channel_open_forward_port,
-                   "ssh_channel_open_forward_port") ||
-      !load_symbol((void **)&p_ssh_channel_cancel_forward, "ssh_channel_cancel_forward") ||
-      !load_symbol((void **)&p_ssh_channel_read, "ssh_channel_read") ||
-      !load_symbol((void **)&p_ssh_channel_write, "ssh_channel_write") ||
-      !load_symbol((void **)&p_ssh_channel_send_eof, "ssh_channel_send_eof") ||
-      !load_symbol((void **)&p_ssh_channel_close, "ssh_channel_close") ||
-      !load_symbol((void **)&p_ssh_channel_get_exit_status, "ssh_channel_get_exit_status") ||
-      !load_symbol((void **)&p_ssh_channel_is_eof, "ssh_channel_is_eof") ||
-      !load_symbol((void **)&p_ssh_get_fd, "ssh_get_fd") ||
-      !load_symbol((void **)&p_ssh_get_poll_flags, "ssh_get_poll_flags") ||
-      !load_symbol((void **)&p_ssh_set_blocking, "ssh_set_blocking") ||
-      !load_symbol((void **)&p_ssh_string_free_char, "ssh_string_free_char") ||
-      !load_symbol((void **)&p_ssh_scp_new, "ssh_scp_new") ||
-      !load_symbol((void **)&p_ssh_scp_init, "ssh_scp_init") ||
-      !load_symbol((void **)&p_ssh_scp_close, "ssh_scp_close") ||
-      !load_symbol((void **)&p_ssh_scp_free, "ssh_scp_free") ||
-      !load_symbol((void **)&p_ssh_scp_pull_request, "ssh_scp_pull_request") ||
-      !load_symbol((void **)&p_ssh_scp_accept_request, "ssh_scp_accept_request") ||
-      !load_symbol((void **)&p_ssh_scp_deny_request, "ssh_scp_deny_request") ||
-      !load_symbol((void **)&p_ssh_scp_request_get_filename, "ssh_scp_request_get_filename") ||
-      !load_symbol((void **)&p_ssh_scp_request_get_permissions, "ssh_scp_request_get_permissions") ||
-      !load_symbol((void **)&p_ssh_scp_request_get_size64, "ssh_scp_request_get_size64") ||
-      !load_symbol((void **)&p_ssh_scp_request_get_warning, "ssh_scp_request_get_warning") ||
-      !load_symbol((void **)&p_ssh_scp_push_directory, "ssh_scp_push_directory") ||
-      !load_symbol((void **)&p_ssh_scp_leave_directory, "ssh_scp_leave_directory") ||
-      !load_symbol((void **)&p_ssh_scp_push_file64, "ssh_scp_push_file64") ||
-      !load_symbol((void **)&p_ssh_scp_read, "ssh_scp_read") ||
-      !load_symbol((void **)&p_ssh_scp_write, "ssh_scp_write") ||
-      !load_symbol((void **)&p_sftp_new, "sftp_new") ||
-      !load_symbol((void **)&p_sftp_init, "sftp_init") ||
-      !load_symbol((void **)&p_sftp_free, "sftp_free") ||
-      !load_symbol((void **)&p_sftp_get_error, "sftp_get_error") ||
-      !load_symbol((void **)&p_sftp_opendir, "sftp_opendir") ||
-      !load_symbol((void **)&p_sftp_readdir, "sftp_readdir") ||
-      !load_symbol((void **)&p_sftp_dir_eof, "sftp_dir_eof") ||
-      !load_symbol((void **)&p_sftp_closedir, "sftp_closedir") ||
-      !load_symbol((void **)&p_sftp_stat, "sftp_stat") ||
-      !load_symbol((void **)&p_sftp_chmod, "sftp_chmod") ||
-      !load_symbol((void **)&p_sftp_chown, "sftp_chown") ||
-      !load_symbol((void **)&p_sftp_utimes, "sftp_utimes") ||
-      !load_symbol((void **)&p_sftp_symlink, "sftp_symlink") ||
-      !load_symbol((void **)&p_sftp_readlink, "sftp_readlink") ||
-      !load_symbol((void **)&p_sftp_seek64, "sftp_seek64") ||
-      !load_symbol((void **)&p_sftp_attributes_free, "sftp_attributes_free") ||
-      !load_symbol((void **)&p_sftp_open, "sftp_open") ||
-      !load_symbol((void **)&p_sftp_close, "sftp_close") ||
-      !load_symbol((void **)&p_sftp_read, "sftp_read") ||
-      !load_symbol((void **)&p_sftp_write, "sftp_write") ||
-      !load_symbol((void **)&p_sftp_unlink, "sftp_unlink") ||
-      !load_symbol((void **)&p_sftp_mkdir, "sftp_mkdir") ||
-      !load_symbol((void **)&p_sftp_rmdir, "sftp_rmdir") ||
-      !load_symbol((void **)&p_sftp_rename, "sftp_rename") ||
-      !load_symbol((void **)&p_sftp_file_set_nonblocking, "sftp_file_set_nonblocking") ||
-      !load_symbol((void **)&p_sftp_file_set_blocking, "sftp_file_set_blocking")) return;
-
-  ssh_aio_available =
-      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_free",
-                                           (void **)&p_sftp_aio_free) &&
-      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_begin_read",
-                                           (void **)&p_sftp_aio_begin_read) &&
-      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_wait_read",
-                                           (void **)&p_sftp_aio_wait_read) &&
-      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_begin_write",
-                                           (void **)&p_sftp_aio_begin_write) &&
-      chezpp_optional_library_probe_symbol(&ssh_library, "sftp_aio_wait_write",
-                                           (void **)&p_sftp_aio_wait_write);
-
+#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
+  ssh_aio_available = 1;
+#endif
   ssh_available = 1;
 }
 
@@ -480,7 +183,7 @@ unsigned chezpp_net_ssh_capabilities(void) {
 
 static ptr ssh_error_status(ssh_session session, const char *fallback) {
   const char *msg = NULL;
-  if (session != NULL && p_ssh_get_error != NULL) msg = p_ssh_get_error(session);
+  if (session != NULL) msg = ssh_get_error(session);
   return make_error_status_message(msg == NULL || *msg == 0 ? fallback : msg);
 }
 
@@ -496,11 +199,11 @@ static ptr ssh_channel_error_status(chezpp_ssh_channel *wrapper, const char *fal
 static ptr sftp_error_status(chezpp_sftp_session *wrapper, const char *fallback) {
   char buffer[128];
   if (wrapper != NULL && wrapper->owner != NULL) {
-    const char *msg = p_ssh_get_error(wrapper->owner->session);
+    const char *msg = ssh_get_error(wrapper->owner->session);
     if (msg != NULL && *msg != 0) return make_error_status_message(msg);
   }
-  if (wrapper != NULL && wrapper->sftp != NULL && p_sftp_get_error != NULL) {
-    snprintf(buffer, sizeof(buffer), "%s (sftp code %d)", fallback, p_sftp_get_error(wrapper->sftp));
+  if (wrapper != NULL && wrapper->sftp != NULL) {
+    snprintf(buffer, sizeof(buffer), "%s (sftp code %d)", fallback, sftp_get_error(wrapper->sftp));
     return make_error_status_message(buffer);
   }
   return make_error_status_message(fallback);
@@ -523,8 +226,8 @@ static ptr wait_ssh_session_until(ssh_session session, short events, int64_t dea
                                   const char *timeout_msg) {
   struct pollfd pfd;
 
-  if (session == NULL || p_ssh_get_fd == NULL) return make_error_status_message("invalid ssh session");
-  pfd.fd = (int)p_ssh_get_fd(session);
+  if (session == NULL) return make_error_status_message("invalid ssh session");
+  pfd.fd = (int)ssh_get_fd(session);
   if (pfd.fd < 0) return make_error_status_message("failed to query ssh session socket");
   pfd.events = events;
   pfd.revents = 0;
@@ -616,7 +319,7 @@ static ptr split_remote_path(const char *path, char **parent_out, char **base_ou
   if (path == NULL || *path == 0) return make_error_status_message("remote path must not be empty");
 
   len = strlen(path);
-  while (len > 1 && path[len - 1] == '/') --len;
+  while (len > path[len - 1] == '/') --len;
   if (len == 0) return make_error_status_message("remote path must not be empty");
 
   for (i = (ssize_t)len - 1; i >= 0; --i) {
@@ -653,7 +356,7 @@ static char *parent_path_dup(const char *path) {
 
   if (path == NULL || *path == 0) return NULL;
   len = strlen(path);
-  while (len > 1 && path[len - 1] == '/') --len;
+  while (len > path[len - 1] == '/') --len;
   for (i = (ssize_t)len - 1; i >= 0; --i) {
     if (path[i] == '/') {
       if (i == 0) return dup_cstring_n(path, 1);
@@ -764,7 +467,7 @@ static const char *path_stack_top(const chezpp_path_stack *stack) {
 }
 
 static ptr scp_warning_status(ssh_scp scp) {
-  const char *warning = p_ssh_scp_request_get_warning == NULL ? NULL : p_ssh_scp_request_get_warning(scp);
+  const char *warning = 0 ? NULL : ssh_scp_request_get_warning(scp);
   return make_error_status_message(warning == NULL || *warning == 0 ? "scp warning" : warning);
 }
 
@@ -779,7 +482,7 @@ static ptr scp_init_wait(chezpp_ssh_session *wrapper, ssh_scp scp, int use_nonbl
                          int64_t deadline, const char *timeout_msg) {
   int rc;
   for (;;) {
-    rc = p_ssh_scp_init(scp);
+    rc = ssh_scp_init(scp);
     if (rc != SSH_AGAIN || !use_nonblocking) break;
     {
       ptr wait_status = wait_scp_until(wrapper, POLLIN | POLLOUT, deadline, timeout_msg);
@@ -795,7 +498,7 @@ static ptr scp_pull_request_wait(chezpp_ssh_session *wrapper, ssh_scp scp, int u
                                  const char *timeout_msg) {
   int rc;
   for (;;) {
-    rc = p_ssh_scp_pull_request(scp);
+    rc = ssh_scp_pull_request(scp);
     if (rc != SSH_AGAIN || !use_nonblocking) break;
     {
       ptr wait_status = wait_scp_until(wrapper, POLLIN, deadline, timeout_msg);
@@ -811,7 +514,7 @@ static ptr scp_accept_request_wait(chezpp_ssh_session *wrapper, ssh_scp scp, int
                                    int64_t deadline, const char *timeout_msg) {
   int rc;
   for (;;) {
-    rc = p_ssh_scp_accept_request(scp);
+    rc = ssh_scp_accept_request(scp);
     if (rc != SSH_AGAIN || !use_nonblocking) break;
     {
       ptr wait_status = wait_scp_until(wrapper, POLLIN | POLLOUT, deadline, timeout_msg);
@@ -827,7 +530,7 @@ static ptr scp_push_directory_wait(chezpp_ssh_session *wrapper, ssh_scp scp, con
                                    const char *timeout_msg) {
   int rc;
   for (;;) {
-    rc = p_ssh_scp_push_directory(scp, dirname, mode);
+    rc = ssh_scp_push_directory(scp, dirname, mode);
     if (rc != SSH_AGAIN || !use_nonblocking) break;
     {
       ptr wait_status = wait_scp_until(wrapper, POLLIN | POLLOUT, deadline, timeout_msg);
@@ -842,7 +545,7 @@ static ptr scp_leave_directory_wait(chezpp_ssh_session *wrapper, ssh_scp scp, in
                                     int64_t deadline, const char *timeout_msg) {
   int rc;
   for (;;) {
-    rc = p_ssh_scp_leave_directory(scp);
+    rc = ssh_scp_leave_directory(scp);
     if (rc != SSH_AGAIN || !use_nonblocking) break;
     {
       ptr wait_status = wait_scp_until(wrapper, POLLIN | POLLOUT, deadline, timeout_msg);
@@ -858,7 +561,7 @@ static ptr scp_push_file_wait(chezpp_ssh_session *wrapper, ssh_scp scp, const ch
                               const char *timeout_msg) {
   int rc;
   for (;;) {
-    rc = p_ssh_scp_push_file64(scp, filename, size, perms);
+    rc = ssh_scp_push_file64(scp, filename, size, perms);
     if (rc != SSH_AGAIN || !use_nonblocking) break;
     {
       ptr wait_status = wait_scp_until(wrapper, POLLIN | POLLOUT, deadline, timeout_msg);
@@ -874,7 +577,7 @@ static ptr scp_read_wait(chezpp_ssh_session *wrapper, ssh_scp scp, void *buffer,
                          int *count_out) {
   int rc;
   for (;;) {
-    rc = p_ssh_scp_read(scp, buffer, size);
+    rc = ssh_scp_read(scp, buffer, size);
     if (rc != SSH_AGAIN || !use_nonblocking) break;
     {
       ptr wait_status = wait_scp_until(wrapper, POLLIN, deadline, timeout_msg);
@@ -890,7 +593,7 @@ static ptr scp_write_wait(chezpp_ssh_session *wrapper, ssh_scp scp, const void *
                           int use_nonblocking, int64_t deadline, const char *timeout_msg) {
   int rc;
   for (;;) {
-    rc = p_ssh_scp_write(scp, buffer, size);
+    rc = ssh_scp_write(scp, buffer, size);
     if (rc != SSH_AGAIN || !use_nonblocking) break;
     {
       ptr wait_status = wait_scp_until(wrapper, POLLOUT, deadline, timeout_msg);
@@ -1079,8 +782,8 @@ static ptr scp_download_directory_to_path(chezpp_ssh_session *wrapper, ssh_scp s
       continue;
     }
     if (request == SSH_SCP_REQUEST_NEWDIR) {
-      const char *name = p_ssh_scp_request_get_filename(scp);
-      int perms = p_ssh_scp_request_get_permissions(scp);
+      const char *name = ssh_scp_request_get_filename(scp);
+      int perms = ssh_scp_request_get_permissions(scp);
       char *child_path = NULL;
 
       if (name == NULL) {
@@ -1121,9 +824,9 @@ static ptr scp_download_directory_to_path(chezpp_ssh_session *wrapper, ssh_scp s
       continue;
     }
     if (request == SSH_SCP_REQUEST_NEWFILE) {
-      const char *name = p_ssh_scp_request_get_filename(scp);
-      uint64_t size = p_ssh_scp_request_get_size64(scp);
-      int perms = p_ssh_scp_request_get_permissions(scp);
+      const char *name = ssh_scp_request_get_filename(scp);
+      uint64_t size = ssh_scp_request_get_size64(scp);
+      int perms = ssh_scp_request_get_permissions(scp);
       char *child_path;
 
       if (!root_started) {
@@ -1171,71 +874,71 @@ ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeou
   if (!ensure_ssh_loaded())
     return make_error_status_message(chezpp_optional_library_error(&ssh_library));
 
-  session = p_ssh_new();
+  session = ssh_new();
   if (session == NULL) return make_error_status_message("failed to allocate ssh session");
 
   uport = port <= 0 ? 22u : (unsigned int)port;
   timeout_sec = (long)(timeout_ms / 1000);
   timeout_usec = (long)((timeout_ms % 1000) * 1000);
 
-  if (p_ssh_options_set(session, SSH_OPTIONS_HOST, host) != SSH_OK ||
-      p_ssh_options_set(session, SSH_OPTIONS_PORT, &uport) != SSH_OK ||
-      (user != NULL && *user != 0 && p_ssh_options_set(session, SSH_OPTIONS_USER, user) != SSH_OK) ||
-      p_ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout_sec) != SSH_OK ||
-      p_ssh_options_set(session, SSH_OPTIONS_TIMEOUT_USEC, &timeout_usec) != SSH_OK) {
+  if (ssh_options_set(session, SSH_OPTIONS_HOST, host) != SSH_OK ||
+      ssh_options_set(session, SSH_OPTIONS_PORT, &uport) != SSH_OK ||
+      (user != NULL && *user != 0 && ssh_options_set(session, SSH_OPTIONS_USER, user) != SSH_OK) ||
+      ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout_sec) != SSH_OK ||
+      ssh_options_set(session, SSH_OPTIONS_TIMEOUT_USEC, &timeout_usec) != SSH_OK) {
     ptr status = ssh_error_status(session, "failed to configure ssh session");
-    p_ssh_free(session);
+    ssh_free(session);
     return status;
   }
 
   if (!configure_default_ssh_paths(session)) {
     ptr status = ssh_error_status(session, "failed to configure ssh known-host paths");
-    p_ssh_free(session);
+    ssh_free(session);
     return status;
   }
 
-  if (p_ssh_options_parse_config(session, NULL) != SSH_OK) {
+  if (ssh_options_parse_config(session, NULL) != SSH_OK) {
     ptr status = ssh_error_status(session, "failed to parse ssh config");
-    p_ssh_free(session);
+    ssh_free(session);
     return status;
   }
 
   if (!add_default_identities(session)) {
     ptr status = ssh_error_status(session, "failed to configure ssh identities");
-    p_ssh_free(session);
+    ssh_free(session);
     return status;
   }
 
-  if (p_ssh_connect(session) != SSH_OK) {
+  if (ssh_connect(session) != SSH_OK) {
     ptr status = ssh_error_status(session, "failed to connect ssh session");
-    p_ssh_disconnect(session);
-    p_ssh_free(session);
+    ssh_disconnect(session);
+    ssh_free(session);
     return status;
   }
 
   if (hostkey_policy != 2) {
-    enum ssh_known_hosts_e state = p_ssh_session_is_known_server(session);
+    enum ssh_known_hosts_e state = ssh_session_is_known_server(session);
     switch (state) {
     case SSH_KNOWN_HOSTS_OK:
       break;
     case SSH_KNOWN_HOSTS_NOT_FOUND:
     case SSH_KNOWN_HOSTS_UNKNOWN:
-      if (hostkey_policy == 1 && p_ssh_session_update_known_hosts(session) == SSH_OK)
+      if (hostkey_policy == ssh_session_update_known_hosts(session) == SSH_OK)
         break;
-      p_ssh_disconnect(session);
-      p_ssh_free(session);
+      ssh_disconnect(session);
+      ssh_free(session);
       return make_error_status_message("SSH host key is not trusted");
     case SSH_KNOWN_HOSTS_CHANGED:
     case SSH_KNOWN_HOSTS_OTHER:
-      p_ssh_disconnect(session);
-      p_ssh_free(session);
+      ssh_disconnect(session);
+      ssh_free(session);
       return make_error_status_message("SSH host key mismatch");
     case SSH_KNOWN_HOSTS_ERROR:
     default:
       {
         ptr status = ssh_error_status(session, "failed to verify SSH host key");
-        p_ssh_disconnect(session);
-        p_ssh_free(session);
+        ssh_disconnect(session);
+        ssh_free(session);
         return status;
       }
     }
@@ -1243,8 +946,8 @@ ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeou
 
   wrapper = (chezpp_ssh_session *)calloc(1, sizeof(chezpp_ssh_session));
   if (wrapper == NULL) {
-    p_ssh_disconnect(session);
-    p_ssh_free(session);
+    ssh_disconnect(session);
+    ssh_free(session);
     return make_errno_status();
   }
   wrapper->session = session;
@@ -1255,8 +958,8 @@ ptr chezpp_net_ssh_close(uptr handle) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   if (wrapper == NULL) return Strue;
   if (wrapper->session != NULL) {
-    p_ssh_disconnect(wrapper->session);
-    p_ssh_free(wrapper->session);
+    ssh_disconnect(wrapper->session);
+    ssh_free(wrapper->session);
   }
   free(wrapper);
   return Strue;
@@ -1265,9 +968,9 @@ ptr chezpp_net_ssh_close(uptr handle) {
 ptr chezpp_net_ssh_session_fd(uptr handle) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   socket_t fd;
-  if (wrapper == NULL || wrapper->session == NULL || p_ssh_get_fd == NULL)
+  if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
-  fd = p_ssh_get_fd(wrapper->session);
+  fd = ssh_get_fd(wrapper->session);
   if (fd < 0) return make_error_status_message("failed to query ssh session socket");
   return Sfixnum((iptr)fd);
 }
@@ -1276,7 +979,7 @@ ptr chezpp_net_ssh_auth_password(uptr handle, const char *user, const char *pass
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   int rc;
   if (wrapper == NULL || wrapper->session == NULL) return make_error_status_message("invalid ssh session");
-  rc = p_ssh_userauth_password(wrapper->session, user != NULL && *user != 0 ? user : NULL, password);
+  rc = ssh_userauth_password(wrapper->session, user != NULL && *user != 0 ? user : NULL, password);
   if (rc == SSH_AUTH_SUCCESS) return Strue;
   return ssh_error_status_from_wrapper(wrapper, "ssh password authentication failed");
 }
@@ -1285,7 +988,7 @@ ptr chezpp_net_ssh_auth_publickey_auto(uptr handle, const char *user, const char
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   int rc;
   if (wrapper == NULL || wrapper->session == NULL) return make_error_status_message("invalid ssh session");
-  rc = p_ssh_userauth_publickey_auto(wrapper->session,
+  rc = ssh_userauth_publickey_auto(wrapper->session,
                                      user != NULL && *user != 0 ? user : NULL,
                                      passphrase != NULL && *passphrase != 0 ? passphrase : NULL);
   if (rc == SSH_AUTH_SUCCESS) return Strue;
@@ -1302,23 +1005,23 @@ ptr chezpp_net_ssh_auth_publickey(uptr handle, const char *user, const char *pub
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
   if (public_path != NULL && *public_path != 0) {
-    if (p_ssh_pki_import_pubkey_file(public_path, &public_key) != SSH_OK)
+    if (ssh_pki_import_pubkey_file(public_path, &public_key) != SSH_OK)
       return ssh_error_status_from_wrapper(wrapper, "failed to import SSH public key");
-    rc = p_ssh_userauth_try_publickey(wrapper->session,
+    rc = ssh_userauth_try_publickey(wrapper->session,
                                       user != NULL && *user != 0 ? user : NULL,
                                       public_key);
-    p_ssh_key_free(public_key);
+    ssh_key_free(public_key);
     if (rc != SSH_AUTH_SUCCESS)
       return ssh_error_status_from_wrapper(wrapper, "SSH public key was not accepted");
   }
-  if (p_ssh_pki_import_privkey_file(private_path,
+  if (ssh_pki_import_privkey_file(private_path,
                                     passphrase != NULL && *passphrase != 0 ? passphrase : NULL,
                                     NULL, NULL, &private_key) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to import SSH private key");
-  rc = p_ssh_userauth_publickey(wrapper->session,
+  rc = ssh_userauth_publickey(wrapper->session,
                                 user != NULL && *user != 0 ? user : NULL,
                                 private_key);
-  p_ssh_key_free(private_key);
+  ssh_key_free(private_key);
   if (rc == SSH_AUTH_SUCCESS) return Strue;
   status = ssh_error_status_from_wrapper(wrapper, "SSH private-key authentication failed");
   return status;
@@ -1334,30 +1037,30 @@ ptr chezpp_net_ssh_auth_keyboard_interactive_step(uptr handle, const char *user)
   ptr result;
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
-  rc = p_ssh_userauth_kbdint(wrapper->session,
+  rc = ssh_userauth_kbdint(wrapper->session,
                              user != NULL && *user != 0 ? user : NULL, NULL);
   if (rc == SSH_AUTH_SUCCESS) return Strue;
   if (rc != SSH_AUTH_INFO)
     return ssh_error_status_from_wrapper(wrapper, "SSH keyboard-interactive authentication failed");
-  count = p_ssh_userauth_kbdint_getnprompts(wrapper->session);
+  count = ssh_userauth_kbdint_getnprompts(wrapper->session);
   if (count < 0)
     return ssh_error_status_from_wrapper(wrapper, "failed to read SSH authentication prompts");
   prompts = Smake_vector(count, Sfalse);
   echoes = Smake_vector(count, Sfalse);
   for (i = 0; i < count; i += 1) {
     char echo = 0;
-    const char *prompt = p_ssh_userauth_kbdint_getprompt(wrapper->session, (unsigned int)i, &echo);
+    const char *prompt = ssh_userauth_kbdint_getprompt(wrapper->session, (unsigned int)i, &echo);
     if (prompt == NULL)
       return ssh_error_status_from_wrapper(wrapper, "failed to read SSH authentication prompt");
     Svector_set(prompts, i, Sstring(prompt));
     Svector_set(echoes, i, Sboolean(echo != 0));
   }
   result = Smake_vector(4, Sfalse);
-  Svector_set(result, 0, Sstring(p_ssh_userauth_kbdint_getname(wrapper->session) == NULL
-                                 ? "" : p_ssh_userauth_kbdint_getname(wrapper->session)));
+  Svector_set(result, 0, Sstring(ssh_userauth_kbdint_getname(wrapper->session) == NULL
+                                 ? "" : ssh_userauth_kbdint_getname(wrapper->session)));
   Svector_set(result, 1,
-              Sstring(p_ssh_userauth_kbdint_getinstruction(wrapper->session) == NULL
-                          ? "" : p_ssh_userauth_kbdint_getinstruction(wrapper->session)));
+              Sstring(ssh_userauth_kbdint_getinstruction(wrapper->session) == NULL
+                          ? "" : ssh_userauth_kbdint_getinstruction(wrapper->session)));
   Svector_set(result, 2, prompts);
   Svector_set(result, 3, echoes);
   return result;
@@ -1368,7 +1071,7 @@ ptr chezpp_net_ssh_auth_keyboard_interactive_answer(uptr handle, int index,
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
-  if (p_ssh_userauth_kbdint_setanswer(wrapper->session, (unsigned int)index, answer) != SSH_OK)
+  if (ssh_userauth_kbdint_setanswer(wrapper->session, (unsigned int)index, answer) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to answer SSH authentication prompt");
   return Strue;
 }
@@ -1377,7 +1080,7 @@ ptr chezpp_net_ssh_auth_agent(uptr handle, const char *user) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   int rc;
   if (wrapper == NULL || wrapper->session == NULL) return make_error_status_message("invalid ssh session");
-  rc = p_ssh_userauth_agent(wrapper->session, user != NULL && *user != 0 ? user : NULL);
+  rc = ssh_userauth_agent(wrapper->session, user != NULL && *user != 0 ? user : NULL);
   if (rc == SSH_AUTH_SUCCESS) return Strue;
   return ssh_error_status_from_wrapper(wrapper, "ssh agent authentication failed");
 }
@@ -1388,9 +1091,9 @@ ptr chezpp_net_ssh_auth_agent_identity(uptr handle, const char *user, const char
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
   if (identity != NULL && *identity != 0 &&
-      p_ssh_options_set(wrapper->session, SSH_OPTIONS_IDENTITY, identity) != SSH_OK)
+      ssh_options_set(wrapper->session, SSH_OPTIONS_IDENTITY, identity) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to select SSH agent identity");
-  rc = p_ssh_userauth_agent(wrapper->session, user != NULL && *user != 0 ? user : NULL);
+  rc = ssh_userauth_agent(wrapper->session, user != NULL && *user != 0 ? user : NULL);
   if (rc == SSH_AUTH_SUCCESS) return Strue;
   return ssh_error_status_from_wrapper(wrapper, "ssh agent authentication failed");
 }
@@ -1401,9 +1104,9 @@ ptr chezpp_net_ssh_known_host_check(uptr handle, const char *path) {
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
   if (path != NULL && *path != 0 &&
-      p_ssh_options_set(wrapper->session, SSH_OPTIONS_KNOWNHOSTS, path) != SSH_OK)
+      ssh_options_set(wrapper->session, SSH_OPTIONS_KNOWNHOSTS, path) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to select SSH known-hosts file");
-  state = p_ssh_session_is_known_server(wrapper->session);
+  state = ssh_session_is_known_server(wrapper->session);
   switch (state) {
   case SSH_KNOWN_HOSTS_OK: return Sstring_to_symbol("ok");
   case SSH_KNOWN_HOSTS_NOT_FOUND: return Sstring_to_symbol("not-found");
@@ -1419,9 +1122,9 @@ ptr chezpp_net_ssh_known_host_update(uptr handle, const char *path) {
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
   if (path != NULL && *path != 0 &&
-      p_ssh_options_set(wrapper->session, SSH_OPTIONS_KNOWNHOSTS, path) != SSH_OK)
+      ssh_options_set(wrapper->session, SSH_OPTIONS_KNOWNHOSTS, path) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to select SSH known-hosts file");
-  if (p_ssh_session_update_known_hosts(wrapper->session) != SSH_OK)
+  if (ssh_session_update_known_hosts(wrapper->session) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to update SSH known host");
   return Strue;
 }
@@ -1432,10 +1135,10 @@ ptr chezpp_net_ssh_known_host_export(uptr handle) {
   ptr result;
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
-  if (p_ssh_session_export_known_hosts_entry(wrapper->session, &entry) != SSH_OK || entry == NULL)
+  if (ssh_session_export_known_hosts_entry(wrapper->session, &entry) != SSH_OK || entry == NULL)
     return ssh_error_status_from_wrapper(wrapper, "failed to export SSH known host");
   result = Sstring(entry);
-  p_ssh_string_free_char(entry);
+  ssh_string_free_char(entry);
   return result;
 }
 
@@ -1454,34 +1157,34 @@ ptr chezpp_net_ssh_channel_open(uptr handle, int timeout_ms) {
     deadline += timeout_ms;
   }
 
-  channel = p_ssh_channel_new(wrapper->session);
+  channel = ssh_channel_new(wrapper->session);
   if (channel == NULL) return ssh_error_status_from_wrapper(wrapper, "failed to allocate ssh channel");
   use_nonblocking = timeout_ms >= 0;
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 0);
+  if (use_nonblocking) ssh_set_blocking(wrapper->session, 0);
   for (;;) {
-    rc = p_ssh_channel_open_session(channel);
+    rc = ssh_channel_open_session(channel);
     if (rc != SSH_AGAIN || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->session, POLLIN | POLLOUT, deadline,
                                                "ssh channel open timed out");
       if (wait_status != Strue) {
-        if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 1);
-        p_ssh_channel_free(channel);
+        if (use_nonblocking) ssh_set_blocking(wrapper->session, 1);
+        ssh_channel_free(channel);
         return wait_status;
       }
     }
   }
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 1);
+  if (use_nonblocking) ssh_set_blocking(wrapper->session, 1);
   if (rc != SSH_OK) {
     ptr status = ssh_error_status_from_wrapper(wrapper, "failed to open ssh channel");
-    p_ssh_channel_free(channel);
+    ssh_channel_free(channel);
     return status;
   }
 
   channel_wrapper = (chezpp_ssh_channel *)calloc(1, sizeof(chezpp_ssh_channel));
   if (channel_wrapper == NULL) {
-    p_ssh_channel_close(channel);
-    p_ssh_channel_free(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
     return make_errno_status();
   }
   channel_wrapper->channel = channel;
@@ -1505,35 +1208,35 @@ ptr chezpp_net_ssh_channel_open_forward(uptr handle, const char *remote_host, in
     if (deadline < 0) return make_errno_status();
     deadline += timeout_ms;
   }
-  channel = p_ssh_channel_new(wrapper->session);
+  channel = ssh_channel_new(wrapper->session);
   if (channel == NULL)
     return ssh_error_status_from_wrapper(wrapper, "failed to allocate SSH forwarding channel");
   use_nonblocking = timeout_ms >= 0;
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 0);
+  if (use_nonblocking) ssh_set_blocking(wrapper->session, 0);
   for (;;) {
-    rc = p_ssh_channel_open_forward(channel, remote_host, remote_port,
+    rc = ssh_channel_open_forward(channel, remote_host, remote_port,
                                     source_host, source_port);
     if (rc != SSH_AGAIN || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->session, POLLIN | POLLOUT, deadline,
                                                "SSH forwarding channel open timed out");
       if (wait_status != Strue) {
-        if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 1);
-        p_ssh_channel_free(channel);
+        if (use_nonblocking) ssh_set_blocking(wrapper->session, 1);
+        ssh_channel_free(channel);
         return wait_status;
       }
     }
   }
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->session, 1);
+  if (use_nonblocking) ssh_set_blocking(wrapper->session, 1);
   if (rc != SSH_OK) {
     ptr status = ssh_error_status_from_wrapper(wrapper, "failed to open SSH forwarding channel");
-    p_ssh_channel_free(channel);
+    ssh_channel_free(channel);
     return status;
   }
   channel_wrapper = (chezpp_ssh_channel *)calloc(1, sizeof(chezpp_ssh_channel));
   if (channel_wrapper == NULL) {
-    p_ssh_channel_close(channel);
-    p_ssh_channel_free(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
     return make_errno_status();
   }
   channel_wrapper->channel = channel;
@@ -1546,7 +1249,7 @@ ptr chezpp_net_ssh_remote_forward_listen(uptr handle, const char *address, int p
   int bound_port = 0;
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
-  if (p_ssh_channel_listen_forward(wrapper->session,
+  if (ssh_channel_listen_forward(wrapper->session,
                                    address != NULL && *address != 0 ? address : NULL,
                                    port, &bound_port) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to request SSH remote forwarding");
@@ -1562,14 +1265,14 @@ ptr chezpp_net_ssh_remote_forward_accept(uptr handle) {
   char *originator = NULL;
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
-  channel = p_ssh_channel_open_forward_port(wrapper->session, 0, &destination_port,
+  channel = ssh_channel_open_forward_port(wrapper->session, 0, &destination_port,
                                             &originator, &originator_port);
-  if (originator != NULL) p_ssh_string_free_char(originator);
+  if (originator != NULL) ssh_string_free_char(originator);
   if (channel == NULL) return ssh_would_block_status(wrapper->session, POLLIN);
   channel_wrapper = (chezpp_ssh_channel *)calloc(1, sizeof(chezpp_ssh_channel));
   if (channel_wrapper == NULL) {
-    p_ssh_channel_close(channel);
-    p_ssh_channel_free(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
     return make_errno_status();
   }
   channel_wrapper->channel = channel;
@@ -1581,7 +1284,7 @@ ptr chezpp_net_ssh_remote_forward_cancel(uptr handle, const char *address, int p
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
-  if (p_ssh_channel_cancel_forward(wrapper->session,
+  if (ssh_channel_cancel_forward(wrapper->session,
                                    address != NULL && *address != 0 ? address : NULL,
                                    port) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to cancel SSH remote forwarding");
@@ -1592,9 +1295,9 @@ ptr chezpp_net_ssh_channel_close(uptr handle) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   if (wrapper == NULL) return Strue;
   if (wrapper->channel != NULL) {
-    p_ssh_channel_send_eof(wrapper->channel);
-    p_ssh_channel_close(wrapper->channel);
-    p_ssh_channel_free(wrapper->channel);
+    ssh_channel_send_eof(wrapper->channel);
+    ssh_channel_close(wrapper->channel);
+    ssh_channel_free(wrapper->channel);
   }
   free(wrapper);
   return Strue;
@@ -1612,20 +1315,20 @@ ptr chezpp_net_ssh_channel_request_exec(uptr handle, const char *cmd, int timeou
     deadline += timeout_ms;
   }
   use_nonblocking = timeout_ms >= 0;
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 0);
   for (;;) {
-    rc = p_ssh_channel_request_exec(wrapper->channel, cmd);
+    rc = ssh_channel_request_exec(wrapper->channel, cmd);
     if (rc != SSH_AGAIN || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN | POLLOUT, deadline,
                                                "ssh exec request timed out");
       if (wait_status != Strue) {
-        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
         return wait_status;
       }
     }
   }
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
   if (rc != SSH_OK)
     return ssh_channel_error_status(wrapper, "failed to request ssh exec");
   return Strue;
@@ -1643,20 +1346,20 @@ ptr chezpp_net_ssh_channel_request_shell(uptr handle, int timeout_ms) {
     deadline += timeout_ms;
   }
   use_nonblocking = timeout_ms >= 0;
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 0);
   for (;;) {
-    rc = p_ssh_channel_request_shell(wrapper->channel);
+    rc = ssh_channel_request_shell(wrapper->channel);
     if (rc != SSH_AGAIN || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN | POLLOUT, deadline,
                                                "ssh shell request timed out");
       if (wait_status != Strue) {
-        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
         return wait_status;
       }
     }
   }
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
   if (rc != SSH_OK)
     return ssh_channel_error_status(wrapper, "failed to request ssh shell");
   return Strue;
@@ -1674,20 +1377,20 @@ ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
     deadline += timeout_ms;
   }
   use_nonblocking = timeout_ms >= 0;
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 0);
   for (;;) {
-    rc = p_ssh_channel_request_pty(wrapper->channel);
+    rc = ssh_channel_request_pty(wrapper->channel);
     if (rc != SSH_AGAIN || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN | POLLOUT, deadline,
                                                "ssh pty request timed out");
       if (wait_status != Strue) {
-        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
         return wait_status;
       }
     }
   }
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
   if (rc != SSH_OK)
     return ssh_channel_error_status(wrapper, "failed to request ssh pty");
   return Strue;
@@ -1709,26 +1412,26 @@ ptr chezpp_net_ssh_channel_read(uptr handle, int size, int is_stderr, int nonblo
     deadline += timeout_ms;
   }
   use_nonblocking = nonblocking || timeout_ms >= 0;
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 0);
   out = Smake_bytevector((iptr)size, 0);
   for (;;) {
-    rc = p_ssh_channel_read(wrapper->channel, Sbytevector_data(out), (uint32_t)size, is_stderr);
+    rc = ssh_channel_read(wrapper->channel, Sbytevector_data(out), (uint32_t)size, is_stderr);
     if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN, deadline,
                                                "ssh read timed out");
       if (wait_status != Strue) {
-        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
         return wait_status;
       }
     }
   }
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
 
   if (rc == SSH_AGAIN)
     return ssh_would_block_status(wrapper->owner->session, POLLIN);
   if (rc == SSH_ERROR) return ssh_channel_error_status(wrapper, "ssh read failed");
-  if (rc == 0 && p_ssh_channel_is_eof(wrapper->channel)) return Seof_object;
+  if (rc == 0 && ssh_channel_is_eof(wrapper->channel)) return Seof_object;
   if (rc < 0) return ssh_channel_error_status(wrapper, "ssh read failed");
   if (rc == size) return out;
 
@@ -1755,26 +1458,26 @@ ptr chezpp_net_ssh_channel_read_into(uptr handle, ptr bv, int start, int stop, i
     deadline += timeout_ms;
   }
   use_nonblocking = nonblocking || timeout_ms >= 0;
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 0);
   for (;;) {
-    rc = p_ssh_channel_read(wrapper->channel, Sbytevector_data(bv) + start,
+    rc = ssh_channel_read(wrapper->channel, Sbytevector_data(bv) + start,
                             (uint32_t)(stop - start), is_stderr);
     if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN, deadline,
                                                "ssh read timed out");
       if (wait_status != Strue) {
-        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
         return wait_status;
       }
     }
   }
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
 
   if (rc == SSH_AGAIN)
     return ssh_would_block_status(wrapper->owner->session, POLLIN);
   if (rc == SSH_ERROR) return ssh_channel_error_status(wrapper, "ssh read failed");
-  if (rc == 0 && p_ssh_channel_is_eof(wrapper->channel)) return Seof_object;
+  if (rc == 0 && ssh_channel_is_eof(wrapper->channel)) return Seof_object;
   if (rc < 0) return ssh_channel_error_status(wrapper, "ssh read failed");
   return Sfixnum((iptr)rc);
 }
@@ -1795,21 +1498,21 @@ ptr chezpp_net_ssh_channel_write(uptr handle, ptr bv, int start, int stop, int n
     deadline += timeout_ms;
   }
   use_nonblocking = nonblocking || timeout_ms >= 0;
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 0);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 0);
   for (;;) {
-    rc = p_ssh_channel_write(wrapper->channel, Sbytevector_data(bv) + start,
+    rc = ssh_channel_write(wrapper->channel, Sbytevector_data(bv) + start,
                              (uint32_t)(stop - start));
     if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLOUT, deadline,
                                                "ssh write timed out");
       if (wait_status != Strue) {
-        if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+        if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
         return wait_status;
       }
     }
   }
-  if (use_nonblocking) p_ssh_set_blocking(wrapper->owner->session, 1);
+  if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 1);
 
   if (rc == SSH_AGAIN)
     return ssh_would_block_status(wrapper->owner->session, POLLOUT);
@@ -1820,7 +1523,7 @@ ptr chezpp_net_ssh_channel_write(uptr handle, ptr bv, int start, int stop, int n
 ptr chezpp_net_ssh_channel_exit_status(uptr handle) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->channel == NULL) return make_error_status_message("invalid ssh channel");
-  return Sfixnum((iptr)p_ssh_channel_get_exit_status(wrapper->channel));
+  return Sfixnum((iptr)ssh_channel_get_exit_status(wrapper->channel));
 }
 
 ptr chezpp_net_ssh_channel_request_environment(uptr handle, const char *name,
@@ -1828,7 +1531,7 @@ ptr chezpp_net_ssh_channel_request_environment(uptr handle, const char *name,
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->channel == NULL)
     return make_error_status_message("invalid ssh channel");
-  if (p_ssh_channel_request_env(wrapper->channel, name, value) != SSH_OK)
+  if (ssh_channel_request_env(wrapper->channel, name, value) != SSH_OK)
     return ssh_channel_error_status(wrapper, "ssh environment request failed");
   return Strue;
 }
@@ -1837,7 +1540,7 @@ ptr chezpp_net_ssh_channel_request_subsystem(uptr handle, const char *subsystem)
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->channel == NULL)
     return make_error_status_message("invalid ssh channel");
-  if (p_ssh_channel_request_subsystem(wrapper->channel, subsystem) != SSH_OK)
+  if (ssh_channel_request_subsystem(wrapper->channel, subsystem) != SSH_OK)
     return ssh_channel_error_status(wrapper, "ssh subsystem request failed");
   return Strue;
 }
@@ -1848,17 +1551,17 @@ ptr chezpp_net_sftp_open(uptr handle) {
   sftp_session sftp;
 
   if (wrapper == NULL || wrapper->session == NULL) return make_error_status_message("invalid ssh session");
-  sftp = p_sftp_new(wrapper->session);
+  sftp = sftp_new(wrapper->session);
   if (sftp == NULL) return ssh_error_status_from_wrapper(wrapper, "failed to allocate sftp session");
-  if (p_sftp_init(sftp) != SSH_OK) {
+  if (sftp_init(sftp) != SSH_OK) {
     ptr status = ssh_error_status_from_wrapper(wrapper, "failed to initialize sftp session");
-    p_sftp_free(sftp);
+    sftp_free(sftp);
     return status;
   }
 
   sftp_wrapper = (chezpp_sftp_session *)calloc(1, sizeof(chezpp_sftp_session));
   if (sftp_wrapper == NULL) {
-    p_sftp_free(sftp);
+    sftp_free(sftp);
     return make_errno_status();
   }
   sftp_wrapper->sftp = sftp;
@@ -1869,7 +1572,7 @@ ptr chezpp_net_sftp_open(uptr handle) {
 ptr chezpp_net_sftp_close(uptr handle) {
   chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
   if (wrapper == NULL) return Strue;
-  if (wrapper->sftp != NULL) p_sftp_free(wrapper->sftp);
+  if (wrapper->sftp != NULL) sftp_free(wrapper->sftp);
   free(wrapper);
   return Strue;
 }
@@ -1881,17 +1584,17 @@ ptr chezpp_net_sftp_list(uptr handle, const char *path) {
 
   if (wrapper == NULL || wrapper->sftp == NULL) return make_error_status_message("invalid sftp session");
 
-  dir = p_sftp_opendir(wrapper->sftp, path);
+  dir = sftp_opendir(wrapper->sftp, path);
   if (dir == NULL) return sftp_error_status(wrapper, "failed to open sftp directory");
 
-  while (!p_sftp_dir_eof(dir)) {
-    sftp_attributes attr = p_sftp_readdir(wrapper->sftp, dir);
+  while (!sftp_dir_eof(dir)) {
+    sftp_attributes attr = sftp_readdir(wrapper->sftp, dir);
     if (attr == NULL) break;
     out = Scons(attr->name == NULL ? Sfalse : Sstring(attr->name), out);
-    p_sftp_attributes_free(attr);
+    sftp_attributes_free(attr);
   }
 
-  if (p_sftp_closedir(dir) != SSH_OK) return sftp_error_status(wrapper, "failed to close sftp directory");
+  if (sftp_closedir(dir) != SSH_OK) return sftp_error_status(wrapper, "failed to close sftp directory");
   return out;
 }
 
@@ -1902,10 +1605,10 @@ ptr chezpp_net_sftp_stat(uptr handle, const char *path) {
 
   if (wrapper == NULL || wrapper->sftp == NULL) return make_error_status_message("invalid sftp session");
 
-  attr = p_sftp_stat(wrapper->sftp, path);
+  attr = sftp_stat(wrapper->sftp, path);
   if (attr == NULL) return sftp_error_status(wrapper, "failed to stat sftp path");
   out = sftp_attr_to_vector(attr);
-  p_sftp_attributes_free(attr);
+  sftp_attributes_free(attr);
   return out;
 }
 
@@ -1915,11 +1618,11 @@ ptr chezpp_net_sftp_open_directory(uptr handle, const char *path) {
   sftp_dir dir;
   if (wrapper == NULL || wrapper->sftp == NULL)
     return make_error_status_message("invalid sftp session");
-  dir = p_sftp_opendir(wrapper->sftp, path);
+  dir = sftp_opendir(wrapper->sftp, path);
   if (dir == NULL) return sftp_error_status(wrapper, "failed to open sftp directory");
   directory = (chezpp_sftp_directory *)calloc(1, sizeof(*directory));
   if (directory == NULL) {
-    p_sftp_closedir(dir);
+    sftp_closedir(dir);
     return make_errno_status();
   }
   directory->dir = dir;
@@ -1933,13 +1636,13 @@ ptr chezpp_net_sftp_read_directory(uptr handle) {
   ptr out;
   if (directory == NULL || directory->dir == NULL || directory->owner == NULL)
     return make_error_status_message("invalid sftp directory");
-  attr = p_sftp_readdir(directory->owner->sftp, directory->dir);
+  attr = sftp_readdir(directory->owner->sftp, directory->dir);
   if (attr == NULL) {
-    if (p_sftp_dir_eof(directory->dir)) return Seof_object;
+    if (sftp_dir_eof(directory->dir)) return Seof_object;
     return sftp_error_status(directory->owner, "failed to read sftp directory");
   }
   out = sftp_attr_to_vector(attr);
-  p_sftp_attributes_free(attr);
+  sftp_attributes_free(attr);
   return out;
 }
 
@@ -1947,7 +1650,7 @@ ptr chezpp_net_sftp_close_directory(uptr handle) {
   chezpp_sftp_directory *directory = (chezpp_sftp_directory *)TO_VOIDP(handle);
   ptr out = Strue;
   if (directory == NULL) return out;
-  if (directory->dir != NULL && p_sftp_closedir(directory->dir) != SSH_OK)
+  if (directory->dir != NULL && sftp_closedir(directory->dir) != SSH_OK)
     out = sftp_error_status(directory->owner, "failed to close sftp directory");
   directory->dir = NULL;
   free(directory);
@@ -1958,7 +1661,7 @@ ptr chezpp_net_sftp_chmod(uptr handle, const char *path, unsigned mode) {
   chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->sftp == NULL)
     return make_error_status_message("invalid sftp session");
-  if (p_sftp_chmod(wrapper->sftp, path, (mode_t)mode) != SSH_OK)
+  if (sftp_chmod(wrapper->sftp, path, (mode_t)mode) != SSH_OK)
     return sftp_error_status(wrapper, "failed to chmod sftp path");
   return Strue;
 }
@@ -1967,7 +1670,7 @@ ptr chezpp_net_sftp_chown(uptr handle, const char *path, unsigned uid, unsigned 
   chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->sftp == NULL)
     return make_error_status_message("invalid sftp session");
-  if (p_sftp_chown(wrapper->sftp, path, (uid_t)uid, (gid_t)gid) != SSH_OK)
+  if (sftp_chown(wrapper->sftp, path, (uid_t)uid, (gid_t)gid) != SSH_OK)
     return sftp_error_status(wrapper, "failed to chown sftp path");
   return Strue;
 }
@@ -1979,7 +1682,7 @@ ptr chezpp_net_sftp_utimes(uptr handle, const char *path, int64_t atime, int64_t
     return make_error_status_message("invalid sftp utimes arguments");
   times[0].tv_sec = (time_t)atime; times[0].tv_usec = 0;
   times[1].tv_sec = (time_t)mtime; times[1].tv_usec = 0;
-  if (p_sftp_utimes(wrapper->sftp, path, times) != SSH_OK)
+  if (sftp_utimes(wrapper->sftp, path, times) != SSH_OK)
     return sftp_error_status(wrapper, "failed to set sftp times");
   return Strue;
 }
@@ -1988,7 +1691,7 @@ ptr chezpp_net_sftp_symlink(uptr handle, const char *target, const char *dest) {
   chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->sftp == NULL)
     return make_error_status_message("invalid sftp session");
-  if (p_sftp_symlink(wrapper->sftp, target, dest) != SSH_OK)
+  if (sftp_symlink(wrapper->sftp, target, dest) != SSH_OK)
     return sftp_error_status(wrapper, "failed to create sftp symlink");
   return Strue;
 }
@@ -1999,10 +1702,10 @@ ptr chezpp_net_sftp_readlink(uptr handle, const char *path) {
   ptr out;
   if (wrapper == NULL || wrapper->sftp == NULL)
     return make_error_status_message("invalid sftp session");
-  target = p_sftp_readlink(wrapper->sftp, path);
+  target = sftp_readlink(wrapper->sftp, path);
   if (target == NULL) return sftp_error_status(wrapper, "failed to read sftp symlink");
   out = Sstring(target);
-  p_ssh_string_free_char(target);
+  ssh_string_free_char(target);
   return out;
 }
 
@@ -2010,7 +1713,7 @@ ptr chezpp_net_sftp_seek(uptr handle, uint64_t offset) {
   chezpp_sftp_file *wrapper = (chezpp_sftp_file *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->file == NULL)
     return make_error_status_message("invalid sftp file");
-  if (p_sftp_seek64(wrapper->file, offset) != SSH_OK)
+  if (sftp_seek64(wrapper->file, offset) != SSH_OK)
     return sftp_file_error_status(wrapper, "failed to seek sftp file");
   return Strue;
 }
@@ -2018,14 +1721,14 @@ ptr chezpp_net_sftp_seek(uptr handle, uint64_t offset) {
 ptr chezpp_net_sftp_delete(uptr handle, const char *path) {
   chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->sftp == NULL) return make_error_status_message("invalid sftp session");
-  if (p_sftp_unlink(wrapper->sftp, path) != SSH_OK) return sftp_error_status(wrapper, "failed to delete sftp file");
+  if (sftp_unlink(wrapper->sftp, path) != SSH_OK) return sftp_error_status(wrapper, "failed to delete sftp file");
   return Strue;
 }
 
 ptr chezpp_net_sftp_mkdir(uptr handle, const char *path, int mode) {
   chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->sftp == NULL) return make_error_status_message("invalid sftp session");
-  if (p_sftp_mkdir(wrapper->sftp, path, (mode_t)mode) != SSH_OK)
+  if (sftp_mkdir(wrapper->sftp, path, (mode_t)mode) != SSH_OK)
     return sftp_error_status(wrapper, "failed to create sftp directory");
   return Strue;
 }
@@ -2033,7 +1736,7 @@ ptr chezpp_net_sftp_mkdir(uptr handle, const char *path, int mode) {
 ptr chezpp_net_sftp_rmdir(uptr handle, const char *path) {
   chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->sftp == NULL) return make_error_status_message("invalid sftp session");
-  if (p_sftp_rmdir(wrapper->sftp, path) != SSH_OK)
+  if (sftp_rmdir(wrapper->sftp, path) != SSH_OK)
     return sftp_error_status(wrapper, "failed to remove sftp directory");
   return Strue;
 }
@@ -2041,7 +1744,7 @@ ptr chezpp_net_sftp_rmdir(uptr handle, const char *path) {
 ptr chezpp_net_sftp_rename(uptr handle, const char *from_path, const char *to_path) {
   chezpp_sftp_session *wrapper = (chezpp_sftp_session *)TO_VOIDP(handle);
   if (wrapper == NULL || wrapper->sftp == NULL) return make_error_status_message("invalid sftp session");
-  if (p_sftp_rename(wrapper->sftp, from_path, to_path) != SSH_OK)
+  if (sftp_rename(wrapper->sftp, from_path, to_path) != SSH_OK)
     return sftp_error_status(wrapper, "failed to rename sftp path");
   return Strue;
 }
@@ -2053,12 +1756,12 @@ ptr chezpp_net_sftp_open_file(uptr handle, const char *path, int flags, int mode
 
   if (wrapper == NULL || wrapper->sftp == NULL) return make_error_status_message("invalid sftp session");
 
-  file = p_sftp_open(wrapper->sftp, path, flags, (mode_t)mode);
+  file = sftp_open(wrapper->sftp, path, flags, (mode_t)mode);
   if (file == NULL) return sftp_error_status(wrapper, "failed to open sftp file");
 
   file_wrapper = (chezpp_sftp_file *)calloc(1, sizeof(chezpp_sftp_file));
   if (file_wrapper == NULL) {
-    p_sftp_close(file);
+    sftp_close(file);
     return make_errno_status();
   }
   file_wrapper->file = file;
@@ -2069,11 +1772,13 @@ ptr chezpp_net_sftp_open_file(uptr handle, const char *path, int flags, int mode
 ptr chezpp_net_sftp_close_file(uptr handle) {
   chezpp_sftp_file *wrapper = (chezpp_sftp_file *)TO_VOIDP(handle);
   if (wrapper == NULL) return Strue;
-  if (p_sftp_aio_free != NULL && wrapper->pending_read != NULL)
-    p_sftp_aio_free(wrapper->pending_read);
-  if (p_sftp_aio_free != NULL && wrapper->pending_write != NULL)
-    p_sftp_aio_free(wrapper->pending_write);
-  if (wrapper->file != NULL) p_sftp_close(wrapper->file);
+#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
+  if (wrapper->pending_read != NULL)
+    sftp_aio_free(wrapper->pending_read);
+  if (wrapper->pending_write != NULL)
+    sftp_aio_free(wrapper->pending_write);
+#endif
+  if (wrapper->file != NULL) sftp_close(wrapper->file);
   free(wrapper);
   return Strue;
 }
@@ -2099,7 +1804,7 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking, int timeout_ms)
 
   if (!use_nonblocking) {
     out = Smake_bytevector((iptr)size, 0);
-    rc = p_sftp_read(wrapper->file, Sbytevector_data(out), (size_t)size);
+    rc = sftp_read(wrapper->file, Sbytevector_data(out), (size_t)size);
 
     if (rc == SSH_AGAIN)
       return ssh_would_block_status(wrapper->owner->owner->session, POLLIN);
@@ -2114,33 +1819,34 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking, int timeout_ms)
     }
   }
 
-  p_ssh_set_blocking(wrapper->owner->owner->session, 0);
-  p_sftp_file_set_nonblocking(wrapper->file);
+#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
+  ssh_set_blocking(wrapper->owner->owner->session, 0);
+  sftp_file_set_nonblocking(wrapper->file);
   for (;;) {
     if (wrapper->pending_read == NULL) {
-      rc = p_sftp_aio_begin_read(wrapper->file, (size_t)size, &wrapper->pending_read);
+      rc = sftp_aio_begin_read(wrapper->file, (size_t)size, &wrapper->pending_read);
       if (rc == SSH_ERROR || rc < 0) {
-        p_sftp_file_set_blocking(wrapper->file);
-        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        sftp_file_set_blocking(wrapper->file);
+        ssh_set_blocking(wrapper->owner->owner->session, 1);
         return sftp_file_error_status(wrapper, "sftp read failed");
       }
       wrapper->pending_read_len = (size_t)rc;
     }
     out = Smake_bytevector((iptr)wrapper->pending_read_len, 0);
-    rc = p_sftp_aio_wait_read(&wrapper->pending_read, Sbytevector_data(out), wrapper->pending_read_len);
+    rc = sftp_aio_wait_read(&wrapper->pending_read, Sbytevector_data(out), wrapper->pending_read_len);
     if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->owner->session, POLLIN, deadline,
                                                "sftp read timed out");
       if (wait_status != Strue) {
-        p_sftp_file_set_blocking(wrapper->file);
-        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        sftp_file_set_blocking(wrapper->file);
+        ssh_set_blocking(wrapper->owner->owner->session, 1);
         return wait_status;
       }
     }
   }
-  p_sftp_file_set_blocking(wrapper->file);
-  p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+  sftp_file_set_blocking(wrapper->file);
+  ssh_set_blocking(wrapper->owner->owner->session, 1);
 
   if (rc == SSH_AGAIN)
     return ssh_would_block_status(wrapper->owner->owner->session, POLLIN);
@@ -2154,6 +1860,9 @@ ptr chezpp_net_sftp_read(uptr handle, int size, int nonblocking, int timeout_ms)
     memcpy(Sbytevector_data(clipped), Sbytevector_data(out), (size_t)rc);
     return clipped;
   }
+#else
+  return make_error_status_message("libssh: sftp AIO capability unavailable");
+#endif
 }
 
 ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonblocking,
@@ -2176,7 +1885,7 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
     return make_error_status_message("libssh: sftp AIO capability unavailable");
 
   if (!use_nonblocking) {
-    rc = p_sftp_read(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
+    rc = sftp_read(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
 
     if (rc == SSH_AGAIN)
       return ssh_would_block_status(wrapper->owner->owner->session, POLLIN);
@@ -2185,19 +1894,20 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
     return Sfixnum((iptr)rc);
   }
 
-  p_ssh_set_blocking(wrapper->owner->owner->session, 0);
-  p_sftp_file_set_nonblocking(wrapper->file);
+#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
+  ssh_set_blocking(wrapper->owner->owner->session, 0);
+  sftp_file_set_nonblocking(wrapper->file);
   for (;;) {
     if (wrapper->pending_read == NULL) {
-      rc = p_sftp_aio_begin_read(wrapper->file, (size_t)(stop - start), &wrapper->pending_read);
+      rc = sftp_aio_begin_read(wrapper->file, (size_t)(stop - start), &wrapper->pending_read);
       if (rc == SSH_ERROR || rc < 0) {
-        p_sftp_file_set_blocking(wrapper->file);
-        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        sftp_file_set_blocking(wrapper->file);
+        ssh_set_blocking(wrapper->owner->owner->session, 1);
         return sftp_file_error_status(wrapper, "sftp read failed");
       }
       wrapper->pending_read_len = (size_t)rc;
     }
-    rc = p_sftp_aio_wait_read(&wrapper->pending_read,
+    rc = sftp_aio_wait_read(&wrapper->pending_read,
                               Sbytevector_data(bv) + start,
                               (size_t)(stop - start));
     if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
@@ -2205,14 +1915,14 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
       ptr wait_status = wait_ssh_session_until(wrapper->owner->owner->session, POLLIN, deadline,
                                                "sftp read timed out");
       if (wait_status != Strue) {
-        p_sftp_file_set_blocking(wrapper->file);
-        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        sftp_file_set_blocking(wrapper->file);
+        ssh_set_blocking(wrapper->owner->owner->session, 1);
         return wait_status;
       }
     }
   }
-  p_sftp_file_set_blocking(wrapper->file);
-  p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+  sftp_file_set_blocking(wrapper->file);
+  ssh_set_blocking(wrapper->owner->owner->session, 1);
 
   if (rc == SSH_AGAIN)
     return ssh_would_block_status(wrapper->owner->owner->session, POLLIN);
@@ -2220,6 +1930,9 @@ ptr chezpp_net_sftp_read_into(uptr handle, ptr bv, int start, int stop, int nonb
   if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp read failed");
   if (rc == 0) return Seof_object;
   return Sfixnum((iptr)rc);
+#else
+  return make_error_status_message("libssh: sftp AIO capability unavailable");
+#endif
 }
 
 ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblocking,
@@ -2242,7 +1955,7 @@ ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblock
     return make_error_status_message("libssh: sftp AIO capability unavailable");
 
   if (!use_nonblocking) {
-    rc = p_sftp_write(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
+    rc = sftp_write(wrapper->file, Sbytevector_data(bv) + start, (size_t)(stop - start));
 
     if (rc == SSH_AGAIN)
       return ssh_would_block_status(wrapper->owner->owner->session, POLLOUT);
@@ -2250,41 +1963,45 @@ ptr chezpp_net_sftp_write(uptr handle, ptr bv, int start, int stop, int nonblock
     return Sfixnum((iptr)rc);
   }
 
-  p_ssh_set_blocking(wrapper->owner->owner->session, 0);
-  p_sftp_file_set_nonblocking(wrapper->file);
+#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
+  ssh_set_blocking(wrapper->owner->owner->session, 0);
+  sftp_file_set_nonblocking(wrapper->file);
   for (;;) {
     if (wrapper->pending_write == NULL) {
-      rc = p_sftp_aio_begin_write(wrapper->file,
+      rc = sftp_aio_begin_write(wrapper->file,
                                   Sbytevector_data(bv) + start,
                                   (size_t)(stop - start),
                                   &wrapper->pending_write);
       if (rc == SSH_ERROR || rc < 0) {
-        p_sftp_file_set_blocking(wrapper->file);
-        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        sftp_file_set_blocking(wrapper->file);
+        ssh_set_blocking(wrapper->owner->owner->session, 1);
         return sftp_file_error_status(wrapper, "sftp write failed");
       }
       wrapper->pending_write_len = (size_t)rc;
     }
-    rc = p_sftp_aio_wait_write(&wrapper->pending_write);
+    rc = sftp_aio_wait_write(&wrapper->pending_write);
     if (rc != SSH_AGAIN || nonblocking || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->owner->session, POLLOUT, deadline,
                                                "sftp write timed out");
       if (wait_status != Strue) {
-        p_sftp_file_set_blocking(wrapper->file);
-        p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+        sftp_file_set_blocking(wrapper->file);
+        ssh_set_blocking(wrapper->owner->owner->session, 1);
         return wait_status;
       }
     }
   }
-  p_sftp_file_set_blocking(wrapper->file);
-  p_ssh_set_blocking(wrapper->owner->owner->session, 1);
+  sftp_file_set_blocking(wrapper->file);
+  ssh_set_blocking(wrapper->owner->owner->session, 1);
 
   if (rc == SSH_AGAIN)
     return ssh_would_block_status(wrapper->owner->owner->session, POLLOUT);
   wrapper->pending_write_len = 0;
   if (rc == SSH_ERROR || rc < 0) return sftp_file_error_status(wrapper, "sftp write failed");
   return Sfixnum((iptr)rc);
+#else
+  return make_error_status_message("libssh: sftp AIO capability unavailable");
+#endif
 }
 
 ptr chezpp_net_scp_upload_file(uptr handle, const char *local_path, const char *remote_path,
@@ -2309,7 +2026,7 @@ ptr chezpp_net_scp_upload_file(uptr handle, const char *local_path, const char *
   status = split_remote_path(remote_path, &remote_parent, &remote_name);
   if (status != Strue) return status;
 
-  scp = p_ssh_scp_new(wrapper->session, SSH_SCP_WRITE, remote_parent);
+  scp = ssh_scp_new(wrapper->session, SSH_SCP_WRITE, remote_parent);
   if (scp == NULL) {
     free(remote_parent);
     free(remote_name);
@@ -2324,8 +2041,8 @@ ptr chezpp_net_scp_upload_file(uptr handle, const char *local_path, const char *
                                       deadline);
   }
 
-  if (initialized) p_ssh_scp_close(scp);
-  p_ssh_scp_free(scp);
+  if (initialized) ssh_scp_close(scp);
+  ssh_scp_free(scp);
   free(remote_parent);
   free(remote_name);
   return status;
@@ -2338,21 +2055,21 @@ ptr chezpp_net_scp_stat(uptr handle, const char *path) {
   ptr out;
   if (wrapper == NULL || wrapper->session == NULL)
     return make_error_status_message("invalid ssh session");
-  sftp = p_sftp_new(wrapper->session);
+  sftp = sftp_new(wrapper->session);
   if (sftp == NULL) return ssh_error_status_from_wrapper(wrapper, "failed to allocate sftp stat");
-  if (p_sftp_init(sftp) != SSH_OK) {
+  if (sftp_init(sftp) != SSH_OK) {
     out = ssh_error_status_from_wrapper(wrapper, "failed to initialize sftp stat");
-    p_sftp_free(sftp);
+    sftp_free(sftp);
     return out;
   }
-  attr = p_sftp_stat(sftp, path);
+  attr = sftp_stat(sftp, path);
   if (attr == NULL) {
-    p_sftp_free(sftp);
+    sftp_free(sftp);
     return Sfalse;
   }
   out = sftp_attr_to_vector(attr);
-  p_sftp_attributes_free(attr);
-  p_sftp_free(sftp);
+  sftp_attributes_free(attr);
+  sftp_free(sftp);
   return out;
 }
 
@@ -2374,7 +2091,7 @@ ptr chezpp_net_scp_download_file(uptr handle, const char *remote_path, const cha
     deadline += timeout_ms;
   }
 
-  scp = p_ssh_scp_new(wrapper->session, SSH_SCP_READ, remote_path);
+  scp = ssh_scp_new(wrapper->session, SSH_SCP_READ, remote_path);
   if (scp == NULL) return ssh_error_status_from_wrapper(wrapper, "failed to allocate scp session");
 
   use_nonblocking = 0;
@@ -2387,7 +2104,7 @@ ptr chezpp_net_scp_download_file(uptr handle, const char *remote_path, const cha
     if (request == SSH_SCP_REQUEST_WARNING) {
       status = scp_warning_status(scp);
     } else if (request == SSH_SCP_REQUEST_NEWDIR) {
-      if (p_ssh_scp_deny_request != NULL) p_ssh_scp_deny_request(scp, "directory not expected");
+      ssh_scp_deny_request(scp, "directory not expected");
       status = make_error_status_message("remote path is a directory; use scp-copy-directory");
     } else if (request != SSH_SCP_REQUEST_NEWFILE) {
       status = make_error_status_message("unexpected scp request kind while receiving file");
@@ -2397,12 +2114,12 @@ ptr chezpp_net_scp_download_file(uptr handle, const char *remote_path, const cha
     status = scp_accept_request_wait(wrapper, scp, use_nonblocking, deadline,
                                      "scp download timed out");
   if (status == Strue)
-    status = scp_download_file_to_path(wrapper, scp, local_path, p_ssh_scp_request_get_size64(scp),
-                                       p_ssh_scp_request_get_permissions(scp), use_nonblocking,
+    status = scp_download_file_to_path(wrapper, scp, local_path, ssh_scp_request_get_size64(scp),
+                                       ssh_scp_request_get_permissions(scp), use_nonblocking,
                                        deadline);
 
-  if (initialized) p_ssh_scp_close(scp);
-  p_ssh_scp_free(scp);
+  if (initialized) ssh_scp_close(scp);
+  ssh_scp_free(scp);
   return status;
 }
 
@@ -2428,7 +2145,7 @@ ptr chezpp_net_scp_upload_directory(uptr handle, const char *local_path, const c
   status = split_remote_path(remote_path, &remote_parent, &remote_name);
   if (status != Strue) return status;
 
-  scp = p_ssh_scp_new(wrapper->session, SSH_SCP_WRITE | SSH_SCP_RECURSIVE, remote_parent);
+  scp = ssh_scp_new(wrapper->session, SSH_SCP_WRITE | SSH_SCP_RECURSIVE, remote_parent);
   if (scp == NULL) {
     free(remote_parent);
     free(remote_name);
@@ -2444,8 +2161,8 @@ ptr chezpp_net_scp_upload_directory(uptr handle, const char *local_path, const c
                                            use_nonblocking, deadline);
   }
 
-  if (initialized) p_ssh_scp_close(scp);
-  p_ssh_scp_free(scp);
+  if (initialized) ssh_scp_close(scp);
+  ssh_scp_free(scp);
   free(remote_parent);
   free(remote_name);
   return status;
@@ -2468,7 +2185,7 @@ ptr chezpp_net_scp_download_directory(uptr handle, const char *remote_path, cons
     deadline += timeout_ms;
   }
 
-  scp = p_ssh_scp_new(wrapper->session, SSH_SCP_READ | SSH_SCP_RECURSIVE, remote_path);
+  scp = ssh_scp_new(wrapper->session, SSH_SCP_READ | SSH_SCP_RECURSIVE, remote_path);
   if (scp == NULL) return ssh_error_status_from_wrapper(wrapper, "failed to allocate scp session");
 
   use_nonblocking = 0;
@@ -2479,8 +2196,8 @@ ptr chezpp_net_scp_download_directory(uptr handle, const char *remote_path, cons
     status = scp_download_directory_to_path(wrapper, scp, local_path, use_nonblocking, deadline);
   }
 
-  if (initialized) p_ssh_scp_close(scp);
-  p_ssh_scp_free(scp);
+  if (initialized) ssh_scp_close(scp);
+  ssh_scp_free(scp);
   return status;
 }
 
@@ -2518,13 +2235,13 @@ static char *scp_quote_command(const char *mode, const char *path) {
 }
 
 static ptr scp_channel_error(chezpp_scp_transfer *t, const char *fallback) {
-  const char *message = p_ssh_get_error(t->owner->session);
+  const char *message = ssh_get_error(t->owner->session);
   return make_error_status_message(message == NULL || *message == '\0' ? fallback : message);
 }
 
 static ptr scp_write_pending_buffer(chezpp_scp_transfer *t, const unsigned char *buffer,
                                     size_t length, size_t *position) {
-  int rc = p_ssh_channel_write(t->channel, buffer + *position,
+  int rc = ssh_channel_write(t->channel, buffer + *position,
                                (uint32_t)(length - *position));
   if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLOUT);
   if (rc == 0) return scp_transfer_retry_pending(t, POLLOUT);
@@ -2536,7 +2253,7 @@ static ptr scp_write_pending_buffer(chezpp_scp_transfer *t, const unsigned char 
 
 static ptr scp_read_ack(chezpp_scp_transfer *t) {
   unsigned char ack;
-  int rc = p_ssh_channel_read(t->channel, &ack, 1, 0);
+  int rc = ssh_channel_read(t->channel, &ack, 1, 0);
   if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
   if (rc < 0) return scp_channel_error(t, "scp acknowledgment read failed");
   if (ack != 0) return make_error_status_message("remote scp rejected the transfer");
@@ -2563,14 +2280,14 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
   t->local_path = dup_cstring(direction == 0 ? target : source);
   t->remote_name = dup_cstring(direction == 0 ? source : target);
   if (t->local_path == NULL || t->remote_name == NULL) goto oom;
-  if (p_ssh_set_blocking != NULL) {
-    p_ssh_set_blocking(owner->session, 0);
+  {
+    ssh_set_blocking(owner->session, 0);
     t->blocking_changed = 1;
   }
   if (direction == 1) {
     if (stat(source, &st) != 0) goto errno_fail;
     if (!S_ISREG(st.st_mode)) {
-      if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+      if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
       free(t->local_path); free(t->remote_name); free(t);
       return make_path_error_status("local file expected", source);
     }
@@ -2580,7 +2297,7 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
     if (split_remote_path(target, &parent, &name) != Strue) goto fail;
     free(t->remote_name); t->remote_name = name; name = NULL;
     if (strchr(t->remote_name, '\n') != NULL || strchr(t->remote_name, '\r') != NULL) {
-      if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+      if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
       close(t->local_fd);
       free(parent); free(t->local_path); free(t->remote_name); free(t);
       return make_path_error_status("invalid remote file name", target);
@@ -2593,27 +2310,27 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
   }
   free(parent);
   if (t->command == NULL) goto oom;
-  t->channel = p_ssh_channel_new(owner->session);
+  t->channel = ssh_channel_new(owner->session);
   if (t->channel == NULL) goto fail;
-  t->fd = p_ssh_get_fd(owner->session);
+  t->fd = ssh_get_fd(owner->session);
   t->phase = 0;
   return make_status("ok", Sunsigned((uptr)t));
 oom:
   if (t->local_fd >= 0) close(t->local_fd);
-  if (t->channel != NULL) p_ssh_channel_free(t->channel);
-  if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+  if (t->channel != NULL) ssh_channel_free(t->channel);
+  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return make_errno_status();
 errno_fail:
   if (t->local_fd >= 0) close(t->local_fd);
-  if (t->channel != NULL) p_ssh_channel_free(t->channel);
-  if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+  if (t->channel != NULL) ssh_channel_free(t->channel);
+  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(parent); free(name); free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return make_errno_status();
 fail:
   if (t->local_fd >= 0) close(t->local_fd);
-  if (t->channel != NULL) p_ssh_channel_free(t->channel);
-  if (t->blocking_changed) p_ssh_set_blocking(owner->session, 1);
+  if (t->channel != NULL) ssh_channel_free(t->channel);
+  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(parent); free(name); free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return ssh_error_status_from_wrapper(owner, "failed to allocate scp transfer");
 }
@@ -2635,7 +2352,7 @@ static ptr scp_transfer_pending(chezpp_scp_transfer *t, int events) {
 }
 
 static ptr scp_transfer_retry_pending(chezpp_scp_transfer *t, int events) {
-  int flags = p_ssh_get_poll_flags == NULL ? 0 : p_ssh_get_poll_flags(t->owner->session);
+  int flags = ssh_get_poll_flags(t->owner->session);
   int requested = 0;
   if ((flags & SSH_WRITE_PENDING) != 0) requested |= POLLOUT;
   if ((flags & SSH_READ_PENDING) != 0) requested |= POLLIN;
@@ -2648,7 +2365,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
   if (t == NULL || t->cancelled || t->channel == NULL)
     return make_error_status_message("invalid or cancelled scp transfer");
   if (t->phase == 0) {
-    rc = p_ssh_channel_open_session(t->channel);
+    rc = ssh_channel_open_session(t->channel);
     if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLIN | POLLOUT);
     if (rc != SSH_OK) return scp_channel_error(t, "scp channel open failed");
     t->initialized = 1;
@@ -2656,7 +2373,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     return scp_transfer_progress(t);
   }
   if (t->phase == 1) {
-    rc = p_ssh_channel_request_exec(t->channel, t->command);
+    rc = ssh_channel_request_exec(t->channel, t->command);
     if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLIN | POLLOUT);
     if (rc != SSH_OK) return scp_channel_error(t, "scp exec request failed");
     t->phase = 2;
@@ -2706,7 +2423,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       t->phase = 5;
       return scp_transfer_progress(t);
     }
-    rc = p_ssh_channel_read(t->channel, t->header + t->header_len, 1, 0);
+    rc = ssh_channel_read(t->channel, t->header + t->header_len, 1, 0);
     if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
     if (rc < 0) return scp_channel_error(t, "scp header read failed");
     t->header_len++;
@@ -2765,7 +2482,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     }
     if (t->remaining == 0) {
       unsigned char end_marker;
-      rc = p_ssh_channel_read(t->channel, &end_marker, 1, 0);
+      rc = ssh_channel_read(t->channel, &end_marker, 1, 0);
       if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
       if (rc < 0) return scp_channel_error(t, "scp end marker read failed");
       if (end_marker != 0) return make_error_status_message("invalid scp end marker");
@@ -2777,7 +2494,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     }
     {
       size_t want = t->remaining > sizeof(t->buffer) ? sizeof(t->buffer) : (size_t)t->remaining;
-      rc = p_ssh_channel_read(t->channel, t->buffer, (uint32_t)want, 0);
+      rc = ssh_channel_read(t->channel, t->buffer, (uint32_t)want, 0);
       if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
       if (rc < 0) return scp_channel_error(t, "scp data read failed");
       {
@@ -2829,12 +2546,12 @@ void chezpp_net_scp_transfer_close(uptr handle) {
   if (t == NULL) return;
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) {
-    (void)p_ssh_channel_send_eof(t->channel);
-    (void)p_ssh_channel_close(t->channel);
-    p_ssh_channel_free(t->channel);
+    (void)ssh_channel_send_eof(t->channel);
+    (void)ssh_channel_close(t->channel);
+    ssh_channel_free(t->channel);
   }
   if (t->blocking_changed && t->owner != NULL && t->owner->session != NULL)
-    p_ssh_set_blocking(t->owner->session, 1);
+    ssh_set_blocking(t->owner->session, 1);
   if (t->direction == 0 && !t->completed && t->local_path != NULL)
     (void)unlink(t->local_path);
   free(t->command); free(t->local_path); free(t->remote_name); free(t);

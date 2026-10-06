@@ -209,18 +209,40 @@
           ffi-net-tls-ocsp-result
           ffi-net-tls-peer-certificate-der
           ffi-net-tls-peer-certificate-chain-der)
-  (import (chezpp chez)
+  (import (chezpp utils) (chezpp optional-library-check) (chezpp chez)
           (chezpp internal))
 
   (define ffi-optional-library-info
     (foreign-procedure "chezpp_optional_library_info" (string) scheme-object))
+  #|proc:ffi-zlib-stream-open
+  The `ffi-zlib-stream-open` procedure calls the native zlib operation `chezpp_zlib_stream_open`.
+  Parameters `compress`, `gzip` are passed to the native operation in that order.
+  `compress` is a number.
+  `gzip` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-zlib-stream-open
-    (foreign-procedure "chezpp_zlib_stream_open" (int int) uptr))
+    (let ([native (foreign-procedure "chezpp_zlib_stream_open" (int int) uptr)])
+      (lambda (compress gzip)
+        (pcheck ([integer? compress] [integer? gzip])
+                (require-optional-library 'ffi-zlib-stream-open 'zlib)
+                (native compress gzip)))))
   (define ffi-zlib-stream-process
     (foreign-procedure "chezpp_zlib_stream_process"
                        (uptr scheme-object int int int int) scheme-object))
+  #|proc:ffi-zlib-stream-close
+  The `ffi-zlib-stream-close` procedure calls the native zlib operation
+  `chezpp_zlib_stream_close`.
+  Parameters `handle` are passed to the native operation in that order.
+  `handle` is the native resource handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-zlib-stream-close
-    (foreign-procedure "chezpp_zlib_stream_close" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_zlib_stream_close" (uptr) void)])
+      (lambda (handle)
+        (pcheck ([natural? handle])
+                (require-optional-library 'ffi-zlib-stream-close 'zlib)
+                (native handle)))))
 
   (define net-af-inet (foreign-procedure "chezpp_net_af_inet" () int))
   (define net-af-inet6 (foreign-procedure "chezpp_net_af_inet6" () int))
@@ -292,14 +314,36 @@
     (foreign-procedure "chezpp_net_resolve_addresses" (string int int int) scheme-object))
   (define ffi-net-service->port
     (foreign-procedure "chezpp_net_service_to_port" (string int) scheme-object))
+  #|proc:ffi-net-dns-start
+  The `ffi-net-dns-start` procedure calls the native cares operation `chezpp_net_dns_start`.
+  Parameters `name`, `family`, `timeout-ms` are passed to the native operation in that order.
+  `name` is the name to hash in the UUID namespace.
+  `family` is a number.
+  `timeout-ms` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-dns-start
-    (foreign-procedure "chezpp_net_dns_start" (string int int) uptr))
+    (let ([native (foreign-procedure "chezpp_net_dns_start" (string int int) uptr)])
+      (lambda (name family timeout-ms)
+        (pcheck ([string? name] [integer? family] [integer? timeout-ms])
+                (require-optional-library 'ffi-net-dns-start 'cares)
+                (native name family timeout-ms)))))
   (define ffi-net-dns-advance
     (foreign-procedure "chezpp_net_dns_advance" (uptr) scheme-object))
   (define ffi-net-dns-cancel
     (foreign-procedure "chezpp_net_dns_cancel" (uptr) scheme-object))
+  #|proc:ffi-net-dns-close
+  The `ffi-net-dns-close` procedure calls the native cares operation `chezpp_net_dns_close`.
+  Parameters `handle` are passed to the native operation in that order.
+  `handle` is the native resource handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-dns-close
-    (foreign-procedure "chezpp_net_dns_close" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_net_dns_close" (uptr) void)])
+      (lambda (handle)
+        (pcheck ([natural? handle])
+                (require-optional-library 'ffi-net-dns-close 'cares)
+                (native handle)))))
   (define ffi-net-idna->ascii
     (foreign-procedure "chezpp_net_idna_to_ascii" (string) scheme-object))
   (define ffi-net-idna->unicode
@@ -338,8 +382,19 @@
     (foreign-procedure "chezpp_net_ftp_transfer_step" (uptr scheme-object int) scheme-object))
   (define ffi-net-ftp-transfer-cancel
     (foreign-procedure "chezpp_net_ftp_transfer_cancel" (uptr) scheme-object))
+  #|proc:ffi-net-ftp-transfer-close
+  The `ffi-net-ftp-transfer-close` procedure calls the native curl operation
+  `chezpp_net_ftp_transfer_close`.
+  Parameters `handle` are passed to the native operation in that order.
+  `handle` is the native resource handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-ftp-transfer-close
-    (foreign-procedure "chezpp_net_ftp_transfer_close" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_net_ftp_transfer_close" (uptr) void)])
+      (lambda (handle)
+        (pcheck ([natural? handle])
+                (require-optional-library 'ffi-net-ftp-transfer-close 'curl)
+                (native handle)))))
   (define ffi-net-ftp-session-open
     (foreign-procedure "chezpp_net_ftp_session_open" () scheme-object))
   (define ffi-net-ftp-session-close
@@ -364,8 +419,19 @@
     (foreign-procedure "chezpp_net_ftp_file_finish" (uptr) scheme-object))
   (define ffi-net-ftp-file-cancel
     (foreign-procedure "chezpp_net_ftp_file_cancel" (uptr) scheme-object))
+  #|proc:ffi-net-ftp-file-close
+  The `ffi-net-ftp-file-close` procedure calls the native curl operation
+  `chezpp_net_ftp_file_close`.
+  Parameters `handle` are passed to the native operation in that order.
+  `handle` is the native resource handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-ftp-file-close
-    (foreign-procedure "chezpp_net_ftp_file_close" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_net_ftp_file_close" (uptr) void)])
+      (lambda (handle)
+        (pcheck ([natural? handle])
+                (require-optional-library 'ffi-net-ftp-file-close 'curl)
+                (native handle)))))
   (define ffi-net-ssh-open
     (foreign-procedure "chezpp_net_ssh_open" (string int string int int) scheme-object))
   (define ffi-net-ssh-close
@@ -450,8 +516,19 @@
     (foreign-procedure "chezpp_net_scp_transfer_step" (uptr) scheme-object))
   (define ffi-net-scp-transfer-cancel
     (foreign-procedure "chezpp_net_scp_transfer_cancel" (uptr) scheme-object))
+  #|proc:ffi-net-scp-transfer-close
+  The `ffi-net-scp-transfer-close` procedure calls the native ssh operation
+  `chezpp_net_scp_transfer_close`.
+  Parameters `handle` are passed to the native operation in that order.
+  `handle` is the native resource handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-scp-transfer-close
-    (foreign-procedure "chezpp_net_scp_transfer_close" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_net_scp_transfer_close" (uptr) void)])
+      (lambda (handle)
+        (pcheck ([natural? handle])
+                (require-optional-library 'ffi-net-scp-transfer-close 'ssh)
+                (native handle)))))
   (define ffi-net-sftp-list
     (foreign-procedure "chezpp_net_sftp_list" (uptr string) scheme-object))
   (define ffi-net-sftp-stat
@@ -579,10 +656,28 @@
     (foreign-procedure "chezpp_net_grpc_server_respond"
                        (uptr ptr int int int string scheme-object)
                        scheme-object))
+  #|proc:ffi-net-grpc-capabilities
+  The `ffi-net-grpc-capabilities` procedure calls the native grpc operation
+  `chezpp_net_grpc_capabilities`.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-grpc-capabilities
-    (foreign-procedure "chezpp_net_grpc_capabilities" () unsigned-int))
+    (let ([native (foreign-procedure "chezpp_net_grpc_capabilities" () unsigned-int)])
+      (lambda ()
+        (pcheck ()
+                (require-optional-library 'ffi-net-grpc-capabilities 'grpc)
+                (native )))))
+  #|proc:ffi-net-grpc-driver-fd
+  The `ffi-net-grpc-driver-fd` procedure calls the native grpc operation
+  `chezpp_net_grpc_driver_fd`.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-grpc-driver-fd
-    (foreign-procedure "chezpp_net_grpc_driver_fd" () int))
+    (let ([native (foreign-procedure "chezpp_net_grpc_driver_fd" () int)])
+      (lambda ()
+        (pcheck ()
+                (require-optional-library 'ffi-net-grpc-driver-fd 'grpc)
+                (native )))))
   (define ffi-net-grpc-driver-drain
     (foreign-procedure "chezpp_net_grpc_driver_drain" () scheme-object))
   (define ffi-net-sftp-flag-read
@@ -603,10 +698,32 @@
     (foreign-procedure "chezpp_net_sftp_flag_text" () int))
   (define ffi-net-tls-load-error
     (foreign-procedure "chezpp_net_tls_load_error" () ptr))
+  #|proc:ffi-net-tls-context-create
+  The `ffi-net-tls-context-create` procedure calls the native openssl operation
+  `chezpp_net_tls_context_create`.
+  Parameters `mode` are passed to the native operation in that order.
+  `mode` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-tls-context-create
-    (foreign-procedure "chezpp_net_tls_context_create" (int) uptr))
+    (let ([native (foreign-procedure "chezpp_net_tls_context_create" (int) uptr)])
+      (lambda (mode)
+        (pcheck ([integer? mode])
+                (require-optional-library 'ffi-net-tls-context-create 'openssl)
+                (native mode)))))
+  #|proc:ffi-net-tls-context-free
+  The `ffi-net-tls-context-free` procedure calls the native openssl operation
+  `chezpp_net_tls_context_free`.
+  Parameters `handle` are passed to the native operation in that order.
+  `handle` is the native resource handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-net-tls-context-free
-    (foreign-procedure "chezpp_net_tls_context_free" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_net_tls_context_free" (uptr) void)])
+      (lambda (handle)
+        (pcheck ([natural? handle])
+                (require-optional-library 'ffi-net-tls-context-free 'openssl)
+                (native handle)))))
   (define ffi-net-tls-context-load-ca-file
     (foreign-procedure "chezpp_net_tls_context_load_ca_file" (uptr string) scheme-object))
   (define ffi-net-tls-context-load-ca-path

@@ -8,6 +8,7 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <stddef.h>
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0

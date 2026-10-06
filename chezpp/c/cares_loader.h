@@ -5,6 +5,5 @@
 
 int chezpp_cares_require(void);
 const chezpp_optional_library *chezpp_cares_library(void);
-void *chezpp_cares_symbol(const char *name);
 
 #endif

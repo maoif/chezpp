@@ -1,5 +1,8 @@
 #include "common.h"
-#include "xxhash-0.8-abi.h"
+#include "build-config.h"
+#if CHEZPP_WITH_XXHASH
+#include <xxhash.h>
+#endif
 
 //=======================================================================
 // xxhash

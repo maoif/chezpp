@@ -15,7 +15,7 @@ SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fix
 CC := gcc
 CFLAGS := -fPIC -Wall -Wextra -O2 -pthread
 CFLAGS += -I$(SCHEME_INCLUDE_DIR)
-LDLIBS := -ldl
+LDLIBS :=
 
 include optional-libraries.mk
 

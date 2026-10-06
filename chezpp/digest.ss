@@ -49,7 +49,7 @@
           digester-get digester-reset! digester-finalize!
 
           call-with-digester)
-  (import (chezpp chez)
+  (import (chezpp optional-library-check) (chezpp chez)
           (chezpp utils)
           (chezpp internal)
           (chezpp file))
@@ -244,32 +244,128 @@
             (mutable finalized?)))
 
 
+  #|proc:ffi-blake3-create
+  The `ffi-blake3-create` procedure calls the native blake3 operation `digester_blake3_create`.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-blake3-create
-    (foreign-procedure "digester_blake3_create" () void*))
+    (let ([native (foreign-procedure "digester_blake3_create" () void*)])
+      (lambda ()
+        (pcheck ()
+                (require-optional-library 'ffi-blake3-create 'blake3)
+                (native )))))
   (define ffi-blake3-get
     (foreign-procedure "digester_blake3_get" (void*) ptr))
+  #|proc:ffi-blake3-string-update!
+  The `ffi-blake3-string-update!` procedure calls the native blake3 operation
+  `digester_blake3_update_string`.
+  Parameters `context`, `text`, `start`, `stop` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `text` is the input text.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-blake3-string-update!
-    (foreign-procedure "digester_blake3_update_string" (void* ptr int int) void))
+    (let ([native (foreign-procedure "digester_blake3_update_string" (void* ptr int int) void)])
+      (lambda (context text start stop)
+        (pcheck ([natural? context] [integer? start] [integer? stop])
+                (require-optional-library 'ffi-blake3-string-update! 'blake3)
+                (native context text start stop)))))
+  #|proc:ffi-blake3-bytevector-update!
+  The `ffi-blake3-bytevector-update!` procedure calls the native blake3 operation
+  `digester_blake3_update_bytevector`.
+  Parameters `context`, `bytevector`, `start`, `stop` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `bytevector` is the input bytevector.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-blake3-bytevector-update!
-    (foreign-procedure "digester_blake3_update_bytevector" (void* ptr int int) void))
+    (let ([native (foreign-procedure "digester_blake3_update_bytevector" (void* ptr int int) void)])
+      (lambda (context bytevector start stop)
+        (pcheck ([natural? context] [integer? start] [integer? stop])
+                (require-optional-library 'ffi-blake3-bytevector-update! 'blake3)
+                (native context bytevector start stop)))))
   (define ffi-blake3-finalize!
     (foreign-procedure "digester_blake3_finalize" (void*) ptr))
+  #|proc:ffi-blake3-reset!
+  The `ffi-blake3-reset!` procedure calls the native blake3 operation `digester_blake3_reset`.
+  Parameters `context` are passed to the native operation in that order.
+  `context` is the native context handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-blake3-reset!
-    (foreign-procedure "digester_blake3_reset" (void*) void))
+    (let ([native (foreign-procedure "digester_blake3_reset" (void*) void)])
+      (lambda (context)
+        (pcheck ([natural? context])
+                (require-optional-library 'ffi-blake3-reset! 'blake3)
+                (native context)))))
 
 
+  #|proc:ffi-openssl-create
+  The `ffi-openssl-create` procedure calls the native openssl operation `digester_openssl_create`.
+  Parameters `algorithm` are passed to the native operation in that order.
+  `algorithm` is the algorithm identifier.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-openssl-create
-    (foreign-procedure "digester_openssl_create" (ptr) void*))
+    (let ([native (foreign-procedure "digester_openssl_create" (ptr) void*)])
+      (lambda (algorithm)
+        (pcheck ()
+                (require-optional-library 'ffi-openssl-create 'openssl)
+                (native algorithm)))))
   (define ffi-openssl-get
     (foreign-procedure "digester_openssl_get" (void*) ptr))
+  #|proc:ffi-openssl-string-update!
+  The `ffi-openssl-string-update!` procedure calls the native openssl operation
+  `digester_openssl_update_string`.
+  Parameters `context`, `text`, `start`, `stop` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `text` is the input text.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-openssl-string-update!
-    (foreign-procedure "digester_openssl_update_string" (void* ptr int int) void))
+    (let ([native (foreign-procedure "digester_openssl_update_string" (void* ptr int int) void)])
+      (lambda (context text start stop)
+        (pcheck ([natural? context] [integer? start] [integer? stop])
+                (require-optional-library 'ffi-openssl-string-update! 'openssl)
+                (native context text start stop)))))
+  #|proc:ffi-openssl-bytevector-update!
+  The `ffi-openssl-bytevector-update!` procedure calls the native openssl operation
+  `digester_openssl_update_bytevector`.
+  Parameters `context`, `bytevector`, `start`, `stop` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `bytevector` is the input bytevector.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-openssl-bytevector-update!
-    (foreign-procedure "digester_openssl_update_bytevector" (void* ptr int int) void))
+    (let ([native (foreign-procedure "digester_openssl_update_bytevector" (void* ptr int int) void)])
+      (lambda (context bytevector start stop)
+        (pcheck ([natural? context] [integer? start] [integer? stop])
+                (require-optional-library 'ffi-openssl-bytevector-update! 'openssl)
+                (native context bytevector start stop)))))
   (define ffi-openssl-finalize!
     (foreign-procedure "digester_openssl_finalize" (void*) ptr))
+  #|proc:ffi-openssl-reset!
+  The `ffi-openssl-reset!` procedure calls the native openssl operation `digester_openssl_reset`.
+  Parameters `context` are passed to the native operation in that order.
+  `context` is the native context handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-openssl-reset!
-    (foreign-procedure "digester_openssl_reset" (void*) void))
+    (let ([native (foreign-procedure "digester_openssl_reset" (void*) void)])
+      (lambda (context)
+        (pcheck ([natural? context])
+                (require-optional-library 'ffi-openssl-reset! 'openssl)
+                (native context)))))
 
 
   (define check-finalized

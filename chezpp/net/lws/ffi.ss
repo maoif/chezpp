@@ -33,9 +33,9 @@
           lws-body-consumed
           lws-context-inject-event!
           lws-context-inject-poll!)
-  (import (chezpp chez)
+  (import (chezpp utils) (chezpp optional-library-check) (chezpp chez)
           (chezpp net errors)
-          (chezpp utils))
+          )
 
   (define lws-cap-http1 (fxsll 1 0))
   (define lws-cap-http2 (fxsll 1 1))
@@ -46,77 +46,384 @@
   (define ffi-lws-status
     (foreign-procedure "chezpp_lws_status" () scheme-object))
 
+  #|proc:ffi-lws-context-open
+  The `ffi-lws-context-open` procedure calls the native websockets operation
+  `chezpp_lws_http_context_open`.
+  Parameters `event-capacity`, `payload-capacity`, `tls-context-handle`, `proxy-address`,
+  `proxy-port` are passed to the native operation in that order.
+  `event-capacity` is a native handle.
+  `payload-capacity` is a native handle.
+  `tls-context-handle` is a native handle.
+  `proxy-address` is a string.
+  `proxy-port` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-context-open
-    (foreign-procedure "chezpp_lws_http_context_open" (uptr uptr uptr string int) uptr))
+    (let ([native (foreign-procedure "chezpp_lws_http_context_open" (uptr uptr uptr string int) uptr)])
+      (lambda (event-capacity payload-capacity tls-context-handle proxy-address proxy-port)
+        (pcheck ([natural? event-capacity] [natural? payload-capacity] [natural? tls-context-handle] [string? proxy-address] [integer? proxy-port])
+                (require-optional-library 'ffi-lws-context-open 'websockets)
+                (native event-capacity payload-capacity tls-context-handle proxy-address proxy-port)))))
+  #|proc:ffi-lws-server-context-open
+  The `ffi-lws-server-context-open` procedure calls the native websockets operation
+  `chezpp_lws_http_server_context_open`.
+  Parameters `event-capacity`, `payload-capacity`, `interface-name`, `port`, `tls-context-handle`
+  are passed to the native operation in that order.
+  `event-capacity` is a native handle.
+  `payload-capacity` is a native handle.
+  `interface-name` is a string.
+  `port` is a number.
+  `tls-context-handle` is a native handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-server-context-open
-    (foreign-procedure "chezpp_lws_http_server_context_open"
-                       (uptr uptr string int uptr) uptr))
+    (let ([native (foreign-procedure "chezpp_lws_http_server_context_open" (uptr uptr string int uptr) uptr)])
+      (lambda (event-capacity payload-capacity interface-name port tls-context-handle)
+        (pcheck ([natural? event-capacity] [natural? payload-capacity] [string? interface-name] [integer? port] [natural? tls-context-handle])
+                (require-optional-library 'ffi-lws-server-context-open 'websockets)
+                (native event-capacity payload-capacity interface-name port tls-context-handle)))))
+  #|proc:ffi-lws-context-close
+  The `ffi-lws-context-close` procedure calls the native websockets operation
+  `chezpp_lws_http_context_close`.
+  Parameters `context-handle` are passed to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-context-close
-    (foreign-procedure "chezpp_lws_http_context_close" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_lws_http_context_close" (uptr) void)])
+      (lambda (context-handle)
+        (pcheck ([natural? context-handle])
+                (require-optional-library 'ffi-lws-context-close 'websockets)
+                (native context-handle)))))
+  #|proc:ffi-lws-context-wakeup-fd
+  The `ffi-lws-context-wakeup-fd` procedure calls the native websockets operation
+  `chezpp_lws_http_context_wakeup_fd`.
+  Parameters `context-handle` are passed to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-context-wakeup-fd
-    (foreign-procedure "chezpp_lws_http_context_wakeup_fd" (uptr) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_context_wakeup_fd" (uptr) int)])
+      (lambda (context-handle)
+        (pcheck ([natural? context-handle])
+                (require-optional-library 'ffi-lws-context-wakeup-fd 'websockets)
+                (native context-handle)))))
   (define ffi-lws-context-poll-snapshot
     (foreign-procedure "chezpp_lws_http_context_poll_snapshot" (uptr) scheme-object))
+  #|proc:ffi-lws-context-service-fd
+  The `ffi-lws-context-service-fd` procedure calls the native websockets operation
+  `chezpp_lws_http_context_service_fd`.
+  Parameters `context-handle`, `fd`, `revents` are passed to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `fd` is a number.
+  `revents` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-context-service-fd
-    (foreign-procedure "chezpp_lws_http_context_service_fd" (uptr int int) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_context_service_fd" (uptr int int) int)])
+      (lambda (context-handle fd revents)
+        (pcheck ([natural? context-handle] [integer? fd] [integer? revents])
+                (require-optional-library 'ffi-lws-context-service-fd 'websockets)
+                (native context-handle fd revents)))))
   (define ffi-lws-context-next-event
     (foreign-procedure "chezpp_lws_http_context_next_event" (uptr) scheme-object))
+  #|proc:ffi-lws-context-timeout-ms
+  The `ffi-lws-context-timeout-ms` procedure calls the native websockets operation
+  `chezpp_lws_http_context_timeout_ms`.
+  Parameters `context-handle`, `maximum-timeout-ms` are passed to the native operation in that
+  order.
+  `context-handle` is the native HTTP context handle.
+  `maximum-timeout-ms` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-context-timeout-ms
-    (foreign-procedure "chezpp_lws_http_context_timeout_ms" (uptr int) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_context_timeout_ms" (uptr int) int)])
+      (lambda (context-handle maximum-timeout-ms)
+        (pcheck ([natural? context-handle] [integer? maximum-timeout-ms])
+                (require-optional-library 'ffi-lws-context-timeout-ms 'websockets)
+                (native context-handle maximum-timeout-ms)))))
+  #|proc:ffi-lws-context-wakeup
+  The `ffi-lws-context-wakeup` procedure calls the native websockets operation
+  `chezpp_lws_http_context_wakeup`.
+  Parameters `context-handle` are passed to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-context-wakeup
-    (foreign-procedure "chezpp_lws_http_context_wakeup" (uptr) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_context_wakeup" (uptr) int)])
+      (lambda (context-handle)
+        (pcheck ([natural? context-handle])
+                (require-optional-library 'ffi-lws-context-wakeup 'websockets)
+                (native context-handle)))))
   (define ffi-lws-context-pool-metrics
     (foreign-procedure "chezpp_lws_http_context_pool_metrics" (uptr) scheme-object))
+  #|proc:ffi-lws-signal-open
+  The `ffi-lws-signal-open` procedure calls the native websockets operation
+  `chezpp_lws_http_signal_open`.
+  Parameters `context-handle` are passed to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-signal-open
-    (foreign-procedure "chezpp_lws_http_signal_open" (uptr) uptr))
+    (let ([native (foreign-procedure "chezpp_lws_http_signal_open" (uptr) uptr)])
+      (lambda (context-handle)
+        (pcheck ([natural? context-handle])
+                (require-optional-library 'ffi-lws-signal-open 'websockets)
+                (native context-handle)))))
+  #|proc:ffi-lws-signal-fd
+  The `ffi-lws-signal-fd` procedure calls the native websockets operation
+  `chezpp_lws_http_signal_fd`.
+  Parameters `signal-handle` are passed to the native operation in that order.
+  `signal-handle` is the native signal handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-signal-fd
-    (foreign-procedure "chezpp_lws_http_signal_fd" (uptr) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_signal_fd" (uptr) int)])
+      (lambda (signal-handle)
+        (pcheck ([natural? signal-handle])
+                (require-optional-library 'ffi-lws-signal-fd 'websockets)
+                (native signal-handle)))))
+  #|proc:ffi-lws-signal-notify
+  The `ffi-lws-signal-notify` procedure calls the native websockets operation
+  `chezpp_lws_http_signal_notify`.
+  Parameters `signal-handle` are passed to the native operation in that order.
+  `signal-handle` is the native signal handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-signal-notify
-    (foreign-procedure "chezpp_lws_http_signal_notify" (uptr) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_signal_notify" (uptr) int)])
+      (lambda (signal-handle)
+        (pcheck ([natural? signal-handle])
+                (require-optional-library 'ffi-lws-signal-notify 'websockets)
+                (native signal-handle)))))
+  #|proc:ffi-lws-signal-drain
+  The `ffi-lws-signal-drain` procedure calls the native websockets operation
+  `chezpp_lws_http_signal_drain`.
+  Parameters `signal-handle` are passed to the native operation in that order.
+  `signal-handle` is the native signal handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-signal-drain
-    (foreign-procedure "chezpp_lws_http_signal_drain" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_lws_http_signal_drain" (uptr) void)])
+      (lambda (signal-handle)
+        (pcheck ([natural? signal-handle])
+                (require-optional-library 'ffi-lws-signal-drain 'websockets)
+                (native signal-handle)))))
+  #|proc:ffi-lws-signal-close
+  The `ffi-lws-signal-close` procedure calls the native websockets operation
+  `chezpp_lws_http_signal_close`.
+  Parameters `signal-handle` are passed to the native operation in that order.
+  `signal-handle` is the native signal handle.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-signal-close
-    (foreign-procedure "chezpp_lws_http_signal_close" (uptr) void))
+    (let ([native (foreign-procedure "chezpp_lws_http_signal_close" (uptr) void)])
+      (lambda (signal-handle)
+        (pcheck ([natural? signal-handle])
+                (require-optional-library 'ffi-lws-signal-close 'websockets)
+                (native signal-handle)))))
+  #|proc:ffi-lws-client-start
+  The `ffi-lws-client-start` procedure calls the native websockets operation
+  `chezpp_lws_http_client_start`.
+  Parameters `context-handle`, `connection-id`, `stream-id`, `generation`, `address`, `port`,
+  `tls`, `method`, `host`, `path`, `headers`, `initial-body`, `has-body`, `alpn` are passed to the
+  native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  `address` is a string.
+  `port` is a number.
+  `tls` is a number.
+  `method` is a string.
+  `host` is a string.
+  `path` is a string.
+  `headers` is a Scheme object.
+  `initial-body` is a Scheme object.
+  `has-body` is a number.
+  `alpn` is a string.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-client-start
-    (foreign-procedure "chezpp_lws_http_client_start"
-                       (uptr unsigned-64 unsigned-64 unsigned-64 string int int
-                             string string string scheme-object scheme-object int string)
-                       int))
+    (let ([native (foreign-procedure "chezpp_lws_http_client_start" (uptr unsigned-64 unsigned-64 unsigned-64 string int int
+                             string string string scheme-object scheme-object int string) int)])
+      (lambda (context-handle connection-id stream-id generation address port tls method host path headers initial-body has-body alpn)
+        (pcheck ([natural? context-handle] [natural? connection-id] [natural? stream-id] [natural? generation] [string? address] [integer? port] [integer? tls] [string? method] [string? host] [string? path] [integer? has-body] [string? alpn])
+                (require-optional-library 'ffi-lws-client-start 'websockets)
+                (native context-handle connection-id stream-id generation address port tls method host path headers initial-body has-body alpn)))))
+  #|proc:ffi-lws-client-acquire
+  The `ffi-lws-client-acquire` procedure calls the native websockets operation
+  `chezpp_lws_http_client_acquire`.
+  Parameters `context-handle`, `connection-id`, `stream-id`, `generation` are passed to the native
+  operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-client-acquire
-    (foreign-procedure "chezpp_lws_http_client_acquire"
-                       (uptr unsigned-64 unsigned-64 unsigned-64) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_client_acquire" (uptr unsigned-64 unsigned-64 unsigned-64) int)])
+      (lambda (context-handle connection-id stream-id generation)
+        (pcheck ([natural? context-handle] [natural? connection-id] [natural? stream-id] [natural? generation])
+                (require-optional-library 'ffi-lws-client-acquire 'websockets)
+                (native context-handle connection-id stream-id generation)))))
+  #|proc:ffi-lws-client-release
+  The `ffi-lws-client-release` procedure calls the native websockets operation
+  `chezpp_lws_http_client_release`.
+  Parameters `context-handle`, `connection-id`, `stream-id`, `generation` are passed to the native
+  operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-client-release
-    (foreign-procedure "chezpp_lws_http_client_release"
-                       (uptr unsigned-64 unsigned-64 unsigned-64) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_client_release" (uptr unsigned-64 unsigned-64 unsigned-64) int)])
+      (lambda (context-handle connection-id stream-id generation)
+        (pcheck ([natural? context-handle] [natural? connection-id] [natural? stream-id] [natural? generation])
+                (require-optional-library 'ffi-lws-client-release 'websockets)
+                (native context-handle connection-id stream-id generation)))))
+  #|proc:ffi-lws-client-body-submit
+  The `ffi-lws-client-body-submit` procedure calls the native websockets operation
+  `chezpp_lws_http_client_body_submit`.
+  Parameters `context-handle`, `connection-id`, `stream-id`, `generation`, `payload`,
+  `final-chunk` are passed to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  `payload` is a Scheme object.
+  `final-chunk` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-client-body-submit
-    (foreign-procedure "chezpp_lws_http_client_body_submit"
-                       (uptr unsigned-64 unsigned-64 unsigned-64 scheme-object int)
-                       int))
+    (let ([native (foreign-procedure "chezpp_lws_http_client_body_submit" (uptr unsigned-64 unsigned-64 unsigned-64 scheme-object int) int)])
+      (lambda (context-handle connection-id stream-id generation payload final-chunk)
+        (pcheck ([natural? context-handle] [natural? connection-id] [natural? stream-id] [natural? generation] [integer? final-chunk])
+                (require-optional-library 'ffi-lws-client-body-submit 'websockets)
+                (native context-handle connection-id stream-id generation payload final-chunk)))))
+  #|proc:ffi-lws-client-body-drain
+  The `ffi-lws-client-body-drain` procedure calls the native websockets operation
+  `chezpp_lws_http_client_body_drain`.
+  Parameters `context-handle`, `connection-id`, `stream-id`, `generation` are passed to the native
+  operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-client-body-drain
-    (foreign-procedure "chezpp_lws_http_client_body_drain"
-                       (uptr unsigned-64 unsigned-64 unsigned-64)
-                       int))
+    (let ([native (foreign-procedure "chezpp_lws_http_client_body_drain" (uptr unsigned-64 unsigned-64 unsigned-64) int)])
+      (lambda (context-handle connection-id stream-id generation)
+        (pcheck ([natural? context-handle] [natural? connection-id] [natural? stream-id] [natural? generation])
+                (require-optional-library 'ffi-lws-client-body-drain 'websockets)
+                (native context-handle connection-id stream-id generation)))))
   (define ffi-lws-server-request-dequeue
     (foreign-procedure "chezpp_lws_http_server_request_dequeue" (uptr) scheme-object))
+  #|proc:ffi-lws-server-response-submit
+  The `ffi-lws-server-response-submit` procedure calls the native websockets operation
+  `chezpp_lws_http_server_response_submit`.
+  Parameters `context-handle`, `connection-id`, `stream-id`, `generation`, `status`, `headers`,
+  `payload`, `final-chunk` are passed to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  `status` is a number.
+  `headers` is a Scheme object.
+  `payload` is a Scheme object.
+  `final-chunk` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-server-response-submit
-    (foreign-procedure "chezpp_lws_http_server_response_submit"
-                       (uptr unsigned-64 unsigned-64 unsigned-64 int scheme-object scheme-object int)
-                       int))
+    (let ([native (foreign-procedure "chezpp_lws_http_server_response_submit" (uptr unsigned-64 unsigned-64 unsigned-64 int scheme-object scheme-object int) int)])
+      (lambda (context-handle connection-id stream-id generation status headers payload final-chunk)
+        (pcheck ([natural? context-handle] [natural? connection-id] [natural? stream-id] [natural? generation] [integer? status] [integer? final-chunk])
+                (require-optional-library 'ffi-lws-server-response-submit 'websockets)
+                (native context-handle connection-id stream-id generation status headers payload final-chunk)))))
+  #|proc:ffi-lws-stream-cancel
+  The `ffi-lws-stream-cancel` procedure calls the native websockets operation
+  `chezpp_lws_http_stream_cancel`.
+  Parameters `context-handle`, `connection-id`, `stream-id`, `generation`, `status` are passed to
+  the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  `status` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-stream-cancel
-    (foreign-procedure "chezpp_lws_http_stream_cancel"
-                       (uptr unsigned-64 unsigned-64 unsigned-64 int)
-                       int))
+    (let ([native (foreign-procedure "chezpp_lws_http_stream_cancel" (uptr unsigned-64 unsigned-64 unsigned-64 int) int)])
+      (lambda (context-handle connection-id stream-id generation status)
+        (pcheck ([natural? context-handle] [natural? connection-id] [natural? stream-id] [natural? generation] [integer? status])
+                (require-optional-library 'ffi-lws-stream-cancel 'websockets)
+                (native context-handle connection-id stream-id generation status)))))
+  #|proc:ffi-lws-body-consumed
+  The `ffi-lws-body-consumed` procedure calls the native websockets operation
+  `chezpp_lws_http_body_consumed`.
+  Parameters `context-handle`, `connection-id`, `stream-id`, `generation`, `byte-count` are passed
+  to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  `byte-count` is a native handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-body-consumed
-    (foreign-procedure "chezpp_lws_http_body_consumed"
-                       (uptr unsigned-64 unsigned-64 unsigned-64 uptr)
-                       int))
+    (let ([native (foreign-procedure "chezpp_lws_http_body_consumed" (uptr unsigned-64 unsigned-64 unsigned-64 uptr) int)])
+      (lambda (context-handle connection-id stream-id generation byte-count)
+        (pcheck ([natural? context-handle] [natural? connection-id] [natural? stream-id] [natural? generation] [natural? byte-count])
+                (require-optional-library 'ffi-lws-body-consumed 'websockets)
+                (native context-handle connection-id stream-id generation byte-count)))))
+  #|proc:ffi-lws-context-inject-event
+  The `ffi-lws-context-inject-event` procedure calls the native websockets operation
+  `chezpp_lws_http_inject_event`.
+  Parameters `context-handle`, `tag`, `connection-id`, `stream-id`, `generation`, `status`,
+  `payload`, `protocol`, `reusable`, `peer-h2-capacity`, `peer-h2-capacity-known`,
+  `terminal-scope` are passed to the native operation in that order.
+  `context-handle` is the native HTTP context handle.
+  `tag` is a number.
+  `connection-id` is the HTTP connection identifier.
+  `stream-id` is the HTTP stream identifier.
+  `generation` is the HTTP stream generation.
+  `status` is a number.
+  `payload` is a Scheme object.
+  `protocol` is a number.
+  `reusable` is a number.
+  `peer-h2-capacity` is a number.
+  `peer-h2-capacity-known` is a number.
+  `terminal-scope` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-context-inject-event
-    (foreign-procedure "chezpp_lws_http_inject_event"
-                       (uptr int unsigned-64 unsigned-64 unsigned-64 int scheme-object
-                             int int unsigned-32 int int)
-                       int))
+    (let ([native (foreign-procedure "chezpp_lws_http_inject_event" (uptr int unsigned-64 unsigned-64 unsigned-64 int scheme-object
+                             int int unsigned-32 int int) int)])
+      (lambda (context-handle tag connection-id stream-id generation status payload protocol reusable peer-h2-capacity peer-h2-capacity-known terminal-scope)
+        (pcheck ([natural? context-handle] [integer? tag] [natural? connection-id] [natural? stream-id] [natural? generation] [integer? status] [integer? protocol] [integer? reusable] [natural? peer-h2-capacity] [integer? peer-h2-capacity-known] [integer? terminal-scope])
+                (require-optional-library 'ffi-lws-context-inject-event 'websockets)
+                (native context-handle tag connection-id stream-id generation status payload protocol reusable peer-h2-capacity peer-h2-capacity-known terminal-scope)))))
+  #|proc:ffi-lws-context-inject-poll
+  The `ffi-lws-context-inject-poll` procedure calls the native websockets operation
+  `chezpp_lws_http_inject_poll`.
+  Parameters `context-handle`, `operation`, `fd`, `events` are passed to the native operation in
+  that order.
+  `context-handle` is the native HTTP context handle.
+  `operation` is a number.
+  `fd` is a number.
+  `events` is a number.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
   (define ffi-lws-context-inject-poll
-    (foreign-procedure "chezpp_lws_http_inject_poll" (uptr int int int) int))
+    (let ([native (foreign-procedure "chezpp_lws_http_inject_poll" (uptr int int int) int)])
+      (lambda (context-handle operation fd events)
+        (pcheck ([natural? context-handle] [integer? operation] [integer? fd] [integer? events])
+                (require-optional-library 'ffi-lws-context-inject-poll 'websockets)
+                (native context-handle operation fd events)))))
 
   (define valid-lws-status?
     (lambda (status)

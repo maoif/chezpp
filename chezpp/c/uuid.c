@@ -1,8 +1,11 @@
+#include "build-config.h"
 #include "common.h"
 
 #include <string.h>
 
+#if CHEZPP_WITH_UUID
 #include <uuid/uuid.h>
+#endif
 
 ptr chezpp_generate_uuid() {
   uuid_t uuid;

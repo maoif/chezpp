@@ -1,7 +1,10 @@
 #ifndef CHEZPP_LWS_HTTP_H
 #define CHEZPP_LWS_HTTP_H
+#include "../build-config.h"
 
+#if CHEZPP_WITH_WEBSOCKETS
 #include <libwebsockets.h>
+#endif
 #include <pthread.h>
 #include <scheme.h>
 #include <stddef.h>

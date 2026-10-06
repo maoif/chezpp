@@ -48,7 +48,7 @@
           hasher-update-flvector!
 
           call-with-hasher)
-  (import (chezpp chez)
+  (import (chezpp optional-library-check) (chezpp chez)
           (chezpp utils)
           (chezpp internal)
           (chezpp io)
@@ -94,18 +94,136 @@
 ;;;;===----------------------------------------------------------------------===
 
 
-  (define ffi-xxh32   (foreign-procedure "hash_XXH32"   (ptr unsigned-int)  unsigned-int))
+  #|proc:ffi-xxh32
+  The `ffi-xxh32` procedure calls the native xxhash operation `hash_XXH32`.
+  Parameters `bytevector`, `seed` are passed to the native operation in that order.
+  `bytevector` is the input bytevector.
+  `seed` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32
+    (let ([native (foreign-procedure "hash_XXH32" (ptr unsigned-int) unsigned-int)])
+      (lambda (bytevector seed)
+        (pcheck ([natural? seed])
+                (require-optional-library 'ffi-xxh32 'xxhash)
+                (native bytevector seed)))))
   (define ffi-xxh64   (foreign-procedure "hash_XXH64"   (ptr unsigned-long) ptr))
   (define ffi-xxh3-64 (foreign-procedure "hash_XXH3_64" (ptr unsigned-long) ptr))
 
-  (define ffi-xxh32-fixnum   (foreign-procedure "hash_XXH32_fixnum" (fixnum unsigned-32) unsigned-32))
-  (define ffi-xxh32-flonum   (foreign-procedure "hash_XXH32_flonum" (double unsigned-32) unsigned-32))
-  (define ffi-xxh32-ratnum   (foreign-procedure "hash_XXH32_ratnum" (fixnum fixnum unsigned-32) unsigned-32))
-  (define ffi-xxh32-cflonum  (foreign-procedure "hash_XXH32_cflonum" (double double unsigned-32) unsigned-32))
-  (define ffi-xxh32-string   (foreign-procedure "hash_XXH32_string" (ptr int int unsigned-32) unsigned-32))
-  (define ffi-xxh32-fxvector (foreign-procedure "hash_XXH32_fxvector" (ptr int int unsigned-32) unsigned-32))
-  (define ffi-xxh32-flvector (foreign-procedure "hash_XXH32_flvector" (ptr int int unsigned-32) unsigned-32))
-  (define ffi-xxh32-bytevector (foreign-procedure "hash_XXH32_bytevector" (ptr int int unsigned-32) unsigned-32))
+  #|proc:ffi-xxh32-fixnum
+  The `ffi-xxh32-fixnum` procedure calls the native xxhash operation `hash_XXH32_fixnum`.
+  Parameters `value`, `salt` are passed to the native operation in that order.
+  `value` is the value passed to the native operation.
+  `salt` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-fixnum
+    (let ([native (foreign-procedure "hash_XXH32_fixnum" (fixnum unsigned-32) unsigned-32)])
+      (lambda (value salt)
+        (pcheck ([fixnum? value] [natural? salt])
+                (require-optional-library 'ffi-xxh32-fixnum 'xxhash)
+                (native value salt)))))
+  #|proc:ffi-xxh32-flonum
+  The `ffi-xxh32-flonum` procedure calls the native xxhash operation `hash_XXH32_flonum`.
+  Parameters `value`, `salt` are passed to the native operation in that order.
+  `value` is the value passed to the native operation.
+  `salt` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-flonum
+    (let ([native (foreign-procedure "hash_XXH32_flonum" (double unsigned-32) unsigned-32)])
+      (lambda (value salt)
+        (pcheck ([flonum? value] [natural? salt])
+                (require-optional-library 'ffi-xxh32-flonum 'xxhash)
+                (native value salt)))))
+  #|proc:ffi-xxh32-ratnum
+  The `ffi-xxh32-ratnum` procedure calls the native xxhash operation `hash_XXH32_ratnum`.
+  Parameters `value`, `other-value`, `salt` are passed to the native operation in that order.
+  `value` is the value passed to the native operation.
+  `other-value` is a number.
+  `salt` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-ratnum
+    (let ([native (foreign-procedure "hash_XXH32_ratnum" (fixnum fixnum unsigned-32) unsigned-32)])
+      (lambda (value other-value salt)
+        (pcheck ([fixnum? value] [fixnum? other-value] [natural? salt])
+                (require-optional-library 'ffi-xxh32-ratnum 'xxhash)
+                (native value other-value salt)))))
+  #|proc:ffi-xxh32-cflonum
+  The `ffi-xxh32-cflonum` procedure calls the native xxhash operation `hash_XXH32_cflonum`.
+  Parameters `value`, `other-value`, `salt` are passed to the native operation in that order.
+  `value` is the value passed to the native operation.
+  `other-value` is a number.
+  `salt` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-cflonum
+    (let ([native (foreign-procedure "hash_XXH32_cflonum" (double double unsigned-32) unsigned-32)])
+      (lambda (value other-value salt)
+        (pcheck ([flonum? value] [flonum? other-value] [natural? salt])
+                (require-optional-library 'ffi-xxh32-cflonum 'xxhash)
+                (native value other-value salt)))))
+  #|proc:ffi-xxh32-string
+  The `ffi-xxh32-string` procedure calls the native xxhash operation `hash_XXH32_string`.
+  Parameters `value`, `start`, `stop`, `salt` are passed to the native operation in that order.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `salt` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-string
+    (let ([native (foreign-procedure "hash_XXH32_string" (ptr int int unsigned-32) unsigned-32)])
+      (lambda (value start stop salt)
+        (pcheck ([integer? start] [integer? stop] [natural? salt])
+                (require-optional-library 'ffi-xxh32-string 'xxhash)
+                (native value start stop salt)))))
+  #|proc:ffi-xxh32-fxvector
+  The `ffi-xxh32-fxvector` procedure calls the native xxhash operation `hash_XXH32_fxvector`.
+  Parameters `value`, `start`, `stop`, `salt` are passed to the native operation in that order.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `salt` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-fxvector
+    (let ([native (foreign-procedure "hash_XXH32_fxvector" (ptr int int unsigned-32) unsigned-32)])
+      (lambda (value start stop salt)
+        (pcheck ([integer? start] [integer? stop] [natural? salt])
+                (require-optional-library 'ffi-xxh32-fxvector 'xxhash)
+                (native value start stop salt)))))
+  #|proc:ffi-xxh32-flvector
+  The `ffi-xxh32-flvector` procedure calls the native xxhash operation `hash_XXH32_flvector`.
+  Parameters `value`, `start`, `stop`, `salt` are passed to the native operation in that order.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `salt` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-flvector
+    (let ([native (foreign-procedure "hash_XXH32_flvector" (ptr int int unsigned-32) unsigned-32)])
+      (lambda (value start stop salt)
+        (pcheck ([integer? start] [integer? stop] [natural? salt])
+                (require-optional-library 'ffi-xxh32-flvector 'xxhash)
+                (native value start stop salt)))))
+  #|proc:ffi-xxh32-bytevector
+  The `ffi-xxh32-bytevector` procedure calls the native xxhash operation `hash_XXH32_bytevector`.
+  Parameters `value`, `start`, `stop`, `salt` are passed to the native operation in that order.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `salt` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-bytevector
+    (let ([native (foreign-procedure "hash_XXH32_bytevector" (ptr int int unsigned-32) unsigned-32)])
+      (lambda (value start stop salt)
+        (pcheck ([integer? start] [integer? stop] [natural? salt])
+                (require-optional-library 'ffi-xxh32-bytevector 'xxhash)
+                (native value start stop salt)))))
 
   (define ffi-xxh64-fixnum   (foreign-procedure "hash_XXH64_fixnum" (fixnum unsigned-64) ptr))
   (define ffi-xxh64-flonum   (foreign-procedure "hash_XXH64_flonum" (double unsigned-64) ptr))
@@ -276,44 +394,519 @@
             (mutable finalized?)))
 
 
-  (define ffi-xxh32-create    (foreign-procedure "hasher_XXH32_create" (unsigned-32) void*))
-  (define ffi-xxh32-get       (foreign-procedure "hasher_XXH32_get" (void*) unsigned-int))
-  (define ffi-xxh32-finalize! (foreign-procedure "hasher_XXH32_finalize" (void*) unsigned-int))
-  (define ffi-xxh32-reset!    (foreign-procedure "hasher_XXH32_reset" (void* unsigned-32) void))
-  (define ffi-xxh32-fixnum-update!   (foreign-procedure "hasher_XXH32_update_fixnum" (void* fixnum int) void))
-  (define ffi-xxh32-flonum-update!   (foreign-procedure "hasher_XXH32_update_flonum" (void* double int) void))
-  (define ffi-xxh32-ratnum-update!   (foreign-procedure "hasher_XXH32_update_ratnum" (void* fixnum fixnum int) void))
-  (define ffi-xxh32-cflonum-update!  (foreign-procedure "hasher_XXH32_update_cflonum" (void* double double int) void))
-  (define ffi-xxh32-string-update!   (foreign-procedure "hasher_XXH32_update_string" (void* ptr int int int) void))
-  (define ffi-xxh32-fxvector-update! (foreign-procedure "hasher_XXH32_update_fxvector" (void* ptr int int int) void))
-  (define ffi-xxh32-flvector-update! (foreign-procedure "hasher_XXH32_update_flvector" (void* ptr int int int) void))
-  (define ffi-xxh32-bytevector-update! (foreign-procedure "hasher_XXH32_update_bytevector" (void* ptr int int int) void))
+  #|proc:ffi-xxh32-create
+  The `ffi-xxh32-create` procedure calls the native xxhash operation `hasher_XXH32_create`.
+  Parameters `seed` are passed to the native operation in that order.
+  `seed` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-create
+    (let ([native (foreign-procedure "hasher_XXH32_create" (unsigned-32) void*)])
+      (lambda (seed)
+        (pcheck ([natural? seed])
+                (require-optional-library 'ffi-xxh32-create 'xxhash)
+                (native seed)))))
+  #|proc:ffi-xxh32-get
+  The `ffi-xxh32-get` procedure calls the native xxhash operation `hasher_XXH32_get`.
+  Parameters `context` are passed to the native operation in that order.
+  `context` is the native context handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-get
+    (let ([native (foreign-procedure "hasher_XXH32_get" (void*) unsigned-int)])
+      (lambda (context)
+        (pcheck ([natural? context])
+                (require-optional-library 'ffi-xxh32-get 'xxhash)
+                (native context)))))
+  #|proc:ffi-xxh32-finalize!
+  The `ffi-xxh32-finalize!` procedure calls the native xxhash operation `hasher_XXH32_finalize`.
+  Parameters `context` are passed to the native operation in that order.
+  `context` is the native context handle.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-finalize!
+    (let ([native (foreign-procedure "hasher_XXH32_finalize" (void*) unsigned-int)])
+      (lambda (context)
+        (pcheck ([natural? context])
+                (require-optional-library 'ffi-xxh32-finalize! 'xxhash)
+                (native context)))))
+  #|proc:ffi-xxh32-reset!
+  The `ffi-xxh32-reset!` procedure calls the native xxhash operation `hasher_XXH32_reset`.
+  Parameters `context`, `seed` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `seed` is the hash seed.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-reset!
+    (let ([native (foreign-procedure "hasher_XXH32_reset" (void* unsigned-32) void)])
+      (lambda (context seed)
+        (pcheck ([natural? context] [natural? seed])
+                (require-optional-library 'ffi-xxh32-reset! 'xxhash)
+                (native context seed)))))
+  #|proc:ffi-xxh32-fixnum-update!
+  The `ffi-xxh32-fixnum-update!` procedure calls the native xxhash operation
+  `hasher_XXH32_update_fixnum`.
+  Parameters `context`, `value`, `tag` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-fixnum-update!
+    (let ([native (foreign-procedure "hasher_XXH32_update_fixnum" (void* fixnum int) void)])
+      (lambda (context value tag)
+        (pcheck ([natural? context] [fixnum? value] [integer? tag])
+                (require-optional-library 'ffi-xxh32-fixnum-update! 'xxhash)
+                (native context value tag)))))
+  #|proc:ffi-xxh32-flonum-update!
+  The `ffi-xxh32-flonum-update!` procedure calls the native xxhash operation
+  `hasher_XXH32_update_flonum`.
+  Parameters `context`, `value`, `tag` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-flonum-update!
+    (let ([native (foreign-procedure "hasher_XXH32_update_flonum" (void* double int) void)])
+      (lambda (context value tag)
+        (pcheck ([natural? context] [flonum? value] [integer? tag])
+                (require-optional-library 'ffi-xxh32-flonum-update! 'xxhash)
+                (native context value tag)))))
+  #|proc:ffi-xxh32-ratnum-update!
+  The `ffi-xxh32-ratnum-update!` procedure calls the native xxhash operation
+  `hasher_XXH32_update_ratnum`.
+  Parameters `context`, `value`, `other-value`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `other-value` is a number.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-ratnum-update!
+    (let ([native (foreign-procedure "hasher_XXH32_update_ratnum" (void* fixnum fixnum int) void)])
+      (lambda (context value other-value tag)
+        (pcheck ([natural? context] [fixnum? value] [fixnum? other-value] [integer? tag])
+                (require-optional-library 'ffi-xxh32-ratnum-update! 'xxhash)
+                (native context value other-value tag)))))
+  #|proc:ffi-xxh32-cflonum-update!
+  The `ffi-xxh32-cflonum-update!` procedure calls the native xxhash operation
+  `hasher_XXH32_update_cflonum`.
+  Parameters `context`, `value`, `other-value`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `other-value` is a number.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-cflonum-update!
+    (let ([native (foreign-procedure "hasher_XXH32_update_cflonum" (void* double double int) void)])
+      (lambda (context value other-value tag)
+        (pcheck ([natural? context] [flonum? value] [flonum? other-value] [integer? tag])
+                (require-optional-library 'ffi-xxh32-cflonum-update! 'xxhash)
+                (native context value other-value tag)))))
+  #|proc:ffi-xxh32-string-update!
+  The `ffi-xxh32-string-update!` procedure calls the native xxhash operation
+  `hasher_XXH32_update_string`.
+  Parameters `context`, `text`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `text` is the input text.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-string-update!
+    (let ([native (foreign-procedure "hasher_XXH32_update_string" (void* ptr int int int) void)])
+      (lambda (context text start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh32-string-update! 'xxhash)
+                (native context text start stop tag)))))
+  #|proc:ffi-xxh32-fxvector-update!
+  The `ffi-xxh32-fxvector-update!` procedure calls the native xxhash operation
+  `hasher_XXH32_update_fxvector`.
+  Parameters `context`, `value`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-fxvector-update!
+    (let ([native (foreign-procedure "hasher_XXH32_update_fxvector" (void* ptr int int int) void)])
+      (lambda (context value start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh32-fxvector-update! 'xxhash)
+                (native context value start stop tag)))))
+  #|proc:ffi-xxh32-flvector-update!
+  The `ffi-xxh32-flvector-update!` procedure calls the native xxhash operation
+  `hasher_XXH32_update_flvector`.
+  Parameters `context`, `value`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-flvector-update!
+    (let ([native (foreign-procedure "hasher_XXH32_update_flvector" (void* ptr int int int) void)])
+      (lambda (context value start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh32-flvector-update! 'xxhash)
+                (native context value start stop tag)))))
+  #|proc:ffi-xxh32-bytevector-update!
+  The `ffi-xxh32-bytevector-update!` procedure calls the native xxhash operation
+  `hasher_XXH32_update_bytevector`.
+  Parameters `context`, `bytevector`, `start`, `stop`, `tag` are passed to the native operation in
+  that order.
+  `context` is the native context handle.
+  `bytevector` is the input bytevector.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh32-bytevector-update!
+    (let ([native (foreign-procedure "hasher_XXH32_update_bytevector" (void* ptr int int int) void)])
+      (lambda (context bytevector start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh32-bytevector-update! 'xxhash)
+                (native context bytevector start stop tag)))))
 
-  (define ffi-xxh64-create    (foreign-procedure "hasher_XXH64_create" (unsigned-64) void*))
+  #|proc:ffi-xxh64-create
+  The `ffi-xxh64-create` procedure calls the native xxhash operation `hasher_XXH64_create`.
+  Parameters `seed` are passed to the native operation in that order.
+  `seed` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-create
+    (let ([native (foreign-procedure "hasher_XXH64_create" (unsigned-64) void*)])
+      (lambda (seed)
+        (pcheck ([natural? seed])
+                (require-optional-library 'ffi-xxh64-create 'xxhash)
+                (native seed)))))
   (define ffi-xxh64-get       (foreign-procedure "hasher_XXH64_get" (void*) ptr))
   (define ffi-xxh64-finalize! (foreign-procedure "hasher_XXH64_finalize" (void*) ptr))
-  (define ffi-xxh64-reset!    (foreign-procedure "hasher_XXH64_reset" (void* unsigned-64) void))
-  (define ffi-xxh64-fixnum-update!   (foreign-procedure "hasher_XXH64_update_fixnum" (void* fixnum int) void))
-  (define ffi-xxh64-flonum-update!   (foreign-procedure "hasher_XXH64_update_flonum" (void* double int) void))
-  (define ffi-xxh64-ratnum-update!   (foreign-procedure "hasher_XXH64_update_ratnum" (void* fixnum fixnum int) void))
-  (define ffi-xxh64-cflonum-update!  (foreign-procedure "hasher_XXH64_update_cflonum" (void* double double int) void))
-  (define ffi-xxh64-string-update!   (foreign-procedure "hasher_XXH64_update_string" (void* ptr int int int) void))
-  (define ffi-xxh64-fxvector-update! (foreign-procedure "hasher_XXH64_update_fxvector" (void* ptr int int int) void))
-  (define ffi-xxh64-flvector-update! (foreign-procedure "hasher_XXH64_update_flvector" (void* ptr int int int) void))
-  (define ffi-xxh64-bytevector-update! (foreign-procedure "hasher_XXH64_update_bytevector" (void* ptr int int int) void))
+  #|proc:ffi-xxh64-reset!
+  The `ffi-xxh64-reset!` procedure calls the native xxhash operation `hasher_XXH64_reset`.
+  Parameters `context`, `seed` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `seed` is the hash seed.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-reset!
+    (let ([native (foreign-procedure "hasher_XXH64_reset" (void* unsigned-64) void)])
+      (lambda (context seed)
+        (pcheck ([natural? context] [natural? seed])
+                (require-optional-library 'ffi-xxh64-reset! 'xxhash)
+                (native context seed)))))
+  #|proc:ffi-xxh64-fixnum-update!
+  The `ffi-xxh64-fixnum-update!` procedure calls the native xxhash operation
+  `hasher_XXH64_update_fixnum`.
+  Parameters `context`, `value`, `tag` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-fixnum-update!
+    (let ([native (foreign-procedure "hasher_XXH64_update_fixnum" (void* fixnum int) void)])
+      (lambda (context value tag)
+        (pcheck ([natural? context] [fixnum? value] [integer? tag])
+                (require-optional-library 'ffi-xxh64-fixnum-update! 'xxhash)
+                (native context value tag)))))
+  #|proc:ffi-xxh64-flonum-update!
+  The `ffi-xxh64-flonum-update!` procedure calls the native xxhash operation
+  `hasher_XXH64_update_flonum`.
+  Parameters `context`, `value`, `tag` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-flonum-update!
+    (let ([native (foreign-procedure "hasher_XXH64_update_flonum" (void* double int) void)])
+      (lambda (context value tag)
+        (pcheck ([natural? context] [flonum? value] [integer? tag])
+                (require-optional-library 'ffi-xxh64-flonum-update! 'xxhash)
+                (native context value tag)))))
+  #|proc:ffi-xxh64-ratnum-update!
+  The `ffi-xxh64-ratnum-update!` procedure calls the native xxhash operation
+  `hasher_XXH64_update_ratnum`.
+  Parameters `context`, `value`, `other-value`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `other-value` is a number.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-ratnum-update!
+    (let ([native (foreign-procedure "hasher_XXH64_update_ratnum" (void* fixnum fixnum int) void)])
+      (lambda (context value other-value tag)
+        (pcheck ([natural? context] [fixnum? value] [fixnum? other-value] [integer? tag])
+                (require-optional-library 'ffi-xxh64-ratnum-update! 'xxhash)
+                (native context value other-value tag)))))
+  #|proc:ffi-xxh64-cflonum-update!
+  The `ffi-xxh64-cflonum-update!` procedure calls the native xxhash operation
+  `hasher_XXH64_update_cflonum`.
+  Parameters `context`, `value`, `other-value`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `other-value` is a number.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-cflonum-update!
+    (let ([native (foreign-procedure "hasher_XXH64_update_cflonum" (void* double double int) void)])
+      (lambda (context value other-value tag)
+        (pcheck ([natural? context] [flonum? value] [flonum? other-value] [integer? tag])
+                (require-optional-library 'ffi-xxh64-cflonum-update! 'xxhash)
+                (native context value other-value tag)))))
+  #|proc:ffi-xxh64-string-update!
+  The `ffi-xxh64-string-update!` procedure calls the native xxhash operation
+  `hasher_XXH64_update_string`.
+  Parameters `context`, `text`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `text` is the input text.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-string-update!
+    (let ([native (foreign-procedure "hasher_XXH64_update_string" (void* ptr int int int) void)])
+      (lambda (context text start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh64-string-update! 'xxhash)
+                (native context text start stop tag)))))
+  #|proc:ffi-xxh64-fxvector-update!
+  The `ffi-xxh64-fxvector-update!` procedure calls the native xxhash operation
+  `hasher_XXH64_update_fxvector`.
+  Parameters `context`, `value`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-fxvector-update!
+    (let ([native (foreign-procedure "hasher_XXH64_update_fxvector" (void* ptr int int int) void)])
+      (lambda (context value start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh64-fxvector-update! 'xxhash)
+                (native context value start stop tag)))))
+  #|proc:ffi-xxh64-flvector-update!
+  The `ffi-xxh64-flvector-update!` procedure calls the native xxhash operation
+  `hasher_XXH64_update_flvector`.
+  Parameters `context`, `value`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-flvector-update!
+    (let ([native (foreign-procedure "hasher_XXH64_update_flvector" (void* ptr int int int) void)])
+      (lambda (context value start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh64-flvector-update! 'xxhash)
+                (native context value start stop tag)))))
+  #|proc:ffi-xxh64-bytevector-update!
+  The `ffi-xxh64-bytevector-update!` procedure calls the native xxhash operation
+  `hasher_XXH64_update_bytevector`.
+  Parameters `context`, `bytevector`, `start`, `stop`, `tag` are passed to the native operation in
+  that order.
+  `context` is the native context handle.
+  `bytevector` is the input bytevector.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh64-bytevector-update!
+    (let ([native (foreign-procedure "hasher_XXH64_update_bytevector" (void* ptr int int int) void)])
+      (lambda (context bytevector start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh64-bytevector-update! 'xxhash)
+                (native context bytevector start stop tag)))))
 
-  (define ffi-xxh3-64-create    (foreign-procedure "hasher_XXH3_64_create" (unsigned-64) void*))
+  #|proc:ffi-xxh3-64-create
+  The `ffi-xxh3-64-create` procedure calls the native xxhash operation `hasher_XXH3_64_create`.
+  Parameters `seed` are passed to the native operation in that order.
+  `seed` is the hash seed.
+  It returns the native result and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-create
+    (let ([native (foreign-procedure "hasher_XXH3_64_create" (unsigned-64) void*)])
+      (lambda (seed)
+        (pcheck ([natural? seed])
+                (require-optional-library 'ffi-xxh3-64-create 'xxhash)
+                (native seed)))))
   (define ffi-xxh3-64-get       (foreign-procedure "hasher_XXH3_64_get" (void*) ptr))
   (define ffi-xxh3-64-finalize! (foreign-procedure "hasher_XXH3_64_finalize" (void*) ptr))
-  (define ffi-xxh3-64-reset!    (foreign-procedure "hasher_XXH3_64_reset" (void* unsigned-64) void))
-  (define ffi-xxh3-64-fixnum-update!   (foreign-procedure "hasher_XXH3_64_update_fixnum" (void* fixnum int) void))
-  (define ffi-xxh3-64-flonum-update!   (foreign-procedure "hasher_XXH3_64_update_flonum" (void* double int) void))
-  (define ffi-xxh3-64-ratnum-update!   (foreign-procedure "hasher_XXH3_64_update_ratnum" (void* fixnum fixnum int) void))
-  (define ffi-xxh3-64-cflonum-update!  (foreign-procedure "hasher_XXH3_64_update_cflonum" (void* double double int) void))
-  (define ffi-xxh3-64-string-update!   (foreign-procedure "hasher_XXH3_64_update_string" (void* ptr int int int) void))
-  (define ffi-xxh3-64-fxvector-update! (foreign-procedure "hasher_XXH3_64_update_fxvector" (void* ptr int int int) void))
-  (define ffi-xxh3-64-flvector-update! (foreign-procedure "hasher_XXH3_64_update_flvector" (void* ptr int int int) void))
-  (define ffi-xxh3-64-bytevector-update! (foreign-procedure "hasher_XXH3_64_update_bytevector" (void* ptr int int int) void))
+  #|proc:ffi-xxh3-64-reset!
+  The `ffi-xxh3-64-reset!` procedure calls the native xxhash operation `hasher_XXH3_64_reset`.
+  Parameters `context`, `seed` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `seed` is the hash seed.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-reset!
+    (let ([native (foreign-procedure "hasher_XXH3_64_reset" (void* unsigned-64) void)])
+      (lambda (context seed)
+        (pcheck ([natural? context] [natural? seed])
+                (require-optional-library 'ffi-xxh3-64-reset! 'xxhash)
+                (native context seed)))))
+  #|proc:ffi-xxh3-64-fixnum-update!
+  The `ffi-xxh3-64-fixnum-update!` procedure calls the native xxhash operation
+  `hasher_XXH3_64_update_fixnum`.
+  Parameters `context`, `value`, `tag` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-fixnum-update!
+    (let ([native (foreign-procedure "hasher_XXH3_64_update_fixnum" (void* fixnum int) void)])
+      (lambda (context value tag)
+        (pcheck ([natural? context] [fixnum? value] [integer? tag])
+                (require-optional-library 'ffi-xxh3-64-fixnum-update! 'xxhash)
+                (native context value tag)))))
+  #|proc:ffi-xxh3-64-flonum-update!
+  The `ffi-xxh3-64-flonum-update!` procedure calls the native xxhash operation
+  `hasher_XXH3_64_update_flonum`.
+  Parameters `context`, `value`, `tag` are passed to the native operation in that order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-flonum-update!
+    (let ([native (foreign-procedure "hasher_XXH3_64_update_flonum" (void* double int) void)])
+      (lambda (context value tag)
+        (pcheck ([natural? context] [flonum? value] [integer? tag])
+                (require-optional-library 'ffi-xxh3-64-flonum-update! 'xxhash)
+                (native context value tag)))))
+  #|proc:ffi-xxh3-64-ratnum-update!
+  The `ffi-xxh3-64-ratnum-update!` procedure calls the native xxhash operation
+  `hasher_XXH3_64_update_ratnum`.
+  Parameters `context`, `value`, `other-value`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `other-value` is a number.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-ratnum-update!
+    (let ([native (foreign-procedure "hasher_XXH3_64_update_ratnum" (void* fixnum fixnum int) void)])
+      (lambda (context value other-value tag)
+        (pcheck ([natural? context] [fixnum? value] [fixnum? other-value] [integer? tag])
+                (require-optional-library 'ffi-xxh3-64-ratnum-update! 'xxhash)
+                (native context value other-value tag)))))
+  #|proc:ffi-xxh3-64-cflonum-update!
+  The `ffi-xxh3-64-cflonum-update!` procedure calls the native xxhash operation
+  `hasher_XXH3_64_update_cflonum`.
+  Parameters `context`, `value`, `other-value`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `other-value` is a number.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-cflonum-update!
+    (let ([native (foreign-procedure "hasher_XXH3_64_update_cflonum" (void* double double int) void)])
+      (lambda (context value other-value tag)
+        (pcheck ([natural? context] [flonum? value] [flonum? other-value] [integer? tag])
+                (require-optional-library 'ffi-xxh3-64-cflonum-update! 'xxhash)
+                (native context value other-value tag)))))
+  #|proc:ffi-xxh3-64-string-update!
+  The `ffi-xxh3-64-string-update!` procedure calls the native xxhash operation
+  `hasher_XXH3_64_update_string`.
+  Parameters `context`, `text`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `text` is the input text.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-string-update!
+    (let ([native (foreign-procedure "hasher_XXH3_64_update_string" (void* ptr int int int) void)])
+      (lambda (context text start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh3-64-string-update! 'xxhash)
+                (native context text start stop tag)))))
+  #|proc:ffi-xxh3-64-fxvector-update!
+  The `ffi-xxh3-64-fxvector-update!` procedure calls the native xxhash operation
+  `hasher_XXH3_64_update_fxvector`.
+  Parameters `context`, `value`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-fxvector-update!
+    (let ([native (foreign-procedure "hasher_XXH3_64_update_fxvector" (void* ptr int int int) void)])
+      (lambda (context value start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh3-64-fxvector-update! 'xxhash)
+                (native context value start stop tag)))))
+  #|proc:ffi-xxh3-64-flvector-update!
+  The `ffi-xxh3-64-flvector-update!` procedure calls the native xxhash operation
+  `hasher_XXH3_64_update_flvector`.
+  Parameters `context`, `value`, `start`, `stop`, `tag` are passed to the native operation in that
+  order.
+  `context` is the native context handle.
+  `value` is the value passed to the native operation.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-flvector-update!
+    (let ([native (foreign-procedure "hasher_XXH3_64_update_flvector" (void* ptr int int int) void)])
+      (lambda (context value start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh3-64-flvector-update! 'xxhash)
+                (native context value start stop tag)))))
+  #|proc:ffi-xxh3-64-bytevector-update!
+  The `ffi-xxh3-64-bytevector-update!` procedure calls the native xxhash operation
+  `hasher_XXH3_64_update_bytevector`.
+  Parameters `context`, `bytevector`, `start`, `stop`, `tag` are passed to the native operation in
+  that order.
+  `context` is the native context handle.
+  `bytevector` is the input bytevector.
+  `start` is the inclusive start index of the input slice.
+  `stop` is the exclusive end index of the input slice.
+  `tag` is a number.
+  It returns unspecified values and raises an error when the dependency is unavailable.
+  |#
+  (define ffi-xxh3-64-bytevector-update!
+    (let ([native (foreign-procedure "hasher_XXH3_64_update_bytevector" (void* ptr int int int) void)])
+      (lambda (context bytevector start stop tag)
+        (pcheck ([natural? context] [integer? start] [integer? stop] [integer? tag])
+                (require-optional-library 'ffi-xxh3-64-bytevector-update! 'xxhash)
+                (native context bytevector start stop tag)))))
 
 
   (define check-finalized

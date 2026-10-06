@@ -2,11 +2,12 @@
 
 #include <pthread.h>
 #include <stdio.h>
+#if CHEZPP_WITH_ZLIB
 #include <zlib.h>
+#endif
 
-static const char *const zlib_names[] = {"libz.so.1", NULL};
 static chezpp_optional_library zlib_library =
-    CHEZPP_OPTIONAL_LIBRARY_INIT("zlib", zlib_names);
+    CHEZPP_OPTIONAL_LIBRARY_INIT("zlib");
 static pthread_once_t zlib_once = PTHREAD_ONCE_INIT;
 static int zlib_available;
 
@@ -26,13 +27,6 @@ typedef struct {
   int ended;
 } chezpp_zlib_stream;
 
-static zlib_version_fn p_zlib_version;
-static zlib_deflate_init2_fn p_deflate_init2;
-static zlib_deflate_fn p_deflate;
-static zlib_deflate_end_fn p_deflate_end;
-static zlib_inflate_init2_fn p_inflate_init2;
-static zlib_inflate_fn p_inflate;
-static zlib_inflate_end_fn p_inflate_end;
 
 static ptr zlib_status(const char *tag, const char *message) {
   ptr result = Smake_vector(2, Sfalse);
@@ -41,34 +35,20 @@ static ptr zlib_status(const char *tag, const char *message) {
   return result;
 }
 
-static void initialize_zlib(void) {
-  const char *version;
-  unsigned major = 0, minor = 0, patch = 0;
 
-  if (!chezpp_optional_library_open(&zlib_library)) return;
-  if (!chezpp_optional_library_symbol(&zlib_library, "zlibVersion",
-                                      (void **)&p_zlib_version) ||
-      !chezpp_optional_library_symbol(&zlib_library, "deflateInit2_",
-                                      (void **)&p_deflate_init2) ||
-      !chezpp_optional_library_symbol(&zlib_library, "deflate", (void **)&p_deflate) ||
-      !chezpp_optional_library_symbol(&zlib_library, "deflateEnd", (void **)&p_deflate_end) ||
-      !chezpp_optional_library_symbol(&zlib_library, "inflateInit2_",
-                                      (void **)&p_inflate_init2) ||
-      !chezpp_optional_library_symbol(&zlib_library, "inflate", (void **)&p_inflate) ||
-      !chezpp_optional_library_symbol(&zlib_library, "inflateEnd", (void **)&p_inflate_end))
-    return;
-  version = p_zlib_version();
+
+static void initialize_zlib(void) {
+  const char *version = zlibVersion();
+  unsigned major = 0, minor = 0, patch = 0;
   chezpp_optional_library_set_version(&zlib_library, version);
   if (version == NULL || sscanf(version, "%u.%u.%u", &major, &minor, &patch) < 2 ||
       major != 1 || minor < 2 || (minor == 2 && patch < 11)) {
-    chezpp_optional_library_fail(
-        &zlib_library, "zlib runtime %s; requires ABI 1 and version >= 1.2.11",
-        version == NULL ? "unknown" : version);
+    chezpp_optional_library_fail(&zlib_library,
+      "zlib runtime %s; requires ABI 1 and version >= 1.2.11", version == NULL ? "unknown" : version);
     return;
   }
   zlib_available = 1;
 }
-
 int chezpp_zlib_require(void) {
   pthread_once(&zlib_once, initialize_zlib);
   return zlib_available;
@@ -82,9 +62,9 @@ const chezpp_optional_library *chezpp_zlib_library(void) {
 static void close_stream(chezpp_zlib_stream *state) {
   if (state == NULL || state->closed) return;
   if (state->compress)
-    (void)p_deflate_end(&state->stream);
+    (void)deflateEnd(&state->stream);
   else
-    (void)p_inflate_end(&state->stream);
+    (void)inflateEnd(&state->stream);
   state->closed = 1;
 }
 
@@ -98,12 +78,12 @@ uptr chezpp_zlib_stream_open(int compress, int gzip) {
   if (state == NULL) return 0;
   state->compress = compress ? 1 : 0;
   if (state->compress)
-    rc = p_deflate_init2(&state->stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+    rc = deflateInit2_(&state->stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
                          window_bits, 8, Z_DEFAULT_STRATEGY,
-                         p_zlib_version(), (int)sizeof(z_stream));
+                         zlibVersion(), (int)sizeof(z_stream));
   else
-    rc = p_inflate_init2(&state->stream, window_bits,
-                         p_zlib_version(), (int)sizeof(z_stream));
+    rc = inflateInit2_(&state->stream, window_bits,
+                         zlibVersion(), (int)sizeof(z_stream));
   if (rc != Z_OK) {
     free(state);
     return 0;
@@ -144,8 +124,8 @@ ptr chezpp_zlib_stream_process(uptr handle, ptr input, int start, int stop,
     uLong before_in = state->stream.total_in;
     uLong before_out = state->stream.total_out;
     rc = state->compress
-             ? p_deflate(&state->stream, finish ? Z_FINISH : Z_NO_FLUSH)
-             : p_inflate(&state->stream, finish ? Z_FINISH : Z_NO_FLUSH);
+             ? deflate(&state->stream, finish ? Z_FINISH : Z_NO_FLUSH)
+             : inflate(&state->stream, finish ? Z_FINISH : Z_NO_FLUSH);
     if (rc != Z_OK && rc != Z_STREAM_END && rc != Z_BUF_ERROR) break;
     if (state->stream.avail_out == 0 && (state->stream.avail_in > 0 || finish)) {
       free(output);

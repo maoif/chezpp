@@ -1,26 +1,17 @@
+#include "../build-config.h"
 #include "../cares_loader.h"
 #include "../common.h"
 
+#if CHEZPP_WITH_CARES
 #include <ares.h>
+#endif
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <poll.h>
 
-typedef int (*ares_init_options_fn)(ares_channel_t **, const struct ares_options *, int);
-typedef void (*ares_destroy_fn)(ares_channel_t *);
-typedef void (*ares_cancel_fn)(ares_channel_t *);
-typedef void (*ares_getaddrinfo_fn)(ares_channel_t *, const char *, const char *,
-                                    const struct ares_addrinfo_hints *,
-                                    ares_addrinfo_callback, void *);
-typedef void (*ares_freeaddrinfo_fn)(struct ares_addrinfo *);
-typedef int (*ares_getsock_fn)(const ares_channel_t *, ares_socket_t *, int);
-typedef struct timeval *(*ares_timeout_fn)(const ares_channel_t *, struct timeval *,
-                                           struct timeval *);
-typedef void (*ares_process_fd_fn)(ares_channel_t *, ares_socket_t, ares_socket_t);
-typedef const char *(*ares_strerror_fn)(int);
 
 typedef struct {
-  ares_channel_t *channel;
+  ares_channel channel;
   struct ares_addrinfo *result;
   char *query_name;
   int status;
@@ -31,15 +22,6 @@ typedef struct {
   int deferred_reported;
 } chezpp_dns_operation;
 
-static ares_init_options_fn p_ares_init_options;
-static ares_destroy_fn p_ares_destroy;
-static ares_cancel_fn p_ares_cancel;
-static ares_getaddrinfo_fn p_ares_getaddrinfo;
-static ares_freeaddrinfo_fn p_ares_freeaddrinfo;
-static ares_getsock_fn p_ares_getsock;
-static ares_timeout_fn p_ares_timeout;
-static ares_process_fd_fn p_ares_process_fd;
-static ares_strerror_fn p_ares_strerror;
 
 static ptr make_status(const char *tag, ptr value) {
   ptr out = Smake_vector(2, Sfalse);
@@ -48,24 +30,7 @@ static ptr make_status(const char *tag, ptr value) {
   return out;
 }
 
-static int load_cares_functions(void) {
-#define LOAD(name)                                                                    \
-  do {                                                                                \
-    p_##name = (name##_fn)chezpp_cares_symbol(#name);                                 \
-    if (p_##name == NULL) return 0;                                                    \
-  } while (0)
-  LOAD(ares_init_options);
-  LOAD(ares_destroy);
-  LOAD(ares_cancel);
-  LOAD(ares_getaddrinfo);
-  LOAD(ares_freeaddrinfo);
-  LOAD(ares_getsock);
-  LOAD(ares_timeout);
-  LOAD(ares_process_fd);
-  LOAD(ares_strerror);
-#undef LOAD
-  return 1;
-}
+static int load_cares_functions(void) { return chezpp_cares_require(); }
 
 static void dns_callback(void *data, int status, int timeouts,
                          struct ares_addrinfo *result) {
@@ -125,7 +90,7 @@ static ptr dns_result(chezpp_dns_operation *operation) {
     out = Smake_vector(3, Sfalse);
     Svector_set(out, 0, Sstring_to_symbol("dns-error"));
     Svector_set(out, 1, Sfixnum(operation->status));
-    Svector_set(out, 2, Sstring(p_ares_strerror(operation->status)));
+    Svector_set(out, 2, Sstring(ares_strerror(operation->status)));
     return out;
   }
   if (operation->result == NULL) return make_status("error", Sstring("empty c-ares result"));
@@ -154,7 +119,7 @@ static ptr dns_result(chezpp_dns_operation *operation) {
 
 static ptr pending_result(chezpp_dns_operation *operation) {
   ares_socket_t sockets[ARES_GETSOCK_MAXNUM];
-  int bits = p_ares_getsock(operation->channel, sockets, ARES_GETSOCK_MAXNUM);
+  int bits = ares_getsock(operation->channel, sockets, ARES_GETSOCK_MAXNUM);
   struct timeval tv;
   struct timeval *timeout;
   ptr specs = Snil;
@@ -174,7 +139,7 @@ static ptr pending_result(chezpp_dns_operation *operation) {
     Svector_set(spec, 1, Sfixnum(events));
     append_item(&specs, &tail, spec);
   }
-  timeout = p_ares_timeout(operation->channel, NULL, &tv);
+  timeout = ares_timeout(operation->channel, NULL, &tv);
   timeout_ms = timeout == NULL ? 1000 : timeout->tv_sec * 1000L +
                                         (timeout->tv_usec + 999L) / 1000L;
   if (timeout_ms < 0) timeout_ms = 0;
@@ -213,7 +178,7 @@ uptr chezpp_net_dns_start(const char *name, int family, int timeout_ms) {
   }
   memset(&options, 0, sizeof(options));
   options.timeout = timeout_ms;
-  status = p_ares_init_options(&operation->channel, &options, ARES_OPT_TIMEOUTMS);
+  status = ares_init_options(&operation->channel, &options, ARES_OPT_TIMEOUTMS);
   if (status != ARES_SUCCESS) {
     free(operation->query_name);
     free(operation);
@@ -222,7 +187,7 @@ uptr chezpp_net_dns_start(const char *name, int family, int timeout_ms) {
   memset(&hints, 0, sizeof(hints));
   hints.ai_flags = ARES_AI_CANONNAME;
   hints.ai_family = family;
-  p_ares_getaddrinfo(operation->channel, name, NULL, &hints, dns_callback, operation);
+  ares_getaddrinfo(operation->channel, name, NULL, &hints, dns_callback, operation);
   if (operation->done) {
     int pipe_fd[2];
     unsigned char ready = 1;
@@ -259,7 +224,7 @@ ptr chezpp_net_dns_advance(uptr handle) {
   }
   if (operation->done) return dns_result(operation);
 
-  bits = p_ares_getsock(operation->channel, sockets, ARES_GETSOCK_MAXNUM);
+  bits = ares_getsock(operation->channel, sockets, ARES_GETSOCK_MAXNUM);
   memset(pollfds, 0, sizeof(pollfds));
   for (index = 0; index < ARES_GETSOCK_MAXNUM; index++) {
     if (!ARES_GETSOCK_READABLE(bits, index) && !ARES_GETSOCK_WRITABLE(bits, index)) continue;
@@ -271,7 +236,7 @@ ptr chezpp_net_dns_advance(uptr handle) {
   ready = poll(pollfds, (nfds_t)count, 0);
   if (ready < 0) return make_status("error", Sstring(strerror(errno)));
   if (ready == 0) {
-    p_ares_process_fd(operation->channel, ARES_SOCKET_BAD, ARES_SOCKET_BAD);
+    ares_process_fd(operation->channel, ARES_SOCKET_BAD, ARES_SOCKET_BAD);
   } else {
     for (index = 0; index < count; index++) {
       ares_socket_t read_fd = (pollfds[index].revents & (POLLIN | POLLERR | POLLHUP))
@@ -281,7 +246,7 @@ ptr chezpp_net_dns_advance(uptr handle) {
                                    ? pollfds[index].fd
                                    : ARES_SOCKET_BAD;
       if (read_fd != ARES_SOCKET_BAD || write_fd != ARES_SOCKET_BAD)
-        p_ares_process_fd(operation->channel, read_fd, write_fd);
+        ares_process_fd(operation->channel, read_fd, write_fd);
     }
   }
   return operation->done ? dns_result(operation) : pending_result(operation);
@@ -289,15 +254,15 @@ ptr chezpp_net_dns_advance(uptr handle) {
 
 ptr chezpp_net_dns_cancel(uptr handle) {
   chezpp_dns_operation *operation = (chezpp_dns_operation *)handle;
-  if (operation != NULL && operation->channel != NULL) p_ares_cancel(operation->channel);
+  if (operation != NULL && operation->channel != NULL) ares_cancel(operation->channel);
   return Strue;
 }
 
 void chezpp_net_dns_close(uptr handle) {
   chezpp_dns_operation *operation = (chezpp_dns_operation *)handle;
   if (operation == NULL) return;
-  if (operation->channel != NULL) p_ares_destroy(operation->channel);
-  if (operation->result != NULL) p_ares_freeaddrinfo(operation->result);
+  if (operation->channel != NULL) ares_destroy(operation->channel);
+  if (operation->result != NULL) ares_freeaddrinfo(operation->result);
   if (operation->deferred_read_fd >= 0) close(operation->deferred_read_fd);
   if (operation->deferred_write_fd >= 0) close(operation->deferred_write_fd);
   free(operation->query_name);

@@ -17,13 +17,16 @@
  * permessage-deflate and LWS extension callbacks are unsupported; a runtime
  * built with LWS_WITHOUT_EXTENSIONS is sufficient. HTTP/2 and alternative
  * event-loop backends (libuv / libev / libevent) are not used by this adapter.
- * All LWS symbols are dynamically loaded; libchezpp.so does not link to LWS.
+ * Enabled builds call LWS symbols directly and link libchezpp.so to LWS.
  */
 
+#include "../build-config.h"
 #include "../common.h"
 #include "../optional_library.h"
 
+#if CHEZPP_WITH_WEBSOCKETS
 #include <libwebsockets.h>
+#endif
 #include <poll.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -144,10 +147,8 @@ typedef int (*lws_hdr_total_length_fn)(struct lws *, enum lws_token_indexes);
 extern void *chezpp_net_tls_context_native(uptr handle);
 extern int chezpp_net_tls_context_copy_credentials(uptr handle, void *destination);
 
-static const char *const websocket_names[] = {
-    "libwebsockets.so.21", NULL};
 static chezpp_optional_library websocket_library =
-    CHEZPP_OPTIONAL_LIBRARY_INIT("websockets", websocket_names);
+    CHEZPP_OPTIONAL_LIBRARY_INIT("websockets");
 static pthread_once_t websocket_once = PTHREAD_ONCE_INIT;
 static int websocket_available;
 static unsigned websocket_capabilities;
@@ -156,29 +157,6 @@ static int websocket_lifetime_state;
 static pthread_mutex_t websocket_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t websocket_runtime_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t context_list_mutex = PTHREAD_MUTEX_INITIALIZER;
-static lws_create_context_fn p_lws_create_context = NULL;
-static lws_context_destroy_fn p_lws_context_destroy = NULL;
-static lws_client_connect_via_info_fn p_lws_client_connect_via_info = NULL;
-static lws_service_tsi_fn p_lws_service_tsi = NULL;
-static lws_service_adjust_timeout_fn p_lws_service_adjust_timeout = NULL;
-static lws_set_log_level_fn p_lws_set_log_level = NULL;
-static lws_get_context_fn p_lws_get_context = NULL;
-static lws_context_user_fn p_lws_context_user = NULL;
-static lws_set_opaque_user_data_fn p_lws_set_opaque_user_data = NULL;
-static lws_get_opaque_user_data_fn p_lws_get_opaque_user_data = NULL;
-static lws_callback_on_writable_fn p_lws_callback_on_writable = NULL;
-static lws_write_fn p_lws_write = NULL;
-static lws_is_final_fragment_fn p_lws_is_final_fragment = NULL;
-static lws_remaining_packet_payload_fn p_lws_remaining_packet_payload = NULL;
-static lws_frame_is_binary_fn p_lws_frame_is_binary = NULL;
-static lws_close_reason_fn p_lws_close_reason = NULL;
-static lws_set_timeout_fn p_lws_set_timeout = NULL;
-static lws_get_vhost_by_name_fn p_lws_get_vhost_by_name = NULL;
-static lws_get_vhost_listen_port_fn p_lws_get_vhost_listen_port = NULL;
-static lws_get_protocol_fn p_lws_get_protocol = NULL;
-static lws_vhost_user_fn p_lws_vhost_user = NULL;
-static lws_hdr_copy_fn p_lws_hdr_copy = NULL;
-static lws_hdr_total_length_fn p_lws_hdr_total_length = NULL;
 static chezpp_ws_context_node *context_list = NULL;
 static atomic_int ws_trace_flag = -1;
 
@@ -417,20 +395,15 @@ static int initialize_server_protocols(chezpp_ws_server *server, const char *off
   return 1;
 }
 
-static int load_symbol(void **out, const char *name) {
-  return chezpp_optional_library_symbol(&websocket_library, name, out);
-}
+
 
 static void initialize_websocket_library(void) {
-  lws_get_library_version_fn version_fn = NULL;
   const char *version;
   unsigned major;
   unsigned minor;
   unsigned patch;
 
-  if (!chezpp_optional_library_open(&websocket_library)) return;
-  if (!load_symbol((void **)&version_fn, "lws_get_library_version")) return;
-  version = version_fn();
+  version = lws_get_library_version();
   if (version == NULL ||
       sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3) {
     chezpp_optional_library_fail(
@@ -448,41 +421,12 @@ static void initialize_websocket_library(void) {
     return;
   }
 
-  if (!load_symbol((void **)&p_lws_create_context, "lws_create_context") ||
-      !load_symbol((void **)&p_lws_context_destroy, "lws_context_destroy") ||
-      !load_symbol((void **)&p_lws_client_connect_via_info, "lws_client_connect_via_info") ||
-      !load_symbol((void **)&p_lws_service_tsi, "lws_service_tsi") ||
-      !load_symbol((void **)&p_lws_service_adjust_timeout, "lws_service_adjust_timeout") ||
-      !load_symbol((void **)&p_lws_set_log_level, "lws_set_log_level") ||
-      !load_symbol((void **)&p_lws_get_context, "lws_get_context") ||
-      !load_symbol((void **)&p_lws_context_user, "lws_context_user") ||
-      !load_symbol((void **)&p_lws_set_opaque_user_data, "lws_set_opaque_user_data") ||
-      !load_symbol((void **)&p_lws_get_opaque_user_data, "lws_get_opaque_user_data") ||
-      !load_symbol((void **)&p_lws_callback_on_writable, "lws_callback_on_writable") ||
-      !load_symbol((void **)&p_lws_write, "lws_write") ||
-      !load_symbol((void **)&p_lws_is_final_fragment, "lws_is_final_fragment") ||
-      !load_symbol((void **)&p_lws_remaining_packet_payload, "lws_remaining_packet_payload") ||
-      !load_symbol((void **)&p_lws_frame_is_binary, "lws_frame_is_binary") ||
-      !load_symbol((void **)&p_lws_close_reason, "lws_close_reason") ||
-      !load_symbol((void **)&p_lws_set_timeout, "lws_set_timeout") ||
-      !load_symbol((void **)&p_lws_get_vhost_by_name, "lws_get_vhost_by_name") ||
-      !load_symbol((void **)&p_lws_get_vhost_listen_port, "lws_get_vhost_listen_port") ||
-      !load_symbol((void **)&p_lws_get_protocol, "lws_get_protocol") ||
-      !load_symbol((void **)&p_lws_vhost_user, "lws_vhost_user") ||
-      !load_symbol((void **)&p_lws_hdr_copy, "lws_hdr_copy") ||
-      !load_symbol((void **)&p_lws_hdr_total_length, "lws_hdr_total_length")) return;
-
+#if defined(LWS_WITH_TLS)
+  websocket_capabilities |= 1U;
+#endif
   {
-    void *symbol = NULL;
     const char *level = getenv("CHEZPP_WS_LOGLEVEL");
-    if (chezpp_optional_library_probe_symbol(
-            &websocket_library, "lws_init_vhost_client_ssl",
-            &symbol))
-      websocket_capabilities |= 1U;
-    if (level != NULL && *level != 0)
-      p_lws_set_log_level((int)strtol(level, NULL, 0), NULL);
-    else
-      p_lws_set_log_level(0, NULL);
+    lws_set_log_level(level == NULL ? 0 : (int)strtol(level, NULL, 0), NULL);
   }
   websocket_available = 1;
 }
@@ -510,7 +454,7 @@ static int initialize_websocket_lifetime_context(void) {
   info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
   info.gid = (gid_t)-1;
   info.uid = (uid_t)-1;
-  websocket_lifetime_context = p_lws_create_context(&info);
+  websocket_lifetime_context = lws_create_context(&info);
   return websocket_lifetime_context != NULL;
 }
 
@@ -541,8 +485,8 @@ __attribute__((destructor)) static void release_websocket_runtime(void) {
   pthread_mutex_lock(&websocket_runtime_mutex);
   pthread_mutex_lock(&context_list_mutex);
   if (context_list == NULL && websocket_lifetime_context != NULL &&
-      p_lws_context_destroy != NULL) {
-    p_lws_context_destroy(websocket_lifetime_context);
+      1) {
+    lws_context_destroy(websocket_lifetime_context);
     websocket_lifetime_context = NULL;
   }
   pthread_mutex_unlock(&context_list_mutex);
@@ -584,7 +528,7 @@ static struct lws_context *create_registered_context(
     }
   }
   pthread_mutex_lock(&context_list_mutex);
-  context = p_lws_create_context(info);
+  context = lws_create_context(info);
   if (context == NULL) {
     pthread_mutex_unlock(&context_list_mutex);
     close(state->wakeup_pipe[0]);
@@ -606,10 +550,10 @@ static void destroy_registered_context(struct lws_context *context) {
   while (*pp != NULL) {
     if ((*pp)->context == context) {
       chezpp_ws_context_node *node = *pp;
-      chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)p_lws_context_user(context);
+      chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)lws_context_user(context);
       *pp = node->next;
       free(node);
-      p_lws_context_destroy(context);
+      lws_context_destroy(context);
       close(state->wakeup_pipe[0]);
       close(state->wakeup_pipe[1]);
       state->forced_pending = 0;
@@ -622,7 +566,7 @@ static void destroy_registered_context(struct lws_context *context) {
 }
 
 static void service_context_ready_locked(struct lws_context *context) {
-  chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)p_lws_context_user(context);
+  chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)lws_context_user(context);
   unsigned char byte = 1;
   unsigned char bytes[64];
   /* Unlike timeout 0 (ignored since LWS 3.2), -1 never waits. LWS services
@@ -631,8 +575,8 @@ static void service_context_ready_locked(struct lws_context *context) {
    * signal if forced work remains, so one call stays bounded and Scheme won't
    * sleep on a drained socket before advancing again. */
   while (read(state->wakeup_pipe[0], bytes, sizeof(bytes)) > 0) {}
-  (void)p_lws_service_tsi(context, -1, 0);
-  state->forced_pending = p_lws_service_adjust_timeout(context, 1, 0) == 0;
+  (void)lws_service_tsi(context, -1, 0);
+  state->forced_pending = lws_service_adjust_timeout(context, 1, 0) == 0;
   if (state->forced_pending) (void)write(state->wakeup_pipe[1], &byte, 1);
 }
 
@@ -646,7 +590,7 @@ static void service_context_locked(struct lws_context *context, int timeout_ms) 
   if (context == NULL || !context_registered_unlocked(context)) return;
   service_context_ready_locked(context);
   if (timeout_ms <= 0) return;
-  state = (chezpp_ws_poll_state *)p_lws_context_user(context);
+  state = (chezpp_ws_poll_state *)lws_context_user(context);
   if (state == NULL) return;
   if (state->forced_pending) return;
   for (entry = state->head; entry != NULL; entry = entry->next) {
@@ -698,9 +642,9 @@ static int context_listen_port(struct lws_context *context, const char *vhost_na
 
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context)) {
-    vhost = p_lws_get_vhost_by_name(context, vhost_name);
-    if (vhost == NULL) vhost = p_lws_get_vhost_by_name(context, "default");
-    if (vhost != NULL) port = p_lws_get_vhost_listen_port(vhost);
+    vhost = lws_get_vhost_by_name(context, vhost_name);
+    if (vhost == NULL) vhost = lws_get_vhost_by_name(context, "default");
+    if (vhost != NULL) port = lws_get_vhost_listen_port(vhost);
   }
   pthread_mutex_unlock(&context_list_mutex);
   return port;
@@ -712,7 +656,7 @@ static struct lws *connect_context(struct lws_context *context,
 
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context))
-    wsi = p_lws_client_connect_via_info(info);
+    wsi = lws_client_connect_via_info(info);
   pthread_mutex_unlock(&context_list_mutex);
   return wsi;
 }
@@ -720,8 +664,8 @@ static struct lws *connect_context(struct lws_context *context,
 static void clear_opaque_user_data(struct lws_context *context, struct lws *wsi) {
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context) && wsi != NULL &&
-      p_lws_set_opaque_user_data != NULL)
-    p_lws_set_opaque_user_data(wsi, NULL);
+      1)
+    lws_set_opaque_user_data(wsi, NULL);
   pthread_mutex_unlock(&context_list_mutex);
 }
 
@@ -729,9 +673,9 @@ static void close_wsi(struct lws_context *context, struct lws *wsi,
                       int code, const unsigned char *reason, size_t reason_len) {
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context) && wsi != NULL) {
-    p_lws_close_reason(wsi, (enum lws_close_status)code,
+    lws_close_reason(wsi, (enum lws_close_status)code,
                        (unsigned char *)reason, reason_len);
-    p_lws_set_timeout(wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
+    lws_set_timeout(wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
   }
   pthread_mutex_unlock(&context_list_mutex);
 }
@@ -739,7 +683,7 @@ static void close_wsi(struct lws_context *context, struct lws *wsi,
 static void request_writable(struct lws_context *context, struct lws *wsi) {
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context) && wsi != NULL)
-    p_lws_callback_on_writable(wsi);
+    lws_callback_on_writable(wsi);
   pthread_mutex_unlock(&context_list_mutex);
 }
 
@@ -773,9 +717,9 @@ static void clear_rx(chezpp_ws_connection *conn) {
 
 static void set_negotiated_protocol(chezpp_ws_connection *conn, struct lws *wsi) {
   const struct lws_protocols *protocol;
-  if (conn == NULL || wsi == NULL || p_lws_get_protocol == NULL) return;
-  if (p_lws_hdr_total_length(wsi, WSI_TOKEN_PROTOCOL) <= 0) return;
-  protocol = p_lws_get_protocol(wsi);
+  if (conn == NULL || wsi == NULL) return;
+  if (lws_hdr_total_length(wsi, WSI_TOKEN_PROTOCOL) <= 0) return;
+  protocol = lws_get_protocol(wsi);
   if (protocol != NULL && protocol->name != NULL) {
     if (conn->negotiated_protocol != NULL) free(conn->negotiated_protocol);
     conn->negotiated_protocol = ws_strdup(protocol->name);
@@ -786,8 +730,8 @@ static void copy_handshake_value(char **slot, struct lws *wsi,
                                  enum lws_token_indexes token) {
   char buffer[512];
   int length;
-  if (slot == NULL || wsi == NULL || p_lws_hdr_copy == NULL) return;
-  length = p_lws_hdr_copy(wsi, buffer, (int)sizeof(buffer), token);
+  if (slot == NULL || wsi == NULL) return;
+  length = lws_hdr_copy(wsi, buffer, (int)sizeof(buffer), token);
   if (length <= 0) return;
   if (*slot != NULL) free(*slot);
   *slot = ws_strdup(buffer);
@@ -932,17 +876,17 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
 
   (void)user;
 
-  if (wsi != NULL && p_lws_get_opaque_user_data != NULL)
-    conn = (chezpp_ws_connection *)p_lws_get_opaque_user_data(wsi);
   if (wsi != NULL)
-    context_user = p_lws_context_user(p_lws_get_context(wsi));
+    conn = (chezpp_ws_connection *)lws_get_opaque_user_data(wsi);
+  if (wsi != NULL)
+    context_user = lws_context_user(lws_get_context(wsi));
 
   ws_tracef("callback reason=%d wsi=%p conn=%p", (int)reason, (void *)wsi, (void *)conn);
 
   switch (reason) {
   case LWS_CALLBACK_OPENSSL_LOAD_EXTRA_SERVER_VERIFY_CERTS: {
     chezpp_ws_server *server =
-        in == NULL ? NULL : (chezpp_ws_server *)p_lws_vhost_user((struct lws_vhost *)in);
+        in == NULL ? NULL : (chezpp_ws_server *)lws_vhost_user((struct lws_vhost *)in);
     if (server == NULL || server->tls_context_handle == 0) return 0;
     return chezpp_net_tls_context_copy_credentials(server->tls_context_handle, user) ? 0 : -1;
   }
@@ -962,7 +906,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
   }
   case LWS_CALLBACK_ESTABLISHED: {
     chezpp_ws_server *server =
-        (chezpp_ws_server *)p_lws_context_user(p_lws_get_context(wsi));
+        (chezpp_ws_server *)lws_context_user(lws_get_context(wsi));
     chezpp_ws_connection *accepted =
         (chezpp_ws_connection *)calloc(1, sizeof(chezpp_ws_connection));
     if (accepted == NULL) return -1;
@@ -975,7 +919,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     accepted->close_code = LWS_CLOSE_STATUS_NOSTATUS;
     set_negotiated_protocol(accepted, wsi);
     server->live_count += 1;
-    p_lws_set_opaque_user_data(wsi, accepted);
+    lws_set_opaque_user_data(wsi, accepted);
     assign_poll_connection(&server->poll_state, wsi, accepted);
     if (server->accept_tail == NULL) {
       server->accept_head = accepted;
@@ -1004,7 +948,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     return 0;
   case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
     if (conn == NULL && wsi != NULL) {
-      conn = (chezpp_ws_connection *)p_lws_context_user(p_lws_get_context(wsi));
+      conn = (chezpp_ws_connection *)lws_context_user(lws_get_context(wsi));
     }
     if (conn != NULL) {
       conn->failed = 1;
@@ -1017,9 +961,9 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
   case LWS_CALLBACK_CLIENT_RECEIVE:
     if (conn == NULL) return 0;
     ws_tracef("receive conn=%p len=%zu final=%d remaining=%zu", (void *)conn, len,
-              p_lws_is_final_fragment(wsi), p_lws_remaining_packet_payload(wsi));
+              lws_is_final_fragment(wsi), lws_remaining_packet_payload(wsi));
     if (conn->rx_len == 0)
-      conn->rx_type = p_lws_frame_is_binary(wsi) ? CHEZPP_WS_BINARY : CHEZPP_WS_TEXT;
+      conn->rx_type = lws_frame_is_binary(wsi) ? CHEZPP_WS_BINARY : CHEZPP_WS_TEXT;
     if (!ensure_rx_capacity(conn, len)) {
       conn->failed = 1;
       set_error(&conn->error, "out of memory while receiving websocket data");
@@ -1027,7 +971,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
     }
     memcpy(conn->rx_buf + conn->rx_len, in, len);
     conn->rx_len += len;
-    if (p_lws_is_final_fragment(wsi) && p_lws_remaining_packet_payload(wsi) == 0) {
+    if (lws_is_final_fragment(wsi) && lws_remaining_packet_payload(wsi) == 0) {
       if (!push_message(conn, conn->rx_type, conn->rx_buf, conn->rx_len)) {
         conn->failed = 1;
         set_error(&conn->error, "out of memory while queueing websocket message");
@@ -1049,7 +993,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
   case LWS_CALLBACK_SERVER_WRITEABLE:
   case LWS_CALLBACK_CLIENT_WRITEABLE:
     if (conn == NULL || conn->pending_send == NULL) return 0;
-    if (p_lws_write(wsi, conn->pending_send->buf + LWS_PRE, conn->pending_send->len,
+    if (lws_write(wsi, conn->pending_send->buf + LWS_PRE, conn->pending_send->len,
                     write_protocol_for_send(conn->pending_send)) <
         (int)conn->pending_send->len) {
       conn->failed = 1;
@@ -1364,7 +1308,7 @@ ptr chezpp_net_websocket_poll_targets(uptr handle, int server_handle) {
     pthread_mutex_unlock(&context_list_mutex);
     return make_error_status_message("invalid websocket context");
   }
-  state = (chezpp_ws_poll_state *)p_lws_context_user(context);
+  state = (chezpp_ws_poll_state *)lws_context_user(context);
   for (entry = state->head; entry != NULL; entry = entry->next)
     if (entry->fd >= 0 && entry->events != 0) count++;
   targets = Smake_vector(count, Sfalse);
