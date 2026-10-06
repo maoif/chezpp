@@ -23,7 +23,7 @@ ar rcs "$tmp/libfixture.a" "$tmp/curl.o"
 cat > "$tmp/show.mk" <<'MAKE'
 .PHONY: show-optional-config
 show-optional-config:
-	@printf '%s\n' $(call build-shell-quote,CURL=$(RESOLVED_WITH_CURL)) $(call build-shell-quote,CFLAGS=$(OPTIONAL_CFLAGS)) $(call build-shell-quote,LIBS=$(OPTIONAL_LIBS)) $(call build-shell-quote,SIGNATURE=$(BUILD_OPTIONS_SIGNATURE)) $(call build-shell-quote,SOURCES=$(SRCS_C)) $(call build-shell-quote,RESOLVED=$(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),$(name)=$(RESOLVED_WITH_$(name))))
+	@printf '%s\n' $(call build-shell-quote,CURL=$(RESOLVED_WITH_CURL)) $(call build-shell-quote,VERSION_CURL=$(RESOLVED_PACKAGE_VERSION_CURL)) $(call build-shell-quote,CFLAGS=$(OPTIONAL_CFLAGS)) $(call build-shell-quote,LIBS=$(OPTIONAL_LIBS)) $(call build-shell-quote,SIGNATURE=$(BUILD_OPTIONS_SIGNATURE)) $(call build-shell-quote,SOURCES=$(SRCS_C)) $(call build-shell-quote,RESOLVED=$(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),$(name)=$(RESOLVED_WITH_$(name))))
 MAKE
 run_make() {
     make --no-print-directory -s -C "$root" -f Makefile -f "$tmp/show.mk" \
@@ -128,6 +128,11 @@ cat > "$tmp/pkg-config" <<'PKG'
 [ "$2" = libcurl ] || exit 1
 case "$1" in
     --exists) exit 0 ;;
+    --atleast-version=*)
+        [ "${FIXTURE_VERSION:-8.0.0}" = 8.0.0 ] || exit 1
+        exit 0 ;;
+    --max-version=*) exit 0 ;;
+    --modversion) printf '%s\n' "${FIXTURE_VERSION:-8.0.0}" ;;
     --cflags) printf '%s\n' "$FIXTURE_CFLAGS" ;;
     --libs) printf '%s\n' "$FIXTURE_LIBS" ;;
     *) exit 1 ;;
@@ -139,7 +144,23 @@ FIXTURE_LIBS="$tmp/libfixture.a"
 export FIXTURE_CFLAGS FIXTURE_LIBS
 result=$(run_make show-optional-config WITH_CURL=auto PKG_CONFIG="$tmp/pkg-config")
 assert_contains "$result" 'CURL=1'
+assert_contains "$result" 'VERSION_CURL=8.0.0'
 assert_contains "$result" "LIBS=$tmp/libfixture.a"
+# Auto detection must reject pkg-config metadata below Chezpp's curl minimum.
+FIXTURE_VERSION=7.99.0
+export FIXTURE_VERSION
+result=$(run_make show-optional-config WITH_CURL=auto PKG_CONFIG="$tmp/pkg-config")
+assert_contains "$result" 'CURL=0'
+assert_contains "$result" 'VERSION_CURL=7.99.0'
+if result=$(run_make show-optional-config WITH_CURL=1 PKG_CONFIG="$tmp/pkg-config" 2>&1); then
+    printf '%s\n' 'old CURL pkg-config version was accepted for explicit enablement' >&2
+    exit 1
+fi
+assert_contains "$result" 'requires >= 8.0.0'
+FIXTURE_VERSION=8.0.0
+export FIXTURE_VERSION
+result=$(run_make show-optional-config WITH_CURL=auto PKG_CONFIG="$tmp/pkg-config")
+assert_contains "$result" 'CURL=1'
 result=$(run_make show-optional-config WITH_CURL=1 PKG_CONFIG="$tmp/pkg-config" \
     "CURL_CFLAGS=-nostdinc -I$tmp/include -DMANUAL=1")
 assert_contains "$result" 'CURL=1'

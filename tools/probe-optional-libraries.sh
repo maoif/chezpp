@@ -21,6 +21,8 @@ if [ "${1-}" = replay ]; then
             replay_assignment "WITH_$name" "$value"
             eval 'value=${RESOLVED_WITH_'"$name"'-0}'
             replay_assignment "RESOLVED_WITH_$name" "$value"
+            eval 'value=${RESOLVED_PACKAGE_VERSION_'"$name"'-not probed}'
+            replay_assignment "RESOLVED_PACKAGE_VERSION_$name" "$value"
             for side in CFLAGS LIBS; do
                 eval 'value=${RESOLVED_'"$name"'_'"$side"'-}'
                 replay_assignment "RESOLVED_${name}_$side" "$value"
@@ -69,6 +71,10 @@ assignment() {
 
 for name in CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH BLAKE3; do
     eval 'choice=${WITH_'"$name"'}'
+    eval 'version_min=${OPTIONAL_VERSION_MIN_'"$name"'-}'
+    eval 'version_max=${OPTIONAL_VERSION_MAX_'"$name"'-}'
+    eval 'version_major_set=${OPTIONAL_VERSION_MAJOR_SET_'"$name"'-}'
+    eval 'version_requirement=${OPTIONAL_VERSION_REQ_'"$name"'-}'
     eval 'cflags=${'"$name"'_CFLAGS-}'
     eval 'libs=${'"$name"'_LIBS-}'
     eval 'cflags_supplied=${'"$name"'_CFLAGS_SUPPLIED}'
@@ -86,9 +92,39 @@ for name in CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH BLAK
         XXHASH) package=libxxhash; header=xxhash.h; symbol=XXH32 ;;
         BLAKE3) package=libblake3; header=blake3.h; symbol=blake3_hasher_init ;;
     esac
+    pkg_version_satisfies() {
+        package_version=$($PKG_CONFIG --modversion "$package" 2> "$workspace/error") || {
+            package_version=unknown
+            return 1
+        }
+        if [ -n "$version_major_set" ]; then
+            version_major=${package_version%%.*}
+            for supported_major in $version_major_set; do
+                [ "$version_major" = "$supported_major" ] && return 0
+            done
+            return 1
+        fi
+        if [ -n "$version_min" ] &&
+           ! $PKG_CONFIG --atleast-version="$version_min" "$package" \
+               2> "$workspace/error"; then
+            return 1
+        fi
+        if [ -n "$version_max" ] &&
+           ! $PKG_CONFIG --max-version="$version_max" "$package" \
+               2> "$workspace/error"; then
+            return 1
+        fi
+        return 0
+    }
     enabled=0
+    package_version='not probed'
     if [ "$choice" != 0 ]; then
         usable=1
+        if [ "$cflags_supplied" = 1 ] && [ "$libs_supplied" = 1 ]; then
+            package_version='manual flags'
+        else
+            package_version='not found'
+        fi
         if [ "$cflags_supplied" = 0 ] || [ "$libs_supplied" = 0 ]; then
             if ! $PKG_CONFIG --exists "$package" 2> "$workspace/error"; then
                 usable=0
@@ -101,17 +137,27 @@ for name in CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH BLAK
                     exit 1
                 fi
             else
-                if [ "$cflags_supplied" = 0 ]; then
-                    if ! cflags=$($PKG_CONFIG --cflags "$package" 2> "$workspace/error"); then usable=0; fi
+                if ! pkg_version_satisfies; then
+                    usable=0
+                    if [ "$choice" = 1 ]; then
+                        printf 'error: WITH_%s=1 found %s version %s; requires %s.\n' \
+                            "$name" "$package" "$package_version" "$version_requirement" >&2
+                        exit 1
+                    fi
                 fi
-                if [ "$libs_supplied" = 0 ]; then
-                    if ! libs=$($PKG_CONFIG --libs "$package" 2> "$workspace/error"); then usable=0; fi
-                fi
-                if [ "$usable" = 0 ] && [ "$choice" = 1 ]; then
-                    printf 'error: WITH_%s=1 could not obtain flags for <%s> from pkg-config.\n' \
-                        "$name" "$header" >&2
-                    cat "$workspace/error" >&2
-                    exit 1
+                if [ "$usable" = 1 ]; then
+                    if [ "$cflags_supplied" = 0 ]; then
+                        if ! cflags=$($PKG_CONFIG --cflags "$package" 2> "$workspace/error"); then usable=0; fi
+                    fi
+                    if [ "$libs_supplied" = 0 ]; then
+                        if ! libs=$($PKG_CONFIG --libs "$package" 2> "$workspace/error"); then usable=0; fi
+                    fi
+                    if [ "$usable" = 0 ] && [ "$choice" = 1 ]; then
+                        printf 'error: WITH_%s=1 could not obtain flags for <%s> from pkg-config.\n' \
+                            "$name" "$header" >&2
+                        cat "$workspace/error" >&2
+                        exit 1
+                    fi
                 fi
             fi
         fi
@@ -132,6 +178,7 @@ for name in CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH BLAK
         fi
     fi
     assignment "RESOLVED_WITH_$name" "$enabled"
+    assignment "RESOLVED_PACKAGE_VERSION_$name" "$package_version"
     if [ "$enabled" = 0 ]; then cflags=; libs=; fi
     assignment "RESOLVED_${name}_CFLAGS" "$cflags"
     assignment "RESOLVED_${name}_LIBS" "$libs"

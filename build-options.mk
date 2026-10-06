@@ -84,7 +84,12 @@ define print-build-options
 	@printf '\033[1;36mChezPP build options\033[0m'; \
 	if [ -n '$(BUILD_VARIANT_LABEL)' ]; then printf ' (variant=%s)' '$(BUILD_VARIANT_LABEL)'; fi; \
 	printf '\n'; \
-	printf '\033[2m%s\033[0m\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE))
+	printf '\033[2m%s\033[0m\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)); \
+	printf '\033[1;36mOptional libraries\033[0m\n'; \
+	printf '  %-16s %-34s %-18s %s\n' Library Requirement pkg-config Status; \
+	$(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),\
+	  printf '  %-16s %-34s %-18s %s\n' '$(or $(OPTIONAL_DEPENDENCY_LABEL_$(name)),$(name))' '$(OPTIONAL_DEPENDENCY_VERSION_REQ_$(name))' '$(or $(RESOLVED_PACKAGE_VERSION_$(name)),not reported)' '$(if $(filter 1,$(RESOLVED_WITH_$(name))),enabled$(if $(filter auto,$(WITH_$(name))), (auto),(required)),$(if $(filter 0,$(WITH_$(name))),disabled,unavailable (auto)))'; \
+	)
 endef
 
 _scheme_true := $(shell printf '\043t')
