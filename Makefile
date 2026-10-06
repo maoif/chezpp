@@ -63,7 +63,7 @@ test: chez++
 	@$(MAKE) --no-print-directory -C tests test \
 		BUILD_VARIANT='$(VARIANT)' \
 		$(foreach option,$(BUILD_OPTION_NAMES),BUILD_$(option)='$($(option))') \
-		TEST='$(TEST)'
+		$(if $(strip $(TEST)),TEST=$(call build-shell-quote,$(TEST)))
 
 define generate_chezpp_launcher
 	@rm -f $(1)

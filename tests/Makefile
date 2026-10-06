@@ -81,7 +81,7 @@ lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
 	$(CC) $(CPPFLAGS) $(RESOLVED_WEBSOCKETS_CFLAGS) -Wall -Wextra -O2 \
 	  $< -o $@ $(LDFLAGS) $(RESOLVED_WEBSOCKETS_LIBS) -ldl
 
-net-lws-http2.so net-http-fiber.so: lws-http2-fixture
+net-lws-http2.so net-http-fiber.so net-http-stress.so: lws-http2-fixture
 endif
 
 .PHONY: test
@@ -97,7 +97,7 @@ mat.so: mat.sls | prepare-chezpp
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
-$(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++ | prepare-chezpp
+$(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++ | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' '$(CHEZ_TEST_COMPILER_FORMS) (load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
@@ -105,6 +105,8 @@ $(OBJS_TEST): %.so: %.ss $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++ | prepare-c
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
+
+test.so: mat-requires-fixture.ss
 
 .PHONY: test-all
 test-all: prepare-chezpp mat.so $(OBJS_TEST)
