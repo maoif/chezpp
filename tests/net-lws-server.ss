@@ -2,12 +2,9 @@
 
 (load "net-common.ss")
 
-(define server-test-port
-  (+ 19000 (modulo (get-process-id) 20000)))
-
 (mat net-lws-server-source-primary-failure
      ;; Error case: a length failure must survive a second exception from source cleanup.
-     (let* ([port (+ server-test-port 30)] [server (http-listen "127.0.0.1" port)]
+     (let* ([port (reserve-loopback-port)] [server (http-listen "127.0.0.1" port)]
             [client (http-open)] [closed 0] [connection #f])
        (dynamic-wind
          void
@@ -32,7 +29,7 @@
 
 (mat net-lws-server-write-primary-over-closer
      ;; Error case: a response write failure must survive a second exception from source cleanup.
-     (let* ([port (+ server-test-port 31)] [server (http-listen "127.0.0.1" port)]
+     (let* ([port (reserve-loopback-port)] [server (http-listen "127.0.0.1" port)]
             [client (http-open)] [closed 0] [connection #f])
        (dynamic-wind
          void
@@ -88,7 +85,7 @@
 
 (mat net-lws-server-refuses-h2-on-http1-listener
      ;; Error case: explicit H2 must fail against an HTTP/1 listener without hanging or downgrading.
-     (let* ([port (+ server-test-port 4)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [client (http-open)])
        (dynamic-wind
@@ -104,7 +101,7 @@
          (lambda () (http-close client) (http-server-close server)))))
 
 (mat net-lws-server-live-keepalive-and-pipeline
-     (let* ([port (+ server-test-port 6)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [socket (server-test-connect port)]
             [worker #f]
@@ -132,7 +129,7 @@
 
 (mat net-lws-server-handler-failure-and-recovery
      ;; Error cases: raised conditions and invalid handler returns produce 500 responses.
-     (let* ([port (+ server-test-port 7)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [client (http-open)]
             [worker #f])
@@ -158,7 +155,7 @@
 
 (mat net-lws-server-body-pipeline-overrun-is-rejected
      ;; Error case: LWS can include a following pipelined request in its HTTP_BODY callback.
-     (let* ([port (+ server-test-port 16)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [socket (server-test-connect port)])
        (dynamic-wind
@@ -173,7 +170,7 @@
          (lambda () (close-socket socket) (http-server-close server)))))
 
 (mat net-lws-server-partial-headers-do-not-block-accept
-     (let* ([port (+ server-test-port 8)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [partial (server-test-connect port)]
             [client (http-open)]
@@ -194,7 +191,7 @@
 
 (mat net-lws-server-close-wakes-accept
      ;; Error case: closing a server interrupts a pending blocking accept.
-     (let* ([server (http-listen "127.0.0.1" (+ server-test-port 9))]
+     (let* ([server (http-listen "127.0.0.1" (reserve-loopback-port))]
             [started (make-condition)]
             [mutex (make-mutex)]
             [waiting? #f]
@@ -212,7 +209,7 @@
 
 (mat net-lws-server-chunked-request-is-rejected
      ;; Error case: LWS does not decode server transfer coding; rejection must not hang.
-     (let* ([port (+ server-test-port 11)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [socket (server-test-connect port)])
        (dynamic-wind
@@ -230,11 +227,12 @@
          (lambda () (close-socket socket) (http-server-close server)))))
 
 (mat net-lws-server-live-streamed-response
-     (let* ([port (+ server-test-port 12)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [client (http-open)]
             [produced 0]
             [closed 0]
+            [worker-failure #f]
             [worker #f])
        (dynamic-wind
          void
@@ -252,7 +250,10 @@
                   262144
                   (lambda () (set! closed (fx1+ closed))))
                  '() 'h1)))
-           (set! worker (fork-thread (lambda () (http-serve server))))
+           (set! worker
+             (fork-thread (lambda ()
+                            (guard (condition [else (set! worker-failure condition)])
+                              (http-serve server)))))
            (let ([response
                   (guard (condition
                           [else (error 'server-stream-response "response failed"
@@ -260,13 +261,17 @@
                     (http-send client (make-http-request 'get
                       (format "http://127.0.0.1:~a/stream" port))))])
              (thread-join worker)
+             (when worker-failure (raise worker-failure))
              (and (equal? (http-response-body response) (make-bytevector 262144 97))
                   (fx= produced 8)
                   (fx= closed 1))))
-         (lambda () (http-close client) (http-server-close server)))))
+         (lambda ()
+           (http-close client)
+           (http-server-close server)
+           (when worker (thread-join worker))))))
 
 (mat net-lws-server-live-http2-concurrent-streams
-     (let* ([port (+ server-test-port 13)]
+     (let* ([port (reserve-loopback-port)]
             [server-tls (make-test-http-verified-server-context)]
             [client-tls (make-test-http-verified-client-context)]
             [server (http-listen "127.0.0.1" port server-tls)]
@@ -312,11 +317,12 @@
            (close-tls-context server-tls)))))
 
 (mat net-lws-server-live-request-body-backpressure
-     (let* ([port (+ server-test-port 14)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [client (http-open)]
             [payload (make-bytevector 262144 113)]
             [received #f]
+            [worker-failure #f]
             [worker #f])
        (dynamic-wind
          void
@@ -325,20 +331,25 @@
            (set! worker
              (fork-thread
               (lambda ()
+               (guard (condition [else (set! worker-failure condition)])
                 (let ([connection (http-accept server)])
                   ($sleep (make-time 'time-duration 30000000 0))
                   (set! received (http-request-body (http-read-request connection)))
                   (http-write-response connection
-                    (make-http-response 200 "OK" '() "received" '() 'h1))))))
+                    (make-http-response 200 "OK" '() "received" '() 'h1)))))))
            (let ([response (http-send client (make-http-request 'post
                              (format "http://127.0.0.1:~a/large" port) '() payload))])
              (thread-join worker)
+             (when worker-failure (raise worker-failure))
              (and (= (http-response-status response) 200) (equal? payload received))))
-         (lambda () (http-close client) (http-server-close server)))))
+         (lambda ()
+           (http-close client)
+           (http-server-close server)
+           (when worker (thread-join worker))))))
 
 (mat net-lws-server-repeated-body-accounting
-     ;; Eighty 256 KiB bodies exceed the server's 16 MiB queue limit; consumption must free it.
-     (let* ([port (+ server-test-port 31)] [server (http-listen "127.0.0.1" port)]
+     ;; Sixty-five 256 KiB bodies exceed the server's 16 MiB queue limit; consumption must free it.
+     (let* ([port (reserve-loopback-port)] [server (http-listen "127.0.0.1" port)]
             [payload (make-bytevector 262144 114)] [worker #f]
             [server-failure #f])
        (dynamic-wind
@@ -365,13 +376,13 @@
                       (string-contains?
                        (server-test-receive-until socket "body-accounted!") "200"))
                     (lambda () (close-socket socket))))))
-            (iota 80)))
+            (iota 65)))
          (lambda () (http-server-close server)
            (when worker (thread-join worker))))))
 
 (mat net-lws-server-disconnect-wakes-partial-body
      ;; Error case: a peer disconnects before sending its declared request body.
-     (let* ([port (+ server-test-port 15)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [socket (server-test-connect port)])
        (dynamic-wind
@@ -388,7 +399,7 @@
 
 (mat net-lws-server-close-wakes-partial-body
      ;; Error case: shutdown interrupts a request whose declared body has not arrived.
-     (let* ([port (+ server-test-port 10)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [socket (server-test-connect port)]
             [result #f])
@@ -409,7 +420,7 @@
          (lambda () (close-socket socket) (http-server-close server)))))
 
 (mat net-lws-server-handler-registry
-     (let ([server (http-listen "127.0.0.1" server-test-port)])
+     (let ([server (http-listen "127.0.0.1" (reserve-loopback-port))])
        (dynamic-wind
          void
          (lambda ()
@@ -422,12 +433,12 @@
          (lambda () (http-server-close server)))))
 
 (mat net-lws-server-close-is-idempotent
-     (let ([server (http-listen "127.0.0.1" (+ server-test-port 1))])
+     (let ([server (http-listen "127.0.0.1" (reserve-loopback-port))])
        (and (eq? server (http-server-close server))
             (eq? server (http-server-close server)))))
 
 (mat net-lws-server-live-http1
-     (let* ([port (+ server-test-port 2)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [server-thread #f])
        (dynamic-wind
@@ -445,7 +456,7 @@
          (lambda () (http-server-close server)))))
 
 (mat net-lws-server-live-request-body
-     (let* ([port (+ server-test-port 3)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [server-thread #f])
        (dynamic-wind
@@ -467,7 +478,7 @@
          (lambda () (http-server-close server)))))
 
 (mat net-lws-server-live-header-roundtrip
-     (let* ([port (+ server-test-port 5)]
+     (let* ([port (reserve-loopback-port)]
             [server (http-listen "127.0.0.1" port)]
             [client (http-open)]
             [received #f]

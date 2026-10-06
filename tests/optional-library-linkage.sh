@@ -237,7 +237,8 @@ for name in curl ssh websockets grpc; do
   case "$name" in
     curl) expected_capabilities='()' ;;
     ssh) expected_capabilities='(sftp-aio)' ;;
-    websockets|grpc) expected_capabilities='(compression tls)' ;;
+    websockets) expected_capabilities='(tls)' ;;
+    grpc) expected_capabilities='(compression tls)' ;;
   esac
   check_available "$name" "$compatible_version" "$expected_capabilities" \
     "$temporary_directory/$name-compatible.out"

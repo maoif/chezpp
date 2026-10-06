@@ -31,6 +31,10 @@
      (check-unavailable 'cares "c-ares")
      (check-unavailable 'idn2 "libidn2"))
 
+(mat net-loader-websocket-capabilities
+     (let ([capabilities (optional-library-capabilities (optional-library-info 'websockets))])
+       (for-all (lambda (capability) (eq? capability 'tls)) capabilities)))
+
 (mat net-loader-does-not-expose-nghttp2
      ;; Error case: nghttp2 is an implementation detail of the optional LWS runtime.
      (guard (condition [else #t])

@@ -25,6 +25,7 @@ ptr chezpp_net_poll(ptr specs, int timeout_ms) {
   ptr out_tail = Snil;
   int count = 0;
   int rc;
+  int poll_errno;
   int i;
 
   while (!Snullp(ls)) {
@@ -56,9 +57,16 @@ ptr chezpp_net_poll(ptr specs, int timeout_ms) {
     i += 1;
   }
 
+  /* Only native storage crosses this wait. An active Chez thread in foreign
+   * code prevents collection, which can stop the peer that must wake poll.
+   * Do not access specs (or any other Scheme object) until reactivation. */
+  Sdeactivate_thread();
   rc = poll(pfds, (nfds_t)count, timeout_ms);
+  poll_errno = errno;
+  Sactivate_thread();
   if (rc < 0) {
     free(pfds);
+    errno = poll_errno;
     return make_errno_status("error");
   }
 

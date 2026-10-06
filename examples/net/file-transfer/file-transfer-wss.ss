@@ -20,7 +20,7 @@
     (errorf 'file-transfer-wss "expected one directory or file path"))
   (let* ([server? (string=? (getenv "CHEZPP_TRANSFER_ROLE") "server")]
          [ctx (secure-context (if server? 'server 'client))]
-         [options (make-websocket-options ctx '("chezpp-file-transfer") #f
+         [options (make-websocket-options ctx '("chezpp-file-transfer")
                                           65536 #f 30000)])
     (set! websocket-file-transfer-port 41009)
     (set! websocket-file-transfer-options options)
