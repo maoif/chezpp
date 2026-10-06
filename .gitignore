@@ -12,3 +12,6 @@ libchezpp.so
 test_*
 tests/lws-http2-fixture
 .chezpp-build-options
+
+chezpp/c/build-config.h
+chezpp/c/build-config.h.tmp.*

@@ -5,7 +5,11 @@ BUILD_OPTIONS_SIGNATURE_FILE ?= $(BUILD_ROOT)/.chezpp-build-options
 
 BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
                       loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
-BUILD_SIGNATURE_NAMES := VARIANT $(BUILD_OPTION_NAMES)
+_PROFILE_SIGNATURE_NAMES := VARIANT $(BUILD_OPTION_NAMES)
+BUILD_SIGNATURE_NAMES := $(_PROFILE_SIGNATURE_NAMES)
+
+# Quote values before passing user-supplied flags through a shell.
+build-shell-quote = '$(subst ','"'"',$(1))'
 
 VARIANT ?= release
 ifeq ($(filter $(VARIANT),release debug coverage),)
@@ -52,7 +56,7 @@ endif
 $(foreach option,$(BUILD_OPTION_NAMES),$(eval $(option) ?= $(_variant_$(option))))
 BUILD_TEST_COVERAGE := f
 BUILD_TEST_OPTIMIZE_LEVEL ?= $(if $(filter 0,$(o)),0,2)
-BUILD_OPTIONS_SIGNATURE := $(foreach option,$(BUILD_SIGNATURE_NAMES),$(option)=$($(option)))
+BUILD_OPTIONS_SIGNATURE = $(foreach option,$(BUILD_SIGNATURE_NAMES),$(option)=$($(option)))
 
 _release_signature := VARIANT=release o=3 d=0 cl= i=t cp0= fc= xf= xl= \
   p= xp= bp= xbp= c=f loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
@@ -61,17 +65,18 @@ _debug_signature := VARIANT=debug o=0 d=3 cl= i=t cp0= fc= xf= xl= \
   p= xp= bp= xbp= c=f loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
   pdhtml= gac= gic= pps= psi=t wpo=t
 _coverage_signature := VARIANT=coverage o=0 d=0 cl= i=t cp0= fc= xf= xl= \
-  p= xp= bp= xbp= c=t loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
+  p=t xp= bp= xbp= c=t loadspd= dumpspd= loadbpd= dumpbpd= compile=compile-file \
   pdhtml= gac= gic= pps= psi=t wpo=t
 
+_PROFILE_SIGNATURE := $(foreach option,$(_PROFILE_SIGNATURE_NAMES),$(option)=$($(option)))
 BUILD_VARIANT_LABEL :=
-ifeq ($(BUILD_OPTIONS_SIGNATURE),$(_release_signature))
+ifeq ($(_PROFILE_SIGNATURE),$(_release_signature))
 BUILD_VARIANT_LABEL := release
 endif
-ifeq ($(BUILD_OPTIONS_SIGNATURE),$(_debug_signature))
+ifeq ($(_PROFILE_SIGNATURE),$(_debug_signature))
 BUILD_VARIANT_LABEL := debug
 endif
-ifeq ($(BUILD_OPTIONS_SIGNATURE),$(_coverage_signature))
+ifeq ($(_PROFILE_SIGNATURE),$(_coverage_signature))
 BUILD_VARIANT_LABEL := coverage
 endif
 
@@ -79,7 +84,7 @@ define print-build-options
 	@printf '\033[1;36mChezPP build options\033[0m'; \
 	if [ -n '$(BUILD_VARIANT_LABEL)' ]; then printf ' (variant=%s)' '$(BUILD_VARIANT_LABEL)'; fi; \
 	printf '\n'; \
-	printf '\033[2m%s\033[0m\n' '$(BUILD_OPTIONS_SIGNATURE)'
+	printf '\033[2m%s\033[0m\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE))
 endef
 
 _scheme_true := $(shell printf '\043t')

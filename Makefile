@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := all
+
 include build-options.mk
 
 SCHEME := scheme
@@ -8,12 +10,14 @@ PREFIX := /usr
 
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
 SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
-SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c')
+SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c' ! -name '*_unavailable.c')
 
 CC := gcc
-CFLAGS := -fPIC -Wall -Wextra -O2 -shared -pthread
+CFLAGS := -fPIC -Wall -Wextra -O2 -pthread
 CFLAGS += -I$(SCHEME_INCLUDE_DIR)
-LDLIBS := -luuid -ldl
+LDLIBS := -ldl
+
+include optional-libraries.mk
 
 chezpplibs = chezpp.lib
 chezppwpos = chezpp.wpo
@@ -37,7 +41,8 @@ prepare-build:
 	$(call print-build-options)
 	@if [ -f "$(BUILD_OPTIONS_SIGNATURE_FILE)" ]; then \
 		old=$$(cat "$(BUILD_OPTIONS_SIGNATURE_FILE)"); \
-		if [ "$$old" != "$(BUILD_OPTIONS_SIGNATURE)" ]; then \
+		new=$(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)); \
+		if [ "$$old" != "$$new" ]; then \
 			printf '%s\n' 'build options changed; running make clean'; \
 			$(MAKE) --no-print-directory clean; \
 		fi; \
@@ -95,10 +100,11 @@ check-scheme-header:
 	  exit 1; \
 	fi
 
-libchezpp.so: ${SRCS_C} | check-scheme-header prepare-build
-	$(CC) $(CFLAGS) -o $@ $(SRCS_C) $(LDLIBS)
+libchezpp.so: ${SRCS_C} chezpp/c/build-config.h | check-scheme-header prepare-build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(OPTIONAL_CFLAGS) -include chezpp/c/build-config.h \
+	  -shared $(LDFLAGS) -o $@ $(SRCS_C) $(LDLIBS) $(OPTIONAL_LIBS)
 
-chezpp.lib: Makefile build-options.mk chezpp.ss ${SRCS_CHEZPP} libchezpp.so | prepare-build
+chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} libchezpp.so | prepare-build
 	@printf '%s\n' '$(CHEZ_COMPILER_FORMS) (compile-imported-libraries #t)' \
 	      '(define old-handler (compile-library-handler))' \
 	      '(define (compile-with-options thunk)' \
@@ -110,7 +116,7 @@ chezpp.lib: Makefile build-options.mk chezpp.ss ${SRCS_CHEZPP} libchezpp.so | pr
 	@rm -f chezpp.so
 	@if [ "$(wpo)" != t ]; then rm -f chezpp.wpo; fi
 	@tmp="$(BUILD_OPTIONS_SIGNATURE_FILE).tmp"; \
-	printf '%s\n' '$(BUILD_OPTIONS_SIGNATURE)' > "$$tmp"; \
+	printf '%s\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)) > "$$tmp"; \
 	mv "$$tmp" "$(BUILD_OPTIONS_SIGNATURE_FILE)"
 
 chez++: prepare-build ${chezppdeps} chez++.in Makefile
@@ -133,7 +139,8 @@ install: chez++ installdeps
 .PHONY: clean
 clean:
 	@rm -f chezpp.lib chezpp.wpo chez++ chez++.ss libchezpp.so \
-		"$(BUILD_OPTIONS_SIGNATURE_FILE)" "$(BUILD_OPTIONS_SIGNATURE_FILE).tmp"
+		"$(BUILD_OPTIONS_SIGNATURE_FILE)" "$(BUILD_OPTIONS_SIGNATURE_FILE).tmp" \
+		chezpp/c/build-config.h chezpp/c/build-config.h.tmp.*
 	@find chezpp/ -name '*.so'  -delete
 	@find tests/  -name '*.so'  -delete
 	@find chezpp/ -name '*.wpo' -delete
