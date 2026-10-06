@@ -4,6 +4,14 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+# Configuration regressions must not clean or replace the caller's compiled build.
+source_root=$root
+root="$tmp/project"
+mkdir -p "$root/tools" "$root/chezpp" "$root/tests"
+cp "$source_root/Makefile" "$source_root/build-options.mk" "$source_root/optional-libraries.mk" "$root/"
+cp "$source_root/tools/probe-optional-libraries.sh" "$root/tools/"
+cp -R "$source_root/chezpp/c" "$root/chezpp/"
+find "$root" -name '*.so' -delete
 names='CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH BLAKE3'
 disabled=''
 for name in $names; do disabled="$disabled WITH_${name}=0"; done
