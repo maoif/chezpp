@@ -3777,13 +3777,10 @@
 ;;;; Iterator extension registration
 ;;;;===----------------------------------------------------------------------===
 
-  (iter-register-source!
-   array?
-   (lambda (arr)
-     (cond [(fxarray? arr) (fxarray->iter arr)]
-           [(flarray? arr) (flarray->iter arr)]
-           [(bytearray? arr) (bytearray->iter arr)]
-           [else (array->iter arr)])))
+  (iter-register-source! array? array->iter)
+  (iter-register-source! fxarray? fxarray->iter)
+  (iter-register-source! flarray? flarray->iter)
+  (iter-register-source! bytearray? bytearray->iter)
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Navigator extension registration
