@@ -99,7 +99,8 @@
   Parameters `bytevector`, `seed` are passed to the native operation in that order.
   `bytevector` is the input bytevector.
   `seed` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32
     (let ([native (foreign-procedure "hash_XXH32" (ptr unsigned-int) unsigned-int)])
@@ -115,7 +116,8 @@
   Parameters `value`, `salt` are passed to the native operation in that order.
   `value` is the value passed to the native operation.
   `salt` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-fixnum
     (let ([native (foreign-procedure "hash_XXH32_fixnum" (fixnum unsigned-32) unsigned-32)])
@@ -128,7 +130,8 @@
   Parameters `value`, `salt` are passed to the native operation in that order.
   `value` is the value passed to the native operation.
   `salt` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-flonum
     (let ([native (foreign-procedure "hash_XXH32_flonum" (double unsigned-32) unsigned-32)])
@@ -142,7 +145,8 @@
   `value` is the value passed to the native operation.
   `other-value` is a number.
   `salt` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-ratnum
     (let ([native (foreign-procedure "hash_XXH32_ratnum" (fixnum fixnum unsigned-32) unsigned-32)])
@@ -156,7 +160,8 @@
   `value` is the value passed to the native operation.
   `other-value` is a number.
   `salt` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-cflonum
     (let ([native (foreign-procedure "hash_XXH32_cflonum" (double double unsigned-32) unsigned-32)])
@@ -171,7 +176,8 @@
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
   `salt` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-string
     (let ([native (foreign-procedure "hash_XXH32_string" (ptr int int unsigned-32) unsigned-32)])
@@ -186,7 +192,8 @@
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
   `salt` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-fxvector
     (let ([native (foreign-procedure "hash_XXH32_fxvector" (ptr int int unsigned-32) unsigned-32)])
@@ -201,7 +208,8 @@
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
   `salt` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-flvector
     (let ([native (foreign-procedure "hash_XXH32_flvector" (ptr int int unsigned-32) unsigned-32)])
@@ -216,7 +224,8 @@
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
   `salt` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-bytevector
     (let ([native (foreign-procedure "hash_XXH32_bytevector" (ptr int int unsigned-32) unsigned-32)])
@@ -398,7 +407,8 @@
   The `ffi-xxh32-create` procedure calls the native xxhash operation `hasher_XXH32_create`.
   Parameters `seed` are passed to the native operation in that order.
   `seed` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned xxHash state handle, or zero when allocation fails.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-create
     (let ([native (foreign-procedure "hasher_XXH32_create" (unsigned-32) void*)])
@@ -410,7 +420,8 @@
   The `ffi-xxh32-get` procedure calls the native xxhash operation `hasher_XXH32_get`.
   Parameters `context` are passed to the native operation in that order.
   `context` is the native context handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-get
     (let ([native (foreign-procedure "hasher_XXH32_get" (void*) unsigned-int)])
@@ -422,7 +433,8 @@
   The `ffi-xxh32-finalize!` procedure calls the native xxhash operation `hasher_XXH32_finalize`.
   Parameters `context` are passed to the native operation in that order.
   `context` is the native context handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the unsigned xxHash value of the input using the supplied hash seed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh32-finalize!
     (let ([native (foreign-procedure "hasher_XXH32_finalize" (void*) unsigned-int)])
@@ -584,7 +596,8 @@
   The `ffi-xxh64-create` procedure calls the native xxhash operation `hasher_XXH64_create`.
   Parameters `seed` are passed to the native operation in that order.
   `seed` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned xxHash state handle, or zero when allocation fails.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh64-create
     (let ([native (foreign-procedure "hasher_XXH64_create" (unsigned-64) void*)])
@@ -748,7 +761,8 @@
   The `ffi-xxh3-64-create` procedure calls the native xxhash operation `hasher_XXH3_64_create`.
   Parameters `seed` are passed to the native operation in that order.
   `seed` is the hash seed.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned xxHash state handle, or zero when allocation fails.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-xxh3-64-create
     (let ([native (foreign-procedure "hasher_XXH3_64_create" (unsigned-64) void*)])

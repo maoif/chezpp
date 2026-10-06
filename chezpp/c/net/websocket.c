@@ -119,30 +119,6 @@ struct chezpp_ws_context_node {
   struct lws_context *context;
 };
 
-typedef struct lws_context *(*lws_create_context_fn)(const struct lws_context_creation_info *);
-typedef void (*lws_context_destroy_fn)(struct lws_context *);
-typedef struct lws *(*lws_client_connect_via_info_fn)(const struct lws_client_connect_info *);
-typedef int (*lws_service_tsi_fn)(struct lws_context *, int, int);
-typedef int (*lws_service_adjust_timeout_fn)(struct lws_context *, int, int);
-typedef void (*lws_set_log_level_fn)(int, lws_log_emit_t);
-typedef struct lws_context *(*lws_get_context_fn)(const struct lws *);
-typedef void *(*lws_context_user_fn)(struct lws_context *);
-typedef void (*lws_set_opaque_user_data_fn)(struct lws *, void *);
-typedef void *(*lws_get_opaque_user_data_fn)(const struct lws *);
-typedef int (*lws_callback_on_writable_fn)(struct lws *);
-typedef int (*lws_write_fn)(struct lws *, unsigned char *, size_t, enum lws_write_protocol);
-typedef int (*lws_is_final_fragment_fn)(struct lws *);
-typedef size_t (*lws_remaining_packet_payload_fn)(struct lws *);
-typedef int (*lws_frame_is_binary_fn)(struct lws *);
-typedef void (*lws_close_reason_fn)(struct lws *, enum lws_close_status, unsigned char *, size_t);
-typedef void (*lws_set_timeout_fn)(struct lws *, enum pending_timeout, int);
-typedef struct lws_vhost *(*lws_get_vhost_by_name_fn)(struct lws_context *, const char *);
-typedef int (*lws_get_vhost_listen_port_fn)(struct lws_vhost *);
-typedef const char *(*lws_get_library_version_fn)(void);
-typedef const struct lws_protocols *(*lws_get_protocol_fn)(struct lws *);
-typedef void *(*lws_vhost_user_fn)(struct lws_vhost *);
-typedef int (*lws_hdr_copy_fn)(struct lws *, char *, int, enum lws_token_indexes);
-typedef int (*lws_hdr_total_length_fn)(struct lws *, enum lws_token_indexes);
 
 extern void *chezpp_net_tls_context_native(uptr handle);
 extern int chezpp_net_tls_context_copy_credentials(uptr handle, void *destination);

@@ -7,25 +7,6 @@
 #endif
 #include <pthread.h>
 
-typedef CURLcode (*curl_global_init_fn)(long);
-typedef void (*curl_global_cleanup_fn)(void);
-typedef CURL *(*curl_easy_init_fn)(void);
-typedef void (*curl_easy_cleanup_fn)(CURL *);
-typedef CURLcode (*curl_easy_setopt_fn)(CURL *, CURLoption, ...);
-typedef CURLcode (*curl_easy_perform_fn)(CURL *);
-typedef CURLcode (*curl_easy_pause_fn)(CURL *, int);
-typedef const char *(*curl_easy_strerror_fn)(CURLcode);
-typedef struct curl_slist *(*curl_slist_append_fn)(struct curl_slist *, const char *);
-typedef void (*curl_slist_free_all_fn)(struct curl_slist *);
-typedef curl_version_info_data *(*curl_version_info_fn)(CURLversion);
-typedef CURLM *(*curl_multi_init_fn)(void);
-typedef CURLMcode (*curl_multi_cleanup_fn)(CURLM *);
-typedef CURLMcode (*curl_multi_add_handle_fn)(CURLM *, CURL *);
-typedef CURLMcode (*curl_multi_remove_handle_fn)(CURLM *, CURL *);
-typedef CURLMcode (*curl_multi_socket_action_fn)(CURLM *, curl_socket_t, int, int *);
-typedef CURLMsg *(*curl_multi_info_read_fn)(CURLM *, int *);
-typedef CURLMcode (*curl_multi_setopt_fn)(CURLM *, CURLMoption, ...);
-typedef const char *(*curl_multi_strerror_fn)(CURLMcode);
 
 typedef struct {
   unsigned char *data;

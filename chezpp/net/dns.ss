@@ -139,18 +139,20 @@ The return value is an immutable DNS options record.
            spec*)))
 
   #|proc:dns-resolve/nonblocking
-The `dns-resolve/nonblocking` procedure starts a readiness-driven lookup of `host`.
-The optional `options` parameter is a DNS options record and defaults to `default-dns-options`.
-The return value is a network operation whose successful value is a DNS result record.
-|#
+  The `dns-resolve/nonblocking` procedure starts a readiness-driven lookup of host string `host`.
+  `options` is an optional DNS options record, defaulting to `default-dns-options`.
+  It returns a network operation whose successful value is a DNS result record.
+  Unavailable c-ares support raises a network error containing the native build diagnostic.
+  |#
   (define-who dns-resolve/nonblocking
     (case-lambda
       [(host) (dns-resolve/nonblocking host default-dns-options)]
       [(host options)
        (pcheck ([string? host] [dns-options? options])
-         (unless (optional-library-available? (optional-library-info 'cares))
-           (raise-net-error 'dns 'resolve "c-ares support is unavailable"
-                            'unsupported #f host #f #f options))
+         (let ([info (optional-library-info 'cares)])
+           (unless (optional-library-available? info)
+             (raise-net-error 'dns 'resolve (optional-library-error info)
+                              'unsupported #f host #f #f options)))
          (let* ([timeout-ms (dns-options-timeout-ms options)]
                 [deadline-ms (+ (current-monotonic-ms) timeout-ms)]
                 [handle (ffi-net-dns-start host (dns-family->int (dns-options-family options))

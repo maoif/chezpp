@@ -157,6 +157,41 @@ static ptr optional_string(const char *value) {
   return value == NULL || value[0] == '\0' ? Sfalse : Sstring(value);
 }
 
+static const char *initialization_error(const char *name) {
+  (void)name;
+#if CHEZPP_WITH_OPENSSL
+  if (strcmp(name, "openssl") == 0) return chezpp_openssl_library()->error;
+#endif
+#if CHEZPP_WITH_XXHASH
+  if (strcmp(name, "xxhash") == 0) return chezpp_xxhash_library()->error;
+#endif
+#if CHEZPP_WITH_BLAKE3
+  if (strcmp(name, "blake3") == 0) return chezpp_blake3_library()->error;
+#endif
+#if CHEZPP_WITH_CURL
+  if (strcmp(name, "curl") == 0) return chezpp_net_curl_library()->error;
+#endif
+#if CHEZPP_WITH_LIBSSH
+  if (strcmp(name, "ssh") == 0) return chezpp_net_ssh_library()->error;
+#endif
+#if CHEZPP_WITH_WEBSOCKETS
+  if (strcmp(name, "websockets") == 0) return chezpp_net_websocket_library()->error;
+#endif
+#if CHEZPP_WITH_GRPC
+  if (strcmp(name, "grpc") == 0) return chezpp_net_grpc_library()->error;
+#endif
+#if CHEZPP_WITH_ZLIB
+  if (strcmp(name, "zlib") == 0) return chezpp_zlib_library()->error;
+#endif
+#if CHEZPP_WITH_CARES
+  if (strcmp(name, "cares") == 0) return chezpp_cares_library()->error;
+#endif
+#if CHEZPP_WITH_IDN2
+  if (strcmp(name, "idn2") == 0) return chezpp_idn2_library()->error;
+#endif
+  return "optional library initialization failed";
+}
+
 ptr chezpp_optional_library_info(const char *name) {
   if (name == NULL) return Sfalse;
   for (size_t index = 0; index < sizeof(descriptors) / sizeof(descriptors[0]); index++) {
@@ -167,7 +202,7 @@ ptr chezpp_optional_library_info(const char *name) {
       unsigned capabilities = available && descriptor->capabilities != NULL
                               ? descriptor->capabilities() : 0;
       const char *error = descriptor->error;
-      if (descriptor->enabled && !available) error = "unsupported linked library version";
+      if (descriptor->enabled && !available) error = initialization_error(name);
       ptr result = Smake_vector(5, Sfalse);
       Svector_set(result, 0, Sstring_to_symbol(name));
       Svector_set(result, 1, available ? Strue : Sfalse);

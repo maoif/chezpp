@@ -246,7 +246,8 @@
 
   #|proc:ffi-blake3-create
   The `ffi-blake3-create` procedure calls the native blake3 operation `digester_blake3_create`.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns a native digester context handle, or zero when allocation fails.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-blake3-create
     (let ([native (foreign-procedure "digester_blake3_create" () void*)])
@@ -309,7 +310,8 @@
   The `ffi-openssl-create` procedure calls the native openssl operation `digester_openssl_create`.
   Parameters `algorithm` are passed to the native operation in that order.
   `algorithm` is the algorithm identifier.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns a native digester context handle, or zero when allocation fails.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-openssl-create
     (let ([native (foreign-procedure "digester_openssl_create" (ptr) void*)])

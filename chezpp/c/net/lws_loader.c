@@ -19,7 +19,7 @@ unsigned chezpp_lws_capabilities(void) {
 #if CHEZPP_WITH_WEBSOCKETS
   if (!chezpp_lws_ensure_loaded()) return 0;
   capabilities = CHEZPP_LWS_CAP_HTTP1 | CHEZPP_LWS_CAP_EXTERNAL_POLL;
-#if defined(LWS_WITH_HTTP2)
+#if defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2)
   capabilities |= CHEZPP_LWS_CAP_HTTP2;
 #endif
 #if defined(LWS_WITH_TLS)

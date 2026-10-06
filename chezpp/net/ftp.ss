@@ -671,7 +671,10 @@ The `session` parameter is an FTP session. The result is `plain`, `explicit`, or
       (let ([status (ffi-net-ftp-session-open)])
         (if (and (vector? status) (eq? 'ok (vector-ref status 0)))
             (vector-ref status 1)
-            (raise-net-error who 'ftp "failed to initialize FTP session" status)))))
+            (raise-net-error who 'ftp
+                             (if (ffi-error? status) (ffi-error-message status)
+                                 "failed to initialize FTP session")
+                             status)))))
 
   #|proc:ftp-open
 The `ftp-open` procedure constructs an FTP or FTPS session from an endpoint or host and port.

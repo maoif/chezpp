@@ -219,7 +219,8 @@
   Parameters `compress`, `gzip` are passed to the native operation in that order.
   `compress` is a number.
   `gzip` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero when the resource could not be created.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-zlib-stream-open
     (let ([native (foreign-procedure "chezpp_zlib_stream_open" (int int) uptr)])
@@ -315,12 +316,11 @@
   (define ffi-net-service->port
     (foreign-procedure "chezpp_net_service_to_port" (string int) scheme-object))
   #|proc:ffi-net-dns-start
-  The `ffi-net-dns-start` procedure calls the native cares operation `chezpp_net_dns_start`.
-  Parameters `name`, `family`, `timeout-ms` are passed to the native operation in that order.
-  `name` is the name to hash in the UUID namespace.
-  `family` is a number.
-  `timeout-ms` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  The `ffi-net-dns-start` procedure starts asynchronous address resolution for string `name`.
+  `family` is zero for either IP family, `net-af-inet` for IPv4, or `net-af-inet6` for IPv6.
+  `timeout-ms` is the per-attempt resolver timeout in milliseconds.
+  It returns an owned DNS-operation handle, or zero on allocation or initialization failure.
+  It raises an error when c-ares is unavailable.
   |#
   (define ffi-net-dns-start
     (let ([native (foreign-procedure "chezpp_net_dns_start" (string int int) uptr)])
@@ -659,7 +659,8 @@
   #|proc:ffi-net-grpc-capabilities
   The `ffi-net-grpc-capabilities` procedure calls the native grpc operation
   `chezpp_net_grpc_capabilities`.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the capability bitmask: bit 0 means TLS and bit 1 means compression.
+  It raises an error when gRPC is unavailable.
   |#
   (define ffi-net-grpc-capabilities
     (let ([native (foreign-procedure "chezpp_net_grpc_capabilities" () unsigned-int)])
@@ -670,7 +671,8 @@
   #|proc:ffi-net-grpc-driver-fd
   The `ffi-net-grpc-driver-fd` procedure calls the native grpc operation
   `chezpp_net_grpc_driver_fd`.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the native file descriptor, or -1 when the handle has no descriptor.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-net-grpc-driver-fd
     (let ([native (foreign-procedure "chezpp_net_grpc_driver_fd" () int)])
@@ -703,7 +705,8 @@
   `chezpp_net_tls_context_create`.
   Parameters `mode` are passed to the native operation in that order.
   `mode` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero when the resource could not be created.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-net-tls-context-create
     (let ([native (foreign-procedure "chezpp_net_tls_context_create" (int) uptr)])

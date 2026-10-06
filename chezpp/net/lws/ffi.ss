@@ -56,7 +56,8 @@
   `tls-context-handle` is a native handle.
   `proxy-address` is a string.
   `proxy-port` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero when the resource could not be created.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-context-open
     (let ([native (foreign-procedure "chezpp_lws_http_context_open" (uptr uptr uptr string int) uptr)])
@@ -74,7 +75,8 @@
   `interface-name` is a string.
   `port` is a number.
   `tls-context-handle` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero when the resource could not be created.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-server-context-open
     (let ([native (foreign-procedure "chezpp_lws_http_server_context_open" (uptr uptr string int uptr) uptr)])
@@ -100,7 +102,8 @@
   `chezpp_lws_http_context_wakeup_fd`.
   Parameters `context-handle` are passed to the native operation in that order.
   `context-handle` is the native HTTP context handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the native file descriptor, or -1 when the handle has no descriptor.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-context-wakeup-fd
     (let ([native (foreign-procedure "chezpp_lws_http_context_wakeup_fd" (uptr) int)])
@@ -117,7 +120,8 @@
   `context-handle` is the native HTTP context handle.
   `fd` is a number.
   `revents` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the native file descriptor, or -1 when the handle has no descriptor.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-context-service-fd
     (let ([native (foreign-procedure "chezpp_lws_http_context_service_fd" (uptr int int) int)])
@@ -134,7 +138,8 @@
   order.
   `context-handle` is the native HTTP context handle.
   `maximum-timeout-ms` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the service timeout in milliseconds, or -1 for an invalid context.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-context-timeout-ms
     (let ([native (foreign-procedure "chezpp_lws_http_context_timeout_ms" (uptr int) int)])
@@ -147,7 +152,8 @@
   `chezpp_lws_http_context_wakeup`.
   Parameters `context-handle` are passed to the native operation in that order.
   `context-handle` is the native HTTP context handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the context was notified and 0 when notification failed.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-context-wakeup
     (let ([native (foreign-procedure "chezpp_lws_http_context_wakeup" (uptr) int)])
@@ -162,7 +168,8 @@
   `chezpp_lws_http_signal_open`.
   Parameters `context-handle` are passed to the native operation in that order.
   `context-handle` is the native HTTP context handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero when the resource could not be created.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-signal-open
     (let ([native (foreign-procedure "chezpp_lws_http_signal_open" (uptr) uptr)])
@@ -175,7 +182,8 @@
   `chezpp_lws_http_signal_fd`.
   Parameters `signal-handle` are passed to the native operation in that order.
   `signal-handle` is the native signal handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the native file descriptor, or -1 when the handle has no descriptor.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-signal-fd
     (let ([native (foreign-procedure "chezpp_lws_http_signal_fd" (uptr) int)])
@@ -188,7 +196,8 @@
   `chezpp_lws_http_signal_notify`.
   Parameters `signal-handle` are passed to the native operation in that order.
   `signal-handle` is the native signal handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when a signal is pending or was delivered and 0 on failure.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-signal-notify
     (let ([native (foreign-procedure "chezpp_lws_http_signal_notify" (uptr) int)])
@@ -242,7 +251,8 @@
   `initial-body` is a Scheme object.
   `has-body` is a number.
   `alpn` is a string.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-client-start
     (let ([native (foreign-procedure "chezpp_lws_http_client_start" (uptr unsigned-64 unsigned-64 unsigned-64 string int int
@@ -260,7 +270,8 @@
   `connection-id` is the HTTP connection identifier.
   `stream-id` is the HTTP stream identifier.
   `generation` is the HTTP stream generation.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-client-acquire
     (let ([native (foreign-procedure "chezpp_lws_http_client_acquire" (uptr unsigned-64 unsigned-64 unsigned-64) int)])
@@ -277,7 +288,8 @@
   `connection-id` is the HTTP connection identifier.
   `stream-id` is the HTTP stream identifier.
   `generation` is the HTTP stream generation.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-client-release
     (let ([native (foreign-procedure "chezpp_lws_http_client_release" (uptr unsigned-64 unsigned-64 unsigned-64) int)])
@@ -296,7 +308,8 @@
   `generation` is the HTTP stream generation.
   `payload` is a Scheme object.
   `final-chunk` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-client-body-submit
     (let ([native (foreign-procedure "chezpp_lws_http_client_body_submit" (uptr unsigned-64 unsigned-64 unsigned-64 scheme-object int) int)])
@@ -313,7 +326,8 @@
   `connection-id` is the HTTP connection identifier.
   `stream-id` is the HTTP stream identifier.
   `generation` is the HTTP stream generation.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-client-body-drain
     (let ([native (foreign-procedure "chezpp_lws_http_client_body_drain" (uptr unsigned-64 unsigned-64 unsigned-64) int)])
@@ -336,7 +350,8 @@
   `headers` is a Scheme object.
   `payload` is a Scheme object.
   `final-chunk` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-server-response-submit
     (let ([native (foreign-procedure "chezpp_lws_http_server_response_submit" (uptr unsigned-64 unsigned-64 unsigned-64 int scheme-object scheme-object int) int)])
@@ -354,7 +369,8 @@
   `stream-id` is the HTTP stream identifier.
   `generation` is the HTTP stream generation.
   `status` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-stream-cancel
     (let ([native (foreign-procedure "chezpp_lws_http_stream_cancel" (uptr unsigned-64 unsigned-64 unsigned-64 int) int)])
@@ -372,7 +388,8 @@
   `stream-id` is the HTTP stream identifier.
   `generation` is the HTTP stream generation.
   `byte-count` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-body-consumed
     (let ([native (foreign-procedure "chezpp_lws_http_body_consumed" (uptr unsigned-64 unsigned-64 unsigned-64 uptr) int)])
@@ -398,7 +415,8 @@
   `peer-h2-capacity` is a number.
   `peer-h2-capacity-known` is a number.
   `terminal-scope` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-context-inject-event
     (let ([native (foreign-procedure "chezpp_lws_http_inject_event" (uptr int unsigned-64 unsigned-64 unsigned-64 int scheme-object
@@ -416,7 +434,8 @@
   `operation` is a number.
   `fd` is a number.
   `events` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the HTTP command was accepted and 0 when the command was rejected.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-context-inject-poll
     (let ([native (foreign-procedure "chezpp_lws_http_inject_poll" (uptr int int int) int)])

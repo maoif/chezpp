@@ -79,7 +79,8 @@
     (foreign-procedure "crypto_openssl_load_error" () ptr))
   #|proc:ffi-random-status
   The `ffi-random-status` procedure calls the native openssl operation `crypto_random_status`.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 when the random generator is ready and 0 otherwise.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-random-status
     (let ([native (foreign-procedure "crypto_random_status" () int)])
@@ -91,15 +92,16 @@
   #|proc:ffi-random-fill!
   The `ffi-random-fill!` procedure calls the native openssl operation `crypto_random_fill`.
   Parameters `bytevector`, `start`, `stop` are passed to the native operation in that order.
-  `bytevector` is the input bytevector.
+  `bytevector` is the mutable bytevector whose slice receives random bytes.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-random-fill!
     (let ([native (foreign-procedure "crypto_random_fill" (ptr unsigned-64 unsigned-64) int)])
       (lambda (bytevector start stop)
-        (pcheck ([natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-random-fill! 'openssl)
                 (native bytevector start stop)))))
   #|proc:ffi-constant-time-eq
@@ -107,18 +109,19 @@
   `crypto_constant_time_eq`.
   Parameters `bv1`, `start1`, `stop1`, `bv2`, `start2`, `stop2` are passed to the native operation
   in that order.
-  `bv1` is a Scheme object.
-  `start1` is a number.
-  `stop1` is a number.
-  `bv2` is a Scheme object.
-  `start2` is a number.
-  `stop2` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `bv1` is the first bytevector to compare.
+  `start1` is the inclusive start index of its bytevector slice.
+  `stop1` is the exclusive end index of its bytevector slice.
+  `bv2` is the second bytevector to compare.
+  `start2` is the inclusive start index of its bytevector slice.
+  `stop2` is the exclusive end index of its bytevector slice.
+  It returns 1 for equal bytevector slices and 0 for unequal slices or lengths.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-constant-time-eq
     (let ([native (foreign-procedure "crypto_constant_time_eq" (ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64) int)])
       (lambda (bv1 start1 stop1 bv2 start2 stop2)
-        (pcheck ([natural? start1] [natural? stop1] [natural? start2] [natural? stop2])
+        (pcheck ([bytevector? bv1] [bytevector? bv2] [natural? start1] [natural? stop1] [natural? start2] [natural? stop2])
                 (require-optional-library 'ffi-constant-time-eq 'openssl)
                 (native bv1 start1 stop1 bv2 start2 stop2)))))
 
@@ -130,38 +133,41 @@
   The `ffi-hash-output-size` procedure calls the native openssl operation
   `crypto_hash_output_size`.
   Parameters `algorithm` are passed to the native operation in that order.
-  `algorithm` is the algorithm identifier.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `algorithm` is the digest algorithm symbol, such as `sha256`.
+  It returns the requested size in bytes, or -1 when the algorithm is unsupported.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hash-output-size
     (let ([native (foreign-procedure "crypto_hash_output_size" (ptr) int)])
       (lambda (algorithm)
-        (pcheck ()
+        (pcheck ([symbol? algorithm])
                 (require-optional-library 'ffi-hash-output-size 'openssl)
                 (native algorithm)))))
   #|proc:ffi-hash-block-size
   The `ffi-hash-block-size` procedure calls the native openssl operation `crypto_hash_block_size`.
   Parameters `algorithm` are passed to the native operation in that order.
-  `algorithm` is the algorithm identifier.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `algorithm` is the digest algorithm symbol, such as `sha256`.
+  It returns the requested size in bytes, or -1 when the algorithm is unsupported.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hash-block-size
     (let ([native (foreign-procedure "crypto_hash_block_size" (ptr) int)])
       (lambda (algorithm)
-        (pcheck ()
+        (pcheck ([symbol? algorithm])
                 (require-optional-library 'ffi-hash-block-size 'openssl)
                 (native algorithm)))))
   #|proc:ffi-hash-state-create
   The `ffi-hash-state-create` procedure calls the native openssl operation
   `crypto_hash_state_create`.
   Parameters `algorithm` are passed to the native operation in that order.
-  `algorithm` is the algorithm identifier.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `algorithm` is the digest algorithm symbol, such as `sha256`.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hash-state-create
     (let ([native (foreign-procedure "crypto_hash_state_create" (ptr) void*)])
       (lambda (algorithm)
-        (pcheck ()
+        (pcheck ([symbol? algorithm])
                 (require-optional-library 'ffi-hash-state-create 'openssl)
                 (native algorithm)))))
   #|proc:ffi-hash-state-destroy
@@ -169,7 +175,8 @@
   `crypto_hash_state_destroy`.
   Parameters `ptr-st` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  It returns unspecified values and raises an error when the dependency is unavailable.
+  It releases the native resource and returns unspecified values; a zero handle is ignored.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hash-state-destroy
     (let ([native (foreign-procedure "crypto_hash_state_destroy" (void*) void)])
@@ -186,7 +193,8 @@
   `crypto_hash_state_reset`.
   Parameters `ptr-st` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hash-state-reset!
     (let ([native (foreign-procedure "crypto_hash_state_reset" (void*) int)])
@@ -203,12 +211,13 @@
   `bytevector` is the input bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hash-state-update-bytevector!
     (let ([native (foreign-procedure "crypto_hash_state_update_bytevector" (void* ptr unsigned-64 unsigned-64) int)])
       (lambda (ptr-st bytevector start stop)
-        (pcheck ([natural? ptr-st] [natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? ptr-st] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-hash-state-update-bytevector! 'openssl)
                 (native ptr-st bytevector start stop)))))
   #|proc:ffi-hash-state-update-string!
@@ -216,15 +225,16 @@
   `crypto_hash_state_update_string`.
   Parameters `ptr-st`, `text`, `start`, `stop` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  `text` is the input text.
+  `text` is the input string; characters are hashed as native-endian UTF-32 values.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hash-state-update-string!
     (let ([native (foreign-procedure "crypto_hash_state_update_string" (void* ptr unsigned-64 unsigned-64) int)])
       (lambda (ptr-st text start stop)
-        (pcheck ([natural? ptr-st] [natural? start] [natural? stop])
+        (pcheck ([string? text] [natural? ptr-st] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-hash-state-update-string! 'openssl)
                 (native ptr-st text start stop)))))
 
@@ -232,16 +242,17 @@
   The `ffi-hmac-state-create` procedure calls the native openssl operation
   `crypto_hmac_state_create`.
   Parameters `algorithm`, `key`, `start`, `stop` are passed to the native operation in that order.
-  `algorithm` is the algorithm identifier.
-  `key` is the cryptographic key.
+  `algorithm` is the digest algorithm symbol, such as `sha256`.
+  `key` is the secret key bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hmac-state-create
     (let ([native (foreign-procedure "crypto_hmac_state_create" (ptr ptr unsigned-64 unsigned-64) void*)])
       (lambda (algorithm key start stop)
-        (pcheck ([natural? start] [natural? stop])
+        (pcheck ([symbol? algorithm] [bytevector? key] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-hmac-state-create 'openssl)
                 (native algorithm key start stop)))))
   #|proc:ffi-hmac-state-destroy
@@ -249,7 +260,8 @@
   `crypto_hmac_state_destroy`.
   Parameters `ptr-st` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  It returns unspecified values and raises an error when the dependency is unavailable.
+  It releases the native resource and returns unspecified values; a zero handle is ignored.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hmac-state-destroy
     (let ([native (foreign-procedure "crypto_hmac_state_destroy" (void*) void)])
@@ -266,7 +278,8 @@
   `crypto_hmac_state_reset`.
   Parameters `ptr-st` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hmac-state-reset!
     (let ([native (foreign-procedure "crypto_hmac_state_reset" (void*) int)])
@@ -283,12 +296,13 @@
   `bytevector` is the input bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hmac-state-update-bytevector!
     (let ([native (foreign-procedure "crypto_hmac_state_update_bytevector" (void* ptr unsigned-64 unsigned-64) int)])
       (lambda (ptr-st bytevector start stop)
-        (pcheck ([natural? ptr-st] [natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? ptr-st] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-hmac-state-update-bytevector! 'openssl)
                 (native ptr-st bytevector start stop)))))
   #|proc:ffi-hmac-state-update-string!
@@ -296,15 +310,16 @@
   `crypto_hmac_state_update_string`.
   Parameters `ptr-st`, `text`, `start`, `stop` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  `text` is the input text.
+  `text` is the input string; characters are hashed as native-endian UTF-32 values.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-hmac-state-update-string!
     (let ([native (foreign-procedure "crypto_hmac_state_update_string" (void* ptr unsigned-64 unsigned-64) int)])
       (lambda (ptr-st text start stop)
-        (pcheck ([natural? ptr-st] [natural? start] [natural? stop])
+        (pcheck ([string? text] [natural? ptr-st] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-hmac-state-update-string! 'openssl)
                 (native ptr-st text start stop)))))
 
@@ -353,38 +368,41 @@
   #|proc:ffi-cipher-key-size
   The `ffi-cipher-key-size` procedure calls the native openssl operation `crypto_cipher_key_size`.
   Parameters `algorithm` are passed to the native operation in that order.
-  `algorithm` is the algorithm identifier.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `algorithm` is the cipher algorithm symbol, such as `aes-128-ctr`.
+  It returns the requested size in bytes, or -1 when the algorithm is unsupported.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cipher-key-size
     (let ([native (foreign-procedure "crypto_cipher_key_size" (ptr) int)])
       (lambda (algorithm)
-        (pcheck ()
+        (pcheck ([symbol? algorithm])
                 (require-optional-library 'ffi-cipher-key-size 'openssl)
                 (native algorithm)))))
   #|proc:ffi-cipher-iv-size
   The `ffi-cipher-iv-size` procedure calls the native openssl operation `crypto_cipher_iv_size`.
   Parameters `algorithm` are passed to the native operation in that order.
-  `algorithm` is the algorithm identifier.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `algorithm` is the cipher algorithm symbol, such as `aes-128-ctr`.
+  It returns the requested size in bytes, or -1 when the algorithm is unsupported.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cipher-iv-size
     (let ([native (foreign-procedure "crypto_cipher_iv_size" (ptr) int)])
       (lambda (algorithm)
-        (pcheck ()
+        (pcheck ([symbol? algorithm])
                 (require-optional-library 'ffi-cipher-iv-size 'openssl)
                 (native algorithm)))))
   #|proc:ffi-cipher-block-size
   The `ffi-cipher-block-size` procedure calls the native openssl operation
   `crypto_cipher_block_size`.
   Parameters `algorithm` are passed to the native operation in that order.
-  `algorithm` is the algorithm identifier.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `algorithm` is the cipher algorithm symbol, such as `aes-128-ctr`.
+  It returns the requested size in bytes, or -1 when the algorithm is unsupported.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cipher-block-size
     (let ([native (foreign-procedure "crypto_cipher_block_size" (ptr) int)])
       (lambda (algorithm)
-        (pcheck ()
+        (pcheck ([symbol? algorithm])
                 (require-optional-library 'ffi-cipher-block-size 'openssl)
                 (native algorithm)))))
   #|proc:ffi-cipher-state-create
@@ -392,20 +410,21 @@
   `crypto_cipher_state_create`.
   Parameters `algorithm`, `encrypt`, `key`, `key-start`, `key-stop`, `iv`, `iv-start`, `iv-stop`
   are passed to the native operation in that order.
-  `algorithm` is the algorithm identifier.
-  `encrypt` is a number.
-  `key` is the cryptographic key.
-  `key-start` is a number.
-  `key-stop` is a number.
-  `iv` is the initialization vector.
-  `iv-start` is a number.
-  `iv-stop` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `algorithm` is the cipher algorithm symbol, such as `aes-128-ctr`.
+  `encrypt` selects encryption when nonzero and decryption when zero.
+  `key` is the secret key bytevector.
+  `key-start` is the inclusive start index of its bytevector slice.
+  `key-stop` is the exclusive end index of its bytevector slice.
+  `iv` is the initialization-vector bytevector.
+  `iv-start` is the inclusive start index of its bytevector slice.
+  `iv-stop` is the exclusive end index of its bytevector slice.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cipher-state-create
     (let ([native (foreign-procedure "crypto_cipher_state_create" (ptr int ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64) void*)])
       (lambda (algorithm encrypt key key-start key-stop iv iv-start iv-stop)
-        (pcheck ([integer? encrypt] [natural? key-start] [natural? key-stop] [natural? iv-start] [natural? iv-stop])
+        (pcheck ([symbol? algorithm] [bytevector? key] [bytevector? iv] [integer? encrypt] [natural? key-start] [natural? key-stop] [natural? iv-start] [natural? iv-stop])
                 (require-optional-library 'ffi-cipher-state-create 'openssl)
                 (native algorithm encrypt key key-start key-stop iv iv-start iv-stop)))))
   #|proc:ffi-cipher-state-destroy
@@ -413,7 +432,8 @@
   `crypto_cipher_state_destroy`.
   Parameters `ptr-st` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  It returns unspecified values and raises an error when the dependency is unavailable.
+  It releases the native resource and returns unspecified values; a zero handle is ignored.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cipher-state-destroy
     (let ([native (foreign-procedure "crypto_cipher_state_destroy" (void*) void)])
@@ -432,7 +452,8 @@
   `crypto_cipher_state_reset`.
   Parameters `ptr-st` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cipher-state-reset!
     (let ([native (foreign-procedure "crypto_cipher_state_reset" (void*) int)])
@@ -444,22 +465,24 @@
   #|proc:ffi-pkey-generate
   The `ffi-pkey-generate` procedure calls the native openssl operation `crypto_pkey_generate`.
   Parameters `alg`, `bits`, `curve` are passed to the native operation in that order.
-  `alg` is a Scheme object.
-  `bits` is a number.
-  `curve` is a Scheme object.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `alg` is the asymmetric algorithm symbol.
+  `bits` is the RSA key size in bits, or zero for other key algorithms.
+  `curve` is an EC curve symbol, or #f for algorithms that do not use a curve.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-pkey-generate
     (let ([native (foreign-procedure "crypto_pkey_generate" (ptr int ptr) void*)])
       (lambda (alg bits curve)
-        (pcheck ([integer? bits])
+        (pcheck ([symbol? alg] [(lambda (value) (or (not value) (symbol? value))) curve] [integer? bits])
                 (require-optional-library 'ffi-pkey-generate 'openssl)
                 (native alg bits curve)))))
   #|proc:ffi-pkey-free
   The `ffi-pkey-free` procedure calls the native openssl operation `crypto_pkey_free`.
   Parameters `ptr-pkey` are passed to the native operation in that order.
   `ptr-pkey` is a native handle.
-  It returns unspecified values and raises an error when the dependency is unavailable.
+  It releases the native resource and returns unspecified values; a zero handle is ignored.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-pkey-free
     (let ([native (foreign-procedure "crypto_pkey_free" (void*) void)])
@@ -473,7 +496,8 @@
   The `ffi-pkey-bits` procedure calls the native openssl operation `crypto_pkey_bits`.
   Parameters `ptr-pkey` are passed to the native operation in that order.
   `ptr-pkey` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the key size in bits, or zero for a null key handle.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-pkey-bits
     (let ([native (foreign-procedure "crypto_pkey_bits" (void*) int)])
@@ -486,7 +510,8 @@
   `crypto_pkey_public_from_private`.
   Parameters `ptr-pkey` are passed to the native operation in that order.
   `ptr-pkey` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-pkey-public-from-private
     (let ([native (foreign-procedure "crypto_pkey_public_from_private" (void*) void*)])
@@ -509,12 +534,13 @@
   `bytevector` is the input bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-pkey-load-private-pem
     (let ([native (foreign-procedure "crypto_pkey_load_private_pem" (ptr unsigned-64 unsigned-64) void*)])
       (lambda (bytevector start stop)
-        (pcheck ([natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-pkey-load-private-pem 'openssl)
                 (native bytevector start stop)))))
   #|proc:ffi-pkey-load-public-pem
@@ -524,12 +550,13 @@
   `bytevector` is the input bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-pkey-load-public-pem
     (let ([native (foreign-procedure "crypto_pkey_load_public_pem" (ptr unsigned-64 unsigned-64) void*)])
       (lambda (bytevector start stop)
-        (pcheck ([natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-pkey-load-public-pem 'openssl)
                 (native bytevector start stop)))))
   #|proc:ffi-pkey-load-private-der
@@ -539,12 +566,13 @@
   `bytevector` is the input bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-pkey-load-private-der
     (let ([native (foreign-procedure "crypto_pkey_load_private_der" (ptr unsigned-64 unsigned-64) void*)])
       (lambda (bytevector start stop)
-        (pcheck ([natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-pkey-load-private-der 'openssl)
                 (native bytevector start stop)))))
   #|proc:ffi-pkey-load-public-der
@@ -554,12 +582,13 @@
   `bytevector` is the input bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-pkey-load-public-der
     (let ([native (foreign-procedure "crypto_pkey_load_public_der" (ptr unsigned-64 unsigned-64) void*)])
       (lambda (bytevector start stop)
-        (pcheck ([natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-pkey-load-public-der 'openssl)
                 (native bytevector start stop)))))
   (define ffi-sign-message
@@ -568,21 +597,22 @@
   The `ffi-verify-message` procedure calls the native openssl operation `crypto_verify_message`.
   Parameters `alg`, `digest`, `ptr-pkey`, `msg`, `msg-start`, `msg-stop`, `sig`, `sig-start`,
   `sig-stop` are passed to the native operation in that order.
-  `alg` is a Scheme object.
-  `digest` is a Scheme object.
+  `alg` is the asymmetric algorithm symbol.
+  `digest` is the digest algorithm symbol, or #f for Ed25519.
   `ptr-pkey` is a native handle.
-  `msg` is a Scheme object.
-  `msg-start` is a number.
-  `msg-stop` is a number.
-  `sig` is a Scheme object.
-  `sig-start` is a number.
-  `sig-stop` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `msg` is the signed message bytevector.
+  `msg-start` is the inclusive start index of its bytevector slice.
+  `msg-stop` is the exclusive end index of its bytevector slice.
+  `sig` is the signature bytevector.
+  `sig-start` is the inclusive start index of its bytevector slice.
+  `sig-stop` is the exclusive end index of its bytevector slice.
+  It returns 1 when the signature verifies and 0 when it is invalid or verification fails.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-verify-message
     (let ([native (foreign-procedure "crypto_verify_message" (ptr ptr void* ptr unsigned-64 unsigned-64 ptr unsigned-64 unsigned-64) int)])
       (lambda (alg digest ptr-pkey msg msg-start msg-stop sig sig-start sig-stop)
-        (pcheck ([natural? ptr-pkey] [natural? msg-start] [natural? msg-stop] [natural? sig-start] [natural? sig-stop])
+        (pcheck ([symbol? alg] [(lambda (value) (or (not value) (symbol? value))) digest] [bytevector? msg] [bytevector? sig] [natural? ptr-pkey] [natural? msg-start] [natural? msg-stop] [natural? sig-start] [natural? sig-stop])
                 (require-optional-library 'ffi-verify-message 'openssl)
                 (native alg digest ptr-pkey msg msg-start msg-stop sig sig-start sig-stop)))))
   (define ffi-derive-shared-secret
@@ -594,12 +624,13 @@
   `bytevector` is the input bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-load-pem
     (let ([native (foreign-procedure "crypto_cert_load_pem" (ptr unsigned-64 unsigned-64) void*)])
       (lambda (bytevector start stop)
-        (pcheck ([natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-cert-load-pem 'openssl)
                 (native bytevector start stop)))))
   #|proc:ffi-cert-load-der
@@ -608,19 +639,21 @@
   `bytevector` is the input bytevector.
   `start` is the inclusive start index of the input slice.
   `stop` is the exclusive end index of the input slice.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-load-der
     (let ([native (foreign-procedure "crypto_cert_load_der" (ptr unsigned-64 unsigned-64) void*)])
       (lambda (bytevector start stop)
-        (pcheck ([natural? start] [natural? stop])
+        (pcheck ([bytevector? bytevector] [natural? start] [natural? stop])
                 (require-optional-library 'ffi-cert-load-der 'openssl)
                 (native bytevector start stop)))))
   #|proc:ffi-cert-free
   The `ffi-cert-free` procedure calls the native openssl operation `crypto_cert_free`.
   Parameters `ptr-cert` are passed to the native operation in that order.
   `ptr-cert` is a native handle.
-  It returns unspecified values and raises an error when the dependency is unavailable.
+  It releases the native resource and returns unspecified values; a zero handle is ignored.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-free
     (let ([native (foreign-procedure "crypto_cert_free" (void*) void)])
@@ -643,13 +676,14 @@
   `crypto_cert_hostname_matches`.
   Parameters `ptr-cert`, `hostname` are passed to the native operation in that order.
   `ptr-cert` is a native handle.
-  `hostname` is a Scheme object.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `hostname` is a UTF-8 hostname bytevector, or #f to omit hostname matching.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-hostname-matches
     (let ([native (foreign-procedure "crypto_cert_hostname_matches" (void* ptr) int)])
       (lambda (ptr-cert hostname)
-        (pcheck ([natural? ptr-cert])
+        (pcheck ([(lambda (value) (or (not value) (bytevector? value))) hostname] [natural? ptr-cert])
                 (require-optional-library 'ffi-cert-hostname-matches 'openssl)
                 (native ptr-cert hostname)))))
   (define ffi-cert-public-key-der
@@ -662,8 +696,9 @@
   The `ffi-cert-store-create` procedure calls the native openssl operation
   `crypto_cert_store_create`.
   Parameters `load-defaults` are passed to the native operation in that order.
-  `load-defaults` is a number.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `load-defaults` selects loading default CA paths when nonzero.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-store-create
     (let ([native (foreign-procedure "crypto_cert_store_create" (int) void*)])
@@ -676,7 +711,8 @@
   `crypto_cert_store_destroy`.
   Parameters `ptr-store` are passed to the native operation in that order.
   `ptr-store` is a native handle.
-  It returns unspecified values and raises an error when the dependency is unavailable.
+  It releases the native resource and returns unspecified values; a zero handle is ignored.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-store-destroy
     (let ([native (foreign-procedure "crypto_cert_store_destroy" (void*) void)])
@@ -689,7 +725,8 @@
   Parameters `ptr-store`, `ptr-cert` are passed to the native operation in that order.
   `ptr-store` is a native handle.
   `ptr-cert` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-store-add
     (let ([native (foreign-procedure "crypto_cert_store_add" (void* void*) int)])
@@ -702,7 +739,8 @@
   `crypto_cert_store_load_defaults`.
   Parameters `ptr-store` are passed to the native operation in that order.
   `ptr-store` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-store-load-defaults
     (let ([native (foreign-procedure "crypto_cert_store_load_defaults" (void*) int)])
@@ -716,13 +754,14 @@
   Parameters `ptr-cert`, `ptr-store`, `hostname` are passed to the native operation in that order.
   `ptr-cert` is a native handle.
   `ptr-store` is a native handle.
-  `hostname` is a Scheme object.
-  It returns the native result and raises an error when the dependency is unavailable.
+  `hostname` is a UTF-8 hostname bytevector, or #f to omit hostname matching.
+  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-verify-state-create
     (let ([native (foreign-procedure "crypto_cert_verify_state_create" (void* void* ptr) void*)])
       (lambda (ptr-cert ptr-store hostname)
-        (pcheck ([natural? ptr-cert] [natural? ptr-store])
+        (pcheck ([(lambda (value) (or (not value) (bytevector? value))) hostname] [natural? ptr-cert] [natural? ptr-store])
                 (require-optional-library 'ffi-cert-verify-state-create 'openssl)
                 (native ptr-cert ptr-store hostname)))))
   #|proc:ffi-cert-verify-state-add-chain-cert
@@ -731,7 +770,8 @@
   Parameters `ptr-st`, `ptr-cert` are passed to the native operation in that order.
   `ptr-st` is a native handle.
   `ptr-cert` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-verify-state-add-chain-cert
     (let ([native (foreign-procedure "crypto_cert_verify_state_add_chain_cert" (void* void*) int)])
@@ -744,7 +784,8 @@
   `crypto_cert_verify_state_verify`.
   Parameters `ptr-st` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns 1 on success and 0 on failure.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-verify-state-verify
     (let ([native (foreign-procedure "crypto_cert_verify_state_verify" (void*) int)])
@@ -757,7 +798,8 @@
   `crypto_cert_verify_state_destroy`.
   Parameters `ptr-st` are passed to the native operation in that order.
   `ptr-st` is a native handle.
-  It returns unspecified values and raises an error when the dependency is unavailable.
+  It releases the native resource and returns unspecified values; a zero handle is ignored.
+  It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-verify-state-destroy
     (let ([native (foreign-procedure "crypto_cert_verify_state_destroy" (void*) void)])

@@ -112,66 +112,6 @@ struct chezpp_grpc_stream {
   int status_tag;
 };
 
-typedef void (*grpc_init_fn)(void);
-typedef void (*grpc_shutdown_fn)(void);
-typedef grpc_completion_queue *(*grpc_completion_queue_create_for_pluck_fn)(void *);
-typedef grpc_completion_queue *(*grpc_completion_queue_create_for_next_fn)(void *);
-typedef grpc_event (*grpc_completion_queue_pluck_fn)(grpc_completion_queue *, void *,
-                                                     gpr_timespec, void *);
-typedef grpc_event (*grpc_completion_queue_next_fn)(grpc_completion_queue *, gpr_timespec, void *);
-typedef void (*grpc_completion_queue_shutdown_fn)(grpc_completion_queue *);
-typedef void (*grpc_completion_queue_destroy_fn)(grpc_completion_queue *);
-typedef grpc_channel_credentials *(*grpc_insecure_credentials_create_fn)(void);
-typedef grpc_server_credentials *(*grpc_insecure_server_credentials_create_fn)(void);
-typedef grpc_channel_credentials *(*grpc_ssl_credentials_create_fn)(
-    const char *, grpc_ssl_pem_key_cert_pair *, const void *, void *);
-typedef grpc_server_credentials *(*grpc_ssl_server_credentials_create_fn)(
-    const char *, grpc_ssl_pem_key_cert_pair *, size_t, int, void *);
-typedef void (*grpc_channel_credentials_release_fn)(grpc_channel_credentials *);
-typedef void (*grpc_server_credentials_release_fn)(grpc_server_credentials *);
-typedef grpc_channel *(*grpc_channel_create_fn)(const char *, grpc_channel_credentials *,
-                                                const grpc_channel_args *);
-typedef void (*grpc_channel_destroy_fn)(grpc_channel *);
-typedef grpc_call *(*grpc_channel_create_call_fn)(grpc_channel *, grpc_call *, uint32_t,
-                                                  grpc_completion_queue *, grpc_slice,
-                                                  const grpc_slice *, gpr_timespec, void *);
-typedef grpc_call_error (*grpc_call_start_batch_fn)(grpc_call *, const grpc_op *, size_t, void *,
-                                                    void *);
-typedef grpc_call_error (*grpc_call_cancel_fn)(grpc_call *, void *);
-typedef void (*grpc_call_unref_fn)(grpc_call *);
-typedef const char *(*grpc_call_error_to_string_fn)(grpc_call_error);
-typedef grpc_server *(*grpc_server_create_fn)(const grpc_channel_args *, void *);
-typedef void (*grpc_server_register_completion_queue_fn)(grpc_server *, grpc_completion_queue *,
-                                                         void *);
-typedef grpc_call_error (*grpc_server_request_call_fn)(grpc_server *, grpc_call **,
-                                                       grpc_call_details *,
-                                                       grpc_metadata_array *,
-                                                       grpc_completion_queue *,
-                                                       grpc_completion_queue *, void *);
-typedef int (*grpc_server_add_http2_port_fn)(grpc_server *, const char *,
-                                             grpc_server_credentials *);
-typedef void (*grpc_server_start_fn)(grpc_server *);
-typedef void (*grpc_server_shutdown_and_notify_fn)(grpc_server *, grpc_completion_queue *, void *);
-typedef void (*grpc_server_destroy_fn)(grpc_server *);
-typedef void (*grpc_call_details_init_fn)(grpc_call_details *);
-typedef void (*grpc_call_details_destroy_fn)(grpc_call_details *);
-typedef void (*grpc_metadata_array_init_fn)(grpc_metadata_array *);
-typedef void (*grpc_metadata_array_destroy_fn)(grpc_metadata_array *);
-typedef grpc_byte_buffer *(*grpc_raw_byte_buffer_create_fn)(grpc_slice *, size_t);
-typedef void (*grpc_byte_buffer_destroy_fn)(grpc_byte_buffer *);
-typedef int (*grpc_byte_buffer_reader_init_fn)(grpc_byte_buffer_reader *, grpc_byte_buffer *);
-typedef void (*grpc_byte_buffer_reader_destroy_fn)(grpc_byte_buffer_reader *);
-typedef grpc_slice (*grpc_byte_buffer_reader_readall_fn)(grpc_byte_buffer_reader *);
-typedef grpc_slice (*grpc_slice_from_copied_buffer_fn)(const char *, size_t);
-typedef grpc_slice (*grpc_slice_from_copied_string_fn)(const char *);
-typedef grpc_slice (*grpc_empty_slice_fn)(void);
-typedef void (*grpc_slice_unref_fn)(grpc_slice);
-typedef gpr_timespec (*gpr_inf_future_fn)(gpr_clock_type);
-typedef gpr_timespec (*gpr_time_from_millis_fn)(int64_t, gpr_clock_type);
-typedef gpr_timespec (*gpr_now_fn)(gpr_clock_type);
-typedef gpr_timespec (*gpr_time_add_fn)(gpr_timespec, gpr_timespec);
-typedef void (*gpr_free_fn)(void *);
-typedef const char *(*grpc_version_string_fn)(void);
 
 static chezpp_optional_library grpc_library =
     CHEZPP_OPTIONAL_LIBRARY_INIT("grpc");

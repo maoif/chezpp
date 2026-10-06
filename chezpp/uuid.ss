@@ -18,7 +18,8 @@
 
   #|proc:ffi-generate-uuid
   The `ffi-generate-uuid` procedure calls the native uuid operation `chezpp_generate_uuid`.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns a new 16-byte UUID bytevector.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-generate-uuid
     (let ([native (foreign-procedure "chezpp_generate_uuid" () ptr)])
@@ -29,7 +30,8 @@
   #|proc:ffi-generate-uuid-time
   The `ffi-generate-uuid-time` procedure calls the native uuid operation
   `chezpp_generate_uuid_time`.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns a vector containing a safe-generation boolean and the UUID bytevector.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-generate-uuid-time
     (let ([native (foreign-procedure "chezpp_generate_uuid_time" () ptr)])
@@ -43,7 +45,8 @@
   Parameters `uuid-ns-bv`, `name` are passed to the native operation in that order.
   `uuid-ns-bv` is the UUID namespace bytevector.
   `name` is the name to hash in the UUID namespace.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the 16-byte UUID bytevector derived using MD5.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-generate-uuid-md5
     (let ([native (foreign-procedure "chezpp_generate_uuid_md5" (ptr string) ptr)])
@@ -57,7 +60,8 @@
   Parameters `uuid-ns-bv`, `name` are passed to the native operation in that order.
   `uuid-ns-bv` is the UUID namespace bytevector.
   `name` is the name to hash in the UUID namespace.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the 16-byte UUID bytevector derived using SHA1.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-generate-uuid-sha1
     (let ([native (foreign-procedure "chezpp_generate_uuid_sha1" (ptr string) ptr)])
@@ -69,7 +73,8 @@
   The `ffi-uuid-to-string` procedure calls the native uuid operation `chezpp_uuid_to_string`.
   Parameters `uuid-bv` are passed to the native operation in that order.
   `uuid-bv` is the UUID bytevector.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the 36-character hexadecimal UUID representation.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-uuid-to-string
     (let ([native (foreign-procedure "chezpp_uuid_to_string" (ptr) ptr)])
@@ -82,7 +87,8 @@
   `chezpp_uuid_to_string_upcase`.
   Parameters `uuid-bv` are passed to the native operation in that order.
   `uuid-bv` is the UUID bytevector.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the 36-character uppercase hexadecimal UUID representation.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-uuid-to-string-upcase
     (let ([native (foreign-procedure "chezpp_uuid_to_string_upcase" (ptr) ptr)])
@@ -95,7 +101,8 @@
   `chezpp_uuid_to_string_downcase`.
   Parameters `uuid-bv` are passed to the native operation in that order.
   `uuid-bv` is the UUID bytevector.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the 36-character lowercase hexadecimal UUID representation.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-uuid-to-string-downcase
     (let ([native (foreign-procedure "chezpp_uuid_to_string_downcase" (ptr) ptr)])
@@ -108,7 +115,8 @@
   Parameters `uuid-bv1`, `uuid-bv2` are passed to the native operation in that order.
   `uuid-bv1` is a Scheme object.
   `uuid-bv2` is a Scheme object.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns a negative integer, zero, or a positive integer according to UUID order.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-uuid-compare
     (let ([native (foreign-procedure "chezpp_uuid_compare" (ptr ptr) int)])
@@ -120,7 +128,8 @@
   The `ffi-uuid-time` procedure calls the native uuid operation `chezpp_uuid_time`.
   Parameters `uuid-bv` are passed to the native operation in that order.
   `uuid-bv` is the UUID bytevector.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns a bytevector containing native `timeval` seconds followed by microseconds.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-uuid-time
     (let ([native (foreign-procedure "chezpp_uuid_time" (ptr) ptr)])
@@ -132,7 +141,8 @@
   The `ffi-string-to-uuid` procedure calls the native uuid operation `chezpp_string_to_uuid`.
   Parameters `text` are passed to the native operation in that order.
   `text` is the input text.
-  It returns the native result and raises an error when the dependency is unavailable.
+  It returns the parsed UUID bytevector, or #f when the representation is invalid.
+  It raises an error when the dependency is unavailable.
   |#
   (define ffi-string-to-uuid
     (let ([native (foreign-procedure "chezpp_string_to_uuid" (string) ptr)])

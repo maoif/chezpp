@@ -33,63 +33,12 @@
 #include <strings.h>
 #include <unistd.h>
 
-
 extern void *chezpp_net_tls_context_native(uptr handle);
 extern int chezpp_net_tls_context_verifies_peer(uptr handle);
 
-typedef struct lws_context *(*lws_create_context_fn)(
-    const struct lws_context_creation_info *);
-typedef void (*lws_context_destroy_fn)(struct lws_context *);
-typedef struct lws *(*lws_client_connect_via_info_fn)(
-    const struct lws_client_connect_info *);
-typedef int (*lws_service_fd_fn)(struct lws_context *, struct lws_pollfd *);
-typedef int (*lws_service_tsi_fn)(struct lws_context *, int, int);
-typedef int (*lws_service_adjust_timeout_fn)(struct lws_context *, int, int);
-typedef void (*lws_cancel_service_fn)(struct lws_context *);
-typedef int (*lws_callback_on_writable_fn)(struct lws *);
-typedef int (*lws_http_client_read_fn)(struct lws *, char **, int *);
-typedef void (*lws_client_http_body_pending_fn)(struct lws *, int);
-typedef struct lws_context *(*lws_get_context_fn)(const struct lws *);
-typedef void *(*lws_context_user_fn)(struct lws_context *);
-typedef void *(*lws_get_opaque_user_data_fn)(const struct lws *);
-typedef struct lws *(*lws_get_network_wsi_fn)(struct lws *);
-typedef int (*lws_http_client_http_response_fn)(struct lws *);
-typedef int (*lws_hdr_copy_fn)(struct lws *, char *, int,
-                               enum lws_token_indexes);
-typedef int (*lws_hdr_total_length_fn)(struct lws *, enum lws_token_indexes);
-typedef const unsigned char *(*lws_token_to_string_fn)(enum lws_token_indexes);
-typedef int (*lws_hdr_copy_fragment_fn)(struct lws *, char *, int,
-                                        enum lws_token_indexes, int);
-typedef int (*lws_hdr_custom_copy_fn)(struct lws *, char *, int,
-                                      const char *, int);
-typedef int (*lws_hdr_custom_name_foreach_fn)(struct lws *,
-                                              lws_hdr_custom_fe_cb_t, void *);
-typedef int (*lws_add_http_header_by_name_fn)(struct lws *,
-                                              const unsigned char *,
-                                              const unsigned char *, int,
-                                              unsigned char **,
-                                              unsigned char *);
-typedef int (*lws_add_http_header_by_token_fn)(struct lws *,
-                                               enum lws_token_indexes,
-                                               const unsigned char *, int,
-                                               unsigned char **,
-                                               unsigned char *);
-typedef int (*lws_write_fn)(struct lws *, unsigned char *, size_t,
-                            enum lws_write_protocol);
-typedef void (*lws_set_log_level_fn)(int, lws_log_emit_t);
-typedef int (*lws_add_http_header_status_fn)(struct lws *, unsigned int,
-                                             unsigned char **, unsigned char *);
-typedef int (*lws_finalize_write_http_header_fn)(struct lws *, unsigned char *,
-                                                  unsigned char **,
-                                                  unsigned char *);
-typedef int (*lws_http_transaction_completed_fn)(struct lws *);
-typedef void (*lws_set_timeout_fn)(struct lws *, enum pending_timeout, int);
-typedef int (*lws_rx_flow_control_fn)(struct lws *, int);
-typedef int (*lws_get_socket_fd_fn)(struct lws *);
-
 /*
- * Callback ordering audited against libwebsockets 4.5.x (the minimum runtime
- * available to this worktree): protocol bind establishes H2 readiness, then
+ * Callback ordering follows the backend's original libwebsockets 4.5.x audit:
+ * protocol bind establishes H2 readiness, then
  * ESTABLISHED_CLIENT_HTTP publishes status and headers; RECEIVE_CLIENT_HTTP
  * and RECEIVE_CLIENT_HTTP_READ publish body bytes; CLIENT_HTTP_WRITEABLE is
  * the only request-body pull point; COMPLETED_CLIENT_HTTP publishes completion;
@@ -98,40 +47,35 @@ typedef int (*lws_get_socket_fd_fn)(struct lws *);
  * while holding the context lock and drained FIFO by the serialized reactor.
  */
 
-static lws_get_context_fn dynamic_get_context;
-static lws_context_user_fn dynamic_context_user;
-static lws_get_opaque_user_data_fn dynamic_get_opaque_user_data;
-
 static struct lws_context *lws_http_lifetime_context;
 static pthread_mutex_t lws_http_lifetime_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int ensure_lws_http_lifetime_context(lws_create_context_fn create_fn) {
+static int ensure_lws_http_lifetime_context(void) {
   struct lws_context_creation_info information;
   pthread_mutex_lock(&lws_http_lifetime_mutex);
   if (lws_http_lifetime_context == NULL) {
     memset(&information, 0, sizeof(information));
     information.port = CONTEXT_PORT_NO_LISTEN;
+#if defined(LWS_WITH_TLS)
     information.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
-    lws_http_lifetime_context = create_fn(&information);
+#endif
+    lws_http_lifetime_context = lws_create_context(&information);
   }
   pthread_mutex_unlock(&lws_http_lifetime_mutex);
   return lws_http_lifetime_context != NULL;
 }
 
 __attribute__((destructor)) static void release_lws_http_lifetime_context(void) {
-  lws_context_destroy_fn destroy_fn;
   pthread_mutex_lock(&lws_http_lifetime_mutex);
-  destroy_fn = (lws_context_destroy_fn)lws_context_destroy;
-  if (lws_http_lifetime_context != NULL && destroy_fn != NULL) {
-    destroy_fn(lws_http_lifetime_context);
+
+  if (lws_http_lifetime_context != NULL) {
+    lws_context_destroy(lws_http_lifetime_context);
     lws_http_lifetime_context = NULL;
   }
   pthread_mutex_unlock(&lws_http_lifetime_mutex);
 }
 static uint64_t next_context_identity;
 static uint64_t next_server_identity;
-
-
 
 static lws_http_context *context_from_handle(uintptr_t handle) {
   return (lws_http_context *)handle;
@@ -574,38 +518,36 @@ static int poll_update_locked(lws_http_context *context,
 
 static lws_http_context *callback_context(struct lws *wsi) {
   struct lws_context *lws_context;
-  if (wsi == NULL || dynamic_get_context == NULL ||
-      dynamic_context_user == NULL)
+  if (wsi == NULL)
     return NULL;
-  lws_context = dynamic_get_context(wsi);
+  lws_context = lws_get_context(wsi);
   return lws_context == NULL
              ? NULL
-             : (lws_http_context *)dynamic_context_user(lws_context);
+             : (lws_http_context *)lws_context_user(lws_context);
 }
 
 static lws_http_stream *callback_stream(struct lws *wsi, void *user) {
   lws_http_stream *stream = NULL;
-  if (wsi != NULL && dynamic_get_opaque_user_data != NULL)
-    stream = (lws_http_stream *)dynamic_get_opaque_user_data(wsi);
+  if (wsi != NULL)
+    stream = (lws_http_stream *)lws_get_opaque_user_data(wsi);
   if (stream == NULL && user != NULL) stream = *(lws_http_stream **)user;
   return stream;
 }
 
 static lws_http_protocol observe_protocol(struct lws *wsi) {
-  lws_get_network_wsi_fn network_fn =
-      (lws_get_network_wsi_fn)lws_get_network_wsi;
-  if (wsi == NULL || network_fn == NULL) return LWS_HTTP_PROTOCOL_UNKNOWN;
-  return network_fn(wsi) == wsi ? LWS_HTTP_PROTOCOL_HTTP1
-                                : LWS_HTTP_PROTOCOL_HTTP2;
+  if (wsi == NULL) return LWS_HTTP_PROTOCOL_UNKNOWN;
+#if (defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2))
+  return lws_get_network_wsi(wsi) == wsi ? LWS_HTTP_PROTOCOL_HTTP1
+                                       : LWS_HTTP_PROTOCOL_HTTP2;
+#else
+  return LWS_HTTP_PROTOCOL_HTTP1;
+#endif
 }
 
 static int observe_http1_reusable(struct lws *wsi) {
-  lws_hdr_copy_fn copy_fn =
-      (lws_hdr_copy_fn)lws_hdr_copy;
   char connection[32];
   int copied;
-  if (copy_fn == NULL) return 0;
-  copied = copy_fn(wsi, connection, sizeof(connection), WSI_TOKEN_CONNECTION);
+    copied = lws_hdr_copy(wsi, connection, sizeof(connection), WSI_TOKEN_CONNECTION);
   return copied <= 0 || strcasecmp(connection, "close") != 0;
 }
 
@@ -666,12 +608,11 @@ typedef struct custom_header_copy_state {
 static void copy_custom_header_name(const char *name, int name_length,
                                     void *opaque) {
   custom_header_copy_state *state = (custom_header_copy_state *)opaque;
-  lws_hdr_custom_copy_fn copy_fn =
-      (lws_hdr_custom_copy_fn)lws_hdr_custom_copy;
+
   size_t clean_length;
   size_t remaining;
   int copied;
-  if (state == NULL || copy_fn == NULL || name == NULL || name_length <= 0)
+  if (state == NULL || name == NULL || name_length <= 0)
     return;
   clean_length = (size_t)name_length;
   if (clean_length != 0 && name[clean_length - 1] == ':') clean_length--;
@@ -680,7 +621,7 @@ static void copy_custom_header_name(const char *name, int name_length,
     return;
   }
   remaining = state->context->payload_capacity - state->used - clean_length - 1;
-  copied = copy_fn(state->wsi,
+  copied = lws_hdr_custom_copy(state->wsi,
                    (char *)state->context->drain_buffer + state->used +
                        clean_length + 1,
                    (int)remaining, name, name_length);
@@ -695,16 +636,9 @@ static void copy_custom_header_name(const char *name, int name_length,
 
 static size_t copy_http_headers(lws_http_context *context,
                                 struct lws *wsi, size_t used) {
-  lws_token_to_string_fn name_fn =
-      (lws_token_to_string_fn)lws_token_to_string;
-  lws_hdr_copy_fragment_fn fragment_fn =
-      (lws_hdr_copy_fragment_fn)lws_hdr_copy_fragment;
-  lws_hdr_custom_name_foreach_fn foreach_fn =
-      (lws_hdr_custom_name_foreach_fn)lws_hdr_custom_name_foreach;
   size_t index;
-  if (name_fn == NULL || fragment_fn == NULL || foreach_fn == NULL) return SIZE_MAX;
   for (index = 0; index < WSI_TOKEN_COUNT; index++) {
-    const unsigned char *name = name_fn((enum lws_token_indexes)index);
+    const unsigned char *name = lws_token_to_string((enum lws_token_indexes)index);
     size_t name_length;
     int fragment = 0;
     if (name == NULL || name[0] == ':') continue;
@@ -718,8 +652,9 @@ static size_t copy_http_headers(lws_http_context *context,
         return SIZE_MAX;
       }
       remaining = context->payload_capacity - used - name_length - 1;
-      copied = fragment_fn(wsi, (char *)context->drain_buffer + used + name_length + 1,
-                           (int)remaining, (enum lws_token_indexes)index, fragment);
+      copied = lws_hdr_copy_fragment(
+          wsi, (char *)context->drain_buffer + used + name_length + 1,
+          (int)remaining, (enum lws_token_indexes)index, fragment);
       if (copied == -1) break;
       if (copied < -1) return SIZE_MAX;
       {
@@ -740,9 +675,9 @@ static size_t copy_http_headers(lws_http_context *context,
       fragment++;
     }
   }
-  if (foreach_fn != NULL) {
+  {
     custom_header_copy_state state = {context, wsi, used, 0};
-    (void)foreach_fn(wsi, copy_custom_header_name, &state);
+    (void)lws_hdr_custom_name_foreach(wsi, copy_custom_header_name, &state);
     used = state.used;
     if (state.overflow) return SIZE_MAX;
   }
@@ -751,19 +686,15 @@ static size_t copy_http_headers(lws_http_context *context,
 
 static size_t copy_server_request(lws_http_context *context, struct lws *wsi,
                                   const void *path, size_t path_length) {
-  lws_hdr_copy_fn copy_fn =
-      (lws_hdr_copy_fn)lws_hdr_copy;
   int method_length;
   size_t used;
-  if (copy_fn == NULL || path == NULL || path_length + 3 > context->payload_capacity)
+  if (path == NULL || path_length + 3 > context->payload_capacity)
     return SIZE_MAX;
-  method_length = copy_fn(wsi, (char *)context->drain_buffer,
+  method_length = lws_hdr_copy(wsi, (char *)context->drain_buffer,
                           (int)context->payload_capacity,
                           WSI_TOKEN_HTTP_COLON_METHOD);
   if (method_length <= 0) {
-    lws_hdr_total_length_fn total_length_fn =
-        (lws_hdr_total_length_fn)lws_hdr_total_length;
-    if (total_length_fn != NULL && total_length_fn(wsi, WSI_TOKEN_POST_URI) > 0) {
+    if (lws_hdr_total_length(wsi, WSI_TOKEN_POST_URI) > 0) {
       method_length = 4;
       memcpy(context->drain_buffer, "POST", 4);
     } else {
@@ -780,17 +711,11 @@ static size_t copy_server_request(lws_http_context *context, struct lws *wsi,
   return copy_http_headers(context, wsi, used);
 }
 
-
 static int append_request_headers(lws_http_stream *stream, struct lws *wsi,
                                   unsigned char **cursor,
                                   unsigned char *end, int *length_present) {
-  lws_add_http_header_by_name_fn add_fn =
-      (lws_add_http_header_by_name_fn)lws_add_http_header_by_name;
-  lws_add_http_header_by_token_fn add_token_fn =
-      (lws_add_http_header_by_token_fn)lws_add_http_header_by_token;
   size_t offset = 0;
-  if (add_fn == NULL) return -1;
-  while (offset < stream->headers_length) {
+    while (offset < stream->headers_length) {
     const unsigned char *name = stream->headers + offset;
     size_t name_length = strnlen((const char *)name,
                                  stream->headers_length - offset);
@@ -809,10 +734,9 @@ static int append_request_headers(lws_http_stream *stream, struct lws *wsi,
       offset += value_length + 1;
       continue;
     }
-    if (strcasecmp((const char *)name, "content-length") == 0 &&
-        add_token_fn != NULL) {
+    if (strcasecmp((const char *)name, "content-length") == 0) {
       if (length_present != NULL) *length_present = 1;
-      if (add_token_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH, value,
+      if (lws_add_http_header_by_token(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH, value,
                        (int)value_length, cursor, end) != 0)
         return -1;
       offset += value_length + 1;
@@ -825,7 +749,7 @@ static int append_request_headers(lws_http_stream *stream, struct lws *wsi,
       memcpy(colon_name, name, name_length);
       colon_name[name_length] = ':';
       colon_name[name_length + 1] = 0;
-      result = add_fn(wsi, colon_name, value, (int)value_length, cursor, end);
+      result = lws_add_http_header_by_name(wsi, colon_name, value, (int)value_length, cursor, end);
       memset(colon_name, 0, name_length + 2);
       if (result != 0) return -1;
     }
@@ -867,8 +791,9 @@ static int lws_http_callback(struct lws *wsi,
   lws_http_context *context = callback_context(wsi);
   lws_http_stream *stream = callback_stream(wsi, user);
   switch (reason) {
+#if defined(LWS_WITH_TLS)
     case LWS_CALLBACK_OPENSSL_LOAD_EXTRA_SERVER_VERIFY_CERTS:
-#if CHEZPP_WITH_OPENSSL && !defined(LWS_WITH_MBEDTLS)
+#if defined(LWS_WITH_TLS) && CHEZPP_WITH_OPENSSL && !defined(LWS_WITH_MBEDTLS)
       if (context != NULL && context->server_tls_context_handle != 0) {
         SSL_CTX *source = chezpp_net_tls_context_native(context->server_tls_context_handle);
         SSL_CTX *destination = user;
@@ -881,6 +806,7 @@ static int lws_http_callback(struct lws *wsi,
       }
 #endif
       return 0;
+#endif
     case LWS_CALLBACK_ADD_POLL_FD:
     case LWS_CALLBACK_CHANGE_MODE_POLL_FD:
     case LWS_CALLBACK_DEL_POLL_FD: {
@@ -913,19 +839,15 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER: {
       unsigned char **cursor = (unsigned char **)input;
-      lws_client_http_body_pending_fn pending_fn;
-      lws_callback_on_writable_fn writable_fn;
+
       if (stream == NULL || cursor == NULL || *cursor == NULL) return -1;
       if (append_request_headers(stream, wsi, cursor, *cursor + length, NULL) != 0)
         return -1;
       if (!stream->has_request_body) return 0;
-      pending_fn = (lws_client_http_body_pending_fn)lws_client_http_body_pending;
-      writable_fn =
-          (lws_callback_on_writable_fn)lws_callback_on_writable;
-      if (pending_fn == NULL || writable_fn == NULL) return -1;
-      pending_fn(wsi, 1);
+
+      lws_client_http_body_pending(wsi, 1);
       {
-        int result = writable_fn(wsi);
+        int result = lws_callback_on_writable(wsi);
         if (result < 0) return -1;
         return 0;
       }
@@ -933,9 +855,8 @@ static int lws_http_callback(struct lws *wsi,
     case LWS_CALLBACK_ESTABLISHED_CLIENT_HTTP: {
       int status = 0;
       size_t headers_length;
-      lws_http_client_http_response_fn response_fn =
-          (lws_http_client_http_response_fn)lws_http_client_http_response;
-      if (response_fn != NULL) status = response_fn(wsi);
+
+      status = lws_http_client_http_response(wsi);
       stream->observed_protocol = observe_protocol(wsi);
       stream->reusable =
           stream->observed_protocol == LWS_HTTP_PROTOCOL_HTTP1
@@ -955,18 +876,16 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     }
     case LWS_CALLBACK_RECEIVE_CLIENT_HTTP: {
-      lws_http_client_read_fn read_fn;
       char *buffer;
       int available;
       int result;
       if (context == NULL || stream == NULL || stream->terminal ||
           stream->pending_body_bytes)
         return 0;
-      read_fn = (lws_http_client_read_fn)lws_http_client_read;
-      if (read_fn == NULL) return -1;
-      buffer = (char *)context->drain_buffer + LWS_PRE;
+
+          buffer = (char *)context->drain_buffer + LWS_PRE;
       available = (int)context->payload_capacity;
-      result = read_fn(wsi, &buffer, &available);
+      result = lws_http_client_read(wsi, &buffer, &available);
       if (result >= 0 && available > 0 && buffer != NULL) {
         if (!callback_queue_stream(context, stream, LWS_HTTP_EVENT_READABLE,
                                    0, buffer, (size_t)available))
@@ -997,14 +916,10 @@ static int lws_http_callback(struct lws *wsi,
       stream->pending_body_bytes += length;
       pthread_mutex_unlock(&context->lock);
       {
-        lws_rx_flow_control_fn flow_fn =
-            (lws_rx_flow_control_fn)lws_rx_flow_control;
-        if (flow_fn != NULL) flow_fn(wsi, 0);
+        lws_rx_flow_control(wsi, 0);
       }
       return 0;
     case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE: {
-      lws_write_fn write_fn;
-      lws_client_http_body_pending_fn pending_fn;
       lws_http_protocol protocol;
       size_t outbound_length;
       int final_chunk;
@@ -1025,9 +940,7 @@ static int lws_http_callback(struct lws *wsi,
       final_chunk = stream->outbound_final;
       pthread_mutex_unlock(&context->lock);
       if (outbound_length != 0) {
-        write_fn = (lws_write_fn)lws_write;
-        if (write_fn == NULL) return -1;
-        written = write_fn(wsi, stream->outbound + LWS_PRE, outbound_length,
+                written = lws_write(wsi, stream->outbound + LWS_PRE, outbound_length,
                            final_chunk ? LWS_WRITE_HTTP_FINAL : LWS_WRITE_HTTP);
         if (written < 0) return -1;
         pthread_mutex_lock(&context->lock);
@@ -1035,8 +948,8 @@ static int lws_http_callback(struct lws *wsi,
         stream->outbound_length = 0;
         pthread_mutex_unlock(&context->lock);
       }
-      pending_fn = (lws_client_http_body_pending_fn)lws_client_http_body_pending;
-      if (pending_fn != NULL && final_chunk) pending_fn(wsi, 0);
+
+      if (final_chunk) lws_client_http_body_pending(wsi, 0);
       (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_WRITABLE,
                                   written, NULL, 0);
       return 0;
@@ -1075,21 +988,16 @@ static int lws_http_callback(struct lws *wsi,
         pthread_mutex_unlock(&context->lock);
       }
       {
-        lws_hdr_total_length_fn total_length_fn =
-            (lws_hdr_total_length_fn)lws_hdr_total_length;
-        int has_body = total_length_fn != NULL &&
-                       (total_length_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0 ||
-                        total_length_fn(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0);
+        int has_body = (lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0 ||
+                        lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0);
         if (stream != NULL) stream->server_request_complete = !has_body;
         if (stream != NULL) {
-          lws_hdr_copy_fn copy_fn = (lws_hdr_copy_fn)lws_hdr_copy;
           char content_length[32];
           stream->server_body_remaining = SIZE_MAX;
-          if (copy_fn != NULL && total_length_fn != NULL &&
-              total_length_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0) {
+          if (lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0) {
             char *end;
             unsigned long long count;
-            if (copy_fn(wsi, content_length, sizeof(content_length),
+            if (lws_hdr_copy(wsi, content_length, sizeof(content_length),
                         WSI_TOKEN_HTTP_CONTENT_LENGTH) <= 0)
               return -1;
             errno = 0;
@@ -1100,8 +1008,8 @@ static int lws_http_callback(struct lws *wsi,
         }
         /* LWS 4.5's HTTP/1 server parser forwards transfer-coded bodies verbatim and
          * cannot signal their completion. Fail before exposing an unfinishable request. */
-        if (observe_protocol(wsi) != LWS_HTTP_PROTOCOL_HTTP2 && total_length_fn != NULL &&
-            total_length_fn(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0)
+        if (observe_protocol(wsi) != LWS_HTTP_PROTOCOL_HTTP2 &&
+            lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0)
           return -1;
         size_t request_length = copy_server_request(context, wsi, input, length);
         if (request_length == SIZE_MAX ||
@@ -1109,9 +1017,7 @@ static int lws_http_callback(struct lws *wsi,
                                    context->drain_buffer, request_length))
           return -1;
         if (!has_body && observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
-          lws_rx_flow_control_fn flow_fn =
-              (lws_rx_flow_control_fn)lws_rx_flow_control;
-          if (flow_fn != NULL) flow_fn(wsi, 0);
+          lws_rx_flow_control(wsi, 0);
         }
       }
       return 0;
@@ -1124,8 +1030,7 @@ static int lws_http_callback(struct lws *wsi,
       }
       {
       int queued;
-      lws_rx_flow_control_fn flow_fn =
-          (lws_rx_flow_control_fn)lws_rx_flow_control;
+
       pthread_mutex_lock(&context->lock);
       queued = queue_event_locked(context, LWS_HTTP_EVENT_READABLE,
                              stream->connection->identity, stream->identity,
@@ -1135,7 +1040,7 @@ static int lws_http_callback(struct lws *wsi,
       }
       pthread_mutex_unlock(&context->lock);
       if (!queued) return -1;
-      if (flow_fn != NULL) flow_fn(wsi, 0);
+      lws_rx_flow_control(wsi, 0);
       return 0;
       }
     case LWS_CALLBACK_HTTP_BODY_COMPLETION:
@@ -1144,22 +1049,13 @@ static int lws_http_callback(struct lws *wsi,
         (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_HEADERS, -1,
                                     NULL, 0);
         if (observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
-          lws_rx_flow_control_fn flow_fn =
-              (lws_rx_flow_control_fn)lws_rx_flow_control;
-          if (flow_fn != NULL) flow_fn(wsi, 0);
+          lws_rx_flow_control(wsi, 0);
         }
       }
       return 0;
     case LWS_CALLBACK_HTTP_WRITEABLE:
       if (context != NULL && stream != NULL && stream->outbound_length <=
                                                    context->payload_capacity) {
-        lws_write_fn write_fn = (lws_write_fn)lws_write;
-        lws_add_http_header_status_fn status_fn =
-            (lws_add_http_header_status_fn)lws_add_http_header_status;
-        lws_finalize_write_http_header_fn finish_headers_fn =
-            (lws_finalize_write_http_header_fn)lws_finalize_write_http_header;
-        lws_http_transaction_completed_fn completed_fn =
-            (lws_http_transaction_completed_fn)lws_http_transaction_completed;
         int written = 0;
         if (!stream->response_headers_sent) {
           unsigned char *start = context->drain_buffer + LWS_PRE;
@@ -1167,27 +1063,23 @@ static int lws_http_callback(struct lws *wsi,
           unsigned char *end = context->drain_buffer + LWS_PRE +
                                context->payload_capacity;
           int length_present = 0;
-          lws_add_http_header_by_token_fn add_token_fn =
-              (lws_add_http_header_by_token_fn)lws_add_http_header_by_token;
-          if (status_fn == NULL || finish_headers_fn == NULL ||
-              status_fn(wsi, (unsigned int)stream->response_status, &cursor,
+
+          if (lws_add_http_header_status(wsi, (unsigned int)stream->response_status, &cursor,
                         end) != 0 ||
               append_request_headers(stream, wsi, &cursor, end, &length_present) != 0)
             return -1;
           if (!length_present && stream->outbound_final) {
             char body_length[32];
             int digits = snprintf(body_length, sizeof(body_length), "%zu", stream->outbound_length);
-            if (add_token_fn == NULL ||
-                add_token_fn(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH,
+            if (lws_add_http_header_by_token(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH,
                              (unsigned char *)body_length, digits, &cursor, end) != 0)
               return -1;
           }
-          if (finish_headers_fn(wsi, start, &cursor, end) != 0) return -1;
+          if (lws_finalize_write_http_header(wsi, start, &cursor, end) != 0) return -1;
           stream->response_headers_sent = 1;
         }
         if (stream->outbound_length != 0) {
-          if (write_fn == NULL) return -1;
-          written = write_fn(wsi, stream->outbound + LWS_PRE,
+                    written = lws_write(wsi, stream->outbound + LWS_PRE,
                              stream->outbound_length,
                              stream->outbound_final ? LWS_WRITE_HTTP_FINAL
                                                     : LWS_WRITE_HTTP);
@@ -1206,11 +1098,9 @@ static int lws_http_callback(struct lws *wsi,
           if (user != NULL) *(lws_http_stream **)user = NULL;
           stream_release_locked(context, stream);
           pthread_mutex_unlock(&context->lock);
-          if (completed_fn != NULL && completed_fn(wsi) != 0) return -1;
+          if (lws_http_transaction_completed(wsi) != 0) return -1;
           {
-            lws_rx_flow_control_fn flow_fn =
-                (lws_rx_flow_control_fn)lws_rx_flow_control;
-            if (flow_fn != NULL) flow_fn(wsi, 1);
+            lws_rx_flow_control(wsi, 1);
           }
           return 0;
         }
@@ -1218,9 +1108,7 @@ static int lws_http_callback(struct lws *wsi,
                                     written, NULL, 0);
         if (stream->server_request_complete &&
             observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
-          lws_rx_flow_control_fn flow_fn =
-              (lws_rx_flow_control_fn)lws_rx_flow_control;
-          if (flow_fn != NULL) flow_fn(wsi, 0);
+          lws_rx_flow_control(wsi, 0);
         }
         return 0;
       }
@@ -1239,9 +1127,7 @@ static int lws_http_callback(struct lws *wsi,
         if (user != NULL) *(lws_http_stream **)user = NULL;
         pthread_mutex_unlock(&context->lock);
         {
-          void (*set_opaque_fn)(struct lws *, void *) =
-              (void (*)(struct lws *, void *))lws_set_opaque_user_data;
-          if (set_opaque_fn != NULL) set_opaque_fn(wsi, NULL);
+          lws_set_opaque_user_data(wsi, NULL);
         }
       }
       return 0;
@@ -1346,25 +1232,15 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
                               const char *interface_name, int listen_port) {
   lws_http_context *context;
   struct lws_context_creation_info information;
-  lws_create_context_fn create_fn;
-  lws_set_log_level_fn log_fn;
+
   if (event_capacity == 0 || payload_capacity == 0 ||
       event_capacity > UINT_MAX || payload_capacity > INT_MAX - LWS_PRE ||
       event_capacity > SIZE_MAX / payload_capacity ||
       !chezpp_lws_ensure_loaded())
     return 0;
-  create_fn = (lws_create_context_fn)lws_create_context;
-  dynamic_get_context =
-      (lws_get_context_fn)lws_get_context;
-  dynamic_context_user =
-      (lws_context_user_fn)lws_context_user;
-  dynamic_get_opaque_user_data = (lws_get_opaque_user_data_fn)lws_get_opaque_user_data;
-  if (create_fn == NULL || dynamic_get_context == NULL ||
-      dynamic_context_user == NULL || dynamic_get_opaque_user_data == NULL)
-    return 0;
-  log_fn = (lws_set_log_level_fn)lws_set_log_level;
-  if (log_fn != NULL) log_fn(0, NULL);
-  if (!ensure_lws_http_lifetime_context(create_fn)) return 0;
+
+  lws_set_log_level(0, NULL);
+  if (!ensure_lws_http_lifetime_context()) return 0;
   context = calloc(1, sizeof(*context));
   if (context == NULL) return 0;
   context->identity = fresh_identity(&next_context_identity);
@@ -1396,13 +1272,19 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
   information.iface = interface_name;
   information.protocols = context->protocols;
   information.user = context;
+#if defined(LWS_WITH_TLS)
   information.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+#endif
+#if (defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2))
   information.alpn = "h2,http/1.1";
+#else
+  information.alpn = "http/1.1";
+#endif
   if (proxy_address != NULL && proxy_address[0] != '\0') {
     information.http_proxy_address = proxy_address;
     information.http_proxy_port = (unsigned int)proxy_port;
   }
-#if CHEZPP_WITH_OPENSSL && !defined(LWS_WITH_MBEDTLS)
+#if defined(LWS_WITH_TLS) && CHEZPP_WITH_OPENSSL && !defined(LWS_WITH_MBEDTLS)
   if (tls_context_handle != 0) {
     if (listen_port >= 0) {
       information.options |= LWS_SERVER_OPTION_CREATE_VHOST_SSL_CTX;
@@ -1419,7 +1301,7 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
 #endif
   information.fd_limit_per_thread = (unsigned int)context->poll_capacity;
   context->initializing = 1;
-  context->lws = create_fn(&information);
+  context->lws = lws_create_context(&information);
   context->initializing = 0;
   if (context->lws == NULL) {
     close(context->wakeup_pipe[0]);
@@ -1452,11 +1334,11 @@ uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
 
 void chezpp_lws_http_context_close(uintptr_t context_handle) {
   lws_http_context *context = context_from_handle(context_handle);
-  lws_context_destroy_fn destroy_fn;
+
   if (context == NULL) return;
   context->closing = 1;
-  destroy_fn = (lws_context_destroy_fn)lws_context_destroy;
-  if (context->lws != NULL && destroy_fn != NULL) destroy_fn(context->lws);
+
+  if (context->lws != NULL) lws_context_destroy(context->lws);
   context->lws = NULL;
   close(context->wakeup_pipe[0]);
   close(context->wakeup_pipe[1]);
@@ -1493,8 +1375,7 @@ ptr chezpp_lws_http_context_poll_snapshot(uintptr_t context_handle) {
 int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
                                        int revents) {
   lws_http_context *context = context_from_handle(context_handle);
-  lws_service_fd_fn service_fn;
-  lws_service_tsi_fn service_tsi_fn;
+
   struct lws_pollfd poll_descriptor;
   if (context == NULL || context->lws == NULL) return -1;
   if (fd == context->wakeup_pipe[0]) {
@@ -1504,11 +1385,9 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
     return 0;
   }
   if (fd < 0) {
-    service_tsi_fn = (lws_service_tsi_fn)lws_service_tsi;
-    return service_tsi_fn == NULL ? -1 : service_tsi_fn(context->lws, -1, 0);
+    return lws_service_tsi(context->lws, -1, 0);
   }
-  service_fn = (lws_service_fd_fn)lws_service_fd;
-  if (service_fn == NULL) return -1;
+
   memset(&poll_descriptor, 0, sizeof(poll_descriptor));
   poll_descriptor.fd = fd;
   pthread_mutex_lock(&context->lock);
@@ -1519,26 +1398,21 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
   pthread_mutex_unlock(&context->lock);
   poll_descriptor.revents = (short)revents;
   if (revents & POLLOUT) {
-    lws_get_socket_fd_fn socket_fn =
-        (lws_get_socket_fd_fn)lws_get_socket_fd;
-    lws_rx_flow_control_fn flow_fn =
-        (lws_rx_flow_control_fn)lws_rx_flow_control;
     size_t index;
     /* LWS 4.5's H1 role suppresses POLLOUT while RX is paused. Unpause only for
      * the observed write-ready event, keeping buffered pipelined input deferred. */
-    if (socket_fn != NULL && flow_fn != NULL)
-      for (index = 0; index < context->stream_capacity; index++) {
+    for (index = 0; index < context->stream_capacity; index++) {
         lws_http_stream *stream = &context->streams[index];
         if (stream->active && stream->server_stream && stream->server_request_complete &&
-            stream->wsi != NULL && socket_fn(stream->wsi) == fd &&
+            stream->wsi != NULL && lws_get_socket_fd(stream->wsi) == fd &&
             observe_protocol(stream->wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
-          flow_fn(stream->wsi, 1);
+          lws_rx_flow_control(stream->wsi, 1);
           poll_descriptor.revents &= (short)~POLLIN;
           break;
         }
       }
   }
-  return service_fn(context->lws, &poll_descriptor);
+  return lws_service_fd(context->lws, &poll_descriptor);
 }
 
 static ptr event_to_scheme_locked(lws_http_context *context,
@@ -1602,27 +1476,26 @@ ptr chezpp_lws_http_context_next_event(uintptr_t context_handle) {
 int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
                                        int maximum_timeout_ms) {
   lws_http_context *context = context_from_handle(context_handle);
-  lws_service_adjust_timeout_fn timeout_fn;
+
   int adjustment;
   if (context == NULL || context->lws == NULL || maximum_timeout_ms < 0)
     return -1;
-  timeout_fn = (lws_service_adjust_timeout_fn)lws_service_adjust_timeout;
-  if (timeout_fn == NULL) return -1;
-  adjustment = timeout_fn(context->lws, maximum_timeout_ms, 0);
+
+  adjustment = lws_service_adjust_timeout(context->lws, maximum_timeout_ms, 0);
   if (adjustment < 0) return -1;
   return adjustment == 0 ? 0 : maximum_timeout_ms;
 }
 
 int chezpp_lws_http_context_wakeup(uintptr_t context_handle) {
   lws_http_context *context = context_from_handle(context_handle);
-  lws_cancel_service_fn cancel_fn;
+
   unsigned char byte = 1;
   ssize_t written;
   if (context == NULL || context->lws == NULL) return 0;
   written = write(context->wakeup_pipe[1], &byte, 1);
   if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK) return 0;
-  cancel_fn = (lws_cancel_service_fn)lws_cancel_service;
-  if (cancel_fn != NULL) cancel_fn(context->lws);
+
+  lws_cancel_service(context->lws);
   return 1;
 }
 
@@ -1730,13 +1603,19 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
                                  const char *alpn) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
-  lws_client_connect_via_info_fn connect_fn;
+
   struct lws_client_connect_info information;
   size_t headers_length;
   size_t initial_body_length;
   if (context == NULL || context->lws == NULL || port <= 0 || port > 65535 ||
       !Sbytevectorp(headers) || !Sbytevectorp(initial_body))
     return 0;
+#if !(defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2))
+  if (alpn != NULL && strcmp(alpn, "h2") == 0) return 0;
+#endif
+#if !defined(LWS_WITH_TLS)
+  if (tls) return 0;
+#endif
   headers_length = (size_t)Sbytevector_length(headers);
   initial_body_length = (size_t)Sbytevector_length(initial_body);
   if (headers_length > context->payload_capacity ||
@@ -1770,11 +1649,14 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   information.address = stream->address;
   information.port = port;
   information.ssl_connection = LCCSCF_HTTP_NO_FOLLOW_REDIRECT;
+#if (defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2))
   if (alpn != NULL && strcmp(alpn, "h2") == 0) {
     information.ssl_connection |= LCCSCF_PIPELINE | LCCSCF_H2_QUIRK_OVERFLOWS_TXCR |
                                   LCCSCF_H2_QUIRK_NGHTTP2_END_STREAM;
     if (!tls) information.ssl_connection |= LCCSCF_H2_PRIOR_KNOWLEDGE;
   }
+#endif
+#if defined(LWS_WITH_TLS)
   if (tls) {
     information.ssl_connection |= LCCSCF_USE_SSL;
     if (!context->tls_verify_peer)
@@ -1783,6 +1665,7 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
           LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK |
           LCCSCF_ALLOW_EXPIRED | LCCSCF_ALLOW_INSECURE;
   }
+#endif
   information.path = stream->path;
   information.host = stream->host;
   information.origin = stream->host;
@@ -1792,8 +1675,8 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   information.alpn = alpn != NULL && alpn[0] != '\0' ? alpn : "http/1.1";
   information.opaque_user_data = stream;
   information.pwsi = &stream->wsi;
-  connect_fn = (lws_client_connect_via_info_fn)lws_client_connect_via_info;
-  if (connect_fn == NULL || connect_fn(&information) == NULL) {
+
+  if (lws_client_connect_via_info(&information) == NULL) {
     pthread_mutex_lock(&context->lock);
     (void)queue_event_locked(context, LWS_HTTP_EVENT_FAILED, connection_id,
                              stream_id, generation, ECONNREFUSED, NULL, 0);
@@ -1806,9 +1689,7 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   stream->connection->wsi = stream->wsi;
   pthread_mutex_unlock(&context->lock);
   if (stream->h2) {
-    lws_callback_on_writable_fn writable_fn =
-        (lws_callback_on_writable_fn)lws_callback_on_writable;
-    if (writable_fn != NULL) (void)writable_fn(stream->wsi);
+    (void)lws_callback_on_writable(stream->wsi);
   }
   return 1;
 }
@@ -1851,7 +1732,7 @@ int chezpp_lws_http_client_body_submit(uintptr_t context_handle,
                                        ptr payload, int final_chunk) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
-  lws_callback_on_writable_fn writable_fn;
+
   size_t length;
   if (context == NULL) return 0;
   length = (size_t)Sbytevector_length(payload);
@@ -1871,18 +1752,15 @@ int chezpp_lws_http_client_body_submit(uintptr_t context_handle,
                           initial_body_is_complete(stream, stream->submitted_body_length);
   pthread_mutex_unlock(&context->lock);
   {
-    lws_client_http_body_pending_fn pending_fn =
-        (lws_client_http_body_pending_fn)lws_client_http_body_pending;
-    if (pending_fn != NULL && stream->wsi != NULL)
-      pending_fn(stream->wsi, final_chunk && length == 0 ? 0 : 1);
+    if (stream->wsi != NULL)
+      lws_client_http_body_pending(stream->wsi, final_chunk && length == 0 ? 0 : 1);
   }
   if (final_chunk && length == 0) return 1;
-  writable_fn =
-      (lws_callback_on_writable_fn)lws_callback_on_writable;
+
   {
-    int result = writable_fn == NULL || stream->wsi == NULL
+    int result = stream->wsi == NULL
                      ? -1
-                     : writable_fn(stream->wsi);
+                     : lws_callback_on_writable(stream->wsi);
     return result >= 0;
   }
 }
@@ -1893,7 +1771,7 @@ int chezpp_lws_http_client_body_drain(uintptr_t context_handle,
                                       uint64_t generation) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
-  lws_http_client_read_fn read_fn;
+
   char *buffer;
   int available;
   if (context == NULL) return 0;
@@ -1905,11 +1783,10 @@ int chezpp_lws_http_client_body_drain(uintptr_t context_handle,
     return 0;
   }
   pthread_mutex_unlock(&context->lock);
-  read_fn = (lws_http_client_read_fn)lws_http_client_read;
-  if (read_fn == NULL) return 0;
+
   buffer = (char *)context->drain_buffer + LWS_PRE;
   available = (int)context->payload_capacity;
-  return read_fn(stream->wsi, &buffer, &available) == 0;
+  return lws_http_client_read(stream->wsi, &buffer, &available) == 0;
 }
 
 ptr chezpp_lws_http_server_request_dequeue(uintptr_t context_handle) {
@@ -1963,9 +1840,7 @@ int chezpp_lws_http_server_response_submit(
       context_handle, connection_id, stream_id, generation, payload,
       final_chunk);
   if (result && final_chunk && Sbytevector_length(payload) == 0) {
-    lws_callback_on_writable_fn writable_fn =
-        (lws_callback_on_writable_fn)lws_callback_on_writable;
-    if (writable_fn == NULL || stream->wsi == NULL || writable_fn(stream->wsi) < 0)
+    if (stream->wsi == NULL || lws_callback_on_writable(stream->wsi) < 0)
       return 0;
   }
   return result;
@@ -1976,7 +1851,7 @@ int chezpp_lws_http_stream_cancel(uintptr_t context_handle,
                                   uint64_t generation, int status) {
   lws_http_context *context = context_from_handle(context_handle);
   lws_http_stream *stream;
-  lws_set_timeout_fn set_timeout_fn;
+
   struct lws *wsi;
   int result;
   if (context == NULL) return 0;
@@ -1992,9 +1867,9 @@ int chezpp_lws_http_stream_cancel(uintptr_t context_handle,
   wsi = stream->wsi;
   pthread_mutex_unlock(&context->lock);
   /* LWS owns the H2 stream WSI and emits RST_STREAM while closing it. */
-  set_timeout_fn = (lws_set_timeout_fn)lws_set_timeout;
-  if (wsi != NULL && set_timeout_fn != NULL)
-    set_timeout_fn(wsi, PENDING_TIMEOUT_AWAITING_SERVER_RESPONSE,
+
+  if (wsi != NULL)
+    lws_set_timeout(wsi, PENDING_TIMEOUT_AWAITING_SERVER_RESPONSE,
                    LWS_TO_KILL_ASYNC);
   (void)chezpp_lws_http_context_wakeup(context_handle);
   return result;
@@ -2031,9 +1906,7 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
   }
   pthread_mutex_unlock(&context->lock);
   if (resume_wsi != NULL) {
-    lws_rx_flow_control_fn flow_fn =
-        (lws_rx_flow_control_fn)lws_rx_flow_control;
-    if (flow_fn != NULL) flow_fn(resume_wsi, 1);
+    lws_rx_flow_control(resume_wsi, 1);
   }
   if (resume)
     (void)chezpp_lws_http_context_wakeup(context_handle);

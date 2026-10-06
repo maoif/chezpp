@@ -11,14 +11,6 @@ static chezpp_optional_library zlib_library =
 static pthread_once_t zlib_once = PTHREAD_ONCE_INIT;
 static int zlib_available;
 
-typedef const char *(*zlib_version_fn)(void);
-typedef int (*zlib_deflate_init2_fn)(z_streamp, int, int, int, int, int,
-                                     const char *, int);
-typedef int (*zlib_deflate_fn)(z_streamp, int);
-typedef int (*zlib_deflate_end_fn)(z_streamp);
-typedef int (*zlib_inflate_init2_fn)(z_streamp, int, const char *, int);
-typedef int (*zlib_inflate_fn)(z_streamp, int);
-typedef int (*zlib_inflate_end_fn)(z_streamp);
 
 typedef struct {
   z_stream stream;
