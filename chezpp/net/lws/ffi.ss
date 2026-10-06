@@ -120,7 +120,8 @@
   `context-handle` is the native HTTP context handle.
   `fd` is a number.
   `revents` is a number.
-  It returns the native file descriptor, or -1 when the handle has no descriptor.
+  It returns the libwebsockets service result, zero for the wakeup descriptor, or -1 for an
+  invalid context.
   It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-context-service-fd

@@ -739,7 +739,7 @@
   `crypto_cert_store_load_defaults`.
   Parameters `ptr-store` are passed to the native operation in that order.
   `ptr-store` is a native handle.
-  It returns an owned native handle, or zero on allocation, parsing, or initialization failure.
+  It returns 1 when default CA paths load successfully, and 0 on failure or a zero store handle.
   It raises an error when OpenSSL is unavailable.
   |#
   (define ffi-cert-store-load-defaults
