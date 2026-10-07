@@ -187,7 +187,11 @@ permissions, owner, group, and complete raw fact alist.
                      (ftp-ready-targets->vector ready-target*)
                      (if timer-expired? 1 0))])
         (when (or (status-error? status) (not (vector? status)))
-          (raise-net-error who 'ftp "FTP file transfer failed" status))
+          (raise-net-error who 'ftp
+                           (if (ffi-error? status)
+                               (ffi-error-message status)
+                               "FTP file transfer failed")
+                           status))
         (case (vector-ref status 0)
           [(pending)
            (ftp-file-targets-set! file
@@ -615,7 +619,13 @@ The `session` parameter is an FTP session. The result is `plain`, `explicit`, or
                                     (vector-ref status 1)
                                     (if (= native-kind 1) (cadr args) (cadr args))))]
                               [else (net-operation-failed
-                                     (make-net-error who 'ftp "FTP transfer failed" status))]))))
+                                     (make-net-error
+                                      who
+                                      'ftp
+                                      (if (ffi-error? status)
+                                          (ffi-error-message status)
+                                          "FTP transfer failed")
+                                      status))]))))
                       (lambda () (ffi-net-ftp-transfer-cancel handle))
                       (lambda ()
                         (ffi-net-ftp-transfer-close handle)

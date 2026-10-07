@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #if CHEZPP_WITH_LIBSSH
+#define SSH_SUPPRESS_DEPRECATED
 #include <libssh/libssh.h>
 #include <libssh/sftp.h>
 #endif
@@ -319,7 +320,7 @@ static ptr split_remote_path(const char *path, char **parent_out, char **base_ou
   if (path == NULL || *path == 0) return make_error_status_message("remote path must not be empty");
 
   len = strlen(path);
-  while (len > path[len - 1] == '/') --len;
+  while (len > 1 && path[len - 1] == '/') --len;
   if (len == 0) return make_error_status_message("remote path must not be empty");
 
   for (i = (ssize_t)len - 1; i >= 0; --i) {
@@ -356,7 +357,7 @@ static char *parent_path_dup(const char *path) {
 
   if (path == NULL || *path == 0) return NULL;
   len = strlen(path);
-  while (len > path[len - 1] == '/') --len;
+  while (len > 1 && path[len - 1] == '/') --len;
   for (i = (ssize_t)len - 1; i >= 0; --i) {
     if (path[i] == '/') {
       if (i == 0) return dup_cstring_n(path, 1);
@@ -923,7 +924,7 @@ ptr chezpp_net_ssh_open(const char *host, int port, const char *user, int timeou
       break;
     case SSH_KNOWN_HOSTS_NOT_FOUND:
     case SSH_KNOWN_HOSTS_UNKNOWN:
-      if (hostkey_policy == ssh_session_update_known_hosts(session) == SSH_OK)
+      if (hostkey_policy == 1 && ssh_session_update_known_hosts(session) == SSH_OK)
         break;
       ssh_disconnect(session);
       ssh_free(session);

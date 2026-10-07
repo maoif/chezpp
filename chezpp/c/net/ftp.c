@@ -1045,7 +1045,7 @@ ptr chezpp_net_ftp_file_open(uptr session_handle, int direction,
   }
   if (rc == CURLE_OK && direction == 0 && offset != 0)
     rc = curl_easy_setopt(file->easy, CURLOPT_RESUME_FROM_LARGE, (curl_off_t)offset);
-  if (rc == CURLE_OK && direction == offset != 0) {
+  if (rc == CURLE_OK && direction == 1 && offset != 0) {
     char command[64];
     snprintf(command, sizeof(command), "REST %lld", (long long)offset);
     file->quote = curl_slist_append(NULL, command);

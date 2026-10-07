@@ -9,6 +9,20 @@
 #include <fcntl.h>
 #include <poll.h>
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+static int chezpp_ares_getsock(const ares_channel channel, ares_socket_t *sockets,
+                               int numsocks) {
+  return ares_getsock(channel, sockets, numsocks);
+}
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 
 typedef struct {
   ares_channel channel;
@@ -117,7 +131,7 @@ static ptr dns_result(chezpp_dns_operation *operation) {
 
 static ptr pending_result(chezpp_dns_operation *operation) {
   ares_socket_t sockets[ARES_GETSOCK_MAXNUM];
-  int bits = ares_getsock(operation->channel, sockets, ARES_GETSOCK_MAXNUM);
+  int bits = chezpp_ares_getsock(operation->channel, sockets, ARES_GETSOCK_MAXNUM);
   struct timeval tv;
   struct timeval *timeout;
   ptr specs = Snil;
@@ -222,7 +236,7 @@ ptr chezpp_net_dns_advance(uptr handle) {
   }
   if (operation->done) return dns_result(operation);
 
-  bits = ares_getsock(operation->channel, sockets, ARES_GETSOCK_MAXNUM);
+  bits = chezpp_ares_getsock(operation->channel, sockets, ARES_GETSOCK_MAXNUM);
   memset(pollfds, 0, sizeof(pollfds));
   for (index = 0; index < ARES_GETSOCK_MAXNUM; index++) {
     if (!ARES_GETSOCK_READABLE(bits, index) && !ARES_GETSOCK_WRITABLE(bits, index)) continue;
