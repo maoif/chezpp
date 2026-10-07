@@ -70,7 +70,7 @@ typedef struct {
 static chezpp_optional_library ssh_library =
     CHEZPP_OPTIONAL_LIBRARY_INIT("ssh");
 static pthread_once_t ssh_once = PTHREAD_ONCE_INIT;
-static int ssh_available;
+static int ssh_available_flag;
 static int ssh_aio_available;
 
 static ptr make_status(const char *tag, ptr value) {
@@ -163,12 +163,12 @@ static void initialize_ssh(void) {
 #if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
   ssh_aio_available = 1;
 #endif
-  ssh_available = 1;
+  ssh_available_flag = 1;
 }
 
 static int ssh_available(void) {
   pthread_once(&ssh_once, initialize_ssh);
-  return ssh_available;
+  return ssh_available_flag;
 }
 
 const chezpp_optional_library *chezpp_net_ssh_library(void) {

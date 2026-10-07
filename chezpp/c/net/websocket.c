@@ -126,7 +126,7 @@ extern int chezpp_net_tls_context_copy_credentials(uptr handle, void *destinatio
 static chezpp_optional_library websocket_library =
     CHEZPP_OPTIONAL_LIBRARY_INIT("websockets");
 static pthread_once_t websocket_once = PTHREAD_ONCE_INIT;
-static int websocket_available;
+static int websocket_available_flag;
 static unsigned websocket_capabilities;
 static struct lws_context *websocket_lifetime_context = NULL;
 static int websocket_lifetime_state;
@@ -404,12 +404,12 @@ static void initialize_websocket_library(void) {
     const char *level = getenv("CHEZPP_WS_LOGLEVEL");
     lws_set_log_level(level == NULL ? 0 : (int)strtol(level, NULL, 0), NULL);
   }
-  websocket_available = 1;
+  websocket_available_flag = 1;
 }
 
 static int websocket_available(void) {
   pthread_once(&websocket_once, initialize_websocket_library);
-  return websocket_available;
+  return websocket_available_flag;
 }
 
 const chezpp_optional_library *chezpp_net_websocket_library(void) {

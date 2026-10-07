@@ -77,7 +77,7 @@ static int ftp_timer_cb(CURLM *multi, long timeout_ms, void *userp);
 static chezpp_optional_library curl_library =
     CHEZPP_OPTIONAL_LIBRARY_INIT("curl");
 static pthread_once_t curl_once = PTHREAD_ONCE_INIT;
-static int curl_available;
+static int curl_available_flag;
 
 static ptr make_status(const char *tag, ptr value) {
   ptr v = Smake_vector(2, Sfalse);
@@ -263,12 +263,12 @@ static void initialize_curl(void) {
     chezpp_optional_library_fail(&curl_library, "curl: runtime initialization failed");
     return;
   }
-  curl_available = 1;
+  curl_available_flag = 1;
 }
 
 static int curl_available(void) {
   pthread_once(&curl_once, initialize_curl);
-  return curl_available;
+  return curl_available_flag;
 }
 
 const chezpp_optional_library *chezpp_net_curl_library(void) {

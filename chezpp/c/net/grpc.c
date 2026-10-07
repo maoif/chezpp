@@ -118,7 +118,7 @@ static chezpp_optional_library grpc_library =
 static chezpp_optional_library gpr_library =
     CHEZPP_OPTIONAL_LIBRARY_INIT("gpr");
 static pthread_once_t grpc_once = PTHREAD_ONCE_INIT;
-static int grpc_available;
+static int grpc_available_flag;
 static unsigned grpc_capabilities;
 static grpc_completion_queue *grpc_driver_cq = NULL;
 static pthread_t grpc_driver_thread;
@@ -394,12 +394,12 @@ static void initialize_grpc(void) {
     return;
   }
   grpc_capabilities = 3U;
-  grpc_available = 1;
+  grpc_available_flag = 1;
 }
 
 static int grpc_available(void) {
   pthread_once(&grpc_once, initialize_grpc);
-  return grpc_available;
+  return grpc_available_flag;
 }
 
 const chezpp_optional_library *chezpp_net_grpc_library(void) {
