@@ -613,7 +613,8 @@
     (foreign-procedure "chezpp_net_grpc_server_open_tls"
                        (string int string string string) scheme-object))
   (define ffi-net-grpc-server-close
-    (foreign-procedure "chezpp_net_grpc_server_close" (uptr) scheme-object))
+    (foreign-procedure __collect_safe
+                       "chezpp_net_grpc_server_close" (uptr) scheme-object))
   (define ffi-net-grpc-unary-call
     (foreign-procedure "chezpp_net_grpc_unary_call"
                        (uptr string ptr int int scheme-object int)
@@ -649,9 +650,11 @@
   (define ffi-net-grpc-stream-close
     (foreign-procedure "chezpp_net_grpc_stream_close" (uptr) scheme-object))
   (define ffi-net-grpc-server-request
-    (foreign-procedure "chezpp_net_grpc_server_request" (uptr) scheme-object))
+    (foreign-procedure __collect_safe
+                       "chezpp_net_grpc_server_request" (uptr) scheme-object))
   (define ffi-net-grpc-server-request-stream
-    (foreign-procedure "chezpp_net_grpc_server_request_stream" (uptr) scheme-object))
+    (foreign-procedure __collect_safe
+                       "chezpp_net_grpc_server_request_stream" (uptr) scheme-object))
   (define ffi-net-grpc-server-respond
     (foreign-procedure "chezpp_net_grpc_server_respond"
                        (uptr ptr int int int string scheme-object)

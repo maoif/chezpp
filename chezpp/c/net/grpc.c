@@ -188,10 +188,13 @@ static int grpc_enqueue_completed_tag(void *tag, int success) {
 
 static void grpc_consume_driver_notification(void) {
 #ifdef __linux__
-  uint64_t count;
+  uint64_t count = 0;
   if (grpc_driver_fd >= 0) {
-    while (read(grpc_driver_fd, &count, sizeof(count)) < 0 && errno == EINTR) {}
-    if (count > 1) {
+    ssize_t n;
+    do {
+      n = read(grpc_driver_fd, &count, sizeof(count));
+    } while (n < 0 && errno == EINTR);
+    if (n == (ssize_t)sizeof(count) && count > 1) {
       uint64_t remaining = count - 1;
       while (write(grpc_driver_write_fd, &remaining, sizeof(remaining)) < 0 &&
              errno == EINTR) {}
@@ -756,7 +759,6 @@ static ptr wait_stream_complete(chezpp_grpc_stream *stream, void *tag, const cha
     int success = 0;
     for (;;) {
       struct pollfd pfd;
-      uint64_t count;
       if (grpc_take_completed_tag(tag, &success)) {
         if (success) return Strue;
         {
@@ -772,7 +774,7 @@ static ptr wait_stream_complete(chezpp_grpc_stream *stream, void *tag, const cha
         if (errno == EINTR) continue;
         return make_error_status_message("gRPC readiness wait failed");
       }
-      while (read(grpc_driver_fd, &count, sizeof(count)) < 0 && errno == EINTR) {}
+      grpc_consume_driver_notification();
     }
   }
   grpc_event ev = pluck_stream_event(stream, tag);

@@ -77,6 +77,7 @@ HTTP_ERROR_SOAK_OBJS := $(addsuffix .so,$(HTTP_ERROR_SOAK_TESTS))
 WEBSOCKETS_ENABLED := $(shell sed -n 's/^\#define CHEZPP_WITH_WEBSOCKETS //p' \
                                    $(ROOT_DIR)/chezpp/c/build-config.h)
 ifeq ($(WEBSOCKETS_ENABLED),1)
+.SECONDARY: lws-http2-fixture
 lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
 	$(CC) $(CPPFLAGS) $(RESOLVED_WEBSOCKETS_CFLAGS) -Wall -Wextra -O2 \
 	  $< -o $@ $(LDFLAGS) $(RESOLVED_WEBSOCKETS_LIBS) -ldl
