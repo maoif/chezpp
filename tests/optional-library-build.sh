@@ -138,7 +138,7 @@ run_probe idn2
 
 # Running tests must retain the manual feature flags, including spaces and empty values.
 manual_signature=$(cat "$fixture_project/.chezpp-build-options")
-if ! make -C "$fixture_project/tests" test TEST=optional-library \
+if ! make -C "$fixture_project/tests" test optional-library.ss \
     > "$fixture_directory/manual-tests.log" 2>&1; then
     cat "$fixture_directory/manual-tests.log" >&2
     exit 1

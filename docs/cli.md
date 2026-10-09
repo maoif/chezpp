@@ -470,7 +470,7 @@ Focused verification:
 
 ```bash
 cd tests
-make test-some TEST='cli'
+make test cli.ss
 ```
 
 When running through the Makefile, normal successful tests should not emit

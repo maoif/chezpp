@@ -166,15 +166,18 @@ Build first, then run all test suites:
 
 ```sh
 make clean && make
-make -C tests test-all
+make test
 ```
 
-Run selected suites by their test names:
+In `tests/`, run all tests or select individual test source files:
 
 ```sh
-make -C tests test-some TEST='array vector cli rich'
-make -C tests test-some TEST='net-http net-lws-http2 net-lws-server'
+make test
+make test vector.ss list.ss
+make test net-http.ss net-lws-http2.ss net-lws-server.ss
 ```
+
+Only files in the test suite are accepted as positional arguments; support files are rejected.
 
 Tests retain the native feature settings from the root build. Clauses that require disabled
 libraries report `Skipped mat ...` individually; unrelated clauses and disabled-API error

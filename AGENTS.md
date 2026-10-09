@@ -108,9 +108,9 @@ By default, `make` is equal to `make release`.
 
 ## Run test code
 
-You can enter `tests/` and run for example `make test-some TEST='array vector'`
-to run tests for `array` and `vector` libs. Use whitespace to seperate
-more libs.
+You can enter `tests/` and run `make test` to run all tests, or pass selected
+test files directly, for example `make test vector.ss list.ss`. Only files in
+the test suite are accepted; support files are rejected.
 
 Each testcase in `mat` form must return either `#t` to indicate success or
 `#f` to indicate failure.

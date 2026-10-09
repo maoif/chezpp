@@ -16,8 +16,20 @@ override CHEZ_TOOLCHAIN_SIGNATURE := $(CHEZ_BUILD_DIR)/.chezscheme-signature
 PREFIX := /usr
 
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
-SRCS_TEST    = $(shell find tests/    -type f -name '*.ss')
 SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c' ! -name '*_unavailable.c')
+
+ifneq ($(filter test,$(MAKECMDGOALS)),)
+include tests/test-files.mk
+TEST_FILE_GOALS := $(filter-out test,$(MAKECMDGOALS))
+INVALID_TEST_FILES := $(filter-out $(SRCS_TEST),$(TEST_FILE_GOALS))
+ifneq ($(strip $(INVALID_TEST_FILES)),)
+$(error unsupported test file(s): $(INVALID_TEST_FILES))
+endif
+ifneq ($(strip $(TEST_FILE_GOALS)),)
+.PHONY: $(TEST_FILE_GOALS)
+$(TEST_FILE_GOALS): ;
+endif
+endif
 
 ifeq ($(origin CC),default)
 CC := gcc
@@ -95,7 +107,7 @@ test: chez++
 	@$(MAKE) --no-print-directory -C tests test \
 		BUILD_VARIANT='$(VARIANT)' \
 		$(foreach option,$(BUILD_OPTION_NAMES),BUILD_$(option)='$($(option))') \
-		$(if $(strip $(TEST)),TEST=$(call build-shell-quote,$(TEST)))
+		$(TEST_FILE_GOALS)
 
 define generate_chezpp_launcher
 	@rm -f $(1)

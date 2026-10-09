@@ -40,8 +40,8 @@ Run the focused tests from the project root after a clean build:
 
 ```sh
 timeout 300s sh -c 'make clean && make'
-timeout 60s make -C tests test-some \
-  TEST='net-http net-http-contract net-lws-reactor net-lws-http2 net-lws-server net-http-fiber'
+timeout 60s make -C tests test \
+  net-http.ss net-http-contract.ss net-lws-reactor.ss net-lws-http2.ss net-lws-server.ss net-http-fiber.ss
 ```
 
 The makefile prints build and suite labels. Successful MAT `.stdout` and `.stderr` files are empty.

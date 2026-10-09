@@ -1,4 +1,5 @@
 .ONESHELL:
+.DEFAULT_GOAL := test
 
 ROOT_DIR := ..
 
@@ -45,30 +46,25 @@ CHEZ_TEST_COMPILER_FORMS := (optimize-level $(BUILD_TEST_OPTIMIZE_LEVEL)) (debug
                             (generate-covin-files $(_scheme_false)) (generate-wpo-files $(_scheme_false))
 COVERAGE_ENABLED := $(if $(filter coverage,$(BUILD_VARIANT)),1,)
 
-NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss net-lws-reactor.ss \
-             net-lws-http2.ss \
-             net-lws-server.ss \
-             net-http-fiber.ss net-lws-stress.ss net-http-stress.ss \
-             net-http.ss net-ftp.ss \
-             net-ssh.ss net-sftp.ss \
-             net-scp.ss net-websocket.ss net-grpc.ss net-examples.ss
+include test-files.mk
+
 NET_TEST_SUPPORT := net-common.ss net-ftp-common.ss net-ftp-server-process.ss net-ssh-common.ss \
                     net-lws-fixture.ss
 
-SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss glob.ss navigator.ss \
-             list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
-             hashset.ss treemap.ss treeset.ss rbtree-specialized.ss \
-             bittree.ss bitvec.ss dset.ss \
-             concurrency.ss \
-             cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss optional-openssl.ss \
-             optional-library.ss net-loader.ss uuid.ss \
-             protobuf.ss protobuf-codegen.ss \
-             $(NET_TESTS) \
-             parser.ss net-errors.ss net-address.ss net-dns.ss net-ip.ss net-docs.ss \
-             net-socket-datagram.ss net-uri.ss
 OBJS_TEST := $(SRCS_TEST:.ss=.so)
-TEST      ?= $(SRCS_TEST)
-TEST_OBJS := $(addsuffix .so,$(basename $(TEST)))
+TEST_FILE_GOALS :=
+
+ifneq ($(filter test,$(MAKECMDGOALS)),)
+TEST_FILE_GOALS := $(filter-out test,$(MAKECMDGOALS))
+INVALID_TEST_FILES := $(filter-out $(SRCS_TEST),$(TEST_FILE_GOALS))
+ifneq ($(strip $(INVALID_TEST_FILES)),)
+$(error unsupported test file(s): $(INVALID_TEST_FILES))
+endif
+ifneq ($(strip $(TEST_FILE_GOALS)),)
+$(TEST_FILE_GOALS): ;
+endif
+endif
+TEST_OBJS := $(if $(TEST_FILE_GOALS),$(TEST_FILE_GOALS:.ss=.so),$(OBJS_TEST))
 
 HTTP_ERROR_SOAK_SECONDS ?= 300
 HTTP_ERROR_SOAK_TESTS := net-http net-lws-http2 net-lws-server
@@ -84,9 +80,6 @@ lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
 
 net-lws-http2.so net-http-fiber.so net-http-stress.so: lws-http2-fixture
 endif
-
-.PHONY: test
-test: test-some
 
 mat.so: mat.sls | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
@@ -109,8 +102,10 @@ $(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++ | pr
 
 test.so: mat-requires-fixture.ss
 
-.PHONY: test-all
-test-all: prepare-chezpp mat.so $(OBJS_TEST)
+.PHONY: test test-all
+test-all: test
+
+test: prepare-chezpp mat.so $(TEST_OBJS)
 	@cleanup() { \
 	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr *.covout coverage.covout; \
 	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
@@ -124,7 +119,7 @@ test-all: prepare-chezpp mat.so $(OBJS_TEST)
 	}; \
 	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
 	@status=0; \
-	for item in $(OBJS_TEST); do \
+	for item in $(TEST_OBJS); do \
 	  stdout="$$item.stdout"; stderr="$$item.stderr"; \
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$item =="; \
@@ -133,51 +128,6 @@ test-all: prepare-chezpp mat.so $(OBJS_TEST)
 	    ../chez++ --script coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
 	  else \
 	    echo '(load "mat.so")(load "'"$$item"'")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
-	  fi; \
-	  code=$$?; \
-	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
-	  if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
-	  if [ $$code -ne 0 ]; then status=1; fi; \
-	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
-	 done; \
-	 if [ -n "$(COVERAGE_ENABLED)" ]; then \
-	   covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
-	   covout_files=$$(find . -maxdepth 1 -type f -name '*.covout' -print); \
-	   set -- $$covin_files; covin_count=$$#; \
-	   ../chez++ --script coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
-	   report_code=$$?; if [ $$report_code -ne 0 ]; then status=1; fi; \
-	 fi; \
-	 exit $$status
-
-.PHONY: test-some
-test-some: prepare-chezpp mat.so $(TEST_OBJS)
-	@cleanup() { \
-	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr *.covout coverage.covout; \
-	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
-	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
-	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
-	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
-	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
-	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
-	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
-	    /tmp/upload-root; \
-	}; \
-	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
-	@status=0; \
-	for item in $(TEST); do \
-	  case "$$item" in \
-	    *.ss) base="$${item%.ss}" ;; \
-	    *.so) base="$${item%.so}" ;; \
-	    *) base="$$item" ;; \
-	  esac; \
-	  stdout="$$base.stdout"; stderr="$$base.stderr"; \
-	  rm -f "$$stdout" "$$stderr"; \
-	  printf '%s\n' "== running $$base.so =="; \
-	  if [ -n "$(COVERAGE_ENABLED)" ]; then \
-	    covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
-	    ../chez++ --script coverage-init.ss "$$base.so" "$$base.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
-	  else \
-	    echo '(load "mat.so")(load "'"$$base"'.so")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
 	  fi; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \

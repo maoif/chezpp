@@ -14,7 +14,7 @@ transfer_mib=${CHEZPP_TRANSFER_MIB:-16}
 dd if=/dev/zero of="$source_file" bs=1048576 count="$transfer_mib" status=none
 
 # These suites start and stop isolated FTP/FTPS and sshd-backed SFTP/SCP fixtures.
-(cd "$project_root/tests" && make test-some TEST='net-transfer net-ftp net-sftp net-scp')
+(cd "$project_root/tests" && make test net-transfer.ss net-ftp.ss net-sftp.ss net-scp.ss)
 
 actual=$(
   cd "$project_root/tests"
