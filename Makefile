@@ -6,13 +6,14 @@ endif
 
 include build-options.mk
 
-CHEZ_SOURCE_DIR := vendor/ChezScheme
-CHEZ_BUILD_DIR := .chezscheme-build
-CHEZ_INSTALL_DIR := .chezscheme-install
-CHEZ_SCHEME := $(abspath $(CHEZ_INSTALL_DIR)/bin/scheme)
-CHEZ_HEADER = $(firstword $(shell find "$(CHEZ_INSTALL_DIR)/lib" -type f -name scheme.h 2>/dev/null))
-CHEZ_INCLUDE_DIR = $(dir $(CHEZ_HEADER))
-SCHEME_SCRIPT := $(CHEZ_SCHEME)
+override CHEZ_SOURCE_DIR := vendor/ChezScheme
+override CHEZ_BUILD_DIR := .chezscheme-build
+override CHEZ_INSTALL_DIR := .chezscheme-install
+override CHEZ_SCHEME := $(abspath $(CHEZ_INSTALL_DIR)/bin/scheme)
+override CHEZ_INCLUDE_DIR = $(dir $(realpath $(CHEZ_SCHEME)))
+override CHEZ_HEADER = $(CHEZ_INCLUDE_DIR)scheme.h
+override SCHEME_SCRIPT := $(CHEZ_SCHEME)
+override CHEZ_TOOLCHAIN_SIGNATURE := $(CHEZ_BUILD_DIR)/.chezscheme-signature
 PREFIX := /usr
 
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
@@ -46,7 +47,7 @@ coverage:
 print-build-options:
 	$(print-build-options)
 
-prepare-build:
+prepare-build: bundled-chez
 	$(call print-build-options)
 	@if [ -f "$(BUILD_OPTIONS_SIGNATURE_FILE)" ]; then \
 		old=$$(cat "$(BUILD_OPTIONS_SIGNATURE_FILE)"); \
@@ -77,22 +78,37 @@ bundled-chez:
 			printf '%s\n' 'error: unable to initialize vendor/ChezScheme; check Git remotes and network access' >&2; \
 			exit 1; \
 		fi; \
-		if ! git -C "$$source" submodule update --init --depth 1 --filter=blob:none --recursive; then \
-			printf '%s\n' 'error: unable to initialize ChezScheme dependency submodules; check Git remotes and network access' >&2; \
-			exit 1; \
-		fi; \
 	fi; \
 	if [ ! -f "$$source/configure" ]; then \
 		printf '%s\n' 'error: vendor/ChezScheme/configure is unavailable after submodule initialization' >&2; \
 		exit 1; \
 	fi; \
-	commit=$$(git -C "$$source" rev-parse HEAD 2>/dev/null || printf '%s' unversioned); \
+	if [ ! -f "$$source/zuo/configure" ] || [ ! -f "$$source/nanopass/nanopass.ss" ] || \
+		[ ! -f "$$source/stex/Mf-stex" ] || [ ! -f "$$source/zlib/configure" ] || \
+		[ ! -f "$$source/lz4/lib/Makefile" ]; then \
+		if [ ! -e "$$source/.git" ]; then \
+			printf '%s\n' 'error: ChezScheme dependency sources are missing; use a complete source archive or initialize its submodules' >&2; \
+			exit 1; \
+		fi; \
+		if ! git -C "$$source" submodule update --init --depth 1 --filter=blob:none --recursive; then \
+			printf '%s\n' 'error: unable to initialize ChezScheme dependency submodules; check Git remotes and network access' >&2; \
+			exit 1; \
+		fi; \
+	fi; \
+	commit=unversioned; \
+	if [ -e "$$source/.git" ]; then \
+		commit=$$(git -C "$$source" rev-parse HEAD) || { \
+			printf '%s\n' 'error: unable to determine the ChezScheme submodule commit' >&2; exit 1; \
+		}; \
+	fi; \
 	signature="commit=$$commit configure=$$source/configure --installprefix=$$install"; \
 	old_signature=$$(cat "$$build/.chezscheme-signature" 2>/dev/null || :); \
 	built_scheme=$$(find "$$build" -type f -path '*/bin/*/scheme' -perm -u+x -print -quit 2>/dev/null || :); \
 	header=$$(find "$$install/lib" -type f -name scheme.h -print -quit 2>/dev/null || :); \
-	if [ "$$old_signature" != "$$signature" ] || [ ! -x "$$install/bin/scheme" ] || \
+	if [ "$$old_signature" != "$$signature" ] || [ ! -f "$$build/Makefile" ] || \
+		[ ! -x "$$install/bin/scheme" ] || \
 		[ -z "$$built_scheme" ] || [ -z "$$header" ]; then \
+		$(MAKE) --no-print-directory clean; \
 		rm -rf "$$build" "$$install"; \
 		mkdir -p "$$build"; \
 		( cd "$$build" && "$$source/configure" --installprefix="$$install" ); \
@@ -104,6 +120,9 @@ bundled-chez:
 		printf '%s\n' "error: bundled ChezScheme compiler was not installed at $$install/bin/scheme" >&2; \
 		exit 1; \
 	fi
+
+$(CHEZ_TOOLCHAIN_SIGNATURE): | bundled-chez
+	@test -f "$@"
 
 test: chez++
 	@$(MAKE) --no-print-directory -C tests test \
@@ -152,12 +171,12 @@ check-scheme-header: bundled-chez
 	  exit 1; \
 	fi
 
-libchezpp.so: ${SRCS_C} chezpp/c/build-config.h | bundled-chez check-scheme-header prepare-build
+libchezpp.so: ${SRCS_C} chezpp/c/build-config.h $(CHEZ_TOOLCHAIN_SIGNATURE) | check-scheme-header prepare-build
 	$(CC) $(CPPFLAGS) -I$(CHEZ_INCLUDE_DIR) $(CFLAGS) $(OPTIONAL_CFLAGS) \
 	  -include chezpp/c/build-config.h \
 	  -shared $(LDFLAGS) -o $@ $(SRCS_C) $(LDLIBS) $(OPTIONAL_LIBS)
 
-chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} libchezpp.so | bundled-chez prepare-build
+chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} libchezpp.so $(CHEZ_TOOLCHAIN_SIGNATURE) | prepare-build
 	@printf '%s\n' '$(CHEZ_COMPILER_FORMS) (compile-imported-libraries #t)' \
 	      '(define old-handler (compile-library-handler))' \
 	      '(define (compile-with-options thunk)' \
