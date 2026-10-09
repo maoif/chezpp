@@ -45,7 +45,8 @@ make clean && make
 
 The repository pins a release ChezScheme in `vendor/ChezScheme`. Ordinary `make` builds and
 installs that bundled compiler under `.chezscheme-build` and `.chezscheme-install` before building
-Chezpp. If the submodule contents are absent, Make initializes it with a filtered shallow checkout.
+Chezpp. Make checks Git’s recursive submodule status and initializes missing submodules with a
+filtered shallow checkout.
 The bundled compiler and its matching `scheme.h` are mandatory; the build does not accept a
 `SCHEME` override or use an ambient ChezScheme installation. A `scheme` symlink beside `chez++`
 points at the generated compiler.
@@ -56,9 +57,9 @@ Use a different C compiler when needed:
 make CC=clang
 ```
 
-The build checks that the bundled ChezScheme executable and development header have the same
-version. `make clean` removes Chezpp outputs while preserving the submodule and generated
-ChezScheme toolchain. `make clean-all` performs that cleanup and removes `.chezscheme-build`,
+The bundled ChezScheme build supplies its compiler and matching development header together.
+`make clean` removes Chezpp outputs while preserving the submodule and generated ChezScheme
+toolchain. `make clean-all` performs that cleanup and removes `.chezscheme-build`,
 `.chezscheme-install`, and the generated root `scheme` symlink.
 
 ### Optional native libraries

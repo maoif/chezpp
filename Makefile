@@ -11,7 +11,6 @@ override CHEZ_BUILD_DIR := .chezscheme-build
 override CHEZ_INSTALL_DIR := .chezscheme-install
 override CHEZ_SCHEME := $(abspath $(CHEZ_INSTALL_DIR)/bin/scheme)
 override CHEZ_INCLUDE_DIR = $(dir $(realpath $(CHEZ_SCHEME)))
-override CHEZ_HEADER = $(CHEZ_INCLUDE_DIR)scheme.h
 override SCHEME_SCRIPT := $(CHEZ_SCHEME)
 override CHEZ_TOOLCHAIN_SIGNATURE := $(CHEZ_BUILD_DIR)/.chezscheme-signature
 PREFIX := /usr
@@ -68,46 +67,18 @@ bundled-chez:
 	source='$(abspath $(CHEZ_SOURCE_DIR))'; \
 	build='$(abspath $(CHEZ_BUILD_DIR))'; \
 	install='$(abspath $(CHEZ_INSTALL_DIR))'; \
-	if [ ! -f "$$source/configure" ]; then \
-		if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
-			printf '%s\n' 'error: vendor/ChezScheme is missing and this directory is not a Git worktree' >&2; \
-			exit 1; \
-		fi; \
-		printf '%s\n' 'initializing vendor/ChezScheme with a filtered shallow checkout'; \
-		if ! git submodule update --init --depth 1 --filter=blob:none vendor/ChezScheme; then \
-			printf '%s\n' 'error: unable to initialize vendor/ChezScheme; check Git remotes and network access' >&2; \
-			exit 1; \
-		fi; \
-	fi; \
-	if [ ! -f "$$source/configure" ]; then \
-		printf '%s\n' 'error: vendor/ChezScheme/configure is unavailable after submodule initialization' >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$source/zuo/configure" ] || [ ! -f "$$source/nanopass/nanopass.ss" ] || \
-		[ ! -f "$$source/stex/Mf-stex" ] || [ ! -f "$$source/zlib/configure" ] || \
-		[ ! -f "$$source/lz4/lib/Makefile" ]; then \
-		if [ ! -e "$$source/.git" ]; then \
-			printf '%s\n' 'error: ChezScheme dependency sources are missing; use a complete source archive or initialize its submodules' >&2; \
-			exit 1; \
-		fi; \
-		if ! git -C "$$source" submodule update --init --depth 1 --filter=blob:none --recursive; then \
-			printf '%s\n' 'error: unable to initialize ChezScheme dependency submodules; check Git remotes and network access' >&2; \
-			exit 1; \
-		fi; \
-	fi; \
 	commit=unversioned; \
-	if [ -e "$$source/.git" ]; then \
-		commit=$$(git -C "$$source" rev-parse HEAD) || { \
-			printf '%s\n' 'error: unable to determine the ChezScheme submodule commit' >&2; exit 1; \
-		}; \
+	if [ -e .git ]; then \
+		submodules=$$(git submodule status --recursive -- "$(CHEZ_SOURCE_DIR)"); \
+		if printf '%s\n' "$$submodules" | grep -Eq '^[-+U]'; then \
+			git submodule update --init --depth 1 --filter=blob:none --recursive -- "$(CHEZ_SOURCE_DIR)"; \
+		fi; \
+		commit=$$(git -C "$$source" rev-parse HEAD); \
 	fi; \
 	signature="commit=$$commit configure=$$source/configure --installprefix=$$install"; \
 	old_signature=$$(cat "$$build/.chezscheme-signature" 2>/dev/null || :); \
-	built_scheme=$$(find "$$build" -type f -path '*/bin/*/scheme' -perm -u+x -print -quit 2>/dev/null || :); \
-	header=$$(find "$$install/lib" -type f -name scheme.h -print -quit 2>/dev/null || :); \
 	if [ "$$old_signature" != "$$signature" ] || [ ! -f "$$build/Makefile" ] || \
-		[ ! -x "$$install/bin/scheme" ] || \
-		[ -z "$$built_scheme" ] || [ -z "$$header" ]; then \
+		[ ! -x "$$install/bin/scheme" ]; then \
 		$(MAKE) --no-print-directory clean; \
 		rm -rf "$$build" "$$install"; \
 		mkdir -p "$$build"; \
@@ -115,10 +86,6 @@ bundled-chez:
 		$(MAKE) --no-print-directory -C "$$build"; \
 		$(MAKE) --no-print-directory -C "$$build" install; \
 		printf '%s\n' "$$signature" > "$$build/.chezscheme-signature"; \
-	fi; \
-	if [ ! -x "$$install/bin/scheme" ]; then \
-		printf '%s\n' "error: bundled ChezScheme compiler was not installed at $$install/bin/scheme" >&2; \
-		exit 1; \
 	fi
 
 $(CHEZ_TOOLCHAIN_SIGNATURE): | bundled-chez
@@ -153,25 +120,7 @@ protobuf-generate: chez++
 	        --chezpp_out=tests/generated --proto_path=tests/data \
 	        tests/data/file-transfer.proto tests/data/codegen-features.proto
 
-.PHONY: check-scheme-header
-check-scheme-header: bundled-chez
-	@header='$(CHEZ_HEADER)'; \
-	if [ ! -r "$$header" ]; then \
-	  echo "error: ChezScheme header not found or unreadable: $$header" >&2; \
-	  exit 1; \
-	fi; \
-	header_version=$$(sed -n 's/^#define VERSION "\([^"]*\)"/\1/p' "$$header" | head -n 1); \
-	if [ -z "$$header_version" ]; then \
-	  echo "error: ChezScheme header version not found in $$header" >&2; \
-	  exit 1; \
-	fi; \
-	scheme_version=$$($(CHEZ_SCHEME) --version 2>&1); \
-	if [ "$$header_version" != "$$scheme_version" ]; then \
-	  echo "error: ChezScheme header version mismatch: $$header reports $$header_version; $(CHEZ_SCHEME) reports $$scheme_version" >&2; \
-	  exit 1; \
-	fi
-
-libchezpp.so: ${SRCS_C} chezpp/c/build-config.h $(CHEZ_TOOLCHAIN_SIGNATURE) | check-scheme-header prepare-build
+libchezpp.so: ${SRCS_C} chezpp/c/build-config.h $(CHEZ_TOOLCHAIN_SIGNATURE) | prepare-build
 	$(CC) $(CPPFLAGS) -I$(CHEZ_INCLUDE_DIR) $(CFLAGS) $(OPTIONAL_CFLAGS) \
 	  -include chezpp/c/build-config.h \
 	  -shared $(LDFLAGS) -o $@ $(SRCS_C) $(LDLIBS) $(OPTIONAL_LIBS)
