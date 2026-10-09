@@ -38,7 +38,7 @@ check_no_optional_linkage() {
 run_probe() {
     probe_mode=$1
     shift
-    if ! "${SCHEME:-scheme}" --script \
+    if ! "$fixture_project/.chezscheme-install/bin/scheme" --script \
         "$fixture_project/tests/optional-linkage-probe.ss" \
         "$fixture_project/libchezpp.so" "$fixture_project/chezpp.lib" "$probe_mode" \
         "$fixture_project/tests" \

@@ -6,10 +6,13 @@ endif
 
 include build-options.mk
 
-SCHEME := scheme
-SCHEME_SCRIPT := $(or $(shell command -v $(SCHEME) 2>/dev/null),$(SCHEME))
-SCHEME_EXE := $(realpath $(SCHEME_SCRIPT))
-SCHEME_INCLUDE_DIR := $(dir $(SCHEME_EXE))
+CHEZ_SOURCE_DIR := vendor/ChezScheme
+CHEZ_BUILD_DIR := .chezscheme-build
+CHEZ_INSTALL_DIR := .chezscheme-install
+CHEZ_SCHEME := $(abspath $(CHEZ_INSTALL_DIR)/bin/scheme)
+CHEZ_HEADER = $(firstword $(shell find "$(CHEZ_INSTALL_DIR)/lib" -type f -name scheme.h 2>/dev/null))
+CHEZ_INCLUDE_DIR = $(dir $(CHEZ_HEADER))
+SCHEME_SCRIPT := $(CHEZ_SCHEME)
 PREFIX := /usr
 
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
@@ -29,7 +32,7 @@ chezpplibs = chezpp.lib
 chezppwpos = chezpp.wpo
 chezppdeps = ${chezpplibs}
 
-.PHONY: all release debug coverage prepare-build print-build-options test
+.PHONY: all release debug coverage prepare-build print-build-options test bundled-chez clean-all
 
 all: chez++
 
@@ -57,6 +60,49 @@ prepare-build:
 			printf '%s\n' 'build options signature missing; running make clean'; \
 			$(MAKE) --no-print-directory clean; \
 		fi; \
+	fi
+
+bundled-chez:
+	@set -eu; \
+	source='$(abspath $(CHEZ_SOURCE_DIR))'; \
+	build='$(abspath $(CHEZ_BUILD_DIR))'; \
+	install='$(abspath $(CHEZ_INSTALL_DIR))'; \
+	if [ ! -f "$$source/configure" ]; then \
+		if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+			printf '%s\n' 'error: vendor/ChezScheme is missing and this directory is not a Git worktree' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' 'initializing vendor/ChezScheme with a filtered shallow checkout'; \
+		if ! git submodule update --init --depth 1 --filter=blob:none vendor/ChezScheme; then \
+			printf '%s\n' 'error: unable to initialize vendor/ChezScheme; check Git remotes and network access' >&2; \
+			exit 1; \
+		fi; \
+		if ! git -C "$$source" submodule update --init --depth 1 --filter=blob:none --recursive; then \
+			printf '%s\n' 'error: unable to initialize ChezScheme dependency submodules; check Git remotes and network access' >&2; \
+			exit 1; \
+		fi; \
+	fi; \
+	if [ ! -f "$$source/configure" ]; then \
+		printf '%s\n' 'error: vendor/ChezScheme/configure is unavailable after submodule initialization' >&2; \
+		exit 1; \
+	fi; \
+	commit=$$(git -C "$$source" rev-parse HEAD 2>/dev/null || printf '%s' unversioned); \
+	signature="commit=$$commit configure=$$source/configure --installprefix=$$install"; \
+	old_signature=$$(cat "$$build/.chezscheme-signature" 2>/dev/null || :); \
+	built_scheme=$$(find "$$build" -type f -path '*/bin/*/scheme' -perm -u+x -print -quit 2>/dev/null || :); \
+	header=$$(find "$$install/lib" -type f -name scheme.h -print -quit 2>/dev/null || :); \
+	if [ "$$old_signature" != "$$signature" ] || [ ! -x "$$install/bin/scheme" ] || \
+		[ -z "$$built_scheme" ] || [ -z "$$header" ]; then \
+		rm -rf "$$build" "$$install"; \
+		mkdir -p "$$build"; \
+		( cd "$$build" && "$$source/configure" --installprefix="$$install" ); \
+		$(MAKE) --no-print-directory -C "$$build"; \
+		$(MAKE) --no-print-directory -C "$$build" install; \
+		printf '%s\n' "$$signature" > "$$build/.chezscheme-signature"; \
+	fi; \
+	if [ ! -x "$$install/bin/scheme" ]; then \
+		printf '%s\n' "error: bundled ChezScheme compiler was not installed at $$install/bin/scheme" >&2; \
+		exit 1; \
 	fi
 
 test: chez++
@@ -89,8 +135,8 @@ protobuf-generate: chez++
 	        tests/data/file-transfer.proto tests/data/codegen-features.proto
 
 .PHONY: check-scheme-header
-check-scheme-header:
-	@header='$(SCHEME_INCLUDE_DIR)/scheme.h'; \
+check-scheme-header: bundled-chez
+	@header='$(CHEZ_HEADER)'; \
 	if [ ! -r "$$header" ]; then \
 	  echo "error: ChezScheme header not found or unreadable: $$header" >&2; \
 	  exit 1; \
@@ -100,18 +146,18 @@ check-scheme-header:
 	  echo "error: ChezScheme header version not found in $$header" >&2; \
 	  exit 1; \
 	fi; \
-	scheme_version=$$($(SCHEME) --version 2>&1); \
+	scheme_version=$$($(CHEZ_SCHEME) --version 2>&1); \
 	if [ "$$header_version" != "$$scheme_version" ]; then \
-	  echo "error: ChezScheme header version mismatch: $$header reports $$header_version; $(SCHEME) reports $$scheme_version" >&2; \
+	  echo "error: ChezScheme header version mismatch: $$header reports $$header_version; $(CHEZ_SCHEME) reports $$scheme_version" >&2; \
 	  exit 1; \
 	fi
 
-libchezpp.so: ${SRCS_C} chezpp/c/build-config.h | check-scheme-header prepare-build
-	$(CC) $(CPPFLAGS) -I$(SCHEME_INCLUDE_DIR) $(CFLAGS) $(OPTIONAL_CFLAGS) \
+libchezpp.so: ${SRCS_C} chezpp/c/build-config.h | bundled-chez check-scheme-header prepare-build
+	$(CC) $(CPPFLAGS) -I$(CHEZ_INCLUDE_DIR) $(CFLAGS) $(OPTIONAL_CFLAGS) \
 	  -include chezpp/c/build-config.h \
 	  -shared $(LDFLAGS) -o $@ $(SRCS_C) $(LDLIBS) $(OPTIONAL_LIBS)
 
-chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} libchezpp.so | prepare-build
+chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} libchezpp.so | bundled-chez prepare-build
 	@printf '%s\n' '$(CHEZ_COMPILER_FORMS) (compile-imported-libraries #t)' \
 	      '(define old-handler (compile-library-handler))' \
 	      '(define (compile-with-options thunk)' \
@@ -119,15 +165,18 @@ chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional
 	      '(parameterize ([compile-library-handler' \
 	      '  (lambda args (compile-with-options (lambda () (apply old-handler args))))])' \
 	      '  $(CHEZ_LIBRARY_BUILD_FORMS))' \
-	      | ${SCHEME} --script /dev/stdin
+	      | $(CHEZ_SCHEME) --script /dev/stdin
 	@rm -f chezpp.so
 	@if [ "$(wpo)" != t ]; then rm -f chezpp.wpo; fi
 	@tmp="$(BUILD_OPTIONS_SIGNATURE_FILE).tmp"; \
 	printf '%s\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)) > "$$tmp"; \
 	mv "$$tmp" "$(BUILD_OPTIONS_SIGNATURE_FILE)"
 
-chez++: prepare-build ${chezppdeps} $(NATIVE_OPTIONS_FILE) chez++.in Makefile
+
+chez++: bundled-chez prepare-build ${chezppdeps} $(NATIVE_OPTIONS_FILE) chez++.in Makefile
 	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib),)
+	@rm -f scheme
+	@ln -s "$(CHEZ_SCHEME)" scheme
 
 .PHONY: chez++.exe
 chez++.exe: chez++
@@ -155,9 +204,12 @@ clean:
 	@find chezpp/ tests/ \( -name '*.covin' -o -name '*.covout' \) -delete
 	@rm -f *.covin *.covout
 
+clean-all: clean
+	@rm -rf "$(CHEZ_BUILD_DIR)" "$(CHEZ_INSTALL_DIR)" scheme
+
 .PHONY: dump
 dump:
 	@echo ${PREFIX}
-	@echo ${SCHEME}
+	@echo ${CHEZ_SCHEME}
 	@echo ${SRCS_CHEZPP}
 	@echo ${SRCS_C}
