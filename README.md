@@ -147,7 +147,17 @@ Install the compiled library and launcher under an absolute prefix:
 make install PREFIX=/absolute/path/to/install
 ```
 
-The launcher is installed at `<prefix>/bin/chez++`.
+`PREFIX` must be an absolute path. The install includes the bundled ChezScheme compiler and
+runtime alongside Chezpp: `<prefix>/bin/scheme`, `<prefix>/bin/petite`,
+`<prefix>/bin/chez++`, and the upstream `lib/csv10.4.1/<machine>` boot and header files,
+plus `<prefix>/lib/chezpp.lib` and `<prefix>/lib/libchezpp.so`. The generated launcher uses
+these installed paths and does not refer back to the source checkout. The bundled compiler's
+relative runtime links are preserved.
+
+`make clean` removes local Chezpp build outputs while preserving the generated bundled compiler.
+`make clean-all` also removes `.chezscheme-build`, `.chezscheme-install`, and the generated
+root `scheme` link. Removing the installation prefix removes both Chezpp and the bundled
+ChezScheme files installed by this target.
 
 ## 🧪 Test
 

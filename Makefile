@@ -114,7 +114,7 @@ test: chez++
 define generate_chezpp_launcher
 	@rm -f $(1)
 	@sed \
-	      -e 's|@SCHEME_SCRIPT@|$(SCHEME_SCRIPT)|g' \
+	      -e 's|@SCHEME_SCRIPT@|$(if $(5),$(5),$(SCHEME_SCRIPT))|g' \
 	      -e 's|@LIBCHEZPP@|$(2)|g' \
 	      -e 's|@CHEZPP_LIB@|$(3)|g' \
 	      -e 's|@FIBER_LIB@|$(4)|g' \
@@ -182,15 +182,28 @@ chez++: bundled-chez prepare-build ${chezppdeps} $(NATIVE_OPTIONS_FILE) chez++.i
 chez++.exe: chez++
 
 installdeps: ${chezppdeps}
+	@case "$(PREFIX)" in /*) ;; *) printf '%s\n' 'error: PREFIX must be an absolute path' >&2; exit 2 ;; esac
 	install -d $(PREFIX)/bin $(PREFIX)/lib
 	install libchezpp.so  $(PREFIX)/lib
 	install ${chezpplibs} $(PREFIX)/lib
 	@if [ -f $(chezppwpos) ]; then install $(chezppwpos) $(PREFIX)/lib; fi
 
+
+.PHONY: check-install-prefix install-bundled-chez
+check-install-prefix:
+	@case "$(PREFIX)" in /*) ;; *) printf '%s\n' 'error: PREFIX must be an absolute path' >&2; exit 2 ;; esac
+
+install-bundled-chez: check-install-prefix bundled-chez
+	@set -eu; \
+	case "$(PREFIX)" in /*) ;; *) printf '%s\n' 'error: PREFIX must be an absolute path' >&2; exit 2 ;; esac; \
+	install -d "$(PREFIX)/bin" "$(PREFIX)/lib"; \
+	cp -a "$(CHEZ_INSTALL_DIR)/bin/." "$(PREFIX)/bin/"; \
+	cp -a "$(CHEZ_INSTALL_DIR)/lib/." "$(PREFIX)/lib/"
+
 .PHONY: install
-install: chez++ installdeps
+install: check-install-prefix chez++ installdeps install-bundled-chez
 	rm -f $(PREFIX)/bin/chez++ $(PREFIX)/lib/chez++.ss
-	$(call generate_chezpp_launcher,$(PREFIX)/bin/chez++,$(abspath $(PREFIX)/lib/libchezpp.so),$(abspath $(PREFIX)/lib/chezpp.lib),)
+	$(call generate_chezpp_launcher,$(PREFIX)/bin/chez++,$(abspath $(PREFIX)/lib/libchezpp.so),$(abspath $(PREFIX)/lib/chezpp.lib),,$(abspath $(PREFIX)/bin/scheme))
 
 .PHONY: clean
 clean:
