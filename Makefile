@@ -59,7 +59,7 @@ print-build-options:
 	$(print-build-options)
 
 prepare-build: bundled-chez
-	$(call print-build-options)
+	$(if $(filter 1,$(QUIET_BUILD_OPTIONS)),,$(call print-build-options))
 	@if [ -f "$(BUILD_OPTIONS_SIGNATURE_FILE)" ]; then \
 		old=$$(cat "$(BUILD_OPTIONS_SIGNATURE_FILE)"); \
 		new=$(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)); \
@@ -107,6 +107,7 @@ test: chez++
 	@$(MAKE) --no-print-directory -C tests test \
 		BUILD_VARIANT='$(VARIANT)' \
 		$(foreach option,$(BUILD_OPTION_NAMES),BUILD_$(option)='$($(option))') \
+		QUIET_BUILD_OPTIONS=1 \
 		$(TEST_FILE_GOALS)
 
 define generate_chezpp_launcher
@@ -137,7 +138,9 @@ libchezpp.so: ${SRCS_C} chezpp/c/build-config.h $(CHEZ_TOOLCHAIN_SIGNATURE) | pr
 	  -include chezpp/c/build-config.h \
 	  -shared $(LDFLAGS) -o $@ $(SRCS_C) $(LDLIBS) $(OPTIONAL_LIBS)
 
-chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} libchezpp.so $(CHEZ_TOOLCHAIN_SIGNATURE) | prepare-build
+chezpp.lib: Makefile build-options.mk optional-libraries.mk \
+	tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} \
+	libchezpp.so $(CHEZ_TOOLCHAIN_SIGNATURE) | prepare-build
 	@printf '%s\n' '$(CHEZ_COMPILER_FORMS) (compile-imported-libraries #t)' \
 	      '(define old-handler (compile-library-handler))' \
 	      '(define (compile-with-options thunk)' \
@@ -151,8 +154,6 @@ chezpp.lib: Makefile build-options.mk optional-libraries.mk tools/probe-optional
 	@tmp="$(BUILD_OPTIONS_SIGNATURE_FILE).tmp"; \
 	printf '%s\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)) > "$$tmp"; \
 	mv "$$tmp" "$(BUILD_OPTIONS_SIGNATURE_FILE)"
-
-
 chez++: bundled-chez prepare-build ${chezppdeps} $(NATIVE_OPTIONS_FILE) chez++.in Makefile
 	$(call generate_chezpp_launcher,chez++,$(abspath libchezpp.so),$(abspath chezpp.lib),)
 	@rm -f scheme
@@ -167,9 +168,8 @@ installdeps: ${chezppdeps}
 	install libchezpp.so  $(PREFIX)/lib
 	install ${chezpplibs} $(PREFIX)/lib
 	@if [ -f $(chezppwpos) ]; then install $(chezppwpos) $(PREFIX)/lib; fi
-
-
 .PHONY: check-install-prefix install-bundled-chez
+
 check-install-prefix:
 	@case "$(PREFIX)" in /*) ;; *) printf '%s\n' 'error: PREFIX must be an absolute path' >&2; exit 2 ;; esac
 

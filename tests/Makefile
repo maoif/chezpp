@@ -30,7 +30,8 @@ prepare-chezpp:
 	@$(MAKE) --no-print-directory -C $(ROOT_DIR) chez++ \
 		NATIVE_OPTIONS_REPLAY='$(abspath $(ROOT_NATIVE_OPTIONS_FILE))' \
 		VARIANT='$(BUILD_VARIANT)' o='$(BUILD_o)' d='$(BUILD_d)' \
-		i='t' psi='t' c='$(BUILD_c)' wpo='$(BUILD_wpo)'
+		i='t' psi='t' c='$(BUILD_c)' wpo='$(BUILD_wpo)' \
+		QUIET_BUILD_OPTIONS=1
 
 BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
                       loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
@@ -91,7 +92,8 @@ mat.so: mat.sls | prepare-chezpp
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
-$(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++ | prepare-chezpp
+$(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
+	../chez++ | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' '$(CHEZ_TEST_COMPILER_FORMS) (load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
@@ -103,6 +105,7 @@ $(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib ../chez++ | pr
 test.so: mat-requires-fixture.ss
 
 .PHONY: test test-all
+
 test-all: test
 
 test: prepare-chezpp mat.so $(TEST_OBJS)

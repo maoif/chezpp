@@ -21,6 +21,8 @@ for directory in "$project_root/tests" "$project_root"; do
         printf '%s\n' 'selected test invocation ran an unexpected test set' "$actual" >&2
         exit 1
     fi
+    test "$(grep -c 'ChezPP build options' "$output")" -eq 1
+    test "$(grep -c 'Optional libraries' "$output")" -eq 1
 
     # Helper sources, fixtures, missing files, names without .ss, and .so are invalid.
     for invalid in net-common.ss mat-requires-fixture.ss coverage-init.ss \
