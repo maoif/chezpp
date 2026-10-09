@@ -14,6 +14,13 @@ tests/lws-http2-fixture
 .chezpp-build-options
 .chezpp-native-options.mk
 .chezpp-native-options.mk.tmp.*
+/.chezscheme-build/
+/.chezscheme-install/
+/scheme
+/petite
+/scheme.boot
+/petite.boot
+/scheme.h
 
 chezpp/c/build-config.h
 chezpp/c/build-config.h.tmp.*
