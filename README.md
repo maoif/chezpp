@@ -33,28 +33,94 @@ Build requirements:
 
 - GNU Make
 - GCC or Clang
-- Git with submodule support
+- Git **2.36.0 or newer**
+- ncurses headers and libraries, for ChezScheme's terminal expression editor
+- X11 headers and client libraries, for ChezScheme's X11 clipboard support
 
-Build the library and launcher:
+`pkg-config` is recommended for detecting optional Chezpp libraries. The bundled ChezScheme
+build enables ncurses and X11 support by default and builds its own zlib and LZ4 from submodules.
+You do not need to install a system ChezScheme package.
+
+### Install dependencies on Linux
+
+Install the packages for your distribution, then follow [Build and run](#build-and-run).
+These packages cover the build tools and bundled ChezScheme dependencies; optional Chezpp
+features are described under [Optional native libraries](#optional-native-libraries).
+
+#### Ubuntu / Debian
+
+For Ubuntu 24.04 or newer and Debian 12 or newer:
 
 ```sh
-git clone --depth=1 https://github.com/maoif/chezpp.git
-cd chezpp
-make clean && make
+sudo apt-get update
+sudo apt-get install build-essential git pkg-config libncurses-dev libx11-dev
 ```
 
-The repository pins a release ChezScheme in `vendor/ChezScheme`. Ordinary `make` builds and
+Older releases may ship Git below the required version. In particular, Ubuntu 22.04 ships
+Git 2.34; upgrade Git to at least 2.36.0 before building.
+
+#### Arch Linux / Manjaro
+
+```sh
+sudo pacman -Syu --needed base-devel git pkgconf ncurses libx11
+```
+
+#### Fedora
+
+```sh
+sudo dnf install gcc make git pkgconf-pkg-config ncurses-devel libX11-devel
+```
+
+#### RHEL / Rocky Linux / AlmaLinux
+
+On RHEL 9 and compatible distributions, enable the standard repositories and install:
+
+```sh
+sudo dnf group install "Development Tools"
+sudo dnf install git pkgconf-pkg-config ncurses-devel libX11-devel
+```
+
+#### openSUSE Leap / Tumbleweed
+
+```sh
+sudo zypper refresh
+sudo zypper install gcc make git pkg-config ncurses-devel libX11-devel
+```
+
+#### Alpine Linux
+
+```sh
+sudo apk add build-base git pkgconf ncurses-dev libx11-dev
+```
+
+### Build and run
+
+Check the installed Git version, clone the repository and its pinned submodules, then build
+the library and launcher. The following steps apply to all distributions above:
+
+```sh
+git --version  # Must be 2.36.0 or newer.
+git clone --depth=1 https://github.com/maoif/chezpp.git
+cd chezpp
+git submodule update --init --depth=1 --filter=blob:none --recursive
+make clean && make -j8
+make run
+```
+
+`-j8` allows up to eight parallel build jobs; adjust the number for your machine. Run the build
+as your normal user. `make run` starts the Chezpp REPL; exit it with `(exit)` or Ctrl + d.
+See [Test](#-test) to run the test suites and [Install](#-install) to install the built toolchain.
+
+The repository pins a release ChezScheme in `vendor/ChezScheme`. `make -j8` builds and
 installs that bundled compiler under `.chezscheme-build` and `.chezscheme-install` before building
 Chezpp. Make checks Git’s recursive submodule status and initializes missing submodules with a
-filtered shallow checkout.
-The bundled compiler and its matching `scheme.h` are mandatory; the build does not accept a
-`SCHEME` override or use an ambient ChezScheme installation. A `scheme` symlink beside `chez++`
-points at the generated compiler.
+filtered shallow checkout, so the explicit submodule update above can also be omitted.
+A `scheme` symlink beside `chez++` points at the generated compiler.
 
 Use a different C compiler when needed:
 
 ```sh
-make CC=clang
+make clean && make -j8 CC=clang
 ```
 
 The bundled ChezScheme build supplies its compiler and matching development header together.
@@ -90,16 +156,16 @@ value counts as supplied. `auto` disables dependencies it cannot detect.
 
 ```sh
 # Detect available dependencies automatically.
-make clean && make WITH_CURL=auto
+make clean && make -j8 WITH_CURL=auto
 
 # Build with FTP support disabled.
-make clean && make WITH_CURL=0
+make clean && make -j8 WITH_CURL=0
 
 # Require cURL using its installed pkg-config metadata.
-make clean && make WITH_CURL=1
+make clean && make -j8 WITH_CURL=1
 
 # Require cURL using manual flags, including when pkg-config is unavailable.
-make clean && make WITH_CURL=1 \
+make clean && make -j8 WITH_CURL=1 \
   CURL_CFLAGS='-I/opt/curl/include' CURL_LIBS='-L/opt/curl/lib -lcurl'
 ```
 
@@ -123,7 +189,7 @@ The generated `chez++` launcher also runs scripts:
 ./chez++ --script path/to/program.ss
 ```
 
-For example:
+A transducer example:
 
 ```scheme
 (import (chezpp))
@@ -165,7 +231,7 @@ ChezScheme files installed by this target.
 Build first, then run all test suites:
 
 ```sh
-make clean && make
+make clean && make -j8
 make test
 ```
 
