@@ -10,11 +10,10 @@ chezpp versioning/tagging: major.minor.patch.chezMajor-chezMinor-chezPatch.,
 or `(major minor patch chez-major chez-minor chez-patch)`.
 Git tags use `major.minor.patch@chezMajor-chezMinor-chezPatch`, such as
 `0.0.0@10-4-1`.
-The umbrella `(chezpp ...)` library is the only versioned public contract for now;
-constituent libraries remain unversioned implementation modules. Promote a constituent
-library to an independently versioned public contract only when it has a stable API,
-an explicit compatibility policy, maintained documentation and tests, and an owner for
-coordinating its release and dependency constraints.
+`CHEZPP_LIBRARY_VERSION` in the root `Makefile` is the canonical library version.
+The build's `compile-library-handler` adds that version to each compiled Chezpp library
+declaration in memory, including the umbrella. Source files are never rewritten or copied.
+Changing the version or handler invalidates existing compiled Chezpp artifacts.
 Each new version of ChezScheme gives a new tag to chezpp; do not chase ChezScheme
 releases unless a breaking change or required compatibility fix warrants it.
 

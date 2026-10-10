@@ -1,5 +1,12 @@
 .DEFAULT_GOAL := all
 
+CHEZPP_LIBRARY_VERSION := 0 0 0 10 4 1
+CHEZPP_VERSION_HANDLER_SIGNATURE := $(shell cksum tools/compile-library-handler.ss)
+
+.PHONY: print-library-version
+print-library-version:
+	@printf '%s\n' '($(CHEZPP_LIBRARY_VERSION))'
+
 ifneq ($(strip $(NATIVE_OPTIONS_REPLAY)),)
 include $(NATIVE_OPTIONS_REPLAY)
 endif
@@ -139,14 +146,17 @@ libchezpp.so: ${SRCS_C} chezpp/c/build-config.h $(CHEZ_TOOLCHAIN_SIGNATURE) | pr
 	  -shared $(LDFLAGS) -o $@ $(SRCS_C) $(LDLIBS) $(OPTIONAL_LIBS)
 
 chezpp.lib: Makefile build-options.mk optional-libraries.mk \
-	tools/probe-optional-libraries.sh chezpp.ss ${SRCS_CHEZPP} \
+	tools/probe-optional-libraries.sh tools/compile-library-handler.ss chezpp.ss ${SRCS_CHEZPP} \
 	libchezpp.so $(CHEZ_TOOLCHAIN_SIGNATURE) | prepare-build
 	@printf '%s\n' '$(CHEZ_COMPILER_FORMS) (compile-imported-libraries #t)' \
+	      '(load "tools/compile-library-handler.ss")' \
 	      '(define old-handler (compile-library-handler))' \
 	      '(define (compile-with-options thunk)' \
 	      '  (parameterize ($(CHEZ_BUILD_COMPILER_FORMS)) (thunk)))' \
 	      '(parameterize ([compile-library-handler' \
-	      '  (lambda args (compile-with-options (lambda () (apply old-handler args))))])' \
+	      '  (let ([handler (make-versioned-compile-library-handler '\''($(CHEZPP_LIBRARY_VERSION)) old-handler' \
+	      '                  '\''($(foreach source,$(SRCS_CHEZPP),"$(source)")))])' \
+	      '    (lambda (source output) (compile-with-options (lambda () (handler source output)))))])' \
 	      '  $(CHEZ_LIBRARY_BUILD_FORMS))' \
 	      | $(CHEZ_SCHEME) --script /dev/stdin
 	@rm -f chezpp.so

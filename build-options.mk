@@ -6,7 +6,7 @@ BUILD_OPTIONS_SIGNATURE_FILE ?= $(BUILD_ROOT)/.chezpp-build-options
 BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
                       loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
 _PROFILE_SIGNATURE_NAMES := VARIANT $(BUILD_OPTION_NAMES)
-BUILD_SIGNATURE_NAMES := $(_PROFILE_SIGNATURE_NAMES)
+BUILD_SIGNATURE_NAMES := CHEZPP_LIBRARY_VERSION CHEZPP_VERSION_HANDLER_SIGNATURE $(_PROFILE_SIGNATURE_NAMES)
 
 # Quote values before passing user-supplied flags through a shell.
 build-shell-quote = '$(subst ','"'"',$(1))'
@@ -133,5 +133,5 @@ CHEZ_BUILD_COMPILER_FORMS := $(CHEZ_COMPILER_FORMS)
 ifeq ($(wpo),f)
 CHEZ_BUILD_COMPILER_FORMS := $(subst (generate-wpo-files $(_scheme_false)),,$(CHEZ_COMPILER_FORMS)) (generate-wpo-files $(_scheme_true))
 endif
-CHEZ_LIBRARY_BUILD_FORMS := (compile-with-options (lambda () (time (compile-file "chezpp.ss")))) \
+CHEZ_LIBRARY_BUILD_FORMS := (compile-with-options (lambda () (time ((compile-library-handler) "chezpp.ss" "chezpp.so")))) \
                             $(CHEZ_WHOLE_LIBRARY_FORM)
