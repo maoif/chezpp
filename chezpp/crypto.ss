@@ -1,8 +1,6 @@
 (library (chezpp crypto)
   (export)
-  (import (chezpp chez)
-          (chezpp utils)
-          (chezpp internal))
+  (import (chezscheme))
 
   (export (import (chezpp crypto random)
                   (chezpp crypto constant-time)

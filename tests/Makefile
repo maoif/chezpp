@@ -39,12 +39,8 @@ VARIANT := $(BUILD_VARIANT)
 o := $(BUILD_o)
 d := $(BUILD_d)
 BUILD_TEST_OPTIMIZE_LEVEL := $(if $(filter 0,$(o)),0,2)
-_scheme_true := $(shell printf '\043t')
-_scheme_false := $(shell printf '\043f')
-CHEZ_TEST_COMPILER_FORMS := (optimize-level $(BUILD_TEST_OPTIMIZE_LEVEL)) (debug-level $(d)) \
-                            (generate-inspector-information $(_scheme_true)) \
-                            (generate-procedure-source-information $(_scheme_true)) \
-                            (generate-covin-files $(_scheme_false)) (generate-wpo-files $(_scheme_false))
+TEST_COMPILER_SCRIPTS := ../tools/compile-test.ss ../tools/compiler-options.ss
+TEST_COMPILER_ARGUMENTS := 'o=$(BUILD_TEST_OPTIMIZE_LEVEL)' 'd=$(d)'
 COVERAGE_ENABLED := $(if $(filter coverage,$(BUILD_VARIANT)),1,)
 
 include test-files.mk
@@ -82,21 +78,22 @@ lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
 net-lws-http2.so net-http-fiber.so net-http-stress.so: lws-http2-fixture
 endif
 
-mat.so: mat.sls | prepare-chezpp
+mat.so: mat.sls $(TEST_COMPILER_SCRIPTS) | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' "== compiling mat.sls =="; \
-	printf '%s\n' '$(CHEZ_TEST_COMPILER_FORMS) (compile-file "mat.sls")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	../chez++ --script ../tools/compile-test.ss $(TEST_COMPILER_ARGUMENTS) -- mat.sls >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
 $(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
-	../chez++ | prepare-chezpp
+	../chez++ $(TEST_COMPILER_SCRIPTS) | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
-	printf '%s\n' '$(CHEZ_TEST_COMPILER_FORMS) (load "mat.so")(compile-file "$(basename $@).ss")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	../chez++ --script ../tools/compile-test.ss $(TEST_COMPILER_ARGUMENTS) -- \
+	  "$(basename $@).ss" mat.so >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -108,7 +105,7 @@ test.so: mat-requires-fixture.ss
 
 test-all: test
 
-test: prepare-chezpp mat.so $(TEST_OBJS)
+test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	@cleanup() { \
 	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr *.covout coverage.covout; \
 	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
@@ -130,7 +127,7 @@ test: prepare-chezpp mat.so $(TEST_OBJS)
 	    covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
 	    ../chez++ --script coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
 	  else \
-	    echo '(load "mat.so")(load "'"$$item"'")' | ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	    ../chez++ --script ../tools/run-test.ss "$$item" >"$$stdout" 2>"$$stderr"; \
 	  fi; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
@@ -148,7 +145,7 @@ test: prepare-chezpp mat.so $(TEST_OBJS)
 	 exit $$status
 
 .PHONY: test-http-error-soak
-test-http-error-soak: prepare-chezpp mat.so $(HTTP_ERROR_SOAK_OBJS)
+test-http-error-soak: prepare-chezpp mat.so $(HTTP_ERROR_SOAK_OBJS) ../tools/run-test.ss
 	@case "$(HTTP_ERROR_SOAK_SECONDS)" in \
 	  ''|*[!0-9]*) \
 	    printf '%s\n' "HTTP_ERROR_SOAK_SECONDS must be a positive integer" >&2; exit 2 ;; \
@@ -175,8 +172,7 @@ test-http-error-soak: prepare-chezpp mat.so $(HTTP_ERROR_SOAK_OBJS)
 	    stdout="$$base.stdout"; stderr="$$base.stderr"; \
 	    rm -f "$$stdout" "$$stderr"; \
 	    printf '%s\n' "== soak round $$round: $$base.so =="; \
-	    echo '(load "mat.so")(load "'"$$base"'.so")' | \
-	      ../chez++ --script /dev/stdin >"$$stdout" 2>"$$stderr"; \
+	    ../chez++ --script ../tools/run-test.ss "$$base.so" >"$$stdout" 2>"$$stderr"; \
 	    code=$$?; \
 	    if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	    if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \

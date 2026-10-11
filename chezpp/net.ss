@@ -1,8 +1,6 @@
 (library (chezpp net)
   (export)
-  (import (chezpp chez)
-          (chezpp utils)
-          (chezpp internal))
+  (import (chezscheme))
 
   (export (import (chezpp net errors)
                   (chezpp net operation)

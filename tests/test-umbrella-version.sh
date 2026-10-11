@@ -1,5 +1,5 @@
 #!/bin/sh
-# Verify the umbrella library version and compile it with bundled ChezScheme.
+# Verify the umbrella source carries the version and compilation preserves it.
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

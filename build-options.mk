@@ -6,7 +6,7 @@ BUILD_OPTIONS_SIGNATURE_FILE ?= $(BUILD_ROOT)/.chezpp-build-options
 BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
                       loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
 _PROFILE_SIGNATURE_NAMES := VARIANT $(BUILD_OPTION_NAMES)
-BUILD_SIGNATURE_NAMES := CHEZPP_LIBRARY_VERSION CHEZPP_VERSION_HANDLER_SIGNATURE $(_PROFILE_SIGNATURE_NAMES)
+BUILD_SIGNATURE_NAMES := CHEZPP_BUILD_SCRIPT_SIGNATURE $(_PROFILE_SIGNATURE_NAMES)
 
 # Quote values before passing user-supplied flags through a shell.
 build-shell-quote = '$(subst ','"'"',$(1))'
@@ -92,46 +92,6 @@ define print-build-options
 	)
 endef
 
-_scheme_true := $(shell printf '\043t')
-_scheme_false := $(shell printf '\043f')
-_chez_bool = $(if $(filter t true yes 1,$(strip $(1))),$(_scheme_true),$(_scheme_false))
-CHEZ_COMPILER_FORMS := (optimize-level $(o)) (debug-level $(d)) \
-                       (generate-inspector-information $(call _chez_bool,$(i))) \
-                       (generate-procedure-source-information $(call _chez_bool,$(psi)))
-ifneq ($(strip $(cl)),)
-CHEZ_COMPILER_FORMS += (commonization-level $(cl))
-endif
-ifneq ($(strip $(cp0)),)
-CHEZ_COMPILER_FORMS += (cp0-effort-limit $(cp0))
-endif
-ifneq ($(strip $(fc)),)
-CHEZ_COMPILER_FORMS += (fasl-compressed $(call _chez_bool,$(fc)))
-endif
-ifneq ($(strip $(c)),)
-CHEZ_COMPILER_FORMS += (generate-covin-files $(call _chez_bool,$(c)))
-endif
-ifneq ($(strip $(p)),)
-CHEZ_COMPILER_FORMS += (compile-profile $(call _chez_bool,$(p)))
-endif
-ifneq ($(strip $(xp)),)
-CHEZ_COMPILER_FORMS += (generate-profile-forms $(call _chez_bool,$(xp)))
-endif
-CHEZ_COMPILER_FORMS += (generate-wpo-files $(call _chez_bool,$(wpo)))
-
-CHEZ_TEST_COMPILER_FORMS := (optimize-level $(BUILD_TEST_OPTIMIZE_LEVEL)) (debug-level $(d)) \
-                            (generate-inspector-information $(call _chez_bool,$(i))) \
-                            (generate-procedure-source-information $(call _chez_bool,$(psi))) \
-                            (generate-covin-files $(_scheme_false)) (generate-wpo-files $(_scheme_false))
-
-ifeq ($(wpo),t)
-CHEZ_WHOLE_LIBRARY_FORM := (compile-with-options (lambda () (unless (null? (compile-whole-library "chezpp.wpo" "chezpp.lib")) (errorf "chezpp.lib" "dependency has to be null"))))
-else
-CHEZ_WHOLE_LIBRARY_FORM := (compile-with-options (lambda () (compile-whole-library "chezpp.wpo" "chezpp.lib")))
-endif
-
-CHEZ_BUILD_COMPILER_FORMS := $(CHEZ_COMPILER_FORMS)
-ifeq ($(wpo),f)
-CHEZ_BUILD_COMPILER_FORMS := $(subst (generate-wpo-files $(_scheme_false)),,$(CHEZ_COMPILER_FORMS)) (generate-wpo-files $(_scheme_true))
-endif
-CHEZ_LIBRARY_BUILD_FORMS := (compile-with-options (lambda () (time ((compile-library-handler) "chezpp.ss" "chezpp.so")))) \
-                            $(CHEZ_WHOLE_LIBRARY_FORM)
+# Pass resolved settings as data; compiler behavior lives in tools/.
+BUILD_SCRIPT_ARGUMENTS = $(foreach option,$(BUILD_OPTION_NAMES),\
+  $(call build-shell-quote,$(option)=$(strip $($(option)))))

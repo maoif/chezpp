@@ -1,12 +1,7 @@
 #!chezscheme
 (library (chezpp logging)
   (export)
-  (import (chezpp chez)
-          (chezpp logging level)
-          (chezpp logging formatter)
-          (chezpp logging sink)
-          (chezpp logging logger)
-          (chezpp logging macros))
+  (import (chezscheme))
 
   (export (import (chezpp logging level)
                   (chezpp logging formatter)
