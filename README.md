@@ -189,6 +189,9 @@ The generated `chez++` launcher also runs scripts:
 ./chez++ --script path/to/program.ss
 ```
 
+Use `./chez++ --help` (or `-h`) to show launcher options. Use `-q` to suppress the
+startup greeting and REPL prompt.
+
 A transducer example:
 
 ```scheme

@@ -11,6 +11,111 @@
   (lambda (file arg*)
     (apply (scheme-script) file arg*)))
 
+(define stdout-terminal?
+  (lambda ()
+    (= 0 (system "test -t 1 2>/dev/null"))))
+
+(define chezpp-version-string
+  (lambda ()
+    (let ([version (library-version '(chezpp))])
+      (format "~a.~a.~a@~a-~a-~a"
+              (car version)
+              (cadr version)
+              (caddr version)
+              (cadddr version)
+              (car (cddddr version))
+              (cadr (cddddr version))))))
+
+(define make-greeting-logo
+  (lambda (content-width)
+    (let ([glyph*
+           '((" ████" "█    " "█    " "█    " " ████")
+             ("█   █" "█   █" "█████" "█   █" "█   █")
+             ("█████" "█    " "████ " "█    " "█████")
+             ("█████" "   █ " "  █  " " █   " "█████")
+             ("   " " █ " "███" " █ " "   ")
+             ("   " " █ " "███" " █ " "   "))]
+          [style* (map (lambda (color) (rich-style 'bold color))
+                       '(#xb04d97 #x8662bd #x427bb3 #x0c8595 #x21866b #xa27021))]
+          [shadow-style (rich-style #x808080)])
+      (make-rich-layout
+       'column
+       (map (lambda (row-index)
+              (let ([row (make-rich-text)])
+                (for-each
+                 (lambda (glyph style)
+                   (let* ([width (string-length (car glyph))]
+                          [front (and (fx< row-index 5) (list-ref glyph row-index))]
+                          [back (and (fx> row-index 0)
+                                     (list-ref glyph (fx1- row-index)))])
+                     ;; Offset the shadow one cell down and right behind the solid lettering.
+                     (do ([column 0 (fx1+ column)])
+                         ((fx> column width))
+                       (cond
+                        [(and front (fx< column width)
+                              (char=? (string-ref front column) #\█))
+                         (rich-text-append! row "█" style)]
+                        [(and back (fx> column 0)
+                              (char=? (string-ref back (fx1- column)) #\█))
+                         (rich-text-append! row "░" shadow-style)]
+                        [else (rich-text-append! row " ")]))
+                     (rich-text-append! row " ")))
+                 glyph* style*)
+                (make-rich-align row content-width 'center)))
+            '(0 1 2 3 4 5))))))
+
+(define print-greeting
+  (lambda ()
+    (let* ([content-width 48]
+           [panel-width (fx+ content-width 4)]
+           [console
+            (rich-console :output-port (current-output-port)
+                          :width panel-width
+                          :color-system (if (stdout-terminal?) 'standard 'none))]
+           [logo (make-greeting-logo content-width)]
+           [label-style (rich-style 'bold 'default)]
+           [author (rich-text "Author   " label-style)]
+           [version (rich-text "Version  " label-style)]
+           [github (rich-text "Github   " label-style)])
+      (rich-text-append! author "Maoif" (rich-style 'default))
+      (rich-text-append! version (chezpp-version-string) (rich-style 'default))
+      (rich-text-append! github
+                         "https://github.com/maoif/chezpp"
+                         (rich-style 'underline 'default))
+      (rich-print console
+                  (rich-style #x777777)
+                  (rich-panel
+                   :body (make-rich-layout
+                          'column
+                          (list "" logo ""
+                                (make-rich-align
+                                 (rich-text "Scheme power, beautifully packaged"
+                                            (rich-style 'italic 'default))
+                                 content-width 'center)
+                                ""
+                                (make-rich-padding
+                                 (make-rich-layout 'column (list author version github))
+                                 0 0 0 5)
+                                ""))
+                   :box 'rounded :width panel-width)
+                  (reset-style)
+                  "\n\n"))))
+
+(define print-help
+  (lambda ()
+    (println "chez++ ~a - Chezpp REPL and script launcher" (chezpp-version-string))
+    (println "")
+    (println "Usage: chez++ [-q] [FILE ...]")
+    (println "       chez++ [-q] --script FILE [ARG ...]")
+    (println "       chez++ -h | --help")
+    (println "")
+    (println "Options:")
+    (println "  -h, --help     Show this help and exit.")
+    (println "  -q             Suppress the startup greeting and REPL prompt.")
+    (println "  --script FILE  Run FILE with the remaining arguments.")
+    (println "")
+    (println "Without --script, load FILEs in order before entering the REPL.")))
+
 (define stdin-interactive?
   (lambda ()
     (= 0 (system "test -t 0 >/dev/null 2>&1"))))
@@ -26,27 +131,32 @@
     (let loop ([rest arg*] [quiet? #f])
       (cond
        [(null? rest)
-        (values quiet? #f '() '())]
+        (values quiet? 'repl '() '())]
+       [(or (string=? (car rest) "--help") (string=? (car rest) "-h"))
+        (values quiet? 'help '() '())]
        [(string=? (car rest) "-q")
         (loop (cdr rest) #t)]
        [(string=? (car rest) "--script")
         (let ([script-rest (cdr rest)])
           (unless (pair? script-rest)
             (errorf 'chez++ "missing script file after --script"))
-          (values quiet? #t (list (car script-rest)) (cdr script-rest)))]
+          (values quiet? 'script (list (car script-rest)) (cdr script-rest)))]
        [else
-        (values quiet? #f rest '())]))))
+        (values quiet? 'repl rest '())]))))
 
 (define main
   (lambda ()
-    (let-values ([(quiet? script? file* script-arg*)
+    (let-values ([(quiet? mode file* script-arg*)
                   (parse-args (command-line-arguments))])
-      (if script?
-          (run-script (car file*) script-arg*)
-          (begin
-            (command-line-arguments file*)
-            (load-file* file*)
-            (configure-repl! quiet?)
-            (new-cafe))))))
+      (case mode
+        [(help) (print-help)]
+        [(script) (run-script (car file*) script-arg*)]
+        [(repl)
+         (command-line-arguments file*)
+         (load-file* file*)
+         (configure-repl! quiet?)
+         (unless quiet?
+           (print-greeting))
+         (new-cafe)]))))
 
 (main)
