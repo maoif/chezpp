@@ -6,16 +6,11 @@ The build system and package manager part are not implemented yet.
 
 ## Versioning And Release Policy
 
-chezpp versioning/tagging: major.minor.patch.chezMajor-chezMinor-chezPatch.,
+chezpp versioning/tagging: major.minor.patch@chezMajor-chezMinor-chezPatch.,
 or `(major minor patch chez-major chez-minor chez-patch)`.
 Git tags use `major.minor.patch@chezMajor-chezMinor-chezPatch`, such as
 `0.0.0@10-4-1`.
-`CHEZPP_LIBRARY_VERSION` in the root `Makefile` is the canonical library version.
-The build's `compile-library-handler` adds that version to each compiled Chezpp library
-declaration in memory, including the umbrella. Source files are never rewritten or copied.
-Changing the version or handler invalidates existing compiled Chezpp artifacts.
-Each new version of ChezScheme gives a new tag to chezpp; do not chase ChezScheme
-releases unless a breaking change or required compatibility fix warrants it.
+
 
 ## Coding requirements
 

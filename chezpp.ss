@@ -1,11 +1,15 @@
 (library (chezpp (0 0 0 10 4 1))
   (export)
   (import (chezscheme)
+          ;; add libs here if you want them auto-compiled when compiling this file,
+          ;; but not auto-imported when importing (chezpp)
           (chezpp optional-library-check)
           (chezpp concurrency fiber)
           (chezpp concurrency fiber-net)
           (chezpp parser combinator))
 
+  ;; add libs here if you want them auto-compiled when compiling this file,
+  ;; *and* auto-imported when importing (chezpp)
   (export (import (chezpp chez)
                   (chezpp match)
                   (chezpp adt)
