@@ -822,7 +822,8 @@
   (define-who dlist-sort!
     (case-lambda
       [(<? dl)
-       (dlist-sort! <? dl 0 ($dlist-size dl))]
+       (pcheck ([dlist? dl] [procedure? <?])
+               (dlist-sort! <? dl 0 ($dlist-size dl)))]
       [(<? dl stop)
        (dlist-sort! <? dl 0 stop)]
       [(<? dl start stop)
