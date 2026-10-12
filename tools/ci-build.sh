@@ -52,19 +52,16 @@ make clean && make -j2 \
 make -C tests test-non-net
 python3 -I tests/test-release-package.py
 
-prefix="$workspace/installed"
-# Replay native choices so install cannot change the features that passed testing.
-make install PREFIX="$prefix" NATIVE_OPTIONS_REPLAY="$repository/.chezpp-native-options.mk"
+# Use the public package target with the same native choices that passed testing.
+make package PACKAGE_COMMIT="$commit" \
+    NATIVE_OPTIONS_REPLAY="$repository/.chezpp-native-options.mk"
 version=$(.chezscheme-install/bin/scheme --script tools/print-library-version.ss chezpp.lib)
 version=${version#ChezPP version: }
-python3 -I tools/package-release.py "$prefix" --output "$repository/dist" \
-    --arch "$architecture" --version "$version" --commit "$commit"
 
 # Run the archive from a different directory, independent of the install prefix and cwd.
 archive="chezpp-$version-linux-$architecture"
 mkdir "$workspace/relocated package"
 tar xzf "dist/$archive.tar.gz" -C "$workspace/relocated package"
-rm -rf "$prefix"
 .chezscheme-install/bin/scheme --script tools/check-scheme-balance.ss tools/package-smoke.ss
 (cd / && "$workspace/relocated package/$archive/bin/chez++" --script "$repository/tools/package-smoke.ss")
 (cd dist && sha256sum --check "$archive.tar.gz.sha256")

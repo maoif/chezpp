@@ -20,6 +20,8 @@ override CHEZ_INCLUDE_DIR = $(dir $(realpath $(CHEZ_SCHEME)))
 override SCHEME_SCRIPT := $(CHEZ_SCHEME)
 override CHEZ_TOOLCHAIN_SIGNATURE := $(CHEZ_BUILD_DIR)/.chezscheme-signature
 PREFIX := /usr
+PACKAGE_DIR ?= $(BUILD_ROOT)/dist
+PACKAGE_COMMIT ?= $(shell git rev-parse HEAD)
 
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
 SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c' ! -name '*_unavailable.c')
@@ -195,6 +197,29 @@ install-bundled-chez: check-install-prefix bundled-chez
 install: check-install-prefix chez++ installdeps install-bundled-chez
 	rm -f $(PREFIX)/bin/chez++ $(PREFIX)/lib/chez++.ss
 	$(call generate_chezpp_launcher,$(PREFIX)/bin/chez++,$(abspath $(PREFIX)/lib/libchezpp.so),$(abspath $(PREFIX)/lib/chezpp.lib),,$(abspath $(PREFIX)/bin/scheme))
+
+.PHONY: package
+package: chez++
+	@set -eu; \
+	case "$$(uname -s):$$(uname -m)" in \
+		Linux:x86_64) architecture=x64 ;; \
+		Linux:aarch64|Linux:arm64) architecture=arm64 ;; \
+		Linux:riscv64) architecture=riscv64 ;; \
+		*) echo 'error: package supports Linux x64, arm64, and riscv64' >&2; exit 1 ;; \
+	esac; \
+	for tool in python3 readelf ldd patchelf; do \
+		command -v "$$tool" >/dev/null || { echo "error: package requires $$tool" >&2; exit 1; }; \
+	done; \
+	workspace=$$(mktemp -d /tmp/chezpp-package.XXXXXXXX); \
+	trap 'rm -rf "$$workspace"' EXIT HUP INT TERM; \
+	$(MAKE) --no-print-directory install PREFIX="$$workspace/installed" \
+		NATIVE_OPTIONS_REPLAY=$(call build-shell-quote,$(abspath $(NATIVE_OPTIONS_FILE))); \
+	version=$$("$(CHEZ_SCHEME)" --script tools/print-library-version.ss chezpp.lib); \
+	version=$${version#ChezPP version: }; \
+	python3 -I tools/package-release.py "$$workspace/installed" \
+		--output $(call build-shell-quote,$(abspath $(PACKAGE_DIR))) \
+		--arch "$$architecture" --version "$$version" \
+		--commit $(call build-shell-quote,$(PACKAGE_COMMIT))
 
 .PHONY: clean
 clean:

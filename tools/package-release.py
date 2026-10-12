@@ -5,8 +5,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 
@@ -105,7 +107,12 @@ def patch_runpaths(prefix):
         if needed(path):
             relative = os.path.relpath(prefix / 'lib/deps', path.parent)
             runpath = '$ORIGIN' if relative == '.' else '$ORIGIN/' + relative
-            command('patchelf', '--set-rpath', runpath, str(path))
+            mode = stat.S_IMODE(path.stat().st_mode)
+            try:
+                path.chmod(mode | stat.S_IWUSR)
+                command('patchelf', '--set-rpath', runpath, str(path))
+            finally:
+                path.chmod(mode)
 
 
 def relocate_launcher(prefix):
@@ -141,7 +148,7 @@ def copy_licenses(prefix, repository, dependencies):
                           ('ChezScheme-license', repository / 'vendor/ChezScheme/LICENSE')]:
         if source.is_file():
             shutil.copy2(source, destination / label)
-    for item in dependencies:
+    for item in dependencies if shutil.which('dpkg-query') else ():
         if not item['bundled']:
             continue
         # Ubuntu's merged /usr can give either spelling in dpkg's ownership database.
@@ -162,6 +169,16 @@ def copy_licenses(prefix, repository, dependencies):
     extra = Path('/usr/local/share/doc/blake3')
     if extra.is_dir():
         shutil.copytree(extra, destination / 'blake3')
+
+
+def build_host_info():
+    """Describe the actual build system and conservatively require its glibc version."""
+    glibc = command('getconf', 'GNU_LIBC_VERSION').strip()
+    if not re.fullmatch(r'glibc \d+\.\d+', glibc):
+        raise RuntimeError(f'packaging requires glibc: {glibc}')
+    return {'baseline': platform.freedesktop_os_release()['PRETTY_NAME'],
+            'host_requirements': ['Linux', glibc.replace('glibc ', 'glibc >= '),
+                                  'architecture-matching ELF loader']}
 
 
 def main():
@@ -186,14 +203,13 @@ def main():
     relocate_launcher(prefix)
     copy_licenses(prefix, repository, dependencies)
     metadata = {'version': arguments.version, 'commit': arguments.commit,
-                'arch': arguments.arch, 'baseline': 'Ubuntu 24.04',
-                'host_requirements': ['Linux', 'glibc >= 2.39', 'architecture-matching ELF loader'],
+                'arch': arguments.arch, **build_host_info(),
                 'dependencies': dependencies,
                 'build_options': (repository / '.chezpp-build-options').read_text().strip()}
     (prefix / 'BUILD-INFO.json').write_text(json.dumps(metadata, indent=2) + '\n')
     (prefix / 'README.txt').write_text(
         'Extract this directory anywhere and run bin/chez++.\n'
-        'Requires Linux, glibc >= 2.39, and the matching CPU architecture.\n'
+        f'Requires {", ".join(metadata["host_requirements"])}.\n'
         'Non-glibc ELF dependencies are bundled recursively in lib/deps.\n'
         'Build provenance and enabled features are in BUILD-INFO.json.\n')
     name = f'chezpp-{arguments.version}-linux-{arguments.arch}'

@@ -231,6 +231,24 @@ ChezScheme files installed by this target.
 
 ### Linux master snapshots
 
+Build a local archive with the same recursive dependency packaging used by CI:
+
+```sh
+make clean && make
+make package
+# Choose another output directory.
+make package PACKAGE_DIR=/absolute/path/to/packages
+```
+
+`make package` stages `make install` in a temporary directory and writes a `.tar.gz`
+archive and SHA-256 checksum to `dist/` by default. It detects Linux x64, arm64, or
+riscv64 and records the current Git commit, build host, and glibc requirement. It requires
+Python 3.11 or newer, `readelf`, `ldd`, and `patchelf`. Dependencies are collected recursively,
+including ChezScheme's X11 runtime library; host glibc and its loader remain external.
+The target packages the selected build configuration; run tests before packaging as needed.
+Pass custom build settings to the target as well, for example
+`make package VARIANT=debug WITH_OPENSSL=0`; plain `make package` uses the default settings.
+
 Every push to `master` builds and runs all non-net tests on Ubuntu 24.04 for x64,
 arm64, and riscv64. x64 and arm64 use native runners; riscv64 uses QEMU. Only after
 all three jobs pass does CI update the rolling

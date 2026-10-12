@@ -2,6 +2,7 @@
 """Exercise packaging with a real, transitive ELF dependency graph."""
 import importlib.util
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -49,7 +50,10 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertFalse((self.prefix / 'lib/deps/libc.so.6').exists())
         self.assertEqual({item['name'] for item in dependencies if item['bundled']},
                          {'libleaf.so', 'libmiddle.so'})
+        # Installed ChezScheme executables can be read-only for an ordinary user.
+        (self.prefix / 'bin/probe').chmod(0o555)
         self.package.patch_runpaths(self.prefix)
+        self.assertEqual((self.prefix / 'bin/probe').stat().st_mode & 0o777, 0o555)
         shutil.rmtree(self.external)
         relocated = self.root / 'moved package'
         self.prefix.rename(relocated)
@@ -106,6 +110,12 @@ class ReleasePackageTests(unittest.TestCase):
         (self.prefix / 'bin/escape').symlink_to(self.external / 'libleaf.so')
         with self.assertRaisesRegex(RuntimeError, 'outside'):
             self.package.collect_dependencies(self.prefix)
+
+    def test_build_host_info_uses_actual_distribution_and_glibc(self):
+        info = self.package.build_host_info()
+        self.assertEqual(info['baseline'], platform.freedesktop_os_release()['PRETTY_NAME'])
+        glibc = subprocess.check_output(['getconf', 'GNU_LIBC_VERSION'], text=True).strip()
+        self.assertIn(glibc.replace('glibc ', 'glibc >= '), info['host_requirements'])
 
 
 if __name__ == '__main__':
