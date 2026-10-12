@@ -6,6 +6,8 @@
 *.lib
 *.zip
 .worktrees/
+__pycache__/
+/dist/
 chez++
 chez++.ss
 libchezpp.so
