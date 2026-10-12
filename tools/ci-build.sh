@@ -17,7 +17,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
     build-essential git pkg-config libncurses-dev libx11-dev \
-    python3 patchelf cmake curl ca-certificates \
+    patchelf cmake curl ca-certificates \
     libssl-dev uuid-dev libxxhash-dev zlib1g-dev libc-ares-dev \
     libcurl4-openssl-dev libgrpc-dev libidn2-dev libssh-dev libwebsockets-dev
 
@@ -50,7 +50,7 @@ make clean && make -j2 \
     WITH_CARES=1 WITH_CURL=1 WITH_GRPC=auto WITH_IDN2=1 WITH_LIBSSH=1 WITH_WEBSOCKETS=1 \
     WITH_ZLIB=1 WITH_OPENSSL=1 WITH_UUID=1 WITH_XXHASH=1 WITH_BLAKE3=1
 make -C tests test-non-net
-python3 -I tests/test-release-package.py
+make -C tests test-release-package
 
 # Use the public package target with the same native choices that passed testing.
 make package PACKAGE_COMMIT="$commit" \

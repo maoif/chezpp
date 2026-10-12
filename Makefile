@@ -207,7 +207,7 @@ package: chez++
 		Linux:riscv64) architecture=riscv64 ;; \
 		*) echo 'error: package supports Linux x64, arm64, and riscv64' >&2; exit 1 ;; \
 	esac; \
-	for tool in python3 readelf ldd patchelf; do \
+	for tool in readelf ldd patchelf tar sha256sum realpath readlink cp getconf cc; do \
 		command -v "$$tool" >/dev/null || { echo "error: package requires $$tool" >&2; exit 1; }; \
 	done; \
 	workspace=$$(mktemp -d /tmp/chezpp-package.XXXXXXXX); \
@@ -216,8 +216,8 @@ package: chez++
 		NATIVE_OPTIONS_REPLAY=$(call build-shell-quote,$(abspath $(NATIVE_OPTIONS_FILE))); \
 	version=$$("$(CHEZ_SCHEME)" --script tools/print-library-version.ss chezpp.lib); \
 	version=$${version#ChezPP version: }; \
-	python3 -I tools/package-release.py "$$workspace/installed" \
-		--output $(call build-shell-quote,$(abspath $(PACKAGE_DIR))) \
+	./chez++ --script tools/package-release.ss "$$workspace/installed" \
+		--output $(call build-shell-quote,$(PACKAGE_DIR)) \
 		--arch "$$architecture" --version "$$version" \
 		--commit $(call build-shell-quote,$(PACKAGE_COMMIT))
 

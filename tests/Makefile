@@ -109,6 +109,10 @@ test-non-net:
 	@test -n "$(SRCS_NON_NET_TEST)" || { echo 'non-net test selection is empty' >&2; exit 1; }
 	@$(MAKE) --no-print-directory test $(SRCS_NON_NET_TEST)
 
+.PHONY: test-release-package
+test-release-package: prepare-chezpp
+	@cd .. && ./chez++ --script tests/release-package.ss
+
 test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	@cleanup() { \
 	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr *.covout coverage.covout; \

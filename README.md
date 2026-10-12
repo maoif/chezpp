@@ -243,11 +243,13 @@ make package PACKAGE_DIR=/absolute/path/to/packages
 `make package` stages `make install` in a temporary directory and writes a `.tar.gz`
 archive and SHA-256 checksum to `dist/` by default. It detects Linux x64, arm64, or
 riscv64 and records the current Git commit, build host, and glibc requirement. It requires
-Python 3.11 or newer, `readelf`, `ldd`, and `patchelf`. Dependencies are collected recursively,
+`readelf`, `ldd`, `patchelf`, GNU `tar`, and GNU coreutils. Packaging runs through `chez++`
+using `tools/package-release.ss`. Dependencies are collected recursively,
 including ChezScheme's X11 runtime library; host glibc and its loader remain external.
 The target packages the selected build configuration; run tests before packaging as needed.
 Pass custom build settings to the target as well, for example
 `make package VARIANT=debug WITH_OPENSSL=0`; plain `make package` uses the default settings.
+Run the packaging regression tests with `make -C tests test-release-package`.
 
 Every push to `master` builds and runs all non-net tests on Ubuntu 24.04 for x64,
 arm64, and riscv64. x64 and arm64 use native runners; riscv64 uses QEMU. Only after
