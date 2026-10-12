@@ -101,9 +101,13 @@ $(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
 
 test.so: mat-requires-fixture.ss
 
-.PHONY: test test-all
+.PHONY: test test-all test-non-net
 
 test-all: test
+
+test-non-net:
+	@test -n "$(SRCS_NON_NET_TEST)" || { echo 'non-net test selection is empty' >&2; exit 1; }
+	@$(MAKE) --no-print-directory test $(SRCS_NON_NET_TEST)
 
 test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	@cleanup() { \

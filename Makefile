@@ -24,8 +24,9 @@ PREFIX := /usr
 SRCS_CHEZPP := $(shell find chezpp/   -type f -name '*.ss')
 SRCS_C      := $(shell find chezpp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c' ! -name '*_unavailable.c')
 
-ifneq ($(filter test,$(MAKECMDGOALS)),)
 include tests/test-files.mk
+
+ifneq ($(filter test,$(MAKECMDGOALS)),)
 TEST_FILE_GOALS := $(filter-out test,$(MAKECMDGOALS))
 INVALID_TEST_FILES := $(filter-out $(SRCS_TEST),$(TEST_FILE_GOALS))
 ifneq ($(strip $(INVALID_TEST_FILES)),)
@@ -50,7 +51,7 @@ chezpplibs = chezpp.lib
 chezppwpos = chezpp.wpo
 chezppdeps = ${chezpplibs}
 
-.PHONY: all release debug coverage prepare-build print-build-options test bundled-chez clean-all
+.PHONY: all release debug coverage prepare-build print-build-options test test-non-net bundled-chez clean-all
 
 all: chez++
 
@@ -115,6 +116,14 @@ test: chez++
 		$(foreach option,$(BUILD_OPTION_NAMES),BUILD_$(option)='$($(option))') \
 		QUIET_BUILD_OPTIONS=1 \
 		$(TEST_FILE_GOALS)
+
+test-non-net: chez++
+	@test -n "$(SRCS_NON_NET_TEST)" || { echo 'non-net test selection is empty' >&2; exit 1; }
+	@$(MAKE) --no-print-directory -C tests test \
+		BUILD_VARIANT='$(VARIANT)' \
+		$(foreach option,$(BUILD_OPTION_NAMES),BUILD_$(option)='$($(option))') \
+		QUIET_BUILD_OPTIONS=1 \
+		$(SRCS_NON_NET_TEST)
 
 define generate_chezpp_launcher
 	@rm -f $(1)
