@@ -19,7 +19,9 @@
           regex-chunker? make-regex-chunker regex-search/chunked regex-match/chunked
           regex-fold regex-fold/chunked regex-extract regex-split regex-replace regex-replace/all
           regex-quote regex-opt regex-sre->string regex-sre->cset)
-  (import (chezpp chez) (chezpp irregex) (chezpp utils))
+  (import (chezpp chez)
+          (chezpp irregex)
+          (chezpp utils))
 
   ;; Raw engine objects remain private except through the explicit escape hatch.
   (define-record-type ($regex %make-regex %regex?)
@@ -34,48 +36,55 @@
     (fields (immutable engine chunker-engine)))
 
   (define sre?
-    (lambda (value) (or (string? value) (symbol? value) (char? value) (list? value))))
+    (lambda (value)
+      (or (string? value) (symbol? value) (char? value) (list? value))))
   (define capture?
-    (lambda (value) (or (symbol? value) (and (fixnum? value) (fx>= value 0)))))
+    (lambda (value)
+      (or (symbol? value) (and (fixnum? value) (fx>= value 0)))))
   (define flags?
     (lambda (flags)
       (and (list? flags)
-           (for-all (lambda (flag) (memq flag '(i ci case-insensitive m multi-line s single-line x ignore-space u utf8))) flags))))
+           (for-all (lambda (flag)
+                      (memq flag '(i ci case-insensitive m multi-line s single-line
+                                   x ignore-space u utf8)))
+                    flags))))
   (define check-range
     (lambda (text start end)
       (pcheck ([string? text] [fixnum? start end])
               (unless (fx<= 0 start end (string-length text))
                 (error 'regex "invalid string bounds" start end)))))
   (define wrap-match
-    (lambda (pattern data) (and data (%make-match pattern data))))
+    (lambda (pattern data)
+      (and data (%make-match pattern data))))
 
   #|proc:regex?
   Return whether `object` is a regex record. Accepts any object.
   |#
   (define regex?
-    (lambda (object) (%regex? object))
-  )
+    (lambda (object)
+      (%regex? object)))
 
   #|proc:regex-match?
   Return whether `object` is a regex-match record. Accepts any object.
   |#
   (define regex-match?
-    (lambda (object) (%match? object))
-  )
+    (lambda (object)
+      (%match? object)))
 
   #|proc:regex-chunker?
   Return whether `object` is a regex-chunker record. Accepts any object.
   |#
   (define regex-chunker?
-    (lambda (object) (%chunker? object))
-  )
+    (lambda (object)
+      (%chunker? object)))
 
   #|proc:make-regex
   Wrap compiled Irregex object `engine` and return a regex record.
   |#
   (define make-regex
-    (lambda (engine) (pcheck ([irregex? engine]) (%make-regex engine))
-  ))
+    (lambda (engine)
+      (pcheck ([irregex? engine])
+              (%make-regex engine))))
 
   #|proc:string->regex
   Compile `pattern` (a pattern string) and return a regex record.
@@ -88,8 +97,7 @@
       [(pattern) (string->regex pattern '())]
       [(pattern flags)
        (pcheck ([string? pattern] [flags? flags])
-               (%make-regex (apply string->irregex pattern flags)))])
-  )
+               (%make-regex (apply string->irregex pattern flags)))]))
 
   #|proc:sre->regex
   Compile `pattern` (an S-expression pattern) and return a regex record.
@@ -102,59 +110,67 @@
       [(pattern) (sre->regex pattern '())]
       [(pattern flags)
        (pcheck ([sre? pattern] [flags? flags])
-               (%make-regex (apply sre->irregex pattern flags)))])
-  )
+               (%make-regex (apply sre->irregex pattern flags)))]))
 
   #|proc:regex->irregex
   Return the underlying engine of `pattern`; mutating it affects this wrapper.
   |#
   (define regex->irregex
-    (lambda (pattern) (pcheck ([regex? pattern]) (regex-engine pattern))
-  ))
+    (lambda (pattern)
+      (pcheck ([regex? pattern])
+              (regex-engine pattern))))
 
   #|proc:regex-flags
   Return the engine's numeric flags for regex record `pattern`.
   |#
   (define regex-flags
-    (lambda (pattern) (pcheck ([regex? pattern]) ((lambda (p) (irregex-flags (regex-engine p))) pattern))
-  ))
+    (lambda (pattern)
+      (pcheck ([regex? pattern])
+              ((lambda (p) (irregex-flags (regex-engine p))) pattern))))
 
   #|proc:regex-num-submatches
   Return the number of capturing groups in regex record `pattern`, excluding group zero.
   |#
   (define regex-num-submatches
-    (lambda (pattern) (pcheck ([regex? pattern]) ((lambda (p) (irregex-num-submatches (regex-engine p))) pattern))
-  ))
+    (lambda (pattern)
+      (pcheck ([regex? pattern])
+              ((lambda (p) (irregex-num-submatches (regex-engine p))) pattern))))
 
   #|proc:regex-names
   Return a fresh name/index association list for regex record `pattern`.
   |#
   (define regex-names
-    (lambda (pattern) (pcheck ([regex? pattern]) ((lambda (p) (map (lambda (entry) (cons (car entry) (cdr entry))) (irregex-names (regex-engine p)))) pattern))
-  ))
+    (lambda (pattern)
+      (pcheck ([regex? pattern])
+              ((lambda (p)
+                 (map (lambda (entry) (cons (car entry) (cdr entry)))
+                      (irregex-names (regex-engine p))))
+               pattern))))
 
   #|proc:regex-match-pattern
   Return the regex record associated with match record `match`.
   |#
   (define regex-match-pattern
-    (lambda (match) (pcheck ([regex-match? match]) (match-pattern match))
-  ))
+    (lambda (match)
+      (pcheck ([regex-match? match])
+              (match-pattern match))))
 
   #|proc:regex-new-match
   Return an empty reusable match record for regex record `pattern`.
   |#
   (define regex-new-match
     (lambda (pattern)
-      (pcheck ([regex? pattern]) (%make-match pattern (irregex-new-matches (regex-engine pattern))))
-  ))
+      (pcheck ([regex? pattern])
+              (%make-match pattern (irregex-new-matches (regex-engine pattern))))))
 
   #|proc:regex-reset-match!
   Clear captures in match record `match` and return `match`.
   |#
   (define regex-reset-match!
     (lambda (match)
-      (pcheck ([regex-match? match]) (irregex-reset-matches! (match-data match)) match)
-  ))
+      (pcheck ([regex-match? match])
+              (irregex-reset-matches! (match-data match))
+              match)))
 
   #|proc:regex-search
   Find the first match of regex `pattern` in string `text`.
@@ -168,8 +184,7 @@
       [(pattern text start end)
        (pcheck ([regex? pattern] [string? text] [fixnum? start end])
                (check-range text start end)
-               (wrap-match pattern (irregex-search (regex-engine pattern) text start end)))])
-  )
+               (wrap-match pattern (irregex-search (regex-engine pattern) text start end)))]))
 
   #|proc:regex-match
   Match the entire selected substring of regex `pattern` in string `text`.
@@ -183,16 +198,15 @@
       [(pattern text start end)
        (pcheck ([regex? pattern] [string? text] [fixnum? start end])
                (check-range text start end)
-               (wrap-match pattern (irregex-match (regex-engine pattern) text start end)))])
-  )
+               (wrap-match pattern (irregex-match (regex-engine pattern) text start end)))]))
 
   #|proc:regex-matches?
   Return whether regex `pattern` matches the entire string `text`.
   |#
   (define regex-matches?
     (lambda (pattern text)
-      (pcheck ([regex? pattern] [string? text]) (and (regex-match pattern text) #t))
-  ))
+      (pcheck ([regex? pattern] [string? text])
+              (and (regex-match pattern text) #t))))
 
   #|proc:regex-search/matches
   Search string `text` with regex `pattern`, storing captures in `match`.
@@ -210,8 +224,10 @@
                (check-range text start end)
                (let ([result (regex-search pattern text start end)])
                  (regex-reset-match! match)
-                 (and result (begin (match-data-set! match (match-data result)) match))))])
-  )
+                 (and result
+                      (begin
+                        (match-data-set! match (match-data result))
+                        match))))]))
 
   #|proc:regex-match-substring
   Return the matched string for capture `index` in `match`.
@@ -223,8 +239,7 @@
       [(match) (regex-match-substring match 0)]
       [(match index)
        (pcheck ([regex-match? match] [capture? index])
-               (irregex-match-substring (match-data match) index))])
-  )
+               (irregex-match-substring (match-data match) index))]))
 
   #|proc:regex-match-start-index
   Return the start character offset within its chunk for capture `index` in `match`.
@@ -236,8 +251,7 @@
       [(match) (regex-match-start-index match 0)]
       [(match index)
        (pcheck ([regex-match? match] [capture? index])
-               (irregex-match-start-index (match-data match) index))])
-  )
+               (irregex-match-start-index (match-data match) index))]))
 
   #|proc:regex-match-end-index
   Return the exclusive end character offset within its chunk for capture `index` in `match`.
@@ -249,8 +263,7 @@
       [(match) (regex-match-end-index match 0)]
       [(match index)
        (pcheck ([regex-match? match] [capture? index])
-               (irregex-match-end-index (match-data match) index))])
-  )
+               (irregex-match-end-index (match-data match) index))]))
 
   #|proc:regex-match-start-chunk
   Return the start chunk for capture `index` in `match`.
@@ -262,8 +275,7 @@
       [(match) (regex-match-start-chunk match 0)]
       [(match index)
        (pcheck ([regex-match? match] [capture? index])
-               (irregex-match-start-chunk (match-data match) index))])
-  )
+               (irregex-match-start-chunk (match-data match) index))]))
 
   #|proc:regex-match-end-chunk
   Return the end chunk for capture `index` in `match`.
@@ -275,8 +287,7 @@
       [(match) (regex-match-end-chunk match 0)]
       [(match index)
        (pcheck ([regex-match? match] [capture? index])
-               (irregex-match-end-chunk (match-data match) index))])
-  )
+               (irregex-match-end-chunk (match-data match) index))]))
 
   #|proc:regex-match-subchunk
   Return the subchunk returned by the chunker's extraction callback for capture `index` in
@@ -289,22 +300,23 @@
       [(match) (regex-match-subchunk match 0)]
       [(match index)
        (pcheck ([regex-match? match] [capture? index])
-               (irregex-match-subchunk (match-data match) index))])
-  )
+               (irregex-match-subchunk (match-data match) index))]))
 
   #|proc:regex-match-num-submatches
   Return the number of capturing groups, excluding group zero of match record `match`.
   |#
   (define regex-match-num-submatches
-    (lambda (match) (pcheck ([regex-match? match]) (irregex-match-num-submatches (match-data match)))
-  ))
+    (lambda (match)
+      (pcheck ([regex-match? match])
+              (irregex-match-num-submatches (match-data match)))))
 
   #|proc:regex-match-names
   Return the name/index association list of match record `match`.
   |#
   (define regex-match-names
-    (lambda (match) (pcheck ([regex-match? match]) (irregex-match-names (match-data match)))
-  ))
+    (lambda (match)
+      (pcheck ([regex-match? match])
+              (irregex-match-names (match-data match)))))
 
   #|proc:regex-match-valid-index?
   Return whether capture `index` (nonnegative integer or symbol) exists in `match`.
@@ -313,8 +325,7 @@
   (define regex-match-valid-index?
     (lambda (match index)
       (pcheck ([regex-match? match] [capture? index])
-              (and (irregex-match-valid-index? (match-data match) index) #t))
-  ))
+              (and (irregex-match-valid-index? (match-data match) index) #t))))
 
   #|proc:make-regex-chunker
   Return a typed chunker. `next` maps a chunk to the next chunk or #f; `text` maps it to a string.
@@ -329,8 +340,7 @@
       [(next text start end substring subchunk)
        (pcheck ([procedure? next text]
                 [(lambda (v) (or (not v) (procedure? v))) start end substring subchunk])
-               (%make-chunker (make-irregex-chunker next text start end substring subchunk)))])
-  )
+               (%make-chunker (make-irregex-chunker next text start end substring subchunk)))]))
 
   #|proc:regex-search/chunked
   Apply regex `pattern` to `source` using typed `chunker`.
@@ -340,9 +350,9 @@
   (define regex-search/chunked
     (lambda (pattern chunker source)
       (pcheck ([regex? pattern] [regex-chunker? chunker])
-              (wrap-match pattern (irregex-search/chunked (regex-engine pattern)
-                                         (chunker-engine chunker) source)))
-  ))
+              (wrap-match pattern
+                          (irregex-search/chunked (regex-engine pattern)
+                                                  (chunker-engine chunker) source)))))
 
   #|proc:regex-match/chunked
   Apply regex `pattern` to `source` using typed `chunker`.
@@ -352,9 +362,9 @@
   (define regex-match/chunked
     (lambda (pattern chunker source)
       (pcheck ([regex? pattern] [regex-chunker? chunker])
-              (wrap-match pattern (irregex-match/chunked (regex-engine pattern)
-                                         (chunker-engine chunker) source)))
-  ))
+              (wrap-match pattern
+                          (irregex-match/chunked (regex-engine pattern)
+                                                 (chunker-engine chunker) source)))))
 
   #|proc:regex-fold
   Fold matches of regex `pattern` in string `text`, starting from `seed`.
@@ -375,9 +385,9 @@
        (pcheck ([regex? pattern] [procedure? proc finish] [string? text] [fixnum? start end])
                (check-range text start end)
                (irregex-fold (regex-engine pattern)
-                 (lambda (previous raw acc) (proc previous (%make-match pattern raw) acc))
-                 seed text finish start end))])
-  )
+                             (lambda (previous raw acc)
+                               (proc previous (%make-match pattern raw) acc))
+                             seed text finish start end))]))
 
   #|proc:regex-fold/chunked
   Fold matches of `pattern` in `source` through typed `chunker`, starting with `seed`.
@@ -388,9 +398,9 @@
     (lambda (pattern proc seed chunker source)
       (pcheck ([regex? pattern] [procedure? proc] [regex-chunker? chunker])
               (irregex-fold/chunked (regex-engine pattern)
-                (lambda (chunk index raw acc) (proc chunk index (%make-match pattern raw) acc))
-                seed (chunker-engine chunker) source))
-  ))
+                                    (lambda (chunk index raw acc)
+                                      (proc chunk index (%make-match pattern raw) acc))
+                                    seed (chunker-engine chunker) source))))
 
   #|proc:regex-extract
   Return a list of matching substrings of regex `pattern` in string `text`.
@@ -402,8 +412,7 @@
       [(pattern text start end)
        (pcheck ([regex? pattern] [string? text] [fixnum? start end])
                (check-range text start end)
-               (irregex-extract (regex-engine pattern) text start end))])
-  )
+               (irregex-extract (regex-engine pattern) text start end))]))
 
   #|proc:regex-split
   Return a list of nonempty pieces between matches (Irregex splitting semantics) of regex
@@ -416,11 +425,11 @@
       [(pattern text start end)
        (pcheck ([regex? pattern] [string? text] [fixnum? start end])
                (check-range text start end)
-               (irregex-split (regex-engine pattern) text start end))])
-  )
+               (irregex-split (regex-engine pattern) text start end))]))
 
   (define replacement?
-    (lambda (value) (or (string? value) (capture? value) (procedure? value))))
+    (lambda (value)
+      (or (string? value) (capture? value) (procedure? value))))
   (define adapt-replacement
     (lambda (pattern replacement)
       (if (procedure? replacement)
@@ -439,10 +448,11 @@
   (define regex-replace
     (lambda (pattern text . replacements)
       (pcheck ([regex? pattern] [string? text])
-              (for-each (lambda (part) (pcheck ([replacement? part]) (void))) replacements)
+              (for-each (lambda (part)
+                          (pcheck ([replacement? part]) (void)))
+                        replacements)
               (apply irregex-replace (regex-engine pattern) text
-                     (map (lambda (part) (adapt-replacement pattern part)) replacements)))
-  ))
+                     (map (lambda (part) (adapt-replacement pattern part)) replacements)))))
 
   #|proc:regex-replace/all
   Return string `text` with all occurrences of regex `pattern` replaced.
@@ -453,17 +463,19 @@
   (define regex-replace/all
     (lambda (pattern text . replacements)
       (pcheck ([regex? pattern] [string? text])
-              (for-each (lambda (part) (pcheck ([replacement? part]) (void))) replacements)
+              (for-each (lambda (part)
+                          (pcheck ([replacement? part]) (void)))
+                        replacements)
               (apply irregex-replace/all (regex-engine pattern) text
-                     (map (lambda (part) (adapt-replacement pattern part)) replacements)))
-  ))
+                     (map (lambda (part) (adapt-replacement pattern part)) replacements)))))
 
   #|proc:regex-quote
   Return string `text` escaped for literal use inside a regex pattern.
   |#
   (define regex-quote
-    (lambda (text) (pcheck ([string? text]) (irregex-quote text))
-  ))
+    (lambda (text)
+      (pcheck ([string? text])
+              (irregex-quote text))))
 
   #|proc:regex-opt
   Return an optimized S-expression pattern matching any member of list `strings`.
@@ -472,15 +484,15 @@
   (define regex-opt
     (lambda (strings)
       (pcheck ([(lambda (v) (and (list? v) (for-all string? v))) strings])
-              (irregex-opt strings))
-  ))
+              (irregex-opt strings))))
 
   #|proc:regex-sre->string
   Return a pattern string representing S-expression pattern `sre`, using Irregex conversion.
   |#
   (define regex-sre->string
-    (lambda (sre) (pcheck ([sre? sre]) (sre->string sre))
-  ))
+    (lambda (sre)
+      (pcheck ([sre? sre])
+              (sre->string sre))))
 
   #|proc:regex-sre->cset
   Return Irregex's character-set vector for S-expression character-set `sre`.
@@ -491,6 +503,6 @@
     (case-lambda
       [(sre) (regex-sre->cset sre #f)]
       [(sre ignore-case?)
-       (pcheck ([sre? sre] [boolean? ignore-case?]) (sre->cset sre ignore-case?))])
-  )
+       (pcheck ([sre? sre] [boolean? ignore-case?])
+               (sre->cset sre ignore-case?))]))
 )
