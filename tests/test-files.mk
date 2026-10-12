@@ -7,7 +7,7 @@ NET_TESTS := net-operation.ss net-transfer.ss net-core.ss net-http-contract.ss n
              net-scp.ss net-websocket.ss net-grpc.ss net-examples.ss
 
 SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss system-user.ss system-filesystem.ss system-signal.ss system-process.ss iter.ss transducer.ss file.ss path.ss glob.ss navigator.ss \
-             list.ss string.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
+             list.ss string.ss regex.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
              hashset.ss treemap.ss treeset.ss rbtree-specialized.ss \
              bittree.ss bitvec.ss dset.ss \
              concurrency.ss \
@@ -17,3 +17,5 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
              $(NET_TESTS) \
              parser.ss net-errors.ss net-address.ss net-dns.ss net-ip.ss net-docs.ss \
              net-socket-datagram.ss net-uri.ss
+
+SRCS_NON_NET_TEST := $(filter-out net-%.ss,$(SRCS_TEST))
