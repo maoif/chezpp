@@ -243,3 +243,26 @@
        (and (= 6 (length processes))
             (andmap process? processes)
             (andmap process-exit-success? statuses))))
+
+(mat process-closed-standard-descriptors
+
+     ;; Error case: a pipe descriptor can equal stdin or stdout when those descriptors are closed.
+     (let ([close (foreign-procedure "close" (int) int)]
+           [dup (foreign-procedure "dup" (int) int)]
+           [dup2 (foreign-procedure "dup2" (int int) int)])
+       (let ([saved-stdin (dup 0)]
+             [saved-stdout (dup 1)])
+         (let ([r (dynamic-wind
+                    (lambda () (close 0) (close 1))
+                    (lambda ()
+                      (capture-process "sh" "-c" "printf out; printf err >&2"
+                                       :stdout capture
+                                       :stderr capture))
+                    (lambda ()
+                      (dup2 saved-stdin 0)
+                      (dup2 saved-stdout 1)
+                      (close saved-stdin)
+                      (close saved-stdout)))])
+           (and (process-exit-success? (process-result-status r))
+                (string=? "out" (process-result-stdout r))
+                (string=? "err" (process-result-stderr r)))))))

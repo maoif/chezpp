@@ -353,6 +353,19 @@ static int set_nonblock(int fd) {
 
 static int make_pipe(int fds[2]) {
   if (pipe(fds) != 0) return -1;
+  // Keep pipe descriptors above standard streams so spawn file actions cannot alias them.
+  for (int i = 0; i < 2; i += 1) {
+    if (fds[i] < 3) {
+      int replacement = fcntl(fds[i], F_DUPFD, 3);
+      if (replacement < 0) {
+        close_fd(&fds[0]);
+        close_fd(&fds[1]);
+        return -1;
+      }
+      close(fds[i]);
+      fds[i] = replacement;
+    }
+  }
   return 0;
 }
 
@@ -362,6 +375,7 @@ static int add_devnull_action(posix_spawn_file_actions_t *actions, int target_fd
 }
 
 static int add_dup_action(posix_spawn_file_actions_t *actions, int from_fd, int to_fd) {
+  if (from_fd == to_fd) return 0;
   int rc = posix_spawn_file_actions_adddup2(actions, from_fd, to_fd);
   if (rc != 0) return rc;
   return posix_spawn_file_actions_addclose(actions, from_fd);
