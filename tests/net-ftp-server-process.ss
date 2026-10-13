@@ -334,25 +334,27 @@
                            (milisleep 50)
                            (loop)))))))))
           (define command-thread
-            (fork-thread
-             (lambda ()
-               (let loop ()
-                 (let ([line (get-line (current-input-port))])
-                   (unless (eof-object? line)
-                     (when (string=? line "stop")
-                       (set! running? #f)
-                       (guard (c [else #f])
-                         (close-socket listener))
-                       (for-each
-                        (lambda (client)
-                          (guard (c [else #f]) (close-socket client)))
-                        client-sockets)
-                       (exit 0))
-                     (when running?
-                       (loop))))))))
-          (write port)
-          (newline)
-          (flush-output-port)
+            (begin
+              ;; Console input and output share a mutex. Announce readiness before reading stdin.
+              (write port)
+              (newline)
+              (flush-output-port)
+              (fork-thread
+               (lambda ()
+                 (let loop ()
+                   (let ([line (get-line (current-input-port))])
+                     (unless (eof-object? line)
+                       (when (string=? line "stop")
+                         (set! running? #f)
+                         (guard (c [else #f])
+                           (close-socket listener))
+                         (for-each
+                          (lambda (client)
+                            (guard (c [else #f]) (close-socket client)))
+                          client-sockets)
+                         (exit 0))
+                       (when running?
+                         (loop)))))))))
           (thread-join command-thread)
           (set! running? #f)
           (guard (c [else #f])

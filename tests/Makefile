@@ -101,6 +101,8 @@ $(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
 
 test.so: mat-requires-fixture.ss
 
+net-ftp.so: net-ftp-startup-process.ss
+
 .PHONY: test test-all test-non-net
 
 test-all: test

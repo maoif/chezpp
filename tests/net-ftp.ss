@@ -840,3 +840,24 @@
                  "rejects symbolic links"
                  (lambda () (ftp-upload-directory session source "/links"))))
               (lambda () (when (file-exists? source) (file-removetree source #f)))))))))
+
+(mat net-ftp-helper-startup-before-command-reader
+     ;; Error case: reading stdin before announcing readiness deadlocks the shared console port.
+     (let-values ([(input output errors pid)
+                   (open-process-ports
+                    "timeout 5s ../chez++ --script net-ftp-startup-process.ss /tmp/chezpp-ftp-startup"
+                    (buffer-mode block) (native-transcoder))])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([port (read output)])
+             (and (integer? port) (<= 1 port 65535)
+                  (begin
+                    (display "stop\n" input)
+                    (flush-output-port input)
+                    (and (eof-object? (read output))
+                         (eof-object? (get-string-all errors)))))))
+         (lambda ()
+           (close-port input)
+           (close-port output)
+           (close-port errors)))))
