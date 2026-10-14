@@ -231,6 +231,18 @@
        (and (process-result? r)
             (string=? "ABC" (process-result-stdout r)))))
 
+     ;; Error case: a pipeline member that cannot exec must raise a system error.
+     (guard (c [(system-error? c) #t] [else #f])
+       (capture-pipeline (list (list "definitely-not-a-chezpp-test-command")))
+       #f)
+
+     ;; Error case: live pipeline startup must clean up when a member cannot exec.
+     (guard (c [(system-error? c) #t] [else #f])
+       (pipe-processes (list (list "true")
+                             (list "definitely-not-a-chezpp-test-command"))
+                       '())
+       #f)
+
 (mat process-expert-pipes
 
      (call-with-values make-pipe

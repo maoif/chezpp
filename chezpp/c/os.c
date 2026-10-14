@@ -368,60 +368,21 @@ static int executable_access(const char *path, const char *cwd) {
   return result;
 }
 
-// Inspect a script's interpreter before spawning.  This catches the exec-time
-// failure that glibc/QEMU may otherwise report only as child exit status 127.
-static int script_interpreter_errno(const char *path, const char *cwd) {
-  char *open_path = NULL;
-  const char *resolved_path = path;
-  if (cwd != NULL && cwd[0] != '\0' && path[0] != '/') {
-    size_t cwd_len = strlen(cwd);
-    size_t path_len = strlen(path);
-    open_path = (char *)malloc(cwd_len + path_len + 2);
-    if (open_path == NULL) return ENOMEM;
-    memcpy(open_path, cwd, cwd_len);
-    open_path[cwd_len] = '/';
-    memcpy(open_path + cwd_len + 1, path, path_len + 1);
-    resolved_path = open_path;
-  }
-  struct stat info;
-  if (stat(resolved_path, &info) != 0) {
-    int error = errno;
-    free(open_path);
-    return error;
-  }
-  if (!S_ISREG(info.st_mode)) {
-    free(open_path);
-    return EACCES;
-  }
-  int fd = open(resolved_path, O_RDONLY);
-  free(open_path);
-  if (fd < 0) return 0;
-  char header[4096];
-  ssize_t n;
-  do {
-    n = read(fd, header, sizeof(header) - 1);
-  } while (n < 0 && errno == EINTR);
-  close(fd);
-  if (n < 2) return 0;
-  if (header[0] != '#' || header[1] != '!') return 0;
-  header[n] = '\0';
-  char *interpreter = header + 2;
-  while (*interpreter == ' ' || *interpreter == '\t') interpreter += 1;
-  char *end = interpreter;
-  while (*end != '\0' && *end != ' ' && *end != '\t' && *end != '\n' && *end != '\r') end += 1;
-  *end = '\0';
-  if (*interpreter == '\0') return ENOEXEC;
-  return executable_access(interpreter, cwd);
+static char *copy_c_string(const char *value) {
+  size_t length = strlen(value);
+  char *copy = (char *)malloc(length + 1);
+  if (copy == NULL) return NULL;
+  memcpy(copy, value, length + 1);
+  return copy;
 }
 
-static int executable_errno(const char *program, char **env, const char *cwd) {
+// Resolve PATH in the parent, but leave the actual execve to the child.  The
+// error pipe below reports exec-time failures without relying on preflight checks.
+static int resolve_executable(const char *program, char **env, const char *cwd,
+                              char **resolved) {
   if (strchr(program, '/') != NULL) {
-    int error = executable_access(program, cwd);
-    if (error != 0) return error;
-    // Keep this check in the parent: fork-after-threads would require strict
-    // async-signal-safe child code and would change the safety profile of the
-    // existing posix_spawn-based implementation.
-    return script_interpreter_errno(program, cwd);
+    *resolved = copy_c_string(program);
+    return *resolved == NULL ? ENOMEM : 0;
   }
 
   const char *path = environment_value(env, "PATH");
@@ -440,9 +401,8 @@ static int executable_errno(const char *program, char **env, const char *cwd) {
     memcpy(candidate + directory_len + separator_len, program, program_len + 1);
     int access_error = executable_access(candidate, cwd);
     if (access_error == 0) {
-      int interpreter_error = script_interpreter_errno(candidate, cwd);
-      free(candidate);
-      return interpreter_error;
+      *resolved = candidate;
+      return 0;
     }
     if (access_error == EACCES) saved_errno = EACCES;
     free(candidate);
@@ -450,6 +410,113 @@ static int executable_errno(const char *program, char **env, const char *cwd) {
     start = end + 1;
   }
   return saved_errno;
+}
+
+static int make_pipe(int fds[2]);
+
+static void child_report_errno(int fd, int error) {
+  const unsigned char *bytes = (const unsigned char *)&error;
+  size_t written = 0;
+  while (written < sizeof(error)) {
+    ssize_t n = write(fd, bytes + written, sizeof(error) - written);
+    if (n > 0) written += (size_t)n;
+    else if (n < 0 && errno == EINTR) continue;
+    else break;
+  }
+  _exit(127);
+}
+
+// source is a descriptor, -1 to inherit, or -2 to connect /dev/null.
+static int child_redirect(int source, int target) {
+  if (source == -1) return 0;
+  int fd = source;
+  if (source == -2) {
+    fd = open("/dev/null", O_RDWR);
+    if (fd < 0) return -1;
+  }
+  if (fd != target && dup2(fd, target) < 0) {
+    if (source == -2) close(fd);
+    return -1;
+  }
+  if (source == -2 && fd != target) close(fd);
+  return 0;
+}
+
+static void wait_child_after_exec_error(pid_t pid) {
+  int status;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+}
+
+static int spawn_checked(pid_t *pid, char *const argv[], char *const env[],
+                         const char *program, const char *cwd,
+                         int stdin_source, int stdout_source,
+                         int stderr_source, int stderr_to_stdout,
+                         const int *child_fds, size_t child_fd_count) {
+  int error_pipe[2];
+  if (make_pipe(error_pipe) != 0) return errno;
+  int flags = fcntl(error_pipe[1], F_GETFD, 0);
+  if (flags < 0 || fcntl(error_pipe[1], F_SETFD, flags | FD_CLOEXEC) < 0) {
+    int error = errno;
+    close(error_pipe[0]);
+    close(error_pipe[1]);
+    return error;
+  }
+
+  pid_t child = fork();
+  if (child < 0) {
+    int error = errno;
+    close(error_pipe[0]);
+    close(error_pipe[1]);
+    return error;
+  }
+  if (child == 0) {
+    close(error_pipe[0]);
+    // Chez may be multithreaded.  After fork, the child must avoid Scheme,
+    // allocation, stdio, and locks; only async-signal-safe calls run until execve.
+    if (cwd != NULL && cwd[0] != '\0' && chdir(cwd) != 0)
+      child_report_errno(error_pipe[1], errno);
+    if (child_redirect(stdin_source, STDIN_FILENO) != 0)
+      child_report_errno(error_pipe[1], errno);
+    if (child_redirect(stdout_source, STDOUT_FILENO) != 0)
+      child_report_errno(error_pipe[1], errno);
+    if (stderr_to_stdout) {
+      if (dup2(STDOUT_FILENO, STDERR_FILENO) < 0)
+        child_report_errno(error_pipe[1], errno);
+    } else if (child_redirect(stderr_source, STDERR_FILENO) != 0) {
+      child_report_errno(error_pipe[1], errno);
+    }
+    for (size_t i = 0; i < child_fd_count; i += 1) {
+      if (child_fds[i] >= 0) close(child_fds[i]);
+    }
+    execve(program, argv, env);
+    child_report_errno(error_pipe[1], errno);
+  }
+
+  close(error_pipe[1]);
+  int child_error = 0;
+  size_t received = 0;
+  while (received < sizeof(child_error)) {
+    ssize_t n = read(error_pipe[0], (unsigned char *)&child_error + received,
+                     sizeof(child_error) - received);
+    if (n > 0) received += (size_t)n;
+    else if (n == 0) break;
+    else if (errno == EINTR) continue;
+    else {
+      int error = errno;
+      close(error_pipe[0]);
+      kill(child, SIGKILL);
+      wait_child_after_exec_error(child);
+      return error;
+    }
+  }
+  close(error_pipe[0]);
+  if (received != 0) {
+    wait_child_after_exec_error(child);
+    return received == sizeof(child_error) ? child_error : EIO;
+  }
+  *pid = child;
+  return 0;
 }
 #endif
 
@@ -482,30 +549,6 @@ static int make_pipe(int fds[2]) {
     }
   }
   return 0;
-}
-
-static int add_devnull_action(posix_spawn_file_actions_t *actions, int target_fd) {
-  int rc = posix_spawn_file_actions_addopen(actions, target_fd, "/dev/null", O_RDWR, 0);
-  return rc;
-}
-
-static int add_dup_action(posix_spawn_file_actions_t *actions, int from_fd, int to_fd) {
-  if (from_fd == to_fd) return 0;
-  int rc = posix_spawn_file_actions_adddup2(actions, from_fd, to_fd);
-  if (rc != 0) return rc;
-  return posix_spawn_file_actions_addclose(actions, from_fd);
-}
-
-static int add_chdir_action(posix_spawn_file_actions_t *actions, const char *cwd) {
-  if (cwd == NULL || cwd[0] == '\0') return 0;
-#if defined(__GLIBC__) || defined(__linux__)
-  return posix_spawn_file_actions_addchdir_np(actions, cwd);
-#else
-  (void)actions;
-  (void)cwd;
-  errno = ENOTSUP;
-  return ENOTSUP;
-#endif
 }
 
 static int write_all_fd(int fd, const unsigned char *data, size_t len) {
@@ -757,76 +800,54 @@ ptr chezpp_spawn_capture(ptr argv, ptr env, const char *cwd,
     errno = EINVAL;
     return chezpp_errno_result("spawn-capture", Snil);
   }
-  int executable_error = executable_errno(cargv[0], cenv, cwd);
-  if (executable_error != 0) {
+  char *resolved_program = NULL;
+  int resolve_error = resolve_executable(cargv[0], cenv, cwd, &resolved_program);
+  if (resolve_error != 0) {
     free_string_array(cargv);
     if (cenv != environ) free_string_array(cenv);
-    errno = executable_error;
+    errno = resolve_error;
     return chezpp_errno_result("spawn-capture", Snil);
   }
 
   int stdin_pipe[2] = {-1, -1};
   int stdout_pipe[2] = {-1, -1};
   int stderr_pipe[2] = {-1, -1};
-  posix_spawn_file_actions_t actions;
-  int rc = posix_spawn_file_actions_init(&actions);
-  if (rc != 0) {
-    errno = rc;
-    free_string_array(cargv);
-    if (cenv != environ) free_string_array(cenv);
-    return chezpp_errno_result("spawn-capture", Snil);
-  }
-
-  rc = add_chdir_action(&actions, cwd);
-  if (rc == 0 && stdin_payload != Sfalse) {
+  int rc = 0;
+  if (stdin_payload != Sfalse) {
     if (make_pipe(stdin_pipe) != 0) rc = errno;
-    else {
-      rc = add_dup_action(&actions, stdin_pipe[0], STDIN_FILENO);
-      if (rc == 0) rc = posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]);
-    }
-  } else if (rc == 0) {
-    rc = add_devnull_action(&actions, STDIN_FILENO);
   }
 
   if (rc == 0 && capture_stdout) {
     if (make_pipe(stdout_pipe) != 0) rc = errno;
-    else {
-      rc = add_dup_action(&actions, stdout_pipe[1], STDOUT_FILENO);
-      if (rc == 0) rc = posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]);
-    }
-  } else if (rc == 0 && stdout_null) {
-    rc = add_devnull_action(&actions, STDOUT_FILENO);
   }
 
-  if (rc == 0 && stderr_to_stdout) {
-    rc = posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
-  } else if (rc == 0 && capture_stderr) {
+  if (rc == 0 && !stderr_to_stdout && capture_stderr) {
     if (make_pipe(stderr_pipe) != 0) rc = errno;
-    else {
-      rc = add_dup_action(&actions, stderr_pipe[1], STDERR_FILENO);
-      if (rc == 0) rc = posix_spawn_file_actions_addclose(&actions, stderr_pipe[0]);
-    }
-  } else if (rc == 0 && stderr_null) {
-    rc = add_devnull_action(&actions, STDERR_FILENO);
   }
 
   if (rc != 0) {
     errno = rc;
-    posix_spawn_file_actions_destroy(&actions);
     close_fd(&stdin_pipe[0]);
     close_fd(&stdin_pipe[1]);
     close_fd(&stdout_pipe[0]);
     close_fd(&stdout_pipe[1]);
     close_fd(&stderr_pipe[0]);
     close_fd(&stderr_pipe[1]);
+    free(resolved_program);
     free_string_array(cargv);
     if (cenv != environ) free_string_array(cenv);
     return chezpp_errno_result("spawn-capture", Snil);
   }
 
   pid_t pid;
-  rc = posix_spawnp(&pid, cargv[0], &actions, NULL, cargv, cenv);
-  posix_spawn_file_actions_destroy(&actions);
+  int child_fds[] = {stdin_pipe[0], stdin_pipe[1], stdout_pipe[0], stdout_pipe[1],
+                     stderr_pipe[0], stderr_pipe[1]};
+  rc = spawn_checked(&pid, cargv, cenv, resolved_program, cwd,
+                     stdin_payload != Sfalse ? stdin_pipe[0] : -2,
+                     capture_stdout ? stdout_pipe[1] : (stdout_null ? -2 : -1),
+                     capture_stderr ? stderr_pipe[1] : (stderr_null ? -2 : -1),
+                     stderr_to_stdout, child_fds, sizeof(child_fds) / sizeof(child_fds[0]));
+  free(resolved_program);
   close_fd(&stdin_pipe[0]);
   close_fd(&stdout_pipe[1]);
   close_fd(&stderr_pipe[1]);
@@ -877,31 +898,22 @@ ptr chezpp_spawn_process(ptr argv, ptr env, const char *cwd,
     errno = EINVAL;
     return chezpp_errno_result("spawn-process", Snil);
   }
-  int executable_error = executable_errno(cargv[0], cenv, cwd);
-  if (executable_error != 0) {
+  char *resolved_program = NULL;
+  int resolve_error = resolve_executable(cargv[0], cenv, cwd, &resolved_program);
+  if (resolve_error != 0) {
     free_string_array(cargv);
     if (cenv != environ) free_string_array(cenv);
-    errno = executable_error;
-    return chezpp_errno_result("spawn-process", Snil);
-  }
-
-  posix_spawn_file_actions_t actions;
-  int rc = posix_spawn_file_actions_init(&actions);
-  if (rc == 0) rc = add_chdir_action(&actions, cwd);
-  if (rc == 0 && stdin_null) rc = add_devnull_action(&actions, STDIN_FILENO);
-  if (rc == 0 && stdout_null) rc = add_devnull_action(&actions, STDOUT_FILENO);
-  if (rc == 0 && stderr_null) rc = add_devnull_action(&actions, STDERR_FILENO);
-  if (rc != 0) {
-    errno = rc;
-    posix_spawn_file_actions_destroy(&actions);
-    free_string_array(cargv);
-    if (cenv != environ) free_string_array(cenv);
+    errno = resolve_error;
     return chezpp_errno_result("spawn-process", Snil);
   }
 
   pid_t pid;
-  rc = posix_spawnp(&pid, cargv[0], &actions, NULL, cargv, cenv);
-  posix_spawn_file_actions_destroy(&actions);
+  int rc = spawn_checked(&pid, cargv, cenv, resolved_program, cwd,
+                         stdin_null ? -2 : -1,
+                         stdout_null ? -2 : -1,
+                         stderr_null ? -2 : -1,
+                         0, NULL, 0);
+  free(resolved_program);
   free_string_array(cargv);
   if (cenv != environ) free_string_array(cenv);
   if (rc != 0) {
@@ -1015,24 +1027,36 @@ ptr chezpp_spawn_pipeline(ptr specs) {
     ls = Scdr(ls);
   }
 
+  int child_fd_count = count > 1 ? 2 * (count - 1) : 0;
+  int *child_fds = child_fd_count == 0 ? NULL : (int *)malloc((size_t)child_fd_count * sizeof(int));
+  if (child_fd_count != 0 && child_fds == NULL) {
+    for (int j = 0; j < count; j += 1) free_string_array(argvs[j]);
+    for (int j = 0; j < count - 1; j += 1) {
+      close_fd(&pipes[j][0]);
+      close_fd(&pipes[j][1]);
+    }
+    free(argvs);
+    free(pids);
+    free(pipes);
+    errno = ENOMEM;
+    return chezpp_errno_result("spawn-pipeline", Snil);
+  }
+  for (int j = 0; j < count - 1; j += 1) {
+    child_fds[2 * j] = pipes[j][0];
+    child_fds[2 * j + 1] = pipes[j][1];
+  }
+
   int spawned = 0;
   for (int i = 0; i < count; i += 1) {
-    posix_spawn_file_actions_t actions;
-    int rc = posix_spawn_file_actions_init(&actions);
-    if (rc == 0 && i > 0) {
-      rc = posix_spawn_file_actions_adddup2(&actions, pipes[i - 1][0], STDIN_FILENO);
-    }
-    if (rc == 0 && i < count - 1) {
-      rc = posix_spawn_file_actions_adddup2(&actions, pipes[i][1], STDOUT_FILENO);
-    }
+    char *resolved_program = NULL;
+    int rc = resolve_executable(argvs[i][0], environ, "", &resolved_program);
     if (rc == 0) {
-      for (int j = 0; j < count - 1; j += 1) {
-        posix_spawn_file_actions_addclose(&actions, pipes[j][0]);
-        posix_spawn_file_actions_addclose(&actions, pipes[j][1]);
-      }
+      rc = spawn_checked(&pids[i], argvs[i], environ, resolved_program, "",
+                         i > 0 ? pipes[i - 1][0] : -1,
+                         i < count - 1 ? pipes[i][1] : -1,
+                         -1, 0, child_fds, (size_t)child_fd_count);
     }
-    if (rc == 0) rc = posix_spawnp(&pids[i], argvs[i][0], &actions, NULL, argvs[i], environ);
-    posix_spawn_file_actions_destroy(&actions);
+    free(resolved_program);
     if (rc != 0) {
       errno = rc;
       for (int j = 0; j < spawned; j += 1) kill(pids[j], SIGKILL);
@@ -1047,6 +1071,7 @@ ptr chezpp_spawn_pipeline(ptr specs) {
           close_fd(&pipes[j][1]);
         }
       }
+      free(child_fds);
       free(argvs);
       free(pids);
       free(pipes);
@@ -1067,6 +1092,7 @@ ptr chezpp_spawn_pipeline(ptr specs) {
     Svector_set(v, i, Sinteger((iptr)pids[i]));
   }
   for (int j = 0; j < count; j += 1) free_string_array(argvs[j]);
+  free(child_fds);
   free(argvs);
   free(pids);
   free(pipes);
@@ -1155,23 +1181,40 @@ ptr chezpp_spawn_pipeline_capture(ptr specs, int timeout_ms) {
     return chezpp_errno_result("spawn-pipeline", Snil);
   }
 
+  int child_fd_count = 2 * (count - 1) + 2;
+  int *child_fds = (int *)malloc((size_t)child_fd_count * sizeof(int));
+  if (child_fds == NULL) {
+    for (int j = 0; j < count; j += 1) free_string_array(argvs[j]);
+    for (int j = 0; j < count - 1; j += 1) {
+      close_fd(&pipes[j][0]);
+      close_fd(&pipes[j][1]);
+    }
+    close_fd(&capture_pipe[0]);
+    close_fd(&capture_pipe[1]);
+    free(argvs);
+    free(pids);
+    free(pipes);
+    errno = ENOMEM;
+    return chezpp_errno_result("spawn-pipeline", Snil);
+  }
+  for (int j = 0; j < count - 1; j += 1) {
+    child_fds[2 * j] = pipes[j][0];
+    child_fds[2 * j + 1] = pipes[j][1];
+  }
+  child_fds[2 * (count - 1)] = capture_pipe[0];
+  child_fds[2 * (count - 1) + 1] = capture_pipe[1];
+
   int spawned = 0;
   for (int i = 0; i < count; i += 1) {
-    posix_spawn_file_actions_t actions;
-    int rc = posix_spawn_file_actions_init(&actions);
-    if (rc == 0 && i > 0) rc = posix_spawn_file_actions_adddup2(&actions, pipes[i - 1][0], STDIN_FILENO);
-    if (rc == 0 && i < count - 1) rc = posix_spawn_file_actions_adddup2(&actions, pipes[i][1], STDOUT_FILENO);
-    if (rc == 0 && i == count - 1) rc = posix_spawn_file_actions_adddup2(&actions, capture_pipe[1], STDOUT_FILENO);
+    char *resolved_program = NULL;
+    int rc = resolve_executable(argvs[i][0], environ, "", &resolved_program);
     if (rc == 0) {
-      for (int j = 0; j < count - 1; j += 1) {
-        posix_spawn_file_actions_addclose(&actions, pipes[j][0]);
-        posix_spawn_file_actions_addclose(&actions, pipes[j][1]);
-      }
-      posix_spawn_file_actions_addclose(&actions, capture_pipe[0]);
-      posix_spawn_file_actions_addclose(&actions, capture_pipe[1]);
+      rc = spawn_checked(&pids[i], argvs[i], environ, resolved_program, "",
+                         i > 0 ? pipes[i - 1][0] : -1,
+                         i < count - 1 ? pipes[i][1] : capture_pipe[1],
+                         -1, 0, child_fds, (size_t)child_fd_count);
     }
-    if (rc == 0) rc = posix_spawnp(&pids[i], argvs[i][0], &actions, NULL, argvs[i], environ);
-    posix_spawn_file_actions_destroy(&actions);
+    free(resolved_program);
     if (rc != 0) {
       errno = rc;
       for (int j = 0; j < spawned; j += 1) kill(pids[j], SIGKILL);
@@ -1186,6 +1229,7 @@ ptr chezpp_spawn_pipeline_capture(ptr specs, int timeout_ms) {
       }
       close_fd(&capture_pipe[0]);
       close_fd(&capture_pipe[1]);
+      free(child_fds);
       free(argvs);
       free(pids);
       free(pipes);
@@ -1206,6 +1250,7 @@ ptr chezpp_spawn_pipeline_capture(ptr specs, int timeout_ms) {
     (void)wait_pid_block(pids[i], &status);
   }
   for (int j = 0; j < count; j += 1) free_string_array(argvs[j]);
+  free(child_fds);
   free(argvs);
   free(pids);
   free(pipes);
