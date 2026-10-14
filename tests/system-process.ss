@@ -152,18 +152,45 @@
        (and (vector? raw)
             (eq? 'ok (vector-ref raw 0))))
 
-     (let ([raw ((foreign-procedure "chezpp_spawn_capture"
-                                    (ptr ptr string ptr int int int int int int)
-                                    ptr)
-                 (list "definitely-not-a-chezpp-test-command") #f "" #f 0 0 0 0 0 -1)])
-       (and (vector? raw)
-            (eq? 'errno (vector-ref raw 0))
-            (= 2 (vector-ref raw 2))))
+     (let ([spawn (foreign-procedure "chezpp_spawn_capture"
+                                     (ptr ptr string ptr int int int int int int)
+                                     ptr)])
+       (let ([missing (spawn (list "definitely-not-a-chezpp-test-command")
+                             #f "" #f 0 0 0 0 0 -1)])
+         (and (vector? missing)
+              (eq? 'errno (vector-ref missing 0))
+              (positive? (vector-ref missing 2))
+              ;; Error case: preserve path errors other than a missing executable.
+              (let* ([path (format "/tmp/chezpp-process-file-~a" (get-process-id))]
+                     [port (open-output-file path)]
+                     [raw #f])
+                (put-string port "not-a-directory")
+                (close-output-port port)
+                (set! raw (spawn (list (string-append path "/child"))
+                                 #f "" #f 0 0 0 0 0 -1))
+                (delete-file path)
+                (and (eq? 'errno (vector-ref raw 0))
+                     (not (= (vector-ref missing 2) (vector-ref raw 2))))))))
 
      ;; Error case: live spawning must report a missing executable as an error.
      (guard (c [(system-error? c) #t] [else #f])
        (spawn-process "definitely-not-a-chezpp-test-command" '() '())
        #f)
+
+     ;; Error case: an executable script with a missing interpreter must fail to spawn.
+     (let* ([path (format "/tmp/chezpp-missing-interpreter-~a" (get-process-id))]
+            [chmod (foreign-procedure "chmod" (string unsigned-32) int)]
+            [port (open-output-file path)])
+       (put-string port "#!/definitely-no-such-chezpp-interpreter\n")
+       (close-output-port port)
+       (chmod path #o700)
+       (dynamic-wind
+         (lambda () (void))
+         (lambda ()
+           (guard (c [(system-error? c) #t] [else #f])
+             (capture-process path :stdout capture :stderr capture)
+             #f))
+         (lambda () (when (file-exists? path) (delete-file path)))))
 
      (let ([status (run-process "/bin/sh" "-c" "exit 127"
                      :stdin null :stdout null :stderr null)])

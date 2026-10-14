@@ -338,6 +338,7 @@ static char **env_from_alist(ptr env) {
   return out;
 }
 
+#if defined(__unix__) || defined(__APPLE__)
 static const char *environment_value(char **env, const char *name) {
   size_t name_len = strlen(name);
   for (char **entry = env; entry != NULL && *entry != NULL; entry += 1) {
@@ -353,7 +354,7 @@ static const char *environment_value(char **env, const char *name) {
 static int executable_access(const char *path, const char *cwd) {
   if (cwd == NULL || cwd[0] == '\0' || path[0] == '/') {
     if (access(path, X_OK) == 0) return 0;
-    return errno == EACCES ? EACCES : ENOENT;
+    return errno;
   }
   size_t cwd_len = strlen(cwd);
   size_t path_len = strlen(path);
@@ -362,13 +363,66 @@ static int executable_access(const char *path, const char *cwd) {
   memcpy(candidate, cwd, cwd_len);
   candidate[cwd_len] = '/';
   memcpy(candidate + cwd_len + 1, path, path_len + 1);
-  int result = access(candidate, X_OK) == 0 ? 0 : (errno == EACCES ? EACCES : ENOENT);
+  int result = access(candidate, X_OK) == 0 ? 0 : errno;
   free(candidate);
   return result;
 }
 
+// Inspect a script's interpreter before spawning.  This catches the exec-time
+// failure that glibc/QEMU may otherwise report only as child exit status 127.
+static int script_interpreter_errno(const char *path, const char *cwd) {
+  char *open_path = NULL;
+  const char *resolved_path = path;
+  if (cwd != NULL && cwd[0] != '\0' && path[0] != '/') {
+    size_t cwd_len = strlen(cwd);
+    size_t path_len = strlen(path);
+    open_path = (char *)malloc(cwd_len + path_len + 2);
+    if (open_path == NULL) return ENOMEM;
+    memcpy(open_path, cwd, cwd_len);
+    open_path[cwd_len] = '/';
+    memcpy(open_path + cwd_len + 1, path, path_len + 1);
+    resolved_path = open_path;
+  }
+  struct stat info;
+  if (stat(resolved_path, &info) != 0) {
+    int error = errno;
+    free(open_path);
+    return error;
+  }
+  if (!S_ISREG(info.st_mode)) {
+    free(open_path);
+    return EACCES;
+  }
+  int fd = open(resolved_path, O_RDONLY);
+  free(open_path);
+  if (fd < 0) return 0;
+  char header[4096];
+  ssize_t n;
+  do {
+    n = read(fd, header, sizeof(header) - 1);
+  } while (n < 0 && errno == EINTR);
+  close(fd);
+  if (n < 2) return 0;
+  if (header[0] != '#' || header[1] != '!') return 0;
+  header[n] = '\0';
+  char *interpreter = header + 2;
+  while (*interpreter == ' ' || *interpreter == '\t') interpreter += 1;
+  char *end = interpreter;
+  while (*end != '\0' && *end != ' ' && *end != '\t' && *end != '\n' && *end != '\r') end += 1;
+  *end = '\0';
+  if (*interpreter == '\0') return ENOEXEC;
+  return executable_access(interpreter, cwd);
+}
+
 static int executable_errno(const char *program, char **env, const char *cwd) {
-  if (strchr(program, '/') != NULL) return executable_access(program, cwd);
+  if (strchr(program, '/') != NULL) {
+    int error = executable_access(program, cwd);
+    if (error != 0) return error;
+    // Keep this check in the parent: fork-after-threads would require strict
+    // async-signal-safe child code and would change the safety profile of the
+    // existing posix_spawn-based implementation.
+    return script_interpreter_errno(program, cwd);
+  }
 
   const char *path = environment_value(env, "PATH");
   if (path == NULL) path = "/bin:/usr/bin";
@@ -386,8 +440,9 @@ static int executable_errno(const char *program, char **env, const char *cwd) {
     memcpy(candidate + directory_len + separator_len, program, program_len + 1);
     int access_error = executable_access(candidate, cwd);
     if (access_error == 0) {
+      int interpreter_error = script_interpreter_errno(candidate, cwd);
       free(candidate);
-      return 0;
+      return interpreter_error;
     }
     if (access_error == EACCES) saved_errno = EACCES;
     free(candidate);
@@ -396,6 +451,7 @@ static int executable_errno(const char *program, char **env, const char *cwd) {
   }
   return saved_errno;
 }
+#endif
 
 static void close_fd(int *fd) {
   if (*fd >= 0) {
