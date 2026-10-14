@@ -338,6 +338,65 @@ static char **env_from_alist(ptr env) {
   return out;
 }
 
+static const char *environment_value(char **env, const char *name) {
+  size_t name_len = strlen(name);
+  for (char **entry = env; entry != NULL && *entry != NULL; entry += 1) {
+    if (strncmp(*entry, name, name_len) == 0 && (*entry)[name_len] == '=') {
+      return *entry + name_len + 1;
+    }
+  }
+  return NULL;
+}
+
+// Check the executable before spawning.  Some emulators report an exec failure
+// as a child exit status instead of returning the POSIX spawn error to the parent.
+static int executable_access(const char *path, const char *cwd) {
+  if (cwd == NULL || cwd[0] == '\0' || path[0] == '/') {
+    if (access(path, X_OK) == 0) return 0;
+    return errno == EACCES ? EACCES : ENOENT;
+  }
+  size_t cwd_len = strlen(cwd);
+  size_t path_len = strlen(path);
+  char *candidate = (char *)malloc(cwd_len + path_len + 2);
+  if (candidate == NULL) return ENOMEM;
+  memcpy(candidate, cwd, cwd_len);
+  candidate[cwd_len] = '/';
+  memcpy(candidate + cwd_len + 1, path, path_len + 1);
+  int result = access(candidate, X_OK) == 0 ? 0 : (errno == EACCES ? EACCES : ENOENT);
+  free(candidate);
+  return result;
+}
+
+static int executable_errno(const char *program, char **env, const char *cwd) {
+  if (strchr(program, '/') != NULL) return executable_access(program, cwd);
+
+  const char *path = environment_value(env, "PATH");
+  if (path == NULL) path = "/bin:/usr/bin";
+  int saved_errno = ENOENT;
+  const char *start = path;
+  for (;;) {
+    const char *end = strchr(start, ':');
+    size_t directory_len = end == NULL ? strlen(start) : (size_t)(end - start);
+    size_t program_len = strlen(program);
+    size_t separator_len = directory_len == 0 ? 0 : 1;
+    char *candidate = (char *)malloc(directory_len + separator_len + program_len + 1);
+    if (candidate == NULL) return ENOMEM;
+    memcpy(candidate, start, directory_len);
+    if (separator_len != 0) candidate[directory_len] = '/';
+    memcpy(candidate + directory_len + separator_len, program, program_len + 1);
+    int access_error = executable_access(candidate, cwd);
+    if (access_error == 0) {
+      free(candidate);
+      return 0;
+    }
+    if (access_error == EACCES) saved_errno = EACCES;
+    free(candidate);
+    if (end == NULL) break;
+    start = end + 1;
+  }
+  return saved_errno;
+}
+
 static void close_fd(int *fd) {
   if (*fd >= 0) {
     close(*fd);
@@ -642,6 +701,13 @@ ptr chezpp_spawn_capture(ptr argv, ptr env, const char *cwd,
     errno = EINVAL;
     return chezpp_errno_result("spawn-capture", Snil);
   }
+  int executable_error = executable_errno(cargv[0], cenv, cwd);
+  if (executable_error != 0) {
+    free_string_array(cargv);
+    if (cenv != environ) free_string_array(cenv);
+    errno = executable_error;
+    return chezpp_errno_result("spawn-capture", Snil);
+  }
 
   int stdin_pipe[2] = {-1, -1};
   int stdout_pipe[2] = {-1, -1};
@@ -753,6 +819,13 @@ ptr chezpp_spawn_process(ptr argv, ptr env, const char *cwd,
     free_string_array(cargv);
     if (cenv != environ) free_string_array(cenv);
     errno = EINVAL;
+    return chezpp_errno_result("spawn-process", Snil);
+  }
+  int executable_error = executable_errno(cargv[0], cenv, cwd);
+  if (executable_error != 0) {
+    free_string_array(cargv);
+    if (cenv != environ) free_string_array(cenv);
+    errno = executable_error;
     return chezpp_errno_result("spawn-process", Snil);
   }
 

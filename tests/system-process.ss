@@ -157,7 +157,18 @@
                                     ptr)
                  (list "definitely-not-a-chezpp-test-command") #f "" #f 0 0 0 0 0 -1)])
        (and (vector? raw)
-            (eq? 'errno (vector-ref raw 0)))))
+            (eq? 'errno (vector-ref raw 0))
+            (= 2 (vector-ref raw 2))))
+
+     ;; Error case: live spawning must report a missing executable as an error.
+     (guard (c [(system-error? c) #t] [else #f])
+       (spawn-process "definitely-not-a-chezpp-test-command" '() '())
+       #f)
+
+     (let ([status (run-process "/bin/sh" "-c" "exit 127"
+                     :stdin null :stdout null :stderr null)])
+       (and (eq? 'exit (process-exit-status-kind status))
+            (= 127 (process-exit-status-code status)))))
 
 ;; Error case: check variant should raise for nonzero exit status.
 (mat process-check-errors
