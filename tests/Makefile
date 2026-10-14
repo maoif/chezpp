@@ -99,6 +99,8 @@ $(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
+file.so: fswatcher-blocking-process.ss
+
 test.so: mat-requires-fixture.ss
 
 net-ftp.so: net-ftp-startup-process.ss

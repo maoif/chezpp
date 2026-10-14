@@ -24,9 +24,9 @@ ptr chezpp_touch(const char *path, ptr atime, ptr mtime, int follow_link);
 
 ptr chezpp_fswatcher_init(int block);
 ptr chezpp_fswatcher_close(int fsw);
-ptr chezpp_fswatcher_add(int fsw, const char *path, int mask);
+ptr chezpp_fswatcher_add(int fsw, const char *path, uint32_t mask);
 ptr chezpp_fswatcher_remove(int fsw, int id);
-ptr chezpp_fswatcher_next(int fsw);
+ptr chezpp_fswatcher_next(int fsw, int timeout_ms);
 uptr chezpp_fs_open_directory(const char *path);
 ptr chezpp_fs_read_directory(uptr directory);
 ptr chezpp_fs_close_directory(uptr directory);
@@ -199,7 +199,9 @@ ptr chezpp_touch(const char *path, ptr atime, ptr mtime, int follow_link) {
 }
 
 ptr chezpp_fswatcher_init(int block) {
-  int res = inotify_init1(IN_CLOEXEC | (block ? 0 : IN_NONBLOCK));
+  /* Waiting is handled by poll, including for watchers with blocking defaults. */
+  (void)block;
+  int res = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   if (res == -1) {
     return errno_str();
   }
@@ -215,7 +217,7 @@ ptr chezpp_fswatcher_close(int fsw) {
   return Strue;
 }
 
-ptr chezpp_fswatcher_add(int fsw, const char *path, int mask) {
+ptr chezpp_fswatcher_add(int fsw, const char *path, uint32_t mask) {
   char *p = expand_pathname(path);
   int fid = inotify_add_watch(fsw, p, mask);
   if (fid == -1) {
@@ -229,37 +231,88 @@ ptr chezpp_fswatcher_add(int fsw, const char *path, int mask) {
 }
 
 ptr chezpp_fswatcher_remove(int fsw, int fid) {
-  if (inotify_rm_watch(fsw, fid) == -1) {
+  /* Deletion and oneshot watches may already have queued IN_IGNORED. */
+  if (inotify_rm_watch(fsw, fid) == -1 && errno != EINVAL) {
     return errno_str();
   }
 
   return Strue;
 }
 
-ptr chezpp_fswatcher_next(int fsw) {
-  int len;
-  const struct inotify_event *event;
-  // just enough to read one event
-  char buf[sizeof(struct inotify_event) + NAME_MAX + 1]
-    __attribute__ ((aligned(__alignof__(struct inotify_event))));
-  memset(buf, 0, sizeof(buf));
+/* Use a monotonic deadline so EINTR does not restart the whole timeout. */
+static int fswatcher_remaining_ms(const struct timespec *deadline) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) return -1;
+  int64_t ns = ((int64_t)deadline->tv_sec - now.tv_sec) * INT64_C(1000000000)
+    + deadline->tv_nsec - now.tv_nsec;
+  if (ns <= 0) return 0;
+  return (int)((ns + 999999) / 1000000);
+}
 
-  len = read(fsw, buf, sizeof(buf));
-  if (len == -1 && errno != EAGAIN) {
+ptr chezpp_fswatcher_next(int fsw, int timeout_ms) {
+  char buf[65536] __attribute__ ((aligned(__alignof__(struct inotify_event))));
+  struct pollfd target = {fsw, POLLIN, 0};
+  struct timespec deadline;
+  ssize_t len = -1;
+  int saved_errno = 0;
+  int remaining = timeout_ms;
+
+  if (timeout_ms > 0) {
+    if (clock_gettime(CLOCK_MONOTONIC, &deadline) == -1) return errno_str();
+    deadline.tv_sec += timeout_ms / 1000;
+    deadline.tv_nsec += (timeout_ms % 1000) * 1000000L;
+    if (deadline.tv_nsec >= 1000000000L) {
+      deadline.tv_sec++;
+      deadline.tv_nsec -= 1000000000L;
+    }
+  }
+
+  /* Only native storage crosses the wait. An active foreign thread prevents
+   * collection and can deadlock the Scheme producer that must wake this read. */
+  Sdeactivate_thread();
+  for (;;) {
+    int ready = poll(&target, 1, remaining);
+    if (ready == 0) { len = 0; break; }
+    if (ready < 0) {
+      if (errno != EINTR) { saved_errno = errno; break; }
+    } else {
+      len = read(fsw, buf, sizeof(buf));
+      if (len >= 0) break;
+      if (errno != EINTR && errno != EAGAIN) { saved_errno = errno; break; }
+    }
+    if (timeout_ms >= 0) {
+      remaining = timeout_ms == 0 ? 0 : fswatcher_remaining_ms(&deadline);
+      if (remaining < 0) { saved_errno = errno; break; }
+      if (remaining == 0) { len = 0; break; }
+    }
+  }
+  Sactivate_thread();
+  if (saved_errno != 0) {
+    errno = saved_errno;
     return errno_str();
   }
-
-  // non-blocking with no events
   if (len <= 0) return Sfalse;
 
-  // TODO check for event queue overflow
-  event = (const struct inotify_event *)buf;
-  ptr v = Smake_vector(3, Sfalse);
-  Svector_set(v, 0, Sfixnum(event->wd));
-  Svector_set(v, 1, Sfixnum(event->mask));
-  if (event->len > 0) {
-    Svector_set(v, 2, Sstring(event->name));
+  /* A read can contain many variable-length records. Return the entire batch
+   * to Scheme, where unconsumed events remain attached to their watcher. */
+  size_t count = 0;
+  for (size_t offset = 0; offset < (size_t)len;) {
+    const struct inotify_event *event = (const struct inotify_event *)(buf + offset);
+    offset += sizeof(*event) + event->len;
+    count++;
   }
-
-  return v;
+  ptr batch = Smake_vector((iptr)count, Sfalse);
+  size_t index = 0;
+  for (size_t offset = 0; offset < (size_t)len;) {
+    const struct inotify_event *event = (const struct inotify_event *)(buf + offset);
+    ptr value = Smake_vector(3, Sfalse);
+    Svector_set(value, 0, Sfixnum(event->wd));
+    Svector_set(value, 1, Sunsigned32(event->mask));
+    if (event->len > 0) {
+      Svector_set(value, 2, Sstring_utf8(event->name, (iptr)strlen(event->name)));
+    }
+    Svector_set(batch, (iptr)index++, value);
+    offset += sizeof(*event) + event->len;
+  }
+  return batch;
 }

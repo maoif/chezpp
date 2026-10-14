@@ -1548,52 +1548,282 @@
             #t))
 
 
-(mat fswatcher
+(define $with-fswatcher-fixture
+  (case-lambda
+    [(proc) ($with-fswatcher-fixture #f proc)]
+    [(blocking? proc)
+     ($with-fs-fixture
+      (lambda (root)
+        (let ([watcher (make-fswatcher blocking?)])
+          (dynamic-wind
+            void
+            (lambda () (proc root watcher))
+            (lambda () (close-fswatcher watcher))))))]))
 
-     ;; nonblocking watcher should return #f when no event is available.
-     (let ([fsw (make-fswatcher #f)])
-       (dynamic-wind
-         void
-         (lambda ()
-           (not (fswatcher-next! fsw)))
-         (lambda () (close-fswatcher fsw))))
+(define $fswatcher-drain
+  (lambda (watcher)
+    (let ([out (make-list-builder)])
+      (let loop ([remaining 512])
+        (let ([event (fswatcher-next! watcher)])
+          (cond [(not event) (out)]
+                [(zero? remaining) #f]
+                [else (out event) (loop (fx1- remaining))]))))))
 
-     ;; file
-     (begin (define f1 ($random-file))
-            (define fsw1 (make-fswatcher))
-            (define t1)
-            (define RW
-              (lambda ()
-                (let loop ([n 10])
-                  (if (fx> n 0)
-                      (begin (write-datum>> f1 #\A)
-                             (milisleep 50)
-                             (loop (sub1 n)))
-                      (delete-file f1)))))
-            (set! t1 (fork-thread RW))
-            ;; make sure the file is created
-            (milisleep 20)
-            (fswatcher-add! fsw1 f1)
-            (define Next!
-              (lambda ()
-                (let loop ([n 20])
-                  (when (fx> n 0)
-                    (let ([res (fswatcher-next! fsw1)])
-                      (let ([mask (vector-ref res 1)])
-                        (if (flag-any-set? (fswatcher-mask FSW_delete_self) mask)
-                            #t
-                            (and (string=? f1 (vector-ref res 0)) (loop (sub1 n))))))))))
-            #t)
-     (Next!)
-     (begin (thread-join t1)
-            (close-fswatcher fsw1)
-            #t)
+(define $fswatcher-event?
+  (lambda (event path mask name)
+    (and (vector? event)
+         (= 3 (vector-length event))
+         (equal? path (vector-ref event 0))
+         (flag-all-set? mask (vector-ref event 1))
+         (equal? name (vector-ref event 2)))))
 
+(mat fswatcher-empty
+     ($with-fswatcher-fixture
+      (lambda (root watcher) (not (fswatcher-next! watcher)))))
 
+(mat fswatcher-batch
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (fswatcher-add! watcher root (fswatcher-mask FSW_create))
+        (let ([names (map (lambda (index) (format "batch~a" index)) (iota 30))])
+          (for-each (lambda (name) (file-touch (path-build root name))) names)
+          (let ([events ($fswatcher-drain watcher)])
+            (and events
+                 (= (length events) (length names))
+                 (equal? names (map (lambda (event) (vector-ref event 2)) events))
+                 (andmap (lambda (event)
+                           ($fswatcher-event? event root (fswatcher-mask FSW_create)
+                                              (vector-ref event 2)))
+                         events)))))))
 
-     ;; files
+(mat fswatcher-multiple-batches
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (fswatcher-add! watcher root (fswatcher-mask FSW_create))
+        ;; These distinct names produce over 64 KiB of events before any read.
+        (let ([names (map (lambda (index)
+                            (string-append (make-string 250 #\x) (format "~a" index)))
+                          (iota 260))])
+          (for-each (lambda (name) (file-touch (path-build root name))) names)
+          (let ([events ($fswatcher-drain watcher)])
+            (and events
+                 (equal? names (map (lambda (event) (vector-ref event 2)) events))))))))
 
+(mat fswatcher-directory-names
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (fswatcher-add! watcher root (fswatcher-mask FSW_create FSW_delete))
+        (let ([name (string (integer->char 233) (integer->char #x4e2d) #\. #\t)]
+              [long-name (make-string 255 #\x)])
+          (file-touch (path-build root name))
+          (and ($fswatcher-event? (fswatcher-next! watcher) root
+                                 (fswatcher-mask FSW_create) name)
+               (begin (file-touch (path-build root long-name)) #t)
+               ($fswatcher-event? (fswatcher-next! watcher) root
+                                 (fswatcher-mask FSW_create) long-name)
+               (begin (mkdir (path-build root "child")) #t)
+               ($fswatcher-event? (fswatcher-next! watcher) root
+                                 (fswatcher-mask FSW_create FSW_isdir) "child")
+               (begin (delete-file (path-build root name)) #t)
+               ($fswatcher-event? (fswatcher-next! watcher) root
+                                 (fswatcher-mask FSW_delete) name))))))
 
+(mat fswatcher-default-masks
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (let ([path (path-build root "top.txt")])
+          (fswatcher-add! watcher path)
+          (write-datum>> path 'change)
+          (delete-file path)
+          (let ([events ($fswatcher-drain watcher)])
+            (and events
+                 (andmap (lambda (event) (equal? path (vector-ref event 0))) events)
+                 (andmap (lambda (mask)
+                           (ormap (lambda (event) (flag-all-set? mask (vector-ref event 1)))
+                                  events))
+                         (list (fswatcher-mask FSW_open) (fswatcher-mask FSW_modify)
+                               (fswatcher-mask FSW_close_write)
+                               (fswatcher-mask FSW_delete_self)
+                               (fswatcher-mask FSW_ignored))))))))
 
-     ;; dir
-     )
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (fswatcher-add! watcher root)
+        (file-touch (path-build root "child.txt"))
+        (file-touch (path-build root "sub/deeper.txt"))
+        (let ([events ($fswatcher-drain watcher)])
+          (and events
+               (ormap (lambda (event)
+                        ($fswatcher-event? event root (fswatcher-mask FSW_create) "child.txt"))
+                      events)
+               ;; Watching a directory must not recurse into its existing subdirectories.
+               (not (ormap (lambda (event) (equal? "deeper.txt" (vector-ref event 2)))
+                           events)))))))
+
+(mat fswatcher-files-and-aliases
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (let* ([first (path-build root "top.txt")]
+               [second (path-build root "sub/nested.txt")]
+               [alias (path-build root "alias")])
+          (file-link first alias)
+          (fswatcher-add! watcher first (fswatcher-mask FSW_modify))
+          (fswatcher-add! watcher alias (fswatcher-mask FSW_modify))
+          (fswatcher-add! watcher second (fswatcher-mask FSW_modify))
+          (write-datum>> alias 'first)
+          (write-datum>> second 'second)
+          (let ([events ($fswatcher-drain watcher)])
+            (and events (= 2 (length events))
+                 ($fswatcher-event? (car events) first (fswatcher-mask FSW_modify) #f)
+                 ($fswatcher-event? (cadr events) second (fswatcher-mask FSW_modify) #f)))))))
+
+(mat fswatcher-remove-queued
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (let ([path (path-build root "top.txt")])
+          (fswatcher-add! watcher path (fswatcher-mask FSW_modify))
+          (write-datum>> path 'before-removal)
+          (fswatcher-remove! watcher path)
+          (write-datum>> path 'after-removal)
+          (let ([events ($fswatcher-drain watcher)])
+            (and events (= 2 (length events))
+                 ($fswatcher-event? (car events) path (fswatcher-mask FSW_modify) #f)
+                 ($fswatcher-event? (cadr events) path (fswatcher-mask FSW_ignored) #f)))))))
+
+(mat fswatcher-remove-pending
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (fswatcher-add! watcher root (fswatcher-mask FSW_create))
+        (file-touch (path-build root "first"))
+        (file-touch (path-build root "second"))
+        (and ($fswatcher-event? (fswatcher-next! watcher) root
+                               (fswatcher-mask FSW_create) "first")
+             (begin (fswatcher-remove! watcher root) #t)
+             ;; Error case: explicit removal cannot be repeated before ignored is consumed.
+             (guard (failure [(fswatcher-error? failure) #t] [else #f])
+               (fswatcher-remove! watcher root) #f)
+             (begin (file-touch (path-build root "unwatched")) #t)
+             ($fswatcher-event? (fswatcher-next! watcher) root
+                                (fswatcher-mask FSW_create) "second")
+             ($fswatcher-event? (fswatcher-next! watcher) root
+                                (fswatcher-mask FSW_ignored) #f)
+             (not (fswatcher-next! watcher))))))
+
+(mat fswatcher-automatic-removal
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (let ([path (path-build root "top.txt")])
+          (fswatcher-add! watcher path (fswatcher-mask FSW_delete_self))
+          (delete-file path)
+          ;; Removal must accept a watch already removed by the kernel, before ignored is read.
+          (fswatcher-remove! watcher path)
+          (let ([events ($fswatcher-drain watcher)])
+            (and events (= 2 (length events))
+                 ($fswatcher-event? (car events) path (fswatcher-mask FSW_delete_self) #f)
+                 ($fswatcher-event? (cadr events) path (fswatcher-mask FSW_ignored) #f)
+                 ;; Error case: ignored retires the path, so a later remove must fail.
+                 (guard (failure [(fswatcher-error? failure) #t] [else #f])
+                   (fswatcher-remove! watcher path)
+                   #f))))))
+
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (let ([path (path-build root "top.txt")])
+          (fswatcher-add! watcher path (fswatcher-mask FSW_modify FSW_oneshot))
+          (write-datum>> path 'once)
+          (let ([events ($fswatcher-drain watcher)])
+            (and events (= 2 (length events))
+                 ($fswatcher-event? (car events) path (fswatcher-mask FSW_modify) #f)
+                 ($fswatcher-event? (cadr events) path (fswatcher-mask FSW_ignored) #f)
+                 (begin (fswatcher-add! watcher path (fswatcher-mask FSW_modify)) #t)
+                 (begin (write-datum>> path 'again) #t)
+                 ($fswatcher-event? (fswatcher-next! watcher) path
+                                    (fswatcher-mask FSW_modify) #f)))))))
+
+(mat fswatcher-dangling-link
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (let ([path (path-build root "dangling")])
+          (file-symlink "missing" path)
+          (fswatcher-add! watcher path (fswatcher-mask FSW_dont_follow FSW_delete_self))
+          (delete-file path)
+          (let ([events ($fswatcher-drain watcher)])
+            (and events (= 2 (length events))
+                 ($fswatcher-event? (car events) path (fswatcher-mask FSW_delete_self) #f)
+                 ($fswatcher-event? (cadr events) path (fswatcher-mask FSW_ignored) #f)))))))
+
+(mat fswatcher-timeout
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (let* ([start (current-time 'time-monotonic)]
+               [event (fswatcher-next! watcher 40)]
+               [elapsed (time-difference (current-time 'time-monotonic) start)])
+          (and (not event)
+               (>= (+ (* (time-second elapsed) 1000000000) (time-nanosecond elapsed))
+                   30000000)))))
+
+     ;; Explicit zero timeout must also return immediately on a blocking watcher.
+     (guard (failure [else #f])
+       ($with-fs-fixture
+        (lambda (root)
+          (let ([result (capture-process "../chez++" "--script" "fswatcher-blocking-process.ss"
+                         (string-append root) "zero-timeout" :timeout 30000 :stdout capture :stderr capture)])
+            (and (process-exit-success? (process-result-status result))
+                 (string=? "" (process-result-stdout result))
+                 (string=? "" (process-result-stderr result)))))))
+
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (fswatcher-add! watcher root (fswatcher-mask FSW_create))
+        (file-touch (path-build root "ready"))
+        ($fswatcher-event? (fswatcher-next! watcher 1000) root
+                           (fswatcher-mask FSW_create) "ready"))))
+
+(mat fswatcher-errors
+     ;; Error case: unknown paths cannot be removed.
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (guard (failure [(fswatcher-error? failure) #t] [else #f])
+          (fswatcher-remove! watcher "unknown")
+          #f)))
+
+     ;; Error cases: invalid masks, timeouts, and missing paths must be rejected.
+     ($with-fswatcher-fixture
+      (lambda (root watcher)
+        (and (guard (failure [else #t]) (fswatcher-add! watcher root -1) #f)
+             (guard (failure [else #t]) (fswatcher-add! watcher root #x100000000) #f)
+             (guard (failure [else #t]) (fswatcher-next! watcher -1) #f)
+             (guard (failure [else #t]) (fswatcher-next! watcher #x80000000) #f)
+             (guard (failure [else #t])
+               (fswatcher-add! watcher (path-build root "missing")) #f))))
+
+     ;; Error cases: closed watchers reject add, remove, next, and a second close.
+     (let ([watcher (make-fswatcher #f)])
+       (close-fswatcher watcher)
+       (and (guard (failure [else #t]) (fswatcher-add! watcher ".") #f)
+            (guard (failure [else #t]) (fswatcher-remove! watcher ".") #f)
+            (guard (failure [else #t]) (fswatcher-next! watcher) #f)
+            (guard (failure [else #t]) (close-fswatcher watcher) #f))))
+
+(mat fswatcher-blocking-timeout
+     ;; A child deadline catches accidental infinite waits for positive blocking timeouts.
+     (guard (failure [else #f])
+       ($with-fs-fixture
+        (lambda (root)
+          (let ([result (capture-process "../chez++" "--script" "fswatcher-blocking-process.ss"
+                         (string-append root) "finite-timeout"
+                         :timeout 30000 :stdout capture :stderr capture)])
+            (and (process-exit-success? (process-result-status result))
+                 (string=? "" (process-result-stdout result))
+                 (string=? "" (process-result-stderr result))))))))
+
+(mat fswatcher-blocking-gc
+     ;; Run the blocking/GC regression in a child so a deadlock cannot hang the suite.
+     (guard (failure [else #f])
+       ($with-fs-fixture
+        (lambda (root)
+          (let ([result (capture-process "../chez++" "--script" "fswatcher-blocking-process.ss"
+                         (string-append root) :timeout 30000 :stdout capture :stderr capture)])
+            (and (process-exit-success? (process-result-status result))
+                 (string=? "" (process-result-stdout result))
+                 (string=? "" (process-result-stderr result))))))))
