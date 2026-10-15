@@ -483,6 +483,17 @@
           (set! seconds #t)))
        (and milliseconds seconds)))
 
+(mat fiber-sleep-event-wrapper-result
+     (equal? '(wrapped selected)
+             (run-fibers
+              (lambda ()
+                (list
+                 (event-sync
+                  (event-wrap (milisleep-event 1) (lambda (ignored) 'wrapped)))
+                 (event-sync
+                  (event-wrap (event-select (event-never) (milisleep-event 1))
+                              (lambda (ignored) 'selected))))))))
+
 (mat fiber-zero-sleep-is-immediate
      (let ([done #f])
        (run-fibers
@@ -520,13 +531,27 @@
                 (and (channel-get done) (loop (sub1 remaining)))))))))
 
 (mat fiber-sleep-shutdown-cleans-timers
-     (begin
+     (let ([registered (make-channel)] [completed (abox #f)])
        (run-fibers
         (lambda ()
-          (spawn-fiber (lambda () (fiber-sleep 60)))
+          (spawn-fiber
+           (lambda ()
+             (channel-put! registered #t)
+             ;; Yield after publishing the attempt so the scheduler can install the
+             ;; timer registration before the init fiber requests shutdown.
+             (fiber-yield)
+             (fiber-sleep 60)
+             (abox-set! completed #t)))
+          ;; Wait until the child has entered its timer event before shutdown.
+          (channel-get registered)
+          (let loop ([remaining 100])
+            (unless (zero? remaining)
+              (fiber-yield)
+              (loop (sub1 remaining))))
           'stopped))
        ;; Negative case: an abandoned timer must not affect a later context.
-       (eq? 'reused (run-fibers (lambda () 'reused)))))
+       (and (not (unabox completed))
+            (eq? 'reused (run-fibers (lambda () 'reused))))))
 
 (mat fiber-with-timer-off-restores-on-error
      (let ([caught #f] [restored #f])

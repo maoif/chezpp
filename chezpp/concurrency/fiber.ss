@@ -1073,7 +1073,9 @@
                 [timer #f])
            (set! timer (make-fiber-timer
                         deadline transaction
-                        (lambda () (commit-sync-transaction! transaction (lambda () (void))))))
+                        ;; Resume through the event protocol callback so wrappers and
+                        ;; selections apply their result transformation before wakeup.
+                        (lambda () (resume (lambda () (void))))))
            ;; Cleanup runs under event-protocol and may briefly acquire park.
            (add-sync-cleanup!
             transaction
@@ -1101,8 +1103,8 @@
       (pcheck ([natural? t])
         (make-timer-event
          (make-time 'time-duration
-                    (if (fx>= t 1000) (fx* (fxmod t 1000) 1000000) (fx* t 1000000))
-                    (if (fx>= t 1000) (fx/ t 1000) 0))))))
+                    (* (modulo t 1000) 1000000)
+                    (quotient t 1000))))))
 
   #|proc:sleep-event
   The `sleep-event` procedure returns an event that completes after at least `t` seconds.
