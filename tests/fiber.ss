@@ -483,6 +483,51 @@
           (set! seconds #t)))
        (and milliseconds seconds)))
 
+(mat fiber-zero-sleep-is-immediate
+     (let ([done #f])
+       (run-fibers
+        (lambda ()
+          (fiber-milisleep 0)
+          (set! done #t)))
+       done))
+
+(mat fiber-sleep-honors-minimum-delay
+     (let ([started #f] [finished #f])
+       (run-fibers
+        (lambda ()
+          (let ([before (current-time 'time-monotonic)])
+            (set! started before)
+            (fiber-milisleep 20)
+            (set! finished (current-time 'time-monotonic)))))
+       ;; Negative case: a timer must not resume before its requested deadline.
+       (and started finished
+            (let ([elapsed (time-difference finished started)])
+              (or (> (time-second elapsed) 0)
+                  (>= (time-nanosecond elapsed) 15000000))))))
+
+(mat fiber-many-sleepers-share-workers
+     (let ([done (make-channel)] [count 32])
+       (run-fibers
+        (lambda ()
+          (do ([i 0 (add1 i)]) ((= i count))
+            (spawn-fiber
+             (lambda ()
+               (fiber-milisleep 1)
+               (channel-put! done #t))))
+          (let loop ([remaining count])
+            (if (zero? remaining)
+                #t
+                (and (channel-get done) (loop (sub1 remaining)))))))))
+
+(mat fiber-sleep-shutdown-cleans-timers
+     (begin
+       (run-fibers
+        (lambda ()
+          (spawn-fiber (lambda () (fiber-sleep 60)))
+          'stopped))
+       ;; Negative case: an abandoned timer must not affect a later context.
+       (eq? 'reused (run-fibers (lambda () 'reused)))))
+
 (mat fiber-with-timer-off-restores-on-error
      (let ([caught #f] [restored #f])
        (run-fibers

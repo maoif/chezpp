@@ -64,7 +64,8 @@
             (mutable terminal-error)
             park-mutex park-condition
             (mutable runnable-count)
-            (mutable transactions)))
+            (mutable transactions)
+            (mutable timers)))
 
   (define-record-type scheduler
     (fields i context rq rq-lock (mutable running?) (mutable thread) (mutable k)))
@@ -185,6 +186,53 @@
                    (or (get-task-locked! (vector-ref schedulers i))
                        (loop (fx1+ i)))))))))
 
+  (define time-duration-expired?
+    (lambda (duration)
+      (let ([seconds (time-second duration)]
+            [nanoseconds (time-nanosecond duration)])
+        (or (< seconds 0)
+            (and (= seconds 0) (<= nanoseconds 0))))))
+
+  (define-record-type fiber-timer
+    (fields deadline transaction resume))
+
+  ;; The timer list is ordered by absolute monotonic deadline. The caller holds park.
+  (define timer-before?
+    (lambda (left right)
+      (time-duration-expired?
+       (time-difference (fiber-timer-deadline left) (fiber-timer-deadline right)))))
+
+  (define insert-timer-locked!
+    (lambda (context timer)
+      (let loop ([before '()] [rest (fiber-run-context-timers context)])
+        (if (or (null? rest) (timer-before? timer (car rest)))
+            (fiber-run-context-timers-set!
+             context (append (reverse before) (cons timer rest)))
+            (loop (cons (car rest) before) (cdr rest))))))
+
+  (define remove-timer-locked!
+    (lambda (context timer)
+      (fiber-run-context-timers-set!
+       context (remq timer (fiber-run-context-timers context)))))
+
+  (define expire-timers-locked!
+    (lambda (context now)
+      (let loop ([rest (fiber-run-context-timers context)] [expired '()])
+        (if (and (pair? rest)
+                 (time-duration-expired?
+                  (time-difference (fiber-timer-deadline (car rest)) now)))
+            (loop (cdr rest) (cons (car rest) expired))
+            (begin
+              (fiber-run-context-timers-set! context rest)
+              (reverse expired))))))
+
+  ;; Expiry commits only after park is released; event protocol is acquired by caller.
+  (define commit-expired-timers!
+    (lambda (expired)
+      (unless (null? expired)
+        (with-event-protocol
+          (for-each (lambda (timer) ((fiber-timer-resume timer))) expired)))))
+
   (define await-task!
     (lambda (sched)
       (let* ([context (scheduler-context sched)]
@@ -194,18 +242,33 @@
         (let loop ()
           (cond
            [(context-stopped? context) (mutex-release mutex) #f]
-           [(fx> (fiber-run-context-runnable-count context) 0)
-            (let ([task (get-or-steal-task-locked! sched)])
-              (assert task)
-              (fiber-run-context-runnable-count-set!
-               context (fx1- (fiber-run-context-runnable-count context)))
-              (mutex-release mutex)
-              task)]
            [else
-            ;; condition-wait releases this mutex atomically and reacquires it once.
-            ;; Every wake rechecks both shutdown and runnable work; no spinlock is held.
-            (condition-wait condition mutex)
-            (loop)])))))
+            (let ([expired (expire-timers-locked! context (current-time 'time-monotonic))])
+              (if (pair? expired)
+                  (begin
+                    (mutex-release mutex)
+                    (commit-expired-timers! expired)
+                    (mutex-acquire mutex)
+                    (loop))
+                  (if (fx> (fiber-run-context-runnable-count context) 0)
+                       (let ([task (get-or-steal-task-locked! sched)])
+                         (assert task)
+                         (fiber-run-context-runnable-count-set!
+                          context (fx1- (fiber-run-context-runnable-count context)))
+                         (mutex-release mutex)
+                         task)
+                       (let ([timers (fiber-run-context-timers context)])
+                         ;; condition-wait releases this mutex atomically and reacquires it once.
+                         ;; Every wake rechecks shutdown, timers, and runnable work.
+                         (if (null? timers)
+                             (condition-wait condition mutex)
+                             (let ([duration
+                                    (time-difference
+                                     (fiber-timer-deadline (car timers))
+                                     (current-time 'time-monotonic))])
+                               (unless (time-duration-expired? duration)
+                                 (condition-wait condition mutex duration))))
+                         (loop)))))])))))
 
   (define continue-task
     (lambda (task thunk)
@@ -313,7 +376,7 @@
             (let* ([context (make-fiber-run-context
                              #f (abox #f) (list (void)) #f #f
                              (make-mutex 'fiber-run-context)
-                             (make-condition 'fiber-run-condition) 0 '())]
+                             (make-condition 'fiber-run-condition) 0 '() '())]
                    [schedulers
                     (list->vector
                      (map (lambda (i)
@@ -996,49 +1059,75 @@
 ;;;; time ops
 
 
-  (define-who time-event
-    (lambda ()
-      (todo)))
+  (define make-timer-event
+    (lambda (duration)
+      (make-base-event
+       #f
+       (lambda ()
+         (if (time-duration-expired? duration)
+             (lambda () (void))
+             #f))
+       (lambda (transaction resume)
+         (let* ([context (sync-transaction-context transaction)]
+                [deadline (add-duration (current-time 'time-monotonic) duration)]
+                [timer #f])
+           (set! timer (make-fiber-timer
+                        deadline transaction
+                        (lambda () (commit-sync-transaction! transaction (lambda () (void))))))
+           ;; Cleanup runs under event-protocol and may briefly acquire park.
+           (add-sync-cleanup!
+            transaction
+            (lambda ()
+              (let ([mutex (fiber-run-context-park-mutex context)])
+                (mutex-acquire mutex)
+                (remove-timer-locked! context timer)
+                (mutex-release mutex))))
+           (let ([mutex (fiber-run-context-park-mutex context)])
+             (mutex-acquire mutex)
+             (if (sync-transaction-live? transaction)
+                 (begin
+                   (insert-timer-locked! context timer)
+                   ;; Wake a worker if this became the earliest deadline.
+                   (condition-signal (fiber-run-context-park-condition context)))
+                 (void))
+             (mutex-release mutex)))))))
 
-  #|doc
-  Construct a first-class event that when synchronized,
-  will make the current fiber sleep at least `t` miliseconds.
+  #|proc:milisleep-event
+  The `milisleep-event` procedure returns an event that completes after at least `t`
+  milliseconds. `t` is a natural number and zero completes immediately.
   |#
   (define-who milisleep-event
     (lambda (t)
       (pcheck ([natural? t])
-              (define try-fn (lambda () #f))
-              (define block-fn
-                (lambda (my-flag resume)
-                  (todo)))
-              (make-base-event #f try-fn block-fn))))
+        (make-timer-event
+         (make-time 'time-duration
+                    (if (fx>= t 1000) (fx* (fxmod t 1000) 1000000) (fx* t 1000000))
+                    (if (fx>= t 1000) (fx/ t 1000) 0))))))
 
-  #|doc
-  Construct a first-class event that when synchronized,
-  will make the current fiber sleep at least `t` seconds.
+  #|proc:sleep-event
+  The `sleep-event` procedure returns an event that completes after at least `t` seconds.
+  `t` is a natural number and zero completes immediately.
   |#
   (define-who sleep-event
     (lambda (t)
       (pcheck ([natural? t])
-              (define try-fn (lambda () #f))
-              (define block-fn
-                (lambda (my-flag resume)
-                  (todo)))
-              (make-base-event #f try-fn block-fn))))
+        (make-timer-event (make-time 'time-duration 0 t)))))
 
-  #|doc
-  Make the current fiber sleep at least `t` miliseconds.
+  #|proc:fiber-milisleep
+  The `fiber-milisleep` procedure suspends the current fiber for at least `t` milliseconds.
+  `t` is a natural number; the return value is unspecified.
   |#
   (define-who fiber-milisleep
     (lambda (t)
-      (event-sync (sleep-event t))))
+      (pcheck ([natural? t]) (event-sync (milisleep-event t)))))
 
-  #|doc
-  Make the current fiber sleep at least `t` seconds.
+  #|proc:fiber-sleep
+  The `fiber-sleep` procedure suspends the current fiber for at least `t` seconds.
+  `t` is a natural number; the return value is unspecified.
   |#
   (define-who fiber-sleep
     (lambda (t)
-      (event-sync (sleep-event t))))
+      (pcheck ([natural? t]) (event-sync (sleep-event t)))))
 
 
 
