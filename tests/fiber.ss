@@ -151,7 +151,7 @@
 (mat fiber-cvar-no-lost-wakeup
      (let ([mutex (make-fiber-mutex)] [cvar (make-fiber-cvar)]
            [ready (make-channel)] [finished (make-channel)]
-           [iterations 8] [count 0] [timed-out #f])
+           [iterations 10000] [count 0])
        (let ((result
               (run-fibers
                (lambda ()
@@ -175,34 +175,197 @@
                         (fiber-cvar-signal cvar)
                         (fiber-mutex-release mutex)
                         (loop (add1 i))))))
-                 ;; Bound the wait so a lost cvar wakeup fails this case promptly.
-                 (event-sync
-                  (event-select
-                   (channel-get-event finished)
-                   (event-wrap (milisleep-event 100)
-                               (lambda (_) 'timeout))))))))
-         (set! timed-out (eq? result 'timeout))
-         (and (not timed-out) (= count iterations)))))
+                 (spawn-fiber
+                  (lambda ()
+                    ;; Negative case: a lost wakeup must fail without depending on fiber timers.
+                    (let loop ([remaining 1000000])
+                      (unless (zero? remaining) (fiber-yield) (loop (sub1 remaining))))
+                    (channel-put! finished 'timeout)))
+                 (channel-get finished)))))
+         (and (eq? result #t) (= count iterations)))))
 
-(mat fiber-mutex-owner-and-unwind
-     (let ([mutex (make-fiber-mutex)] [foreign-error #f] [released #f])
+(mat fiber-mutex-rejects-foreign-release
+     (let ([mutex (make-fiber-mutex)] [outcome (make-channel)])
        (run-fibers
         (lambda ()
           (fiber-mutex-acquire mutex)
           (spawn-fiber
            (lambda ()
              ;; Negative case: a foreign fiber must not release this mutex.
-             (set! foreign-error
-                   (guard (condition [else #t]) (fiber-mutex-release mutex) #f))))
-          (fiber-yield)
-          (fiber-mutex-release mutex)
-          (guard (condition [else #t])
-            (with-fiber-mutex mutex (error 'fiber-mutex "unwind"))
-            #f)
-          (fiber-mutex-acquire mutex)
-          (set! released #t)
-          (fiber-mutex-release mutex)))
-       (and foreign-error released)))
+             (channel-put! outcome
+               (guard (condition
+                       [else (and (who-condition? condition)
+                                  (eq? 'fiber-mutex-release (condition-who condition)))])
+                 (fiber-mutex-release mutex)
+                 #f))))
+          ;; The owner keeps the mutex until the foreign release has actually been attempted.
+          (let ([rejected (channel-get outcome)])
+            (when rejected (fiber-mutex-release mutex))
+            rejected)))))
+
+(mat fiber-mutex-unwind-releases-to-peer
+     (let ([mutex (make-fiber-mutex)] [done (make-channel)]
+           [original (condition (make-error) (make-message-condition "mutex unwind"))])
+       (run-fibers
+        (lambda ()
+          ;; Negative case: an exception after yielding must release exactly once.
+          (let ([caught (guard (condition [else condition])
+                          (with-fiber-mutex mutex (fiber-yield) (raise original))
+                          #f)])
+            (spawn-fiber
+             (lambda ()
+               (with-fiber-mutex mutex (void))
+               (channel-put! done 'released)))
+            (spawn-fiber
+             (lambda ()
+               (let loop ([remaining 100000])
+                 (unless (zero? remaining) (fiber-yield) (loop (sub1 remaining))))
+               (channel-put! done 'timeout)))
+            (and (eq? caught original) (eq? 'released (channel-get done))))))))
+
+(mat fiber-mutex-yield-preserves-ownership
+     (let ([mutex (make-fiber-mutex)] [attempted (make-channel)] [done (make-channel)]
+           [entered (abox #f)])
+       (run-fibers
+        (lambda ()
+          (let ([retained
+                 (with-fiber-mutex mutex
+                   (spawn-fiber
+                    (lambda ()
+                      (channel-put! attempted #t)
+                      (with-fiber-mutex mutex (abox-set! entered #t))
+                      (channel-put! done #t)))
+                   (channel-get attempted)
+                   ;; Negative case: yielding inside the scope must not unlock its mutex.
+                   (let loop ([remaining 1000])
+                     (unless (zero? remaining) (fiber-yield) (loop (sub1 remaining))))
+                   (not (unabox entered)))])
+            (and retained (channel-get done) (unabox entered)))))))
+
+(mat fiber-mutex-scope-preserves-multiple-values
+     (let ([mutex (make-fiber-mutex)])
+       (equal? '(left right)
+               (run-fibers
+                (lambda ()
+                  (let ([result
+                         (call-with-values
+                          (lambda ()
+                            (with-fiber-mutex mutex (fiber-yield) (values 'left 'right)))
+                          list)])
+                    ;; A normal scope exit must release before another acquisition.
+                    (with-fiber-mutex mutex result)))))))
+
+(mat fiber-cvar-wait-requires-mutex-owner
+     (let ([mutex (make-fiber-mutex)] [cvar (make-fiber-cvar)])
+       (run-fibers
+        (lambda ()
+          ;; Negative case: waiting without ownership must raise on the calling fiber.
+          (guard (condition
+                  [else (and (who-condition? condition)
+                             (eq? 'fiber-cvar-wait (condition-who condition)))])
+            (fiber-cvar-wait cvar mutex)
+            #f)))))
+
+(mat fiber-cvar-broadcast-wakes-predicate-waiters
+     (let ([mutex (make-fiber-mutex)] [cvar (make-fiber-cvar)]
+           [ready (make-channel)] [done (make-channel)] [open? #f])
+       (run-fibers
+        (lambda ()
+          (do ([index 0 (add1 index)]) ((= index 4))
+            (spawn-fiber
+             (lambda ()
+               (with-fiber-mutex mutex
+                 (channel-put! ready #t)
+                 (let wait ()
+                   (unless open? (fiber-cvar-wait cvar mutex) (wait))))
+               (channel-put! done #t))))
+          (spawn-fiber
+           (lambda ()
+             ;; Negative case: a broadcast must not strand any of the registered waiters.
+             (let loop ([remaining 100000])
+               (unless (zero? remaining) (fiber-yield) (loop (sub1 remaining))))
+             (channel-put! done #f)))
+          (do ([index 0 (add1 index)]) ((= index 4)) (channel-get ready))
+          ;; Acquiring proves the final child has registered its wait and released the mutex.
+          (with-fiber-mutex mutex
+            (set! open? #t)
+            (fiber-cvar-broadcast cvar))
+          (let loop ([remaining 4])
+            (or (zero? remaining)
+                (and (channel-get done) (loop (sub1 remaining)))))))))
+
+(mat fiber-mutex-shutdown-discards-waiter
+     (let ([mutex (make-fiber-mutex)] [held (make-channel)] [attempted (make-channel)]
+           [release (make-channel)] [released (make-channel)] [done (make-channel)])
+       (equal? '#(owner reused)
+               (run-threads 0
+                (lambda ()
+                  (run-fibers
+                   (lambda ()
+                     (fiber-mutex-acquire mutex)
+                     (channel-put! held #t)
+                     (channel-get release)
+                     (fiber-mutex-release mutex)
+                     (channel-put! released #t)
+                     'owner)))
+                (lambda ()
+                  (run-fibers
+                   (lambda ()
+                     (channel-get held)
+                     (spawn-fiber
+                      (lambda ()
+                        (channel-put! attempted #t)
+                        (with-fiber-mutex mutex (void))))
+                     (channel-get attempted)
+                     (let loop ([remaining 1000])
+                       (unless (zero? remaining) (fiber-yield) (loop (sub1 remaining))))))
+                  (run-fibers
+                   (lambda ()
+                     (channel-put! release #t)
+                     (channel-get released)
+                     (spawn-fiber
+                      (lambda ()
+                        (with-fiber-mutex mutex (void))
+                        (channel-put! done 'reused)))
+                     (spawn-fiber
+                      (lambda ()
+                        ;; Negative case: a canceled waiter must never receive ownership.
+                        (let loop ([remaining 100000])
+                          (unless (zero? remaining) (fiber-yield) (loop (sub1 remaining))))
+                        (channel-put! done 'timeout)))
+                     (channel-get done))))))))
+
+(mat fiber-cvar-shutdown-discards-waiter
+     (let ([mutex (make-fiber-mutex)] [cvar (make-fiber-cvar)]
+           [ready (make-channel)] [done (make-channel)])
+       (run-fibers
+        (lambda ()
+          (spawn-fiber
+           (lambda ()
+             (with-fiber-mutex mutex
+               (channel-put! ready #t)
+               (fiber-cvar-wait cvar mutex))))
+          (channel-get ready)
+          ;; The child is registered once this acquisition succeeds.
+          (with-fiber-mutex mutex (void))))
+       (eq? 'reused
+            (run-fibers
+             (lambda ()
+               (spawn-fiber
+                (lambda ()
+                  (with-fiber-mutex mutex
+                    (channel-put! ready #t)
+                    (fiber-cvar-wait cvar mutex))
+                  (channel-put! done 'reused)))
+               (spawn-fiber
+                (lambda ()
+                  ;; Negative case: a stale cvar waiter must not consume the fresh signal.
+                  (let loop ([remaining 100000])
+                    (unless (zero? remaining) (fiber-yield) (loop (sub1 remaining))))
+                  (channel-put! done 'timeout)))
+               (channel-get ready)
+               (with-fiber-mutex mutex (fiber-cvar-signal cvar))
+               (channel-get done))))))
 
 (mat fiber-select-cleans-losing-registrations
      (let ([unused (make-channel)] [active (make-channel)] [done (make-channel)]

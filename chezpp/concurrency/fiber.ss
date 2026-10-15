@@ -722,36 +722,10 @@
   (define make-channel
     (lambda () (pcheck () (%make-channel (make-dlist) (make-dlist)))))
 
-  (define $locked-enqueue!
-    (lambda (Q lock v)
-      (with-timer-off
-       (spinlock-acquire lock)
-       (enqueue! Q v)
-       (spinlock-release lock))))
-
-  (define $locked-dequeue!
-    (lambda (Q lock)
-      (with-timer-off
-       (spinlock-acquire lock)
-       (let ([v (dequeue! Q)])
-         (spinlock-release lock)
-         v))))
-
-  (define $locked-drain-queue!
-    (lambda (Q lock)
-      (with-timer-off
-       (spinlock-acquire lock)
-       (let ([v* (dlist->list Q)])
-         (dlist-clear! Q)
-         (spinlock-release lock)
-         v*))))
-
-
-
-  ;; Channel queues are guarded by event-protocol-mutex, not a queue spinlock.
-  ;; Consequently matching two transactions, unlinking losers, and publishing both
-  ;; continuations is one atomic protocol operation even across separate run contexts.
-  (define channel-take-waiter!
+  ;; Channel, mutex, and cvar queues share #(transaction resume payload) entries.
+  ;; Their caller holds event-protocol-mutex while taking or registering a waiter.
+  ;; Exclude the calling transaction when matching opposite channel branches.
+  (define take-sync-waiter!
     (lambda (queue transaction)
       (let loop ()
         (let ([index (dlist-find-index queue
@@ -761,7 +735,7 @@
                  (dlist-delete! queue index)
                  (if (sync-transaction-live? (vector-ref item 0)) item (loop))))))))
 
-  (define channel-register!
+  (define register-sync-waiter!
     (lambda (queue transaction resume message)
       (let ([item (vector transaction resume message)])
         (add-sync-cleanup!
@@ -780,18 +754,18 @@
       (pcheck ([channel? channel])
         (define try
           (lambda ()
-            (let ([item (channel-take-waiter! (channel-putQ channel) #f)])
+            (let ([item (take-sync-waiter! (channel-putQ channel) #f)])
               (and item
                    (begin ((vector-ref item 1) void)
                           (let ([message (vector-ref item 2)]) (lambda () message)))))))
         (define block
           (lambda (transaction resume)
-            (let ([item (channel-take-waiter! (channel-putQ channel) transaction)])
+            (let ([item (take-sync-waiter! (channel-putQ channel) transaction)])
               (if item
                   (begin
                     ((vector-ref item 1) void)
                     (resume (let ([message (vector-ref item 2)]) (lambda () message))))
-                  (channel-register! (channel-getQ channel) transaction resume #f)))))
+                  (register-sync-waiter! (channel-getQ channel) transaction resume #f)))))
         (make-base-event #f try block))))
 
   #|proc:channel-put-event
@@ -804,15 +778,15 @@
       (pcheck ([channel? channel])
         (define try
           (lambda ()
-            (let ([item (channel-take-waiter! (channel-getQ channel) #f)])
+            (let ([item (take-sync-waiter! (channel-getQ channel) #f)])
               (and item
                    (begin ((vector-ref item 1) (lambda () message)) void)))))
         (define block
           (lambda (transaction resume)
-            (let ([item (channel-take-waiter! (channel-getQ channel) transaction)])
+            (let ([item (take-sync-waiter! (channel-getQ channel) transaction)])
               (if item
                   (begin ((vector-ref item 1) (lambda () message)) (resume void))
-                  (channel-register! (channel-putQ channel) transaction resume message)))))
+                  (register-sync-waiter! (channel-putQ channel) transaction resume message)))))
         (make-base-event #f try block))))
 
   (define get-operation channel-get-event)
@@ -858,149 +832,137 @@
       ($channel-put! who ch m)))
 
 
-
 
-  (define-record-type fiber-mutex
-    (fields
-     (immutable name)
-     ;; abox
-     (immutable flag)
-     ;; dlist
-     (immutable blockQ)
-     ;; spinlock
-     (immutable blockQ-lock))
-    (protocol (lambda (new)
-                (rec f
-                  (case-lambda
-                    [() (f 'fiber-mutex)]
-                    [(name)
-                     (new name (abox #f) (dlist) (make-spinlock 'fiber-mutex-Q-lock))])))))
+;;;;===----------------------------------------------------------------------===
+;;;; Fiber mutexes and condition variables
+;;;;===----------------------------------------------------------------------===
 
+  ;; Ownership and both wait queues are guarded by event-protocol-mutex. Tokens are
+  ;; stable across continuation migration; OS thread identity does not own a mutex.
+  (define-record-type (fiber-mutex %make-fiber-mutex fiber-mutex?)
+    (fields name (mutable owner) blockQ))
 
-  (define-record-type fiber-cvar
-    (fields
-     (immutable name)
-     ;; dlist
-     (immutable waitQ)
-     ;; spinlock
-     (immutable waitQ-lock))
-    (protocol (lambda (new)
-                (rec f
-                  (case-lambda
-                    [() (f 'fiber-cvar)]
-                    [(name) (new name (dlist) (make-spinlock 'fiber-cvar-Q-lock))])))))
+  (define-record-type (fiber-cvar %make-fiber-cvar fiber-cvar?)
+    (fields name waitQ))
 
+  #|proc:make-fiber-mutex
+  The `make-fiber-mutex` procedure returns a new, initially unlocked fiber mutex.
+  The optional `name` parameter is any object used as a diagnostic label; its default is
+  the symbol `fiber-mutex`. Mutex ownership belongs to a fiber and survives yielding.
+  |#
+  (define make-fiber-mutex
+    (case-lambda
+      [() (make-fiber-mutex 'fiber-mutex)]
+      [(name) (pcheck () (%make-fiber-mutex name #f (make-dlist)))]))
 
-  #|doc
-  Acquire the fiber-mutex.
-  If the fiber-mutex is currently held by another fiber,
-  the current fiber blocks until the fiber-mutex can be acquired.
+  #|proc:make-fiber-cvar
+  The `make-fiber-cvar` procedure returns a new fiber condition variable with no waiters.
+  The optional `name` parameter is any object used as a diagnostic label; its default is
+  the symbol `fiber-cvar`. A condition variable retains no signal when no fiber is waiting.
+  |#
+  (define make-fiber-cvar
+    (case-lambda
+      [() (make-fiber-cvar 'fiber-cvar)]
+      [(name) (pcheck () (%make-fiber-cvar name (make-dlist)))]))
+
+  (define require-fiber-token
+    (lambda (who)
+      (unless (and current-scheduler current-fiber-task)
+        (errorf who "not running a fiber"))
+      (fiber-task-token current-fiber-task)))
+
+  ;; The caller holds event-protocol-mutex for ownership validation and transfer.
+  (define check-fiber-mutex-owner!
+    (lambda (who mutex token)
+      (unless (eq? token (fiber-mutex-owner mutex))
+        (errorf who "fiber does not own fiber-mutex ~a" (fiber-mutex-name mutex)))))
+
+  (define release-fiber-mutex-locked!
+    (lambda (who mutex token)
+      (check-fiber-mutex-owner! who mutex token)
+      (let ([waiter (take-sync-waiter! (fiber-mutex-blockQ mutex) #f)])
+        (if waiter
+            (begin
+              ;; Transfer before publication, so another acquisition cannot barge in.
+              (fiber-mutex-owner-set! mutex (vector-ref waiter 2))
+              ((vector-ref waiter 1) void))
+            (fiber-mutex-owner-set! mutex #f)))
+      (void)))
+
+  #|proc:fiber-mutex-acquire
+  The `fiber-mutex-acquire` procedure acquires fiber mutex `mutex` for the current fiber.
+  If it is already held, the fiber waits without blocking its scheduler worker. Acquisition
+  is not recursive. It returns an unspecified value after becoming the owner.
   |#
   (define-who fiber-mutex-acquire
-    (lambda (mtx)
-      (event-sync (fiber-mutex-acquire-event mtx))))
+    (lambda (mutex)
+      (pcheck ([fiber-mutex? mutex])
+        (let ([token (require-fiber-token who)])
+          (event-sync
+           (make-base-event
+            #f
+            (lambda ()
+              (and (not (fiber-mutex-owner mutex))
+                   (begin (fiber-mutex-owner-set! mutex token) void)))
+            (lambda (transaction resume)
+              (register-sync-waiter! (fiber-mutex-blockQ mutex)
+                                     transaction resume token))))))))
 
-  #|doc
-  Release the fiber-mutex.
-  An error is raised if the current fiber does not already hold the fiber-mutex.
+  #|proc:fiber-mutex-release
+  The `fiber-mutex-release` procedure releases fiber mutex `mutex`, transferring ownership
+  to a waiting fiber if one exists. It raises an error unless the current fiber owns `mutex`.
+  It returns an unspecified value.
   |#
   (define-who fiber-mutex-release
-    (lambda (mtx)
-      (event-sync (fiber-mutex-release-event mtx))))
+    (lambda (mutex)
+      (pcheck ([fiber-mutex? mutex])
+        (let ([token (require-fiber-token who)])
+          (with-event-protocol (release-fiber-mutex-locked! who mutex token))))))
 
-  (define-who fiber-cvar-wait
-    (lambda (cvar mtx)
-      (event-sync (fiber-cvar-wait-event cvar mtx))))
-
-
-  (define-who fiber-mutex-acquire-event
-    (lambda (mtx)
-      (pcheck ([fiber-mutex? mtx])
-              (let ([lock        (fiber-mutex-flag   mtx)]
-                    [blockQ      (fiber-mutex-blockQ mtx)]
-                    [blockQ-lock (fiber-mutex-blockQ-lock mtx)])
-                (define try-fn
-                  (lambda ()
-                    #;
-                    (with-spinlock blockQ-lock
-                    (printf "acq: ~a~n" (dlist-size blockQ)))
-                    (if (abox-cas! lock #f #t)
-                        ;; locked
-                        #f
-                        ;; fail
-                        void)))
-                (define block-fn
-                  (lambda (my-flag resume)
-                    ($locked-enqueue! blockQ blockQ-lock resume)))
-                (make-base-event #f try-fn block-fn)))))
-
-
-  (define-who fiber-mutex-release-event
-    (lambda (mtx)
-      (pcheck ([fiber-mutex? mtx])
-              (let ([lock        (fiber-mutex-flag   mtx)]
-                    [blockQ      (fiber-mutex-blockQ mtx)]
-                    [blockQ-lock (fiber-mutex-blockQ-lock mtx)])
-                (define try-fn
-                  (lambda ()
-                    (if (unabox lock)
-                        ;; good, wake up one fiber
-                        (let ([resume-task ($locked-dequeue! blockQ blockQ-lock)])
-                          (if resume-task
-                              ;; TODO return what?
-                              (resume-task void)
-                              (abox-set! lock #f))
-                          void)
-                        ;; not holding the lock
-                        (errorf 'who "fiber does not own fiber-mutex ~a" (fiber-mutex-name mtx)))))
-                (define block-fn (lambda (my-flag resume) (assert-unreachable)))
-                (make-base-event #f try-fn block-fn)))))
-
-
+  #|macro:with-fiber-mutex
+  The `with-fiber-mutex` macro evaluates `mutex` once, acquires that fiber mutex, and evaluates
+  `expression ...` while owning it. Yielding preserves ownership. Normal return releases the
+  mutex and returns all expression values; an exception releases it and raises the same object.
+  |#
   (define-syntax with-fiber-mutex
     (syntax-rules ()
-      [(_ m e ...)
-       (let ([mtx m])
-         (fiber-mutex-acquire mtx)
-         (let ([v (begin e ...)])
-           (fiber-mutex-release mtx)
-           v))]))
+      [(_ mutex expression ...)
+       (let ([held-mutex mutex])
+         (fiber-mutex-acquire held-mutex)
+         (call-with-values
+          (lambda ()
+            ;; A continuation yield must not run a dynamic-wind exit/entry cleanup.
+            (guard (condition
+                    [else (fiber-mutex-release held-mutex) (raise condition)])
+              expression ...))
+          (lambda results
+            (fiber-mutex-release held-mutex)
+            (apply values results))))]))
 
-
-  ;; note: this is different from the cvar in PCML and Guile fiber,
-  ;; where no mutex is needed, so there's no mutual exclusion.
-  (define-who fiber-cvar-wait-event
-    (lambda (cvar mtx)
-      ;; (println who)
-      (pcheck ([fiber-cvar? cvar] [fiber-mutex? mtx])
-              (let ([waitQ       (fiber-cvar-waitQ cvar)]
-                    [waitQ-lock  (fiber-cvar-waitQ-lock cvar)]
-                    [lock        (fiber-mutex-flag   mtx)]
-                    [blockQ      (fiber-mutex-blockQ mtx)]
-                    [blockQ-lock (fiber-mutex-blockQ-lock mtx)])
-                (define try-fn
-                  (lambda ()
-                    #;
-                    (with-spinlock waitQ-lock
-                    (printf "wait: ~a~n" (dlist-size waitQ)))
-                    (if (unabox lock)
-                        ;; "release" the lock
-                        (let ([resume-task ($locked-dequeue! blockQ blockQ-lock)])
-                          (if resume-task
-                              (resume-task void)
-                              (abox-set! lock #f))
-                          ;; go to block-fn
-                          #f)
-                        ;; not holding the lock
-                        (errorf 'who "fiber does not own fiber-mutex ~a" (fiber-mutex-name mtx)))))
-                (define block-fn
-                  (lambda (my-flag resume)
-                    (define resume1 (lambda ()
-                                      ;; reacquire the mtx when woken up,
-                                      ;; which may fail
-                                      (resume (lambda () (fiber-mutex-acquire mtx)))))
-                    ($locked-enqueue! waitQ waitQ-lock resume1)))
-                (make-base-event #f try-fn block-fn)))))
+  #|proc:fiber-cvar-wait
+  The `fiber-cvar-wait` procedure waits on condition variable `cvar` with fiber mutex `mutex`.
+  The current fiber must own `mutex`. Waiting registers the fiber and releases the mutex
+  atomically. A signal or broadcast wakes the fiber, which reacquires `mutex` before returning
+  an unspecified value. Callers should recheck their protected predicate after every wakeup.
+  |#
+  (define-who fiber-cvar-wait
+    (lambda (cvar mutex)
+      (pcheck ([fiber-cvar? cvar] [fiber-mutex? mutex])
+        (let ([token (require-fiber-token who)])
+          ;; Report invalid ownership on the calling fiber, where its guard can catch it.
+          (with-event-protocol (check-fiber-mutex-owner! who mutex token))
+          (event-sync
+           (make-base-event
+            #f (lambda () #f)
+            (lambda (transaction resume)
+              ;; Publish before unlocking, under the same protocol used by signal/broadcast.
+              (register-sync-waiter!
+               (fiber-cvar-waitQ cvar) transaction
+               (lambda (ignored)
+                 ;; Reacquisition executes on the resumed fiber, outside the protocol mutex.
+                 (resume (lambda () (fiber-mutex-acquire mutex))))
+               #f)
+              (release-fiber-mutex-locked! who mutex token))))))))
 
   #|proc:fiber-cvar-signal
   The `fiber-cvar-signal` procedure wakes one fiber waiting on condition variable `cvar`, if any.
@@ -1009,12 +971,10 @@
   (define-who fiber-cvar-signal
     (lambda (cvar)
       (pcheck ([fiber-cvar? cvar])
-              (let ([waitQ       (fiber-cvar-waitQ cvar)]
-                    [waitQ-lock  (fiber-cvar-waitQ-lock cvar)])
-                (let ([resume ($locked-dequeue! waitQ waitQ-lock)])
-                  (if resume
-                      (with-event-protocol (resume))
-                      ))))))
+        (with-event-protocol
+          (let ([waiter (take-sync-waiter! (fiber-cvar-waitQ cvar) #f)])
+            (when waiter ((vector-ref waiter 1) void)))
+          (void)))))
 
   #|proc:fiber-cvar-broadcast
   The `fiber-cvar-broadcast` procedure wakes every fiber waiting on condition variable `cvar`.
@@ -1022,13 +982,14 @@
   |#
   (define-who fiber-cvar-broadcast
     (lambda (cvar)
-      ;; (println who)
       (pcheck ([fiber-cvar? cvar])
-              (let ([waitQ       (fiber-cvar-waitQ cvar)]
-                    [waitQ-lock  (fiber-cvar-waitQ-lock cvar)])
-                (let ([resumes ($locked-drain-queue! waitQ waitQ-lock)])
-                  (with-event-protocol
-                   (for-each (lambda (x) (x)) resumes)))))))
+        (with-event-protocol
+          (let loop ()
+            (let ([waiter (take-sync-waiter! (fiber-cvar-waitQ cvar) #f)])
+              (when waiter
+                ((vector-ref waiter 1) void)
+                (loop))))
+          (void)))))
 
 
 
