@@ -611,8 +611,22 @@
                                    (commit-sync-transaction! transaction (wrap-result base thunk))
                                    (poll (fx1+ index))))))))))))))))))
 
+  #|proc:wrap-operation
+  Alias of `event-wrap`. Accepts an event and a procedure receiving its synchronization values.
+  Returns a new event whose synchronization returns the procedure's result values.
+  |#
   (define wrap-operation event-wrap)
+
+  #|proc:choice-operation
+  Alias of `event-select`. Accepts zero or more events and returns an event choosing one of them.
+  No arguments returns a disabled event.
+  |#
   (define choice-operation event-select)
+
+  #|proc:perform-operation
+  Alias of `event-sync`. Accepts an event and returns its synchronization values after waiting
+  for it to become ready and applying its wrappers.
+  |#
   (define perform-operation event-sync)
 
   ;;;;===----------------------------------------------------------------------===
@@ -852,7 +866,16 @@
                   (register-sync-waiter! (channel-putQ channel) transaction resume message)))))
         (make-base-event #f try block))))
 
+  #|proc:get-operation
+  Alias of `channel-get-event`. Accepts a channel and returns an event whose synchronization
+  receives and returns a message from that channel.
+  |#
   (define get-operation channel-get-event)
+
+  #|proc:put-operation
+  Alias of `channel-put-event`. Accepts a channel and any message, and returns an event sending
+  that message. Its synchronization waits for a receiver and returns an unspecified value.
+  |#
   (define put-operation channel-put-event)
 
 
