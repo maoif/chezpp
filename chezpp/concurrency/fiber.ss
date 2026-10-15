@@ -17,7 +17,8 @@
 
           make-fiber-cvar fiber-cvar-wait fiber-cvar-signal fiber-cvar-broadcast
 
-          with-timer-off with-fiber-mutex)
+          with-timer-off with-fiber-mutex
+          milisleep-event sleep-event fiber-milisleep fiber-sleep)
   (import (chezpp chez)
           (chezpp utils)
           (chezpp dlist)
