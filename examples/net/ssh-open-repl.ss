@@ -1,5 +1,6 @@
 (import (chezpp))
 
+(load "examples/common.ss")
 (load "examples/net/net-example-common.ss")
 
 (define parse-ssh-open-repl-arguments
@@ -90,6 +91,11 @@ The `ssh-open-repl` procedure opens an authenticated interactive shell on
           (lambda ()
             (ssh-close session)))))))
 
-(let-values ([(host port user auth-kind auth-arg)
-              (parse-ssh-open-repl-arguments (command-line-arguments))])
-  (ssh-open-repl host port user auth-kind auth-arg))
+(let ([arg* (command-line-arguments)])
+  (when (or (member "--help" arg*) (member "-h" arg*))
+    (display "ssh-open-repl: open an interactive authenticated remote shell\n")
+    (display "  arguments: host port user auth-kind [passphrase-or-password]\n")
+    (exit 0))
+  (let-values ([(host port user auth-kind auth-arg)
+                (parse-ssh-open-repl-arguments arg*)])
+    (ssh-open-repl host port user auth-kind auth-arg)))
