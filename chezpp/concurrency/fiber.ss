@@ -38,321 +38,305 @@
 
 
   (define *default-ticks* 3000)
-  ;; vector of all schedulers
-  (define *scheds* #f)
 
-  ;; even non-fiber threads will inherit a copy of these
+  ;; Chez continuations migrate between OS threads, but thread parameters do not.
+  ;; Set both parameters before invoking every fresh or resumed task.
   (define-threaded current-scheduler #f)
-  (define-threaded *timer* (timer-interrupt-handler))
-  (define-threaded *preemption-count* 0)
-
+  (define-threaded current-fiber-task #f)
 
   (define enqueue!
-    (lambda (Q v)
-      (dlist-add! Q v)))
-
+    (lambda (queue value)
+      (dlist-add! queue value)))
 
   (define dequeue!
-    (lambda (Q)
-      ;; (printf "remaining ~a tasks~n" (dlist-size Q))
-      (if (dlist-empty? Q)
+    (lambda (queue)
+      (if (dlist-empty? queue)
           #f
-          (let ([v (dlist-ref Q 0)])
-            (dlist-delete! Q 0)
-            v))))
+          (let ([value (dlist-ref queue 0)])
+            (dlist-delete! queue 0)
+            value))))
 
+  (define-record-type fiber-run-context
+    (fields (mutable schedulers)
+            stop-flag
+            (mutable init-values)
+            (mutable terminal-error)
+            park-mutex park-condition
+            (mutable runnable-count)))
 
   (define-record-type scheduler
-    (fields i (mutable running?)
-            rq
-            ;; spinlock
-            rq-lock
-            (mutable thread)
-            (mutable k)))
+    (fields i context rq rq-lock (mutable running?) (mutable thread) (mutable k)))
 
+  ;; A resumed continuation has the same token and init status as its original task.
+  (define-record-type fiber-task
+    (fields token init? thunk))
 
-  #|doc
-  Evaluate the expression e, ... with timed preemption turned off.
-  Timed preemption is turn on again after the expression are evaluated.
-  The value of `with-timer-off` is the value of the last expression in e, ...
+  (define context-stopped?
+    (lambda (context)
+      (unabox (fiber-run-context-stop-flag context))))
+
+  (define scheduler-return
+    (lambda (type value)
+      ;; Never return to the scheduler captured on the continuation's source thread.
+      ((scheduler-k current-scheduler) type value)))
+
+  (define request-context-stop!
+    (lambda (context error)
+      (let ([mutex (fiber-run-context-park-mutex context)])
+        (mutex-acquire mutex)
+        (unless (context-stopped? context)
+          (when error
+            (fiber-run-context-terminal-error-set! context error))
+          (abox-set! (fiber-run-context-stop-flag context) #t))
+        (condition-broadcast (fiber-run-context-park-condition context))
+        (mutex-release mutex))))
+
+  #|macro:with-timer-off
+  Evaluate expressions `expression ...` with instruction-count preemption disabled. Restore
+  the previous timer on normal return or an exception, and return all expression values.
   |#
   (define-syntax with-timer-off
     (syntax-rules ()
-      [(_ e ...)
-       ;; Must write nested let because the evaluation order of rhs in the
-       ;; same let is NOT left to right.
-       (let ([t (set-timer 0)])
-         (let ([v (begin e ...)])
-           (set-timer t)
-           v))]))
+      [(_ expression ...)
+       (let ([previous-timer (set-timer 0)])
+         (call-with-values
+          (lambda ()
+            ;; Exception cleanup avoids dynamic-wind exit/entry on an ordinary fiber yield.
+            (guard (condition
+                    [else (set-timer previous-timer) (raise condition)])
+              (begin expression ...)))
+          (lambda results
+            (set-timer previous-timer)
+            (apply values results))))]))
 
-
-  ;; TODO other things to worry about?
-  #|doc
-  Terminate the execution of the current fiber.
+  #|proc:fiber-quit
+  The `fiber-quit` procedure terminates the current fiber without returning. When the init
+  fiber quits, its entire run context stops and `run-fibers` returns an unspecified value.
+  A child fiber quitting lets its init fiber and siblings continue.
   |#
   (define-who fiber-quit
     (lambda ()
-      (unless current-scheduler
-        (errorf who "not running scheduler"))
-      ;; TODO restore timer handler?
-      ;; TODO restore *sched-k*?
-      (set-timer 0)
-      ;; RET
-      ((scheduler-k current-scheduler) 'quit #f)))
+      (pcheck ()
+        (unless current-scheduler
+          (errorf who "not running scheduler"))
+        (set-timer 0)
+        (when (fiber-task-init? current-fiber-task)
+          (request-context-stop! (scheduler-context current-scheduler) #f))
+        (scheduler-return 'quit #f))))
 
-  #|doc
-  Yield control of the current fiber,
-  which will be run some time later.
+  #|proc:fiber-yield
+  The `fiber-yield` procedure suspends the current fiber and requeues it to run later.
+  When the fiber resumes, it returns an unspecified value.
   |#
   (define-who fiber-yield
     (lambda ()
-      (unless current-scheduler
-        (errorf who "not running scheduler"))
-      (call/cc
-       (lambda (k)
-         (set-timer 0)
-         ;; RET
-         ((scheduler-k current-scheduler) 'yield k)))))
-
-
-  (define get-task!
-    (case-lambda
-      [()
-       (get-task! current-scheduler)]
-      [(sched)
-       (assert (= 0 (set-timer 0)))
-       (let ([lock (scheduler-rq-lock sched)])
-         (spinlock-acquire lock)
-         (let ([task (dequeue! (scheduler-rq sched))])
-           (spinlock-release lock)
-           task))]))
-
+      (pcheck ()
+        (unless current-scheduler
+          (errorf who "not running scheduler"))
+        (set-timer 0)
+        ;; The yielded continuation is resumed at most once.
+        (call/1cc (lambda (resume) (scheduler-return 'yield resume))))))
 
   (define put-task!
     (case-lambda
-      [(t)
-       (put-task! current-scheduler t)]
+      [(task) (put-task! current-scheduler task)]
       [(sched task)
        (assert (= 0 (set-timer 0)))
-       (assert (scheduler-running? sched))
-       (let ([lock (scheduler-rq-lock sched)])
-         (spinlock-acquire lock)
-         (enqueue! (scheduler-rq sched) task)
-         (spinlock-release lock))]))
+       (let* ([context (scheduler-context sched)]
+              [mutex (fiber-run-context-park-mutex context)])
+         ;; Publication and the park predicate use one mutex, always before queue locks.
+         (mutex-acquire mutex)
+         (unless (context-stopped? context)
+           (let ([lock (scheduler-rq-lock sched)])
+             (spinlock-acquire lock)
+             (enqueue! (scheduler-rq sched) task)
+             (spinlock-release lock))
+           (fiber-run-context-runnable-count-set!
+            context (fx1+ (fiber-run-context-runnable-count context)))
+           (condition-signal (fiber-run-context-park-condition context)))
+         (mutex-release mutex))]))
 
-
-  (define-who get-or-steal-task!
+  ;; The caller holds the context park mutex throughout queue inspection and removal.
+  (define get-task-locked!
     (lambda (sched)
-      (assert (= 0 (set-timer 0)))
-      ;; (println who)
-      (let* ([rq (scheduler-rq sched)]
-             [task (get-task!)])
-        (if task task
-            (begin
-              ;;(println "steal task")
-              (get-task! (random-sched)))))))
+      (let ([lock (scheduler-rq-lock sched)])
+        (spinlock-acquire lock)
+        (let ([task (dequeue! (scheduler-rq sched))])
+          (spinlock-release lock)
+          task))))
 
+  (define get-or-steal-task-locked!
+    (lambda (sched)
+      (or (get-task-locked! sched)
+          (let* ([schedulers (fiber-run-context-schedulers (scheduler-context sched))]
+                 [count (vector-length schedulers)])
+            (let loop ([i 0])
+              (and (fx< i count)
+                   (or (get-task-locked! (vector-ref schedulers i))
+                       (loop (fx1+ i)))))))))
 
-  (define-who run-scheduler
-    (lambda (sched quit?)
-      ;; (printf "running scheduler ~a~n" (scheduler-i sched))
-      (let loop ([i 0] [j 0])
-        ;; quit? returns #t when the main init thunk is finished
-        ;;(printf "[~a] ~a~n" (scheduler-i sched) 'sched-loop)
-        ;; (when (and (> i 0) (= 0 (modulo i #e1e5)))
-        ;;   (printf "[~a] loop ~a times~n" (scheduler-i sched) i))
-        (if (quit? (scheduler-i sched))
-            (begin
-              #;
-              (printf "[~a] sched quit (remaining tasks: ~a)~n"
-              (scheduler-i sched) (dlist-size (scheduler-rq sched)))
-              ;; (printf "[~a] sched quit~n" (scheduler-i sched))
-              (void))
-            (let lp ([j j])
-              ;; (printf "[~a] ~a~n" (scheduler-i sched) 'sched-lp)
-              ;; (when (and (> j 0) (= 0 (modulo j #e1e5)))
-              ;;   (printf "[~a] lp ~a times~n" (scheduler-i sched) j))
-              (let ([task (get-or-steal-task! sched)])
-                (if task
-                    (let-values ([(type val0)
-                                  (call/cc
-                                   (lambda (return)
-                                     ;; save
-                                     (set! *timer* (timer-interrupt-handler))
-                                     (timer-interrupt-handler
-                                      (lambda ()
-                                        ;; When timer interrupt occurs, capture the cont. of the task
-                                        ;; and return to scheduler.
-                                        (call/cc
-                                         (lambda (resume-k)
-                                           (set-timer 0)
-                                           ;; RET
-                                           (return 'time resume-k)))))
-                                     (scheduler-k-set! current-scheduler return)
+  (define await-task!
+    (lambda (sched)
+      (let* ([context (scheduler-context sched)]
+             [mutex (fiber-run-context-park-mutex context)]
+             [condition (fiber-run-context-park-condition context)])
+        (mutex-acquire mutex)
+        (let loop ()
+          (cond
+           [(context-stopped? context) (mutex-release mutex) #f]
+           [(fx> (fiber-run-context-runnable-count context) 0)
+            (let ([task (get-or-steal-task-locked! sched)])
+              (assert task)
+              (fiber-run-context-runnable-count-set!
+               context (fx1- (fiber-run-context-runnable-count context)))
+              (mutex-release mutex)
+              task)]
+           [else
+            ;; condition-wait releases this mutex atomically and reacquires it once.
+            ;; Every wake rechecks both shutdown and runnable work; no spinlock is held.
+            (condition-wait condition mutex)
+            (loop)])))))
+
+  (define continue-task
+    (lambda (task thunk)
+      (make-fiber-task (fiber-task-token task) (fiber-task-init? task) thunk)))
+
+  (define run-scheduler
+    (lambda (sched)
+      (let ([original-handler (timer-interrupt-handler)]
+            [context (scheduler-context sched)])
+        (set-timer 0)
+        (let loop ()
+          (let ([task (await-task! sched)])
+            (when task
+              (unless (context-stopped? context)
+                (set! current-fiber-task task)
+                (let-values ([(type value)
+                              ;; Each scheduler escape is invoked exactly once.
+                              (call/1cc
+                               (lambda (return)
+                                 (scheduler-k-set! sched return)
+                                 (timer-interrupt-handler
+                                  (lambda ()
+                                    (set-timer 0)
+                                    ;; The interrupted continuation is resumed once.
+                                    (call/1cc
+                                     (lambda (resume)
+                                       (scheduler-return 'time resume)))))
+                                 (with-exception-handler
+                                     (lambda (condition)
+                                       (set-timer 0)
+                                       (scheduler-return 'error condition))
+                                   (lambda ()
                                      (set-timer *default-ticks*)
-                                     (task)
-                                     ;; Reach here only if `task` is a function.
-                                     ;; restore, necessary?
-                                     ;; (set! *sched-k* #f)
-                                     (timer-interrupt-handler *timer*)
-                                     ;; disable the timer here in case the scheduler code gets interrupted
+                                     ((fiber-task-thunk task))
                                      (set-timer 0)
-                                     ;; Always return to the current thread's scheduler.
-                                     ;; If this task is created in and stolen from other threads,
-                                     ;; naively returning will cause the current thread to
-                                     ;; run the scheduler in other threads.
-                                     (return 'complete #f)))])
-                      (assert (= 0 (set-timer 0)))
-                      (case type
-                        [complete
-                         (lp (fx1+ j))]
-                        [quit
-                         ;;(printf "sched task quit~n")
-                         (lp (fx1+ j))]
-                        ;; enqueue the task to be run later
-                        [yield
-                         (put-task! val0)
-                         (lp (fx1+ j))]
-                        ;; enqueue the task to be run later
-                        [time
-                         (put-task! val0)
-                         (lp (fx1+ j))]
-                        [callback
-                         (val0)
-                         (lp (fx1+ j))]
-                        [error
-                         (printf "sched task error: ~a~n" val0)
-                         (lp (fx1+ j))]
-                        [else (errorf who "unknown fiber return type: ~a" type)]))
-                    ;; Is sleeping a good way to avoid busy looping?
-                    (begin (nanosleep #e1e4) (loop (fx1+ i) j)))))))))
+                                     (scheduler-return 'complete #f)))))])
+                  (set-timer 0)
+                  (timer-interrupt-handler original-handler)
+                  (set! current-fiber-task #f)
+                  (unless (context-stopped? context)
+                    (case type
+                      [(yield time)
+                       (put-task! sched (continue-task task (lambda () (value (void)))))]
+                      [(callback)
+                       ;; Registration executes on the scheduler, with preemption disabled.
+                       ;; Keep task identity visible for event registration and ownership.
+                       (set! current-fiber-task task)
+                       (guard (condition
+                               [else (request-context-stop! context condition)])
+                         (value))
+                       (set! current-fiber-task #f)]
+                      [(error) (request-context-stop! context value)]
+                      [else (void)]))))
+              (loop))))
+        (set-timer 0)
+        (timer-interrupt-handler original-handler)
+        (scheduler-k-set! sched #f))))
 
-
-  ;; TODO maybe move this into scheduler
   (define wrap-thunk
-    (lambda (t)
-      (lambda ()
-        (with-exception-handler
-            (lambda (con)
-              ;; RET
-              (set-timer 0)
-              ((scheduler-k current-scheduler) 'error (format "msg: ~a, irritants: ~a"
-                                                              (condition-message con) (condition-irritants con))))
-          (lambda ()
-            (t)
+    (lambda (context init? thunk)
+      (make-fiber-task
+       (cons 'fiber-task '()) init?
+       (lambda ()
+         (call-with-values
+          thunk
+          (lambda results
             (set-timer 0)
-            ;; RET
-            ;; Always return to the current thread's scheduler.
-            ;; If this task is created in and stolen from other threads,
-            ;; naive returning will cause the current thread to
-            ;; run the scheduler in other threads, or, in the case where the orginal
-            ;; thread has terminated, we'll return to stale foreign context.
-            ((scheduler-k current-scheduler) 'complete 'task-complete))))))
+            (when init?
+              (fiber-run-context-init-values-set! context results)
+              (request-context-stop! context #f))
+            ;; This boundary also handles completion after continuation migration.
+            (scheduler-return 'complete #f)))))))
 
+  (define random-sched
+    (lambda (context)
+      (let* ([schedulers (fiber-run-context-schedulers context)]
+             [count (vector-length schedulers)])
+        (vector-ref schedulers (fxmod (random 99999) count)))))
 
-  (define-who random-sched
-    (lambda ()
-      (unless current-scheduler
-        (errorf who "not running scheduler"))
-      (let* ([len (vector-length *scheds*)] [i (fxmod (random 99999) len)])
-        ;; TOOD a better way to randomly select scheds?
-        (let loop ([i i])
-          (let ([sched (vector-ref *scheds* i)])
-            (if (scheduler-running? sched)
-                sched
-                (loop (fxmod (fx1+ i) len))))))))
-
-
-  #|doc
-  Run the thunk `th` in a new fiber.
+  #|proc:spawn-fiber
+  The `spawn-fiber` procedure schedules `thunk`, a zero-argument procedure, as a child fiber
+  in the current run context. Its result is discarded. Returns an unspecified value.
   |#
   (define-who spawn-fiber
-    (lambda (th)
-      (unless current-scheduler
-        (errorf who "not running scheduler"))
-      ;; disable timer here
-      ;; Otherwise when timer int. occurs and we are holding the mutex,
-      ;; and when the next fiber also tries to hold the mutex, we have deadlock.
-      (with-timer-off
-       ;; randomly choose sched in spawn-fiber
-       (put-task! (random-sched) (wrap-thunk th)))))
+    (lambda (thunk)
+      (pcheck ([procedure? thunk])
+        (unless current-scheduler
+          (errorf who "not running scheduler"))
+        (with-timer-off
+          (let ([context (scheduler-context current-scheduler)])
+            (put-task! (random-sched context) (wrap-thunk context #f thunk)))))))
 
-
-
-  #|doc
-  Initiate a new fiber context and run `th` as the init fiber in the context.
-  As the init fiber, when it exits, the fiber context is destroyed
-  and all other fibers will be terminated.
+  #|proc:run-fibers
+  The `run-fibers` procedure runs `thunk`, a zero-argument procedure, as the init fiber in a new
+  context. Init completion or quit stops the context and drops pending child work. All workers
+  join before its init values are returned or the first fiber failure is raised to the caller.
+  A nested call enqueues `thunk` as a child in the current context and returns an unspecified
+  value immediately, without waiting for the nested thunk to finish.
   |#
   (define-who run-fibers
-    (lambda (th)
-      (if current-scheduler
-          ;; already running, just enqueue the task
-          (todo)
-          ;; spawn sched threads,
-          ;; set current-scheduler,
-          ;; add sched threads and sched pairs to global sched vector,
-          ;; schedule `th` to run by one of the scheds,
-          ;; when `th` completes, set flag to signal all other scheds to quit
-          (let* ([quit-flag (abox #f)] [init-res (void)]
-                 [init (lambda ()
-                         (with-exception-handler
-                             (lambda (con)
-                               (abox-set! quit-flag #t)
-                               ;; (println ">>> init abnormal quit <<<")
-                               ;; RET
-                               (set-timer 0)
-                               ((scheduler-k current-scheduler) 'error
-                                (format "msg: ~a, irritants: ~a"
-                                        (condition-message con) (condition-irritants con))))
-                           (lambda ()
-                             (set! init-res (th))
-                             (abox-set! quit-flag #t)
-                             ;; (println ">>> init normal quit <<<")
-                             (set-timer 0)
-                             ;; RET
-                             ;; Always return to the current thread's scheduler.
-                             ;; If this task is created in and stolen from other threads,
-                             ;; naive returning will cause the current thread to
-                             ;; run the scheduler in other threads, or, in the case where the orginal
-                             ;; thread has terminated, we'll return to stale foreign context.
-                             ((scheduler-k current-scheduler) 'complete 'init-complete))))]
-                 ;; make scheds wait for the main thunk to exit in run-fibers
-                 [quit? (lambda (i)
-                          (let ([f (unabox quit-flag)])
-                            (if f (begin
-                                    #;
-                                    (printf "sched [~a] received quit (*preemption-count*: ~a)~n" ; ;
-                                    i *preemption-count*)
-                                    f)
-                                f)))]
-                 [scheds (map (lambda (i)
-                                (let ([sched (make-scheduler i #f (make-dlist)
-                                                             (make-spinlock (string->symbol (format "fiber-sched-Q-~a" i)))
-                                                             #f #f)])
-                                  sched))
-                              (iota (cpu-count)
-                                    ))])
-            (enqueue! (scheduler-rq (car scheds)) init)
-            (set! *scheds* (list->vector scheds))
-            ;; spawn a bunch of scheduler threads
-            (let ([threads (map (lambda (s)
-                                  (let ([t (fork-thread (lambda ()
-                                                          ;; TODO race here?
-                                                          (set! current-scheduler s)
-                                                          (scheduler-running?-set! s #t)
-                                                          ;; (call/cc (lambda (k) (run-scheduler s quit? k)))
-                                                          (run-scheduler s quit?)
-                                                          (set! current-scheduler #f)
-                                                          (scheduler-running?-set! s #f)))])
-                                    (scheduler-thread-set! s t)
-                                    t))
-                                scheds)])
-              (for-each thread-join threads)
-              (set! *scheds* #f)
-              init-res)))))
-
+    (lambda (thunk)
+      (pcheck ([procedure? thunk])
+        (if current-scheduler
+            (spawn-fiber thunk)
+            (let* ([context (make-fiber-run-context
+                             #f (abox #f) (list (void)) #f
+                             (make-mutex 'fiber-run-context)
+                             (make-condition 'fiber-run-condition) 0)]
+                   [schedulers
+                    (list->vector
+                     (map (lambda (i)
+                            (make-scheduler i context (make-dlist)
+                                            (make-spinlock 'fiber-scheduler-queue)
+                                            #f #f #f))
+                          (iota (cpu-count))))])
+              (fiber-run-context-schedulers-set! context schedulers)
+              (with-timer-off
+                (put-task! (vector-ref schedulers 0) (wrap-thunk context #t thunk)))
+              (let ([threads
+                     (vector-map
+                      (lambda (sched)
+                        (let ([thread
+                               (fork-thread
+                                (lambda ()
+                                  (let ([previous-scheduler current-scheduler]
+                                        [previous-task current-fiber-task])
+                                    (set! current-scheduler sched)
+                                    (set! current-fiber-task #f)
+                                    (scheduler-running?-set! sched #t)
+                                    (run-scheduler sched)
+                                    (scheduler-running?-set! sched #f)
+                                    (set! current-fiber-task previous-task)
+                                    (set! current-scheduler previous-scheduler))))])
+                          (scheduler-thread-set! sched thread)
+                          thread))
+                      schedulers)])
+                (vector-for-each thread-join threads)
+                (let ([condition (fiber-run-context-terminal-error context)])
+                  (if condition
+                      (raise condition)
+                      (apply values (fiber-run-context-init-values context))))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -461,15 +445,10 @@
                     (make-select-event (list->vector bevts)))))))
 
 
-  #|doc
-  Synchronize on the given first-class event value `evt`.
-
-  When the synchronization succeeds, the synchronization value of the
-  event is returned, if any, with all wrap functions applied to the original synchronization value
-  in the order they are added to the event via `event-wrap`.
-
-  If the synchronization is currently impossible, the current fiber blocks
-  untill it becomes ready to do the synchronization.
+  #|proc:event-sync
+  The `event-sync` procedure synchronizes the current fiber on event `evt`. It returns the
+  event's synchronization values after applying its wrap functions in their construction order.
+  If no synchronization is possible yet, the fiber waits without blocking its scheduler worker.
   |#
   (define-who event-sync
     (lambda (evt)
@@ -504,7 +483,9 @@
                   ;; Return to scheduler and do blocking there, since timer is turned off there.
                   ;; This is a function call that usually calls the `thunk` below.
                   (set-timer 0)
-                  (let ([suspended-scheduler current-scheduler])
+                  (let ([suspended-scheduler current-scheduler]
+                        [suspended-task current-fiber-task])
+                  ;; Event registrations may resume a continuation from another OS thread.
                   ((call/cc
                     (lambda (k)
                       ;; This is called in things like channel code when doing rendez-vous
@@ -513,7 +494,8 @@
                       (define resume
                         (lambda (thunk)
                           (assert (= 0 (set-timer 0)))
-                          (put-task! suspended-scheduler (lambda () (k thunk)))))
+                          (put-task! suspended-scheduler
+                                     (continue-task suspended-task (lambda () (k thunk))))))
                       (assert (scheduler-running? current-scheduler))
                       ;; RET
                       ((scheduler-k current-scheduler) 'callback (lambda () (block resume)))))))))
@@ -570,7 +552,7 @@
 
   (define net-waiter-live?
     (lambda (waiter)
-      (and (eq? *scheds* (vector-ref waiter 3))
+      (and (not (context-stopped? (vector-ref waiter 3)))
            (scheduler-running? (vector-ref waiter 4))
            (not (eq? 'S (unabox (vector-ref waiter 0)))))))
 
@@ -599,11 +581,11 @@
        (let ([flag (vector-ref waiter 0)]
              [resume (vector-ref waiter 1)]
              [result-box (vector-ref waiter 2)]
-             [schedulers (vector-ref waiter 3)]
+             [context (vector-ref waiter 3)]
              [scheduler (vector-ref waiter 4)])
         (with-spinlock net-driver-lock (release-net-waiter-locked! waiter))
         (guard (ignored [else (void)])
-          (when (and (eq? *scheds* schedulers) (scheduler-running? scheduler))
+          (when (and (not (context-stopped? context)) (scheduler-running? scheduler))
             (abox-set! result-box result)
             (let spin ()
               (case (abox-cas! flag 'W 'S)
@@ -706,7 +688,7 @@
                                     (vector-set! waiter 0 flag)
                                     (vector-set! waiter 1 resume)
                                     (vector-set! waiter 2 result)
-                                    (vector-set! waiter 3 *scheds*)
+                                    (vector-set! waiter 3 (scheduler-context current-scheduler))
                                     (vector-set! waiter 4 current-scheduler)
                                     (vector-set! job 1 (cons waiter (vector-ref job 1)))
                                     (set! net-driver-waiters-in-use

@@ -46,9 +46,7 @@
                     (list (event-sync source) (event-sync wrapped))))))))
 
 (mat fiber-quit-stops-context
-     (let ([result (run-fibers (lambda () (fiber-quit)))])
-       (void result)
-       #t))
+     (begin (run-fibers (lambda () (fiber-quit))) #t))
 
 (mat fiber-quit-stops-only-child
      (let ([events (make-channel)])
@@ -58,7 +56,8 @@
           (spawn-fiber (lambda () (channel-put! events 'sibling)))
           (let ([first (channel-get events)] [second (channel-get events)])
             (and (memq 'child (list first second))
-                 (memq 'sibling (list first second))))))))
+                 (memq 'sibling (list first second))
+                 #t))))))
 
 (mat fiber-shutdown-drops-runnable-children
      (let ([result (run-fibers
@@ -71,31 +70,42 @@
 
 (mat fiber-init-error-reaches-caller
      ;; Negative case: the original init condition must reach the caller.
-     (let ([caught (guard (condition [else condition])
-                    (run-fibers (lambda () (error 'fiber-init "boom")))
-                    #f)])
-       (and (condition? caught)
-            (string=? "boom" (condition-message caught)))))
+     (let ([original (condition (make-error) (make-who-condition 'fiber-init)
+                               (make-message-condition "boom")
+                               (make-irritants-condition '(original)))])
+       (let ([caught (guard (condition [else condition])
+                       (run-fibers (lambda () (fiber-yield) (raise original)))
+                       #f)])
+         (eq? original caught))))
+
+(mat fiber-child-error-reaches-caller
+     ;; Negative case: a child failure must stop the init fiber and reach its caller.
+     (let ([original (condition (make-error) (make-message-condition "child boom"))])
+       (eq? original
+            (guard (condition [else condition])
+              (run-fibers
+               (lambda ()
+                 (spawn-fiber (lambda () (fiber-yield) (raise original)))
+                 (let loop () (fiber-yield) (loop))))
+              #f))))
 
 (mat fiber-multiple-values-preserved
      (call-with-values (lambda () (run-fibers (lambda () (values 'left 'right))))
        (lambda (left right) (and (eq? left 'left) (eq? right 'right)))))
 
 (mat fiber-nested-run-spawns-and-returns
-     (let ([nested-ran #f] [nested-done (make-channel)])
+     (let ([nested-ran #f] [nested-done (make-channel)] [outer-ready (make-channel)])
        (let ((result
               (run-fibers
                (lambda ()
                  (run-fibers
                   (lambda ()
+                    ;; The nested thunk waits for work published after run-fibers returns.
+                    (channel-get outer-ready)
                     (set! nested-ran #t)
                     (channel-put! nested-done #t)))
-                 ;; Bound the assertion if nested work is never published.
-                 (event-sync
-                  (event-select
-                   (channel-get-event nested-done)
-                   (event-wrap (milisleep-event 100)
-                               (lambda (_) 'timeout))))
+                 (channel-put! outer-ready #t)
+                 (channel-get nested-done)
                  'outer))))
          (and (eq? result 'outer) nested-ran))))
 
@@ -115,7 +125,7 @@
                         (fiber-cvar-wait cvar mutex)
                         (set! count (add1 count))
                         (fiber-mutex-release mutex)
-                        (loop (add1 i)))
+                        (loop (add1 i))))
                     (channel-put! finished #t)))
                  (spawn-fiber
                   (lambda ()
@@ -175,7 +185,7 @@
                     (set! timed-out #t)
                     (begin
                       (set! done (add1 done))
-                      (loop (add1 i))))))))))
+                      (loop (add1 i)))))))))
        (and (not timed-out) (= done iterations))))
 
 (mat fiber-sleep-event
@@ -189,17 +199,17 @@
        (and milliseconds seconds)))
 
 (mat fiber-with-timer-off-restores-on-error
-     (let ([caught #f] [continued #f])
+     (let ([caught #f] [restored #f])
        (run-fibers
         (lambda ()
           ;; Negative case: timer-off must restore preemption after an exception.
+          (set-timer 10000000)
           (set! caught
                 (guard (condition [else #t])
                   (with-timer-off (error 'timer "boom"))
                   #f))
-          (fiber-yield)
-          (set! continued #t)))
-       (and caught continued)))
+          (set! restored (positive? (set-timer 0)))))
+       (and caught restored)))
 
 (mat fiber-independent-contexts
      (let ([results (run-threads 0
