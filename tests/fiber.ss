@@ -38,11 +38,12 @@
 
 (mat fiber-wrap-does-not-mutate-source
      (let ([source (event-select (event-always 1))])
-       (equal? '(1 2)
-               (run-fibers
-                (lambda ()
-                  (list (event-sync source)
-                        (event-sync (event-wrap source add1))))))))
+       ;; Negative case: constructing a wrapper must not modify its source event.
+       (let ([wrapped (event-wrap source add1)])
+         (equal? '(1 2)
+                 (run-fibers
+                  (lambda ()
+                    (list (event-sync source) (event-sync wrapped))))))))
 
 (mat fiber-quit-stops-context
      (let ([result (run-fibers (lambda () (fiber-quit)))])
