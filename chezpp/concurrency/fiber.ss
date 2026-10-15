@@ -63,7 +63,8 @@
             (mutable terminal-error?)
             (mutable terminal-error)
             park-mutex park-condition
-            (mutable runnable-count)))
+            (mutable runnable-count)
+            (mutable transactions)))
 
   (define-record-type scheduler
     (fields i context rq rq-lock (mutable running?) (mutable thread) (mutable k)))
@@ -83,16 +84,22 @@
 
   (define request-context-stop!
     (lambda (context error? error)
-      (let ([mutex (fiber-run-context-park-mutex context)])
-        (mutex-acquire mutex)
-        (unless (context-stopped? context)
-          ;; Raised objects may be #f, so error presence must be stored separately.
-          (when error?
-            (fiber-run-context-terminal-error?-set! context #t)
-            (fiber-run-context-terminal-error-set! context error))
-          (abox-set! (fiber-run-context-stop-flag context) #t))
-        (condition-broadcast (fiber-run-context-park-condition context))
-        (mutex-release mutex))))
+      ;; The hierarchy is event mutex -> park mutex -> queue spinlock. No park-held
+      ;; path enters the event protocol, and no condition wait holds the event mutex.
+      (with-event-protocol
+        (let ([mutex (fiber-run-context-park-mutex context)])
+          (mutex-acquire mutex)
+          (unless (context-stopped? context)
+            ;; Raised objects may be #f, so error presence is stored separately.
+            (when error?
+              (fiber-run-context-terminal-error?-set! context #t)
+              (fiber-run-context-terminal-error-set! context error))
+            (abox-set! (fiber-run-context-stop-flag context) #t))
+          (condition-broadcast (fiber-run-context-park-condition context))
+          (mutex-release mutex))
+        ;; Cleanups only detach registrations; they never invoke user code or reenter
+        ;; this mutex. Stop is already visible before any registration is detached.
+        (for-each cancel-sync-transaction! (fiber-run-context-transactions context)))))
 
   #|macro:with-timer-off
   Evaluate expressions `expression ...` with instruction-count preemption disabled. Restore
@@ -306,7 +313,7 @@
             (let* ([context (make-fiber-run-context
                              #f (abox #f) (list (void)) #f #f
                              (make-mutex 'fiber-run-context)
-                             (make-condition 'fiber-run-condition) 0)]
+                             (make-condition 'fiber-run-condition) 0 '())]
                    [schedulers
                     (list->vector
                      (map (lambda (i)
@@ -350,185 +357,196 @@
 
   (define-record-type event (fields))
 
-  ;; the base event type
+  ;; All event poll/register/commit/cleanup operations hold this mutex. One global
+  ;; protocol also makes rendezvous between independent run contexts atomic, without
+  ;; acquiring two park mutexes. It serializes short queue operations, never user code.
+  (define event-protocol-mutex (make-mutex 'fiber-event-protocol))
+
+  (define-syntax with-event-protocol
+    (syntax-rules ()
+      [(_ expression ...)
+       (with-timer-off
+         (mutex-acquire event-protocol-mutex)
+         (call-with-values
+          (lambda ()
+            (guard (condition
+                    [else (mutex-release event-protocol-mutex) (raise condition)])
+              expression ...))
+          (lambda results
+            (mutex-release event-protocol-mutex)
+            (apply values results))))]))
+
+  (define-record-type sync-transaction
+    (fields context resume (mutable state) (mutable cleanups)))
+
+  (define sync-transaction-live?
+    (lambda (transaction)
+      (and (eq? 'waiting (sync-transaction-state transaction))
+           (not (context-stopped? (sync-transaction-context transaction))))))
+
+  ;; Each cleanup is installed before publishing its registration. Finishing first
+  ;; clears the cleanup list, so cleanup and cancellation are idempotent. Callers hold
+  ;; event-protocol-mutex; cleanups must only unlink storage and never reacquire it.
+  (define add-sync-cleanup!
+    (lambda (transaction cleanup)
+      (sync-transaction-cleanups-set!
+       transaction (cons cleanup (sync-transaction-cleanups transaction)))))
+
+  (define finish-sync-transaction!
+    (lambda (transaction state)
+      (when (eq? 'waiting (sync-transaction-state transaction))
+        (sync-transaction-state-set! transaction state)
+        (let ([context (sync-transaction-context transaction)]
+              [cleanups (sync-transaction-cleanups transaction)])
+          (sync-transaction-cleanups-set! transaction '())
+          (fiber-run-context-transactions-set!
+           context (remq transaction (fiber-run-context-transactions context)))
+          (for-each (lambda (cleanup) (cleanup)) cleanups)))))
+
+  (define cancel-sync-transaction!
+    (lambda (transaction) (finish-sync-transaction! transaction 'cancelled)))
+
+  (define commit-sync-transaction!
+    (lambda (transaction thunk)
+      (and (sync-transaction-live? transaction)
+           (begin
+             (finish-sync-transaction! transaction 'committed)
+             ;; Resume only publishes a task: wrappers and result thunks run later,
+             ;; outside this mutex. put-task! owns park before its queue spinlock.
+             ((sync-transaction-resume transaction) thunk)
+             #t))))
+
   (define-record-type base-event
     (parent event)
     (sealed #t)
     (fields wrap-fn
-            ;; unit -> any
+            ;; unit -> result thunk or #f, under the event protocol mutex
             try-fn
-            ;; abox -> resume -> unit
+            ;; transaction -> committing resume -> unit, under the same mutex
             block-fn))
 
-  ;; event type returned by `select-event`
   (define-record-type select-event
     (parent event)
     (sealed #t)
-    ;; vector of base events
-    (fields (mutable events)))
+    ;; Immutable vector of base events; wrapping always allocates a new graph.
+    (fields events))
 
-
-  #|doc
-  Make an event that will never be successfully synchronized.
+  #|proc:event-never
+  The `event-never` procedure returns a disabled event. Synchronizing it waits forever,
+  unless the run context stops or another branch of a selection succeeds.
   |#
   (define event-never
-    (let ([e (make-base-event
-              #f
-              (lambda () (lambda () #f))
-              ;; just drop the fiber
-              (lambda (my-flag resume) (void)))])
-      (lambda () e)))
+    (let ([event (make-base-event #f (lambda () #f)
+                                  (lambda (transaction resume) (void)))])
+      (lambda () (pcheck () event))))
 
-
-  #|doc
-  Make an event that will always return the value `x` when synchronized.
+  #|proc:event-always
+  The `event-always` procedure returns an event that immediately synchronizes with value `value`.
   |#
   (define event-always
-    (lambda (x)
-      (make-base-event
-       #f
-       (lambda () (lambda () x))
-       (lambda (my-flag resume) (assert-unreachable)))))
+    (lambda (value)
+      (pcheck ()
+        (make-base-event #f (lambda () (lambda () value))
+                         (lambda (transaction resume) (assert-unreachable))))))
 
-
-  #|doc
-  Wrap the first-class event `evt` with function `f`.
-  When the event `evt` is successfully synchronized,
-  the return value will be passed to `f`, and the return value of `f`
-  will be the final return value of the synchronization action.
+  #|proc:event-wrap
+  The `event-wrap` procedure returns a new event wrapping `event`, leaving `event` unchanged.
+  After synchronization, `procedure` receives all event result values as its arguments and its
+  return values become the synchronization results. Repeated wrappers run in construction order.
   |#
   (define-who event-wrap
-    (lambda (evt f)
-      (pcheck ([event? evt] [procedure? f])
-              (if (select-event? evt)
-                  (let ([bevts (select-event-events evt)])
-                    (select-event-events-set! evt
-                                              (vector-map (lambda (e) (event-wrap e f)) bevts))
-                    evt)
-                  (let ([wrap-fn (base-event-wrap-fn evt)])
-                    (make-base-event
-                     ;; compose
-                     (if wrap-fn
-                         (lambda args
-                           (call-with-values (lambda () (apply wrap-fn args)) f))
-                         f)
-                     (base-event-try-fn evt)
-                     (base-event-block-fn evt)))))))
+    (lambda (event procedure)
+      (pcheck ([event? event] [procedure? procedure])
+        (if (select-event? event)
+            (make-select-event
+             (vector-map (lambda (base) (event-wrap base procedure))
+                         (select-event-events event)))
+            (let ([wrap (base-event-wrap-fn event)])
+              (make-base-event
+               (if wrap
+                   (lambda arguments
+                     (call-with-values (lambda () (apply wrap arguments)) procedure))
+                   procedure)
+               (base-event-try-fn event) (base-event-block-fn event)))))))
 
-  (define all-events?
-    (lambda (evts)
-      (andmap (lambda (e) (or (event? e) (select-event? e))) evts)))
+  (define all-events? (lambda (events) (andmap event? events)))
 
-
-  #|doc
-  Construct a first-class select event that when synchronized,
-  will nondeterministically choose one component event to synchronize.
-  This enables selective communication among, e.g., a group of channels.
+  #|proc:event-select
+  The `event-select` procedure returns an event choosing one of `events` nondeterministically.
+  Each argument must be an event. Nested selections are flattened without changing their sources.
+  With no arguments, it returns a disabled event equivalent to `(event-never)`.
   |#
   (define-who event-select
-    (lambda evts
-      (pcheck ([all-events? evts])
-              (if (null? evts)
-                  ;; TODO check
-                  event-never
-                  ;; make sure all events in a select event are base events
-                  (let* ([flatten
-                          (lambda (evts)
-                            (let loop ([e* evts] [res '()])
-                              (if (null? e*)
-                                  res
-                                  (let ([e (car e*)])
-                                    (if (base-event? e)
-                                        (loop (cdr e*) (cons e res))
-                                        (loop (cdr e*)
-                                              (append (vector->list (select-event-events e))
-                                                      res)))))))]
-                         [bevts (flatten evts)])
-                    (make-select-event (list->vector bevts)))))))
-
+    (lambda events
+      (pcheck ([all-events? events])
+        (if (null? events)
+            (event-never)
+            (make-select-event
+             (list->vector
+              (apply append
+                     (map (lambda (event)
+                            (if (base-event? event)
+                                (list event)
+                                (vector->list (select-event-events event))))
+                          events))))))))
 
   #|proc:event-sync
-  The `event-sync` procedure synchronizes the current fiber on event `evt`. It returns the
-  event's synchronization values after applying its wrap functions in their construction order.
-  If no synchronization is possible yet, the fiber waits without blocking its scheduler worker.
+  The `event-sync` procedure synchronizes the current fiber on event `event`. It returns the
+  event's synchronization values after applying wrappers in their construction order.
+  A blocked synchronization parks the fiber without blocking its scheduler worker. Successful
+  selection and context shutdown detach all of that synchronization's losing registrations.
   |#
   (define-who event-sync
-    (lambda (evt)
-      (pcheck ([event? evt])
-              (define wrap-resume
-                (lambda (resume wrap-fn)
-                  (if wrap-fn
-                      (lambda (thunk)
-                        (resume (lambda ()
-                                  (call-with-values thunk wrap-fn))))
-                      resume)))
-              (define block
-                (lambda (resume)
-                  ;; the atomic flag used to mark event state per sync instance
-                  (let ([flag (abox 'W)])
-                    (if (select-event? evt)
-                        (let* ([bevts (select-event-events evt)]
-                               [len (vector-length bevts)])
-                          ;; call block-fn on every base event
-                          (vector-for-each
-                           (lambda (evt)
-                             (let ([wrap-fn  (base-event-wrap-fn  evt)]
-                                   [block-fn (base-event-block-fn evt)])
-                               (block-fn flag (wrap-resume resume wrap-fn))))
-                           bevts))
-                        (let ([wrap-fn  (base-event-wrap-fn  evt)]
-                              [block-fn (base-event-block-fn evt)])
-                          (block-fn flag (wrap-resume resume wrap-fn)))))))
-              ;; capture the cont.
-              (define suspend
-                (lambda ()
-                  ;; Return to scheduler and do blocking there, since timer is turned off there.
-                  ;; This is a function call that usually calls the `thunk` below.
-                  (set-timer 0)
-                  (let ([suspended-scheduler current-scheduler]
-                        [suspended-task current-fiber-task])
-                  ;; Event registrations may resume a continuation from another OS thread.
-                  ((call/cc
-                    (lambda (k)
-                      ;; This is called in things like channel code when doing rendez-vous
-                      ;; and handling over messege.
-                      ;; `thunk`, when called, will return the message.
-                      (define resume
-                        (lambda (thunk)
-                          (assert (= 0 (set-timer 0)))
-                          (put-task! suspended-scheduler
-                                     (continue-task suspended-task (lambda () (k thunk))))))
-                      (assert (scheduler-running? current-scheduler))
-                      ;; RET
-                      ((scheduler-k current-scheduler) 'callback (lambda () (block resume)))))))))
-              (if (select-event? evt)
-                  ;; Start from a random base event, and try all of them.
-                  ;; If no one works, block on all of them.
-                  (let* ([bevts (select-event-events evt)]
-                         [len   (vector-length bevts)]
-                         [start (fxmod (random 99999) len)])
-                    (let loop ([i 0] [start start])
-                      (if (fx= i len)
-                          (suspend)
-                          (let* ([evt      (vector-ref bevts start)]
-                                 [wrap-fn  (base-event-wrap-fn  evt)]
-                                 [try-fn   (base-event-try-fn   evt)]
-                                 [th       (with-timer-off (try-fn))])
-                            (if th
-                                (if wrap-fn
-                                    (call-with-values th wrap-fn)
-                                    (th))
-                                (loop (fx1+ i) (fxmod (fx1+ start) len)))))))
-                  (let ([wrap-fn  (base-event-wrap-fn  evt)]
-                        [try-fn   (base-event-try-fn   evt)]
-                        [block-fn (base-event-block-fn evt)])
-                    (let ([th (with-timer-off (try-fn))])
-                      (if th
-                          (if wrap-fn
-                              (call-with-values th wrap-fn)
-                              (th))
-                          (suspend))))))))
-
+    (lambda (event)
+      (pcheck ([event? event])
+        (unless current-scheduler (errorf who "not running scheduler"))
+        (let ([scheduler current-scheduler] [task current-fiber-task])
+          (define wrap-result
+            (lambda (base thunk)
+              (let ([wrap (base-event-wrap-fn base)])
+                (if wrap (lambda () (call-with-values thunk wrap)) thunk))))
+          (set-timer 0)
+          ;; A synchronization continuation is committed and resumed at most once.
+          ((call/1cc
+            (lambda (continuation)
+              (scheduler-return
+               'callback
+               (lambda ()
+                 (with-event-protocol
+                   (let* ([context (scheduler-context scheduler)]
+                          [transaction
+                           (make-sync-transaction
+                            context
+                            (lambda (thunk)
+                              (put-task! scheduler
+                                         (continue-task task
+                                           (lambda () (continuation thunk)))))
+                            'waiting '())]
+                          [bases (if (base-event? event)
+                                     (vector event) (select-event-events event))]
+                          [length (vector-length bases)]
+                          [start (fxmod (random 99999) length)])
+                     (unless (context-stopped? context)
+                       (fiber-run-context-transactions-set!
+                        context (cons transaction (fiber-run-context-transactions context)))
+                       ;; Poll all branches before registering any. The same mutex covers
+                       ;; the second phase, closing the poll-to-registration wakeup gap.
+                       (let poll ([index 0])
+                         (if (fx= index length)
+                             (vector-for-each
+                              (lambda (base)
+                                (when (sync-transaction-live? transaction)
+                                  ((base-event-block-fn base)
+                                   transaction
+                                   (lambda (thunk)
+                                     (commit-sync-transaction!
+                                      transaction (wrap-result base thunk))))))
+                              bases)
+                             (let* ([base (vector-ref bases (fxmod (fx+ start index) length))]
+                                    [thunk ((base-event-try-fn base))])
+                               (if thunk
+                                   (commit-sync-transaction! transaction (wrap-result base thunk))
+                                   (poll (fx1+ index))))))))))))))))))
 
   (define wrap-operation event-wrap)
   (define choice-operation event-select)
@@ -538,7 +556,9 @@
   ;;;; Network operation events
   ;;;;===----------------------------------------------------------------------===
 
-  (define net-driver-lock (make-spinlock 'fiber-net-driver))
+  ;; The existing four-worker driver and bounded pools remain a compatibility path.
+  ;; Pool ownership and waiter membership use event-protocol-mutex. Operation advance
+  ;; and result inspection use ordinary network mutexes only after releasing it.
   (define net-driver-job* '())
   (define net-driver-workers 0)
   (define net-driver-job-free (map (lambda (_) (vector #f '() #f)) (iota 64)))
@@ -554,19 +574,27 @@
 
   (define net-waiter-live?
     (lambda (waiter)
-      (and (not (context-stopped? (vector-ref waiter 3)))
-           (scheduler-running? (vector-ref waiter 4))
-           (not (eq? 'S (unabox (vector-ref waiter 0)))))))
+      ;; Context liveness and scheduler liveness are separate from transaction state.
+      (and (sync-transaction-live? (vector-ref waiter 0))
+           (not (context-stopped? (vector-ref waiter 3)))
+           (scheduler-running? (vector-ref waiter 4)))))
 
   (define detach-net-job-locked!
     (lambda (job)
-      (let ([waiter* (vector-ref job 1)])
-        (set! net-driver-job* (remq job net-driver-job*))
-        (vector-set! job 0 #f)
-        (vector-set! job 1 '())
-        (vector-set! job 2 #f)
-        (set! net-driver-job-free (cons job net-driver-job-free))
-        waiter*)))
+      ;; A claimed job cannot be recycled while a driver still holds its identity.
+      (assert (not (vector-ref job 2)))
+      (assert (null? (vector-ref job 1)))
+      (set! net-driver-job* (remq job net-driver-job*))
+      (vector-set! job 0 #f)
+      (set! net-driver-job-free (cons job net-driver-job-free))))
+
+  (define remove-net-waiter-locked!
+    (lambda (job waiter)
+      (when (memq waiter (vector-ref job 1))
+        (vector-set! job 1 (remq waiter (vector-ref job 1)))
+        (release-net-waiter-locked! waiter)
+        (when (and (null? (vector-ref job 1)) (not (vector-ref job 2)))
+          (detach-net-job-locked! job)))))
 
   (define snapshot-net-result
     (lambda (operation)
@@ -577,93 +605,73 @@
          (let ([failure (net-operation-condition operation)]) (lambda () (raise failure)))]
         [else #f])))
 
-  (define deliver-net-waiter!
-    (lambda (waiter result)
-      (with-timer-off
-       (let ([flag (vector-ref waiter 0)]
-             [resume (vector-ref waiter 1)]
-             [result-box (vector-ref waiter 2)]
-             [context (vector-ref waiter 3)]
-             [scheduler (vector-ref waiter 4)])
-        (with-spinlock net-driver-lock (release-net-waiter-locked! waiter))
-        (guard (ignored [else (void)])
-          (when (and (not (context-stopped? context)) (scheduler-running? scheduler))
-            (abox-set! result-box result)
-            (let spin ()
-              (case (abox-cas! flag 'W 'S)
-                [(W) (resume result)]
-                [(C) (spin)]
-                [(S) (void)]
-                [else (assert-unreachable)]))))))))
-
   (define drive-net-job!
-    (lambda (job)
-      (let ([operation
-             (with-timer-off
-               (with-spinlock net-driver-lock
-                 (let ([live* '()])
-                   (for-each
-                    (lambda (waiter)
-                      (if (net-waiter-live? waiter)
-                          (set! live* (cons waiter live*))
-                          (release-net-waiter-locked! waiter)))
-                    (vector-ref job 1))
-                   (vector-set! job 1 (reverse live*))
-                   (if (null? live*)
-                       (begin (detach-net-job-locked! job) #f)
-                       (vector-ref job 0)))))])
-        (when operation
-          ;; Only the OS driver thread enters the operation's ordinary mutexes and callbacks.
-          (guard (ignored [else (void)])
-            (when (eq? 'pending (net-operation-state operation))
-              (net-operation-step! operation)))
-          (let ([result (snapshot-net-result operation)])
-            (if result
-              (let ([waiter*
-                     (with-timer-off
-                       (with-spinlock net-driver-lock (detach-net-job-locked! job)))])
-                (for-each (lambda (waiter) (deliver-net-waiter! waiter result)) waiter*))
-              (with-timer-off
-                (with-spinlock net-driver-lock (vector-set! job 2 #f)))))))))
+    (lambda (job operation)
+      ;; The job is claimed, but no event/park/queue lock is held over user callbacks.
+      (guard (ignored [else (void)])
+        (when (eq? 'pending (net-operation-state operation))
+          (net-operation-step! operation)))
+      (let ([result (snapshot-net-result operation)])
+        (with-event-protocol
+          (when result
+            ;; Capture delivery data before any commit recycles pooled vectors. One
+            ;; transaction may have several branches registered on this same job.
+            (let ([deliveries
+                   (map (lambda (waiter)
+                          (and (net-waiter-live? waiter)
+                               (vector (vector-ref waiter 0) (vector-ref waiter 1)
+                                       (vector-ref waiter 2))))
+                        (vector-ref job 1))])
+              (for-each
+               (lambda (delivery)
+                 (when (and delivery (sync-transaction-live? (vector-ref delivery 0)))
+                   (abox-set! (vector-ref delivery 2) result)
+                   ((vector-ref delivery 1) result)))
+               deliveries)))
+          (vector-set! job 2 #f)
+          (when (null? (vector-ref job 1)) (detach-net-job-locked! job))))))
 
   (define drive-net-operations
     (lambda ()
       (set! current-scheduler #f)
+      (set! current-fiber-task #f)
       (let loop ()
-        (let ([job
-               (with-timer-off
-                 (with-spinlock net-driver-lock
-                   (if (null? net-driver-job*)
-                       (begin (set! net-driver-workers (fx1- net-driver-workers)) 'stop)
-                       (let ([job (find (lambda (job) (not (vector-ref job 2)))
-                                        net-driver-job*)])
-                         (when job
-                           (vector-set! job 2 #t)
-                           ;; Rotate claims so a pending operation cannot starve later jobs.
-                           (set! net-driver-job* (append (remq job net-driver-job*) (list job))))
-                         job))))])
-          (unless (eq? job 'stop)
-            (when job (drive-net-job! job))
+        (let ([claim
+               (with-event-protocol
+                 (if (null? net-driver-job*)
+                     (begin (set! net-driver-workers (fx1- net-driver-workers)) 'stop)
+                     (let ([job (find (lambda (job) (not (vector-ref job 2)))
+                                      net-driver-job*)])
+                       (and job
+                            (begin
+                              (vector-set! job 2 #t)
+                              ;; Rotate claims so a pending job cannot starve later work.
+                              (set! net-driver-job*
+                                    (append (remq job net-driver-job*) (list job)))
+                              (cons job (vector-ref job 0)))))))])
+          (unless (eq? claim 'stop)
+            (when claim (drive-net-job! (car claim) (cdr claim)))
             (milisleep 1)
             (loop))))))
 
   #|proc:net-operation-event-pool-metrics
   The `net-operation-event-pool-metrics` procedure returns a fresh vector of driver job count,
-  active waiter count, and waiter high-water count. Four workers serve up to 64 jobs and 256 waiters.
+  active waiter count, and waiter high-water count. Four workers serve up to 64 jobs and
+  256 waiters.
   |#
   (define net-operation-event-pool-metrics
     (lambda ()
       (pcheck ()
-        (with-timer-off
-          (with-spinlock net-driver-lock
-            (vector (length net-driver-job*) net-driver-waiters-in-use
-                    net-driver-waiter-high-water))))))
+        (with-event-protocol
+          (vector (length net-driver-job*) net-driver-waiters-in-use
+                  net-driver-waiter-high-water)))))
 
   #|proc:net-operation-event
   The `net-operation-event` procedure creates a fiber event for network `operation`.
   Synchronization drives the operation on a bounded OS worker pool and returns its result.
   The original failure or cancellation condition is raised when the fiber resumes.
-  Losing event choices and stopped schedulers release their bounded waiters without advancing work.
+  Losing choices and context shutdown immediately detach their waiters. An already running
+  driver callback may finish, but cleanup never cancels a shared operation owned by the caller.
   |#
   (define net-operation-event
     (lambda (operation)
@@ -671,56 +679,48 @@
         (let ([result (abox #f)])
           (define try (lambda () (unabox result)))
           (define block
-            (lambda (flag resume)
-              (let ([accepted?
-                     (with-timer-off
-                       (with-spinlock net-driver-lock
-                         (let ([job (find (lambda (job) (eq? operation (vector-ref job 0)))
-                                          net-driver-job*)])
-                           (and (pair? net-driver-waiter-free)
-                                (or job (pair? net-driver-job-free))
-                                (begin
-                                  (unless job
-                                    (set! job (car net-driver-job-free))
-                                    (set! net-driver-job-free (cdr net-driver-job-free))
-                                    (vector-set! job 0 operation)
-                                    (set! net-driver-job* (cons job net-driver-job*)))
-                                  (let ([waiter (car net-driver-waiter-free)])
-                                    (set! net-driver-waiter-free (cdr net-driver-waiter-free))
-                                    (vector-set! waiter 0 flag)
-                                    (vector-set! waiter 1 resume)
-                                    (vector-set! waiter 2 result)
-                                    (vector-set! waiter 3 (scheduler-context current-scheduler))
-                                    (vector-set! waiter 4 current-scheduler)
-                                    (vector-set! job 1 (cons waiter (vector-ref job 1)))
-                                    (set! net-driver-waiters-in-use
-                                          (fx1+ net-driver-waiters-in-use))
-                                    (set! net-driver-waiter-high-water
-                                          (fxmax net-driver-waiter-high-water
-                                                 net-driver-waiters-in-use)))
-                                  (let start-workers ()
-                                    (when (fx< net-driver-workers 4)
-                                      (set! net-driver-workers (fx1+ net-driver-workers))
-                                      (fork-thread drive-net-operations)
-                                      (start-workers)))
-                                  #t)))))])
-                (unless accepted?
-                  (when (eq? 'W (abox-cas! flag 'W 'S))
+            (lambda (transaction resume)
+              (let ([job (find (lambda (job) (eq? operation (vector-ref job 0)))
+                               net-driver-job*)])
+                (if (and (pair? net-driver-waiter-free)
+                         (or job (pair? net-driver-job-free)))
+                    (begin
+                      (unless job
+                        (set! job (car net-driver-job-free))
+                        (set! net-driver-job-free (cdr net-driver-job-free))
+                        (vector-set! job 0 operation)
+                        (set! net-driver-job* (cons job net-driver-job*)))
+                      (let ([waiter (car net-driver-waiter-free)])
+                        (set! net-driver-waiter-free (cdr net-driver-waiter-free))
+                        (vector-set! waiter 0 transaction)
+                        (vector-set! waiter 1 resume)
+                        (vector-set! waiter 2 result)
+                        (vector-set! waiter 3 (scheduler-context current-scheduler))
+                        (vector-set! waiter 4 current-scheduler)
+                        (add-sync-cleanup!
+                         transaction (lambda () (remove-net-waiter-locked! job waiter)))
+                        (vector-set! job 1 (cons waiter (vector-ref job 1)))
+                        (set! net-driver-waiters-in-use (fx1+ net-driver-waiters-in-use))
+                        (set! net-driver-waiter-high-water
+                              (fxmax net-driver-waiter-high-water net-driver-waiters-in-use)))
+                      (let start-workers ()
+                        (when (fx< net-driver-workers 4)
+                          (set! net-driver-workers (fx1+ net-driver-workers))
+                          (fork-thread drive-net-operations)
+                          (start-workers))))
                     (resume (lambda () (errorf 'net-operation-event
-                                               "network event waiter pool exhausted"))))))))
+                                                "network event waiter pool exhausted")))))))
           (make-base-event #f try block)))))
 
 
-  (define-record-type channel
-    (fields
-     ;; item: #(flag resume-put msg)
-     putQ
-     ;; item: #(flag resume-get)
-     getQ
-     putQ-lock getQ-lock putQ-gc-counter getQ-gc-counter)
-    (protocol (lambda (new)
-                (lambda ()
-                  (new (dlist) (dlist) (make-spinlock 'channel-getQ) (make-spinlock 'channel-putQ) (abox 0) (abox 0))))))
+  (define-record-type (channel %make-channel channel?)
+    (fields putQ getQ))
+
+  #|proc:make-channel
+  The `make-channel` procedure returns a new synchronous channel for rendezvous between fibers.
+  |#
+  (define make-channel
+    (lambda () (pcheck () (%make-channel (make-dlist) (make-dlist)))))
 
   (define $locked-enqueue!
     (lambda (Q lock v)
@@ -737,37 +737,6 @@
          (spinlock-release lock)
          v))))
 
-  (define $locked-undequeue!
-    (lambda (Q lock v)
-      (with-timer-off
-       (spinlock-acquire lock)
-       (dlist-add! Q 0 v)
-       (spinlock-release lock))))
-
-  (define $locked-dequeue-match!
-    (lambda (Q lock pred)
-      (with-timer-off
-       (spinlock-acquire lock)
-       (let ([v (if (fx= 0 (dlist-size Q))
-                    #f
-                    ;; TODO optimize
-                    (let ([i (dlist-find-index Q pred)])
-                      (if i
-                          (let ([v (dlist-ref Q i)])
-                            (dlist-delete! Q i)
-                            v)
-                          #f)))])
-         (spinlock-release lock)
-         v))))
-
-  (define $locked-dequeue-filter!
-    (lambda (Q lock pred)
-      (with-timer-off
-       (spinlock-acquire lock)
-       (dlist-filter! Q pred)
-       (spinlock-release lock))))
-
-
   (define $locked-drain-queue!
     (lambda (Q lock)
       (with-timer-off
@@ -779,168 +748,72 @@
 
 
 
-  #|doc
-  Construct a first-class event that when synchronized,
-  will return a message received from the channel `ch`.
-  If there is no senders on the other side of the channel,
-  the current fiber is blocked.
+  ;; Channel queues are guarded by event-protocol-mutex, not a queue spinlock.
+  ;; Consequently matching two transactions, unlinking losers, and publishing both
+  ;; continuations is one atomic protocol operation even across separate run contexts.
+  (define channel-take-waiter!
+    (lambda (queue transaction)
+      (let loop ()
+        (let ([index (dlist-find-index queue
+                       (lambda (item) (not (eq? transaction (vector-ref item 0)))))])
+          (and index
+               (let ([item (dlist-ref queue index)])
+                 (dlist-delete! queue index)
+                 (if (sync-transaction-live? (vector-ref item 0)) item (loop))))))))
+
+  (define channel-register!
+    (lambda (queue transaction resume message)
+      (let ([item (vector transaction resume message)])
+        (add-sync-cleanup!
+         transaction
+         (lambda ()
+           (let ([index (dlist-find-index queue (lambda (entry) (eq? entry item)))])
+             (when index (dlist-delete! queue index)))))
+        (enqueue! queue item))))
+
+  #|proc:channel-get-event
+  The `channel-get-event` procedure returns an event receiving a message from channel `channel`.
+  Synchronization returns the sender's message, waiting if no sender is available.
   |#
   (define-who channel-get-event
-    (lambda (ch)
-      (pcheck ([channel? ch])
-              (let ([putQ (channel-putQ ch)]
-                    [getQ (channel-getQ ch)]
-                    [putQ-lock (channel-putQ-lock ch)]
-                    [getQ-lock (channel-getQ-lock ch)]
-                    [getQ-gc-counter (channel-getQ-gc-counter ch)])
-                ;; called by event-sync
-                (define try-fn
-                  (lambda ()
-                    ;; (printf "~a ~a~n" who 'try-fn)
-                    (assert (= 0 (set-timer 0)))
-                    (let try ()
-                      (let ([item ($locked-dequeue! putQ putQ-lock)])
-                        (if item
-                            ;; TODO resume-put and resume-get below
-                            ;; should be sth that will not disrupt the current fiber's stack
-                            (let ([other-flag (vector-ref item 0)]
-                                  [resume-put (vector-ref item 1)]
-                                  [msg        (vector-ref item 2)])
-                              (let spin ()
-                                (case (abox-cas! other-flag 'W 'S)
-                                  ;; sync success
-                                  [W (resume-put void) (lambda () msg)]
-                                  [C (spin)]
-                                  [S (try)]
-                                  [else (assert-unreachable)])))
-                            #f)))))
-                ;; called by scheduler
-                (define block-fn
-                  (lambda (my-flag resume)
-                    ;; In this get event, it is used to fetch an item from the putQ.
-                    ;; That the my-flag also exists in the putQ can happen when
-                    ;; syncing on select event like (select (put-event ch) (get-event ch)).
-                    (define (not-me? item)
-                      (let ([other-flag (vector-ref item 0)])
-                        (not (eq? my-flag other-flag))))
-                    (assert (= 0 (set-timer 0)))
-                    ;;(printf "~a ~a~n" who 'block-fn)
-                    ;; publish
-                    ($locked-enqueue! getQ getQ-lock (vector my-flag resume))
-                    ;; GC
-                    (when (fx= (abox-sub1&get! getQ-gc-counter) 0)
-                      ($locked-dequeue-filter! getQ getQ-lock
-                                               (lambda (x) (not (eq? 'S (unabox (vector-ref x 0))))))
-                      (abox-set! getQ-gc-counter 42))
-                    ;; try commit again
-                    (let get-try ()
-                      (let ([item ($locked-dequeue-match! putQ putQ-lock not-me?)])
-                        (when item
-                          (let ([other-flag (vector-ref item 0)]
-                                [resume-put (vector-ref item 1)]
-                                [msg        (vector-ref item 2)])
-                            (if (eq? 'S (unabox other-flag))
-                                ;; the item is already sync'ed by other fibers, try another one
-                                (get-try)
-                                ;; since we have published the flag, claim the flag to
-                                ;; prevent ourselves from being sync'ed by others
-                                (let spin ()
-                                  (case (abox-cas! my-flag 'W 'C)
-                                    ;; claim success, try commit
-                                    [W (case (abox-cas! other-flag 'W 'S)
-                                         [W
-                                          ;; sync success
-                                          (abox-set! my-flag 'S)
-                                          (resume-put void)
-                                          (resume (lambda () msg))
-                                          ;; return to scheduler
-                                          ]
-                                         [C (abox-set! my-flag 'W)
-                                            (spin)]
-                                         [S (abox-set! my-flag 'W)
-                                            (get-try)]
-                                         [else (assert-unreachable)])]
-                                    ;; we are sync'ed by others, so put the item back
-                                    [S ($locked-undequeue! putQ putQ-lock item)]
-                                    [else (assert-unreachable)])))))))))
-                (make-base-event #f try-fn block-fn)))))
+    (lambda (channel)
+      (pcheck ([channel? channel])
+        (define try
+          (lambda ()
+            (let ([item (channel-take-waiter! (channel-putQ channel) #f)])
+              (and item
+                   (begin ((vector-ref item 1) void)
+                          (let ([message (vector-ref item 2)]) (lambda () message)))))))
+        (define block
+          (lambda (transaction resume)
+            (let ([item (channel-take-waiter! (channel-putQ channel) transaction)])
+              (if item
+                  (begin
+                    ((vector-ref item 1) void)
+                    (resume (let ([message (vector-ref item 2)]) (lambda () message))))
+                  (channel-register! (channel-getQ channel) transaction resume #f)))))
+        (make-base-event #f try block))))
 
-
-  #|doc
-  Construct a first-class event that when synchronized,
-  will put a message to the channel `ch`.
-  If there is no receivers on the other side of the channel,
-  the current fiber is blocked.
+  #|proc:channel-put-event
+  The `channel-put-event` procedure returns an event sending `message` on channel `channel`.
+  Synchronization waits for a receiver and returns an unspecified value after handing it
+  the message.
   |#
   (define-who channel-put-event
-    (lambda (ch msg)
-      ;; (printf "~a ~a~n" who msg)
-      (pcheck ([channel? ch])
-              (let ([putQ (channel-putQ ch)]
-                    [getQ (channel-getQ ch)]
-                    [putQ-lock (channel-putQ-lock ch)]
-                    [getQ-lock (channel-getQ-lock ch)]
-                    [putQ-gc-counter (channel-putQ-gc-counter ch)])
-                ;; called by event-sync
-                (define try-fn
-                  (lambda ()
-                    (assert (= 0 (set-timer 0)))
-                    ;; (printf "~a ~a~n" who 'try-fn)
-                    (let try ()
-                      (let ([item ($locked-dequeue! getQ getQ-lock)])
-                        (if item
-                            (let ([other-flag (vector-ref item 0)]
-                                  [resume-get (vector-ref item 1)])
-                              (let spin ()
-                                (case (abox-cas! other-flag 'W 'S)
-                                  ;; sync success
-                                  [W (resume-get (lambda () msg)) void]
-                                  [C (spin)]
-                                  [S (try)]
-                                  [else (assert-unreachable)])))
-                            #f)))))
-                ;; called by scheduler
-                (define block-fn
-                  (lambda (my-flag resume)
-                    (define (not-me? item)
-                      (let ([other-flag (vector-ref item 0)])
-                        (not (eq? other-flag my-flag))))
-                    (assert (= 0 (set-timer 0)))
-                    ;; (printf "~a ~a~n" who 'block-fn)
-                    ;; publish
-                    ($locked-enqueue! putQ putQ-lock (vector my-flag resume msg))
-                    ;; GC
-                    (when (fx= (abox-sub1&get! putQ-gc-counter) 0)
-                      ($locked-dequeue-filter! putQ putQ-lock
-                                               (lambda (x) (not (eq? 'S (unabox (vector-ref x 0))))))
-                      (abox-set! putQ-gc-counter 42))
-                    ;; try commit again
-                    (let put-try ()
-                      (let ([item ($locked-dequeue-match! getQ getQ-lock not-me?)])
-                        (when item
-                          (let ([other-flag (vector-ref item 0)]
-                                [resume-get (vector-ref item 1)])
-                            (if (eq? 'S (unabox other-flag))
-                                (put-try)
-                                ;; since we have published the flag,
-                                ;; prevent ourselves from being sync'ed by others
-                                (let spin ()
-                                  (case (abox-cas! my-flag 'W 'C)
-                                    [W (case (abox-cas! other-flag 'W 'S)
-                                         [W (abox-set! my-flag 'S)
-                                            (resume-get (lambda () msg))
-                                            (resume void)
-                                            ;; return to scheduler
-                                            ]
-                                         [C (abox-set! my-flag 'W)
-                                            (spin)]
-                                         [S (abox-set! my-flag 'W)
-                                            (put-try)]
-                                         [else (assert-unreachable)])]
-                                    [S ($locked-undequeue! getQ getQ-lock item)]
-                                    [else (assert-unreachable)])))))))))
-                (make-base-event #f try-fn block-fn)))))
-
+    (lambda (channel message)
+      (pcheck ([channel? channel])
+        (define try
+          (lambda ()
+            (let ([item (channel-take-waiter! (channel-getQ channel) #f)])
+              (and item
+                   (begin ((vector-ref item 1) (lambda () message)) void)))))
+        (define block
+          (lambda (transaction resume)
+            (let ([item (channel-take-waiter! (channel-getQ channel) transaction)])
+              (if item
+                  (begin ((vector-ref item 1) (lambda () message)) (resume void))
+                  (channel-register! (channel-putQ channel) transaction resume message)))))
+        (make-base-event #f try block))))
 
   (define get-operation channel-get-event)
   (define put-operation channel-put-event)
@@ -1129,6 +1002,10 @@
                     ($locked-enqueue! waitQ waitQ-lock resume1)))
                 (make-base-event #f try-fn block-fn)))))
 
+  #|proc:fiber-cvar-signal
+  The `fiber-cvar-signal` procedure wakes one fiber waiting on condition variable `cvar`, if any.
+  It returns an unspecified value; the awakened fiber reacquires its mutex before returning.
+  |#
   (define-who fiber-cvar-signal
     (lambda (cvar)
       (pcheck ([fiber-cvar? cvar])
@@ -1136,9 +1013,13 @@
                     [waitQ-lock  (fiber-cvar-waitQ-lock cvar)])
                 (let ([resume ($locked-dequeue! waitQ waitQ-lock)])
                   (if resume
-                      (with-timer-off (resume))
+                      (with-event-protocol (resume))
                       ))))))
 
+  #|proc:fiber-cvar-broadcast
+  The `fiber-cvar-broadcast` procedure wakes every fiber waiting on condition variable `cvar`.
+  It returns an unspecified value; each awakened fiber reacquires its mutex before returning.
+  |#
   (define-who fiber-cvar-broadcast
     (lambda (cvar)
       ;; (println who)
@@ -1146,7 +1027,7 @@
               (let ([waitQ       (fiber-cvar-waitQ cvar)]
                     [waitQ-lock  (fiber-cvar-waitQ-lock cvar)])
                 (let ([resumes ($locked-drain-queue! waitQ waitQ-lock)])
-                  (with-timer-off
+                  (with-event-protocol
                    (for-each (lambda (x) (x)) resumes)))))))
 
 
