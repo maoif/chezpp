@@ -89,6 +89,25 @@
                  (let loop () (fiber-yield) (loop))))
               #f))))
 
+(mat fiber-init-false-error-reaches-caller
+     ;; Negative case: #f is a raised object, even though it is also the default error value.
+     (guard (condition [else (eq? condition #f)])
+       (run-fibers (lambda () (fiber-yield) (raise #f)))
+       #f))
+
+(mat fiber-child-false-error-reaches-caller
+     ;; Negative case: a child's raised #f must stop the context and reach its caller.
+     (guard (condition [else (eq? condition #f)])
+       (run-fibers
+        (lambda ()
+          (spawn-fiber (lambda () (fiber-yield) (raise #f)))
+          ;; Bound the init wait so a swallowed child error fails instead of hanging.
+          (let loop ([remaining 1000])
+            (unless (zero? remaining)
+              (fiber-yield)
+              (loop (sub1 remaining))))))
+       #f))
+
 (mat fiber-multiple-values-preserved
      (call-with-values (lambda () (run-fibers (lambda () (values 'left 'right))))
        (lambda (left right) (and (eq? left 'left) (eq? right 'right)))))

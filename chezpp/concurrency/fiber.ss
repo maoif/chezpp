@@ -60,6 +60,7 @@
     (fields (mutable schedulers)
             stop-flag
             (mutable init-values)
+            (mutable terminal-error?)
             (mutable terminal-error)
             park-mutex park-condition
             (mutable runnable-count)))
@@ -81,11 +82,13 @@
       ((scheduler-k current-scheduler) type value)))
 
   (define request-context-stop!
-    (lambda (context error)
+    (lambda (context error? error)
       (let ([mutex (fiber-run-context-park-mutex context)])
         (mutex-acquire mutex)
         (unless (context-stopped? context)
-          (when error
+          ;; Raised objects may be #f, so error presence must be stored separately.
+          (when error?
+            (fiber-run-context-terminal-error?-set! context #t)
             (fiber-run-context-terminal-error-set! context error))
           (abox-set! (fiber-run-context-stop-flag context) #t))
         (condition-broadcast (fiber-run-context-park-condition context))
@@ -121,7 +124,7 @@
           (errorf who "not running scheduler"))
         (set-timer 0)
         (when (fiber-task-init? current-fiber-task)
-          (request-context-stop! (scheduler-context current-scheduler) #f))
+          (request-context-stop! (scheduler-context current-scheduler) #f #f))
         (scheduler-return 'quit #f))))
 
   #|proc:fiber-yield
@@ -244,10 +247,10 @@
                        ;; Keep task identity visible for event registration and ownership.
                        (set! current-fiber-task task)
                        (guard (condition
-                               [else (request-context-stop! context condition)])
+                               [else (request-context-stop! context #t condition)])
                          (value))
                        (set! current-fiber-task #f)]
-                      [(error) (request-context-stop! context value)]
+                      [(error) (request-context-stop! context #t value)]
                       [else (void)]))))
               (loop))))
         (set-timer 0)
@@ -265,7 +268,7 @@
             (set-timer 0)
             (when init?
               (fiber-run-context-init-values-set! context results)
-              (request-context-stop! context #f))
+              (request-context-stop! context #f #f))
             ;; This boundary also handles completion after continuation migration.
             (scheduler-return 'complete #f)))))))
 
@@ -301,7 +304,7 @@
         (if current-scheduler
             (spawn-fiber thunk)
             (let* ([context (make-fiber-run-context
-                             #f (abox #f) (list (void)) #f
+                             #f (abox #f) (list (void)) #f #f
                              (make-mutex 'fiber-run-context)
                              (make-condition 'fiber-run-condition) 0)]
                    [schedulers
@@ -333,10 +336,9 @@
                           thread))
                       schedulers)])
                 (vector-for-each thread-join threads)
-                (let ([condition (fiber-run-context-terminal-error context)])
-                  (if condition
-                      (raise condition)
-                      (apply values (fiber-run-context-init-values context))))))))))
+                (if (fiber-run-context-terminal-error? context)
+                    (raise (fiber-run-context-terminal-error context))
+                    (apply values (fiber-run-context-init-values context)))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
