@@ -27,3 +27,11 @@ nested-run case observes the nested thunk's side effect.
 The fiber timer regression now uses the exported `milisleep-event` and
 `sleep-event` APIs for millisecond and second waits. The focused run rebuilt
 the fiber library and test successfully before timing out during execution.
+
+Review follow-up added scheduler-level timer alternatives to the cvar and
+select cleanup waits, so a lost wakeup or leaked registration returns a
+failure marker instead of waiting indefinitely once timer scheduling works.
+The nested-run case now waits for a bounded completion signal and asserts that
+the nested thunk actually ran. Negative-case comments cover the watchdog and
+timer restoration paths. The focused command `timeout 20s make test fiber.ss`
+still timed out in the pre-fix scheduler after compiling successfully.
