@@ -2,6 +2,30 @@
         (chezpp concurrency fiber)
         (chezpp net operation))
 
+;; These bounds use the monotonic clock independently of the fiber timer implementation.
+(define fiber-test-deadline
+  (lambda (milliseconds)
+    (add-duration (current-time 'time-monotonic)
+                  (make-time 'time-duration
+                             (* (modulo milliseconds 1000) 1000000)
+                             (quotient milliseconds 1000)))))
+
+(define fiber-test-await
+  (lambda (ready? deadline)
+    (let loop ()
+      (cond
+       [(ready?) #t]
+       [(time>=? (current-time 'time-monotonic) deadline) #f]
+       [else (fiber-yield) (loop)]))))
+
+(define fiber-test-watchdog
+  (lambda (deadline)
+    (spawn-fiber
+     (lambda ()
+       ;; Negative case: a stranded channel or barrier must fail within the deadline.
+       (fiber-test-await (lambda () #f) deadline)
+       (error 'fiber-test "monotonic deadline exceeded")))))
+
 (mat fiber-event-never-blocks
      (let ([attempted (make-channel)] [done (abox #f)])
        (run-fibers
@@ -531,27 +555,94 @@
                 (and (channel-get done) (loop (sub1 remaining)))))))))
 
 (mat fiber-sleep-shutdown-cleans-timers
-     (let ([registered (make-channel)] [completed (abox #f)])
-       (run-fibers
-        (lambda ()
-          (spawn-fiber
-           (lambda ()
-             (channel-put! registered #t)
-             ;; Yield after publishing the attempt so the scheduler can install the
-             ;; timer registration before the init fiber requests shutdown.
-             (fiber-yield)
-             (fiber-sleep 60)
-             (abox-set! completed #t)))
-          ;; Wait until the child has entered its timer event before shutdown.
-          (channel-get registered)
-          (let loop ([remaining 100])
-            (unless (zero? remaining)
-              (fiber-yield)
-              (loop (sub1 remaining))))
-          'stopped))
-       ;; Negative case: an abandoned timer must not affect a later context.
-       (and (not (unabox completed))
-            (eq? 'reused (run-fibers (lambda () 'reused))))))
+     (let* ([registered (abox #f)] [wrappers (abox 0)] [resumes (abox 0)]
+            [operation (make-net-operation 'timer-shutdown-registration
+                         (lambda ()
+                           (abox-set! registered #t)
+                           (net-operation-pending '() #f))
+                         void)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let ([stopped
+                  (run-fibers
+                   (lambda ()
+                     (spawn-fiber
+                      (lambda ()
+                        ;; Poll order is random, but failed polls register in source order
+                        ;; under the event mutex. The driver callback can run only after
+                        ;; that mutex is released, proving the earlier timer registered.
+                        (event-sync
+                         (event-select
+                          (event-wrap (milisleep-event 1000)
+                                      (lambda (ignored) (abox-get&add1! wrappers)))
+                          (net-operation-event operation)))
+                        (abox-get&add1! resumes)))
+                     (fiber-test-await (lambda () (unabox registered))
+                                       (fiber-test-deadline 5000))))])
+             (net-operation-cancel! operation)
+             ;; Negative case: shutdown must prevent wrappers and resumes, including
+             ;; after the abandoned timer's deadline while a later context is active.
+             (let ([late (fiber-test-deadline 1100)])
+               (and stopped
+                    (eq? 'reused
+                         (run-fibers
+                          (lambda ()
+                            (and (fiber-test-await
+                                  (lambda () (time>=? (current-time 'time-monotonic) late))
+                                  (fiber-test-deadline 5000))
+                                 'reused))))
+                    (zero? (unabox wrappers))
+                    (zero? (unabox resumes))))))
+         (lambda () (net-operation-cancel! operation)))))
+
+(mat fiber-select-cleans-losing-timer-before-late-expiry
+     (let* ([registered (abox #f)] [timer-wrappers (abox 0)]
+            [channel-wrappers (abox 0)] [resumes (abox 0)] [active (make-channel)]
+            [operation (make-net-operation 'losing-timer-registration
+                         (lambda ()
+                           (abox-set! registered #t)
+                           (net-operation-pending '() #f))
+                         void)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (run-fibers
+            (lambda ()
+              (let ([deadline (fiber-test-deadline 5000)])
+                (fiber-test-watchdog deadline)
+                (spawn-fiber
+                 (lambda ()
+                   ;; As above, the final driver's callback acknowledges registration
+                   ;; of both the earlier timer and channel branches under the mutex.
+                   (let ([selected
+                          (event-sync
+                           (event-select
+                            (event-wrap (milisleep-event 1000)
+                                        (lambda (ignored)
+                                          (abox-get&add1! timer-wrappers)
+                                          'timer))
+                            (event-wrap (channel-get-event active)
+                                        (lambda (value)
+                                          (abox-get&add1! channel-wrappers)
+                                          value))
+                            (net-operation-event operation)))])
+                     (unless (eq? selected 'channel)
+                       (error 'fiber-test "timer won before channel selection"))
+                     (abox-get&add1! resumes))))
+                (and (fiber-test-await (lambda () (unabox registered)) deadline)
+                     (let ([late (fiber-test-deadline 1100)])
+                       (channel-put! active 'channel)
+                       (and (fiber-test-await (lambda () (= 1 (unabox resumes))) deadline)
+                            ;; Negative case: expiry of the losing timer must neither
+                            ;; invoke its wrapper nor repeat the winning wrapper/resume.
+                            (fiber-test-await
+                             (lambda () (time>=? (current-time 'time-monotonic) late))
+                             deadline)
+                            (zero? (unabox timer-wrappers))
+                            (= 1 (unabox channel-wrappers))
+                            (= 1 (unabox resumes)))))))))
+         (lambda () (net-operation-cancel! operation)))))
 
 (mat fiber-with-timer-off-restores-on-error
      (let ([caught #f] [restored #f])
@@ -567,8 +658,45 @@
        (and caught restored)))
 
 (mat fiber-independent-contexts
-     (let ([results (run-threads 0
-                                 (lambda () (run-fibers (lambda () 'left)))
-                                 (lambda () (run-fibers (lambda () 'right))))])
-       (and (eq? (vector-ref results 0) 'left)
-            (eq? (vector-ref results 1) 'right))))
+     (let ([left-entered (abox #f)] [right-entered (abox #f)]
+           [left-published (abox #f)] [right-published (abox #f)]
+           [left-finished (abox #f)] [right-finished (abox #f)])
+       (define exercise-context
+         (lambda (label entered peer-entered published peer-published finished peer-finished)
+           (run-fibers
+            (lambda ()
+              (let ([deadline (fiber-test-deadline 10000)]
+                    [request (make-channel)] [reply (make-channel)] [iterations 100])
+                (fiber-test-watchdog deadline)
+                (abox-set! entered #t)
+                ;; Both init fibers must enter before either publishes child work.
+                (unless (fiber-test-await (lambda () (unabox peer-entered)) deadline)
+                  (error 'fiber-test "peer context did not enter"))
+                (spawn-fiber
+                 (lambda ()
+                   (do ([index 0 (add1 index)]) ((= index iterations))
+                     (let ([value (channel-get request)])
+                       (fiber-yield)
+                       (channel-put! reply (list label value))))))
+                (abox-set! published #t)
+                (unless (fiber-test-await (lambda () (unabox peer-published)) deadline)
+                  (error 'fiber-test "peer context did not publish child"))
+                (do ([index 0 (add1 index)]) ((= index iterations))
+                  (channel-put! request index)
+                  (unless (equal? (list label index) (channel-get reply))
+                    (error 'fiber-test "wrong context or round-trip result"))
+                  (fiber-yield))
+                (abox-set! finished #t)
+                ;; Keep both contexts active until all child block/resume cycles finish.
+                (and (fiber-test-await (lambda () (unabox peer-finished)) deadline)
+                     label))))))
+       (let ([results
+              (run-threads 0
+               (lambda ()
+                 (exercise-context 'left left-entered right-entered
+                                   left-published right-published left-finished right-finished))
+               (lambda ()
+                 (exercise-context 'right right-entered left-entered
+                                   right-published left-published right-finished left-finished)))])
+         (and (eq? (vector-ref results 0) 'left)
+              (eq? (vector-ref results 1) 'right)))))
