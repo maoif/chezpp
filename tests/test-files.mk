@@ -19,3 +19,7 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
              net-socket-datagram.ss net-uri.ss
 
 SRCS_NON_NET_TEST := $(filter-out net-%.ss,$(SRCS_TEST))
+
+# These workloads are intentionally opt-in because they consume all scheduler
+# worker threads for several seconds. Run one with `make test fiber-stress.ss`.
+STRESS_TESTS := fiber-stress.ss

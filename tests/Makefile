@@ -53,7 +53,7 @@ TEST_FILE_GOALS :=
 
 ifneq ($(filter test,$(MAKECMDGOALS)),)
 TEST_FILE_GOALS := $(filter-out test,$(MAKECMDGOALS))
-INVALID_TEST_FILES := $(filter-out $(SRCS_TEST),$(TEST_FILE_GOALS))
+INVALID_TEST_FILES := $(filter-out $(SRCS_TEST) $(STRESS_TESTS),$(TEST_FILE_GOALS))
 ifneq ($(strip $(INVALID_TEST_FILES)),)
 $(error unsupported test file(s): $(INVALID_TEST_FILES))
 endif
@@ -88,7 +88,7 @@ mat.so: mat.sls $(TEST_COMPILER_SCRIPTS) | prepare-chezpp
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
-$(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
+$(OBJS_TEST) $(STRESS_TESTS:.ss=.so): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
 	../chez++ $(TEST_COMPILER_SCRIPTS) | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
