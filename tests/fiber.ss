@@ -84,6 +84,136 @@
                   (loop (add1 index)))))))
        #t))
 
+(mat loko-tests
+     (let ([messages (make-channel)] [wrapped (make-channel)] [choice (make-channel)])
+       (run-fibers
+        (lambda ()
+          ;; Nested senders may rendezvous in either order, as in the original Loko case.
+          (spawn-fiber
+           (lambda ()
+             (spawn-fiber (lambda () (channel-put! messages 'first)))
+             (channel-put! messages 'second)))
+          (let ([received (list (channel-get messages) (channel-get messages))])
+            (unless (or (equal? received '(first second))
+                        (equal? received '(second first)))
+              (error 'loko-tests "unexpected nested sender order")))
+          (spawn-fiber (lambda () (channel-put! wrapped 'message)))
+          (unless (equal? '(wrapped . message)
+                         (event-sync
+                          (event-wrap (channel-get-event wrapped)
+                                      (lambda (message) (cons 'wrapped message)))))
+            (error 'loko-tests "wrapped receive mismatch"))
+          (spawn-fiber
+           (lambda ()
+             (fiber-milisleep 1)
+             (channel-put! choice 'choice)))
+          (equal? 'choice
+                  (event-sync
+                   (event-select (channel-get-event choice)
+                                 (event-wrap (milisleep-event 20)
+                                             (lambda (_) 'timeout)))))))))
+
+(mat sieve-of-Eratosthenes
+     (letrec ([sieve
+               (lambda (prime input)
+                 (let ([output (make-channel)])
+                   (spawn-fiber
+                    (lambda ()
+                      (let loop ()
+                        (let ([value (channel-get input)])
+                          (unless (zero? (modulo value prime))
+                            (channel-put! output value))
+                          (loop)))))
+                   output))]
+              [integers-from
+               (lambda (start)
+                 (let ([output (make-channel)])
+                   (spawn-fiber
+                    (lambda ()
+                      (let loop ([value start])
+                        (channel-put! output value)
+                        (loop (add1 value)))))
+                   output))]
+              [take-primes
+               (lambda (count)
+                 (let loop ([input (integers-from 2)] [remaining count] [result '()])
+                   (if (zero? remaining)
+                       (reverse result)
+                       (let ([prime (channel-get input)])
+                         (loop (sieve prime input)
+                               (sub1 remaining)
+                               (cons prime result))))))])
+       (equal? '(2 3 5 7 11 13 17 19 23 29
+                 31 37 41 43 47 53 59 61 67 71
+                 73 79 83 89 97)
+               (run-fibers (lambda () (take-primes 25))))))
+
+(mat merge-sort
+     (letrec ([split
+               (lambda (input left right)
+                 (let loop ([value (channel-get input)] [left left] [right right])
+                   (if (eq? value 'done)
+                       (begin (channel-put! left 'done) (channel-put! right 'done))
+                       (begin
+                         (channel-put! left value)
+                         (loop (channel-get input) right left)))))]
+              [copy-channel
+               (lambda (source output)
+                 (let loop ([value (channel-get source)])
+                   (unless (eq? value 'done)
+                     (channel-put! output value)
+                     (loop (channel-get source)))))]
+              [merge-values
+               (lambda (left right output)
+                 (let loop ([left-value (channel-get left)]
+                            [right-value (channel-get right)])
+                   (cond
+                    [(eq? left-value 'done)
+                     (if (eq? right-value 'done)
+                         (channel-put! output 'done)
+                         (begin
+                           (channel-put! output right-value)
+                           (copy-channel right output)))]
+                    [(eq? right-value 'done)
+                     (channel-put! output left-value)
+                     (copy-channel left output)]
+                    [(< left-value right-value)
+                     (channel-put! output left-value)
+                     (loop (channel-get left) right-value)]
+                    [else
+                     (channel-put! output right-value)
+                     (loop left-value (channel-get right))])))]
+              [sort-helper
+               (lambda ()
+                 (let ([input (make-channel)])
+                   (spawn-fiber
+                    (lambda ()
+                      (let ([first (channel-get input)])
+                        (if (eq? first 'done)
+                            (channel-put! input 'done)
+                            (let ([second (channel-get input)])
+                              (if (eq? second 'done)
+                                  (begin (channel-put! input first)
+                                         (channel-put! input 'done))
+                                  (let ([left (sort-helper)] [right (sort-helper)])
+                                    (channel-put! left first)
+                                    (channel-put! right second)
+                                    (split input left right)
+                                    (merge-values left right input))))))
+                      (channel-put! input 'done)))
+                   input))])
+       ;; Negative case: the channel pipeline must return the sorted values, not lose a tail.
+       (equal? (sort < (reverse (iota 64)))
+               (run-fibers
+                (lambda ()
+                  (let ([input (sort-helper)] [values (reverse (iota 64))])
+                    (for-each (lambda (value) (channel-put! input value)) values)
+                    (channel-put! input 'done)
+                    (let loop ([value (channel-get input)] [result '()])
+                      (if (eq? value 'done)
+                          (reverse result)
+                          (loop (channel-get input) (cons value result))))))))))
+
 ;; These bounds use the monotonic clock independently of the fiber timer implementation.
 (define fiber-test-deadline
   (lambda (milliseconds)
