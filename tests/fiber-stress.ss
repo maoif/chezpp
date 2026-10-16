@@ -12,12 +12,17 @@
 (define fiber-stress-workers (cpu-count))
 (define fiber-stress-yield-interval 4096)
 
-(define fiber-stress-sieve-limit 100000)
-(define fiber-stress-mandelbrot-width 320)
-(define fiber-stress-mandelbrot-height 240)
-(define fiber-stress-mandelbrot-iterations 128)
-(define fiber-stress-sort-items-per-worker 4096)
-(define fiber-stress-monte-carlo-samples-per-worker 100000)
+;; Larger problems keep computation running long enough to observe CPU use.
+;; The sieve's reference values are for primes strictly below its limit;
+;; update both reference values when changing the limit.
+(define fiber-stress-sieve-limit 10000000)
+(define fiber-stress-sieve-expected-count 664579)
+(define fiber-stress-sieve-expected-sum 3203324994356)
+(define fiber-stress-mandelbrot-width 2560)
+(define fiber-stress-mandelbrot-height 1920)
+(define fiber-stress-mandelbrot-iterations 1024)
+(define fiber-stress-sort-items-per-worker 65536)
+(define fiber-stress-monte-carlo-samples-per-worker 20000000)
 
 (define fiber-stress-watchdog-milliseconds 120000)
 
@@ -125,10 +130,9 @@
                          (collect (sub1 remaining)
                                   (+ total (car part))
                                   (+ sum (cdr part)))))))))])
-       ;; These are the known count and sum of primes below 100,000. If the
-       ;; configurable limit changes, update this expected pair accordingly.
-       (and (= (car result) 9592)
-            (= (cdr result) 454396537))))
+       ;; Check the known prime count and sum configured beside the limit.
+       (and (= (car result) fiber-stress-sieve-expected-count)
+            (= (cdr result) fiber-stress-sieve-expected-sum))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Mandelbrot tile rendering
