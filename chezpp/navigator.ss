@@ -1,6 +1,6 @@
 (library (chezpp navigator)
-  (export nav? nav-path? nav-path nav-compile-path nav-path-append
-          nav-empty-path nav-empty-path? make-nav nav-name nav-coerce
+  (export nav? nav-path? nav/path nav-compile-path nav/path-append
+          nav/empty-path nav-empty-path? make-nav nav-name nav-coerce
 
           nav-select nav-select-one nav-select-first nav-select-count nav-selected?
           nav-traverse nav-traverse/i nav-traverse->iter

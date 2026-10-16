@@ -6,8 +6,8 @@
           $navigator-clear-proc $navigator-clear!-proc
           $path-steps $recursive-nav-group-bindings $recursive-nav-group-root
           $nav-ref-name
-          nav? nav-path? nav-empty-path nav-empty-path?
-          make-nav nav-name nav-coerce nav-path nav-compile-path nav-path-append
+          nav? nav-path? nav/empty-path nav-empty-path?
+          make-nav nav-name nav-coerce nav/path nav-compile-path nav/path-append
           make-nav-ref nav-ref? nav-missing nav-missing?
           nav-error nav-unsupported-error nav-required-error
           nav-path-steps nav-normalize-step nav-debug-name-core nav->datum-core
@@ -56,10 +56,10 @@
   |#
   (define nav-path? $path?)
 
-  #|proc:nav-empty-path
-  The `nav-empty-path` value is the compiled empty path that focuses the root value.
+  #|proc:nav/empty-path
+  The `nav/empty-path` value is the compiled empty path that focuses the root value.
   |#
-  (define nav-empty-path (make-$path '()))
+  (define nav/empty-path (make-$path '()))
 
   #|proc:nav-empty-path?
   The `nav-empty-path?` procedure returns `#t` when `path` is a compiled path
@@ -186,20 +186,20 @@
              (make-$path (apply append (map nav-normalize-step pathish)))]
             [else (make-$path (nav-normalize-step pathish))])))
 
-  #|proc:nav-path
-  The `nav-path` procedure creates a compiled path from the path-like values
+  #|proc:nav/path
+  The `nav/path` procedure creates a compiled path from the path-like values
   `args`. Navigator values, path values, recursive values, symbols, and
   non-negative integer indexes are accepted; nested paths are flattened.
   |#
-  (define nav-path
+  (define nav/path
     (lambda args
       (make-$path (apply append (map nav-normalize-step args)))))
 
-  #|proc:nav-path-append
-  The `nav-path-append` procedure concatenates each path-like value in `paths`
+  #|proc:nav/path-append
+  The `nav/path-append` procedure concatenates each path-like value in `paths`
   and returns one compiled path.
   |#
-  (define nav-path-append
+  (define nav/path-append
     (lambda paths
       (make-$path
        (apply append
@@ -209,7 +209,7 @@
   (define nav-debug-name-core
     (lambda (x)
       (cond [($navigator? x) ($navigator-name x)]
-            [($path? x) 'nav-path]
+            [($path? x) 'nav/path]
             [($recursive-nav-group? x) 'nav/letrec]
             [($nav-ref? x) ($nav-ref-name x)]
             [else #f])))
@@ -217,7 +217,7 @@
   (define nav->datum-core
     (lambda (x recur)
       (cond [($navigator? x) ($navigator-metadata x)]
-            [($path? x) `(nav-path ,@(map recur ($path-steps x)))]
+            [($path? x) `(nav/path ,@(map recur ($path-steps x)))]
             [($nav-ref? x) `(nav-ref ,($nav-ref-name x))]
             [($recursive-nav-group? x)
              `(nav/letrec ,(map (lambda (binding)
