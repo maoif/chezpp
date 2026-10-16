@@ -2,6 +2,88 @@
         (chezpp concurrency fiber)
         (chezpp net operation))
 
+;; Bounded adaptations of the older spawn/yield/channel cases from fiber.ss.bak.
+(mat fiber-spawn-nested-completes
+     (let ([done (make-channel)] [values (make-vector 6 #f)])
+       (run-fibers
+        (lambda ()
+          (for-each
+           (lambda (index)
+             (spawn-fiber
+              (lambda ()
+                (vector-set! values index index)
+                (channel-put! done index))))
+           (iota 6))
+          (let loop ([remaining 6])
+            (if (zero? remaining)
+                #t
+                (begin (channel-get done) (loop (sub1 remaining)))))))
+       (equal? '#(0 1 2 3 4 5) values)))
+
+(mat fiber-yield-round-trips
+     (let ([done (make-channel)] [rounds 64])
+       (run-fibers
+        (lambda ()
+          (spawn-fiber
+           (lambda ()
+             (let loop ([index 0])
+               (if (= index rounds)
+                   (channel-put! done #t)
+                   (begin (fiber-yield) (loop (add1 index)))))))
+          (channel-get done)))
+       #t))
+
+(mat fiber-operation-aliases-wrap-and-select
+     (equal? '((wrapped . message) selected)
+             (run-fibers
+              (lambda ()
+                (list
+                 (perform-operation
+                  (wrap-operation (event-always 'message)
+                                  (lambda (message) (cons 'wrapped message))))
+                 (perform-operation
+                  (choice-operation
+                   (wrap-operation (event-always 'selected)
+                                   (lambda (value) value))
+                   (event-never))))))))
+
+(mat fiber-channel-fan-in-and-fan-out
+     (let ([channel (make-channel)] [out (make-channel)] [count 32])
+       (run-fibers
+        (lambda ()
+          (spawn-fiber
+           (lambda ()
+             (let loop ([total 0] [remaining count])
+               (if (zero? remaining)
+                   (channel-put! out (= total (* count (sub1 count) 1/2)))
+                   (loop (+ total (channel-get channel)) (sub1 remaining))))))
+          (for-each
+           (lambda (value)
+             (spawn-fiber (lambda () (channel-put! channel value))))
+           (iota count))
+          (channel-get out)))
+       #t))
+
+(mat fiber-channel-ping-pong
+     (let ([request (make-channel)] [reply (make-channel)] [rounds 128])
+       (run-fibers
+        (lambda ()
+          (spawn-fiber
+           (lambda ()
+             (let loop ([index 0])
+               (unless (= index rounds)
+                 (channel-put! reply (channel-get request))
+                 (loop (add1 index))))))
+          (let loop ([index 0])
+            (if (= index rounds)
+                #t
+                (begin
+                  (channel-put! request index)
+                  (unless (= index (channel-get reply))
+                    (error 'fiber-channel-ping-pong "wrong message"))
+                  (loop (add1 index)))))))
+       #t))
+
 ;; These bounds use the monotonic clock independently of the fiber timer implementation.
 (define fiber-test-deadline
   (lambda (milliseconds)
