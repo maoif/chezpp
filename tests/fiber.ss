@@ -238,6 +238,212 @@
        (fiber-test-await (lambda () #f) deadline)
        (error 'fiber-test "monotonic deadline exceeded")))))
 
+;;;;===----------------------------------------------------------------------===
+;;;; Public API usage examples
+;;;;===----------------------------------------------------------------------===
+
+(mat fiber-api-channel-operation-aliases
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 5000))
+        (let ([request (make-channel)] [reply (make-channel)]
+              [payload (vector 'request 42)])
+          (spawn-fiber
+           (lambda ()
+             (let ([message (get-message request)])
+               (put-message reply (list 'reply message)))))
+          ;; put-operation constructs an event; perform-operation performs the send.
+          (perform-operation (put-operation request payload))
+          (let ([response (perform-operation (get-operation reply))])
+            (and (eq? 'reply (car response))
+                 (eq? payload (cadr response))))))))
+
+(mat fiber-api-wrapped-send-event
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 5000))
+        (let ([messages (make-channel)] [received (make-channel)] [wrap-count 0])
+          (spawn-fiber
+           (lambda () (channel-put! received (channel-get messages))))
+          (let ([sent
+                 (event-sync
+                  (event-wrap
+                   (channel-put-event messages #f)
+                   (lambda (ignored)
+                     (set! wrap-count (add1 wrap-count))
+                     'sent)))])
+            (and (eq? 'sent sent)
+                 (eq? #f (channel-get received))
+                 (= 1 wrap-count)))))))
+
+(mat fiber-api-named-mutex-and-cvar
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 5000))
+        (let ([mutex (make-fiber-mutex 'mailbox)]
+              [changed (make-fiber-cvar 'mailbox-changed)]
+              [ready (make-channel)] [done (make-channel)] [message #f])
+          (spawn-fiber
+           (lambda ()
+             (let ([result
+                    (with-fiber-mutex mutex
+                      (channel-put! ready #t)
+                      (let wait ()
+                        (unless message
+                          (fiber-cvar-wait changed mutex)
+                          (wait)))
+                      message)])
+               (channel-put! done result))))
+          (channel-get ready)
+          ;; Acquiring the mutex proves that the child registered before releasing it.
+          (fiber-mutex-acquire mutex)
+          (set! message '(delivered 42))
+          (fiber-cvar-signal changed)
+          (fiber-mutex-release mutex)
+          (equal? '(delivered 42) (channel-get done))))))
+
+(mat fiber-api-timer-constructors-and-reuse
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 5000))
+        (let ([milliseconds (milisleep-event 0)] [seconds (sleep-event 0)])
+          (fiber-milisleep 0)
+          (fiber-sleep 0)
+          ;; Event values can be constructed once and synchronized more than once.
+          (equal? '(milliseconds seconds milliseconds seconds)
+                  (map (lambda (event) (event-sync event))
+                       (list (event-wrap milliseconds (lambda (ignored) 'milliseconds))
+                             (event-wrap seconds (lambda (ignored) 'seconds))
+                             (event-wrap milliseconds (lambda (ignored) 'milliseconds))
+                             (event-wrap seconds (lambda (ignored) 'seconds)))))))))
+
+(mat fiber-api-timer-off-preserves-values
+     (run-fibers
+      (lambda ()
+        (let* ([results
+                (call-with-values
+                 (lambda () (with-timer-off (with-timer-off (values 'left 'right))))
+                 list)]
+               [empty (call-with-values (lambda () (with-timer-off (values))) list)]
+               [previous-timer (set-timer 0)])
+          (set-timer previous-timer)
+          (and (equal? '(left right) results)
+               (null? empty)
+               (positive? previous-timer))))))
+
+(mat fiber-api-network-result-and-failure
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 5000))
+        (let ([completed
+               (make-net-operation 'usage-result
+                 (lambda () (net-operation-completed '(response 42))) void)])
+          (equal? '(response 42) (event-sync (net-operation-event completed))))))
+
+     ;; Negative case: synchronizing a failed network operation raises its exact failure.
+     (error?
+      (run-fibers
+       (lambda ()
+         (event-sync
+          (net-operation-event
+           (make-net-operation 'usage-failure
+             (lambda ()
+               (net-operation-failed
+                (condition (make-error) (make-message-condition "usage failure"))))
+             void)))))))
+
+(mat fiber-api-requires-run-context
+     ;; Spawning requires an active run context.
+     (error? (spawn-fiber void))
+
+     ;; Yielding requires a running fiber.
+     (error? (fiber-yield))
+
+     ;; Quitting requires a running fiber.
+     (error? (fiber-quit))
+
+     ;; Synchronization requires a running fiber even for an immediately ready event.
+     (error? (event-sync (event-always 'ready)))
+
+     ;; The synchronization alias also requires a run context.
+     (error? (perform-operation (event-never)))
+
+     ;; Receiving requires a running fiber.
+     (error? (channel-get (make-channel)))
+
+     ;; Sending requires a running fiber.
+     (error? (channel-put! (make-channel) 'message))
+
+     ;; Mutex acquisition requires a fiber owner token.
+     (error? (fiber-mutex-acquire (make-fiber-mutex)))
+
+     ;; Mutex release requires a fiber owner token.
+     (error? (fiber-mutex-release (make-fiber-mutex)))
+
+     ;; Zero-duration millisecond sleep still requires a run context.
+     (error? (fiber-milisleep 0))
+
+     ;; Zero-duration second sleep still requires a run context.
+     (error? (fiber-sleep 0)))
+
+(mat fiber-api-rejects-invalid-arguments
+     ;; The init argument must be a procedure.
+     (error? (run-fibers 'not-a-thunk))
+
+     ;; The wrapped value must be an event.
+     (error? (event-wrap 'not-an-event values))
+
+     ;; The wrapper must be a procedure.
+     (error? (event-wrap (event-always 'ready) 'not-a-procedure))
+
+     ;; Every selected value must be an event.
+     (error? (event-select (event-always 'ready) 'not-an-event))
+
+     ;; A receive-event constructor requires a channel.
+     (error? (channel-get-event 'not-a-channel))
+
+     ;; A send-event constructor requires a channel.
+     (error? (channel-put-event 'not-a-channel 'message))
+
+     ;; The receive-event alias requires a channel.
+     (error? (get-operation 'not-a-channel))
+
+     ;; The send-event alias requires a channel.
+     (error? (put-operation 'not-a-channel 'message))
+
+     ;; Acquiring requires a fiber mutex.
+     (error? (fiber-mutex-acquire 'not-a-mutex))
+
+     ;; Releasing requires a fiber mutex.
+     (error? (fiber-mutex-release 'not-a-mutex))
+
+     ;; Waiting requires a fiber condition variable.
+     (error? (fiber-cvar-wait 'not-a-cvar (make-fiber-mutex)))
+
+     ;; Waiting also requires a fiber mutex.
+     (error? (fiber-cvar-wait (make-fiber-cvar) 'not-a-mutex))
+
+     ;; Signaling requires a fiber condition variable.
+     (error? (fiber-cvar-signal 'not-a-cvar))
+
+     ;; Broadcasting requires a fiber condition variable.
+     (error? (fiber-cvar-broadcast 'not-a-cvar))
+
+     ;; A network event requires a network operation.
+     (error? (net-operation-event 'not-an-operation))
+
+     ;; Millisecond event durations cannot be negative.
+     (error? (milisleep-event -1))
+
+     ;; Second event durations must be integers.
+     (error? (sleep-event 1/2))
+
+     ;; Millisecond sleep durations cannot be negative.
+     (error? (fiber-milisleep -1))
+
+     ;; Second sleep durations must be integers.
+     (error? (fiber-sleep 1/2)))
+
 (mat fiber-event-never-blocks
      (let ([attempted (make-channel)] [done (abox #f)])
        (run-fibers
