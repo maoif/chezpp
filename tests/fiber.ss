@@ -61,8 +61,7 @@
            (lambda (value)
              (spawn-fiber (lambda () (channel-put! channel value))))
            (iota count))
-          (channel-get out)))
-       #t))
+          (channel-get out)))))
 
 (mat fiber-channel-ping-pong
      (let ([request (make-channel)] [reply (make-channel)] [rounds 128])
