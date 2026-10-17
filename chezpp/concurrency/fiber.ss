@@ -672,17 +672,9 @@
                                 (vector->list (select-event-events event))))
                           events))))))))
 
-  #|proc:event-sync
-  The `event-sync` procedure synchronizes the current fiber on event `event`. It returns the
-  event's synchronization values after applying wrappers in their construction order.
-  A blocked synchronization parks the fiber without blocking its scheduler worker. Successful
-  selection and context shutdown detach all of that synchronization's losing registrations.
-  |#
-  (define-who event-sync
+  (define sync-event-slow
     (lambda (event)
-      (pcheck ([event? event])
-        (unless (on-scheduler-thread?) (errorf who "not running scheduler"))
-        (let ([scheduler current-scheduler] [task current-fiber-task])
+      (let ([scheduler current-scheduler] [task current-fiber-task])
           (define wrap-result
             (lambda (base thunk)
               (let ([wrap (base-event-wrap-fn base)])
@@ -728,7 +720,38 @@
                                     [thunk ((base-event-try-fn base))])
                                (if thunk
                                    (commit-sync-transaction! transaction (wrap-result base thunk))
-                                   (poll (fx1+ index))))))))))))))))))
+                                   (poll (fx1+ index)))))))))))))))))
+
+  (define poll-event
+    (lambda (event)
+      (let* ([bases (if (base-event? event) (vector event) (select-event-events event))]
+             [length (vector-length bases)]
+             [start (fxmod (random 99999) length)])
+        (let loop ([index 0])
+          (and (fx< index length)
+               (let* ([base (vector-ref bases (fxmod (fx+ start index) length))]
+                      [thunk ((base-event-try-fn base))])
+                 (if thunk
+                     (let ([wrap (base-event-wrap-fn base)])
+                       (if wrap (lambda () (call-with-values thunk wrap)) thunk))
+                     (loop (fx1+ index)))))))))
+
+  #|proc:event-sync
+  The `event-sync` procedure synchronizes the current fiber on event `event`. It returns the
+  event's synchronization values after applying wrappers in their construction order.
+  A blocked synchronization parks the fiber without blocking its scheduler worker. Successful
+  selection and context shutdown detach all of that synchronization's losing registrations.
+  |#
+  (define-who event-sync
+    (lambda (event)
+      (pcheck ([event? event])
+        (unless (on-scheduler-thread?) (errorf who "not running scheduler"))
+        (let ([ready (with-event-protocol (poll-event event))])
+          ;; Only a miss captures a continuation. The slow protocol polls again
+          ;; under its registration lock, so readiness changing here cannot be lost.
+          ;; Invoke the result after releasing the lock and restoring preemption:
+          ;; wrappers can yield, raise, return multiple values, or synchronize again.
+          (if ready (ready) (sync-event-slow event))))))
 
   #|proc:wrap-operation
   Alias of `event-wrap`. Accepts an event and a procedure receiving its synchronization values.

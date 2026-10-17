@@ -1257,3 +1257,27 @@
           (abox-set! stop #t)
           #t)
         1 100)))
+
+(mat fiber-ready-event-does-not-schedule-another-fiber
+     ;; A ready operation must not capture/requeue its caller just to return a value.
+     (run-fibers
+      (lambda ()
+        (let ([child-ran #f])
+          (with-timer-off
+            (spawn-fiber (lambda () (set! child-ran #t)))
+            (let ([result (event-sync (event-always 42))])
+              (and (= result 42) (not child-ran))))))
+      1 300000))
+
+(mat fiber-ready-wrapper-can-yield-and-synchronize
+     ;; Ready wrappers are user code: they must run outside every protocol lock.
+     (run-fibers
+      (lambda ()
+        (let ([channel (make-channel)])
+          (spawn-fiber (lambda () (channel-put! channel 40)))
+          (= 42 (event-sync
+                 (event-wrap (event-always 2)
+                             (lambda (value)
+                               (fiber-yield)
+                               (+ value (channel-get channel))))))))
+      2 100))
