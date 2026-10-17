@@ -1015,10 +1015,6 @@ configuration pairs.
 
   (define parse-positionals!
     (lambda (state cmd positionals args)
-      (let ([rest (member "--" args)])
-        (when rest
-          (set! args (append (list-head args (fx- (length args) (length rest)))
-                             (cdr rest)))))
       (let ([len-pos (length positionals)]
             [len-args (length args)])
         (cond
@@ -1026,8 +1022,12 @@ configuration pairs.
           (unless (null? args)
             (errorf 'run-cli-command! "unknown arguments: ~s" args))]
          [(option-sink? (list-last positionals))
-          (let ([fixed-count (fx1- len-pos)])
-            (when (fx< len-args len-pos)
+          (let* ([fixed-count (fx1- len-pos)]
+                 [sink-opt (list-last positionals)]
+                 [minimum-count (if (memq (option-number sink-opt) '(1 +))
+                                    len-pos
+                                    fixed-count)])
+            (when (fx< len-args minimum-count)
               (errorf 'run-cli-command! "missing positional arguments for command ~a"
                       (command-name cmd)))
             (let ([fixed-opts (list-head positionals fixed-count)]
@@ -1187,12 +1187,14 @@ configuration pairs.
         (lambda (title rows)
           (unless (null? rows)
             (println "~a" title)
-            (for-each (lambda (row)
-                        (println "    ~a~a~a"
-                                 (car row)
-                                 (make-string (max 1 (- 18 (string-length (car row)))) #\space)
-                                 (cdr row)))
-                      rows)
+            (let ([width (fx+ 2 (apply max (map (lambda (row) (string-length (car row)))
+                                               rows)))])
+              (for-each (lambda (row)
+                          (println "    ~a~a~a"
+                                   (car row)
+                                   (make-string (fx- width (string-length (car row))) #\space)
+                                   (cdr row)))
+                        rows))
             (newline))))
       (define group-by-category
         (lambda (objects category-proc row-proc)
@@ -1270,7 +1272,10 @@ configuration pairs.
         (newline)
         (if commands?
             (print-command-paths '() top)
-            (print-options-and-commands cmd all?)))))
+            (begin
+              (print-options-and-commands cmd all?)
+              (unless (string=? (command-about cmd) "")
+                (println "~a" (command-about cmd))))))))
 
   (define print-help
     (lambda (path all? commands?)
@@ -1352,7 +1357,14 @@ without running command exec procedures.
                               (state-add-option! state cmd opt raw)))
                           (parse-args (cdr args))]
                          [(null? (subcommand-list cmd))
-                          (parse-positionals! state cmd positionals args)
+                          ;; Remove the separator at the transition to positional parsing.
+                          ;; All subsequent arguments, including more separators, are literal.
+                          (let ([rest (member "--" args)])
+                            (parse-positionals! state cmd positionals
+                              (if rest
+                                  (append (list-head args (fx- (length args) (length rest)))
+                                          (cdr rest))
+                                  args)))
                           (return (run-current))]
                          [else
                           (let ([subcmd (find (lambda (subcmd)
