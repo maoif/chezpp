@@ -232,43 +232,101 @@
                  (iota 8)))
               (lambda () (http-close http1) (http-close http2) (close-tls-context tls))))))))
 
+(define fiber-http-interruption-condition
+  (lambda (mode)
+    ;; Return only the expected condition, after all behavioral checks succeed.
+    ;; Any setup, protocol, registration, or watchdog error returns #f instead,
+    ;; so an unrelated exception cannot satisfy the outer (error? ...) clause.
+    (guard (unexpected [else #f])
+      (call-with-h2-fixture
+       8
+       (lambda (port command)
+         (let ([client (http-open)])
+           (dynamic-wind
+             void
+             (lambda ()
+               (http-client-version-set! client 'h2)
+               (http-set-timeout! client 3000)
+               (let ([operation
+                      (http-send/nonblocking client
+                        (make-http-request 'get
+                          (format "http://127.0.0.1:~a/hold" port)))])
+                 (run-fibers
+                  (lambda ()
+                    (let ([results (make-channel)]
+                          [registration-deadline
+                           (add-duration (current-time 'time-monotonic)
+                                         (make-time 'time-duration 0 2))])
+                      (spawn-fiber
+                       (lambda ()
+                         (fiber-milisleep 8000)
+                         (error 'fiber-http "interruption did not resume the waiter")))
+                      (spawn-fiber
+                       (lambda ()
+                         (channel-put! results
+                           (guard (failure [else failure])
+                             (net-operation-wait operation)
+                             #f))))
+                      ;; Observe both the server's held request and its fiber
+                      ;; waiter before cancel/close, or before allowing timeout.
+                      (and
+                       (let wait ()
+                         (let ([stats (command 'stats)]
+                               [metrics (net-operation-event-pool-metrics)])
+                           (and
+                            (eq? 'pending (net-operation-state operation))
+                            (cond
+                             [(and (> (list-ref stats 2) 0)
+                                   (= (list-ref stats 4) 1)
+                                   (= (vector-ref metrics 1) 1)) #t]
+                             [(time>=? (current-time 'time-monotonic)
+                                       registration-deadline) #f]
+                             [else (fiber-milisleep 1) (wait)]))))
+                       (begin
+                         (case mode
+                           [(cancel) (net-operation-cancel! operation)]
+                           [(close) (http-close client)])
+                         ;; Inspect terminal state only after the waiter returns;
+                         ;; ordinary let initializers have unspecified order.
+                         (let* ([failure (channel-get results)]
+                                [state (net-operation-state operation)]
+                                [metrics (net-operation-event-pool-metrics)])
+                           (and
+                            (condition? failure)
+                            (case mode
+                              [(timeout)
+                               (and (eq? state 'failed)
+                                    (net-error? failure)
+                                    (eq? 'timeout (net-error-kind failure)))]
+                              [(cancel close)
+                               (and (eq? state 'cancelled)
+                                    (who-condition? failure)
+                                    (eq? 'net-operation-cancel!
+                                         (condition-who failure)))]
+                              [else #f])
+                            ;; The fiber must raise the operation's original
+                            ;; condition, and all event waiters must be detached.
+                            (eq? failure (net-operation-condition operation))
+                            (zero? (vector-ref metrics 0))
+                            (zero? (vector-ref metrics 1))
+                            failure)))))))))
+             (lambda () (http-close client)))))))))
+
 (mat net-operation-fiber-live-cancel-timeout-close
-     ;; Error cases: cancel, deadline expiry, and client shutdown must release live H2 waiters.
+     ;; Negative case: explicit cancellation must raise the original cancel condition.
      (mat-requires (websockets)
-       (call-with-h2-fixture
-        8
-        (lambda (port command)
-          (for-all
-           (lambda (mode)
-             (let ([client (http-open)])
-               (dynamic-wind
-                 void
-                 (lambda ()
-                   (http-client-version-set! client 'h2)
-                   (http-set-timeout! client (if (eq? mode 'timeout) 100 1500))
-                   (let* ([operation (http-send/nonblocking client
-                                       (make-http-request 'get
-                                         (format "http://127.0.0.1:~a/hold" port)))]
-                          [result
-                           (run-fibers
-                            (lambda ()
-                              (let ([results (make-channel)])
-                                (spawn-fiber
-                                 (lambda ()
-                                   (channel-put! results
-                                     (guard (condition [else #t])
-                                       (net-operation-wait operation) #f))))
-                                (let wait ([remaining 10000])
-                                  (when (and (positive? remaining)
-                                             (fxzero? (vector-ref (net-operation-event-pool-metrics) 1)))
-                                    (fiber-yield) (wait (fx1- remaining))))
-                                (case mode
-                                  [(cancel) (net-operation-cancel! operation)]
-                                  [(close) (http-close client)])
-                                (channel-get results))))])
-                     (and result
-                          (let ([metrics (net-operation-event-pool-metrics)])
-                            (and (fxzero? (vector-ref metrics 0))
-                                 (fxzero? (vector-ref metrics 1)))))))
-                 (lambda () (http-close client)))))
-           '(cancel timeout close))))))
+       (error?
+        (let ([failure (fiber-http-interruption-condition 'cancel)])
+          (when failure (raise failure)))))
+
+     ;; Negative case: a live held request must fail specifically with a timeout.
+     (mat-requires (websockets)
+       (error?
+        (let ([failure (fiber-http-interruption-condition 'timeout)])
+          (when failure (raise failure)))))
+
+     ;; Negative case: closing the client must cancel its already registered waiter.
+     (mat-requires (websockets)
+       (error?
+        (let ([failure (fiber-http-interruption-condition 'close)])
+          (when failure (raise failure))))))
