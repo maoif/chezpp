@@ -1281,3 +1281,124 @@
                                (fiber-yield)
                                (+ value (channel-get channel))))))))
       2 100))
+
+(mat fiber-choice-joins-previously-blocked-resources
+     ;; Joining lock domains must keep older channel/timer registrations cancellable.
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 10000))
+        (let ([left (make-channel)] [right (make-channel)] [done (make-channel)])
+          (spawn-fiber
+           (lambda ()
+             (channel-put! done
+               (event-sync (event-select (channel-get-event left)
+                                         (milisleep-event 60000))))))
+          (spawn-fiber
+           (lambda ()
+             (channel-put! done
+               (event-sync (event-select (channel-get-event right)
+                                         (milisleep-event 60000))))))
+          (fiber-milisleep 2)
+          ;; Connect domains while transactions already wait on each original root.
+          (let ([choice (event-select (channel-put-event left 'delivered)
+                                      (channel-put-event right 'delivered))])
+            (event-sync choice)
+            (event-sync choice))
+          (and (eq? 'delivered (channel-get done))
+               (eq? 'delivered (channel-get done)))))
+      4 100))
+
+(mat fiber-opposite-choice-order-does-not-deadlock
+     ;; Concurrent choices list shared resources in opposite orders; both must finish.
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 10000))
+        (let ([left (make-channel)] [right (make-channel)] [done (make-channel)])
+          (spawn-fiber
+           (lambda ()
+             (do ([round 0 (add1 round)]) ((= round 1000))
+               (event-sync (event-select (channel-put-event left 1)
+                                         (channel-put-event right 1))))
+             (channel-put! done #t)))
+          (spawn-fiber
+           (lambda ()
+             (do ([round 0 (add1 round)]
+                  [sum 0 (+ sum (event-sync
+                                 (event-select (channel-get-event right)
+                                               (channel-get-event left))))])
+                 ((= round 1000) (channel-put! done (= sum 1000))))))
+          (and (channel-get done) (channel-get done))))
+      4 100))
+
+(mat fiber-repeated-overlapping-domain-joins
+     ;; Each round creates three roots and joins overlapping pairs concurrently.
+     ;; Reusing one pair would exercise a real merge only during the first round.
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 20000))
+        (do ([round 0 (add1 round)]) ((= round 100) #t)
+          (let ([left (make-channel)] [middle (make-channel)] [right (make-channel)]
+                [ready (make-channel)] [done (make-channel)] [start (abox #f)])
+            (define launch
+              (lambda (thunk)
+                (spawn-fiber
+                 (lambda ()
+                   (channel-put! ready #t)
+                   (let wait () (unless (unabox start) (fiber-yield) (wait)))
+                   (channel-put! done (thunk))))))
+            (launch
+             (lambda ()
+               (event-sync (event-select (channel-put-event left 42)
+                                         (channel-put-event middle 42)))
+               0))
+            (launch
+             (lambda ()
+               (event-sync (event-select (channel-get-event right)
+                                         (channel-get-event middle)))))
+            (launch
+             (lambda ()
+               ;; This third edge connects the two other choices without consuming.
+               (event-select (channel-get-event right) (channel-get-event left))
+               0))
+            (do ([index 0 (add1 index)]) ((= index 3)) (channel-get ready))
+            (abox-set! start #t)
+            (let ([sum (do ([index 0 (add1 index)] [sum 0 (+ sum (channel-get done))])
+                           ((= index 3) sum))])
+              (unless (= sum 42) (error 'fiber-test "incorrect joined rendezvous"))))))
+      4 100))
+
+(mat fiber-shutdown-races-independent-transaction-registries
+     ;; Stop while many independent resources register/finish; then verify that
+     ;; their abandoned senders and receivers cannot participate in a later run.
+     (let rounds ([remaining 20])
+       (or (zero? remaining)
+           (let ([channels (map (lambda (_) (make-channel)) (iota 24))])
+             (run-fibers
+              (lambda ()
+                (fiber-test-watchdog (fiber-test-deadline 10000))
+                (let ([ready (make-channel)])
+                  (for-each
+                   (lambda (channel)
+                     (spawn-fiber
+                      (lambda ()
+                        (channel-put! ready #t)
+                        (let loop () (channel-put! channel 'abandoned) (loop))))
+                     (spawn-fiber
+                      (lambda ()
+                        (channel-put! ready #t)
+                        (let loop () (channel-get channel) (loop)))))
+                   channels)
+                  (do ([index 0 (add1 index)]) ((= index 48)) (channel-get ready))
+                  (do ([index 0 (add1 index)]) ((= index 32)) (fiber-yield))))
+              4 100)
+             (and
+              (run-fibers
+               (lambda ()
+                 (fiber-test-watchdog (fiber-test-deadline 10000))
+                 (for-each
+                  (lambda (channel)
+                    (spawn-fiber (lambda () (channel-put! channel 'fresh))))
+                  channels)
+                 (andmap (lambda (channel) (eq? 'fresh (channel-get channel))) channels))
+               4 100)
+              (rounds (sub1 remaining)))))))

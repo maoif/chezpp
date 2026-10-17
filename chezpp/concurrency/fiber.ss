@@ -75,8 +75,9 @@
   ;; `sleepers` is an atomic hint: publication checks it after releasing its queue lock.
   ;; `next-deadline` is an atomic timer hint, so ordinary dispatch avoids the park lock.
   ;; `park-condition` wakes idle workers after publication, timer changes, or shutdown.
-  ;; `transactions` holds pending synchronizations under `event-protocol-mutex`,
-  ;; so shutdown can detach their registrations exactly once.
+  ;; `worker-count` and `quantum` are immutable scheduler settings captured at entry.
+  ;; `transactions` is an intrusive pending-transaction list under `transaction-mutex`.
+  ;; Shutdown snapshots it before acquiring domains to detach registrations once.
   (define-record-type fiber-run-context
     (fields (mutable schedulers)
             stop-flag
@@ -86,14 +87,13 @@
             worker-count quantum
             park-mutex park-condition
             sleepers next-deadline
-            (mutable transactions)
+            transaction-mutex (mutable transactions)
             (mutable timers)))
 
   ;; A `scheduler`'s `i` identifies its slot in `context`; `rq` holds runnable `fiber-task`
   ;; values. Only `rq-lock` protects queue access; it is released before taking park.
-  ;; Slow workers may inspect queues while holding park, so the reverse order is forbidden.
-  ;; `running?`
-  ;; is visible to the network driver. `thread` is the OS thread joined on shutdown;
+  ;; Slow workers inspect queues while holding park, so the reverse order is forbidden.
+  ;; `running?` is visible to the network driver. `thread` is the OS thread joined on shutdown;
   ;; `thread-id` verifies ownership despite inherited parameters. `k` is the current
   ;; `scheduler` escape and may only be invoked on that `scheduler`'s own OS thread.
   (define-record-type scheduler
@@ -129,23 +129,30 @@
 
   (define request-context-stop!
     (lambda (context error? error)
-      ;; The hierarchy is `event` mutex -> park mutex -> queue spinlock. Queue publishers
-      ;; release their queue lock before taking park. No park-held
-      ;; path enters the `event` protocol, and no condition wait holds `event-protocol-mutex`.
-      (with-event-protocol
-        (let ([mutex (fiber-run-context-park-mutex context)])
-          (mutex-acquire mutex)
-          (unless (context-stopped? context)
-            ;; Raised objects may be #f, so error presence is stored separately.
-            (when error?
-              (fiber-run-context-terminal-error?-set! context #t)
-              (fiber-run-context-terminal-error-set! context error))
-            (abox-set! (fiber-run-context-stop-flag context) #t))
+      (let ([registry (fiber-run-context-transaction-mutex context)]
+            [park (fiber-run-context-park-mutex context)])
+        ;; Mark stop and snapshot pending transactions under the registry lock.
+        ;; Drop it before taking park or any event domain, avoiding lock inversions
+        ;; with a committing transaction. Registrations recheck stop under registry.
+        (mutex-acquire registry)
+        (unless (context-stopped? context)
+          (when error?
+            (fiber-run-context-terminal-error?-set! context #t)
+            (fiber-run-context-terminal-error-set! context error))
+          (abox-set! (fiber-run-context-stop-flag context) #t))
+        (let ([transactions
+               (let loop ([transaction (fiber-run-context-transactions context)]
+                          [result '()])
+                 (if transaction
+                     (loop (sync-transaction-next transaction) (cons transaction result))
+                     result))])
+          (mutex-release registry)
+          (mutex-acquire park)
           (condition-broadcast (fiber-run-context-park-condition context))
-          (mutex-release mutex))
-        ;; Cleanups only detach registrations; they never invoke user code or reenter
-        ;; this mutex. Stop is already visible before any registration is detached.
-        (for-each cancel-sync-transaction! (fiber-run-context-transactions context)))))
+          (mutex-release park)
+          ;; Each cancellation resolves the latest root: a choice may have joined
+          ;; this transaction's original domain with another one since registration.
+          (for-each cancel-sync-transaction! transactions)))))
 
   #|macro:with-timer-off
   Evaluate expressions `expression ...` with instruction-count preemption disabled. Restore
@@ -250,7 +257,7 @@
   ;; A pending timer registration: `deadline` is an absolute monotonic time,
   ;; `transaction` owns its cancellation cleanup, and `resume` commits its event.
   ;; Timers live in their `context`'s ordered list under `park-mutex`. Expiration
-  ;; removes entries there, then invokes `resume` under the `event-protocol-mutex`.
+  ;; removes entries there, then invokes `resume` under its transaction's domain.
   (define-record-type fiber-timer
     (fields deadline transaction resume))
 
@@ -298,8 +305,11 @@
   (define commit-expired-timers!
     (lambda (expired)
       (unless (null? expired)
-        (with-event-protocol
-          (for-each (lambda (timer) ((fiber-timer-resume timer))) expired)))))
+        (for-each
+         (lambda (timer)
+           (with-event-protocol (sync-transaction-domain (fiber-timer-transaction timer))
+             ((fiber-timer-resume timer))))
+         expired))))
 
   (define await-task-slow!
     (lambda (sched)
@@ -481,7 +491,8 @@
                               #f (abox #f) (list (void)) #f #f worker-count quantum
                               (make-mutex 'fiber-run-context)
                               (make-condition 'fiber-run-condition)
-                              (abox 0) (abox #f) '() '())]
+                              (abox 0) (abox #f)
+                              (make-mutex 'fiber-transactions) #f '())]
                     [schedulers
                      (list->vector
                       (map (lambda (i)
@@ -528,31 +539,108 @@
   ;; `event` does not register a wait; `event-sync` creates a fresh transaction.
   (define-record-type event (fields))
 
-  ;; All `event` poll/register/commit/cleanup operations hold this mutex. One global
-  ;; protocol also makes rendezvous between independent run contexts atomic, without
-  ;; acquiring two park mutexes. It serializes short queue operations, never user code.
-  (define event-protocol-mutex (make-mutex 'fiber-event-protocol))
+  ;; A protocol lock domain begins at one resource. `id` orders joins; `parent`
+  ;; redirects an obsolete root after a choice connects resources. Parent links only
+  ;; point to lower IDs and are published while both roots are locked. Access always
+  ;; resolves, locks, and revalidates the root, so a concurrent join cannot split a
+  ;; channel rendezvous or mutate a losing choice registration under a different lock.
+  ;; Joined domains remain joined: unrelated resources retain independent locks.
+  ;; This conservatively serializes resources once connected by a choice; it avoids
+  ;; partial two-party commits and acquiring losing-branch locks during cleanup.
+  (define-record-type event-domain
+    (fields id mutex parent))
+
+  (define event-domain-counter (abox 0))
+
+  (define new-event-domain
+    (lambda ()
+      (make-event-domain (abox-get&add1! event-domain-counter)
+                         (make-mutex 'fiber-event-domain) (abox #f))))
+
+  (define event-domain-root
+    (lambda (domain)
+      (let ([parent (unabox (event-domain-parent domain))])
+        (memory-order-acquire)
+        (if parent (event-domain-root parent) domain))))
+
+  ;; No `dynamic-wind`: a fiber suspension must never leave a protocol critical
+  ;; section. Internal callbacks run with timers off; user result thunks run later.
+  (define call-with-protocol-domain
+    (lambda (domain thunk)
+      (with-timer-off
+        (if (not domain)
+            (thunk)
+            (let retry ()
+              (let* ([root (event-domain-root domain)]
+                     [mutex (event-domain-mutex root)])
+                (mutex-acquire mutex)
+                (if (not (eq? root (event-domain-root domain)))
+                    (begin (mutex-release mutex) (retry))
+                    (call-with-values
+                     (lambda ()
+                       (guard (condition
+                               [else (mutex-release mutex) (raise condition)])
+                         (thunk)))
+                     (lambda results
+                       (mutex-release mutex)
+                       (apply values results))))))))))
 
   (define-syntax with-event-protocol
     (syntax-rules ()
-      [(_ expression ...)
-       (with-timer-off
-         (mutex-acquire event-protocol-mutex)
-         (call-with-values
-          (lambda ()
-            (guard (condition
-                    [else (mutex-release event-protocol-mutex) (raise condition)])
-              expression ...))
-          (lambda results
-            (mutex-release event-protocol-mutex)
-            (apply values results))))]))
+      [(_ domain expression ...)
+       (call-with-protocol-domain domain (lambda () expression ...))]))
+
+  (define join-event-domains!
+    (lambda (left right)
+      (with-timer-off
+        (cond [(not left) right]
+              [(not right) left]
+              [else
+               (let retry ()
+                 (let ([a (event-domain-root left)] [b (event-domain-root right)])
+                   (if (eq? a b)
+                       a
+                       (let* ([first (if (< (event-domain-id a) (event-domain-id b)) a b)]
+                              [second (if (eq? first a) b a)]
+                              [first-lock (event-domain-mutex first)]
+                              [second-lock (event-domain-mutex second)])
+                         ;; Every join locks roots in increasing ID order. Ordinary
+                         ;; operations hold exactly one root and never perform joins.
+                         (mutex-acquire first-lock)
+                         (mutex-acquire second-lock)
+                         (if (and (eq? a (event-domain-root left))
+                                  (eq? b (event-domain-root right)))
+                             (begin
+                               (abox-set! (event-domain-parent second) first)
+                               (mutex-release second-lock)
+                               (mutex-release first-lock)
+                               first)
+                             (begin
+                               (mutex-release second-lock)
+                               (mutex-release first-lock)
+                               (retry)))))))]))))
+
+  (define event-protocol-domain
+    (lambda (event)
+      (if (base-event? event) (base-event-domain event) (select-event-domain event))))
+
+  (define selection-domain
+    (lambda (bases)
+      (let loop ([index 0] [domain #f])
+        (if (fx= index (vector-length bases))
+            domain
+            (loop (fx1+ index)
+                  (join-event-domains! domain
+                                       (base-event-domain (vector-ref bases index))))))))
 
   ;; One `event-sync` attempt, shared by all branches of a choice. `context` owns its
   ;; lifetime, and `resume` accepts a result `thunk` and only publishes runnable work.
   ;; `state` changes once from `waiting` to `committed`/`cancelled`; `cleanups` unlink every
-  ;; registration, including losing branches. All mutation holds `event-protocol-mutex`.
+  ;; registration, including losing branches. `domain` guards state and cleanup;
+  ;; `previous`, `next`, and `linked?` belong to the context's registry mutex.
   (define-record-type sync-transaction
-    (fields context resume (mutable state) (mutable cleanups)))
+    (fields context domain resume (mutable state) (mutable cleanups)
+            (mutable previous) (mutable next) (mutable linked?)))
 
   (define sync-transaction-live?
     (lambda (transaction)
@@ -561,64 +649,106 @@
 
   ;; Each cleanup is installed before publishing its registration. Finishing first
   ;; clears the cleanup list, so cleanup and cancellation are idempotent. Callers hold
-  ;; `event-protocol-mutex`; `cleanups` must only unlink storage and never reacquire it.
+  ;; the transaction's domain; `cleanups` only unlink storage and never reacquire it.
   (define add-sync-cleanup!
     (lambda (transaction cleanup)
       (sync-transaction-cleanups-set!
        transaction (cons cleanup (sync-transaction-cleanups transaction)))))
 
+  (define register-sync-transaction!
+    (lambda (transaction)
+      (let* ([context (sync-transaction-context transaction)]
+             [mutex (fiber-run-context-transaction-mutex context)])
+        (mutex-acquire mutex)
+        (let ([registered? (not (context-stopped? context))])
+          (when registered?
+            (let ([head (fiber-run-context-transactions context)])
+              (sync-transaction-next-set! transaction head)
+              (when head (sync-transaction-previous-set! head transaction))
+              (fiber-run-context-transactions-set! context transaction)
+              (sync-transaction-linked?-set! transaction #t)))
+          (mutex-release mutex)
+          registered?))))
+
+  ;; The caller holds the context registry mutex; domain ownership alone does not
+  ;; protect neighboring transactions, which may finish on independent resources.
+  (define unregister-sync-transaction-locked!
+    (lambda (transaction)
+      (when (sync-transaction-linked? transaction)
+        (let ([context (sync-transaction-context transaction)]
+              [previous (sync-transaction-previous transaction)]
+              [next (sync-transaction-next transaction)])
+          (if previous
+              (sync-transaction-next-set! previous next)
+              (fiber-run-context-transactions-set! context next))
+          (when next (sync-transaction-previous-set! next previous))
+          (sync-transaction-previous-set! transaction #f)
+          (sync-transaction-next-set! transaction #f)
+          (sync-transaction-linked?-set! transaction #f)))))
+
   (define finish-sync-transaction!
     (lambda (transaction state)
-      (when (eq? 'waiting (sync-transaction-state transaction))
-        (sync-transaction-state-set! transaction state)
-        (let ([context (sync-transaction-context transaction)]
-              [cleanups (sync-transaction-cleanups transaction)])
-          (sync-transaction-cleanups-set! transaction '())
-          (fiber-run-context-transactions-set!
-           context (remq transaction (fiber-run-context-transactions context)))
-          (for-each (lambda (cleanup) (cleanup)) cleanups)))))
+      (let* ([context (sync-transaction-context transaction)]
+             [mutex (fiber-run-context-transaction-mutex context)])
+        (mutex-acquire mutex)
+        ;; Claim under registry as well as domain: shutdown sets stop under registry,
+        ;; so a successful commit has one definite ordering relative to context stop.
+        (let ([finish? (and (eq? 'waiting (sync-transaction-state transaction))
+                            (or (eq? state 'cancelled) (not (context-stopped? context))))])
+          (when finish?
+            (sync-transaction-state-set! transaction state)
+            (unregister-sync-transaction-locked! transaction))
+          (mutex-release mutex)
+          (when finish?
+            (let ([cleanups (sync-transaction-cleanups transaction)])
+              (sync-transaction-cleanups-set! transaction '())
+              ;; Drop registry before cleanup acquires park or publishes any work.
+              (for-each (lambda (cleanup) (cleanup)) cleanups)))
+          finish?))))
 
   (define cancel-sync-transaction!
-    (lambda (transaction) (finish-sync-transaction! transaction 'cancelled)))
+    (lambda (transaction)
+      (with-event-protocol (sync-transaction-domain transaction)
+        (finish-sync-transaction! transaction 'cancelled))))
 
   (define commit-sync-transaction!
     (lambda (transaction thunk)
-      (and (sync-transaction-live? transaction)
+      (and (finish-sync-transaction! transaction 'committed)
            (begin
-             (finish-sync-transaction! transaction 'committed)
              ;; Resume only publishes a task: wrappers and result thunks run later,
-             ;; outside this mutex. `put-task!` owns park before its queue spinlock.
+             ;; outside this domain. `put-task!` releases its queue lock before park.
              ((sync-transaction-resume transaction) thunk)
              #t))))
 
   ;; One synchronization branch. `wrap-fn` is `#f` or a procedure transforming all
   ;; result values; `try-fn` polls readiness and returns a deferred result thunk.
   ;; `block-fn` installs a cancellable wait only after every choice branch was polled.
-  ;; Poll/register callbacks hold `event-protocol-mutex`; result thunks/wrappers run later
+  ;; `domain` guards poll/register callbacks; result thunks/wrappers run later
   ;; on a resumed fiber, where user code can yield, raise, or synchronize again.
   (define-record-type base-event
     (parent event)
     (sealed #t)
-    (fields wrap-fn
-            ;; Signature: `() -> result-thunk-or-#f`, under `event-protocol-mutex`.
+    (fields domain wrap-fn
+            ;; Signature: `() -> result-thunk-or-#f`, under the resource domain.
             try-fn
             ;; Signature: `(transaction resume) -> unspecified`, under the same mutex.
             block-fn))
 
   ;; `events` is a flattened vector of `base-event` alternatives. The graph is
   ;; immutable after construction, so choices/wrappers can share their sources.
+  ;; `domain` joins all alternatives, including previously registered transactions.
   (define-record-type select-event
     (parent event)
     (sealed #t)
     ;; Immutable vector of base events; wrapping always allocates a new graph.
-    (fields events))
+    (fields events domain))
 
   #|proc:event-never
   The `event-never` procedure returns a disabled event. Synchronizing it waits forever,
   unless the run context stops or another branch of a selection succeeds.
   |#
   (define event-never
-    (let ([event (make-base-event #f (lambda () #f)
+    (let ([event (make-base-event #f #f (lambda () #f)
                                   (lambda (transaction resume) (void)))])
       (lambda () (pcheck () event))))
 
@@ -628,7 +758,7 @@
   (define event-always
     (lambda (value)
       (pcheck ()
-        (make-base-event #f (lambda () (lambda () value))
+        (make-base-event #f #f (lambda () (lambda () value))
                          (lambda (transaction resume) (assert-unreachable))))))
 
   #|proc:event-wrap
@@ -642,9 +772,11 @@
         (if (select-event? event)
             (make-select-event
              (vector-map (lambda (base) (event-wrap base procedure))
-                         (select-event-events event)))
+                         (select-event-events event))
+             (select-event-domain event))
             (let ([wrap (base-event-wrap-fn event)])
               (make-base-event
+               (base-event-domain event)
                (if wrap
                    (lambda arguments
                      (call-with-values (lambda () (apply wrap arguments)) procedure))
@@ -663,64 +795,67 @@
       (pcheck ([all-events? events])
         (if (null? events)
             (event-never)
-            (make-select-event
-             (list->vector
-              (apply append
-                     (map (lambda (event)
-                            (if (base-event? event)
-                                (list event)
-                                (vector->list (select-event-events event))))
-                          events))))))))
+            (let ([bases
+                   (list->vector
+                    (apply append
+                           (map (lambda (event)
+                                  (if (base-event? event)
+                                      (list event)
+                                      (vector->list (select-event-events event))))
+                                events)))])
+              (make-select-event bases (selection-domain bases)))))))
+
 
   (define sync-event-slow
     (lambda (event)
-      (let ([scheduler current-scheduler] [task current-fiber-task])
-          (define wrap-result
-            (lambda (base thunk)
-              (let ([wrap (base-event-wrap-fn base)])
-                (if wrap (lambda () (call-with-values thunk wrap)) thunk))))
-          (set-timer 0)
-          ;; A synchronization continuation is committed and resumed at most once.
-          ((call/1cc
-            (lambda (continuation)
-              (scheduler-return
-               'callback
-               (lambda ()
-                 (with-event-protocol
-                   (let* ([context (scheduler-context scheduler)]
-                          [transaction
-                           (make-sync-transaction
-                            context
-                            (lambda (thunk)
-                              (put-task! scheduler
-                                         (continue-task task
-                                           (lambda () (continuation thunk)))))
-                            'waiting '())]
-                          [bases (if (base-event? event)
-                                     (vector event) (select-event-events event))]
-                          [length (vector-length bases)]
-                          [start (fxmod (random 99999) length)])
-                     (unless (context-stopped? context)
-                       (fiber-run-context-transactions-set!
-                        context (cons transaction (fiber-run-context-transactions context)))
-                       ;; Poll all branches before registering any. The same mutex covers
-                       ;; the second phase, closing the poll-to-registration wakeup gap.
-                       (let poll ([index 0])
-                         (if (fx= index length)
-                             (vector-for-each
-                              (lambda (base)
-                                (when (sync-transaction-live? transaction)
-                                  ((base-event-block-fn base)
-                                   transaction
-                                   (lambda (thunk)
-                                     (commit-sync-transaction!
-                                      transaction (wrap-result base thunk))))))
-                              bases)
-                             (let* ([base (vector-ref bases (fxmod (fx+ start index) length))]
-                                    [thunk ((base-event-try-fn base))])
-                               (if thunk
-                                   (commit-sync-transaction! transaction (wrap-result base thunk))
-                                   (poll (fx1+ index)))))))))))))))))
+      (let ([scheduler current-scheduler] [task current-fiber-task]
+            ;; Neutral events have no resource state, but a blocked transaction still
+            ;; needs its own domain for cancellation to serialize with registration.
+            [domain (or (event-protocol-domain event) (new-event-domain))])
+        (define wrap-result
+          (lambda (base thunk)
+            (let ([wrap (base-event-wrap-fn base)])
+              (if wrap (lambda () (call-with-values thunk wrap)) thunk))))
+        (set-timer 0)
+        ;; A synchronization continuation is committed and resumed at most once.
+        ((call/1cc
+          (lambda (continuation)
+            (scheduler-return
+             'callback
+             (lambda ()
+               (with-event-protocol domain
+                 (let* ([context (scheduler-context scheduler)]
+                        [transaction
+                         (make-sync-transaction
+                          context domain
+                          (lambda (thunk)
+                            (put-task! scheduler
+                                       (continue-task task
+                                         (lambda () (continuation thunk)))))
+                          'waiting '() #f #f #f)]
+                        [bases (if (base-event? event)
+                                   (vector event) (select-event-events event))]
+                        [length (vector-length bases)]
+                        [start (fxmod (random 99999) length)])
+                   (when (register-sync-transaction! transaction)
+                     ;; Poll all branches before registering any. The same mutex covers
+                     ;; the second phase, closing the poll-to-registration wakeup gap.
+                     (let poll ([index 0])
+                       (if (fx= index length)
+                           (vector-for-each
+                            (lambda (base)
+                              (when (sync-transaction-live? transaction)
+                                ((base-event-block-fn base)
+                                 transaction
+                                 (lambda (thunk)
+                                   (commit-sync-transaction!
+                                    transaction (wrap-result base thunk))))))
+                            bases)
+                           (let* ([base (vector-ref bases (fxmod (fx+ start index) length))]
+                                  [thunk ((base-event-try-fn base))])
+                             (if thunk
+                                 (commit-sync-transaction! transaction (wrap-result base thunk))
+                                 (poll (fx1+ index)))))))))))))))))
 
   (define poll-event
     (lambda (event)
@@ -746,7 +881,7 @@
     (lambda (event)
       (pcheck ([event? event])
         (unless (on-scheduler-thread?) (errorf who "not running scheduler"))
-        (let ([ready (with-event-protocol (poll-event event))])
+        (let ([ready (with-event-protocol (event-protocol-domain event) (poll-event event))])
           ;; Only a miss captures a continuation. The slow protocol polls again
           ;; under its registration lock, so readiness changing here cannot be lost.
           ;; Invoke the result after releasing the lock and restoring preemption:
@@ -776,8 +911,9 @@
   ;;;;===----------------------------------------------------------------------===
 
   ;; The existing four-worker driver and bounded pools remain a compatibility path.
-  ;; Pool ownership and waiter membership use event-protocol-mutex. Operation advance
+  ;; Pool ownership and waiter membership use `net-driver-domain`. Operation advance
   ;; and result inspection use ordinary network mutexes only after releasing it.
+  (define net-driver-domain (new-event-domain))
   (define net-driver-job* '())
   (define net-driver-workers 0)
   (define net-driver-job-free (map (lambda (_) (vector #f '() #f)) (iota 64)))
@@ -831,7 +967,7 @@
         (when (eq? 'pending (net-operation-state operation))
           (net-operation-step! operation)))
       (let ([result (snapshot-net-result operation)])
-        (with-event-protocol
+        (with-event-protocol net-driver-domain
           (when result
             ;; Capture delivery data before any commit recycles pooled vectors. One
             ;; `transaction` may have several branches registered on this same job.
@@ -856,7 +992,7 @@
       (set! current-fiber-task #f)
       (let loop ()
         (let ([claim
-               (with-event-protocol
+               (with-event-protocol net-driver-domain
                  (if (null? net-driver-job*)
                      (begin (set! net-driver-workers (fx1- net-driver-workers)) 'stop)
                      (let ([job (find (lambda (job) (not (vector-ref job 2)))
@@ -881,7 +1017,7 @@
   (define net-operation-event-pool-metrics
     (lambda ()
       (pcheck ()
-        (with-event-protocol
+        (with-event-protocol net-driver-domain
           (vector (length net-driver-job*) net-driver-waiters-in-use
                   net-driver-waiter-high-water)))))
 
@@ -929,25 +1065,25 @@
                           (start-workers))))
                     (resume (lambda () (errorf 'net-operation-event
                                                 "network event waiter pool exhausted")))))))
-          (make-base-event #f try block)))))
+          (make-base-event net-driver-domain #f try block)))))
 
 
 
   ;; A synchronous rendezvous point. `putQ` stores pending sends and their messages;
   ;; `getQ` stores pending receives. Both contain transaction/resume/payload entries
-  ;; and are accessed only under the `event-protocol-mutex`. Cleanup removes each
+  ;; and are accessed only under `domain`'s current root. Cleanup removes each
   ;; losing or cancelled waiter before another synchronization can match it.
   (define-record-type (channel %make-channel channel?)
-    (fields putQ getQ))
+    (fields domain putQ getQ))
 
   #|proc:make-channel
   The `make-channel` procedure returns a new synchronous channel for rendezvous between fibers.
   |#
   (define make-channel
-    (lambda () (pcheck () (%make-channel (make-dlist) (make-dlist)))))
+    (lambda () (pcheck () (%make-channel (new-event-domain) (make-dlist) (make-dlist)))))
 
   ;; Channel, mutex, and cvar queues share `#(transaction resume payload)` entries.
-  ;; Their caller holds `event-protocol-mutex` while taking or registering a waiter.
+  ;; Their caller holds the resource domain while taking or registering a waiter.
   ;; Exclude the calling `transaction` when matching opposite `channel` branches.
   (define take-sync-waiter!
     (lambda (queue transaction)
@@ -978,19 +1114,21 @@
       (pcheck ([channel? channel])
         (define try
           (lambda ()
-            (let ([item (take-sync-waiter! (channel-putQ channel) #f)])
-              (and item
-                   (begin ((vector-ref item 1) void)
-                          (let ([message (vector-ref item 2)]) (lambda () message)))))))
+            (let loop ()
+              (let ([item (take-sync-waiter! (channel-putQ channel) #f)])
+                (and item
+                     (if ((vector-ref item 1) void)
+                         (let ([message (vector-ref item 2)]) (lambda () message))
+                         (loop)))))))
         (define block
           (lambda (transaction resume)
             (let ([item (take-sync-waiter! (channel-putQ channel) transaction)])
               (if item
-                  (begin
-                    ((vector-ref item 1) void)
-                    (resume (let ([message (vector-ref item 2)]) (lambda () message))))
+                  (if ((vector-ref item 1) void)
+                      (resume (let ([message (vector-ref item 2)]) (lambda () message)))
+                      (block transaction resume))
                   (register-sync-waiter! (channel-getQ channel) transaction resume #f)))))
-        (make-base-event #f try block))))
+        (make-base-event (channel-domain channel) #f try block))))
 
   #|proc:channel-put-event
   The `channel-put-event` procedure returns an event sending `message` on channel `channel`.
@@ -1002,16 +1140,19 @@
       (pcheck ([channel? channel])
         (define try
           (lambda ()
-            (let ([item (take-sync-waiter! (channel-getQ channel) #f)])
-              (and item
-                   (begin ((vector-ref item 1) (lambda () message)) void)))))
+            (let loop ()
+              (let ([item (take-sync-waiter! (channel-getQ channel) #f)])
+                (and item
+                     (if ((vector-ref item 1) (lambda () message)) void (loop)))))))
         (define block
           (lambda (transaction resume)
             (let ([item (take-sync-waiter! (channel-getQ channel) transaction)])
               (if item
-                  (begin ((vector-ref item 1) (lambda () message)) (resume void))
+                  (if ((vector-ref item 1) (lambda () message))
+                      (resume void)
+                      (block transaction resume))
                   (register-sync-waiter! (channel-putQ channel) transaction resume message)))))
-        (make-base-event #f try block))))
+        (make-base-event (channel-domain channel) #f try block))))
 
   #|proc:get-operation
   Alias of `channel-get-event`. Accepts a channel and returns an event whose synchronization
@@ -1071,18 +1212,18 @@
 ;;;; Fiber mutexes and condition variables
 ;;;;===----------------------------------------------------------------------===
 
-  ;; Ownership and both wait queues are guarded by event-protocol-mutex. Tokens are
+  ;; `domain` guards ownership and the acquiring queue. Tokens are
   ;; stable across continuation migration; OS thread identity does not own a mutex.
   ;; `name` is diagnostic, `owner` is `#f` or a `fiber-task` `token`, and `blockQ` contains
   ;; acquiring fibers. Release transfers `owner` before publishing the next resume.
   (define-record-type (fiber-mutex %make-fiber-mutex fiber-mutex?)
-    (fields name (mutable owner) blockQ))
+    (fields domain name (mutable owner) blockQ))
 
-  ;; `name` is diagnostic and `waitQ` holds condition waiters under `event-protocol-mutex`.
+  ;; `name` is diagnostic; `domain` guards condition waiters in `waitQ`.
   ;; Each waiter carries its own mutex reacquisition closure; the cvar stores no
   ;; persistent signal and is not permanently associated with one fiber mutex.
   (define-record-type (fiber-cvar %make-fiber-cvar fiber-cvar?)
-    (fields name waitQ))
+    (fields domain name waitQ))
 
   #|proc:make-fiber-mutex
   The `make-fiber-mutex` procedure returns a new, initially unlocked fiber mutex.
@@ -1092,7 +1233,7 @@
   (define make-fiber-mutex
     (case-lambda
       [() (make-fiber-mutex 'fiber-mutex)]
-      [(name) (pcheck () (%make-fiber-mutex name #f (make-dlist)))]))
+      [(name) (pcheck () (%make-fiber-mutex (new-event-domain) name #f (make-dlist)))]))
 
   #|proc:make-fiber-cvar
   The `make-fiber-cvar` procedure returns a new fiber condition variable with no waiters.
@@ -1102,7 +1243,7 @@
   (define make-fiber-cvar
     (case-lambda
       [() (make-fiber-cvar 'fiber-cvar)]
-      [(name) (pcheck () (%make-fiber-cvar name (make-dlist)))]))
+      [(name) (pcheck () (%make-fiber-cvar (new-event-domain) name (make-dlist)))]))
 
   (define require-fiber-token
     (lambda (who)
@@ -1110,7 +1251,7 @@
         (errorf who "not running a fiber"))
       (fiber-task-token current-fiber-task)))
 
-  ;; The caller holds `event-protocol-mutex` for ownership validation and transfer.
+  ;; The caller holds the mutex's domain for ownership validation and transfer.
   (define check-fiber-mutex-owner!
     (lambda (who mutex token)
       (unless (eq? token (fiber-mutex-owner mutex))
@@ -1119,13 +1260,15 @@
   (define release-fiber-mutex-locked!
     (lambda (who mutex token)
       (check-fiber-mutex-owner! who mutex token)
-      (let ([waiter (take-sync-waiter! (fiber-mutex-blockQ mutex) #f)])
-        (if waiter
-            (begin
-              ;; Transfer before publication, so another acquisition cannot barge in.
-              (fiber-mutex-owner-set! mutex (vector-ref waiter 2))
-              ((vector-ref waiter 1) void))
-            (fiber-mutex-owner-set! mutex #f)))
+      (let loop ()
+        (let ([waiter (take-sync-waiter! (fiber-mutex-blockQ mutex) #f)])
+          (if waiter
+              (begin
+                ;; Transfer before publication. A stopped context may reject commit;
+                ;; in that case continue instead of leaving an unreachable owner.
+                (fiber-mutex-owner-set! mutex (vector-ref waiter 2))
+                (unless ((vector-ref waiter 1) void) (loop)))
+              (fiber-mutex-owner-set! mutex #f))))
       (void)))
 
   #|proc:fiber-mutex-acquire
@@ -1139,7 +1282,7 @@
         (let ([token (require-fiber-token who)])
           (event-sync
            (make-base-event
-            #f
+            (fiber-mutex-domain mutex) #f
             (lambda ()
               (and (not (fiber-mutex-owner mutex))
                    (begin (fiber-mutex-owner-set! mutex token) void)))
@@ -1156,7 +1299,8 @@
     (lambda (mutex)
       (pcheck ([fiber-mutex? mutex])
         (let ([token (require-fiber-token who)])
-          (with-event-protocol (release-fiber-mutex-locked! who mutex token))))))
+          (with-event-protocol (fiber-mutex-domain mutex)
+            (release-fiber-mutex-locked! who mutex token))))))
 
   #|macro:with-fiber-mutex
   The `with-fiber-mutex` macro evaluates `mutex` once, acquires that fiber mutex, and evaluates
@@ -1189,10 +1333,12 @@
       (pcheck ([fiber-cvar? cvar] [fiber-mutex? mutex])
         (let ([token (require-fiber-token who)])
           ;; Report invalid ownership on the calling fiber, where its guard can catch it.
-          (with-event-protocol (check-fiber-mutex-owner! who mutex token))
+          (join-event-domains! (fiber-cvar-domain cvar) (fiber-mutex-domain mutex))
+          (with-event-protocol (fiber-mutex-domain mutex)
+            (check-fiber-mutex-owner! who mutex token))
           (event-sync
            (make-base-event
-            #f (lambda () #f)
+            (fiber-cvar-domain cvar) #f (lambda () #f)
             (lambda (transaction resume)
               ;; Publish before unlocking, under the same protocol used by signal/broadcast.
               (register-sync-waiter!
@@ -1210,9 +1356,10 @@
   (define-who fiber-cvar-signal
     (lambda (cvar)
       (pcheck ([fiber-cvar? cvar])
-        (with-event-protocol
-          (let ([waiter (take-sync-waiter! (fiber-cvar-waitQ cvar) #f)])
-            (when waiter ((vector-ref waiter 1) void)))
+        (with-event-protocol (fiber-cvar-domain cvar)
+          (let loop ()
+            (let ([waiter (take-sync-waiter! (fiber-cvar-waitQ cvar) #f)])
+              (when (and waiter (not ((vector-ref waiter 1) void))) (loop))))
           (void)))))
 
   #|proc:fiber-cvar-broadcast
@@ -1222,7 +1369,7 @@
   (define-who fiber-cvar-broadcast
     (lambda (cvar)
       (pcheck ([fiber-cvar? cvar])
-        (with-event-protocol
+        (with-event-protocol (fiber-cvar-domain cvar)
           (let loop ()
             (let ([waiter (take-sync-waiter! (fiber-cvar-waitQ cvar) #f)])
               (when waiter
@@ -1239,7 +1386,7 @@
   (define make-timer-event
     (lambda (duration)
       (make-base-event
-       #f
+       (new-event-domain) #f
        (lambda ()
          (if (time-duration-expired? duration)
              (lambda () (void))
