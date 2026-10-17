@@ -100,8 +100,11 @@
       ;; `fork-thread` inherits thread parameters, including a parent's scheduler.
       ;; Only the OS thread actually running that `scheduler` may use its escapes
       ;; or current task token. Read `current-scheduler` afresh after migration.
-      (and current-scheduler
-           (eqv? (get-thread-id) (scheduler-thread-id current-scheduler)))))
+      ;; Keep both IDs in one preemption-free snapshot: migration between the
+      ;; reads would compare the old worker's ID with the resumed scheduler's ID.
+      (with-timer-off
+        (and current-scheduler
+             (eqv? (get-thread-id) (scheduler-thread-id current-scheduler))))))
 
   ;; A schedulable slice of one logical fiber. `token` is its immutable mutex-owner
   ;; identity; `init?` determines whether completion stops the whole run. `thunk` is a
@@ -407,6 +410,7 @@
   join before its init values are returned or the first fiber failure is raised to the caller.
   A nested call enqueues `thunk` as a child in the current context and returns an unspecified
   value immediately, without waiting for the nested thunk to finish.
+  A call on a separate OS thread creates its own context, including threads forked by a fiber.
   |#
   (define-who run-fibers
     (lambda (thunk)

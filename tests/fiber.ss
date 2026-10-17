@@ -2,7 +2,12 @@
         (chezpp concurrency fiber)
         (chezpp net operation))
 
-;; Bounded adaptations of the older spawn/yield/channel cases from fiber.ss.bak.
+;; Bounded adaptations of the older spawn/yield/channel cases from `fiber.ss.bak`.
+;; That legacy file labels `loko-tests` as adapted from Loko, and the sieve and
+;; merge-sort examples as Guile Fibers benchmarks. These cases retain that origin
+;; while using Chezpp APIs and finite result assertions.
+;; Loko: https://scheme.fail/ and https://gitlab.com/akkuscm/loko
+;; Guile Fibers: https://github.com/wingo/fibers (benchmarks)
 (mat fiber-spawn-nested-completes
      (let ([done (make-channel)] [values (make-vector 6 #f)])
        (run-fibers
@@ -1151,3 +1156,24 @@
                    (fiber-mutex-release mutex)))))
              (when (unabox failure) (fiber-mutex-release mutex)))))
         (when (unabox failure) (raise (unabox failure))))))
+
+(mat fiber-owner-checks-under-preemption
+     (run-fibers
+      (lambda ()
+        (fiber-test-watchdog (fiber-test-deadline 10000))
+        (let ([done (make-channel)])
+          (do ([worker 0 (add1 worker)]) ((= worker 24))
+            (spawn-fiber
+             (lambda ()
+               (let ([mutex (make-fiber-mutex)])
+                 (do ([round 0 (add1 round)]) ((= round 256))
+                   ;; Tiny, varied instruction budgets exercise migration near
+                   ;; the scheduler/owner checks. Valid fibers must keep access.
+                   (set-timer (add1 (modulo round 13)))
+                   (fiber-mutex-acquire mutex)
+                   (set-timer (add1 (modulo round 7)))
+                   (fiber-mutex-release mutex))
+                 (channel-put! done #t)))))
+          (let collect ([remaining 24])
+            (or (zero? remaining)
+                (and (channel-get done) (collect (sub1 remaining)))))))))
