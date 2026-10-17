@@ -845,7 +845,7 @@
      ;; Error case: reading stdin before announcing readiness deadlocks the shared console port.
      (let-values ([(input output errors pid)
                    (open-process-ports
-                    "timeout 5s ../chez++ --script net-ftp-startup-process.ss /tmp/chezpp-ftp-startup"
+                    "timeout 5s ../chez++ --script=net-ftp-startup-process.ss /tmp/chezpp-ftp-startup"
                     (buffer-mode block) (native-transcoder))])
        (dynamic-wind
          void

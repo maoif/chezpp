@@ -82,7 +82,7 @@ mat.so: mat.sls $(TEST_COMPILER_SCRIPTS) | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' "== compiling mat.sls =="; \
-	../chez++ --script ../tools/compile-test.ss $(TEST_COMPILER_ARGUMENTS) -- mat.sls >"$$stdout" 2>"$$stderr"; \
+	../chez++ --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- mat.sls >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -92,7 +92,7 @@ $(OBJS_TEST): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
 	../chez++ $(TEST_COMPILER_SCRIPTS) | prepare-chezpp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
-	../chez++ --script ../tools/compile-test.ss $(TEST_COMPILER_ARGUMENTS) -- \
+	../chez++ --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- \
 	  "$(basename $@).ss" mat.so >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
@@ -115,7 +115,7 @@ test-non-net:
 
 .PHONY: test-release-package
 test-release-package: prepare-chezpp
-	@cd .. && ./chez++ --script tests/release-package.ss
+	@cd .. && ./chez++ --script=tests/release-package.ss
 
 test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	@cleanup() { \
@@ -137,9 +137,9 @@ test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	  printf '%s\n' "== running $$item =="; \
 	  if [ -n "$(COVERAGE_ENABLED)" ]; then \
 	    covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
-	    ../chez++ --script coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
+	    ../chez++ --script=coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
 	  else \
-	    ../chez++ --script ../tools/run-test.ss "$$item" >"$$stdout" 2>"$$stderr"; \
+	    ../chez++ --script=../tools/run-test.ss "$$item" >"$$stdout" 2>"$$stderr"; \
 	  fi; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
@@ -151,7 +151,7 @@ test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	   covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
 	   covout_files=$$(find . -maxdepth 1 -type f -name '*.covout' -print); \
 	   set -- $$covin_files; covin_count=$$#; \
-	   ../chez++ --script coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
+	   ../chez++ --script=coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
 	   report_code=$$?; if [ $$report_code -ne 0 ]; then status=1; fi; \
 	 fi; \
 	 exit $$status
@@ -184,7 +184,7 @@ test-http-error-soak: prepare-chezpp mat.so $(HTTP_ERROR_SOAK_OBJS) ../tools/run
 	    stdout="$$base.stdout"; stderr="$$base.stderr"; \
 	    rm -f "$$stdout" "$$stderr"; \
 	    printf '%s\n' "== soak round $$round: $$base.so =="; \
-	    ../chez++ --script ../tools/run-test.ss "$$base.so" >"$$stdout" 2>"$$stderr"; \
+	    ../chez++ --script=../tools/run-test.ss "$$base.so" >"$$stdout" 2>"$$stderr"; \
 	    code=$$?; \
 	    if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	    if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -222,7 +222,7 @@ test-optional-library-build:
 .PHONY: test-optional-native
 test-optional-native:
 	@python3 ../tools/test-optional-native.py --sentinels
-	@../chez++ --script optional-library-runtime.ss
+	@../chez++ --script=optional-library-runtime.ss
 
 .PHONY: clean
 clean:

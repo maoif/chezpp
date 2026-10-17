@@ -183,14 +183,16 @@ Start a Chezpp REPL:
 make run
 ```
 
-The generated `chez++` launcher also runs scripts:
+The generated `chez++` launcher also runs scripts and inline code:
 
 ```sh
-./chez++ --script path/to/program.ss
+./chez++ --script=path/to/program.ss
+./chez++ -c='(display "Hello from Chezpp") (newline)'
+./chez++ --version
 ```
 
 Use `./chez++ --help` (or `-h`) to show launcher options. Use `-q` to suppress the
-startup greeting and REPL prompt.
+startup greeting and REPL prompt. `-s` is an alias for `--script`.
 
 A transducer example:
 

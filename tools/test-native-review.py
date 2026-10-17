@@ -88,7 +88,7 @@ def contracts():
     for case in cases:
         script += f'\n;; Reject the invalid Scheme object before safe-stub native entry: {case}.\n'
         script += f'(unless (rejected-by-pcheck? \'{case}) (error \'test-native-review "missing object contract" \'{case}))\n'
-    result = subprocess.run(['./chez++', '--script', '/dev/stdin'], input=script, text=True,
+    result = subprocess.run(['./chez++', '--script=/dev/stdin'], input=script, text=True,
                             cwd=ROOT, capture_output=True)
     assert result.returncode == 0 and not result.stdout and not result.stderr, result.stdout + result.stderr
 

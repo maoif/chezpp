@@ -7,4 +7,4 @@ if grep -q '^#define CHEZPP_WITH_OPENSSL 0$' "$project_root/chezpp/c/build-confi
         exit 1
     fi
 fi
-exec "$project_root/chez++" --script "$project_root/tests/optional-library-runtime.ss"
+exec "$project_root/chez++" --script="$project_root/tests/optional-library-runtime.ss"
