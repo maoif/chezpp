@@ -49,7 +49,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-  (define *default-ticks* 3000)
+  (define *default-ticks* 30000)
 
   ;; Chez continuations migrate between OS threads, but thread parameters do not.
   ;; Set both parameters before invoking every fresh or resumed task.
@@ -81,6 +81,7 @@
             (mutable init-values)
             (mutable terminal-error?)
             (mutable terminal-error)
+            worker-count quantum
             park-mutex park-condition
             (mutable runnable-count)
             (mutable transactions)
@@ -344,7 +345,7 @@
                                        (set-timer 0)
                                        (scheduler-return 'error condition))
                                    (lambda ()
-                                     (set-timer *default-ticks*)
+                                     (set-timer (fiber-run-context-quantum context))
                                      ((fiber-task-thunk task))
                                      (set-timer 0)
                                      (scheduler-return 'complete #f)))))])
@@ -404,57 +405,67 @@
           (let ([context (scheduler-context current-scheduler)])
             (put-task! (random-sched context) (wrap-thunk context #f thunk)))))))
 
+  (define positive-fixnum? (lambda (value) (and (fixnum? value) (fx> value 0))))
+
   #|proc:run-fibers
   The `run-fibers` procedure runs `thunk`, a zero-argument procedure, as the init fiber in a new
   context. Init completion or quit stops the context and drops pending child work. All workers
   join before its init values are returned or the first fiber failure is raised to the caller.
   A nested call enqueues `thunk` as a child in the current context and returns an unspecified
   value immediately, without waiting for the nested thunk to finish.
+  Optional `worker-count` is the number of OS workers, a positive fixnum defaulting to
+  `(cpu-count)`. Optional `quantum` is a positive fixnum counting Scheme timer ticks per slice;
+  it defaults to 30000. Ticks measure Scheme work, not a fixed wall-clock duration. A larger
+  quantum favors throughput at the cost of wakeup latency. Both settings are captured for
+  the lifetime of a new context; nested calls keep their parent's scheduler configuration.
   A call on a separate OS thread creates its own context, including threads forked by a fiber.
   |#
   (define-who run-fibers
-    (lambda (thunk)
-      (pcheck ([procedure? thunk])
-        (if (on-scheduler-thread?)
-            (spawn-fiber thunk)
-            (let* ([context (make-fiber-run-context
-                             #f (abox #f) (list (void)) #f #f
-                             (make-mutex 'fiber-run-context)
-                             (make-condition 'fiber-run-condition) 0 '() '())]
-                   [schedulers
-                    (list->vector
-                     (map (lambda (i)
-                            (make-scheduler i context (make-dlist)
-                                            (make-spinlock 'fiber-scheduler-queue)
-                                            #f #f #f #f))
-                          (iota (cpu-count))))])
-              (fiber-run-context-schedulers-set! context schedulers)
-              (with-timer-off
-                (put-task! (vector-ref schedulers 0) (wrap-thunk context #t thunk)))
-              (let ([threads
-                     (vector-map
-                      (lambda (sched)
-                        (let ([thread
-                               (fork-thread
-                                (lambda ()
-                                  (let ([previous-scheduler current-scheduler]
-                                        [previous-task current-fiber-task])
-                                    (set! current-scheduler sched)
-                                    (set! current-fiber-task #f)
-                                    (scheduler-thread-id-set! sched (get-thread-id))
-                                    (scheduler-running?-set! sched #t)
-                                    (run-scheduler sched)
-                                    (scheduler-running?-set! sched #f)
-                                    (set! current-fiber-task previous-task)
-                                    (set! current-scheduler previous-scheduler))))])
-                          (scheduler-thread-set! sched thread)
-                          thread))
-                      schedulers)])
-                (vector-for-each thread-join threads)
-                (if (fiber-run-context-terminal-error? context)
-                    (raise (fiber-run-context-terminal-error context))
-                    (apply values (fiber-run-context-init-values context)))))))))
-
+    (case-lambda
+      [(thunk) (run-fibers thunk (cpu-count) *default-ticks*)]
+      [(thunk worker-count) (run-fibers thunk worker-count *default-ticks*)]
+      [(thunk worker-count quantum)
+       (pcheck ([procedure? thunk]
+                [positive-fixnum? worker-count quantum])
+         (if (on-scheduler-thread?)
+             (spawn-fiber thunk)
+             (let* ([context (make-fiber-run-context
+                              #f (abox #f) (list (void)) #f #f worker-count quantum
+                              (make-mutex 'fiber-run-context)
+                              (make-condition 'fiber-run-condition) 0 '() '())]
+                    [schedulers
+                     (list->vector
+                      (map (lambda (i)
+                             (make-scheduler i context (make-dlist)
+                                             (make-spinlock 'fiber-scheduler-queue)
+                                             #f #f #f #f))
+                           (iota worker-count)))])
+               (fiber-run-context-schedulers-set! context schedulers)
+               (with-timer-off
+                 (put-task! (vector-ref schedulers 0) (wrap-thunk context #t thunk)))
+               (let ([threads
+                      (vector-map
+                       (lambda (sched)
+                         (let ([thread
+                                (fork-thread
+                                 (lambda ()
+                                   (let ([previous-scheduler current-scheduler]
+                                         [previous-task current-fiber-task])
+                                     (set! current-scheduler sched)
+                                     (set! current-fiber-task #f)
+                                     (scheduler-thread-id-set! sched (get-thread-id))
+                                     (scheduler-running?-set! sched #t)
+                                     (run-scheduler sched)
+                                     (scheduler-running?-set! sched #f)
+                                     (set! current-fiber-task previous-task)
+                                     (set! current-scheduler previous-scheduler))))])
+                           (scheduler-thread-set! sched thread)
+                           thread))
+                       schedulers)])
+                 (vector-for-each thread-join threads)
+                 (if (fiber-run-context-terminal-error? context)
+                     (raise (fiber-run-context-terminal-error context))
+                     (apply values (fiber-run-context-init-values context)))))))]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

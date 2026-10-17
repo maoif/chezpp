@@ -1177,3 +1177,50 @@
           (let collect ([remaining 24])
             (or (zero? remaining)
                 (and (channel-get done) (collect (sub1 remaining)))))))))
+
+;;;;===----------------------------------------------------------------------===
+;;;; Scheduler configuration
+;;;;===----------------------------------------------------------------------===
+
+(mat fiber-configured-single-worker-preemption
+     ;; With one worker, the init fiber cannot observe the child without preemption.
+     (let ([ready (abox #f)])
+       (run-fibers
+        (lambda ()
+          (spawn-fiber (lambda () (abox-set! ready #t)))
+          (let wait ([remaining 1000000])
+            (cond [(unabox ready) #t]
+                  [(zero? remaining) #f]
+                  [else (wait (sub1 remaining))])))
+        1 100)))
+
+(mat fiber-configured-workers-and-values
+     ;; The configured pool must execute every child and preserve all init values.
+     (equal? '(42 done)
+             (call-with-values
+              (lambda ()
+                (run-fibers
+                 (lambda ()
+                   (let ([done (make-channel)])
+                     (do ([index 0 (add1 index)]) ((= index 16))
+                       (spawn-fiber (lambda () (channel-put! done 1))))
+                     (do ([index 0 (add1 index)] [sum 0 (+ sum (channel-get done))])
+                         ((= index 16) (values (+ sum 26) 'done)))))
+                 2 30000))
+              list)))
+
+(mat fiber-configuration-rejects-invalid-arguments
+     ;; Negative case: the worker count cannot be zero.
+     (error? (run-fibers (lambda () #t) 0))
+
+     ;; Negative case: the worker count must be a fixnum, not a fraction.
+     (error? (run-fibers (lambda () #t) 1/2))
+
+     ;; Negative case: the quantum cannot disable preemption with zero ticks.
+     (error? (run-fibers (lambda () #t) 1 0))
+
+     ;; Negative case: the quantum cannot be negative.
+     (error? (run-fibers (lambda () #t) 1 -1))
+
+     ;; Negative case: a bignum is outside ChezScheme's instruction timer range.
+     (error? (run-fibers (lambda () #t) 1 (expt 2 100))))

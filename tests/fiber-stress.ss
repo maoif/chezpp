@@ -10,7 +10,15 @@
 ;; make a local run shorter or longer without changing any algorithm below.
 ;; The default worker count matches the scheduler's logical CPU count.
 (define fiber-stress-workers (cpu-count))
+(define fiber-stress-quantum 300000)
 (define fiber-stress-yield-interval 4096)
+
+;; All workloads use the same scheduler controls. Set the quantum to 3000 to
+;; exercise frequent preemption, or reduce `fiber-stress-workers` for scaling runs.
+;; A zero yield interval disables cooperative yields; automatic preemption stays on.
+(define fiber-stress-run
+  (lambda (thunk)
+    (run-fibers thunk fiber-stress-workers fiber-stress-quantum)))
 
 ;; Larger problems keep computation running long enough to observe CPU use.
 ;; The sieve's reference values are for primes strictly below its limit;
@@ -34,7 +42,8 @@
   (lambda (index)
     ;; Yield often enough to let the scheduler move runnable fibers between
     ;; worker threads, while keeping the inner loop mostly computation-only.
-    (when (and (positive? index)
+    (when (and (positive? fiber-stress-yield-interval)
+               (positive? index)
                (zero? (modulo index fiber-stress-yield-interval)))
       (fiber-yield))))
 
@@ -99,7 +108,7 @@
 
 (define fiber-stress-run-sieve
   (lambda (limit workers)
-    (run-fibers
+    (fiber-stress-run
      (lambda ()
        (fiber-stress-watchdog)
        (let* ([primes (fiber-stress-base-primes
@@ -168,7 +177,7 @@
 
 (define fiber-stress-render-mandelbrot
   (lambda (width height iterations workers)
-    (run-fibers
+    (fiber-stress-run
      (lambda ()
        (fiber-stress-watchdog)
        (let ([results (make-channel)])
@@ -288,7 +297,7 @@
 
 (mat fiber-stress-parallel-merge-sort
      (let ([result
-            (run-fibers
+            (fiber-stress-run
              (lambda ()
                (fiber-stress-watchdog)
                (let* ([workers fiber-stress-workers]
@@ -342,7 +351,7 @@
 
 (define fiber-stress-monte-carlo
   (lambda (samples workers)
-    (run-fibers
+    (fiber-stress-run
      (lambda ()
        (fiber-stress-watchdog)
        (let ([results (make-channel)])
