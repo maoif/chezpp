@@ -29,6 +29,18 @@
           (chezpp net operation)
           (chezpp net operation private))
 
+;;;;===----------------------------------------------------------------------===
+;;;; Implementation origin and design references
+;;;;===----------------------------------------------------------------------===
+
+  ;; The event vocabulary and poll/register/commit protocol follow Concurrent ML:
+  ;; https://cml.cs.uchicago.edu/
+  ;; The original cvar implementation also compared its API with PCML and Guile
+  ;; Fibers. Here a cvar wait explicitly releases and reacquires a caller-owned mutex.
+  ;; Guile Fibers reference: https://github.com/wingo/fibers
+  ;; Tests adapted from the legacy `fiber.ss.bak` include examples labeled as coming
+  ;; from Loko and Guile Fibers benchmarks; see the attribution in `tests/fiber.ss`.
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -56,6 +68,13 @@
             (dlist-delete! queue 0)
             value))))
 
+  ;; One top-level `run-fibers` lifetime. `schedulers` is published before workers
+  ;; start; `stop-flag` is atomic. `init-values` and `terminal-error` are read after
+  ;; all workers join; `terminal-error?` distinguishes a raised `#f` from no error.
+  ;; `park-mutex` protects `runnable-count` and the ordered
+  ;; `timers` list; `park-condition` wakes idle workers after publication or shutdown.
+  ;; `transactions` holds pending synchronizations under `event-protocol-mutex`,
+  ;; so shutdown can detach their registrations exactly once.
   (define-record-type fiber-run-context
     (fields (mutable schedulers)
             stop-flag
@@ -67,19 +86,27 @@
             (mutable transactions)
             (mutable timers)))
 
+  ;; A `scheduler`'s `i` identifies its slot in `context`; `rq` holds runnable `fiber-task`
+  ;; values. Queue access holds the `context`'s `park-mutex` before `rq-lock`. `running?`
+  ;; is visible to the network driver. `thread` is the OS thread joined on shutdown;
+  ;; `thread-id` verifies ownership despite inherited parameters. `k` is the current
+  ;; `scheduler` escape and may only be invoked on that `scheduler`'s own OS thread.
   (define-record-type scheduler
     (fields i context rq rq-lock (mutable running?) (mutable thread)
             (mutable thread-id) (mutable k)))
 
   (define on-scheduler-thread?
     (lambda ()
-      ;; fork-thread inherits thread parameters, including a parent's scheduler.
-      ;; Only the OS thread actually running that scheduler may use its escapes
-      ;; or current task token. Read current-scheduler afresh after migration.
+      ;; `fork-thread` inherits thread parameters, including a parent's scheduler.
+      ;; Only the OS thread actually running that `scheduler` may use its escapes
+      ;; or current task token. Read `current-scheduler` afresh after migration.
       (and current-scheduler
            (eqv? (get-thread-id) (scheduler-thread-id current-scheduler)))))
 
-  ;; A resumed continuation has the same token and init status as its original task.
+  ;; A schedulable slice of one logical fiber. `token` is its immutable mutex-owner
+  ;; identity; `init?` determines whether completion stops the whole run. `thunk` is a
+  ;; zero-argument entry procedure or a one-shot continuation-resumption closure.
+  ;; Resumed tasks keep their original `token` and init status across OS threads.
   (define-record-type fiber-task
     (fields token init? thunk))
 
@@ -89,13 +116,13 @@
 
   (define scheduler-return
     (lambda (type value)
-      ;; Never return to the scheduler captured on the continuation's source thread.
+      ;; Never return to the `scheduler` captured on the continuation's source thread.
       ((scheduler-k current-scheduler) type value)))
 
   (define request-context-stop!
     (lambda (context error? error)
-      ;; The hierarchy is event mutex -> park mutex -> queue spinlock. No park-held
-      ;; path enters the event protocol, and no condition wait holds the event mutex.
+      ;; The hierarchy is `event` mutex -> park mutex -> queue spinlock. No park-held
+      ;; path enters the `event` protocol, and no condition wait holds `event-protocol-mutex`.
       (with-event-protocol
         (let ([mutex (fiber-run-context-park-mutex context)])
           (mutex-acquire mutex)
@@ -121,7 +148,7 @@
        (let ([previous-timer (set-timer 0)])
          (call-with-values
           (lambda ()
-            ;; Exception cleanup avoids dynamic-wind exit/entry on an ordinary fiber yield.
+            ;; Exception cleanup avoids `dynamic-wind` exit/entry on an ordinary fiber yield.
             (guard (condition
                     [else (set-timer previous-timer) (raise condition)])
               (begin expression ...)))
@@ -176,7 +203,7 @@
            (condition-signal (fiber-run-context-park-condition context)))
          (mutex-release mutex))]))
 
-  ;; The caller holds the context park mutex throughout queue inspection and removal.
+  ;; The caller holds the `context` park mutex throughout queue inspection and removal.
   (define get-task-locked!
     (lambda (sched)
       (let ([lock (scheduler-rq-lock sched)])
@@ -202,6 +229,10 @@
         (or (< seconds 0)
             (and (= seconds 0) (<= nanoseconds 0))))))
 
+  ;; A pending timer registration: `deadline` is an absolute monotonic time,
+  ;; `transaction` owns its cancellation cleanup, and `resume` commits its event.
+  ;; Timers live in their `context`'s ordered list under `park-mutex`. Expiration
+  ;; removes entries there, then invokes `resume` under the `event-protocol-mutex`.
   (define-record-type fiber-timer
     (fields deadline transaction resume))
 
@@ -235,7 +266,7 @@
               (fiber-run-context-timers-set! context rest)
               (reverse expired))))))
 
-  ;; Expiry commits only after park is released; event protocol is acquired by caller.
+  ;; Expiry commits only after park is released; `event` protocol is acquired by caller.
   (define commit-expired-timers!
     (lambda (expired)
       (unless (null? expired)
@@ -268,7 +299,7 @@
                          task)
                        (let ([timers (fiber-run-context-timers context)])
                          ;; condition-wait releases this mutex atomically and reacquires it once.
-                         ;; Every wake rechecks shutdown, timers, and runnable work.
+                         ;; Every wake rechecks shutdown, `timers`, and runnable work.
                          (if (null? timers)
                              (condition-wait condition mutex)
                              (let ([duration
@@ -294,7 +325,7 @@
               (unless (context-stopped? context)
                 (set! current-fiber-task task)
                 (let-values ([(type value)
-                              ;; Each scheduler escape is invoked exactly once.
+                              ;; Each `scheduler` escape is invoked exactly once.
                               (call/1cc
                                (lambda (return)
                                  (scheduler-k-set! sched return)
@@ -322,8 +353,8 @@
                       [(yield time)
                        (put-task! sched (continue-task task (lambda () (value (void)))))]
                       [(callback)
-                       ;; Registration executes on the scheduler, with preemption disabled.
-                       ;; Keep task identity visible for event registration and ownership.
+                       ;; Registration executes on the `scheduler`, with preemption disabled.
+                       ;; Keep task identity visible for `event` registration and ownership.
                        (set! current-fiber-task task)
                        (guard (condition
                                [else (request-context-stop! context #t condition)])
@@ -420,7 +451,8 @@
                     (raise (fiber-run-context-terminal-error context))
                     (apply values (fiber-run-context-init-values context)))))))))
 
-
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;;   first-class events
@@ -428,9 +460,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
+  ;; Common type tag for immutable base and selection events. Constructing an
+  ;; `event` does not register a wait; `event-sync` creates a fresh transaction.
   (define-record-type event (fields))
 
-  ;; All event poll/register/commit/cleanup operations hold this mutex. One global
+  ;; All `event` poll/register/commit/cleanup operations hold this mutex. One global
   ;; protocol also makes rendezvous between independent run contexts atomic, without
   ;; acquiring two park mutexes. It serializes short queue operations, never user code.
   (define event-protocol-mutex (make-mutex 'fiber-event-protocol))
@@ -449,6 +483,10 @@
             (mutex-release event-protocol-mutex)
             (apply values results))))]))
 
+  ;; One `event-sync` attempt, shared by all branches of a choice. `context` owns its
+  ;; lifetime, and `resume` accepts a result `thunk` and only publishes runnable work.
+  ;; `state` changes once from `waiting` to `committed`/`cancelled`; `cleanups` unlink every
+  ;; registration, including losing branches. All mutation holds `event-protocol-mutex`.
   (define-record-type sync-transaction
     (fields context resume (mutable state) (mutable cleanups)))
 
@@ -459,7 +497,7 @@
 
   ;; Each cleanup is installed before publishing its registration. Finishing first
   ;; clears the cleanup list, so cleanup and cancellation are idempotent. Callers hold
-  ;; event-protocol-mutex; cleanups must only unlink storage and never reacquire it.
+  ;; `event-protocol-mutex`; `cleanups` must only unlink storage and never reacquire it.
   (define add-sync-cleanup!
     (lambda (transaction cleanup)
       (sync-transaction-cleanups-set!
@@ -485,19 +523,26 @@
            (begin
              (finish-sync-transaction! transaction 'committed)
              ;; Resume only publishes a task: wrappers and result thunks run later,
-             ;; outside this mutex. put-task! owns park before its queue spinlock.
+             ;; outside this mutex. `put-task!` owns park before its queue spinlock.
              ((sync-transaction-resume transaction) thunk)
              #t))))
 
+  ;; One synchronization branch. `wrap-fn` is `#f` or a procedure transforming all
+  ;; result values; `try-fn` polls readiness and returns a deferred result thunk.
+  ;; `block-fn` installs a cancellable wait only after every choice branch was polled.
+  ;; Poll/register callbacks hold `event-protocol-mutex`; result thunks/wrappers run later
+  ;; on a resumed fiber, where user code can yield, raise, or synchronize again.
   (define-record-type base-event
     (parent event)
     (sealed #t)
     (fields wrap-fn
-            ;; unit -> result thunk or #f, under the event protocol mutex
+            ;; Signature: `() -> result-thunk-or-#f`, under `event-protocol-mutex`.
             try-fn
-            ;; transaction -> committing resume -> unit, under the same mutex
+            ;; Signature: `(transaction resume) -> unspecified`, under the same mutex.
             block-fn))
 
+  ;; `events` is a flattened vector of `base-event` alternatives. The graph is
+  ;; immutable after construction, so choices/wrappers can share their sources.
   (define-record-type select-event
     (parent event)
     (sealed #t)
@@ -524,7 +569,7 @@
 
   #|proc:event-wrap
   The `event-wrap` procedure returns a new event wrapping `event`, leaving `event` unchanged.
-  After synchronization, `procedure` receives all event result values as its arguments and its
+  After synchronization, procedure receives all event result values as its arguments and its
   return values become the synchronization results. Repeated wrappers run in construction order.
   |#
   (define-who event-wrap
@@ -661,7 +706,7 @@
 
   (define net-waiter-live?
     (lambda (waiter)
-      ;; Context liveness and scheduler liveness are separate from transaction state.
+      ;; Context liveness and `scheduler` liveness are separate from `transaction` state.
       (and (sync-transaction-live? (vector-ref waiter 0))
            (not (context-stopped? (vector-ref waiter 3)))
            (scheduler-running? (vector-ref waiter 4)))))
@@ -702,7 +747,7 @@
         (with-event-protocol
           (when result
             ;; Capture delivery data before any commit recycles pooled vectors. One
-            ;; transaction may have several branches registered on this same job.
+            ;; `transaction` may have several branches registered on this same job.
             (let ([deliveries
                    (map (lambda (waiter)
                           (and (net-waiter-live? waiter)
@@ -799,7 +844,12 @@
                                                 "network event waiter pool exhausted")))))))
           (make-base-event #f try block)))))
 
-
+
+
+  ;; A synchronous rendezvous point. `putQ` stores pending sends and their messages;
+  ;; `getQ` stores pending receives. Both contain transaction/resume/payload entries
+  ;; and are accessed only under the `event-protocol-mutex`. Cleanup removes each
+  ;; losing or cancelled waiter before another synchronization can match it.
   (define-record-type (channel %make-channel channel?)
     (fields putQ getQ))
 
@@ -809,9 +859,9 @@
   (define make-channel
     (lambda () (pcheck () (%make-channel (make-dlist) (make-dlist)))))
 
-  ;; Channel, mutex, and cvar queues share #(transaction resume payload) entries.
-  ;; Their caller holds event-protocol-mutex while taking or registering a waiter.
-  ;; Exclude the calling transaction when matching opposite channel branches.
+  ;; Channel, mutex, and cvar queues share `#(transaction resume payload)` entries.
+  ;; Their caller holds `event-protocol-mutex` while taking or registering a waiter.
+  ;; Exclude the calling `transaction` when matching opposite `channel` branches.
   (define take-sync-waiter!
     (lambda (queue transaction)
       (let loop ()
@@ -928,16 +978,22 @@
       ($channel-put! who ch m)))
 
 
-
+
+
 ;;;;===----------------------------------------------------------------------===
 ;;;; Fiber mutexes and condition variables
 ;;;;===----------------------------------------------------------------------===
 
   ;; Ownership and both wait queues are guarded by event-protocol-mutex. Tokens are
   ;; stable across continuation migration; OS thread identity does not own a mutex.
+  ;; `name` is diagnostic, `owner` is `#f` or a `fiber-task` `token`, and `blockQ` contains
+  ;; acquiring fibers. Release transfers `owner` before publishing the next resume.
   (define-record-type (fiber-mutex %make-fiber-mutex fiber-mutex?)
     (fields name (mutable owner) blockQ))
 
+  ;; `name` is diagnostic and `waitQ` holds condition waiters under `event-protocol-mutex`.
+  ;; Each waiter carries its own mutex reacquisition closure; the cvar stores no
+  ;; persistent signal and is not permanently associated with one fiber mutex.
   (define-record-type (fiber-cvar %make-fiber-cvar fiber-cvar?)
     (fields name waitQ))
 
@@ -967,7 +1023,7 @@
         (errorf who "not running a fiber"))
       (fiber-task-token current-fiber-task)))
 
-  ;; The caller holds event-protocol-mutex for ownership validation and transfer.
+  ;; The caller holds `event-protocol-mutex` for ownership validation and transfer.
   (define check-fiber-mutex-owner!
     (lambda (who mutex token)
       (unless (eq? token (fiber-mutex-owner mutex))
@@ -1027,7 +1083,7 @@
          (fiber-mutex-acquire held-mutex)
          (call-with-values
           (lambda ()
-            ;; A continuation yield must not run a dynamic-wind exit/entry cleanup.
+            ;; A continuation yield must not run a `dynamic-wind` exit/entry cleanup.
             (guard (condition
                     [else (fiber-mutex-release held-mutex) (raise condition)])
               expression ...))
@@ -1088,7 +1144,8 @@
           (void)))))
 
 
-
+
+
 ;;;; time ops
 
 
@@ -1106,7 +1163,7 @@
                 [timer #f])
            (set! timer (make-fiber-timer
                         deadline transaction
-                        ;; Resume through the event protocol callback so wrappers and
+                        ;; Resume through the `event` protocol callback so wrappers and
                         ;; selections apply their result transformation before wakeup.
                         (lambda () (resume (lambda () (void))))))
            ;; Cleanup runs under event-protocol and may briefly acquire park.
