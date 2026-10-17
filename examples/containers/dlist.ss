@@ -12,6 +12,8 @@
        ;; Add an item at the front and another at the back.
        (dlist-push! items 0)
        (dlist-push-back! items 4)
+       ;; Replace the first item through the indexed mutation API.
+       (dlist-set! items 0 -1)
        ;; Reverse the list in place to demonstrate bidirectional mutation.
        (dlist-reverse! items)
        ;; Convert the final dlist to a Scheme list for printing.

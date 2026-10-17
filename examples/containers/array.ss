@@ -24,6 +24,18 @@
            ;; Append finite flonum values to the specialized array.
            (do ([index 0 (+ index 1)]) ((= index size))
              (flarray-add! flonums (exact->inexact index)))
+           ;; Map each representation while preserving its numeric element type.
+           (example-print (array-map (lambda (value) (* value 2)) generic))
+           (example-print (fxarray-map (lambda (value) (fx* value 2)) fixnums))
+           (example-print (flarray-map (lambda (value) (fl* value 2.0)) flonums))
+           ;; Fold comparable contents with the appropriate numeric arithmetic.
+           (example-print (array-fold-left + 0 generic))
+           (example-print (fxarray-fold-left fx+ 0 fixnums))
+           (example-print (flarray-fold-left fl+ 0.0 flonums))
+           ;; Convert to corresponding vectors, then reconstruct the arrays.
+           (example-print (vector->array (array->vector generic)))
+           (example-print (fxvector->fxarray (fxarray->fxvector fixnums)))
+           (example-print (flvector->flarray (flarray->flvector flonums)))
            ;; Convert each representation to a list for comparison.
            (example-print
             (list (array->list generic)

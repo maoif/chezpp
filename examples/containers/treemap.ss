@@ -21,8 +21,8 @@
          ;; Print ordered entries and one lookup from each map.
          (example-print
           (list (treemap->list generic)
-                (treemap-ref generic 3)
+                (and (pair? values) (treemap-ref generic (car values)))
                 (fxtreemap->list specialized)
-                (fxtreemap-ref specialized 3)))))
+                (and (pair? values) (fxtreemap-ref specialized (car values)))))))
      0))
  (command-line-arguments))

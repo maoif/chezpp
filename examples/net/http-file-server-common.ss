@@ -55,35 +55,46 @@
                                                 (path-parse 'unix root-arg))))])
       (unless (and (file-directory? root) (not (reject-symlink-path? root)))
         (errorf 'http-file-server "directory is missing or contains a symlink: ~a" root))
-      (let* ([log (server-log)]
-             [context
-              (and (eq? protocol-version 'https)
-                   (let ([ctx (make-tls-context 'server)])
-                     (tls-context-load-cert! ctx (example-required 'https-file-server ref 'cert))
-                     (tls-context-load-private-key!
-                      ctx (example-required 'https-file-server ref 'key))
-                     ctx))]
-             [server (http-listen host port context)])
+      (let ([log (server-log)] [context #f] [server #f]
+            [old-interrupt (keyboard-interrupt-handler)])
         (dynamic-wind
           (lambda ()
-            (with-logger log
-              (log-infof "serving ~a from ~a:~a" root host port)))
+            (keyboard-interrupt-handler
+             (lambda () (errorf 'http-file-server "interrupted"))))
           (lambda ()
+            (when (eq? protocol-version 'https)
+              ;; Allocate a server TLS context and load the certificate and matching key.
+              (set! context (make-tls-context 'server))
+              (tls-context-load-cert! context (example-required 'https-file-server ref 'cert))
+              (tls-context-load-private-key! context (example-required 'https-file-server ref 'key)))
+            ;; Cleartext H2 uses an explicit prior-knowledge listener; TLS negotiates via ALPN.
+            (set! server (http-listen host port context 128
+                                     (if (eq? protocol-version 'h2) 'h2 'h1)))
+            (with-logger log (log-infof "serving ~a from ~a:~a" root host port))
             (let loop ()
-              ;; Accept one HTTP request so this example can resolve paths itself.
+              ;; Accept one logical HTTP request, preserving sibling streams on H2 connections.
               (let ([connection (http-accept server)])
                 (dynamic-wind
                   void
                   (lambda ()
-                    (let* ([request (http-read-request connection)]
-                           [response (file-server-response root request)])
-                      ;; Send the static file response or the request error response.
-                      (http-write-response connection response)))
-                  (lambda () (http-connection-close connection))))
+                    (guard (condition
+                            [else
+                             (with-logger log
+                               (log-warnf "request failed: ~a" condition))])
+                      ;; Read the request and resolve a regular file under the selected root.
+                      (let* ([request (http-read-request connection)]
+                             [response (file-server-response root request)])
+                        ;; Stream the response; its file source closes after success or failure.
+                        (http-write-response connection response))))
+                  (lambda ()
+                    ;; Cancel only this request if the peer disconnected before completion.
+                    (http-connection-close connection))))
               (loop)))
           (lambda ()
-            ;; Close the listening server after interruption or failure.
-            (http-server-close server)
+            (keyboard-interrupt-handler old-interrupt)
+            ;; Close successfully allocated resources even when TLS or listener setup fails.
+            (when server (http-server-close server))
             (when context (close-tls-context context))
+            (with-logger log (log-info "file server closed"))
             (logger-close! log))))
       0)))

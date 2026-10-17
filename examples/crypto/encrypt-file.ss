@@ -54,7 +54,7 @@
       ;; Encrypt the file bytes with authenticated associated metadata.
       (let-values ([(ciphertext tag)
                     (aead-encrypt/aad method key nonce
-                                      (string->utf8 "chezpp-file-v1") plaintext)])
+                                      (aead-file-header method salt nonce) plaintext)])
         ;; Store algorithm, salt, nonce, ciphertext, and authentication tag.
         (write-u8vec! output
                       (bytevector-concatenate
@@ -89,7 +89,7 @@
             ;; Authenticate the ciphertext and metadata before writing plaintext.
             (let ([plaintext
                    (aead-decrypt/aad method key nonce
-                                     (string->utf8 "chezpp-file-v1") ciphertext tag)])
+                                     (bytevector-copy-range data 0 body-start) ciphertext tag)])
               (bytevector-fill! key 0)
               (unless plaintext
                 (errorf 'encrypt-file "authentication failed; wrong password or corrupt file"))

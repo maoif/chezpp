@@ -1,5 +1,8 @@
 (import (except (chezpp) http-download))
 
+(load "examples/net/legacy-example-common.ss")
+(net-example-help! 'http-download "Download URI bytes to stdout. Positional arguments: URI [auto|http/1.1|h2].")
+
 (load "examples/net/net-example-common.ss")
 
 #|proc:http-download
@@ -12,11 +15,14 @@ standard output, writes the negotiated response version to standard error, and r
     [(uri) (http-download uri 'auto)]
     [(uri version)
      (pcheck ([string? uri] [symbol? version])
+       ;; Own an HTTP client for this single download.
        (let ([client (http-open)])
          (dynamic-wind
            void
            (lambda ()
+             ;; Select the advertised negotiation policy.
              (http-client-version-set! client version)
+             ;; Fetch the response and route only its body bytes to stdout.
              (let* ([response (http-get client uri)]
                     [body (http-response-body response)])
                (call-with-example-output-ports
@@ -35,13 +41,17 @@ standard output, writes the negotiated response version to standard error, and r
                   (flush-output-port out)
                   (flush-output-port err)))
                response))
+           ;; Close client resources on success or error.
            (lambda () (http-close client)))))]))
 
-(let ([arg* (command-line-arguments)])
-  (case (length arg*)
-    [(1) (http-download (car arg*))]
-    [(2) (http-download (car arg*) (string->symbol (cadr arg*)))]
-    [else
-     (errorf 'http-download
-             "expected URI and optional auto, http/1.1, or h2 argument, given ~s"
-             arg*)]))
+(call-with-legacy-example-log
+ 'http-download
+ (lambda ()
+   (let ([arg* (command-line-arguments)])
+     (case (length arg*)
+       [(1) (http-download (car arg*))]
+       [(2) (http-download (car arg*) (string->symbol (cadr arg*)))]
+       [else
+        (errorf 'http-download
+                "expected URI and optional auto, http/1.1, or h2 argument, given ~s"
+                arg*)]))))

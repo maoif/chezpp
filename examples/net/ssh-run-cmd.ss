@@ -1,52 +1,37 @@
 (import (chezpp) (chezpp logging))
 (load "examples/common.ss")
-(load "examples/net/net-example-common.ss")
+(load "examples/net/ssh-example-common.ss")
 
-(define ssh-run-cmd
-  (lambda (host port user auth-kind auth-arg command)
-    (let ([session (ssh-open host port user)]
-          [log (make-logger 'ssh-run-cmd)])
-      (logger-add-sink! log (make-log-port-sink 'stderr (current-error-port)))
-      (dynamic-wind
-        void
-        (lambda ()
-          (with-logger log
-            (log-infof "opening SSH command session to ~a:~a" host port))
-          ;; Authenticate the SSH session using the selected credential.
-          (ssh-authenticate! 'ssh-run-cmd session user auth-kind auth-arg)
-          ;; Execute the remote command and forward both output streams.
-          (call-with-ssh-channel
-           session
-           (lambda (channel)
-             (ssh-exec channel command)
-             (call-with-example-output-ports
-              (lambda (out err)
-                (let loop ()
-                  (let ([stdout (ssh-read/nonblocking channel 65536)]
-                        [stderr (ssh-read-stderr/nonblocking channel 65536)])
-                    (when (bytevector? stdout) (put-bytevector out stdout))
-                    (when (bytevector? stderr) (put-bytevector err stderr))
-                    (flush-output-port out)
-                    (flush-output-port err)
-                    (unless (and (eof-object? stdout) (eof-object? stderr))
-                      (milisleep 5)
-                      (loop)))))))))
-        (lambda ()
-          (logger-close! log)
-          (ssh-close session))))))
+(define has-command-words? (and (member "--" (command-line-arguments)) #t))
 
-(example-run!
- 'ssh-run-cmd
- "Run a command over SSH."
- '(host port user auth command)
- (lambda (ref)
-   (let* ([host (example-required 'ssh-run-cmd ref 'host)]
-          [port (parse-port-argument
-                 'ssh-run-cmd (example-required 'ssh-run-cmd ref 'port))]
-          [user (example-required 'ssh-run-cmd ref 'user)]
-          [auth (or (ref 'auth) "agent")]
-          [secret (or (getenv "CHEZPP_SSH_PASSWORD")
-                      (getenv "CHEZPP_SSH_PASSPHRASE"))]
-          [command (example-required 'ssh-run-cmd ref 'command)])
-     (ssh-run-cmd host port user auth secret command)))
- (command-line-arguments))
+(define command
+  (example-command
+   'ssh-run-cmd "Run --command=text [-- remaining command words] over SSH."
+   (append ssh-example-options '(command))
+   (lambda (ref)
+     (let* ([words (if has-command-words? (ref 'command-words) '())]
+            [text (join-command-arguments
+                   (append (if (ref 'command) (list (ref 'command)) '()) words))])
+       (when (string=? text "") (errorf 'ssh-run-cmd "provide --command or command words"))
+       (exit
+        (call-with-example-ssh
+         'ssh-run-cmd ref
+         (lambda (session log)
+           ;; Execute command text in a fresh SSH channel.
+           (call-with-ssh-channel
+            session
+            (lambda (channel)
+              ;; Request execution of the assembled remote shell command.
+              (ssh-exec channel text)
+              ;; Commands receive stdin EOF so programs waiting for input can finish.
+              (ssh-send-eof! channel)
+              (ssh-example-drain channel void))))))))))
+
+;; The CLI sink is needed only when positional words follow the named options.
+(let ([args (command-line-arguments)])
+  (when (member "--" args)
+    (let ([words (example-make-option 'command-words)])
+      (option-positional?-set! words #t)
+      (option-sink?-set! words #t)
+      (command-options-add! command words)))
+  (run-cli-command! command args))

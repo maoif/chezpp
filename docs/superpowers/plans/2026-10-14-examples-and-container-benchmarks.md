@@ -10,13 +10,14 @@
 
 **Spec:** User request in the current session; no separate design document was requested.
 
-**Current status (2026-10-16):** The implementation is committed in `38af622`. Tasks 1–4,
-6–8 are implemented and their focused tests, clean build, full test suite, and example/benchmark
-smoke checks pass. Task 5 is implemented enough for CLI/help and library-level tests, but a local
-sshd fixture has not been run in this environment. In particular, SSH forwarding byte-relay and
-password/key/agent integration remain follow-up verification work; `ssh-open-repl.ss` retains its
-legacy positional interface. HTTP/2 and HTTPS entry points are capability-gated by the active LWS/
-TLS build and are documented as such in `examples/README.md`.
+**Current status (2026-10-17):** Tasks 1–8 are implemented. Fresh verification includes clean
+release/debug builds, a no-OpenSSL/no-websockets/no-libssh build, the full test suite, parser/data/
+container/crypto/benchmark integration, HTTP/1 and cleartext H2/HTTPS-H2 loopback requests,
+isolated SSH key/agent/password fixtures, SCP file/tree transfers, both forwarding directions,
+and the ten-protocol local transfer matrix. Follow-up implementation and verification are recorded
+in commits after `38af622`. HTTP/2/HTTPS remain capability-gated when
+their optional libraries or an H2-capable curl are unavailable. Review notes are recorded in
+`.superpowers/sdd/2026-10-14-examples-and-container-benchmarks/final-review.md`.
 
 ## Global Constraints
 
@@ -251,29 +252,29 @@ TLS build and are documented as such in `examples/README.md`.
   options. Use the library's `scp-upload`, `scp-download`, and `scp-copy-directory` APIs; reject
   unsupported symlinks unless a specific supported policy is selected.
 
-- [ ] **Step 1: Verify SSH password, key, and agent flow against local fixture.**
+- [x] **Step 1: Verify SSH password, key, and agent flow against local fixture.**
   Extend `tests/net-ssh-common.ss` fixture setup to permit password plus public-key auth while
   retaining existing public-key-only cases. Add a password fixture secret and exercise
   `ssh-auth-password!`, `ssh-auth-private-key!`, and configured agent auth through a local sshd;
   never use a public network host in automated tests.
-- [ ] **Step 2: Repair SSH EOF and port lifecycle.**
+- [x] **Step 2: Repair SSH EOF and port lifecycle.**
   `ssh-write-all` currently treats empty bytevectors as zero-byte writes; inspect
   `chezpp/net/ssh.ss` and `chezpp/c/net/ssh.c` for the supported channel EOF primitive and add a
   documented public procedure only if required. Close `open-ssh-channel-output-port` in the
   REPL's cleanup path, and ensure remote command loops do not wait forever after remote EOF/status.
   Add tests where the remote process waits for stdin EOF and where stdout and stderr arrive
   concurrently before exit.
-- [ ] **Step 3: Normalize argument parsing and authentication.**
+- [x] **Step 3: Normalize argument parsing and authentication.**
   Replace ad hoc `command-line-arguments` parsers in both existing scripts with `(chezpp cli)`;
   use one common auth function, do not accept secrets as argv values, and retain their
   documented SSH operations. Add help and invalid-option checks.
-- [ ] **Step 4: Implement local and remote forwarding modes.**
+- [x] **Step 4: Implement local and remote forwarding modes.**
   Use `ssh-open-local-forward` for local forwarding and
   `ssh-request-remote-forward!`/`ssh-accept-remote-forward` for reverse forwarding. Use
   nonblocking reads/writes and `poll` targets to pump both directions; half-close and close each
   pair when the opposite side reaches EOF. Test each direction against loopback echo services and
   test cancellation during active traffic.
-- [ ] **Step 5: Implement bidirectional file and directory SCP.**
+- [x] **Step 5: Implement bidirectional file and directory SCP.**
   Add explicit `upload|download`, local path, remote path, `file|directory`, and transfer policy
   CLI options. Ensure both `scp-session` and its SSH session are closed on exceptions. Use
   temporary sshd-backed tests for file and nested-directory upload/download, overwrite behavior,
@@ -393,7 +394,7 @@ TLS build and are documented as such in `examples/README.md`.
 - [x] **Step 1: Verify scope and clean source checkout.**
   Confirm all changes are in the dated plan worktree and the original source checkout's pre-existing
   untracked files remain untouched. Review `git status --short` and `git diff --check`.
-- [ ] **Step 2: Check Scheme syntax and runnable entry points.**
+- [x] **Step 2: Check Scheme syntax and runnable entry points.**
   Run the repository's parenthesis checker over every added/edited Scheme file. Run every new
   script with `--help` and `-h`; run fixture-backed parser, container, crypto, downloader, local
   server, SSH/SCP fixture, and benchmark smoke commands.

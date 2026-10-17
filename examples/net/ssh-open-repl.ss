@@ -1,101 +1,52 @@
-(import (chezpp))
-
+(import (chezpp) (chezpp logging))
 (load "examples/common.ss")
-(load "examples/net/net-example-common.ss")
+(load "examples/net/ssh-example-common.ss")
 
-(define parse-ssh-open-repl-arguments
-  (lambda (arg*)
-    (unless (>= (length arg*) 4)
-      (errorf 'ssh-open-repl
-              "expected host port user auth-kind arguments, given ~s"
-              arg*))
-    (let ([host (car arg*)]
-          [port (parse-port-argument 'ssh-open-repl (cadr arg*))]
-          [user (caddr arg*)]
-          [auth-kind (cadddr arg*)]
-          [rest (cddddr arg*)])
-      (cond
-       [(string=? auth-kind "agent")
-        (unless (null? rest)
-          (errorf 'ssh-open-repl
-                  "agent authentication does not take an extra argument, given ~s"
-                  rest))
-        (values host port user auth-kind #f)]
-       [(or (string=? auth-kind "password")
-            (string=? auth-kind "publickey"))
-        (unless (= (length rest) 1)
-          (errorf 'ssh-open-repl
-                  "authentication kind ~s requires exactly one secret/passphrase argument"
-                  auth-kind))
-        (values host port user auth-kind (car rest))]
-       [else
-        (errorf 'ssh-open-repl "invalid SSH auth kind ~s" auth-kind)]))))
+(define ssh-example-shell
+  (lambda (session log pty?)
+    ;; Open a remote interactive shell; this is the remote user's shell.
+    (call-with-ssh-channel
+     session
+     (lambda (channel)
+       (when pty?
+         ;; Request a remote terminal for interactive terminal use.
+         (ssh-request-pty! channel))
+       ;; Start the remote user's shell on this channel.
+       (ssh-shell channel)
+       ;; Wrap channel stdin in a binary output port, closed in the cleanup path.
+       (let ([output (open-ssh-channel-output-port channel)]
+             [input (open-file-input-port "/proc/self/fd/0" (file-options)
+                                          (buffer-mode none) #f)]
+             [stdin-open? #t])
+         (dynamic-wind
+           void
+           (lambda ()
+             (ssh-example-drain
+              channel
+              (lambda ()
+                (when (and stdin-open?
+                           (pair? (poll-target-ready-events
+                                   (car (poll (list (make-poll-target input '(read))) 0)))))
+                  (let ([chunk (get-bytevector-some input)])
+                    (if (eof-object? chunk)
+                        (begin
+                          (set! stdin-open? #f)
+                          (flush-output-port output)
+                          ;; Half-close shell stdin while continuing to drain its output.
+                          (ssh-send-eof! channel))
+                        (begin
+                          (put-bytevector output chunk)
+                          (flush-output-port output))))))))
+           (lambda () (close-port input) (close-port output))))))))
 
-#|proc:ssh-open-repl
-The `ssh-open-repl` procedure opens an authenticated interactive shell on
-`host:port` and forwards local terminal input/output to the remote shell.
-|#
-(define ssh-open-repl
-  (lambda (host port user auth-kind auth-arg)
-    (pcheck ([string? host user auth-kind] [fixnum? port])
-      (let ([session (ssh-open host port user)]
-            [stop? (vector #f)])
-        (dynamic-wind
-          void
-          (lambda ()
-            (ssh-authenticate! 'ssh-open-repl session user auth-kind auth-arg)
-            (call-with-ssh-channel
-             session
-             (lambda (channel)
-               (ssh-request-pty! channel)
-               (ssh-shell channel)
-               (call-with-example-output-ports
-                (lambda (out err)
-                  (let ([op (open-ssh-channel-output-port channel)]
-                        [stdin-open? #t])
-                    (let loop ([stdout-eof? #f] [stderr-eof? #f] [exit-status #f])
-                      (let* ([stdout (if stdout-eof? #t (ssh-read/nonblocking channel 65536))]
-                             [stderr (if stderr-eof? #t (ssh-read-stderr/nonblocking channel 65536))]
-                             [stdout-eof* (or stdout-eof? (eof-object? stdout))]
-                             [stderr-eof* (or stderr-eof? (eof-object? stderr))]
-                             [status (or exit-status
-                                         (guard (c [else #f])
-                                           (let ([x (ssh-channel-exit-status channel)])
-                                             (and (fixnum? x) (fx>= x 0) x))))]
-                             [targets
-                              (append
-                               (if (net-would-block? stdout)
-                                   (list (make-poll-target
-                                          (net-would-block-resource stdout)
-                                          (net-would-block-events stdout)))
-                                   '())
-                               (if (net-would-block? stderr)
-                                   (list (make-poll-target
-                                          (net-would-block-resource stderr)
-                                          (net-would-block-events stderr)))
-                                   '()))])
-                        (when (bytevector? stdout) (put-bytevector out stdout) (flush-output-port out))
-                        (when (bytevector? stderr) (put-bytevector err stderr) (flush-output-port err))
-                        (when (and stdin-open? (char-ready? (current-input-port)))
-                          (let ([ch (get-char (current-input-port))])
-                            (if (eof-object? ch)
-                                (begin (set! stdin-open? #f) (ssh-write-all channel #vu8()))
-                                (begin
-                                  (put-bytevector op (string->utf8 (string ch)))
-                                  (flush-output-port op)))))
-                        (cond
-                         [(and stdout-eof* stderr-eof* status) (vector-set! stop? 0 #t) channel]
-                         [else
-                          (if (null? targets) (milisleep 5) (poll targets 100))
-                          (loop stdout-eof* stderr-eof* status)])))))))))
-          (lambda ()
-            (ssh-close session)))))))
-
-(let ([arg* (command-line-arguments)])
-  (when (or (member "--help" arg*) (member "-h" arg*))
-    (display "ssh-open-repl: open an interactive authenticated remote shell\n")
-    (display "  arguments: host port user auth-kind [passphrase-or-password]\n")
-    (exit 0))
-  (let-values ([(host port user auth-kind auth-arg)
-                (parse-ssh-open-repl-arguments arg*)])
-    (ssh-open-repl host port user auth-kind auth-arg)))
+(example-run!
+ 'ssh-open-repl
+ "Open a remote shell. --pty=yes|no (default yes); credentials use environment variables."
+ (append ssh-example-options '(pty))
+ (lambda (ref)
+   (let ([pty (or (ref 'pty) "yes")])
+     (unless (member pty '("yes" "no")) (errorf 'ssh-open-repl "--pty must be yes or no"))
+     (exit (call-with-example-ssh
+            'ssh-open-repl ref
+            (lambda (session log) (ssh-example-shell session log (string=? pty "yes")))))))
+ (command-line-arguments))

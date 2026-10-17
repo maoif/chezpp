@@ -82,3 +82,10 @@
 (mat example-script-reader-pass
      (parameterize ([current-directory ".."])
        (andmap (lambda (path) (pair? (read-script path))) example-entry-point*)))
+
+(mat example-core-and-benchmark-integration
+     (= 0 (system "cd .. && python3 tests/integration/examples.py help core benchmarks")))
+
+(mat example-crypto-integration
+     (mat-requires (openssl)
+       (= 0 (system "cd .. && python3 tests/integration/examples.py crypto"))))

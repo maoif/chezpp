@@ -40,17 +40,42 @@ that currently expose them.
 | Script | Invocation | Demonstrates |
 |---|---|---|
 | `examples/net/http-file-server.ss` | `--dir=examples/data --port=8080` | local HTTP/1 file server |
-| `examples/net/http2-file-server.ss` | `--dir=examples/data --port=8443` | H2 server, requires H2 server support |
+| `examples/net/http2-file-server.ss` | `--dir=examples/data --port=8443` | cleartext H2 with prior knowledge |
 | `examples/net/https-file-server.ss` | `--dir=examples/data --port=8443 --cert=cert.pem --key=key.pem` | TLS file server |
 | `examples/net/wget.ss` | `--uri=http://127.0.0.1:8080/sample.scm --output=sample.scm` | HTTP downloader |
-| `examples/net/ssh-open-repl.ss` | `HOST PORT USER agent` | interactive remote shell |
+| `examples/net/ssh-open-repl.ss` | `--host=HOST --user=USER --auth=agent` | interactive remote shell |
 | `examples/net/ssh-run-cmd.ss` | `--host=HOST --port=22 --user=USER --auth=agent --command='uname -a'` | remote command and streams |
 | `examples/net/ssh-port-forward.ss` | `--host=HOST --user=USER --auth=agent --direction=local --target-host=127.0.0.1 --target-port=22` | SSH TCP forwarding |
 | `examples/net/scp.ss` | `--host=HOST --user=USER --auth=agent --direction=upload --kind=file --local=FILE --remote=PATH` | SCP files and directories |
 
-SSH uses strict host-key verification. Passwords and private-key passphrases are read from
-environment variables, not command arguments. HTTPS and HTTP/2 rows are included only when the
-active Chezpp build and public listener APIs support the named mode; see their `--help` output.
+SSH checks `$HOME/.ssh/known_hosts`. Select `--auth=publickey --private-key=PATH`,
+`--auth=password`, or `--auth=agent`. Set `CHEZPP_SSH_PASSWORD` or `CHEZPP_SSH_PASSPHRASE`
+for secrets; agent authentication uses `SSH_AUTH_SOCK`. Use `--pty=no` for piped shell input.
+Remote command stdout/stderr remain separate and its exit status becomes the local exit status.
+
+Forwarding accepts `--direction=local|remote`, `--listen-host`, and `--listen-port`; local mode
+listens locally and connects the target through SSH, while remote mode listens remotely and
+connects the target locally. `--listen-port=0` requests a free port, logged to stderr. It runs until
+Ctrl-C unless `--duration=MILLISECONDS` is supplied. SCP accepts both directions and kinds, plus
+`--overwrite=error|replace|skip`. It rejects symlinks and unsupported resume modes.
+
+| Server mode | Requirements | Verified request |
+|---|---|---|
+| HTTP/1 | libwebsockets | `curl --http1.1 http://127.0.0.1:8080/sample.scm` |
+| Cleartext H2 | libwebsockets with HTTP/2 | `curl --http2-prior-knowledge http://127.0.0.1:8443/sample.scm` |
+| HTTPS / TLS H2 | libwebsockets TLS/HTTP2 and OpenSSL; certificate and key | `curl --http2 --cacert=cert.pem https://localhost:8443/sample.scm` |
+
+The H2 example selects prior knowledge explicitly; it requires an H2 client. The HTTPS example
+negotiates HTTP/1 or H2 through ALPN. Tests verify the negotiated version and certificate trust.
+Server roots and requested paths reject symlinks and traversal, and only GET regular files are served.
+
+Existing positional examples also accept both help flags through `(chezpp cli)`. These include
+`http-download.ss URI [auto|http/1.1|h2]`, `echo-{client,server}-grpc.ss [HOST PORT]`,
+`ftp-client.ss HOST PORT USER PASSWORD`, `sftp-client.ss HOST PORT USER AGENT-OR-PRIVATE-KEY`,
+and the commands under `examples/net/file-transfer/`. Their lifecycle logs are opt-in with
+`CHEZPP_EXAMPLE_LOG_LEVEL=debug`, preserving binary output and the transfer verifiers' quiet mode.
+The `*-common.ss` and protocol implementation modules are loaded helpers, not commands. The
+`verify-*.ss` and shell drivers under `file-transfer/` are test fixtures/verifiers.
 
 ## Cryptography
 
@@ -58,6 +83,10 @@ active Chezpp build and public listener APIs support the named mode; see their `
 |---|---|---|
 | `examples/crypto/encrypt-file.ss` | `--mode=encrypt --input=input --output=input.enc --method=aes-256-gcm` | authenticated file encryption/decryption |
 | `examples/crypto/hash-file.ss` | `--file=input --method=sha256` | cryptographic hashes and checksums |
+
+Set `CHEZPP_EXAMPLE_PASSWORD` before encryption/decryption. Both methods authenticate the envelope
+and ciphertext before creating a plaintext output; output must be a new path. Modern digests use
+OpenSSL; BLAKE3 and xxhash checksums require their corresponding optional libraries.
 
 ## Benchmarks
 
@@ -68,5 +97,27 @@ active Chezpp build and public listener APIs support the named mode; see their `
 | `benchmarks/vectors.ss` | `--size=100000 --samples=10` | vector, fxvector, and flvector |
 | `benchmarks/arrays.ss` | `--size=100000 --samples=10` | array, fxarray, and flarray |
 
-Benchmarks accept text, CSV, JSON, or datum output where supported and report timing and allocation
-summaries. Optional runtime cost-center metrics vary by build.
+Each benchmark accepts `--size`, `--samples`, `--warmup`, `--min-time`, `--max-iterations`,
+`--filter=NAME-SUBSTRING`, `--format=text|csv|json|datum`, `--output=PATH`, and `--cost-center`.
+Reports include build/runtime metadata, arguments, per-iteration timing/allocation summaries
+(mean, median, range, standard deviation, confidence interval), and raw sample CPU/real time,
+allocated bytes, GC count/bytes/time, and iteration counts. Unavailable cost-center measurements
+are labeled explicitly. No report file is created unless `--output` is supplied.
+
+Sets/maps measure populate, successful lookup, traversal, update, and delete. Vectors measure
+fill/read/map/fold; arrays measure append/index/map/fold. Generic flonum cases provide a matching
+domain for flvector/flarray, alongside generic fixnum cases for fxvector/fxarray. Setup and mutation
+resets stay outside measured regions; no cross-profile specialization ratios are reported.
+
+## Local Verification
+
+After `make clean && make`, `make -C tests test examples.ss net-examples.ss benchmarks.ss`
+runs parser/data/container/crypto/benchmark examples, both CLI help forms, and local HTTP/SSH
+fixtures. Network fixtures require curl with HTTP/2, OpenSSL tools, and OpenSSH tools. These
+checks use temporary files, host keys, certificates, loopback listeners, and bounded subprocesses.
+
+Run `CHEZPP_EXAMPLE_TEST_VERBOSE=1 python3 tests/integration/examples.py` for individual example
+checks, `python3 tests/ssh-examples-integration.py` for SSH/SCP/forwarding, and
+`CHEZPP_TRANSFER_MIB=1 examples/net/file-transfer/verify-local-transfers.sh` for the existing ten
+protocol transfer matrix. `python3 tests/ssh-examples-integration.py --password` additionally uses
+the optional Python Paramiko package to verify password auth without modifying a system account.

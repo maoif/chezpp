@@ -1,6 +1,9 @@
 (import (chezpp)
         (chezpp net))
 
+(load "examples/net/legacy-example-common.ss")
+(net-example-help! 'grpc-echo-server "Serve gRPC echo requests. Positional arguments: [HOST PORT].")
+
 (load "examples/net/net-example-common.ss")
 
 (define grpc-echo-method "/chezpp.examples.Echo/Unary")
@@ -15,8 +18,10 @@ with the same value.
     (pcheck ([string? host] [fixnum? port])
       (with-grpc-example-env
        (lambda ()
+         ;; Bind the local gRPC server channel.
          (let ([server (grpc-open-channel 'server host port)]
                [count 0])
+           ;; Register a unary echo handler that returns the incoming value.
            (grpc-register-service!
             server
             grpc-echo-method
@@ -31,19 +36,24 @@ with the same value.
              void
              (lambda ()
                (let loop ()
+                 ;; Serve pending unary requests.
                  (grpc-serve server)
                  (loop)))
              (lambda ()
+               ;; Release the listening gRPC channel on exit.
                (grpc-close-channel server)))))))))
 
-(let ([arg* (command-line-arguments)])
-  (cond
-   [(null? arg*)
-    (grpc-echo-server grpc-echo-example-host grpc-echo-example-port)]
-   [(= (length arg*) 2)
-    (grpc-echo-server (car arg*)
-                      (parse-port-argument 'grpc-echo-server (cadr arg*)))]
-   [else
-    (errorf 'grpc-echo-server
-            "expected zero arguments or host/port, given ~s"
-            arg*)]))
+(call-with-legacy-example-log
+ 'grpc-echo-server
+ (lambda ()
+   (let ([arg* (command-line-arguments)])
+     (cond
+      [(null? arg*)
+       (grpc-echo-server grpc-echo-example-host grpc-echo-example-port)]
+      [(= (length arg*) 2)
+       (grpc-echo-server (car arg*)
+                         (parse-port-argument 'grpc-echo-server (cadr arg*)))]
+      [else
+       (errorf 'grpc-echo-server
+               "expected zero arguments or host/port, given ~s"
+               arg*)]))))

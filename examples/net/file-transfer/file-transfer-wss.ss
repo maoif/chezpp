@@ -1,5 +1,8 @@
 (import (chezpp) (chezpp net))
 
+(load "examples/net/legacy-example-common.ss")
+(net-example-help! 'file-transfer-wss "Transfer a file over WSS. Positional argument: FILE-OR-DIRECTORY; CHEZPP_TRANSFER_ROLE=server|client.")
+
 (load "examples/net/file-transfer/file-transfer-common.ss")
 (load "examples/net/file-transfer/file-transfer-websocket.ss")
 
@@ -15,16 +18,19 @@
             (tls-context-set-verify! ctx #t)))
       ctx)))
 
-(let ([arg* (command-line-arguments)])
-  (unless (= (length arg*) 1)
-    (errorf 'file-transfer-wss "expected one directory or file path"))
-  (let* ([server? (string=? (getenv "CHEZPP_TRANSFER_ROLE") "server")]
-         [ctx (secure-context (if server? 'server 'client))]
-         [options (make-websocket-options ctx '("chezpp-file-transfer")
-                                          65536 #f 30000)])
-    (set! websocket-file-transfer-port 41009)
-    (set! websocket-file-transfer-options options)
-    (if server?
-        (websocket-file-server (car arg*))
-        (websocket-file-client (list (car arg*))))
-    (close-tls-context ctx)))
+(call-with-legacy-example-log
+ 'file-transfer-wss
+ (lambda ()
+   (let ([arg* (command-line-arguments)])
+     (unless (= (length arg*) 1)
+       (errorf 'file-transfer-wss "expected one directory or file path"))
+     (let* ([server? (string=? (getenv "CHEZPP_TRANSFER_ROLE") "server")]
+            [ctx (secure-context (if server? 'server 'client))]
+            [options (make-websocket-options ctx '("chezpp-file-transfer")
+                                             65536 #f 30000)])
+       (set! websocket-file-transfer-port 41009)
+       (set! websocket-file-transfer-options options)
+       (if server?
+           (websocket-file-server (car arg*))
+           (websocket-file-client (list (car arg*))))
+       (close-tls-context ctx)))))

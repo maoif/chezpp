@@ -1,4 +1,9 @@
 (import (chezpp))
+(load (if (file-exists? "examples/net/legacy-example-common.ss")
+          "examples/net/legacy-example-common.ss"
+          "../examples/net/legacy-example-common.ss"))
+(net-example-help! 'verify-external-downloads "Verify optional public HTTPS artifacts. Positional argument: OUTPUT-DIRECTORY.")
+
 
 (define external-artifacts
   '(("https://ftp.gnu.org/gnu/emacs/windows/emacs-30/emacs-30.2.zip"

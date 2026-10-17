@@ -7,8 +7,11 @@
  '(limit)
  (lambda (ref)
    (let* ([limit (example-option-natural 'iter-example ref 'limit 5)]
+          ;; Construct independent sources and map the first one.
           [mapped (iter-map (lambda (x) (* x 2)) (range 10))]
+          ;; Filter the second source before zipping it with the first.
           [filtered (iter-filter even? (range 10))]
+          ;; Pair values from the two iterators until either source finishes.
           [zipped (iter-zip mapped filtered)])
      ;; Pull and finalize the zipped iterator even when bounded traversal stops early.
      (dynamic-wind

@@ -1,63 +1,155 @@
 (import (chezpp) (chezpp logging))
 (load "examples/common.ss")
-(load "examples/net/net-example-common.ss")
+(load "examples/net/ssh-example-common.ss")
 
-(define open-forwarding!
-  (lambda (session direction listen-host listen-port target-host target-port log)
-    (case direction
-      ((local)
-       ;; Open a direct SSH channel to the target service.
-       (let ((forwarding (ssh-open-local-forward session target-host target-port
-                                                 listen-host listen-port)))
-         (with-logger log
-           (log-infof "local forwarding channel opened to ~a:~a"
-                      target-host target-port))
-         forwarding))
-      ((remote)
-       ;; Ask the SSH server to listen on the requested address and port.
-       (let ((listener (ssh-request-remote-forward! session listen-host listen-port)))
-         (with-logger log
-           (log-infof "remote forwarding listener opened on ~a:~a"
-                      (ssh-forwarding-address listener)
-                      (ssh-forwarding-port listener)))
-         listener))
-      (else
-       (errorf 'ssh-port-forward "direction must be local or remote")))))
+(define monotonic-ms
+  (lambda ()
+    (let ([time (current-time 'time-monotonic)])
+      (+ (* (time-second time) 1000) (quotient (time-nanosecond time) 1000000)))))
+
+;; One bounded buffer per direction provides backpressure without unbounded allocation.
+;; Fields: socket, forwarding, upload, upload-offset, download, download-offset,
+;; local-read-EOF, SSH-read-EOF, SSH-write-EOF, socket-write-EOF.
+(define make-relay (lambda (socket forwarding) (vector socket forwarding #f 0 #f 0 #f #f #f #f)))
+
+(define close-relay!
+  (lambda (relay)
+    (guard (condition [else #f]) (close-socket (vector-ref relay 0)))
+    (guard (condition [else #f]) (ssh-close-forwarding (vector-ref relay 1)))))
+
+(define step-relay!
+  (lambda (relay wait!)
+    (let ([socket (vector-ref relay 0)]
+          [channel (ssh-forwarding-channel (vector-ref relay 1))])
+      (unless (or (vector-ref relay 2) (vector-ref relay 6))
+        ;; Read local data only while the upload buffer is empty.
+        (let ([answer (socket-recv/nonblocking socket 65536)])
+          (cond [(net-would-block? answer) (wait! answer)]
+                [(eof-object? answer) (vector-set! relay 6 #t)]
+                [else (vector-set! relay 2 answer) (vector-set! relay 3 0)])))
+      (when (vector-ref relay 2)
+        ;; Advance the offset after a partial SSH write; retain the unconsumed suffix.
+        (let* ([buffer (vector-ref relay 2)]
+               [offset (vector-ref relay 3)]
+               [answer (ssh-write/nonblocking channel buffer offset (bytevector-length buffer))])
+          (if (net-would-block? answer)
+              (wait! answer)
+              (let ([next (fx+ offset answer)])
+                (vector-set! relay 3 next)
+                (when (fx= next (bytevector-length buffer)) (vector-set! relay 2 #f))))))
+      (when (and (vector-ref relay 6) (not (vector-ref relay 2))
+                 (not (vector-ref relay 8)))
+        ;; Preserve the remote readable stream after local stdin reaches EOF.
+        (ssh-send-eof! channel)
+        (vector-set! relay 8 #t))
+      (unless (or (vector-ref relay 4) (vector-ref relay 7))
+        ;; Read forwarded SSH data only while the download buffer is empty.
+        (let ([answer (ssh-read/nonblocking channel 65536)])
+          (cond [(net-would-block? answer) (wait! answer)]
+                [(eof-object? answer) (vector-set! relay 7 #t)]
+                [else (vector-set! relay 4 answer) (vector-set! relay 5 0)])))
+      (when (vector-ref relay 4)
+        ;; Retain partial local writes until the socket can accept the remaining bytes.
+        (let* ([buffer (vector-ref relay 4)]
+               [offset (vector-ref relay 5)]
+               [answer (socket-send/nonblocking socket buffer offset (bytevector-length buffer))])
+          (if (net-would-block? answer)
+              (wait! answer)
+              (let ([next (fx+ offset answer)])
+                (vector-set! relay 5 next)
+                (when (fx= next (bytevector-length buffer)) (vector-set! relay 4 #f))))))
+      (when (and (vector-ref relay 7) (not (vector-ref relay 4))
+                 (not (vector-ref relay 9)))
+        ;; Half-close local output after delivering every remote byte.
+        (socket-shutdown! socket 'write)
+        (vector-set! relay 9 #t))
+      (and (vector-ref relay 8) (vector-ref relay 9)))))
+
+(define serve-forwarding!
+  (lambda (session log direction listen-host listen-port target-host target-port duration)
+    (let ([listener #f] [relay* '()] [stop? #f]
+          [deadline (and (> duration 0) (+ (monotonic-ms) duration))]
+          [old-interrupt (keyboard-interrupt-handler)])
+      (dynamic-wind
+        (lambda () (keyboard-interrupt-handler (lambda () (set! stop? #t))))
+        (lambda ()
+          (set! listener
+                (if (eq? direction 'local)
+                    (let ([socket (open-socket 'inet 'stream)])
+                      (guard (condition [else (close-socket socket) (raise condition)])
+                        (socket-set-option! socket 'reuse-address #t)
+                        (socket-bind! socket (make-socket-address 'inet listen-host listen-port))
+                        (socket-listen! socket)
+                        socket))
+                    ;; Ask the remote SSH server to bind the reverse listener.
+                    (ssh-request-remote-forward! session listen-host listen-port)))
+          (with-logger log
+            (log-infof "~a forwarding listening on ~a:~a" direction listen-host
+                       (if (socket? listener)
+                           (socket-address-port (socket-local-address listener))
+                           (ssh-forwarding-port listener))))
+          (let loop ()
+            (unless (or stop? (and deadline (>= (monotonic-ms) deadline)))
+              (let ([waiting '()])
+                (define wait! (lambda (answer) (set! waiting (cons answer waiting))))
+                (if (eq? direction 'local)
+                    (call-with-values
+                        (lambda () (socket-accept/nonblocking listener))
+                      (lambda (answer . peer)
+                        (if (net-would-block? answer)
+                            (wait! answer)
+                            (guard (condition [else (close-socket answer) (raise condition)])
+                              ;; Each accepted local socket gets its own direct SSH channel.
+                              (set! relay*
+                                    (cons (make-relay
+                                           answer
+                                           (ssh-open-local-forward session target-host target-port
+                                                                   listen-host listen-port))
+                                          relay*))))))
+                    ;; Accept one reverse connection and connect it to the local target.
+                    (let ([answer (ssh-accept-remote-forward listener)])
+                      (if (net-would-block? answer)
+                          (wait! answer)
+                          (let ([socket (open-socket 'inet 'stream)])
+                            (guard (condition [else (close-socket socket)
+                                                   (ssh-close-forwarding answer)
+                                                   (raise condition)])
+                              (socket-connect! socket
+                                               (make-socket-address 'inet target-host target-port))
+                              (set! relay* (cons (make-relay socket answer) relay*)))))))
+                (set! relay*
+                      (filter
+                       (lambda (relay)
+                         (if (step-relay! relay wait!)
+                             (begin (close-relay! relay) #f)
+                             #t))
+                       relay*))
+                ;; Ctrl-C can interrupt the native poll after setting the stop flag.
+                (guard (condition [stop? (void)] [else (raise condition)])
+                  (ssh-example-wait waiting))
+                (loop)))))
+        (lambda ()
+          (keyboard-interrupt-handler old-interrupt)
+          (for-each close-relay! relay*)
+          (when listener
+            (if (socket? listener) (close-socket listener) (ssh-close-forwarding listener)))
+          (with-logger log (log-info "forwarding stopped")))))))
 
 (example-run!
  'ssh-port-forward
- "Open an SSH forwarding channel in local or remote direction."
- '(host port user auth direction listen-host listen-port target-host target-port)
+ "Relay TCP through SSH. --direction=local|remote; --duration=milliseconds (0 runs until Ctrl-C)."
+ (append ssh-example-options '(direction listen-host listen-port target-host target-port duration))
  (lambda (ref)
-   (let* ((host (example-required 'ssh-port-forward ref 'host))
-          (port (example-option-natural 'ssh-port-forward ref 'port 22))
-          (user (example-required 'ssh-port-forward ref 'user))
-          (auth (or (ref 'auth) "agent"))
-          (direction (string->symbol
-                      (example-required 'ssh-port-forward ref 'direction)))
-          (listen-host (or (ref 'listen-host) "127.0.0.1"))
-          (listen-port (example-option-natural 'ssh-port-forward ref 'listen-port 0))
-          (target-host (or (ref 'target-host) "127.0.0.1"))
-          (target-port (example-option-natural 'ssh-port-forward ref 'target-port 22))
-          (secret (or (getenv "CHEZPP_SSH_PASSWORD")
-                      (getenv "CHEZPP_SSH_PASSPHRASE")))
-          (log (make-logger 'ssh-port-forward))
-          (session (ssh-open host port user)))
-     (logger-add-sink! log (make-log-port-sink 'stderr (current-error-port)))
-     (dynamic-wind
-       void
-       (lambda ()
-         ;; Authenticate before opening forwarding resources.
-         (ssh-authenticate! 'ssh-port-forward session user auth secret)
-         (let ((forwarding
-                (open-forwarding! session direction listen-host listen-port
-                                  target-host target-port log)))
-           ;; Keep the forwarding resource available for a bounded example lifetime.
-           (milisleep (example-option-natural 'ssh-port-forward ref 'duration 1000))
-           (ssh-close-forwarding forwarding)))
-       (lambda ()
-         ;; Close session and logger on all exit paths.
-         (logger-close! log)
-         (ssh-close session)))
-     0))
+   (let ([direction (string->symbol (example-required 'ssh-port-forward ref 'direction))])
+     (unless (memq direction '(local remote))
+       (errorf 'ssh-port-forward "--direction must be local or remote"))
+     (call-with-example-ssh
+      'ssh-port-forward ref
+      (lambda (session log)
+        (serve-forwarding!
+         session log direction (or (ref 'listen-host) "127.0.0.1")
+         (ssh-example-port 'ssh-port-forward ref 'listen-port 0)
+         (or (ref 'target-host) "127.0.0.1")
+         (ssh-example-port 'ssh-port-forward ref 'target-port 22)
+         (example-option-natural 'ssh-port-forward ref 'duration 0))))))
  (command-line-arguments))

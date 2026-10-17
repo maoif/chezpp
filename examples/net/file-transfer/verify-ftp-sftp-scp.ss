@@ -1,4 +1,9 @@
 (import (chezpp))
+(load (if (file-exists? "examples/net/legacy-example-common.ss")
+          "examples/net/legacy-example-common.ss"
+          "../examples/net/legacy-example-common.ss"))
+(net-example-help! 'verify-ftp-sftp-scp "Verify loopback transfers. Positional arguments: SOURCE FTP-DOWNLOAD SFTP-DOWNLOAD SCP-DOWNLOAD.")
+
 
 (load "net-common.ss")
 (load "net-ftp-common.ss")
