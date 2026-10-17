@@ -71,8 +71,10 @@
   ;; One top-level `run-fibers` lifetime. `schedulers` is published before workers
   ;; start; `stop-flag` is atomic. `init-values` and `terminal-error` are read after
   ;; all workers join; `terminal-error?` distinguishes a raised `#f` from no error.
-  ;; `park-mutex` protects `runnable-count` and the ordered
-  ;; `timers` list; `park-condition` wakes idle workers after publication or shutdown.
+  ;; `park-mutex` protects sleeping transitions and the ordered `timers` list.
+  ;; `sleepers` is an atomic hint: publication checks it after releasing its queue lock.
+  ;; `next-deadline` is an atomic timer hint, so ordinary dispatch avoids the park lock.
+  ;; `park-condition` wakes idle workers after publication, timer changes, or shutdown.
   ;; `transactions` holds pending synchronizations under `event-protocol-mutex`,
   ;; so shutdown can detach their registrations exactly once.
   (define-record-type fiber-run-context
@@ -83,12 +85,14 @@
             (mutable terminal-error)
             worker-count quantum
             park-mutex park-condition
-            (mutable runnable-count)
+            sleepers next-deadline
             (mutable transactions)
             (mutable timers)))
 
   ;; A `scheduler`'s `i` identifies its slot in `context`; `rq` holds runnable `fiber-task`
-  ;; values. Queue access holds the `context`'s `park-mutex` before `rq-lock`. `running?`
+  ;; values. Only `rq-lock` protects queue access; it is released before taking park.
+  ;; Slow workers may inspect queues while holding park, so the reverse order is forbidden.
+  ;; `running?`
   ;; is visible to the network driver. `thread` is the OS thread joined on shutdown;
   ;; `thread-id` verifies ownership despite inherited parameters. `k` is the current
   ;; `scheduler` escape and may only be invoked on that `scheduler`'s own OS thread.
@@ -125,7 +129,8 @@
 
   (define request-context-stop!
     (lambda (context error? error)
-      ;; The hierarchy is `event` mutex -> park mutex -> queue spinlock. No park-held
+      ;; The hierarchy is `event` mutex -> park mutex -> queue spinlock. Queue publishers
+      ;; release their queue lock before taking park. No park-held
       ;; path enters the `event` protocol, and no condition wait holds `event-protocol-mutex`.
       (with-event-protocol
         (let ([mutex (fiber-run-context-park-mutex context)])
@@ -194,21 +199,26 @@
       [(sched task)
        (assert (= 0 (set-timer 0)))
        (let* ([context (scheduler-context sched)]
-              [mutex (fiber-run-context-park-mutex context)])
-         ;; Publication and the park predicate use one mutex, always before queue locks.
-         (mutex-acquire mutex)
+              [lock (scheduler-rq-lock sched)])
          (unless (context-stopped? context)
-           (let ([lock (scheduler-rq-lock sched)])
-             (spinlock-acquire lock)
-             (enqueue! (scheduler-rq sched) task)
-             (spinlock-release lock))
-           (fiber-run-context-runnable-count-set!
-            context (fx1+ (fiber-run-context-runnable-count context)))
-           (condition-signal (fiber-run-context-park-condition context)))
-         (mutex-release mutex))]))
+           ;; Publish under this queue's lock; no context-wide lock on the common path.
+           (spinlock-acquire lock)
+           (enqueue! (scheduler-rq sched) task)
+           (spinlock-release lock)
+           (memory-order-release)
+           ;; Release publication before reading the sleep hint. A worker announces
+           ;; its intent under park, then checks every queue before condition-wait.
+           ;; Either that check sees this task, or we see its intent and signal under
+           ;; park after condition-wait atomically releases park. No wakeup is lost.
+           (when (fx> (unabox (fiber-run-context-sleepers context)) 0)
+             (let ([mutex (fiber-run-context-park-mutex context)])
+               (mutex-acquire mutex)
+               (when (fx> (unabox (fiber-run-context-sleepers context)) 0)
+                 (condition-signal (fiber-run-context-park-condition context)))
+               (mutex-release mutex)))))]))
 
-  ;; The caller holds the `context` park mutex throughout queue inspection and removal.
-  (define get-task-locked!
+  ;; Queue consumers need only the selected queue's lock, including local dispatch.
+  (define get-task!
     (lambda (sched)
       (let ([lock (scheduler-rq-lock sched)])
         (spinlock-acquire lock)
@@ -216,15 +226,19 @@
           (spinlock-release lock)
           task))))
 
-  (define get-or-steal-task-locked!
+  (define get-or-steal-task!
     (lambda (sched)
-      (or (get-task-locked! sched)
+      (or (get-task! sched)
           (let* ([schedulers (fiber-run-context-schedulers (scheduler-context sched))]
-                 [count (vector-length schedulers)])
-            (let loop ([i 0])
-              (and (fx< i count)
-                   (or (get-task-locked! (vector-ref schedulers i))
-                       (loop (fx1+ i)))))))))
+                 [count (vector-length schedulers)]
+                 [start (scheduler-i sched)])
+            ;; Rotate victims by worker identity so idle workers do not all start
+            ;; at queue zero. Hold at most one queue lock at any time.
+            (let loop ([offset 1])
+              (and (fx< offset count)
+                   (or (get-task! (vector-ref schedulers
+                                             (fxmod (fx+ start offset) count)))
+                       (loop (fx1+ offset)))))))))
 
   (define time-duration-expired?
     (lambda (duration)
@@ -246,18 +260,27 @@
       (time-duration-expired?
        (time-difference (fiber-timer-deadline left) (fiber-timer-deadline right)))))
 
+  (define update-timer-hint-locked!
+    (lambda (context)
+      (let ([timers (fiber-run-context-timers context)])
+        (memory-order-release)
+        (abox-set! (fiber-run-context-next-deadline context)
+                   (and (pair? timers) (fiber-timer-deadline (car timers)))))))
+
   (define insert-timer-locked!
     (lambda (context timer)
       (let loop ([before '()] [rest (fiber-run-context-timers context)])
         (if (or (null? rest) (timer-before? timer (car rest)))
             (fiber-run-context-timers-set!
              context (append (reverse before) (cons timer rest)))
-            (loop (cons (car rest) before) (cdr rest))))))
+            (loop (cons (car rest) before) (cdr rest))))
+      (update-timer-hint-locked! context)))
 
   (define remove-timer-locked!
     (lambda (context timer)
       (fiber-run-context-timers-set!
-       context (remq timer (fiber-run-context-timers context)))))
+       context (remq timer (fiber-run-context-timers context)))
+      (update-timer-hint-locked! context)))
 
   (define expire-timers-locked!
     (lambda (context now)
@@ -268,6 +291,7 @@
             (loop (cdr rest) (cons (car rest) expired))
             (begin
               (fiber-run-context-timers-set! context rest)
+              (update-timer-hint-locked! context)
               (reverse expired))))))
 
   ;; Expiry commits only after park is released; `event` protocol is acquired by caller.
@@ -277,42 +301,66 @@
         (with-event-protocol
           (for-each (lambda (timer) ((fiber-timer-resume timer))) expired)))))
 
-  (define await-task!
+  (define await-task-slow!
     (lambda (sched)
       (let* ([context (scheduler-context sched)]
              [mutex (fiber-run-context-park-mutex context)]
-             [condition (fiber-run-context-park-condition context)])
+             [condition (fiber-run-context-park-condition context)]
+             [sleepers (fiber-run-context-sleepers context)])
         (mutex-acquire mutex)
+        ;; Intent covers both the final queue scan and the atomic release-and-wait.
+        ;; Producers can read this hint without park, but signal only while holding it.
+        (abox-get&add1! sleepers)
+        ;; Chez's release fence includes store-load ordering: the intent is visible
+        ;; before our queue scan, pairing with the publisher's post-publication fence.
+        (memory-order-release)
         (let loop ()
           (cond
-           [(context-stopped? context) (mutex-release mutex) #f]
+           [(context-stopped? context)
+            (abox-get&sub1! sleepers)
+            (mutex-release mutex)
+            #f]
            [else
             (let ([expired (expire-timers-locked! context (current-time 'time-monotonic))])
               (if (pair? expired)
                   (begin
+                    ;; Timer commit can publish work; never enter event while holding park.
                     (mutex-release mutex)
                     (commit-expired-timers! expired)
                     (mutex-acquire mutex)
                     (loop))
-                  (if (fx> (fiber-run-context-runnable-count context) 0)
-                       (let ([task (get-or-steal-task-locked! sched)])
-                         (assert task)
-                         (fiber-run-context-runnable-count-set!
-                          context (fx1- (fiber-run-context-runnable-count context)))
-                         (mutex-release mutex)
-                         task)
-                       (let ([timers (fiber-run-context-timers context)])
-                         ;; condition-wait releases this mutex atomically and reacquires it once.
-                         ;; Every wake rechecks shutdown, `timers`, and runnable work.
-                         (if (null? timers)
-                             (condition-wait condition mutex)
-                             (let ([duration
-                                    (time-difference
-                                     (fiber-timer-deadline (car timers))
-                                     (current-time 'time-monotonic))])
-                               (unless (time-duration-expired? duration)
-                                 (condition-wait condition mutex duration))))
-                         (loop)))))])))))
+                  (let ([task (get-or-steal-task! sched)])
+                    (if task
+                        (begin
+                          (abox-get&sub1! sleepers)
+                          (mutex-release mutex)
+                          task)
+                        (begin
+                          (let ([timers (fiber-run-context-timers context)])
+                            ;; Every wake rechecks stop, timers, and all runnable queues.
+                            (if (null? timers)
+                                (condition-wait condition mutex)
+                                (let ([duration
+                                       (time-difference
+                                        (fiber-timer-deadline (car timers))
+                                        (current-time 'time-monotonic))])
+                                  (unless (time-duration-expired? duration)
+                                    (condition-wait condition mutex duration)))))
+                          (loop))))))])))))
+
+  (define await-task!
+    (lambda (sched)
+      (let* ([context (scheduler-context sched)]
+             [deadline (unabox (fiber-run-context-next-deadline context))])
+        (memory-order-acquire)
+        (cond
+         [(context-stopped? context) #f]
+         ;; The hint only chooses the slow path. Actual expiry always holds park.
+         [(and deadline
+               (time-duration-expired?
+                (time-difference deadline (current-time 'time-monotonic))))
+          (await-task-slow! sched)]
+         [else (or (get-or-steal-task! sched) (await-task-slow! sched))]))))
 
   (define continue-task
     (lambda (task thunk)
@@ -432,7 +480,8 @@
              (let* ([context (make-fiber-run-context
                               #f (abox #f) (list (void)) #f #f worker-count quantum
                               (make-mutex 'fiber-run-context)
-                              (make-condition 'fiber-run-condition) 0 '() '())]
+                              (make-condition 'fiber-run-condition)
+                              (abox 0) (abox #f) '() '())]
                     [schedulers
                      (list->vector
                       (map (lambda (i)

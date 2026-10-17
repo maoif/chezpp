@@ -624,8 +624,13 @@
                  (spawn-fiber
                   (lambda ()
                     ;; Negative case: a lost wakeup must fail without depending on fiber timers.
-                    (let loop ([remaining 1000000])
-                      (unless (zero? remaining) (fiber-yield) (loop (sub1 remaining))))
+                    ;; Count elapsed time: queue optimization changes yields per second.
+                    (let ([deadline (add-duration (current-time 'time-monotonic)
+                                                  (make-time 'time-duration 0 30))])
+                      (let loop ()
+                        (when (time<? (current-time 'time-monotonic) deadline)
+                          (fiber-yield)
+                          (loop))))
                     (channel-put! finished 'timeout)))
                  (channel-get finished)))))
          (and (eq? result #t) (= count iterations)))))
@@ -1224,3 +1229,31 @@
 
      ;; Negative case: a bignum is outside ChezScheme's instruction timer range.
      (error? (run-fibers (lambda () #t) 1 (expt 2 100))))
+
+(mat fiber-idle-workers-wake-for-published-work
+     ;; Repeated empty-queue transitions must not lose the producer's wakeup.
+     (run-fibers
+      (lambda ()
+        (let ([results (make-channel)])
+          (do ([round 0 (add1 round)]) ((= round 200) #t)
+            (fiber-milisleep 1)
+            (do ([index 0 (add1 index)]) ((= index 8))
+              (spawn-fiber (lambda () (fiber-yield) (channel-put! results index))))
+            (let ([sum (do ([index 0 (add1 index)] [sum 0 (+ sum (channel-get results))])
+                           ((= index 8) sum))])
+              (unless (= sum 28) (error 'fiber-test "lost or duplicated runnable task"))))))
+      4 100))
+
+(mat fiber-timers-progress-with-continuously-runnable-work
+     ;; A local queue fast path must still service due timers when it never empties.
+     (let ([stop (abox #f)])
+       (run-fibers
+        (lambda ()
+          (spawn-fiber
+           (lambda ()
+             (let loop ()
+               (unless (unabox stop) (fiber-yield) (loop)))))
+          (fiber-milisleep 5)
+          (abox-set! stop #t)
+          #t)
+        1 100)))
