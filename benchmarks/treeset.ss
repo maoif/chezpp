@@ -2,60 +2,61 @@
 (load "benchmarks/common.ss")
 
 (define make-set-case
-  (lambda (name size specialized? operation)
-    (make-benchmark
-     name
-     (lambda (state n values)
-       (let ([set (if specialized?
-                      (make-fxtreeset fx= fx<)
-                      (make-treeset = <))])
+  (lambda (type operation size)
+    (let* ([specialized? (eq? type 'fxtreeset)]
+           ;; Select matching generic or fixnum operations before measurement.
+           [new (if specialized? (lambda () (make-fxtreeset fx= fx<))
+                                (lambda () (make-treeset = <)))]
+           [put! (if specialized? fxtreeset-add! treeset-add!)]
+           [lookup (if specialized? fxtreeset-contains? treeset-contains?)]
+           [remove! (if specialized? fxtreeset-delete! treeset-delete!)]
+           [contents (if specialized? fxtreeset->list treeset->list)]
+           [copy (if specialized?
+                     (lambda (container) (fxtreeset-map (lambda (item) item) container))
+                     (lambda (container) (treeset-map (lambda (item) item) container)))]
+           [keys (iota size)])
+      ;; Register a workload with deterministic inputs created outside timed regions.
+      (make-benchmark
+       (string->symbol (format "~a-~a" type operation))
+       (lambda (state n prepared)
          (case operation
            [(populate)
-            (for-each (lambda (value)
-                        (if specialized?
-                            (fxtreeset-add! set value)
-                            (treeset-add! set value)))
-                      values)
-            (benchmark-consume
-             (if specialized? (fxtreeset-size set) (treeset-size set)))]
+            (let ([container (new)])
+              (for-each (lambda (key) (put! container key)) keys)
+              (benchmark-consume container))]
            [(lookup)
-            (for-each (lambda (value)
-                        (benchmark-consume
-                         (if specialized?
-                             (fxtreeset-contains? set value)
-                             (treeset-contains? set value))))
-                      values)]
-           [(traverse)
-            (for-each (lambda (value) (benchmark-consume value))
-                      (if specialized?
-                          (fxtreeset->list (apply fxtreeset fx= fx< values))
-                          (treeset->list (apply treeset = < values))))])))
-     `((args (n) (,size))
-       (setup . ,(lambda (state) (iota size)))
-       (warmup . 0)
-       (samples . 5)
-       (min-time . 0.01)
-       (max-iterations . 10000)))))
-
-(define make-set-benchmarks
-  (lambda (size)
-    (apply append
-     (map (lambda (pair)
-       (map (lambda (operation)
-              (make-set-case (string->symbol
-                              (format "~a-~a" (if (car pair) "fxtreeset" "treeset") operation))
-                             size (car pair) operation))
-            '(populate lookup traverse)))
-          '((#f) (#t))))))
+            (for-each (lambda (key) (benchmark-consume (lookup prepared key))) keys)]
+           [(traverse) (benchmark-consume (contents prepared))]
+           [(update delete)
+            ;; Reset each iteration without charging setup to the operation under test.
+            (benchmark-pause-timing state)
+            (let ([container (copy prepared)])
+              (benchmark-resume-timing state)
+              (for-each (lambda (key)
+                           (if (eq? operation 'delete)
+                              (remove! container key)
+                              (begin
+                                (remove! container key)
+                                (put! container key))))
+                        keys)
+              (benchmark-consume container))]))
+       `((args (size) (,size))
+         (setup . ,(lambda (state)
+                     (let ([container (new)])
+                       (for-each (lambda (key) (put! container key)) keys)
+                       container))))))))
 
 (benchmark-cli
  'treeset-benchmark
- "Compare generic treeset and fixnum fxtreeset workloads."
+ "Compare generic and fixnum treeset populate, lookup, traversal, update, and delete."
  (lambda (ref)
    (let ([size (benchmark-size ref)])
      (benchmark-run-cli!
-      'treeset-benchmark
-      "treeset and fxtreeset"
-      (make-set-benchmarks size)
+      'treeset-benchmark "treeset representations"
+      (apply append
+             (map (lambda (type)
+                    (map (lambda (operation) (make-set-case type operation size))
+                         '(populate lookup traverse update delete)))
+                  '(treeset fxtreeset)))
       ref)))
  (command-line-arguments))
