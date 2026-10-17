@@ -68,7 +68,16 @@
             (mutable timers)))
 
   (define-record-type scheduler
-    (fields i context rq rq-lock (mutable running?) (mutable thread) (mutable k)))
+    (fields i context rq rq-lock (mutable running?) (mutable thread)
+            (mutable thread-id) (mutable k)))
+
+  (define on-scheduler-thread?
+    (lambda ()
+      ;; fork-thread inherits thread parameters, including a parent's scheduler.
+      ;; Only the OS thread actually running that scheduler may use its escapes
+      ;; or current task token. Read current-scheduler afresh after migration.
+      (and current-scheduler
+           (eqv? (get-thread-id) (scheduler-thread-id current-scheduler)))))
 
   ;; A resumed continuation has the same token and init status as its original task.
   (define-record-type fiber-task
@@ -128,7 +137,7 @@
   (define-who fiber-quit
     (lambda ()
       (pcheck ()
-        (unless current-scheduler
+        (unless (on-scheduler-thread?)
           (errorf who "not running scheduler"))
         (set-timer 0)
         (when (fiber-task-init? current-fiber-task)
@@ -142,7 +151,7 @@
   (define-who fiber-yield
     (lambda ()
       (pcheck ()
-        (unless current-scheduler
+        (unless (on-scheduler-thread?)
           (errorf who "not running scheduler"))
         (set-timer 0)
         ;; The yielded continuation is resumed at most once.
@@ -355,7 +364,7 @@
   (define-who spawn-fiber
     (lambda (thunk)
       (pcheck ([procedure? thunk])
-        (unless current-scheduler
+        (unless (on-scheduler-thread?)
           (errorf who "not running scheduler"))
         (with-timer-off
           (let ([context (scheduler-context current-scheduler)])
@@ -371,7 +380,7 @@
   (define-who run-fibers
     (lambda (thunk)
       (pcheck ([procedure? thunk])
-        (if current-scheduler
+        (if (on-scheduler-thread?)
             (spawn-fiber thunk)
             (let* ([context (make-fiber-run-context
                              #f (abox #f) (list (void)) #f #f
@@ -382,7 +391,7 @@
                      (map (lambda (i)
                             (make-scheduler i context (make-dlist)
                                             (make-spinlock 'fiber-scheduler-queue)
-                                            #f #f #f))
+                                            #f #f #f #f))
                           (iota (cpu-count))))])
               (fiber-run-context-schedulers-set! context schedulers)
               (with-timer-off
@@ -397,6 +406,7 @@
                                         [previous-task current-fiber-task])
                                     (set! current-scheduler sched)
                                     (set! current-fiber-task #f)
+                                    (scheduler-thread-id-set! sched (get-thread-id))
                                     (scheduler-running?-set! sched #t)
                                     (run-scheduler sched)
                                     (scheduler-running?-set! sched #f)
@@ -562,7 +572,7 @@
   (define-who event-sync
     (lambda (event)
       (pcheck ([event? event])
-        (unless current-scheduler (errorf who "not running scheduler"))
+        (unless (on-scheduler-thread?) (errorf who "not running scheduler"))
         (let ([scheduler current-scheduler] [task current-fiber-task])
           (define wrap-result
             (lambda (base thunk)
@@ -953,7 +963,7 @@
 
   (define require-fiber-token
     (lambda (who)
-      (unless (and current-scheduler current-fiber-task)
+      (unless (and (on-scheduler-thread?) current-fiber-task)
         (errorf who "not running a fiber"))
       (fiber-task-token current-fiber-task)))
 
@@ -1179,7 +1189,7 @@
 
   (%net-operation-wait-hook
    (lambda (operation blocking-wait)
-     (if current-scheduler
+     (if (on-scheduler-thread?)
          (event-sync (net-operation-event operation))
          (blocking-wait operation))))
 

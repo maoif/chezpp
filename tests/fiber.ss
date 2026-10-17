@@ -1118,3 +1118,37 @@
                                    right-published left-published right-finished left-finished)))])
          (and (eq? (vector-ref results 0) 'left)
               (eq? (vector-ref results 1) 'right)))))
+
+(mat fiber-forked-thread-runs-independent-context
+     (run-fibers
+      (lambda ()
+        (let ([result (abox #f)])
+          ;; Chez thread parameters are inherited, but a new OS thread must create
+          ;; its own context rather than enqueue its init thunk in the parent.
+          (thread-join
+           (fork-thread
+            (lambda ()
+              (abox-set! result
+                (run-fibers
+                 (lambda ()
+                   (fiber-yield)
+                   (values 'independent)))))))
+          (eq? 'independent (unabox result))))))
+
+(mat fiber-forked-thread-cannot-release-parent-mutex
+     ;; Negative case: inherited parameters must not confer fiber ownership.
+     (error?
+      (let ([failure (abox #f)])
+        (run-fibers
+         (lambda ()
+           (let ([mutex (make-fiber-mutex)])
+             (fiber-mutex-acquire mutex)
+             (thread-join
+              (fork-thread
+               (lambda ()
+                 ;; Transport the exception to mat's thread without invoking a
+                 ;; continuation captured by its exception handler on another thread.
+                 (guard (condition [else (abox-set! failure condition)])
+                   (fiber-mutex-release mutex)))))
+             (when (unabox failure) (fiber-mutex-release mutex)))))
+        (when (unabox failure) (raise (unabox failure))))))
