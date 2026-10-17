@@ -125,6 +125,11 @@ ptr chezpp_net_ssh_remote_forward_cancel(uptr handle, const char *address, int p
   return chezpp_unavailable_status("ssh: disabled at build time");
 }
 
+ptr chezpp_net_ssh_channel_send_eof(uptr handle) {
+  (void)handle;
+  return chezpp_unavailable_status("ssh: disabled at build time");
+}
+
 ptr chezpp_net_ssh_channel_close(uptr handle) {
   (void)handle;
   return chezpp_unavailable_status("ssh: disabled at build time");

@@ -814,14 +814,17 @@ Encodes multipart parts `parts`. Returns a body source and its multipart content
 
   #|proc:http-listen
 The `http-listen` procedure opens an LWS HTTP server on `host` and `port`. `tls-context` is `#f`
-or a server TLS context, and `backlog` is retained for API compatibility. It returns the server.
+or a server TLS context, and `backlog` is retained for API compatibility. Optional `version` is
+`h1` (default) or `h2`. Cleartext H2 uses prior knowledge; TLS negotiates through ALPN. An H2
+request raises an error if the LWS build lacks HTTP/2 support. It returns the server.
 |#
   (define-who http-listen
     (case-lambda
       [(host port) (http-listen host port #f 128)]
       [(host port tls-context) (http-listen host port tls-context 128)]
-      [(host port tls-context backlog)
-       (pcheck ([string? host] [fixnum? port backlog])
+      [(host port tls-context backlog) (http-listen host port tls-context backlog 'h1)]
+      [(host port tls-context backlog version)
+       (pcheck ([string? host] [fixnum? port backlog] [symbol? version])
          (unless (and (fxpositive? port) (fx<= port 65535))
            (errorf who "invalid port ~s" port))
          (unless (fxpositive? backlog) (errorf who "invalid backlog ~s" backlog))
@@ -829,7 +832,7 @@ or a server TLS context, and `backlog` is retained for API compatibility. It ret
            (errorf who "expected #f or a TLS context"))
          (%make-http-server
           (make-lws-http-server host port (if tls-context
-                                              (tls-context-native-handle tls-context) 0))
+                                              (tls-context-native-handle tls-context) 0) version)
           (make-hashtable equal-hash equal?) (make-mutex 'http-server) #f))]))
 
   #|proc:http-server-close

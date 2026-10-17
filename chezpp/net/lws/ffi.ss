@@ -67,7 +67,8 @@
                 (native event-capacity payload-capacity tls-context-handle proxy-address proxy-port)))))
   #|proc:ffi-lws-server-context-open
   The `ffi-lws-server-context-open` procedure calls the native websockets operation
-  `chezpp_lws_http_server_context_open`.
+  `chezpp_lws_http_server_context_open_version`.
+  `prior-knowledge?` selects cleartext H2 when true.
   Parameters `event-capacity`, `payload-capacity`, `interface-name`, `port`, `tls-context-handle`
   are passed to the native operation in that order.
   `event-capacity` is a native handle.
@@ -79,11 +80,12 @@
   It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-server-context-open
-    (let ([native (foreign-procedure "chezpp_lws_http_server_context_open" (uptr uptr string int uptr) uptr)])
-      (lambda (event-capacity payload-capacity interface-name port tls-context-handle)
-        (pcheck ([natural? event-capacity] [natural? payload-capacity] [string? interface-name] [integer? port] [natural? tls-context-handle])
+    (let ([native (foreign-procedure "chezpp_lws_http_server_context_open_version" (uptr uptr string int uptr int) uptr)])
+      (lambda (event-capacity payload-capacity interface-name port tls-context-handle prior-knowledge?)
+        (pcheck ([natural? event-capacity] [natural? payload-capacity] [string? interface-name] [integer? port] [natural? tls-context-handle] [boolean? prior-knowledge?])
                 (require-optional-library 'ffi-lws-server-context-open 'websockets)
-                (native event-capacity payload-capacity interface-name port tls-context-handle)))))
+                (native event-capacity payload-capacity interface-name port tls-context-handle
+                        (if prior-knowledge? 1 0))))))
   #|proc:ffi-lws-context-close
   The `ffi-lws-context-close` procedure calls the native websockets operation
   `chezpp_lws_http_context_close`.
@@ -639,22 +641,29 @@ native context handle.
 The `lws-server-context-open` procedure creates a listening LWS context. `event-capacity` bounds
 events, `payload-capacity` bounds copied bytes, `interface-name` selects the local interface,
 `port` is the listening port, and `tls-context` is zero or a native TLS context handle. It returns
-a native context handle.
+a native context handle. Optional `version` is `h1` (the default) or `h2`; cleartext `h2`
+uses prior knowledge and a TLS listener negotiates H2 using ALPN.
 |#
   (define-who lws-server-context-open
-    (lambda (event-capacity payload-capacity interface-name port tls-context)
+    (case-lambda
+      [(event-capacity payload-capacity interface-name port tls-context)
+       (lws-server-context-open event-capacity payload-capacity interface-name port tls-context 'h1)]
+      [(event-capacity payload-capacity interface-name port tls-context version)
       (pcheck ([positive-size? event-capacity payload-capacity]
                [string? interface-name]
                [port-number? port]
-               [natural? tls-context])
+               [natural? tls-context] [symbol? version])
+        (unless (memq version '(h1 h2)) (errorf who "version must be h1 or h2"))
+        (when (eq? version 'h2) (lws-require-capability! lws-cap-http2 'http2))
         (lws-require-capability! lws-cap-http1 'http1)
         (lws-require-capability! lws-cap-external-poll 'external-poll)
         (let ([context (ffi-lws-server-context-open event-capacity payload-capacity
-                                                    interface-name port tls-context)])
+                                                    interface-name port tls-context
+                                                    (and (eq? version 'h2) (zero? tls-context)))])
           (when (zero? context)
             (raise-net-error who 'resource "could not create LWS HTTP server context"
                              (vector interface-name port)))
-          context))))
+          context))]))
 
   #|proc:lws-context-close
 The `lws-context-close` procedure closes `context`, its LWS context, and its wakeup descriptors.

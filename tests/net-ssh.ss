@@ -628,3 +628,39 @@
                       (ssh-close session)))))))
            (lambda ()
              (stop-server))))))
+
+(mat net-ssh-stdin-eof
+     (mat-requires (ssh)
+       (with-test-ssh-channel
+        "cat; printf eof-observed; exit 7"
+        (lambda (channel)
+          (ssh-write-all channel (string->utf8 "input:"))
+          ;; Half-close stdin while preserving the channel's readable output streams.
+          (ssh-send-eof! channel)
+          (let loop ([chunks '()])
+            (let ([chunk (ssh-read channel 65536 2000)])
+              (if (eof-object? chunk)
+                  (and (string=? (apply string-append (reverse chunks)) "input:eof-observed")
+                       (= (ssh-channel-exit-status channel) 7))
+                  (loop (cons (utf8->string chunk) chunks)))))))))
+
+(mat net-ssh-fixed-reverse-port
+     (mat-requires (ssh)
+       (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (with-env
+              "HOME" home
+              (lambda ()
+                (call-with-ssh-session
+                 "127.0.0.1" port user
+                 (lambda (session)
+                   (ssh-auth-publickey! session user)
+                   (let* ([requested (reserve-loopback-port)]
+                          [listener (ssh-request-remote-forward! session "127.0.0.1" requested)])
+                     (dynamic-wind
+                       void
+                       (lambda () (= requested (ssh-forwarding-port listener)))
+                       (lambda () (ssh-cancel-remote-forward! listener)))))))))
+           stop-server))))

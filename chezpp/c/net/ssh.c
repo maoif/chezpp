@@ -1254,7 +1254,8 @@ ptr chezpp_net_ssh_remote_forward_listen(uptr handle, const char *address, int p
                                    address != NULL && *address != 0 ? address : NULL,
                                    port, &bound_port) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to request SSH remote forwarding");
-  return Sfixnum(bound_port);
+  /* libssh fills bound_port only when the requested port was zero. */
+  return Sfixnum(port == 0 ? bound_port : port);
 }
 
 ptr chezpp_net_ssh_remote_forward_accept(uptr handle) {
@@ -1289,6 +1290,15 @@ ptr chezpp_net_ssh_remote_forward_cancel(uptr handle, const char *address, int p
                                    address != NULL && *address != 0 ? address : NULL,
                                    port) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to cancel SSH remote forwarding");
+  return Strue;
+}
+
+ptr chezpp_net_ssh_channel_send_eof(uptr handle) {
+  chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->channel == NULL)
+    return make_error_status_message("invalid ssh channel");
+  if (ssh_channel_send_eof(wrapper->channel) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper->owner, "failed to send SSH channel EOF");
   return Strue;
 }
 

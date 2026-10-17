@@ -977,6 +977,10 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     case LWS_CALLBACK_HTTP:
       if (context == NULL) return 0;
+      /* LWS can invoke HTTP twice for an empty H2 POST, before its per-session
+       * user slot is established. Keep the request identity on the WSI itself. */
+      if (stream != NULL && stream->active && stream->server_stream && !stream->terminal)
+        return 0;
       if (stream == NULL || stream->terminal) {
         uint64_t identity = fresh_identity(&next_server_identity);
         pthread_mutex_lock(&context->lock);
@@ -985,6 +989,7 @@ static int lws_http_callback(struct lws *wsi,
           stream->wsi = wsi;
           stream->connection->wsi = wsi;
           stream->server_stream = 1;
+          lws_set_opaque_user_data(wsi, stream);
           if (user != NULL) *(lws_http_stream **)user = stream;
         }
         pthread_mutex_unlock(&context->lock);
@@ -1056,6 +1061,9 @@ static int lws_http_callback(struct lws *wsi,
       }
       return 0;
     case LWS_CALLBACK_HTTP_WRITEABLE:
+      /* H2 may become writable before Scheme has submitted a response. */
+      if (stream != NULL && (stream->response_status == 0 ||
+          (stream->outbound_length == 0 && !stream->outbound_final))) return 0;
       if (context != NULL && stream != NULL && stream->outbound_length <=
                                                    context->payload_capacity) {
         int written = 0;
@@ -1080,14 +1088,33 @@ static int lws_http_callback(struct lws *wsi,
           if (lws_finalize_write_http_header(wsi, start, &cursor, end) != 0) return -1;
           stream->response_headers_sent = 1;
         }
-        if (stream->outbound_length != 0) {
-                    written = lws_write(wsi, stream->outbound + LWS_PRE,
-                             stream->outbound_length,
-                             stream->outbound_final ? LWS_WRITE_HTTP_FINAL
-                                                    : LWS_WRITE_HTTP);
+        if (stream->outbound_length != 0 || stream->outbound_final) {
+          size_t count = stream->outbound_length;
+          int h2 = observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP2;
+          if (h2) {
+            lws_filepos_t allowance = lws_get_peer_write_allowance(wsi);
+            /* Every H2 peer accepts 16 KiB DATA frames. Respect its flow-control
+             * window as well, retaining the rest until another writable callback. */
+            if (count > 16384) count = 16384;
+            if (allowance != (lws_filepos_t)-1 && count > allowance)
+              count = (size_t)allowance;
+            if (count == 0 && stream->outbound_length != 0) {
+              lws_callback_on_writable(wsi);
+              return 0;
+            }
+          }
+          written = lws_write(wsi, stream->outbound + LWS_PRE, count,
+                     stream->outbound_final && count == stream->outbound_length
+                       ? LWS_WRITE_HTTP_FINAL : LWS_WRITE_HTTP);
           if (written < 0) return -1;
-          memset(stream->outbound + LWS_PRE, 0, stream->outbound_length);
-          stream->outbound_length = 0;
+          size_t consumed = (size_t)written < count ? (size_t)written : count;
+          stream->outbound_length -= consumed;
+          memmove(stream->outbound + LWS_PRE,
+                  stream->outbound + LWS_PRE + consumed, stream->outbound_length);
+          if (stream->outbound_length != 0) {
+            lws_callback_on_writable(wsi);
+            return 0;
+          }
         }
         if (stream->outbound_final) {
           (void)callback_queue_stream(context, stream,
@@ -1097,6 +1124,7 @@ static int lws_http_callback(struct lws *wsi,
            * old request first so its cleanup cannot erase that request's user pointer. */
           pthread_mutex_lock(&context->lock);
           stream->wsi = NULL;
+          lws_set_opaque_user_data(wsi, NULL);
           if (user != NULL) *(lws_http_stream **)user = NULL;
           stream_release_locked(context, stream);
           pthread_mutex_unlock(&context->lock);
@@ -1236,7 +1264,7 @@ static void free_context_storage(lws_http_context *context) {
 static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
                               uintptr_t tls_context_handle,
                               const char *proxy_address, int proxy_port,
-                              const char *interface_name, int listen_port) {
+                              const char *interface_name, int listen_port, int prior_knowledge) {
   lws_http_context *context;
   struct lws_context_creation_info information;
 
@@ -1292,7 +1320,15 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
 #endif
 #if (defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2))
   information.alpn = "h2,http/1.1";
+  if (prior_knowledge) information.options |= LWS_SERVER_OPTION_H2_PRIOR_KNOWLEDGE;
 #else
+  if (prior_knowledge) {
+    close(context->wakeup_pipe[0]);
+    close(context->wakeup_pipe[1]);
+    pthread_mutex_destroy(&context->lock);
+    free_context_storage(context);
+    return 0;
+  }
   information.alpn = "http/1.1";
 #endif
   if (proxy_address != NULL && proxy_address[0] != '\0') {
@@ -1334,7 +1370,7 @@ uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
                                        const char *proxy_address,
                                        int proxy_port) {
   return context_open(event_capacity, payload_capacity, tls_context_handle,
-                      proxy_address, proxy_port, NULL, CONTEXT_PORT_NO_LISTEN);
+                      proxy_address, proxy_port, NULL, CONTEXT_PORT_NO_LISTEN, 0);
 }
 
 uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
@@ -1344,7 +1380,15 @@ uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
                                               uintptr_t tls_context_handle) {
   if (interface_name == NULL || port <= 0 || port > 65535) return 0;
   return context_open(event_capacity, payload_capacity, tls_context_handle,
-                      NULL, 0, interface_name, port);
+                      NULL, 0, interface_name, port, 0);
+}
+
+uintptr_t chezpp_lws_http_server_context_open_version(size_t event_capacity,
+    size_t payload_capacity, const char *interface_name, int port,
+    uintptr_t tls_context_handle, int prior_knowledge) {
+  if (interface_name == NULL || port <= 0 || port > 65535) return 0;
+  return context_open(event_capacity, payload_capacity, tls_context_handle,
+                      NULL, 0, interface_name, port, prior_knowledge);
 }
 
 void chezpp_lws_http_context_close(uintptr_t context_handle) {

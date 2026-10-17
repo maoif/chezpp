@@ -89,6 +89,7 @@
           ffi-net-ssh-remote-forward-accept
           ffi-net-ssh-remote-forward-cancel
           ffi-net-ssh-channel-close
+          ffi-net-ssh-channel-send-eof
           ffi-net-ssh-channel-request-exec
           ffi-net-ssh-channel-request-shell
           ffi-net-ssh-channel-request-pty
@@ -475,6 +476,8 @@
   (define ffi-net-ssh-remote-forward-cancel
     (foreign-procedure "chezpp_net_ssh_remote_forward_cancel"
                        (uptr string int) scheme-object))
+  (define ffi-net-ssh-channel-send-eof
+    (foreign-procedure "chezpp_net_ssh_channel_send_eof" (uptr) scheme-object))
   (define ffi-net-ssh-channel-close
     (foreign-procedure "chezpp_net_ssh_channel_close" (uptr) scheme-object))
   (define ffi-net-ssh-channel-request-exec

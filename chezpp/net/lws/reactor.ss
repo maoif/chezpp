@@ -519,19 +519,23 @@ reactor.
 The `make-lws-server-reactor` procedure creates an unstarted listening reactor. `event-capacity`,
 `payload-capacity`, and `command-capacity` bound native and Scheme queues. `interface-name` and
 `port` select the listener, while `tls-context-handle` is zero or a native TLS context. It returns
-the reactor.
+the reactor. Optional `version` selects `h1` (default) or `h2`, using prior knowledge for
+cleartext H2 and ALPN for TLS.
 |#
   (define make-lws-server-reactor
-    (lambda (event-capacity payload-capacity command-capacity interface-name port
-                            tls-context-handle)
+    (case-lambda
+      [(event-capacity payload-capacity command-capacity interface-name port tls-context-handle)
+       (make-lws-server-reactor event-capacity payload-capacity command-capacity interface-name
+                                port tls-context-handle 'h1)]
+      [(event-capacity payload-capacity command-capacity interface-name port tls-context-handle version)
       (pcheck ([positive-natural? event-capacity payload-capacity command-capacity]
                [string? interface-name]
                [fixnum? port]
-               [natural? tls-context-handle])
+               [natural? tls-context-handle] [symbol? version])
         (make-reactor-from-context
          (lws-server-context-open event-capacity payload-capacity interface-name port
-                                  tls-context-handle)
-         command-capacity))))
+                                  tls-context-handle version)
+         command-capacity))]))
 
   #|proc:lws-reactor-state
 The `lws-reactor-state` procedure returns the lifecycle symbol for `reactor`.

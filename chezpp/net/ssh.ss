@@ -34,6 +34,7 @@
           ssh-close-forwarding
           ssh-open-channel
           ssh-close-channel
+          ssh-send-eof!
           ssh-exec
           ssh-shell
           ssh-read
@@ -806,6 +807,19 @@ The `ssh-request-subsystem!` procedure requests non-empty `subsystem` on open `c
               (ensure-success who 'ssh
                               (ffi-net-ssh-channel-request-subsystem
                                (ssh-channel-handle channel) subsystem))
+              channel)))
+
+  #|proc:ssh-send-eof!
+The `ssh-send-eof!` procedure half-closes the stdin stream of open `channel`.
+The `channel` parameter is an SSH channel. Remote stdout and stderr remain readable.
+It returns `channel` after sending EOF; later writes to the channel must be avoided.
+|#
+  (define-who ssh-send-eof!
+    (lambda (channel)
+      (pcheck ([ssh-channel? channel])
+              (ensure-channel-open who channel)
+              (ensure-success who 'ssh
+                              (ffi-net-ssh-channel-send-eof (ssh-channel-handle channel)))
               channel)))
 
   #|proc:ssh-close-channel
