@@ -20,19 +20,25 @@
   (lambda (thunk)
     (run-fibers thunk fiber-stress-workers fiber-stress-quantum)))
 
-;; Larger problems keep computation running long enough to observe CPU use.
+;; Larger defaults keep the optimized scheduler busy: sieve checks 100 million
+;; numbers, Mandelbrot renders 19.7 million pixels with up to 2048 iterations,
+;; sort handles 262144 values per worker, and Monte Carlo samples 100 million
+;; points per worker. Full runtime includes the scalar checks below.
 ;; The sieve's reference values are for primes strictly below its limit;
-;; update both reference values when changing the limit.
-(define fiber-stress-sieve-limit 10000000)
-(define fiber-stress-sieve-expected-count 664579)
-(define fiber-stress-sieve-expected-sum 3203324994356)
-(define fiber-stress-mandelbrot-width 2560)
-(define fiber-stress-mandelbrot-height 1920)
-(define fiber-stress-mandelbrot-iterations 1024)
-(define fiber-stress-sort-items-per-worker 65536)
-(define fiber-stress-monte-carlo-samples-per-worker 20000000)
+;; update both reference values when changing the limit. The 100-million count
+;; and sum were also checked with an independent scalar byte-array sieve.
+(define fiber-stress-sieve-limit 100000000)
+(define fiber-stress-sieve-expected-count 5761455)
+(define fiber-stress-sieve-expected-sum 279209790387276)
+(define fiber-stress-mandelbrot-width 5120)
+(define fiber-stress-mandelbrot-height 3840)
+(define fiber-stress-mandelbrot-iterations 2048)
+(define fiber-stress-sort-items-per-worker 262144)
+(define fiber-stress-monte-carlo-samples-per-worker 100000000)
 
-(define fiber-stress-watchdog-milliseconds 120000)
+;; Allow five minutes per parallel workload on slower machines. The watchdog
+;; bounds fiber work; scalar validation runs afterward on the calling thread.
+(define fiber-stress-watchdog-milliseconds 300000)
 
 ;; Each stress result is checked exactly. Mandelbrot and Monte Carlo also run
 ;; separate scalar references, so changing dimensions, sample count, or worker
