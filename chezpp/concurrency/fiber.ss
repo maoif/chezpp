@@ -57,9 +57,17 @@
   (define *minimum-ticks* 100)
 
   ;; Chez continuations migrate between OS threads, but thread parameters do not.
-  ;; Set both parameters before invoking every fresh or resumed task.
+  ;; Each worker keeps its scheduler parameter; its task slot is set before dispatch.
   (define-threaded current-scheduler #f)
-  (define-threaded current-fiber-task #f)
+  ;; Chez serializes thread-parameter writes through its global thread-context mutex.
+  ;; Keep the frequently updated task in the worker-owned scheduler record instead.
+  ;; Reading the scheduler and its task must be one preemption-free snapshot: a
+  ;; continuation may migrate between those reads and otherwise see a source worker's task.
+  (define-syntax current-fiber-task
+    (identifier-syntax
+      (id (with-timer-off
+            (and current-scheduler (scheduler-task current-scheduler))))
+      ((set! id value) (scheduler-task-set! current-scheduler value))))
 
   (define enqueue!
     (lambda (queue value)
@@ -101,9 +109,11 @@
   ;; `running?` is visible to the network driver. `thread` is the OS thread joined on shutdown;
   ;; `thread-id` verifies ownership despite inherited parameters. `k` is the current
   ;; `scheduler` escape and may only be invoked on that `scheduler`'s own OS thread.
+  ;; `task` is written only by this worker with preemption disabled. Other OS threads
+  ;; may inherit `current-scheduler`, but must clear that reference without touching `task`.
   (define-record-type scheduler
     (fields i context rq rq-lock (mutable running?) (mutable thread)
-            (mutable thread-id) (mutable k)))
+            (mutable thread-id) (mutable k) (mutable task)))
 
   (define on-scheduler-thread?
     (lambda ()
@@ -518,7 +528,7 @@
                       (map (lambda (i)
                              (make-scheduler i context (make-dlist)
                                              (make-spinlock 'fiber-scheduler-queue)
-                                             #f #f #f #f))
+                                             #f #f #f #f #f))
                            (iota worker-count)))])
                (fiber-run-context-schedulers-set! context schedulers)
                (with-timer-off
@@ -529,15 +539,13 @@
                          (let ([thread
                                 (fork-thread
                                  (lambda ()
-                                   (let ([previous-scheduler current-scheduler]
-                                         [previous-task current-fiber-task])
+                                   (let ([previous-scheduler current-scheduler])
                                      (set! current-scheduler sched)
                                      (set! current-fiber-task #f)
                                      (scheduler-thread-id-set! sched (get-thread-id))
                                      (scheduler-running?-set! sched #t)
                                      (run-scheduler sched)
                                      (scheduler-running?-set! sched #f)
-                                     (set! current-fiber-task previous-task)
                                      (set! current-scheduler previous-scheduler))))])
                            (scheduler-thread-set! sched thread)
                            thread))
@@ -1009,8 +1017,9 @@
 
   (define drive-net-operations
     (lambda ()
+      ;; The driver is a separate OS thread. Clearing its inherited scheduler also
+      ;; hides its parent's task; clearing the record slot would corrupt that worker.
       (set! current-scheduler #f)
-      (set! current-fiber-task #f)
       (let loop ()
         (let ([claim
                (with-event-protocol net-driver-domain
