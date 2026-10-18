@@ -2358,7 +2358,12 @@ static ptr scp_transfer_pending(chezpp_scp_transfer *t, int events) {
   Svector_set(target, 1, event_ls);
   Svector_set(out, 0, Sstring_to_symbol("pending"));
   Svector_set(out, 1, target);
-  Svector_set(out, 2, Sfalse);
+  /* Offset counts bytes accepted by SSH (upload) or written to disk (download).
+     The remote download size is unknown until its file header has been parsed. */
+  Svector_set(out, 2,
+              Scons(Sunsigned64(t->offset),
+                    (t->direction == 1 || t->phase >= 5) ?
+                    Sunsigned64(t->offset + t->remaining) : Sfalse));
   return out;
 }
 
@@ -2534,14 +2539,26 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     }
     t->completed = 1;
     t->phase = 8;
-    return make_status("completed", Strue);
+    {
+      ptr out = Smake_vector(3, Sfalse);
+      Svector_set(out, 0, Sstring_to_symbol("completed"));
+      Svector_set(out, 1, Strue);
+      Svector_set(out, 2, Scons(Sunsigned64(t->offset), Sunsigned64(t->offset)));
+      return out;
+    }
   }
   if (t->phase == 7) {
     ptr ans = scp_read_ack(t);
     if (ans != Strue) return ans;
     t->completed = 1;
     t->phase = 8;
-    return make_status("completed", Strue);
+    {
+      ptr out = Smake_vector(3, Sfalse);
+      Svector_set(out, 0, Sstring_to_symbol("completed"));
+      Svector_set(out, 1, Strue);
+      Svector_set(out, 2, Scons(Sunsigned64(t->offset), Sunsigned64(t->offset)));
+      return out;
+    }
   }
   return make_error_status_message("scp transfer is already complete");
 }

@@ -318,3 +318,33 @@
              (run-net-scp-closed-session-test home port user))
            (lambda ()
              (stop-server))))))
+
+(mat net-scp-policy-progress
+     (mat-requires (ssh)
+       (with-test-scp-session
+        (lambda (session remote-root)
+          (let* ([local (format "/tmp/chezpp-scp-progress-~a" (get-process-id))]
+                 [remote (string-append remote-root "/progress")]
+                 [events '()]
+                 [policy (make-transfer-policy
+                          'never 'replace 65536
+                          (lambda (protocol direction path completed total)
+                            (set! events (cons (list protocol direction path completed total)
+                                               events))))])
+            (dynamic-wind
+              (lambda () (write-u8vec! local (make-bytevector 262144 42)))
+              (lambda ()
+                (scp-upload session local remote policy)
+                (scp-download session remote local policy)
+                (andmap
+                 (lambda (direction)
+                   (let ([selected (filter (lambda (event) (eq? direction (cadr event)))
+                                           (reverse events))])
+                     (and (pair? selected)
+                          (andmap (lambda (event)
+                                    (and (eq? 'scp (car event))
+                                         (string=? remote (caddr event)))) selected)
+                          (exists (lambda (event) (< 0 (cadddr event) 262144)) selected)
+                          (equal? '(262144 262144) (cdddr (car (reverse selected)))))))
+                 '(upload download)))
+              (lambda () (when (file-exists? local) (delete-file local)))))))))
