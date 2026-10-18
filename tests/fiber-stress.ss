@@ -11,7 +11,10 @@
 ;; The default worker count matches the scheduler's logical CPU count.
 (define fiber-stress-workers (cpu-count))
 (define fiber-stress-quantum 300000)
-(define fiber-stress-yield-interval 4096)
+;; CPU kernels already preempt automatically. Extra cooperative suspensions
+;; allocate continuations and contend on runtime locks without adding useful work.
+;; Use a positive interval (for example 4096) to stress explicit handoffs instead.
+(define fiber-stress-yield-interval 0)
 
 ;; All workloads use the same scheduler controls. Set the quantum to 3000 to
 ;; exercise frequent preemption, or reduce `fiber-stress-workers` for scaling runs.
@@ -49,8 +52,8 @@
 
 (define fiber-stress-yield-if-needed
   (lambda (index)
-    ;; Yield often enough to let the scheduler move runnable fibers between
-    ;; worker threads, while keeping the inner loop mostly computation-only.
+    ;; Optional scheduling stress. Throughput runs leave this off; timer-driven
+    ;; preemption still lets blocked peers and watchdog deadlines make progress.
     (when (and (positive? fiber-stress-yield-interval)
                (positive? index)
                (zero? (modulo index fiber-stress-yield-interval)))
@@ -277,8 +280,34 @@
 ;;;;===----------------------------------------------------------------------===
 
 (define fiber-stress-lcg-step
-  (lambda (state)
-    (modulo (+ (* state 1664525) 1013904223) 4294967296)))
+  ;; For a 32-bit state the largest product-plus-increment is 7149081450614098.
+  ;; Select fixed-width arithmetic only if that bound fits this Chez machine.
+  ;; The mask implements reduction modulo 2^32 without generic integer division.
+  (if (<= 7149081450614098 (most-positive-fixnum))
+      (lambda (state)
+        (if (and (fixnum? state) (fx>= state 0) (fx<= state #xffffffff))
+            (fxand (fx+ (fx* state 1664525) 1013904223) #xffffffff)
+            ;; Configured seeds or direct helper calls may start outside 32 bits.
+            ;; One generic step normalizes them before later fast-path steps.
+            (modulo (+ (* state 1664525) 1013904223) 4294967296)))
+      ;; Keep the same deterministic streams on machines with narrower fixnums.
+      (lambda (state)
+        (modulo (+ (* state 1664525) 1013904223) 4294967296))))
+
+(mat fiber-stress-lcg-boundaries
+     ;; These literal unsigned results also exercise the generic path for states
+     ;; outside 32 bits; the worker fast path must preserve the same recurrence.
+     (= 1013904223 (fiber-stress-lcg-step 0))
+
+     (= 1042201148 (fiber-stress-lcg-step 17))
+
+     (= 1012239698 (fiber-stress-lcg-step 4294967295))
+
+     (= 1012239698 (fiber-stress-lcg-step -1))
+
+     (= 1013904223 (fiber-stress-lcg-step 4294967296))
+
+     (= 1013904223 (fiber-stress-lcg-step (expt 2 100))))
 
 (define fiber-stress-merge-two
   (lambda (left right)
