@@ -55,7 +55,7 @@
     (fields (immutable connection-id)
             (immutable stream-id)
             (immutable generation)
-            (immutable signal)
+            (mutable signal)
             (immutable poll-target)
             (immutable deadline-ms)
             (immutable retain?)
@@ -309,7 +309,13 @@
                     (set! procedure*
                           (release-operation-waiters-locked! reactor state))))))))
         (for-each (lambda (procedure) (procedure operation)) procedure*)
-        (when signal (lws-signal-notify signal)))))
+        (when signal
+          ;; Cleanup can return this signal to the pool while waiter callbacks run.
+          ;; Recheck the owning state and notify under the same mutex as signal release.
+          (with-mutex (lws-reactor-mutex reactor)
+            (let ([state (find-operation-state-locked reactor operation)])
+              (when (and state (= signal (reactor-operation-state-signal state)))
+                (lws-signal-notify signal))))))))
 
   (define drain-native-events!
     (lambda (reactor)
@@ -441,6 +447,14 @@
                    ready*))))
         (drain-native-events! reactor))))
 
+  ;; Must be called under the reactor mutex, before context storage is destroyed.
+  (define close-operation-signal-locked!
+    (lambda (state)
+      (let ([signal (reactor-operation-state-signal state)])
+        (unless (zero? signal)
+          (lws-signal-close signal)
+          (reactor-operation-state-signal-set! state 0)))))
+
   (define fail-pending-operations!
     (lambda (reactor failure)
       (let ([notification* '()])
@@ -451,13 +465,13 @@
                (when (eq? 'pending (reactor-operation-state-lifecycle state))
                  (reactor-operation-state-lifecycle-set! state 'failed)
                  (reactor-operation-state-failure-set! state failure)
-                 ;; Close the per-operation native signal before the context is destroyed.
-                 ;; `lws-signal-close` is idempotent; terminal cleanup may call it again.
-                 (lws-signal-close (reactor-operation-state-signal state))
                  (set! notification*
                        (cons (cons (car entry)
                                    (release-operation-waiters-locked! reactor state))
-                             notification*)))))
+                             notification*)))
+               ;; Terminal native events may still await their Scheme cleanup callback.
+               ;; Invalidate every handle so stepping/cancelling later cannot touch freed C data.
+               (close-operation-signal-locked! state)))
            (lws-reactor-operations reactor)))
         (for-each
          (lambda (notification)
@@ -647,89 +661,96 @@ until `lws-reactor-release-operation!` is called. It returns a network operation
                 [natural? connection-id stream-id generation]
                 [(lambda (value) (or (not value) (natural? value))) deadline-ms]
                 [boolean? retain?])
-        (when (memq (lws-reactor-state reactor) '(stopping stopped))
-          (errorf 'make-lws-reactor-operation "reactor is shutting down"))
-        (let* ([signal (lws-signal-open (lws-reactor-native-context reactor))]
-               [state
-                (begin
-                  (when (zero? signal)
-                    (errorf 'make-lws-reactor-operation
-                            "reactor operation signal pool is exhausted"))
-                  (%make-reactor-operation-state
-                   connection-id stream-id generation signal
-                   (make-poll-target (lws-signal-fd signal) '(read))
-                   deadline-ms retain? 'pending '() #f #f #f))]
-              [operation #f])
-          (set! operation
-                (make-net-operation
-                 kind
-                 (lambda ()
-                   (lws-signal-drain signal)
-                   (when deadline-ms
-                     (let* ([time (current-time 'time-monotonic)]
-                            [now (+ (* (time-second time) 1000)
-                                    (quotient (time-nanosecond time) 1000000))]
-                            [expired?
-                             (with-mutex (lws-reactor-mutex reactor)
-                               (and (eq? 'pending (reactor-operation-state-lifecycle state))
-                                    (>= now deadline-ms)
-                                    (begin
-                                      (reactor-operation-state-lifecycle-set! state 'failed)
-                                      (reactor-operation-state-failure-set!
-                                       state (make-net-error 'lws-reactor 'timeout
-                                                             "HTTP operation deadline expired"
-                                                             (list connection-id stream-id
-                                                                   generation)))
-                                      #t)))])
-                       (when expired?
-                         (enqueue-command! reactor 'cancel
-                                           (list connection-id stream-id generation 0)))))
-                   (with-mutex (lws-reactor-mutex reactor)
-                     (case (reactor-operation-state-lifecycle state)
-                       [(pending)
-                        (net-operation-pending
-                         (list (reactor-operation-state-poll-target state))
-                         (reactor-operation-state-deadline-ms state))]
-                       [(completed)
-                        (net-operation-completed
-                         (reactor-operation-state-result state))]
-                       [else
-                        (net-operation-failed
-                         (reactor-operation-state-failure state))])))
-                 (lambda ()
-                   (with-mutex (lws-reactor-mutex reactor)
-                     (reactor-operation-state-lifecycle-set! state 'cancelled)
-                     (reactor-operation-state-failure-set!
-                      state (make-network-condition kind "operation cancelled" '())))
-                   (enqueue-command!
-                    reactor 'cancel
-                    (list connection-id stream-id generation 0)))
-                 (lambda ()
-                   (lws-signal-close signal)
-                   (with-mutex (lws-reactor-mutex reactor)
-                     (release-operation-waiters-locked! reactor state)
-                     (unless (reactor-operation-state-retain? state)
-                       (lws-reactor-operations-set!
-                        reactor
-                        (remp (lambda (entry) (eq? operation (car entry)))
-                              (lws-reactor-operations reactor))))))))
-          (with-mutex (lws-reactor-mutex reactor)
+        (with-mutex (lws-reactor-mutex reactor)
+          (when (memq (lws-reactor-lifecycle reactor) '(stopping stopped))
+            (errorf 'make-lws-reactor-operation "reactor is shutting down"))
+          (let* ([signal (lws-signal-open (lws-reactor-native-context reactor))]
+                 [state
+                  (begin
+                    (when (zero? signal)
+                      (errorf 'make-lws-reactor-operation
+                              "reactor operation signal pool is exhausted"))
+                    (%make-reactor-operation-state
+                     connection-id stream-id generation signal
+                     (make-poll-target (lws-signal-fd signal) '(read))
+                     deadline-ms retain? 'pending '() #f #f #f))]
+                [operation #f])
+            (set! operation
+                  (make-net-operation
+                   kind
+                   (lambda ()
+                     (with-mutex (lws-reactor-mutex reactor)
+                       (let ([signal (reactor-operation-state-signal state)])
+                         (unless (zero? signal) (lws-signal-drain signal))))
+                     (when deadline-ms
+                       (let* ([time (current-time 'time-monotonic)]
+                              [now (+ (* (time-second time) 1000)
+                                      (quotient (time-nanosecond time) 1000000))]
+                              [expired?
+                               (with-mutex (lws-reactor-mutex reactor)
+                                 (and (eq? 'pending (reactor-operation-state-lifecycle state))
+                                      (>= now deadline-ms)
+                                      (begin
+                                        (reactor-operation-state-lifecycle-set! state 'failed)
+                                        (reactor-operation-state-failure-set!
+                                         state (make-net-error 'lws-reactor 'timeout
+                                                               "HTTP operation deadline expired"
+                                                               (list connection-id stream-id
+                                                                     generation)))
+                                        #t)))])
+                         (when expired?
+                           (enqueue-command! reactor 'cancel
+                                             (list connection-id stream-id generation 0)))))
+                     (with-mutex (lws-reactor-mutex reactor)
+                       (case (reactor-operation-state-lifecycle state)
+                         [(pending)
+                          (net-operation-pending
+                           (list (reactor-operation-state-poll-target state))
+                           (reactor-operation-state-deadline-ms state))]
+                         [(completed)
+                          (net-operation-completed
+                           (reactor-operation-state-result state))]
+                         [else
+                          (net-operation-failed
+                           (reactor-operation-state-failure state))])))
+                   (lambda ()
+                     (with-mutex (lws-reactor-mutex reactor)
+                       (reactor-operation-state-lifecycle-set! state 'cancelled)
+                       (reactor-operation-state-failure-set!
+                        state (make-network-condition kind "operation cancelled" '())))
+                     (enqueue-command!
+                      reactor 'cancel
+                      (list connection-id stream-id generation 0)))
+                   (lambda ()
+                     (with-mutex (lws-reactor-mutex reactor)
+                       (close-operation-signal-locked! state)
+                       (release-operation-waiters-locked! reactor state)
+                       (unless (reactor-operation-state-retain? state)
+                         (lws-reactor-operations-set!
+                          reactor
+                          (remp (lambda (entry) (eq? operation (car entry)))
+                                (lws-reactor-operations reactor))))))))
             (lws-reactor-operations-set!
-             reactor (cons (cons operation state) (lws-reactor-operations reactor))))
-          operation))]))
+             reactor (cons (cons operation state) (lws-reactor-operations reactor)))
+            operation)))]))
 
   #|proc:lws-reactor-release-operation!
 The `lws-reactor-release-operation!` procedure removes retained `operation` routing state from
-`reactor`. The operation must be terminal. The return value is unspecified.
+`reactor` and closes its signal. Both the native lifecycle and the Scheme operation must be
+terminal, so no waiter can still depend on that signal. The return value is unspecified.
 |#
   (define-who lws-reactor-release-operation!
     (lambda (reactor operation)
       (pcheck ([reactor? reactor] [net-operation? operation])
+        ;; Read the operation state before taking the reactor mutex to preserve lock order.
+        (when (eq? 'pending (net-operation-state operation))
+          (errorf who "cannot release an operation before Scheme completion"))
         (with-mutex (lws-reactor-mutex reactor)
           (let ([state (find-operation-state-locked reactor operation)])
             (when state
               (when (eq? 'pending (reactor-operation-state-lifecycle state))
                 (errorf who "cannot release a pending operation"))
+              (close-operation-signal-locked! state)
               (release-operation-waiters-locked! reactor state)
               (lws-reactor-operations-set!
                reactor

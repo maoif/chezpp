@@ -717,3 +717,61 @@
                      (= 44 (vector-ref second 3))
                      (not (lws-reactor-server-request-dequeue! reactor))))))
            (lambda () (lws-reactor-shutdown! reactor))))))
+
+(mat net-lws-reactor-shutdown-before-terminal-cleanup
+     ;; Error case: shutdown must invalidate signals before the context storage is freed.
+     (mat-requires (websockets)
+       (andmap
+        (lambda (outcome)
+          (let* ([reactor (make-lws-reactor 16 64 8)]
+                 [operation (make-lws-reactor-operation reactor 'shutdown 501 502 1 #f #t)])
+            (lws-reactor-start! reactor)
+            (unless (eq? outcome 'pending)
+              (lws-reactor-inject-event! reactor outcome 501 502 1 0 #vu8())
+              (unless (wait-until
+                       (lambda () (pair? (lws-reactor-operation-events reactor operation))))
+                (error 'shutdown-test "terminal event was not published")))
+            (lws-reactor-shutdown! reactor)
+            (net-operation-step! operation)
+            (let ([expected (if (eq? outcome 'complete) 'completed 'failed)])
+              (lws-reactor-release-operation! reactor operation)
+              (and (eq? expected (net-operation-state operation))
+                   (eq? reactor (lws-reactor-shutdown! reactor))))))
+        '(pending complete failed))))
+
+(mat net-lws-reactor-cancel-after-shutdown
+     ;; Error case: late cancellation must not close a signal from the destroyed context.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [operation (make-lws-reactor-operation reactor 'shutdown 601 602 1 #f)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-shutdown! reactor)
+         (net-operation-cancel! operation)
+         (eq? 'cancelled (net-operation-state operation)))))
+
+(mat net-lws-reactor-rejects-release-before-scheme-cleanup
+     ;; Error case: releasing before Scheme completion could drain a signal still used by waiters.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 1 64 8)]
+              [operation (make-lws-reactor-operation reactor 'release 901 902 1 #f #t)])
+         (dynamic-wind
+           (lambda () (lws-reactor-start! reactor))
+           (lambda ()
+             (lws-reactor-inject-event! reactor 'complete 901 902 1 0 #vu8())
+             (and (wait-until
+                   (lambda ()
+                     (eq? 'completed (lws-reactor-operation-lifecycle reactor operation))))
+                  (guard (condition
+                          [else (and (message-condition? condition)
+                                     (string-contains? (condition-message condition)
+                                                       "before Scheme completion") #t)])
+                    (lws-reactor-release-operation! reactor operation)
+                    #f)
+                  (begin
+                    (net-operation-step! operation)
+                    (lws-reactor-release-operation! reactor operation)
+                    ;; Normal terminal release leaves the one-slot signal pool reusable.
+                    (make-lws-reactor-operation reactor 'next 901 903 1 #f)
+                    #t)
+                  (eq? 'completed (net-operation-state operation))))
+           (lambda () (lws-reactor-shutdown! reactor))))))
