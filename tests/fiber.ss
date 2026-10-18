@@ -1214,6 +1214,44 @@
                  2 30000))
               list)))
 
+(mat fiber-configured-quantum-is-installed
+     ;; Sampling the initial budget catches an ignored quantum without timing CPU work.
+     ;; The lower bound allows entry overhead; the upper bound rejects a larger default.
+     (for-all
+      (lambda (quantum)
+        (run-fibers
+         (lambda ()
+           (let ([remaining (set-timer 0)])
+             (and (<= remaining quantum) (> remaining (quotient quantum 2)))))
+         1 quantum))
+      '(1000000 100000000)))
+
+(mat fiber-configured-workers-execute-concurrently
+     ;; Both tasks must enter on different OS threads before either can leave its
+     ;; barrier. OS sleeps intentionally occupy the worker: fiber-yield would let
+     ;; a one-worker pool satisfy the barrier sequentially and hide ignored settings.
+     (let ([entered (abox 0)])
+       (run-fibers
+        (lambda ()
+          (let ([done (make-channel)])
+            (do ([index 0 (add1 index)]) ((= index 2))
+              (spawn-fiber
+               (lambda ()
+                 (let ([result
+                        (with-timer-off
+                          (let ([thread-id (get-thread-id)]
+                                [deadline (fiber-test-deadline 1000)])
+                            (abox-get&add1! entered)
+                            (let wait ()
+                              (cond [(= 2 (unabox entered)) (cons thread-id #t)]
+                                    [(time>=? (current-time 'time-monotonic) deadline)
+                                     (cons thread-id #f)]
+                                    [else (milisleep 1) (wait)]))))])
+                   (channel-put! done result)))))
+            (let ([first (channel-get done)] [second (channel-get done)])
+              (and (cdr first) (cdr second) (not (eqv? (car first) (car second)))))))
+        2 30000)))
+
 (mat fiber-configuration-rejects-invalid-arguments
      ;; Negative case: the worker count cannot be zero.
      (error? (run-fibers (lambda () #t) 0))
