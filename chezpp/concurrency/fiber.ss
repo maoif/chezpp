@@ -115,8 +115,10 @@
   ;; identity; `init?` determines whether completion stops the whole run. `thunk` is a
   ;; zero-argument entry procedure or a one-shot continuation-resumption closure.
   ;; Resumed tasks keep their original `token` and init status across OS threads.
+  ;; `ticks` is the saved instruction budget, including zero for a disabled timer;
+  ;; `#f` requests a fresh context quantum for a new task or automatic preemption.
   (define-record-type fiber-task
-    (fields token init? thunk))
+    (fields token init? thunk (mutable ticks)))
 
   (define context-stopped?
     (lambda (context)
@@ -157,6 +159,7 @@
   #|macro:with-timer-off
   Evaluate expressions `expression ...` with instruction-count preemption disabled. Restore
   the previous timer on normal return or an exception, and return all expression values.
+  Explicit yielding or blocking is allowed; the timer stays disabled after resumption.
   |#
   (define-syntax with-timer-off
     (syntax-rules ()
@@ -196,7 +199,8 @@
       (pcheck ()
         (unless (on-scheduler-thread?)
           (errorf who "not running scheduler"))
-        (set-timer 0)
+        (let ([ticks (set-timer 0)])
+          (fiber-task-ticks-set! current-fiber-task ticks))
         ;; The yielded continuation is resumed at most once.
         (call/1cc (lambda (resume) (scheduler-return 'yield resume))))))
 
@@ -374,7 +378,8 @@
 
   (define continue-task
     (lambda (task thunk)
-      (make-fiber-task (fiber-task-token task) (fiber-task-init? task) thunk)))
+      (make-fiber-task (fiber-task-token task) (fiber-task-init? task)
+                       thunk (fiber-task-ticks task))))
 
   (define run-scheduler
     (lambda (sched)
@@ -394,6 +399,7 @@
                                  (timer-interrupt-handler
                                   (lambda ()
                                     (set-timer 0)
+                                    (fiber-task-ticks-set! current-fiber-task #f)
                                     ;; The interrupted continuation is resumed once.
                                     (call/1cc
                                      (lambda (resume)
@@ -403,7 +409,10 @@
                                        (set-timer 0)
                                        (scheduler-return 'error condition))
                                    (lambda ()
-                                     (set-timer (fiber-run-context-quantum context))
+                                     ;; A suspended disabled scope remains disabled after
+                                     ;; migration; sibling tasks use their own budgets.
+                                     (set-timer (or (fiber-task-ticks task)
+                                                    (fiber-run-context-quantum context)))
                                      ((fiber-task-thunk task))
                                      (set-timer 0)
                                      (scheduler-return 'complete #f)))))])
@@ -442,7 +451,8 @@
               (fiber-run-context-init-values-set! context results)
               (request-context-stop! context #f #f))
             ;; This boundary also handles completion after continuation migration.
-            (scheduler-return 'complete #f)))))))
+            (scheduler-return 'complete #f))))
+       #f)))
 
   (define random-sched
     (lambda (context)
@@ -816,7 +826,8 @@
           (lambda (base thunk)
             (let ([wrap (base-event-wrap-fn base)])
               (if wrap (lambda () (call-with-values thunk wrap)) thunk))))
-        (set-timer 0)
+        (let ([ticks (set-timer 0)])
+          (fiber-task-ticks-set! current-fiber-task ticks))
         ;; A synchronization continuation is committed and resumed at most once.
         ((call/1cc
           (lambda (continuation)

@@ -1402,3 +1402,46 @@
                  (andmap (lambda (channel) (eq? 'fresh (channel-get channel))) channels))
                4 100)
               (rounds (sub1 remaining)))))))
+
+(mat fiber-timer-off-survives-suspension
+     ;; Suspend inside nested scopes; resumption must not arm the instruction timer.
+     (for-all
+      (lambda (suspend)
+        (run-fibers
+         (lambda ()
+           (let ([outside (set-timer 10000000)])
+             (let ([disabled?
+                    (with-timer-off
+                      (with-timer-off
+                        (suspend)
+                        (zero? (set-timer 0))))])
+               (let ([restored (set-timer outside)])
+                 (and disabled? (positive? restored))))))
+         2 100))
+      (list fiber-yield (lambda () (fiber-milisleep 1))
+            (lambda () (event-sync (event-always #t))))))
+
+(mat fiber-timer-off-exception-after-suspension
+     ;; Negative case: a raised object must restore the enclosing timer after a yield.
+     (run-fibers
+      (lambda ()
+        (let ([original (list 'failure)] [caught #f])
+          (set-timer 10000000)
+          (guard (condition [else (set! caught condition)])
+            (with-timer-off (fiber-yield) (raise original)))
+          (let ([restored (set-timer 0)])
+            (and (eq? caught original) (positive? restored)))))
+      1 100))
+
+(mat fiber-timer-off-does-not-disable-siblings
+     ;; A disabled task can yield, but another task must retain its own preemption.
+     (run-fibers
+      (lambda ()
+        (let ([done (make-channel)])
+          (spawn-fiber
+           (lambda ()
+             (with-timer-off
+               (fiber-yield)
+               (channel-put! done (zero? (set-timer 0))))))
+          (and (channel-get done) (positive? (set-timer 0)))))
+      1 100))
