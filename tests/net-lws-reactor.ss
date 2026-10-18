@@ -775,3 +775,49 @@
                     #t)
                   (eq? 'completed (net-operation-state operation))))
            (lambda () (lws-reactor-shutdown! reactor))))))
+
+(mat net-lws-reactor-concurrent-shutdown-before-start
+     ;; Error case: a second shutdown must wait for the first even without an owner thread.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [operation (make-lws-reactor-operation reactor 'shutdown 701 702 1 #f)]
+              [callback-entered? #f] [release? #f] [failure #f])
+         (lws-reactor-register-waiter!
+          reactor operation
+          (lambda (ignored)
+            (set! callback-entered? #t)
+            (let wait () (unless release? (milisleep 1) (wait)))))
+         (let ([first (fork-thread (lambda () (lws-reactor-shutdown! reactor)))])
+           (unless (wait-until (lambda () callback-entered?))
+             (error 'shutdown-test "first shutdown did not reach its callback"))
+           (let ([second
+                  (fork-thread
+                   (lambda ()
+                     (guard (condition [else (set! failure condition)])
+                       (lws-reactor-shutdown! reactor))))])
+             (milisleep 10)
+             (set! release? #t)
+             (thread-join first)
+             (thread-join second)
+             (and (not failure)
+                  (eq? 'stopped (lws-reactor-state reactor))
+                  (begin (net-operation-step! operation) #t)
+                  (eq? 'failed (net-operation-state operation))))))))
+
+(mat net-lws-reactor-shutdown-from-owner-callback
+     ;; Error case: a terminal waiter running on the owner must never join its own thread.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [operation (make-lws-reactor-operation reactor 'shutdown 801 802 1 #f #t)]
+              [returned? #f])
+         (lws-reactor-register-waiter!
+          reactor operation
+          (lambda (ignored)
+            (lws-reactor-shutdown! reactor)
+            (set! returned? #t)))
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 801 802 1 0 #vu8())
+         (and (wait-until (lambda () (eq? 'stopped (lws-reactor-state reactor))))
+              returned?
+              (begin (net-operation-step! operation) #t)
+              (eq? 'completed (net-operation-state operation))))))

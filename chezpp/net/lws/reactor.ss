@@ -231,7 +231,10 @@
                                   (condition-signal (lws-reactor-condition reactor))
                                   #t)))))))])
         (when accepted?
-          (lws-context-wakeup (lws-reactor-native-context reactor)))
+          (with-mutex (lws-reactor-mutex reactor)
+            ;; Shutdown may begin after queue acceptance; never wake a destroyed context.
+            (unless (memq (lws-reactor-lifecycle reactor) '(stopping stopped))
+              (lws-context-wakeup (lws-reactor-native-context reactor)))))
         accepted?)))
 
   (define dequeue-command!
@@ -521,7 +524,7 @@ The `value` parameter may be any Scheme object.
               context (make-mutex 'lws-reactor) (make-condition 'lws-reactor)
               command-capacity (make-vector command-capacity) #f #f #f 0 0 0 0
               command-capacity (make-vector command-capacity) #f 0 0 0
-              '() '() '#() 'created 0 #f #f)])
+              '() '() '#() 'created -1 #f #f)])
         (initialize-command-pool! reactor)
         (initialize-waiter-pool! reactor)
         reactor)))
@@ -590,15 +593,19 @@ It returns zero before the owner thread starts.
     (lambda (reactor)
       (pcheck ([reactor? reactor])
         (with-mutex (lws-reactor-mutex reactor)
-          (lws-reactor-owner-thread-id reactor)))))
+          (max 0 (lws-reactor-owner-thread-id reactor))))))
 
   #|proc:lws-reactor-wakeup-fd
-The `lws-reactor-wakeup-fd` procedure returns the wakeup descriptor owned by `reactor`.
+The `lws-reactor-wakeup-fd` procedure returns the wakeup descriptor owned by `reactor`,
+or `-1` once shutdown has begun.
 |#
   (define lws-reactor-wakeup-fd
     (lambda (reactor)
       (pcheck ([reactor? reactor])
-        (lws-context-wakeup-fd (lws-reactor-native-context reactor)))))
+        (with-mutex (lws-reactor-mutex reactor)
+          (if (memq (lws-reactor-lifecycle reactor) '(stopping stopped))
+              -1
+              (lws-context-wakeup-fd (lws-reactor-native-context reactor)))))))
 
   #|proc:lws-reactor-start!
 The `lws-reactor-start!` procedure starts the owner thread for `reactor`.
@@ -618,31 +625,47 @@ It returns `#t` when started and `#f` when the reactor was already started.
 
   #|proc:lws-reactor-shutdown!
 The `lws-reactor-shutdown!` procedure stops `reactor`, joins its owner, and releases its context.
-Repeated calls are inert. The return value is `reactor`.
+Concurrent calls wait for the same shutdown; repeated calls are inert. A call from the reactor
+owner requests shutdown and returns without joining itself. The return value is `reactor`.
 |#
   (define lws-reactor-shutdown!
     (lambda (reactor)
       (pcheck ([reactor? reactor])
-        (let ([state (lws-reactor-state reactor)])
-          (cond
-           [(eq? state 'created)
-            (with-mutex (lws-reactor-mutex reactor)
-              (lws-reactor-lifecycle-set! reactor 'stopping))
-            (fail-pending-operations!
-             reactor
-             (make-network-condition 'lws-reactor-shutdown!
-                                     "reactor stopped" '()))
-            (lws-context-close (lws-reactor-native-context reactor))
-            (with-mutex (lws-reactor-mutex reactor)
-              (lws-reactor-lifecycle-set! reactor 'stopped))]
-           [(memq state '(starting running))
-            (with-mutex (lws-reactor-mutex reactor)
-              (lws-reactor-lifecycle-set! reactor 'stopping))
-            (lws-context-wakeup (lws-reactor-native-context reactor))
-            (thread-join (lws-reactor-thread reactor))]
-           [(eq? state 'stopping)
-            (thread-join (lws-reactor-thread reactor))]
-           [else (void)]))
+        (let ([action
+               (with-mutex (lws-reactor-mutex reactor)
+                 (case (lws-reactor-lifecycle reactor)
+                   [(created)
+                    (lws-reactor-owner-thread-id-set! reactor (get-thread-id))
+                    (lws-reactor-lifecycle-set! reactor 'stopping)
+                    'close]
+                   [(starting running)
+                    (lws-reactor-lifecycle-set! reactor 'stopping)
+                    ;; Keep lifecycle validation and the native wakeup atomic with close.
+                    (lws-context-wakeup (lws-reactor-native-context reactor))
+                    'wait]
+                   [(stopping) 'wait]
+                   [else 'done]))])
+          (case action
+            [(close)
+             (fail-pending-operations!
+              reactor
+              (make-network-condition 'lws-reactor-shutdown! "reactor stopped" '()))
+             (lws-context-close (lws-reactor-native-context reactor))
+             (with-mutex (lws-reactor-mutex reactor)
+               (lws-reactor-lifecycle-set! reactor 'stopped)
+               (condition-broadcast (lws-reactor-condition reactor)))]
+            [(wait)
+             (unless (with-mutex (lws-reactor-mutex reactor)
+                       (= (get-thread-id) (lws-reactor-owner-thread-id reactor)))
+               (with-mutex (lws-reactor-mutex reactor)
+                 (let wait ()
+                   (unless (eq? 'stopped (lws-reactor-lifecycle reactor))
+                     (condition-wait (lws-reactor-condition reactor)
+                                     (lws-reactor-mutex reactor))
+                     (wait))))
+               (let ([thread (lws-reactor-thread reactor)])
+                 (when thread (thread-join thread))))]
+            [else (void)]))
         reactor)))
 
   #|proc:make-lws-reactor-operation
