@@ -296,14 +296,14 @@
                          (cons (channel-get (car channels)) merged))))))))
 
 (mat fiber-stress-parallel-merge-sort
-     (let ([result
+     (let* ([input (make-vector (* fiber-stress-workers fiber-stress-sort-items-per-worker))]
+            [result
             (fiber-stress-run
              (lambda ()
                (fiber-stress-watchdog)
                (let* ([workers fiber-stress-workers]
                       [items-per-worker fiber-stress-sort-items-per-worker]
                       [total (* workers items-per-worker)]
-                      [input (make-vector total)]
                       [results (make-channel)])
                  ;; Generate one deterministic input vector, then hand each
                  ;; worker a disjoint chunk to sort independently.
@@ -329,21 +329,9 @@
                        (fiber-stress-merge-round chunks)
                        (collect (sub1 remaining)
                                 (cons (channel-get results) chunks)))))))])
-       ;; Verify ordering, cardinality, and conservation of the generated data.
-       (let loop ([values result] [previous #f] [count 0] [sum 0])
-         (if (null? values)
-             (and (= count (* fiber-stress-workers
-                              fiber-stress-sort-items-per-worker))
-                  (= sum
-                     (let fill ([index 0] [state 17] [total 0])
-                       (if (= index count)
-                           total
-                           (fill (add1 index)
-                                 (fiber-stress-lcg-step state)
-                                 (+ total (modulo state 1000000)))))))
-             (and (or (not previous) (<= previous (car values)))
-                  (loop (cdr values) (car values) (add1 count)
-                        (+ sum (car values))))))))
+       ;; Compare every element with a scalar sort of the original input. Sorted
+       ;; output with the right count and sum can still lose or duplicate values.
+       (equal? result (sort < (vector->list input)))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Deterministic Monte Carlo pi
