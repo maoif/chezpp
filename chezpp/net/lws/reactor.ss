@@ -201,18 +201,35 @@
              (with-mutex (lws-reactor-mutex reactor)
                (if (memq (lws-reactor-lifecycle reactor) '(stopping stopped))
                    #f
-                   (let ([command (command-acquire-locked! reactor)])
-                     (and command
-                          (begin
-                            (reactor-command-tag-set! command tag)
-                            (reactor-command-arguments-set! command arguments)
-                            (if (lws-reactor-command-tail reactor)
-                                (reactor-command-next-set!
-                                 (lws-reactor-command-tail reactor) command)
-                                (lws-reactor-command-head-set! reactor command))
-                            (lws-reactor-command-tail-set! reactor command)
-                            (condition-signal (lws-reactor-condition reactor))
-                            #t)))))])
+                   ;; Consumption acknowledgements are additive. Merge pending bytes for the
+                   ;; same stream so a burst of small chunks cannot fill the command pool.
+                   (let ([pending
+                          (and (eq? tag 'consume-body)
+                               (let find ([command (lws-reactor-command-head reactor)])
+                                 (and command
+                                      (let ([queued (reactor-command-arguments command)])
+                                        (if (and (eq? (reactor-command-tag command) 'consume-body)
+                                                 (= (car arguments) (car queued))
+                                                 (= (cadr arguments) (cadr queued))
+                                                 (= (caddr arguments) (caddr queued)))
+                                            command
+                                            (find (reactor-command-next command)))))))])
+                     (if pending
+                         (let ([queued (reactor-command-arguments pending)])
+                           (set-car! (cdddr queued) (+ (cadddr queued) (cadddr arguments)))
+                           #t)
+                         (let ([command (command-acquire-locked! reactor)])
+                           (and command
+                                (begin
+                                  (reactor-command-tag-set! command tag)
+                                  (reactor-command-arguments-set! command arguments)
+                                  (if (lws-reactor-command-tail reactor)
+                                      (reactor-command-next-set!
+                                       (lws-reactor-command-tail reactor) command)
+                                      (lws-reactor-command-head-set! reactor command))
+                                  (lws-reactor-command-tail-set! reactor command)
+                                  (condition-signal (lws-reactor-condition reactor))
+                                  #t)))))))])
         (when accepted?
           (lws-context-wakeup (lws-reactor-native-context reactor)))
         accepted?)))
@@ -869,7 +886,8 @@ It returns whether the bounded command pool accepted the command.
 
   #|proc:lws-reactor-consume-body!
 The `lws-reactor-consume-body!` procedure acknowledges `byte-count` response bytes on `reactor`.
-The identity and generation parameters select the stream. It returns command acceptance.
+The identity and generation parameters select the stream. Pending acknowledgements for that
+stream are combined in the bounded queue. It returns command acceptance.
 |#
   (define lws-reactor-consume-body!
     (lambda (reactor connection-id stream-id generation byte-count)

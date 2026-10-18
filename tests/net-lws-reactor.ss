@@ -567,6 +567,36 @@
           (procedure? lws-reactor-consume-body!)
           (procedure? lws-reactor-close-stream!)))
 
+(mat net-lws-reactor-coalesces-body-consumption
+     ;; Error case: many consumed chunks must not exhaust the bounded acknowledgement queue.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 8 1024 2)]
+              [operation (make-lws-reactor-operation reactor 'consume 91 92 1 #f)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (lws-reactor-inject-event! reactor 'readable 91 92 1 0
+                                             (make-bytevector 100 7))
+                  (for-all (lambda (index) (lws-reactor-consume-body! reactor 91 92 1 1))
+                           (iota 100))
+                  ;; Acknowledgements for another identity cannot merge into this stream.
+                  (not (lws-reactor-consume-body! reactor 91 93 1 1))
+
+                  ;; Error case: the same stream ID in a new generation is a separate lease.
+                  (not (lws-reactor-consume-body! reactor 91 92 2 1))
+                  (let ([metrics (lws-reactor-pool-metrics reactor)])
+                    (and (= 2 (vector-ref metrics 0)) (= 2 (vector-ref metrics 1))))
+                  (begin (lws-reactor-start! reactor) #t)
+                  (wait-until
+                   (lambda () (zero? (vector-ref (lws-reactor-pool-metrics reactor) 1))))
+                  (lws-reactor-inject-event! reactor 'complete 91 92 1 0 #vu8())
+                  (wait-until
+                   (lambda () (eq? 'completed
+                                    (lws-reactor-operation-lifecycle reactor operation))))
+                  (begin (net-operation-step! operation)
+                         (eq? 'completed (net-operation-state operation)))))
+           (lambda () (lws-reactor-shutdown! reactor))))))
+
 (mat net-lws-reactor-drain-operation-events-is-destructive
      ;; Draining copied events must remove them so retained payloads do not grow unbounded.
      (mat-requires (websockets)
