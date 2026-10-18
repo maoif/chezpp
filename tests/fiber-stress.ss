@@ -282,22 +282,19 @@
 
 (define fiber-stress-merge-two
   (lambda (left right)
-    (let loop ([left left] [right right] [out '()])
-      (cond
-       [(null? left) (append (reverse out) right)]
-       [(null? right) (append (reverse out) left)]
-       [(<= (car left) (car right))
-        (loop (cdr left) right (cons (car left) out))]
-       [else
-        (loop left (cdr right) (cons (car right) out))]))))
+    ;; Each chunk/pair has one consumer, and its sender never uses it again.
+    ;; `merge!` can relink those private pairs without a reversed accumulator,
+    ;; copied prefix or new list nodes. This removes most merge-stage GC work.
+    (merge! < left right)))
 
 (define fiber-stress-merge-round
   (lambda (sorted-lists)
-    (if (null? (cdr sorted-lists))
+    (if (or (null? sorted-lists) (null? (cdr sorted-lists)))
         (if (null? sorted-lists) '() (car sorted-lists))
         (let ([outputs '()])
-          ;; Each merge pair is independent, so the merge tree also runs as
-          ;; fibers instead of making only the initial sorts parallel.
+          ;; Each pair owns disjoint lists, so concurrent destructive merges are safe.
+          ;; Later rounds have fewer pairs: the final merge still uses only one fiber.
+          ;; Retaining the original input vector below permits a full independent check.
           (let loop ([rest sorted-lists])
             (unless (null? rest)
               (let ([output (make-channel)])
@@ -315,6 +312,23 @@
                 (fiber-stress-merge-round (reverse merged))
                 (collect (cdr channels)
                          (cons (channel-get (car channels)) merged))))))))
+
+(mat fiber-stress-merge-boundaries
+     ;; Fresh input lists are owned by the merge and consumed exactly once.
+     ;; Duplicates, empty chunks and an odd tree width must conserve every item.
+     (equal? '(1 2 2 2 3 9)
+             (fiber-stress-merge-two (list 1 2 9) (list 2 2 3)))
+
+     (equal? '(1 3) (fiber-stress-merge-two '() (list 1 3)))
+
+     (equal? '(1 3) (fiber-stress-merge-two (list 1 3) '()))
+
+     (fiber-stress-run
+      (lambda ()
+        (and (null? (fiber-stress-merge-round '()))
+             (equal? '(1 2 2 3 9)
+                     (fiber-stress-merge-round
+                      (list (list 1 9) '() (list 2 2 3))))))))
 
 (mat fiber-stress-parallel-merge-sort
      (let* ([input (make-vector (* fiber-stress-workers fiber-stress-sort-items-per-worker))]
