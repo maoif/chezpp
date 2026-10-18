@@ -55,12 +55,14 @@
                                                 (path-parse 'unix root-arg))))])
       (unless (and (file-directory? root) (not (reject-symlink-path? root)))
         (errorf 'http-file-server "directory is missing or contains a symlink: ~a" root))
-      (let ([log (server-log)] [context #f] [server #f]
+      (let ([log (server-log)] [context #f] [server #f] [interrupted? #f]
             [old-interrupt (keyboard-interrupt-handler)])
         (dynamic-wind
           (lambda ()
             (keyboard-interrupt-handler
-             (lambda () (errorf 'http-file-server "interrupted"))))
+             (lambda ()
+               (set! interrupted? #t)
+               (errorf 'http-file-server "interrupted"))))
           (lambda ()
             (when (eq? protocol-version 'https)
               ;; Allocate a server TLS context and load the certificate and matching key.
@@ -78,6 +80,7 @@
                   void
                   (lambda ()
                     (guard (condition
+                            [interrupted? (raise condition)]
                             [else
                              (with-logger log
                                (log-warnf "request failed: ~a" condition))])

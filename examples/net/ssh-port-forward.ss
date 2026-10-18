@@ -17,6 +17,13 @@
     (guard (condition [else #f]) (close-socket (vector-ref relay 0)))
     (guard (condition [else #f]) (ssh-close-forwarding (vector-ref relay 1)))))
 
+(define forwarding-connection-error!
+  (lambda (log condition)
+    ;; A failed client connection must not close the shared forwarding listener.
+    (if (net-error? condition)
+        (with-logger log (log-warnf "forwarded connection failed: ~a" condition))
+        (raise condition))))
+
 (define step-relay!
   (lambda (relay wait!)
     (let ([socket (vector-ref relay 0)]
@@ -98,7 +105,9 @@
                       (lambda (answer . peer)
                         (if (net-would-block? answer)
                             (wait! answer)
-                            (guard (condition [else (close-socket answer) (raise condition)])
+                            (guard (condition
+                                    [else (close-socket answer)
+                                          (forwarding-connection-error! log condition)])
                               ;; Each accepted local socket gets its own direct SSH channel.
                               (set! relay*
                                     (cons (make-relay
@@ -111,18 +120,29 @@
                       (if (net-would-block? answer)
                           (wait! answer)
                           (let ([socket (open-socket 'inet 'stream)])
-                            (guard (condition [else (close-socket socket)
-                                                   (ssh-close-forwarding answer)
-                                                   (raise condition)])
+                            (guard (condition
+                                    [else (close-relay! (make-relay socket answer))
+                                          (forwarding-connection-error! log condition)])
                               (socket-connect! socket
                                                (make-socket-address 'inet target-host target-port))
                               (set! relay* (cons (make-relay socket answer) relay*)))))))
                 (set! relay*
                       (filter
                        (lambda (relay)
-                         (if (step-relay! relay wait!)
-                             (begin (close-relay! relay) #f)
-                             #t))
+                         (let ([relay-waiting '()])
+                           (guard (condition
+                                   [else (close-relay! relay)
+                                         (forwarding-connection-error! log condition)
+                                         #f])
+                             (if (step-relay!
+                                  relay
+                                  (lambda (answer)
+                                    (set! relay-waiting (cons answer relay-waiting))))
+                                 (begin (close-relay! relay) #f)
+                                 (begin
+                                   ;; Poll only resources still owned by active connections.
+                                   (set! waiting (append relay-waiting waiting))
+                                   #t)))))
                        relay*))
                 ;; Ctrl-C can interrupt the native poll after setting the stop flag.
                 (guard (condition [stop? (void)] [else (raise condition)])
@@ -138,7 +158,7 @@
 (example-run!
  'ssh-port-forward
  "Relay TCP through SSH. --direction=local|remote; --duration=milliseconds (0 runs until Ctrl-C)."
- (append ssh-example-options '((direction . "Forwarding: local (local listener to remote target) or remote (remote listener to local target); default: local.")
+ (append ssh-example-options '((direction . "Required: local (local listener to remote target) or remote (remote listener to local target).")
    (listen-host . "Listener bind address, interpreted on the selected listener side (default: 127.0.0.1).")
    (listen-port . "Listener port, 0 through 65535 (default: 0, request a free port).")
    (target-host . "Target hostname or IP, resolved on the target side (default: 127.0.0.1).")

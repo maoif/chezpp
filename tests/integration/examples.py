@@ -47,7 +47,7 @@ def reserve_port():
 
 
 @contextlib.contextmanager
-def server(script, directory, *args):
+def server(script, directory, *args, with_process=False):
     port = reserve_port()
     process = subprocess.Popen(['./chez++', '--script', script, f'--dir={directory}',
                                 f'--port={port}', *args], stdout=subprocess.PIPE,
@@ -63,15 +63,61 @@ def server(script, directory, *args):
                 time.sleep(.02)
         else:
             raise AssertionError('listener startup timed out')
-        yield port
+        yield (port, process) if with_process else port
     finally:
-        process.send_signal(signal.SIGINT)
+        if process.poll() is None:
+            process.send_signal(signal.SIGINT)
         try:
             _, log = process.communicate(timeout=5)
             assert b'file server closed' in log, log
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate()
+            raise AssertionError('file server ignored shutdown signal')
+
+
+def http_interrupt():
+    with tempfile.TemporaryDirectory(prefix='chezpp-example-interrupt-') as name:
+        directory = Path(name)
+        with (directory / 'large').open('wb') as output:
+            output.truncate(32 * 1024 * 1024)
+        with server('examples/net/http-file-server.ss', directory,
+                    with_process=True) as (port, process):
+            # Error case: Ctrl-C during a response to a stalled reader must stop the server.
+            with socket.socket() as connection:
+                connection.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+                connection.settimeout(5)
+                connection.connect(('127.0.0.1', port))
+                connection.sendall(b'GET /large HTTP/1.1\r\nHost: localhost\r\n\r\n')
+                assert connection.recv(1), 'response never started'
+                process.send_signal(signal.SIGINT)
+                process.wait(timeout=3)
+
+
+def wget_errors():
+    with tempfile.TemporaryDirectory(prefix='chezpp-example-wget-') as name:
+        directory = Path(name)
+        with server('examples/net/http-file-server.ss', directory) as port:
+            for exists in (False, True):
+                output = directory / 'output'
+                if exists:
+                    output.write_bytes(b'keep original')
+                # Error case: HTTP errors must fail without creating/replacing the destination.
+                result = example('examples/net/wget.ss',
+                                 f'--uri=http://127.0.0.1:{port}/missing',
+                                 f'--output={output}', ok=False)
+                assert result.returncode != 0, result
+                assert b'downloaded ' not in result.stderr, result.stderr
+                if exists:
+                    assert output.read_bytes() == b'keep original'
+                else:
+                    assert not output.exists()
+            # A successful retry replaces the existing destination without leaking staging files.
+            (directory / 'payload').write_bytes(b'downloaded content')
+            example('examples/net/wget.ss', f'--uri=http://127.0.0.1:{port}/payload',
+                    f'--output={output}')
+            assert output.read_bytes() == b'downloaded content'
+            assert sorted(p.name for p in directory.iterdir()) == ['output', 'payload']
 
 
 def http():
@@ -129,7 +175,9 @@ def http():
                     example('examples/net/wget.ss', f'--uri={base}/payload',
                             f'--output={output}', f'--version={version}')
                     assert output.read_bytes() == data
-        summary('HTTP examples: HTTP/1, cleartext H2, HTTPS/H2, trust, path rejection, concurrent requests, wget passed')
+        wget_errors()
+        http_interrupt()
+        summary('HTTP examples: HTTP/1, cleartext H2, HTTPS/H2, trust, paths, concurrent requests, wget errors, shutdown passed')
 
 
 def help_commands():
@@ -253,6 +301,7 @@ def benchmarks():
 
 
 if __name__ == '__main__':
-    groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto, 'benchmarks': benchmarks}
-    for group in sys.argv[1:] or groups:
+    groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto,
+              'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt}
+    for group in sys.argv[1:] or ['help', 'http', 'core', 'crypto', 'benchmarks']:
         groups[group]()

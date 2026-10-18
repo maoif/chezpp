@@ -2,25 +2,43 @@
 (load "examples/common.ss")
 (load "examples/net/ssh-example-common.ss")
 
-(define reject-scp-link!
-  (lambda (session local remote)
-    (when (file-symbolic-link? local)
-      (errorf 'scp-example "local symlinks are rejected: ~a" local))
-    ;; Directory entries retain the link type; scp-stat follows links.
-    (let* ([path (path-parse 'unix remote)]
-           [name (path-basename path)]
-           [parent (path-render (path-dirname path))])
-      (when name
-        (call-with-sftp-session
-         session
-         (lambda (sftp)
-           ;; Inspect the remote parent without following its final child entry.
-           (for-each
-            (lambda (attributes)
-              (when (and (string=? name (sftp-attributes-name attributes))
-                         (eq? (sftp-attributes-type attributes) 'symlink))
-                (errorf 'scp-example "remote symlinks are rejected: ~a" remote)))
-            (sftp-list sftp (if (string=? parent "") "." parent)))))))))
+;; Visit original path components before any normalization can hide a symlink before '..'.
+;; The inspector returns false at a missing component; later components cannot exist yet.
+(define check-scp-path!
+  (lambda (path inspect)
+    (let loop ([parts (string-split path #\/)]
+               [parent (if (string-startswith? path "/") "/" ".")])
+      (unless (null? parts)
+        (let* ([name (car parts)]
+               [next (string-append parent "/" name)])
+          (cond
+           [(string=? name "") (loop (cdr parts) parent)]
+           [(member name '("." "..")) (loop (cdr parts) next)]
+           [(inspect parent name next) (loop (cdr parts) next)]
+           [(member ".." (cdr parts))
+            (errorf 'scp-example "missing path component before '..': ~a" next)]))))))
+
+(define reject-local-scp-link!
+  (lambda (path)
+    (check-scp-path!
+     path
+     (lambda (parent name prefix)
+       (when (file-symbolic-link? prefix)
+         (errorf 'scp-example "local symlinks are rejected: ~a" prefix))
+       (file-exists? prefix)))))
+
+(define reject-remote-scp-link!
+  (lambda (sftp path)
+    (check-scp-path!
+     path
+     (lambda (parent name prefix)
+       ;; List each parent to inspect link attributes without following the child.
+       (let ([entry (find (lambda (attributes)
+                            (string=? name (sftp-attributes-name attributes)))
+                          (sftp-list sftp parent))])
+         (when (and entry (eq? (sftp-attributes-type entry) 'symlink))
+           (errorf 'scp-example "remote symlinks are rejected: ~a" prefix))
+         (and entry #t))))))
 
 (define scp-example
   (lambda (session log direction kind local remote policy)
@@ -29,22 +47,36 @@
       (dynamic-wind
         void
         (lambda ()
-          (reject-scp-link! session local remote)
-          (with-logger log (log-infof "starting SCP ~a of ~a" direction kind))
-          (if (eq? kind 'file)
-              (case direction
-                [(upload)
-                 ;; Upload one file with the selected overwrite/resume policy.
-                 (scp-upload scp local remote policy)]
-                [(download)
-                 ;; Download one file with the selected overwrite/resume policy.
-                 (scp-download scp remote local policy)])
-              ;; Copy a tree in the selected direction; reject symlinks in the tree.
-              (scp-copy-directory scp direction
-                                  (if (eq? direction 'upload) local remote)
-                                  (if (eq? direction 'upload) remote local)
-                                  policy (lambda (relative-path attributes) #t) 'reject))
-          (with-logger log (log-infof "SCP ~a completed" direction)))
+          ;; Keep one SFTP inspector open for root and recursive destination checks.
+          (call-with-sftp-session
+           session
+           (lambda (sftp)
+             (reject-local-scp-link! local)
+             (reject-remote-scp-link! sftp remote)
+             (with-logger log (log-infof "starting SCP ~a of ~a" direction kind))
+             (if (eq? kind 'file)
+                 (case direction
+                   [(upload)
+                    ;; Upload one file with the selected overwrite/resume policy.
+                    (scp-upload scp local remote policy)]
+                   [(download)
+                    ;; Download one file with the selected overwrite/resume policy.
+                    (scp-download scp remote local policy)])
+                 ;; Copy a tree in the selected direction; reject symlinks in the tree.
+                 (scp-copy-directory scp direction
+                                     (if (eq? direction 'upload) local remote)
+                                     (if (eq? direction 'upload) remote local)
+                                     policy
+                                     (lambda (relative-path attributes)
+                                       ;; Check each destination before the copier creates or replaces it.
+                                       (if (eq? direction 'download)
+                                           (reject-local-scp-link!
+                                            (string-append local "/" relative-path))
+                                           (reject-remote-scp-link!
+                                            sftp (string-append remote "/" relative-path)))
+                                       #t)
+                                     'reject))
+             (with-logger log (log-infof "SCP ~a completed" direction)))))
         ;; Cancel pending transfers and release the SCP wrapper on all exit paths.
         (lambda () (scp-close scp))))))
 

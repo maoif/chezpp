@@ -252,8 +252,10 @@ def verify():
             f"--remote={remote_link}",
         )
         assert p.returncode != 0 and b"symlinks are rejected" in p.stderr, p
+        verify_scp_path_links(root, env, args)
         verify_scp_interruption(root, env, args)
         verify_forwarding(env, args)
+        verify_forwarding_recovery(env, args)
         verify_forwarding_cancellation(env, args)
         # Explicit encrypted private keys use a separate passphrase environment variable.
         key = root / "home/.ssh/id_ed25519"
@@ -302,6 +304,100 @@ def verify():
         pathlib.Path(badenv["HOME"]).mkdir()
         p = run("ssh-run-cmd", badenv, args, "--command=true")
         assert p.returncode != 0 and b"host key is not trusted" in p.stderr, p
+
+
+def verify_scp_path_links(root, env, args):
+    for direction in ("upload", "download"):
+        for kind in ("file", "directory"):
+            for scenario in ("source-parent", "source-dot-parent", "target-parent",
+                             "target-missing-parent", "target-root", "target-child",
+                             "target-dangling-child", "target-directory"):
+                if kind == "file" and scenario in ("target-child", "target-dangling-child", "target-directory"):
+                    continue
+                case = root / f"links-{direction}-{kind}-{scenario}"
+                source, target, outside = case / "source", case / "target", case / "outside"
+                (source / "nested").mkdir(parents=True)
+                (source / "nested/data").write_bytes(b"new content")
+                outside.mkdir()
+                (outside / "data").write_bytes(b"unrelated content")
+                source_path = source / "nested/data" if kind == "file" else source
+                target_path = target
+                if scenario == "source-parent":
+                    (case / "source-link").symlink_to(source, target_is_directory=True)
+                    source_path = case / "source-link" / ("nested/data" if kind == "file" else "nested")
+                elif scenario == "source-dot-parent":
+                    (case / "source-link").symlink_to(source / "nested", target_is_directory=True)
+                    source_path = case / "source-link/.." / ("nested/data" if kind == "file" else "nested")
+                elif scenario in ("target-parent", "target-missing-parent"):
+                    target.symlink_to(outside, target_is_directory=True)
+                    target_path = target / ("data" if kind == "file" else "new-tree")
+                    if scenario == "target-missing-parent":
+                        target_path = case / "missing/../target" / target_path.name
+                elif scenario == "target-root":
+                    target.symlink_to(outside / "data" if kind == "file" else outside,
+                                      target_is_directory=(kind == "directory"))
+                elif scenario in ("target-child", "target-dangling-child"):
+                    (target / "nested").mkdir(parents=True)
+                    (target / "nested/data").symlink_to(
+                        outside / ("data" if scenario == "target-child" else "missing"))
+                else:
+                    target.mkdir()
+                    (target / "nested").symlink_to(outside, target_is_directory=True)
+                local, remote = ((source_path, target_path) if direction == "upload"
+                                 else (target_path, source_path))
+                # Error case: symlinked ancestors and destination entries must never be followed.
+                p = run("scp", env, args, f"--direction={direction}", f"--kind={kind}",
+                        f"--local={local}", f"--remote={remote}", "--overwrite=replace")
+                assert p.returncode != 0, (direction, kind, scenario, p)
+                assert (outside / "data").read_bytes() == b"unrelated content", scenario
+                assert not (outside / "new-tree").exists(), scenario
+                assert not (outside / "missing").exists(), scenario
+
+
+def verify_forwarding_recovery(env, args):
+    import threading
+
+    for direction in ("local", "remote"):
+        with socket.socket() as target:
+            target.bind(("127.0.0.1", 0))
+            port = free_port()
+            process = subprocess.Popen(
+                ["./chez++", "--script", "examples/net/ssh-port-forward.ss", *args,
+                 f"--direction={direction}", f"--listen-port={port}",
+                 f"--target-port={target.getsockname()[1]}", "--duration=4000"],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                wait_for_log(process, b"forwarding listening")
+                # Error case: one refused target connection must leave the listener available.
+                with socket.create_connection(("127.0.0.1", port), 5) as client:
+                    client.settimeout(3)
+                    try:
+                        assert client.recv(1) == b""
+                    except ConnectionResetError:
+                        pass
+                assert process.poll() is None, process.communicate(timeout=2)
+                target.listen()
+                target.settimeout(5)
+
+                def echo():
+                    conn, _ = target.accept()
+                    with conn:
+                        conn.sendall(conn.recv(32))
+
+                thread = threading.Thread(target=echo, daemon=True)
+                thread.start()
+                with socket.create_connection(("127.0.0.1", port), 5) as client:
+                    client.settimeout(5)
+                    client.sendall(b"recovered")
+                    assert client.recv(32) == b"recovered", direction
+                thread.join(5)
+                assert not thread.is_alive(), direction
+                _, errors = process.communicate(timeout=8)
+                assert process.returncode == 0, errors
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
 
 
 def verify_scp_interruption(root, env, args):
