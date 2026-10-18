@@ -400,6 +400,15 @@
     (lambda (sched)
       (let ([original-handler (timer-interrupt-handler)]
             [context (scheduler-context sched)])
+        ;; A timer-handler setter takes Chez's global thread-context mutex.
+        ;; Reuse one handler for this worker instead of installing and restoring
+        ;; it on every slice. User code may replace it, so dispatch checks below.
+        (define interrupt
+          (lambda ()
+            (set-timer 0)
+            (fiber-task-ticks-set! current-fiber-task #f)
+            ;; The interrupted continuation is resumed once.
+            (call/1cc (lambda (resume) (scheduler-return 'time resume)))))
         (set-timer 0)
         (let loop ()
           (let ([task (await-task! sched)])
@@ -411,14 +420,10 @@
                               (call/1cc
                                (lambda (return)
                                  (scheduler-k-set! sched return)
-                                 (timer-interrupt-handler
-                                  (lambda ()
-                                    (set-timer 0)
-                                    (fiber-task-ticks-set! current-fiber-task #f)
-                                    ;; The interrupted continuation is resumed once.
-                                    (call/1cc
-                                     (lambda (resume)
-                                       (scheduler-return 'time resume)))))
+                                 ;; Reads are thread-local. Reinstall after a fiber changes
+                                 ;; the handler; the normal path avoids the global mutex.
+                                 (unless (eq? interrupt (timer-interrupt-handler))
+                                   (timer-interrupt-handler interrupt))
                                  (with-exception-handler
                                      (lambda (condition)
                                        (set-timer 0)
@@ -432,7 +437,6 @@
                                      (set-timer 0)
                                      (scheduler-return 'complete #f)))))])
                   (set-timer 0)
-                  (timer-interrupt-handler original-handler)
                   (set! current-fiber-task #f)
                   (unless (context-stopped? context)
                     (case type
@@ -450,6 +454,7 @@
                       [else (void)]))))
               (loop))))
         (set-timer 0)
+        ;; Restore once, after the timer is disabled and this worker stops dispatching.
         (timer-interrupt-handler original-handler)
         (scheduler-k-set! sched #f))))
 

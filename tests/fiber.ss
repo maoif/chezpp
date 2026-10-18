@@ -1484,6 +1484,25 @@
           (and (channel-get done) (positive? (set-timer 0)))))
       1 100))
 
+(mat fiber-reinstalls-timer-handler-after-suspension
+     ;; A fiber can replace the thread's handler. Its next slice must regain the
+     ;; scheduler handler, including when a cached handler is reused between slices.
+     (for-all
+      (lambda (suspend)
+        (let ([stale-handler-ran? #f])
+          (and
+           (run-fibers
+            (lambda ()
+              (with-timer-off
+                (timer-interrupt-handler (lambda () (set! stale-handler-ran? #t)))
+                (suspend))
+              ;; Force an interrupt after resumption without depending on CPU speed.
+              (set-timer 100)
+              (do ([index 0 (add1 index)]) ((= index 100000) #t)))
+            1 3000)
+           (not stale-handler-ran?))))
+      (list fiber-yield (lambda () (fiber-milisleep 1)))))
+
 (mat fiber-quantum-boundary-has-bounded-progress
      ;; An OS process deadline bounds dispatch livelock independently of fiber timers.
      (for-all
