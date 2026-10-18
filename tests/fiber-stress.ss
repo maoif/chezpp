@@ -27,6 +27,9 @@
 ;; The sieve's reference values are for primes strictly below its limit;
 ;; update both reference values when changing the limit. The 100-million count
 ;; and sum were also checked with an independent scalar byte-array sieve.
+;; Each sieve fiber owns one reusable byte buffer. Its size stays bounded as the
+;; prime limit grows; 64 KiB reduces memory traffic and fits comfortably in cache.
+(define fiber-stress-sieve-segment-size 65536)
 (define fiber-stress-sieve-limit 100000000)
 (define fiber-stress-sieve-expected-count 5761455)
 (define fiber-stress-sieve-expected-sum 279209790387276)
@@ -90,71 +93,83 @@
                          primes)))))))
 
 (define fiber-stress-sieve-segment
-  (lambda (low high primes)
-    (let ([marked (make-vector (- high low) #t)])
-      (let prime-loop ([prime-index 0])
-        (when (< prime-index (vector-length primes))
-          (let* ([prime (vector-ref primes prime-index)]
-                 [first (max (* prime prime)
-                             (* prime (fiber-stress-ceiling-div low prime)))])
-            (let mark ([multiple first])
-              (when (< multiple high)
-                (vector-set! marked (- multiple low) #f)
-                (mark (+ multiple prime)))))
-          (prime-loop (add1 prime-index))))
-      (let count ([index 0] [number low] [total 0] [sum 0])
-        (if (= number high)
-            (cons total sum)
-            (begin
-              (fiber-stress-yield-if-needed index)
-              (if (vector-ref marked index)
-                  (count (add1 index) (add1 number)
-                         (add1 total) (+ sum number))
-                  (count (add1 index) (add1 number) total sum))))))))
+  (lambda (low high primes marked)
+    ;; `marked` belongs to this fiber and may contain marks from its previous range.
+    ;; Reset the entire fixed buffer; the scan below reads only `[low, high)`.
+    (bytevector-fill! marked 1)
+    (let prime-loop ([prime-index 0])
+      (when (< prime-index (vector-length primes))
+        (let* ([prime (vector-ref primes prime-index)]
+               [first (max (* prime prime)
+                           (* prime (fiber-stress-ceiling-div low prime)))])
+          (let mark ([multiple first])
+            (when (< multiple high)
+              (bytevector-u8-set! marked (- multiple low) 0)
+              (mark (+ multiple prime)))))
+        (prime-loop (add1 prime-index))))
+    (let count ([index 0] [number low] [total 0] [sum 0])
+      (if (= number high)
+          (cons total sum)
+          (begin
+            (fiber-stress-yield-if-needed index)
+            (if (= 1 (bytevector-u8-ref marked index))
+                (count (add1 index) (add1 number)
+                       (add1 total) (+ sum number))
+                (count (add1 index) (add1 number) total sum)))))))
 
 (define fiber-stress-run-sieve
-  (lambda (limit workers)
-    (fiber-stress-run
-     (lambda ()
-       (fiber-stress-watchdog)
-       (let* ([primes (fiber-stress-base-primes
-                       (inexact->exact (floor (sqrt limit))))]
-              [segment-count (* workers 4)]
-              [segment-size
-               (max 1 (fiber-stress-ceiling-div (- limit 1)
-                                                 segment-count))]
-              [results (make-channel)])
-         ;; Each worker owns every Nth segment, so large ranges stay
-         ;; balanced even when one segment contains more composites.
-         (do ([worker 0 (add1 worker)])
-             ((= worker workers))
-           (spawn-fiber
-            (lambda ()
-              (let loop ([segment worker] [total 0] [sum 0])
-                (if (>= segment segment-count)
-                    (channel-put! results (cons total sum))
-                    ;; Ceiling division pads the final segments. Clamp both
-                    ;; ends so an empty tail is [limit, limit), never reversed.
-                    (let* ([low (min limit (+ 2 (* segment segment-size)))]
-                           [high (min limit (+ low segment-size))]
-                           [part (fiber-stress-sieve-segment
-                                   low high primes)])
-                      (loop (+ segment workers)
-                            (+ total (car part))
-                            (+ sum (cdr part)))))))))
-         (let collect ([remaining workers] [total 0] [sum 0])
-           (if (= remaining 0)
-               (cons total sum)
-               (let ([part (channel-get results)])
-                 (collect (sub1 remaining)
-                          (+ total (car part))
-                          (+ sum (cdr part)))))))))))
+  (case-lambda
+    [(limit workers)
+     (fiber-stress-run-sieve limit workers fiber-stress-sieve-segment-size)]
+    [(limit workers segment-size)
+     (fiber-stress-run
+      (lambda ()
+        (fiber-stress-watchdog)
+        (let* ([primes (fiber-stress-base-primes
+                        (inexact->exact (floor (sqrt limit))))]
+               [segment-count (fiber-stress-ceiling-div (- limit 2) segment-size)]
+               [results (make-channel)])
+          ;; Every worker owns every Nth segment and reuses one byte array. Memory
+          ;; use is O(workers * segment-size), not O(limit); fibers never share marks.
+          (do ([worker 0 (add1 worker)])
+              ((= worker workers))
+            (spawn-fiber
+             (lambda ()
+               (let ([marked (make-bytevector segment-size)])
+                 (let loop ([segment worker] [total 0] [sum 0])
+                   (if (>= segment segment-count)
+                       (channel-put! results (cons total sum))
+                       (let* ([low (+ 2 (* segment segment-size))]
+                              [high (min limit (+ low segment-size))]
+                              [part (fiber-stress-sieve-segment low high primes marked)])
+                         (loop (+ segment workers)
+                               (+ total (car part))
+                               (+ sum (cdr part))))))))))
+          (let collect ([remaining workers] [total 0] [sum 0])
+            (if (= remaining 0)
+                (cons total sum)
+                (let ([part (channel-get results)])
+                  (collect (sub1 remaining)
+                           (+ total (car part))
+                           (+ sum (cdr part)))))))))]))
 
 (mat fiber-stress-sieve-small-partitions
-     ;; Small ranges must work even when there are more padded segments than numbers.
+     ;; Small ranges must work even when most workers own no segment at all.
      (equal? '(25 . 1060) (fiber-stress-run-sieve 100 16))
 
      (equal? '(0 . 0) (fiber-stress-run-sieve 2 16)))
+
+(mat fiber-stress-sieve-buffer-boundaries
+     ;; Literal prime counts/sums check empty segments, exact boundaries and
+     ;; partial tails. A reused buffer must clear composite marks from prior ranges.
+     (for-all
+      (lambda (segment-size)
+        (for-all
+         (lambda (case)
+           (equal? (cdr case) (fiber-stress-run-sieve (car case) 4 segment-size)))
+         '((2 . (0 . 0)) (3 . (1 . 2)) (7 . (3 . 10)) (8 . (4 . 17))
+           (11 . (4 . 17)) (12 . (5 . 28)) (100 . (25 . 1060)))))
+      '(1 7 16)))
 
 (mat fiber-stress-segmented-sieve
      (equal? (cons fiber-stress-sieve-expected-count fiber-stress-sieve-expected-sum)
