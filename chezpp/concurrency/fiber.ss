@@ -212,12 +212,17 @@
   (define-who fiber-yield
     (lambda ()
       (pcheck ()
-        (unless (on-scheduler-thread?)
-          (errorf who "not running scheduler"))
+        ;; Suspension already needs a timer-disabled snapshot. Validate ownership
+        ;; in that same snapshot instead of disabling/restoring the timer twice.
         (let ([ticks (set-timer 0)])
-          (fiber-task-ticks-set! current-fiber-task ticks))
-        ;; The yielded continuation is resumed at most once.
-        (call/1cc (lambda (resume) (scheduler-return 'yield resume))))))
+          (unless (and current-scheduler
+                       (eqv? (get-thread-id) (scheduler-thread-id current-scheduler)))
+            ;; An invalid caller still owns its timer; restore it before raising.
+            (set-timer ticks)
+            (errorf who "not running scheduler"))
+          (fiber-task-ticks-set! current-fiber-task ticks)
+          ;; The yielded continuation is resumed at most once.
+          (call/1cc (lambda (resume) (scheduler-return 'yield resume)))))))
 
   (define put-task!
     (case-lambda

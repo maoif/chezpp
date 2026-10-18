@@ -1503,6 +1503,20 @@
            (not stale-handler-ran?))))
       (list fiber-yield (lambda () (fiber-milisleep 1)))))
 
+(define fiber-test-invalid-yield-timer #f)
+
+(mat fiber-invalid-yield-preserves-caller-timer
+     ;; Negative case: rejecting a call outside a worker must restore its timer.
+     (error?
+      (let ([previous (set-timer 10000000)])
+        (guard (failure
+                [else
+                 (set! fiber-test-invalid-yield-timer (set-timer previous))
+                 (raise failure)])
+          (fiber-yield))))
+
+     (and fiber-test-invalid-yield-timer (positive? fiber-test-invalid-yield-timer)))
+
 (mat fiber-quantum-boundary-has-bounded-progress
      ;; An OS process deadline bounds dispatch livelock independently of fiber timers.
      (for-all
