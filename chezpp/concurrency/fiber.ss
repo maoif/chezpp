@@ -51,6 +51,11 @@
 
   (define *default-ticks* 30000)
 
+  ;; Task dispatch and continuation resumption consume instruction ticks before
+  ;; reaching user code. Keep a supported minimum above this overhead; otherwise
+  ;; a worker can repeatedly preempt its own dispatch without advancing the fiber.
+  (define *minimum-ticks* 100)
+
   ;; Chez continuations migrate between OS threads, but thread parameters do not.
   ;; Set both parameters before invoking every fresh or resumed task.
   (define-threaded current-scheduler #f)
@@ -475,6 +480,9 @@
 
   (define positive-fixnum? (lambda (value) (and (fixnum? value) (fx> value 0))))
 
+  (define scheduler-quantum?
+    (lambda (value) (and (fixnum? value) (fx>= value *minimum-ticks*))))
+
   #|proc:run-fibers
   The `run-fibers` procedure runs `thunk`, a zero-argument procedure, as the init fiber in a new
   context. Init completion or quit stops the context and drops pending child work. All workers
@@ -482,8 +490,9 @@
   A nested call enqueues `thunk` as a child in the current context and returns an unspecified
   value immediately, without waiting for the nested thunk to finish.
   Optional `worker-count` is the number of OS workers, a positive fixnum defaulting to
-  `(cpu-count)`. Optional `quantum` is a positive fixnum counting Scheme timer ticks per slice;
-  it defaults to 30000. Ticks measure Scheme work, not a fixed wall-clock duration. A larger
+  `(cpu-count)`. Optional `quantum` is a fixnum of at least 100 Scheme timer ticks per slice;
+  it defaults to 30000. Smaller budgets cannot reliably advance past scheduler dispatch and
+  are rejected before any workers start. Ticks measure Scheme work, not wall-clock time. A larger
   quantum favors throughput at the cost of wakeup latency. Both settings are captured for
   the lifetime of a new context; nested calls keep their parent's scheduler configuration.
   A call on a separate OS thread creates its own context, including threads forked by a fiber.
@@ -494,7 +503,8 @@
       [(thunk worker-count) (run-fibers thunk worker-count *default-ticks*)]
       [(thunk worker-count quantum)
        (pcheck ([procedure? thunk]
-                [positive-fixnum? worker-count quantum])
+                [positive-fixnum? worker-count]
+                [scheduler-quantum? quantum])
          (if (on-scheduler-thread?)
              (spawn-fiber thunk)
              (let* ([context (make-fiber-run-context

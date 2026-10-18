@@ -1483,3 +1483,17 @@
                (channel-put! done (zero? (set-timer 0))))))
           (and (channel-get done) (positive? (set-timer 0)))))
       1 100))
+
+(mat fiber-quantum-boundary-has-bounded-progress
+     ;; An OS process deadline bounds dispatch livelock independently of fiber timers.
+     (for-all
+      (lambda (case)
+        (guard (failure [else #f])
+          (let ([result
+                 (capture-process "../chez++" "--script" "fiber-quantum-process.ss"
+                   (car case) :timeout 5000 :stdin null :stdout capture :stderr capture)])
+            (and (process-exit-success? (process-result-status result))
+                 (string=? (cdr case) (process-result-stdout result))
+                 (string=? "" (process-result-stderr result))))))
+      '(("1" . "rejected\n") ("2" . "rejected\n") ("99" . "rejected\n")
+        ("100" . "completed\n"))))
