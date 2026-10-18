@@ -672,3 +672,48 @@
                     (eq? 'timeout (net-error-kind condition-before))
                     (eq? condition-before (net-operation-condition operation)))))
            (lambda () (lws-reactor-shutdown! reactor))))))
+
+(mat net-lws-reactor-poll-events-are-not-server-requests
+     ;; Poll bookkeeping must not accumulate in an idle client/server application queue.
+     (mat-requires (websockets)
+       (let ([reactor (make-lws-reactor 16 64 8)])
+         (dynamic-wind
+           (lambda () (lws-reactor-start! reactor))
+           (lambda ()
+             (lws-reactor-inject-poll! reactor 'add 901 1)
+             (and
+              (wait-until
+               (lambda () (poll-snapshot-find (lws-reactor-poll-snapshot reactor) 901)))
+              (let loop ([count 0])
+                (if (= count 100)
+                    #t
+                    (let ([mask (if (even? count) 5 1)])
+                      (and (lws-reactor-inject-poll! reactor 'change 901 mask)
+                           (wait-until
+                            (lambda ()
+                              (let ([entry (poll-snapshot-find
+                                            (lws-reactor-poll-snapshot reactor) 901)])
+                                (and entry (= mask (vector-ref entry 1))))))
+                           (loop (fx1+ count))))))
+              (begin (lws-reactor-inject-poll! reactor 'delete 901 0) #t)
+              (wait-until
+               (lambda ()
+                 (not (poll-snapshot-find (lws-reactor-poll-snapshot reactor) 901))))
+              (begin
+                ;; A logical server event is a barrier after the preceding poll commands.
+                (lws-reactor-inject-event! reactor 'headers 42 43 1 200 #vu8(1))
+                (lws-reactor-inject-event! reactor 'headers 42 44 1 200 #vu8(2))
+                #t)
+              (let ([first #f] [second #f])
+                (and (wait-until
+                      (lambda ()
+                        (set! first (lws-reactor-server-request-dequeue! reactor)) first))
+                     (wait-until
+                      (lambda ()
+                        (set! second (lws-reactor-server-request-dequeue! reactor)) second))
+                     (eq? 'headers (vector-ref first 0))
+                     (= 43 (vector-ref first 3))
+                     (eq? 'headers (vector-ref second 0))
+                     (= 44 (vector-ref second 3))
+                     (not (lws-reactor-server-request-dequeue! reactor))))))
+           (lambda () (lws-reactor-shutdown! reactor))))))

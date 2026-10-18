@@ -316,7 +316,11 @@
       (let loop ()
         (let ([event (lws-context-next-event (lws-reactor-native-context reactor))])
           (when event
-            (publish-event! reactor event)
+            ;; Native poll callbacks already update the authoritative poll snapshot. They
+            ;; are not application events: retaining them in the server queue makes each
+            ;; receive-flow change copy an ever-growing history, even in a client reactor.
+            (unless (memq (vector-ref event 0) '(poll-add poll-change poll-delete))
+              (publish-event! reactor event))
             (loop))))))
 
   (define process-command!
@@ -910,7 +914,7 @@ It returns whether the bounded command pool accepted the command.
 
   #|proc:lws-reactor-server-request-dequeue!
 The `lws-reactor-server-request-dequeue!` procedure removes the oldest copied server event from
-`reactor`. It returns `#f` when no logical request event is ready.
+`reactor`. Poll bookkeeping is excluded. It returns `#f` when no logical request event is ready.
 |#
   (define lws-reactor-server-request-dequeue!
     (lambda (reactor)
