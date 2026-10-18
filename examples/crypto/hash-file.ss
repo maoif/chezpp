@@ -29,7 +29,8 @@
 (example-run!
  'hash-file
  "Print a file hash or checksum using a selected digest method."
- '(file method)
+ '((file . "Required: path to the file to hash.")
+   (method . "Digest: sha224, sha256 (default), sha384, sha512, sha3-224/256/384/512, blake2b-512, blake2s-256, md5, sha512-224, sha512-256, blake3, xxhash32, or xxhash64. Use full names such as sha3-256; some require optional libraries."))
  (lambda (ref)
    (let* ([path (example-required 'hash-file ref 'file)]
           [method (string->symbol (or (ref 'method) "sha256"))]

@@ -4,7 +4,7 @@
 (example-run!
  'iter-example
  "Map, filter, zip, and fold iterators with deterministic cleanup."
- '(limit)
+ '((limit . "Maximum zipped pairs to print, a nonnegative integer (default: 5)."))
  (lambda (ref)
    (let* ([limit (example-option-natural 'iter-example ref 'limit 5)]
           ;; Construct independent sources and map the first one.

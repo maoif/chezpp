@@ -4,7 +4,7 @@
 (example-run!
  'scheme-example
  "Parse Scheme datums from a file and print the resulting list."
- '(file)
+ '((file . "Required: path to the Scheme datum file to parse."))
  (lambda (ref)
    (let ([path (example-required 'scheme-example ref 'file)])
      ;; Parse all Scheme datums in this file.

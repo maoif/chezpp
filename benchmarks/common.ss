@@ -1,8 +1,10 @@
 (import (chezpp benchmark) (chezpp cli))
 
 (define benchmark-option
-  (lambda (name parser)
+  (lambda (name parser help)
     (let ([option (make-option name)])
+      ;; Explain the benchmark option's values, units, and default.
+      (option-help-set! option help)
       (option-value-number-set! option 1)
       (option-value-parser-set! option parser)
       (option-no-short?-set! option #t)
@@ -16,15 +18,16 @@
       (command-exec-set! command body)
       (command-options-add!
        command
-       (benchmark-option 'size parser-natural)
-       (benchmark-option 'samples parser-natural)
-       (benchmark-option 'warmup parser-natural)
-       (benchmark-option 'min-time parser-flonum)
-       (benchmark-option 'max-iterations parser-natural)
-       (benchmark-option 'format parser-string)
-       (benchmark-option 'output parser-string)
-       (benchmark-option 'filter parser-string)
+       (benchmark-option 'size parser-natural "Number of elements, a nonnegative integer (default: 1000).")
+       (benchmark-option 'samples parser-natural "Measured samples per case, a positive integer (default: 5).")
+       (benchmark-option 'warmup parser-natural "Warmup runs per case, a nonnegative integer (default: 1).")
+       (benchmark-option 'min-time parser-flonum "Minimum seconds per sample, nonnegative (default: 0.01).")
+       (benchmark-option 'max-iterations parser-natural "Maximum iterations per sample, positive (default: 10000).")
+       (benchmark-option 'format parser-string "Report format: text, csv, json, or datum (default: text).")
+       (benchmark-option 'output parser-string "Report file to create or replace (default: standard output).")
+       (benchmark-option 'filter parser-string "Run cases whose names contain this substring (default: all cases).")
        (let ([option (make-option 'cost-center)])
+         (option-help-set! option "Request optional cost-center metrics; unavailable metrics are labeled (default: off).")
          (option-value-number-set! option 0)
          (option-no-short?-set! option #t)
          option))

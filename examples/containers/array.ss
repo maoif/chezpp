@@ -4,7 +4,7 @@
 (example-run!
  'array-example
  "Fill generic, fixnum, and flonum arrays and print their contents."
- '(size)
+ '((size . "Number of elements, a nonnegative fixnum (default: 5)."))
  (lambda (ref)
    (let ([size (example-option-natural 'array-example ref 'size 5)])
      (unless (fixnum? size)

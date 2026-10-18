@@ -42,7 +42,7 @@
 (example-run!
  'ssh-open-repl
  "Open a remote shell. --pty=yes|no (default yes); credentials use environment variables."
- (append ssh-example-options '(pty))
+ (append ssh-example-options '((pty . "Request a remote terminal: yes or no (default: yes); use no for piped input.")))
  (lambda (ref)
    (let ([pty (or (ref 'pty) "yes")])
      (unless (member pty '("yes" "no")) (errorf 'ssh-open-repl "--pty must be yes or no"))

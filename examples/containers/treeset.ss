@@ -4,7 +4,7 @@
 (example-run!
  'treeset-example
  "Build generic and fixnum treesets and print their ordered contents."
- '(values)
+ '((values . "Comma-separated fixnums (default: 4,1,3,2,2)."))
  (lambda (ref)
    (let ([values (example-option-integer-list
                  'treeset-example ref 'values '(4 1 3 2 2))])

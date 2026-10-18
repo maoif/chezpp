@@ -4,7 +4,7 @@
 (example-run!
  'transducer-example
  "Compose a map, filter, and take pipeline over a sequence."
- '(limit)
+ '((limit . "Maximum results from squared odd values of 0 through 19; nonnegative integer (default: 5)."))
  (lambda (ref)
    (let ([limit (example-option-natural 'transducer-example ref 'limit 5)])
      ;; Compose map, filter, and take transducers in pipeline order.

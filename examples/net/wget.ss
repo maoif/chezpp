@@ -4,7 +4,9 @@
 (example-run!
  'chezpp-wget
  "Download a URI to a file using HTTP or HTTP/2."
- '(uri output version)
+ '((uri . "Required: HTTP or HTTPS URI to download.")
+   (output . "Required: destination file path.")
+   (version . "HTTP policy: auto, http/1.1, or h2 (default: auto)."))
  (lambda (ref)
    (let* ([uri (example-required 'chezpp-wget ref 'uri)]
           [output (example-required 'chezpp-wget ref 'output)]

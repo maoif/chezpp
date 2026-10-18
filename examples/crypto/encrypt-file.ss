@@ -100,7 +100,11 @@
 (example-run!
  'encrypt-file
  "Encrypt or decrypt a file using authenticated AES-GCM or ChaCha20-Poly1305."
- '(mode input output method password-env)
+ '((mode . "Operation: encrypt or decrypt (default: encrypt).")
+   (input . "Required: path to the plaintext or encrypted input file.")
+   (output . "Required: new output path, distinct from input; existing files are rejected.")
+   (method . "Encryption algorithm: aes-256-gcm or chacha20-poly1305 (default: aes-256-gcm); decryption reads it from the envelope.")
+   (password-env . "Environment variable containing a nonempty password (default: CHEZPP_EXAMPLE_PASSWORD)."))
  (lambda (ref)
    (let* ([mode (string->symbol (or (ref 'mode) "encrypt"))]
           [input (example-required 'encrypt-file ref 'input)]

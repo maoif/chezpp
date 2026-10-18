@@ -4,7 +4,7 @@
 (example-run!
  'heap-example
  "Push values into a priority heap, inspect its top, then pop all values."
- '(values)
+ '((values . "Comma-separated integers (default: 4,1,3,2)."))
  (lambda (ref)
    (let ([values (example-option-integer-list 'heap-example ref 'values '(4 1 3 2))])
      ;; Construct a min-heap by ordering values in ascending order.

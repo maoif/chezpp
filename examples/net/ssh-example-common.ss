@@ -1,7 +1,11 @@
 ;; Shared SSH CLI, authentication, output draining, and lifecycle helpers.
 (load "examples/net/net-example-common.ss")
 
-(define ssh-example-options '(host port user auth private-key))
+(define ssh-example-options '((host . "Required: SSH server IP address or hostname; known_hosts verification is strict.")
+   (port . "SSH server port, 0 through 65535 (default: 22).")
+   (user . "Required: remote SSH username.")
+   (auth . "Authentication: agent, publickey, or password (default: agent). Password uses CHEZPP_SSH_PASSWORD; agent uses SSH_AUTH_SOCK.")
+   (private-key . "Private key path for publickey auth (default: discover keys in ~/.ssh). Passphrase uses CHEZPP_SSH_PASSPHRASE.")))
 
 (define ssh-example-port
   (lambda (who ref name default)

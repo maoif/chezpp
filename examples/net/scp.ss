@@ -51,7 +51,12 @@
 (example-run!
  'scp-example
  "Copy --kind=file|directory via SCP; --overwrite=error|replace|skip, --resume=never."
- (append ssh-example-options '(direction kind local remote overwrite resume))
+ (append ssh-example-options '((direction . "Required: upload (local to remote) or download (remote to local).")
+   (kind . "Required: file or directory; directory copies are recursive.")
+   (local . "Required: local source path for upload or destination path for download.")
+   (remote . "Required: remote destination path for upload or source path for download.")
+   (overwrite . "Existing destination policy: error, replace, or skip (default: error).")
+   (resume . "Resume policy: never is the only supported value (default: never).")))
  (lambda (ref)
    (let* ([direction (string->symbol (example-required 'scp-example ref 'direction))]
           [kind (string->symbol (example-required 'scp-example ref 'kind))]

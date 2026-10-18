@@ -4,7 +4,7 @@
 (example-run!
  'treemap-example
  "Build generic and fixnum treemaps and print their ordered entries."
- '(values)
+ '((values . "Comma-separated fixnums whose squares fit in a fixnum (default: 4,1,3,2)."))
  (lambda (ref)
    (let ([values (example-option-integer-list
                  'treemap-example ref 'values '(4 1 3 2))])

@@ -138,7 +138,12 @@
 (example-run!
  'ssh-port-forward
  "Relay TCP through SSH. --direction=local|remote; --duration=milliseconds (0 runs until Ctrl-C)."
- (append ssh-example-options '(direction listen-host listen-port target-host target-port duration))
+ (append ssh-example-options '((direction . "Forwarding: local (local listener to remote target) or remote (remote listener to local target); default: local.")
+   (listen-host . "Listener bind address, interpreted on the selected listener side (default: 127.0.0.1).")
+   (listen-port . "Listener port, 0 through 65535 (default: 0, request a free port).")
+   (target-host . "Target hostname or IP, resolved on the target side (default: 127.0.0.1).")
+   (target-port . "Target port, 0 through 65535 (default: 22).")
+   (duration . "Run time in milliseconds, a nonnegative integer (default: 0, run until Ctrl-C).")))
  (lambda (ref)
    (let ([direction (string->symbol (example-required 'ssh-port-forward ref 'direction))])
      (unless (memq direction '(local remote))

@@ -4,7 +4,7 @@
 (example-run!
  'navigator-example
  "Select and transform values in a nested Scheme datum."
- '(value)
+ '((value . "Scheme datum with a scores key containing numbers (default: ((name . Ada) (scores . #(2 4 6))))."))
  (lambda (ref)
    (let* ([text (or (ref 'value) "((name . Ada) (scores . #(2 4 6)))")]
           [value (parse-scheme-datum text)]

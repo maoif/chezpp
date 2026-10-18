@@ -4,7 +4,7 @@
 (example-run!
  'xml-example
  "Parse an XML file and print its document value."
- '(file)
+ '((file . "Required: path to the XML file to parse."))
  (lambda (ref)
    (let ([path (example-required 'xml-example ref 'file)])
      ;; Parse the selected XML file into an xml-document.

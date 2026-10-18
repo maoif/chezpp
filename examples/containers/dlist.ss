@@ -4,7 +4,7 @@
 (example-run!
  'dlist-example
  "Build and mutate a doubly-linked list, then print its values."
- '(values)
+ '((values . "Comma-separated integers (default: 1,2,3)."))
  (lambda (ref)
    (let ([values (example-option-integer-list 'dlist-example ref 'values '(1 2 3))])
      ;; Construct a doubly-linked list from the selected values.

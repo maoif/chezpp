@@ -7,7 +7,7 @@
 (define command
   (example-command
    'ssh-run-cmd "Run --command=text [-- remaining command words] over SSH."
-   (append ssh-example-options '(command))
+   (append ssh-example-options '((command . "Remote shell command text; required unless command words follow --. Prints stdout/stderr and returns the remote exit status.")))
    (lambda (ref)
      (let* ([words (if has-command-words? (ref 'command-words) '())]
             [text (join-command-arguments
@@ -30,7 +30,8 @@
 ;; The CLI sink is needed only when positional words follow the named options.
 (let ([args (command-line-arguments)])
   (when (member "--" args)
-    (let ([words (example-make-option 'command-words)])
+    (let ([words (example-make-option 'command-words
+                                      "Remaining words joined as remote shell command text after --.")])
       (option-positional?-set! words #t)
       (option-sink?-set! words #t)
       (command-options-add! command words)))
