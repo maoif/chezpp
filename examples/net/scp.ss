@@ -1,5 +1,6 @@
 (import (chezpp) (chezpp net scp) (chezpp net transfer) (chezpp logging))
 (load "examples/common.ss")
+(load "examples/net/transfer-progress.ss")
 (load "examples/net/ssh-example-common.ss")
 
 ;; Visit original path components before any normalization can hide a symlink before '..'.
@@ -76,7 +77,7 @@
                                             sftp (string-append remote "/" relative-path)))
                                        #t)
                                      'reject))
-             (with-logger log (log-infof "SCP ~a completed" direction)))))
+             (void))))
         ;; Cancel pending transfers and release the SCP wrapper on all exit paths.
         (lambda () (scp-close scp))))))
 
@@ -88,6 +89,7 @@
    (local . "Required: local source path for upload or destination path for download.")
    (remote . "Required: remote destination path for upload or source path for download.")
    (overwrite . "Existing destination policy: error, replace, or skip (default: error).")
+   (progress . "Show a progress bar per file on stderr: yes or no (default: yes).")
    (resume . "Resume policy: never is the only supported value (default: never).")))
  (lambda (ref)
    (let* ([direction (string->symbol (example-required 'scp-example ref 'direction))]
@@ -95,7 +97,8 @@
           [local (example-required 'scp-example ref 'local)]
           [remote (example-required 'scp-example ref 'remote)]
           [overwrite (string->symbol (or (ref 'overwrite) "error"))]
-          [resume (or (ref 'resume) "never")])
+          [resume (or (ref 'resume) "never")]
+          [progress? (example-progress-enabled? 'scp-example ref)])
      (unless (memq direction '(upload download))
        (errorf 'scp-example "--direction must be upload or download"))
      (unless (memq kind '(file directory))
@@ -108,6 +111,15 @@
      (call-with-example-ssh
       'scp-example ref
       (lambda (session log)
-        (scp-example session log direction kind local remote
-                     (make-transfer-policy 'never overwrite 65536 #f))))))
+        (call-with-example-progress
+         progress?
+         (lambda (report)
+           (scp-example session log direction kind local remote
+                        ;; Report native SCP byte counts through the transfer policy hook.
+                        (make-transfer-policy
+                         'never overwrite 65536
+                         (and progress?
+                              (lambda (protocol direction path completed total)
+                                (report path completed total)))))))
+        (with-logger log (log-infof "SCP ~a completed" direction))))))
  (command-line-arguments))

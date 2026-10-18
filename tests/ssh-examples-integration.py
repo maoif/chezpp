@@ -171,6 +171,8 @@ def verify():
                 f"--remote={remote}",
             )
             assert p.returncode == 0, p.stderr
+            assert b"100%" in p.stderr and b"262144/262144 bytes" in p.stderr, p.stderr
+            assert not p.stdout, p.stdout
         assert source.read_bytes() == destination.read_bytes()
         # Error case: existing destinations must not be overwritten by default.
         p = run(
@@ -183,6 +185,10 @@ def verify():
             f"--remote={remote}",
         )
         assert p.returncode != 0, p
+        # Error case: invalid progress values fail before connecting.
+        p = run("scp", env, args, "--direction=upload", "--kind=file",
+                f"--local={source}", f"--remote={remote}", "--progress=maybe")
+        assert p.returncode != 0 and b"--progress" in p.stderr, p
         source.write_bytes(b"replaced")
         p = run(
             "scp",
@@ -195,6 +201,7 @@ def verify():
             "--overwrite=skip",
         )
         assert p.returncode == 0 and remote.read_bytes() != b"replaced", p
+        assert b"bytes" not in p.stderr, p.stderr
         p = run(
             "scp",
             env,
@@ -204,12 +211,15 @@ def verify():
             f"--local={source}",
             f"--remote={remote}",
             "--overwrite=replace",
+            "--progress=no",
         )
         assert p.returncode == 0 and remote.read_bytes() == b"replaced", p
+        assert b"bytes" not in p.stderr and b"100%" not in p.stderr, p.stderr
         tree = root / "tree"
         (tree / "nested").mkdir(parents=True)
         (tree / "nested/data").write_bytes(b"tree data")
         (tree / "empty").mkdir()
+        (tree / "zero").touch()
         remote_tree = root / "remote-tree"
         copy = root / "copy"
         for direction in ("upload", "download"):
@@ -223,6 +233,7 @@ def verify():
                 f"--remote={remote_tree}",
             )
             assert p.returncode == 0, p.stderr
+            assert b"9/9 bytes" in p.stderr and b"0/0 bytes" in p.stderr, p.stderr
         assert (copy / "nested/data").read_bytes() == b"tree data" and (
             copy / "empty"
         ).is_dir()

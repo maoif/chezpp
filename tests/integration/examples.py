@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import select
 from pathlib import Path
 import socket
 import signal
@@ -110,6 +111,7 @@ def wget_errors():
                                  f'--output={output}', ok=False)
                 assert result.returncode != 0, result
                 assert b'downloaded ' not in result.stderr, result.stderr
+                assert b'100%' not in result.stderr, result.stderr
                 if exists:
                     assert output.read_bytes() == b'keep original'
                 else:
@@ -153,12 +155,22 @@ def wget_options():
             thread.start()
             base = f'http://127.0.0.1:{listener.server_port}'
             try:
-                example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}')
+                result = example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}')
+                assert b'100%' in result.stderr and b'7/7 bytes' in result.stderr, result.stderr
+                assert not result.stdout, result.stdout
                 assert received[-1].startswith('chezpp-wget'), received
                 assert output.read_bytes() == b'payload'
                 example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}',
                         '--user-agent=Chezpp-test/1.0')
                 assert received[-1] == 'Chezpp-test/1.0', received
+                result = example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}',
+                                 '--progress=no')
+                assert b'bytes' not in result.stderr and b'100%' not in result.stderr, result.stderr
+                # Error case: invalid progress values must fail before sending a request.
+                count = len(received)
+                result = example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}',
+                                 '--progress=maybe', ok=False)
+                assert result.returncode != 0 and len(received) == count, result
                 # Error case: a short total timeout must fail and preserve the output.
                 output.write_bytes(b'original')
                 result = example('examples/net/wget.ss', f'--uri={base}/slow',
@@ -178,8 +190,77 @@ def wget_options():
                 thread.join(5)
 
 
+def wget_progress():
+    # A response stays open until the test observes live byte progress.
+    for mode in ('known', 'unknown', 'redirect'):
+        release = threading.Event()
+        payload = b'x' * 65536
+
+        class Handler(http_server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == '/redirect':
+                    self.send_response(302)
+                    self.send_header('Location', '/payload')
+                    self.send_header('Content-Length', '4')
+                    self.end_headers()
+                    self.wfile.write(b'skip')
+                    return
+                self.send_response(200)
+                if mode != 'unknown':
+                    self.send_header('Content-Length', str(len(payload) * 2))
+                self.end_headers()
+                self.wfile.write(payload)
+                self.wfile.flush()
+                assert release.wait(10), 'test never released the streaming response'
+                self.wfile.write(payload)
+
+            def log_message(self, *args):
+                pass
+
+        with tempfile.TemporaryDirectory(prefix='chezpp-wget-progress-') as name:
+            output = Path(name) / 'output'
+            with http_server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as listener:
+                thread = threading.Thread(target=listener.serve_forever, daemon=True)
+                thread.start()
+                path = 'redirect' if mode == 'redirect' else 'payload'
+                process = subprocess.Popen(
+                    ['./chez++', '--script', 'examples/net/wget.ss',
+                     f'--uri=http://127.0.0.1:{listener.server_port}/{path}', f'--output={output}'],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                captured = bytearray()
+                pattern = (rb' --% [1-9][0-9]* bytes' if mode == 'unknown'
+                           else rb' [1-9][0-9]?% [1-9][0-9]*/131072 bytes')
+                try:
+                    deadline = time.monotonic() + 8
+                    while not re.search(pattern, captured):
+                        remaining = deadline - time.monotonic()
+                        assert remaining > 0, (mode, bytes(captured))
+                        ready, _, _ = select.select([process.stderr], [], [], remaining)
+                        assert ready, (mode, bytes(captured))
+                        data = os.read(process.stderr.fileno(), 4096)
+                        assert data, (mode, bytes(captured))
+                        captured.extend(data)
+                    # Progress must arrive before the response finishes or the file is published.
+                    assert process.poll() is None and not output.exists(), bytes(captured)
+                    assert b'/4 bytes' not in captured, bytes(captured)
+                    release.set()
+                    stdout, stderr = process.communicate(timeout=10)
+                    captured.extend(stderr)
+                    assert process.returncode == 0 and not stdout, bytes(captured)
+                    assert b'100% 131072/131072 bytes' in captured, bytes(captured)
+                    assert output.read_bytes() == payload * 2
+                finally:
+                    release.set()
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate()
+                    listener.shutdown()
+                    thread.join(5)
+
+
 def h2_window():
     failures = []
+    release = threading.Event()
 
     def frame(kind, flags, stream, payload):
         return len(payload).to_bytes(3, 'big') + bytes([kind, flags]) + stream.to_bytes(4, 'big') + payload
@@ -217,7 +298,9 @@ def h2_window():
                         # Use a nonempty, length-delimited body to exercise normal read completion.
                         connection.sendall(frame(4, 1, 0, b'') +
                                            frame(1, 4, stream, b'\x88\x0f\x0d\x017') +
-                                           frame(0, 1, stream, b'payload'))
+                                           frame(0, 0, stream, b'pay'))
+                        assert release.wait(10), 'HTTP/2 progress was not observed'
+                        connection.sendall(frame(0, 1, stream, b'load'))
                         # Keep HTTP/2 alive until the client closes, instead of racing response delivery.
                         try:
                             while connection.recv(4096):
@@ -235,12 +318,37 @@ def h2_window():
         thread = threading.Thread(target=serve, args=(listener,), daemon=True)
         thread.start()
         output = Path(name) / 'output'
-        result = example('examples/net/wget.ss',
-                         f'--uri=http://127.0.0.1:{listener.getsockname()[1]}/',
-                         f'--output={output}', '--version=h2', ok=False)
-        thread.join(6)
+        process = subprocess.Popen(
+            ['./chez++', '--script', 'examples/net/wget.ss',
+             f'--uri=http://127.0.0.1:{listener.getsockname()[1]}/',
+             f'--output={output}', '--version=h2'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        captured = bytearray()
+        try:
+            deadline = time.monotonic() + 8
+            while b'42% 3/7 bytes' not in captured:
+                remaining = deadline - time.monotonic()
+                assert remaining > 0, bytes(captured)
+                ready, _, _ = select.select([process.stderr], [], [], remaining)
+                assert ready, bytes(captured)
+                chunk = os.read(process.stderr.fileno(), 4096)
+                assert chunk, bytes(captured)
+                captured.extend(chunk)
+            assert process.poll() is None and not output.exists()
+            release.set()
+            stdout, stderr = process.communicate(timeout=10)
+            captured.extend(stderr)
+            assert process.returncode == 0 and not stdout, bytes(captured)
+            assert output.read_bytes() == b'payload'
+            assert b'100% 7/7 bytes' in captured, bytes(captured)
+        finally:
+            release.set()
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+            thread.join(6)
         assert not thread.is_alive() and not failures, failures
-        assert result.returncode == 0 and output.read_bytes() == b'payload', result
+
 
 
 def http():
@@ -300,6 +408,7 @@ def http():
                     assert output.read_bytes() == data
         wget_errors()
         wget_options()
+        wget_progress()
         h2_window()
         http_interrupt()
         summary('HTTP examples: HTTP/1, cleartext H2, HTTPS/H2, trust, paths, concurrent requests, wget errors, shutdown passed')
@@ -428,6 +537,6 @@ def benchmarks():
 if __name__ == '__main__':
     groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto,
               'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt,
-              'wget-options': wget_options, 'h2-window': h2_window}
+              'wget-options': wget_options, 'wget-progress': wget_progress, 'h2-window': h2_window}
     for group in sys.argv[1:] or ['help', 'http', 'core', 'crypto', 'benchmarks']:
         groups[group]()

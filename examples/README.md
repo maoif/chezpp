@@ -59,6 +59,15 @@ connects the target locally. `--listen-port=0` requests a free port, logged to s
 Ctrl-C unless `--duration=MILLISECONDS` is supplied. SCP accepts both directions and kinds, plus
 `--overwrite=error|replace|skip`. It rejects symlinks and unsupported resume modes.
 
+`wget.ss` and `scp.ss` display progress bars on stderr by default. Pass `--progress=no` to disable
+progress, or `--progress=yes` to enable it explicitly; lifecycle logs remain enabled. SCP shows
+bytes and percentage per copied file, including recursive uploads and downloads. Wget uses the
+GET response's `Content-Length` to show current/total bytes and percentage during the download,
+including after redirects. If the server omits the length, it shows a moving bar and received bytes
+until the final size is known. A successful download ends at 100%.
+Displays update about ten times per second, with immediate updates for the first bytes, file
+transitions, and completion.
+
 | Server mode | Requirements | Verified request |
 |---|---|---|
 | HTTP/1 | libwebsockets | `curl --http1.1 http://127.0.0.1:8080/sample.scm` |
