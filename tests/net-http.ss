@@ -896,3 +896,63 @@
                   (eq? 'pending (net-operation-state second))
                   (finish-h2-stream! reactor second 1 2 2 200 #vu8(2))))
            (lambda () (lws-http2-client-close! client))))))
+
+
+(mat net-http-sink-response-headers
+     (mat-requires (websockets)
+       (let ([events '()])
+         (call-with-http1-response
+          "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata"
+          (lambda (client uri)
+            (net-operation-wait
+             (http-send/nonblocking
+              client (make-http-request 'get uri)
+              (make-http-body-sink
+               (lambda (bytes start count) (set! events (cons 'body events)))
+               (lambda () (set! events (cons 'finished events)))
+               (lambda (status headers)
+                 (set! events (cons (list status (http-header-ref headers "Content-Length"))
+                                    events))))))
+            (let ([ordered (reverse events)])
+              (and (equal? '(200 "4") (car ordered))
+                   (eq? 'finished (car (reverse ordered)))
+                   (memq 'body ordered)
+                   (= 1 (length (filter pair? ordered))))))))))
+
+
+(mat net-http-sink-empty-response-headers
+     (mat-requires (websockets)
+       (let ([events '()])
+         (call-with-http1-response
+          "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+          (lambda (client uri)
+            (net-operation-wait
+             (http-send/nonblocking
+              client (make-http-request 'get uri)
+              (make-http-body-sink
+               (lambda (bytes start count) (set! events (cons 'body events)))
+               (lambda () (set! events (cons 'finished events)))
+               (lambda (status headers)
+                 (set! events (cons (list status (http-header-ref headers "Content-Length"))
+                                    events))))))
+            (equal? events '(finished (200 "0"))))))))
+
+(mat net-http-sink-header-observer-failure
+     ;; Error case: a header observer exception fails the operation and still finishes its sink.
+     (mat-requires (websockets)
+       (let ([finished 0] [body-seen? #f])
+         (call-with-http1-response
+          "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata"
+          (lambda (client uri)
+            (guard (condition
+                    [else (and (= 1 finished) (not body-seen?)
+                               (message-condition? condition)
+                               (string=? "header observer failed" (condition-message condition)))])
+              (net-operation-wait
+               (http-send/nonblocking
+                client (make-http-request 'get uri)
+                (make-http-body-sink
+                 (lambda (bytes start count) (set! body-seen? #t))
+                 (lambda () (set! finished (fx1+ finished)))
+                 (lambda (status headers) (error 'test "header observer failed")))))
+              #f))))))

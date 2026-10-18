@@ -28,10 +28,12 @@ A pull-based request body source with a producer, optional length, and one-shot 
   (define-record-type (http-body-source %make-http-body-source http-body-source?) (sealed #t) (opaque #f)
     (fields (immutable producer http-body-source-producer) (immutable length http-body-source-length) (immutable closer http-body-source-closer) (mutable closed? http-body-source-closed? http-body-source-closed?-set!)))
   #|record:http-body-sink
-A push-based response body sink with a consumer and one-shot finisher.
+A push-based response body sink with a consumer, header observer, and one-shot finisher.
 |#
   (define-record-type (http-body-sink %make-http-body-sink http-body-sink?) (sealed #t) (opaque #f)
-    (fields (immutable consumer http-body-sink-consumer) (immutable finisher http-body-sink-finisher) (mutable finished? http-body-sink-finished? http-body-sink-finished?-set!)))
+    (fields (immutable consumer http-body-sink-consumer) (immutable finisher http-body-sink-finisher)
+            (immutable headers-observer http-body-sink-headers-observer)
+            (mutable finished? http-body-sink-finished? http-body-sink-finished?-set!)))
   #|record:http-cookie
 An immutable cookie with name, value, domain, path, and secure transport flag.
 |#
@@ -116,10 +118,21 @@ Reads at most `n` bytes from source `s`, returning bytes or end-of-file.
 |#
   (define http-body-source-read (lambda (s n) (pcheck ([http-body-source? s] [positive? n]) ((http-body-source-producer s) n))))
   #|proc:make-http-body-sink
-Creates a response sink from a consumer `(bytevector start count)` and optional finisher.
-Returns a sink record.
+Creates a response sink from `consumer`, with signature `(bytevector start count) -> unspecified`.
+Optional `finisher` has signature `() -> unspecified` and runs once when the sink finishes.
+Optional `headers-observer` has signature `(status header-alist) -> unspecified`. It runs once per
+response before its first body chunk, or at response completion for an empty body. Intermediate
+redirect responses followed by the client do not invoke it. Callback conditions fail the operation.
+Returns a sink record. The default finisher and header observer do nothing.
 |#
-  (define make-http-body-sink (case-lambda [(c) (make-http-body-sink c void)] [(c f) (pcheck ([procedure? c f]) (%make-http-body-sink c f #f))]))
+  (define make-http-body-sink
+    (case-lambda
+      [(consumer) (make-http-body-sink consumer void)]
+      [(consumer finisher)
+       (make-http-body-sink consumer finisher (lambda (status headers) (void)))]
+      [(consumer finisher headers-observer)
+       (pcheck ([procedure? consumer finisher headers-observer])
+               (%make-http-body-sink consumer finisher headers-observer #f))]))
   #|proc:http-body-sink-write!
 Writes `count` bytes from `body` at `start` to sink `sink`; returns an unspecified value.
 |#
@@ -412,15 +425,23 @@ retained for the client's lifetime, or `#f` for the default TLS policy.
                    (http-request-method req) u (or (uri-scheme u) "http") host port tls?
                    (request-path u) headers source (body-length (http-request-body req))
                    policy-snapshot)]
+             ;; The transport checks this predicate before delivering response chunks.
+             ;; Notify the sink once, using headers from the GET itself, after redirects.
+             [skip-response-body?
+              (let ([headers-observed? #f])
+                (lambda (status response-headers)
+                  (let ([skip? (and follow-redirects?
+                                    (redirect-status? status)
+                                    (exists (lambda (entry)
+                                              (string-ci=? "location" (car entry)))
+                                            response-headers))])
+                    (unless (or skip? headers-observed? (not sink))
+                      (set! headers-observed? #t)
+                      ((http-body-sink-headers-observer sink) status response-headers))
+                    skip?)))]
              [sv (and sink
                       (vector (lambda (b i n) (http-body-sink-write! sink b i n))
-                              void
-                              (lambda (status response-headers)
-                                (and follow-redirects?
-                                     (redirect-status? status)
-                                     (exists (lambda (entry)
-                                               (string-ci=? "location" (car entry)))
-                                             response-headers)))))]
+                              void skip-response-body?))]
              [transport (http-client-transport c)]
              [inner (lws-client-request/nonblocking transport vec sv)]
              [outer #f])
@@ -440,6 +461,9 @@ retained for the client's lifetime, or `#f` for the default TLS policy.
                             (transport-response-body transport-response)
                             (transport-response-trailers transport-response)
                             (transport-response-version transport-response))])
+                      ;; Empty responses have no body callback to deliver their headers.
+                      (skip-response-body? (http-response-status response)
+                                           (http-response-headers response))
                       (store-response-cookies! c req (http-response-headers response))
                       (http-client-active-set! c (remq outer (http-client-active c)))
                       (net-operation-completed (decode-response-body response)))]
