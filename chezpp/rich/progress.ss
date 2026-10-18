@@ -46,9 +46,9 @@
   (define $default-columns
     '(description bar percentage completed elapsed remaining speed))
 
-  (define $positive-total?
+  (define $total?
     (lambda (x)
-      (or (not x) (rich-positive-integer? x))))
+      (or (not x) (rich-nonnegative-integer? x))))
 
   (define $nonnegative-real?
     (lambda (x)
@@ -92,16 +92,16 @@
   (define $percent
     (lambda (completed total)
       (if (zero? total)
-          0
+          100
           (min 100 ($rounded-exact (* 100 (/ completed total)))))))
 
   (define $task-bar
     (lambda (task width)
       (let* ([total ($rich-progress-task-total task)]
              [completed ($rich-progress-task-completed task)]
-             [filled (if total
-                         (min width ($rounded-exact (* width (/ completed total))))
-                         0)])
+             [filled (cond [(not total) 0]
+                           [(zero? total) width]
+                           [else (min width ($rounded-exact (* width (/ completed total))))])])
         (string-append "["
                        ($string-repeat "#" filled)
                        ($string-repeat "-" (- width filled))
@@ -245,14 +245,15 @@
               ($rich-progress-columns-set! progress columns))))
 
   #|proc:rich-progress-add-task!
-  The `rich-progress-add-task!` procedure adds a task to `progress` and returns
-  its numeric task id.
+  The `rich-progress-add-task!` procedure adds a task to the progress display `progress`.
+  The string `description` labels the task. The `total` is an exact nonnegative count or `#f`
+  when unknown. A zero total renders as complete (100%). Returns the numeric task id.
   |#
   (define rich-progress-add-task!
     (lambda (progress description total)
       (pcheck ([rich-progress? progress]
                [string? description]
-               [$positive-total? total])
+               [$total? total])
               (let* ([id ($rich-progress-next-id progress)]
                      [task ($make-rich-progress-task-record
                             id description total 0 #t ((rich-current-time)) #f)])
@@ -321,13 +322,15 @@
                description))))
 
   #|proc:rich-progress-task-total-set!
-  The `rich-progress-task-total-set!` procedure sets a task total.
+  The `rich-progress-task-total-set!` procedure sets the total for task `id` in `progress`.
+  The `total` is an exact nonnegative count or `#f` when unknown. A zero total renders as
+  complete (100%). Returns an unspecified value.
   |#
   (define rich-progress-task-total-set!
     (lambda (progress id total)
       (pcheck ([rich-progress? progress]
                [rich-nonnegative-integer? id]
-               [$positive-total? total])
+               [$total? total])
               ($rich-progress-task-total-set!
                ($progress-task-ref progress id 'rich-progress-task-total-set!)
                total))))
