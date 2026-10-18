@@ -566,12 +566,11 @@
      (guard (condition [else (eq? condition #f)])
        (run-fibers
         (lambda ()
+          ;; A yield count is not a deadline: a faster init can finish its loop
+          ;; before the child starts. Block until failure and bound it by the clock.
+          (fiber-test-watchdog (fiber-test-deadline 5000))
           (spawn-fiber (lambda () (fiber-yield) (raise #f)))
-          ;; Bound the init wait so a swallowed child error fails instead of hanging.
-          (let loop ([remaining 1000])
-            (unless (zero? remaining)
-              (fiber-yield)
-              (loop (sub1 remaining))))))
+          (event-sync (event-never))))
        #f))
 
 (mat fiber-multiple-values-preserved
