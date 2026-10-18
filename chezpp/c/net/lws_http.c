@@ -1320,6 +1320,12 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
 #endif
 #if (defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2))
   information.alpn = "h2,http/1.1";
+  /* LWS 4.5 initializes client connection credit from SETTINGS_INITIAL_WINDOW_SIZE.
+   * nginx advertises 65536 for streams then raises connection credit from 65535 to
+   * INT32_MAX. Use LWS's supported clamp to tolerate its resulting one-byte overflow;
+   * all HTTP/2 frame and flow-control handling remains owned by LWS. */
+  if (listen_port < 0)
+    information.options |= LWS_SERVER_OPTION_H2_JUST_FIX_WINDOW_UPDATE_OVERFLOW;
   if (prior_knowledge) information.options |= LWS_SERVER_OPTION_H2_PRIOR_KNOWLEDGE;
 #else
   if (prior_knowledge) {

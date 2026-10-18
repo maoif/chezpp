@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 def summary(message):
@@ -120,6 +121,71 @@ def wget_errors():
             assert sorted(p.name for p in directory.iterdir()) == ['output', 'payload']
 
 
+def h2_window():
+    failures = []
+
+    def frame(kind, flags, stream, payload):
+        return len(payload).to_bytes(3, 'big') + bytes([kind, flags]) + stream.to_bytes(4, 'big') + payload
+
+    def serve(listener):
+        try:
+            connection, _ = listener.accept()
+            with connection:
+                connection.settimeout(5)
+                data = b''
+                while len(data) < 24:
+                    chunk = connection.recv(24 - len(data))
+                    assert chunk, 'client closed during HTTP/2 preface'
+                    data += chunk
+                assert data == b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n', data
+                # Valid nginx-style peer settings: stream window 65536; connection window 2^31-1.
+                connection.sendall(frame(4, 0, 0, b'\x00\x04' + (65536).to_bytes(4, 'big')) +
+                                   frame(8, 0, 0, (2147483647 - 65535).to_bytes(4, 'big')))
+                data = b''
+                while True:
+                    while len(data) < 9:
+                        chunk = connection.recv(4096)
+                        assert chunk, 'client closed before sending request headers'
+                        data += chunk
+                    length = int.from_bytes(data[:3], 'big')
+                    while len(data) < 9 + length:
+                        chunk = connection.recv(4096)
+                        assert chunk, 'client closed during frame'
+                        data += chunk
+                    kind, stream = data[3], int.from_bytes(data[5:9], 'big')
+                    data = data[9 + length:]
+                    assert kind != 7, 'client incorrectly rejected the window update with GOAWAY'
+                    if kind == 1:
+                        # HPACK index 8 is :status 200; literal indexed name 28 is content-length.
+                        # Use a nonempty, length-delimited body to exercise normal read completion.
+                        connection.sendall(frame(4, 1, 0, b'') +
+                                           frame(1, 4, stream, b'\x88\x0f\x0d\x017') +
+                                           frame(0, 1, stream, b'payload'))
+                        # Keep HTTP/2 alive until the client closes, instead of racing response delivery.
+                        try:
+                            while connection.recv(4096):
+                                pass
+                        except ConnectionResetError:
+                            pass
+                        return
+        except Exception as error:
+            failures.append(error)
+
+    with socket.socket() as listener, tempfile.TemporaryDirectory(prefix='chezpp-h2-window-') as name:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        listener.settimeout(5)
+        thread = threading.Thread(target=serve, args=(listener,), daemon=True)
+        thread.start()
+        output = Path(name) / 'output'
+        result = example('examples/net/wget.ss',
+                         f'--uri=http://127.0.0.1:{listener.getsockname()[1]}/',
+                         f'--output={output}', '--version=h2', ok=False)
+        thread.join(6)
+        assert not thread.is_alive() and not failures, failures
+        assert result.returncode == 0 and output.read_bytes() == b'payload', result
+
+
 def http():
     with tempfile.TemporaryDirectory(prefix='chezpp-example-http-') as name:
         directory = Path(name)
@@ -176,6 +242,7 @@ def http():
                             f'--output={output}', f'--version={version}')
                     assert output.read_bytes() == data
         wget_errors()
+        h2_window()
         http_interrupt()
         summary('HTTP examples: HTTP/1, cleartext H2, HTTPS/H2, trust, paths, concurrent requests, wget errors, shutdown passed')
 
@@ -302,6 +369,7 @@ def benchmarks():
 
 if __name__ == '__main__':
     groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto,
-              'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt}
+              'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt,
+              'h2-window': h2_window}
     for group in sys.argv[1:] or ['help', 'http', 'core', 'crypto', 'benchmarks']:
         groups[group]()
