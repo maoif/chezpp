@@ -275,6 +275,12 @@
     (lambda (tag)
       (memq tag '(complete closed failed reset goaway))))
 
+  ;; User waiters are notifications, like net-operation listeners. One failing observer
+  ;; must not kill the owner thread or prevent native context shutdown.
+  (define notify-waiter!
+    (lambda (procedure operation)
+      (guard (failure [else (void)]) (procedure operation))))
+
   (define publish-event!
     (lambda (reactor event)
       (let ([operation #f]
@@ -311,7 +317,7 @@
                                   (vector-ref (vector-ref event 7) 3))))))
                     (set! procedure*
                           (release-operation-waiters-locked! reactor state))))))))
-        (for-each (lambda (procedure) (procedure operation)) procedure*)
+        (for-each (lambda (procedure) (notify-waiter! procedure operation)) procedure*)
         (when signal
           ;; Cleanup can return this signal to the pool while waiter callbacks run.
           ;; Recheck the owning state and notify under the same mutex as signal release.
@@ -478,7 +484,7 @@
            (lws-reactor-operations reactor)))
         (for-each
          (lambda (notification)
-           (for-each (lambda (procedure) (procedure (car notification)))
+           (for-each (lambda (procedure) (notify-waiter! procedure (car notification)))
                      (cdr notification)))
          notification*))))
 
@@ -821,6 +827,7 @@ The `reactor` parameter owns `operation`.
   #|proc:lws-reactor-register-waiter!
 The `lws-reactor-register-waiter!` procedure registers `procedure` for `operation` completion.
 `procedure` has signature `(net-operation) -> unspecified`. The `reactor` owns the operation.
+Notification exceptions are ignored so one observer cannot interrupt other waiters or shutdown.
 It returns an unregister procedure with signature `() -> unspecified`, or `#f` on exhaustion.
 |#
   (define-who lws-reactor-register-waiter!
@@ -873,7 +880,7 @@ It returns an unregister procedure with signature `() -> unspecified`, or `#f` o
                              (waiter-release-locked! reactor current)]
                             [else
                              (remove (reactor-waiter-next current) current)]))))))])))
-          (when notify? (procedure operation))
+          (when notify? (notify-waiter! procedure operation))
           unregister))))
 
   #|proc:lws-reactor-client-acquire!

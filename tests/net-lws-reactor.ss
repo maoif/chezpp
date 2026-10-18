@@ -749,33 +749,6 @@
          (net-operation-cancel! operation)
          (eq? 'cancelled (net-operation-state operation)))))
 
-(mat net-lws-reactor-rejects-release-before-scheme-cleanup
-     ;; Error case: releasing before Scheme completion could drain a signal still used by waiters.
-     (mat-requires (websockets)
-       (let* ([reactor (make-lws-reactor 1 64 8)]
-              [operation (make-lws-reactor-operation reactor 'release 901 902 1 #f #t)])
-         (dynamic-wind
-           (lambda () (lws-reactor-start! reactor))
-           (lambda ()
-             (lws-reactor-inject-event! reactor 'complete 901 902 1 0 #vu8())
-             (and (wait-until
-                   (lambda ()
-                     (eq? 'completed (lws-reactor-operation-lifecycle reactor operation))))
-                  (guard (condition
-                          [else (and (message-condition? condition)
-                                     (string-contains? (condition-message condition)
-                                                       "before Scheme completion") #t)])
-                    (lws-reactor-release-operation! reactor operation)
-                    #f)
-                  (begin
-                    (net-operation-step! operation)
-                    (lws-reactor-release-operation! reactor operation)
-                    ;; Normal terminal release leaves the one-slot signal pool reusable.
-                    (make-lws-reactor-operation reactor 'next 901 903 1 #f)
-                    #t)
-                  (eq? 'completed (net-operation-state operation))))
-           (lambda () (lws-reactor-shutdown! reactor))))))
-
 (mat net-lws-reactor-concurrent-shutdown-before-start
      ;; Error case: a second shutdown must wait for the first even without an owner thread.
      (mat-requires (websockets)
@@ -821,3 +794,79 @@
               returned?
               (begin (net-operation-step! operation) #t)
               (eq? 'completed (net-operation-state operation))))))
+
+(mat net-lws-reactor-rejects-release-before-scheme-cleanup
+     ;; Error case: releasing before Scheme completion could drain a signal still used by waiters.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 1 64 8)]
+              [operation (make-lws-reactor-operation reactor 'release 901 902 1 #f #t)])
+         (dynamic-wind
+           (lambda () (lws-reactor-start! reactor))
+           (lambda ()
+             (lws-reactor-inject-event! reactor 'complete 901 902 1 0 #vu8())
+             (and (wait-until
+                   (lambda ()
+                     (eq? 'completed (lws-reactor-operation-lifecycle reactor operation))))
+                  (guard (condition
+                          [else (and (message-condition? condition)
+                                     (string-contains? (condition-message condition)
+                                                       "before Scheme completion") #t)])
+                    (lws-reactor-release-operation! reactor operation)
+                    #f)
+                  (begin
+                    (net-operation-step! operation)
+                    (lws-reactor-release-operation! reactor operation)
+                    ;; Normal terminal release leaves the one-slot signal pool reusable.
+                    (make-lws-reactor-operation reactor 'next 901 903 1 #f)
+                    #t)
+                  (eq? 'completed (net-operation-state operation))))
+           (lambda () (lws-reactor-shutdown! reactor))))))
+
+
+(mat net-lws-reactor-shutdown-survives-waiter-failure
+     ;; Error case: a user waiter throwing must not skip context release or the stopped broadcast.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [operation (make-lws-reactor-operation reactor 'shutdown 1001 1002 1 #f)]
+              [called? #f])
+         (lws-reactor-register-waiter!
+          reactor operation
+          (lambda (ignored)
+            (set! called? #t)
+            (error 'shutdown-waiter "deliberate callback failure")))
+         (guard (condition [else #f])
+           (and (eq? reactor (lws-reactor-shutdown! reactor))
+                called?
+                (eq? 'stopped (lws-reactor-state reactor))
+                (= -1 (lws-reactor-wakeup-fd reactor))
+                (eq? reactor (lws-reactor-shutdown! reactor)))))))
+
+
+(mat net-lws-reactor-waiter-failure-is-isolated
+     ;; Error case: a throwing observer must not stop publication or block later notifications.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [first (make-lws-reactor-operation reactor 'waiter 1101 1102 1 #f #t)]
+              [second (make-lws-reactor-operation reactor 'waiter 1101 1103 1 #f #t)]
+              [notified? #f] [immediate? #f])
+         (dynamic-wind
+           (lambda () (lws-reactor-start! reactor))
+           (lambda ()
+             (lws-reactor-register-waiter!
+              reactor first (lambda (ignored) (error 'waiter "deliberate callback failure")))
+             (lws-reactor-register-waiter!
+              reactor second (lambda (ignored) (set! notified? #t)))
+             (lws-reactor-inject-event! reactor 'complete 1101 1102 1 0 #vu8())
+             (lws-reactor-inject-event! reactor 'complete 1101 1103 1 0 #vu8())
+             (and (wait-until (lambda () notified?))
+                  (begin (net-operation-step! first) (net-operation-step! second) #t)
+                  (eq? 'completed (net-operation-state first))
+                  (eq? 'completed (net-operation-state second))
+                  (procedure?
+                   (lws-reactor-register-waiter!
+                    reactor first
+                    (lambda (ignored)
+                      (set! immediate? #t)
+                      (error 'waiter "deliberate immediate callback failure"))))
+                  immediate?))
+           (lambda () (lws-reactor-shutdown! reactor))))))
