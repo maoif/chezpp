@@ -122,6 +122,11 @@ def wget_errors():
                     f'--output={output}')
             assert output.read_bytes() == b'downloaded content'
             assert sorted(p.name for p in directory.iterdir()) == ['output', 'payload']
+            (directory / 'empty').touch()
+            result = example('examples/net/wget.ss', f'--uri=http://127.0.0.1:{port}/empty',
+                             f'--output={output}')
+            assert output.read_bytes() == b'' and b'100% 0/0 bytes' in result.stderr, result
+            assert not result.stdout, result.stdout
 
 
 def wget_options():
@@ -228,8 +233,9 @@ def wget_progress():
                      f'--uri=http://127.0.0.1:{listener.server_port}/{path}', f'--output={output}'],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 captured = bytearray()
-                pattern = (rb' --% [1-9][0-9]* bytes' if mode == 'unknown'
-                           else rb' [1-9][0-9]?% [1-9][0-9]*/131072 bytes')
+                pattern = ((rb' [1-9][0-9]* bytes' if mode == 'unknown'
+                            else rb' [0-9]{1,2}% [1-9][0-9]*/131072 bytes')
+                           + rb' +[0-9]*[1-9][0-9]*(?:\.[0-9]+)? (?:B|KiB|MiB|GiB)/s')
                 try:
                     deadline = time.monotonic() + 8
                     while not re.search(pattern, captured):
@@ -243,11 +249,14 @@ def wget_progress():
                     # Progress must arrive before the response finishes or the file is published.
                     assert process.poll() is None and not output.exists(), bytes(captured)
                     assert b'/4 bytes' not in captured, bytes(captured)
+                    if mode == 'unknown':
+                        assert b'(total unknown)' in captured, bytes(captured)
                     release.set()
                     stdout, stderr = process.communicate(timeout=10)
                     captured.extend(stderr)
                     assert process.returncode == 0 and not stdout, bytes(captured)
                     assert b'100% 131072/131072 bytes' in captured, bytes(captured)
+                    assert b'########################' in captured, bytes(captured)
                     assert output.read_bytes() == payload * 2
                 finally:
                     release.set()
@@ -256,6 +265,65 @@ def wget_progress():
                         process.communicate()
                     listener.shutdown()
                     thread.join(5)
+
+
+def wget_speed():
+    release = threading.Event()
+    started = threading.Event()
+    payload = b'x' * 2048
+    tail = b'y' * 128
+
+    class Handler(http_server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(payload) + len(tail)))
+            self.end_headers()
+            self.wfile.write(payload)
+            self.wfile.flush()
+            started.set()
+            assert release.wait(10), 'test never released the slow tail'
+            self.wfile.write(tail)
+
+        def log_message(self, *args):
+            pass
+
+    with tempfile.TemporaryDirectory(prefix='chezpp-wget-speed-') as name:
+        output = Path(name) / 'output'
+        with http_server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as listener:
+            thread = threading.Thread(target=listener.serve_forever, daemon=True)
+            thread.start()
+            process = subprocess.Popen(
+                ['./chez++', '--script', 'examples/net/wget.ss',
+                 f'--uri=http://127.0.0.1:{listener.server_port}/', f'--output={output}'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            captured = bytearray()
+            try:
+                assert started.wait(5)
+                deadline = time.monotonic() + 5
+                while b'2048/2176 bytes' not in captured:
+                    remaining = deadline - time.monotonic()
+                    assert remaining > 0, bytes(captured)
+                    ready, _, _ = select.select([process.stderr], [], [], remaining)
+                    assert ready, bytes(captured)
+                    chunk = os.read(process.stderr.fileno(), 4096)
+                    assert chunk, bytes(captured)
+                    captured.extend(chunk)
+                time.sleep(.3)
+                release.set()
+                stdout, stderr = process.communicate(timeout=10)
+                captured.extend(stderr)
+                assert process.returncode == 0 and not stdout, bytes(captured)
+                speed = re.search(rb'100% 2176/2176 bytes +([0-9.]+) B/s', captured)
+                assert speed and 0 < float(speed[1]) < 1024, bytes(captured)
+                # The recent interval contains only the slow tail, not the initial burst.
+                assert output.read_bytes() == payload + tail
+            finally:
+                release.set()
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate()
+                listener.shutdown()
+                thread.join(5)
 
 
 def h2_window():
@@ -326,7 +394,7 @@ def h2_window():
         captured = bytearray()
         try:
             deadline = time.monotonic() + 8
-            while b'42% 3/7 bytes' not in captured:
+            while b'43% 3/7 bytes' not in captured:
                 remaining = deadline - time.monotonic()
                 assert remaining > 0, bytes(captured)
                 ready, _, _ = select.select([process.stderr], [], [], remaining)
@@ -409,6 +477,7 @@ def http():
         wget_errors()
         wget_options()
         wget_progress()
+        wget_speed()
         h2_window()
         http_interrupt()
         summary('HTTP examples: HTTP/1, cleartext H2, HTTPS/H2, trust, paths, concurrent requests, wget errors, shutdown passed')
@@ -537,6 +606,6 @@ def benchmarks():
 if __name__ == '__main__':
     groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto,
               'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt,
-              'wget-options': wget_options, 'wget-progress': wget_progress, 'h2-window': h2_window}
+              'wget-options': wget_options, 'wget-progress': wget_progress, 'wget-speed': wget_speed, 'h2-window': h2_window}
     for group in sys.argv[1:] or ['help', 'http', 'core', 'crypto', 'benchmarks']:
         groups[group]()

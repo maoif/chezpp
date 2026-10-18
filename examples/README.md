@@ -61,10 +61,13 @@ Ctrl-C unless `--duration=MILLISECONDS` is supplied. SCP accepts both directions
 
 `wget.ss` and `scp.ss` display progress bars on stderr by default. Pass `--progress=no` to disable
 progress, or `--progress=yes` to enable it explicitly; lifecycle logs remain enabled. SCP shows
-bytes and percentage per copied file, including recursive uploads and downloads. Wget uses the
-GET response's `Content-Length` to show current/total bytes and percentage during the download,
-including after redirects. If the server omits the length, it shows a moving bar and received bytes
-until the final size is known. A successful download ends at 100%.
+bytes and percentage per copied file, including recursive uploads and downloads. Wget uses
+`(chezpp rich)` progress tasks and a live display on stderr. It uses the GET response's
+`Content-Length` to show current/total bytes and percentage during the download,
+including after redirects. If the server omits the length, it shows received bytes with an unknown
+total until the final size is known. Wget also shows current download speed in `B/s`, `KiB/s`, `MiB/s`,
+or `GiB/s`, sampled between progress updates using monotonic time. A successful download ends at
+100%.
 Displays update about ten times per second, with immediate updates for the first bytes, file
 transitions, and completion.
 

@@ -1,6 +1,65 @@
-(import (chezpp) (chezpp net http) (chezpp logging))
+(import (chezpp) (chezpp net http) (chezpp logging) (chezpp rich))
 (load "examples/common.ss")
 (load "examples/net/transfer-progress.ss")
+
+;; PROC receives (report path completed-bytes total-bytes-or-#f).
+(define call-with-wget-progress
+  (lambda (enabled? proc)
+    (if (not enabled?)
+        (proc (lambda (path completed total) (void)))
+        ;; Create the Rich console and progress task used throughout this download.
+        (let* ([console (make-rich-console)]
+               [progress (make-rich-progress 24 (rich-progress-default-columns))]
+               [task (rich-progress-add-task! progress "download" #f)]
+               ;; Refresh synchronously after chunks; no background thread is needed.
+               [live (make-rich-live progress console 0 #f)]
+               [last-render #f] [previous-count 0] [previous-total #f] [speed 0])
+          (define report
+            (lambda (path completed total)
+              (let* ([time (current-time 'time-monotonic)]
+                     [now (+ (time-second time) (/ (time-nanosecond time) 1000000000))]
+                     [changed? (or (not (= completed previous-count))
+                                   (not (equal? total previous-total)))])
+                (when (or (not last-render)
+                          (and changed?
+                               (or (>= (- now last-render) 1/10)
+                                   (and (zero? previous-count) (positive? completed))
+                                   (and total (= completed total)))))
+                  (when (and last-render (> now last-render) (> completed previous-count))
+                    (set! speed (/ (- completed previous-count) (- now last-render))))
+                  ;; Set the file label, advertised size, and byte count on the Rich task.
+                  (rich-progress-task-description-set! progress task (format "~s" path))
+                  (rich-progress-task-total-set! progress task total)
+                  (rich-progress-update! progress task completed)
+                  (when (and total (= completed total))
+                    ;; Mark a finished task, including an empty file, as complete.
+                    (rich-progress-complete! progress task))
+                  (let ([rate (let loop ([value (inexact speed)]
+                                        [units '(B/s KiB/s MiB/s GiB/s)])
+                                (if (or (< value 1024) (null? (cdr units)))
+                                    (format "~8,1f ~5a" value (car units))
+                                    (loop (/ value 1024) (cdr units))))])
+                    ;; Render the library's bar and counts, then append the recent byte rate.
+                    (rich-live-renderable-set!
+                     live (rich-text (string-append (rich-export-text progress)
+                                                    " bytes " rate
+                                                    (if total "" " (total unknown)")))))
+                  ;; Let Rich clear and redraw the live line on stderr.
+                  (if last-render (rich-live-refresh! live) (rich-live-start! live))
+                  (set! last-render now)
+                  (set! previous-count completed)
+                  (set! previous-total total)))))
+          ;; Progress and logging share stderr; downloaded bytes go only to the file.
+          (rich-console-output-port-set! console (current-error-port))
+          (dynamic-wind
+            void
+            (lambda () (proc report))
+            (lambda ()
+              (when last-render
+                ;; Stop the Rich display and separate the next lifecycle/error log line.
+                (rich-live-stop! live)
+                (rich-println console)
+                (flush-output-port (current-error-port)))))))))
 
 (define download-file!
   (lambda (client uri output report)
@@ -54,7 +113,7 @@
    (output . "Required: destination file path.")
    (version . "HTTP policy: auto, http/1.1, or h2 (default: auto).")
    (timeout . "Total request timeout in seconds, a positive integer (default: 3600).")
-   (progress . "Show a progress bar on stderr: yes or no (default: yes).")
+   (progress . "Show progress and current download speed on stderr: yes or no (default: yes).")
    (user-agent . "User-Agent sent to the server (default: chezpp-wget)."))
  (lambda (ref)
    (let* ([uri (example-required 'chezpp-wget ref 'uri)]
@@ -80,7 +139,7 @@
          ;; Select the requested HTTP protocol policy on the client.
          (http-client-version-set! client version)
          ;; Preserve the destination until the request has completed with a successful status.
-         (let ([response (call-with-example-progress
+         (let ([response (call-with-wget-progress
                            progress?
                            (lambda (report) (download-file! client uri output report)))])
            (with-logger log
