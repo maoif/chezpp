@@ -69,6 +69,12 @@ The H2 example selects prior knowledge explicitly; it requires an H2 client. The
 negotiates HTTP/1 or H2 through ALPN. Tests verify the negotiated version and certificate trust.
 Server roots and requested paths reject symlinks and traversal, and only GET regular files are served.
 
+`wget.ss` streams into a temporary file beside the destination and publishes it only after a
+successful HTTP response. It sends `User-Agent: chezpp-wget` by default; override it with
+`--user-agent=TEXT`. Its total request timeout is one hour; use `--timeout=SECONDS` with a positive
+integer for a different limit. Large files stream to disk without retaining the entire body in
+memory. Interrupted downloads are removed; resume is not supported.
+
 Existing positional examples also accept both help flags through `(chezpp cli)`. These include
 `http-download.ss URI [auto|http/1.1|h2]`, `echo-{client,server}-grpc.ss [HOST PORT]`,
 `ftp-client.ss HOST PORT USER PASSWORD`, `sftp-client.ss HOST PORT USER AGENT-OR-PRIVATE-KEY`,

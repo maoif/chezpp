@@ -31,11 +31,15 @@
  "Download a URI to a file using HTTP or HTTP/2."
  '((uri . "Required: HTTP or HTTPS URI to download.")
    (output . "Required: destination file path.")
-   (version . "HTTP policy: auto, http/1.1, or h2 (default: auto)."))
+   (version . "HTTP policy: auto, http/1.1, or h2 (default: auto).")
+   (timeout . "Total request timeout in seconds, a positive integer (default: 3600).")
+   (user-agent . "User-Agent sent to the server (default: chezpp-wget)."))
  (lambda (ref)
    (let* ([uri (example-required 'chezpp-wget ref 'uri)]
           [output (example-required 'chezpp-wget ref 'output)]
           [version (string->symbol (or (ref 'version) "auto"))]
+          [timeout (example-option-natural 'chezpp-wget ref 'timeout 3600)]
+          [user-agent (or (ref 'user-agent) "chezpp-wget")]
           [client (http-open)]
           [log (make-logger 'chezpp-wget)])
      (logger-add-sink! log (make-log-port-sink 'stderr (current-error-port)))
@@ -44,6 +48,12 @@
        (lambda ()
          (unless (memq version '(auto http/1.1 h2))
            (errorf 'chezpp-wget "version must be auto, http/1.1, or h2"))
+         (unless (<= 1 timeout (fxquotient (most-positive-fixnum) 1000))
+           (errorf 'chezpp-wget "timeout must be positive and fit in milliseconds as a fixnum"))
+         ;; Allow large downloads to finish within the selected total request deadline.
+         (http-set-timeout! client (* timeout 1000))
+         ;; Identify the downloader; mirrors may reject requests without a User-Agent.
+         (http-set-header! client "User-Agent" user-agent)
          ;; Select the requested HTTP protocol policy on the client.
          (http-client-version-set! client version)
          ;; Preserve the destination until the request has completed with a successful status.

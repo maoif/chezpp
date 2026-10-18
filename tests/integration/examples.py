@@ -8,6 +8,7 @@ import concurrent.futures
 import contextlib
 import csv
 import hashlib
+import http.server as http_server
 import io
 import json
 import os
@@ -119,6 +120,62 @@ def wget_errors():
                     f'--output={output}')
             assert output.read_bytes() == b'downloaded content'
             assert sorted(p.name for p in directory.iterdir()) == ['output', 'payload']
+
+
+def wget_options():
+    received = []
+
+    class Handler(http_server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            agent = self.headers.get('User-Agent')
+            received.append(agent)
+            # Error case: mirrors can reject downloaders that omit their User-Agent.
+            if not agent:
+                self.send_error(403)
+                return
+            if self.path == '/slow':
+                time.sleep(2)
+            self.send_response(200)
+            self.send_header('Content-Length', '7')
+            self.end_headers()
+            try:
+                self.wfile.write(b'payload')
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def log_message(self, *args):
+            pass
+
+    with tempfile.TemporaryDirectory(prefix='chezpp-wget-options-') as name:
+        output = Path(name) / 'output'
+        with http_server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as listener:
+            thread = threading.Thread(target=listener.serve_forever, daemon=True)
+            thread.start()
+            base = f'http://127.0.0.1:{listener.server_port}'
+            try:
+                example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}')
+                assert received[-1].startswith('chezpp-wget'), received
+                assert output.read_bytes() == b'payload'
+                example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}',
+                        '--user-agent=Chezpp-test/1.0')
+                assert received[-1] == 'Chezpp-test/1.0', received
+                # Error case: a short total timeout must fail and preserve the output.
+                output.write_bytes(b'original')
+                result = example('examples/net/wget.ss', f'--uri={base}/slow',
+                                 f'--output={output}', '--timeout=1', ok=False)
+                assert result.returncode != 0 and output.read_bytes() == b'original', result
+                example('examples/net/wget.ss', f'--uri={base}/slow', f'--output={output}',
+                        '--timeout=5')
+                assert output.read_bytes() == b'payload'
+                # Error case: zero timeout must fail before starting a request.
+                count = len(received)
+                result = example('examples/net/wget.ss', f'--uri={base}/',
+                                 f'--output={output}', '--timeout=0', ok=False)
+                assert result.returncode != 0 and len(received) == count, result
+                assert list(Path(name).iterdir()) == [output]
+            finally:
+                listener.shutdown()
+                thread.join(5)
 
 
 def h2_window():
@@ -242,6 +299,7 @@ def http():
                             f'--output={output}', f'--version={version}')
                     assert output.read_bytes() == data
         wget_errors()
+        wget_options()
         h2_window()
         http_interrupt()
         summary('HTTP examples: HTTP/1, cleartext H2, HTTPS/H2, trust, paths, concurrent requests, wget errors, shutdown passed')
@@ -370,6 +428,6 @@ def benchmarks():
 if __name__ == '__main__':
     groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto,
               'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt,
-              'h2-window': h2_window}
+              'wget-options': wget_options, 'h2-window': h2_window}
     for group in sys.argv[1:] or ['help', 'http', 'core', 'crypto', 'benchmarks']:
         groups[group]()
