@@ -1,4 +1,6 @@
 (import (chezpp)
+        (chezpp net socket)
+        (chezpp net address)
         (chezpp net poll)
         (chezpp net lws ffi)
         (chezpp net lws reactor))
@@ -201,6 +203,23 @@
                               (vector-ref (lws-context-next-event context) 0))
                             '(1 2 3))
                        '(poll-add poll-change poll-delete)))))))
+
+(mat net-lws-live-poll-keeps-application-event-pool-free
+     ;; Native descriptor changes update the snapshot without consuming body/event slots.
+     (mat-requires (websockets)
+       (let ([context (lws-context-open 8 65536)]
+             [listener (open-socket 'inet 'stream)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+             (socket-listen! listener 1)
+             (let ([port (socket-address-port (socket-local-address listener))])
+               (and (lws-client-start context 1 1 1 "127.0.0.1" port #f
+                                      "GET" "127.0.0.1" "/")
+                    (positive? (vector-length (lws-context-poll-snapshot context)))
+                    (zero? (vector-ref (lws-context-pool-metrics context) 1)))))
+           (lambda () (lws-context-close context) (close-socket listener))))))
 
 (mat net-lws-stream-exhaustion-releases-connection
      ;; Error case: acquiring a connection before stream exhaustion must not leak the connection.

@@ -820,8 +820,9 @@ static int lws_http_callback(struct lws *wsi,
                                          : LWS_HTTP_EVENT_POLL_DELETE;
       if (context == NULL || arguments == NULL) return 0;
       pthread_mutex_lock(&context->lock);
-      (void)poll_update_locked(context, tag, arguments->fd, arguments->events,
-                               !context->initializing);
+      /* The snapshot is authoritative. Descriptor bookkeeping is not an
+       * application event and must not occupy payload slots or cross the FFI. */
+      (void)poll_update_locked(context, tag, arguments->fd, arguments->events, 0);
       pthread_mutex_unlock(&context->lock);
       return 0;
     }
