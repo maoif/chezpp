@@ -15,6 +15,16 @@
  * callback-capable entry points must also acquire this same gate. */
 static pthread_mutex_t lws_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static _Thread_local unsigned lws_runtime_depth;
+static pthread_once_t lws_logging_once = PTHREAD_ONCE_INIT;
+
+static void initialize_lws_logging(void) {
+  /* Legacy `lwsl_*` paths still read the non-atomic global flags even when a
+   * context has private logging. A setter-only mutex cannot protect those reads
+   * during concurrent service. Configure the global log once before the first
+   * context can exist, then keep it immutable. Adapter-specific log levels belong
+   * to private log contexts, including `CHEZPP_WS_LOGLEVEL` for WebSocket. */
+  lws_set_log_level(0, NULL);
+}
 
 #if LWS_MAX_SMP == 1 && (defined(LWS_WITH_TLS_JIT_TRUST) || \
     defined(LWS_WITH_SYS_ASYNC_DNS) || defined(LWS_WITH_SYS_DHCP_CLIENT) || \
@@ -46,6 +56,9 @@ static void leave_lws_service(void) {
 struct lws_context *chezpp_lws_create_context(
     const struct lws_context_creation_info *information) {
   struct lws_context *context;
+  /* Both adapters and their lifetime contexts enter here. Complete initialization
+   * before LWS can log or dispatch callbacks; nested creation sees a completed once. */
+  pthread_once(&lws_logging_once, initialize_lws_logging);
   enter_lws_runtime();
   context = lws_create_context(information);
   leave_lws_runtime();
@@ -131,14 +144,6 @@ void chezpp_lws_cancel_service(struct lws_context *context) {
   enter_lws_service();
   lws_cancel_service(context);
   leave_lws_service();
-}
-
-void chezpp_lws_set_log_level(int flags, lws_log_emit_t emit) {
-  /* Initialization can race with another adapter already servicing contexts.
-   * Protect writes to the dependency's global logging configuration as well. */
-  enter_lws_runtime();
-  lws_set_log_level(flags, emit);
-  leave_lws_runtime();
 }
 #endif
 int chezpp_lws_available(void) {

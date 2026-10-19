@@ -55,7 +55,6 @@ static int ensure_lws_http_lifetime_context(void) {
   struct lws_context_creation_info information;
   pthread_mutex_lock(&lws_http_lifetime_mutex);
   if (lws_http_lifetime_context == NULL) {
-    chezpp_lws_set_log_level(0, NULL);
     memset(&information, 0, sizeof(information));
     information.port = CONTEXT_PORT_NO_LISTEN;
     information.log_cx = &lws_http_lifetime_log_context;

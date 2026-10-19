@@ -5,6 +5,21 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 task_directory=$(mktemp -d)
 trap 'rm -rf "$task_directory"' EXIT HUP INT TERM
 cd "$project_root"
+# Observe real adapter startup in fresh processes so each ordering starts with
+# unused once controls. Link only reachable native paths; no Scheme runtime runs.
+tls_source=
+if [ "$(sed -n 's/^#define CHEZPP_WITH_OPENSSL //p' chezpp/c/build-config.h)" = 1 ]; then
+  tls_source=chezpp/c/net/tls.c
+fi
+${CC:-cc} ${CPPFLAGS:-} ${LWS_CFLAGS:-} -pthread -Wall -Wextra -O2 \
+  -ffunction-sections -fdata-sections -I "$CHEZ_INCLUDE_DIR" \
+  tests/lws-log-init.c chezpp/c/net/lws_loader.c chezpp/c/net/lws_http.c \
+  chezpp/c/net/websocket.c $tls_source chezpp/c/optional_library.c \
+  -Wl,--gc-sections -Wl,--wrap=lws_set_log_level -Wl,--wrap=lws_create_context \
+  ${LDFLAGS:-} ${LWS_LIBS:-} -o "$task_directory/log-init"
+for ordering in http-first websocket-first concurrent; do
+  timeout 15s "$task_directory/log-init" "$ordering"
+done
 for feature in none LWS_WITH_TLS_JIT_TRUST LWS_WITH_SYS_ASYNC_DNS \
                LWS_WITH_SYS_DHCP_CLIENT LWS_WITH_SYS_NTPCLIENT; do
   {

@@ -35,7 +35,6 @@ static void timer_callback(lws_sorted_usec_list_t *timer) {
     struct lws_context_creation_info info = {0};
     lws_log_cx_t log_context = {.u.emit = lwsl_emit_stderr};
     struct lws_context *nested;
-    chezpp_lws_set_log_level(0, NULL);
     (void)chezpp_lws_http_context_timeout_ms((uintptr_t)&state->adapter, 1);
     /* Lifecycle calls and service must share a reentrant gate, too. */
     info.port = CONTEXT_PORT_NO_LISTEN;
@@ -67,7 +66,6 @@ int main(int argc, char **argv) {
   worker states[2] = {0};
   pthread_t threads[2];
   int expect_serialized = argc > 1 && atoi(argv[1]);
-  lws_set_log_level(0, NULL);
   if (pthread_barrier_init(&start, NULL, 2)) return 2;
   for (int index = 0; index < 2; index++) {
     struct lws_context_creation_info info = {0};

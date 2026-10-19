@@ -15,6 +15,7 @@ struct lws_context;
 struct lws_context_creation_info;
 
 /* Both adapters must serialize LWS's process-global system-vhost bookkeeping.
+ * Creation first initializes global logging once, before any context can exist.
  * Private logging keeps service concurrent except for the affected features below. */
 struct lws_context *chezpp_lws_create_context(
     const struct lws_context_creation_info *information);
@@ -33,7 +34,6 @@ int chezpp_lws_rx_flow_control(struct lws *wsi, int enable);
 int chezpp_lws_callback_on_writable(struct lws *wsi);
 void chezpp_lws_set_timeout(struct lws *wsi, enum pending_timeout reason, int seconds);
 void chezpp_lws_cancel_service(struct lws_context *context);
-void chezpp_lws_set_log_level(int flags, lws_log_emit_t emit);
 #endif
 
 int chezpp_lws_available(void);

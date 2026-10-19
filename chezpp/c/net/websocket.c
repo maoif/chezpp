@@ -406,10 +406,11 @@ static void initialize_websocket_library(void) {
   websocket_capabilities |= 1U;
 #endif
   {
+    /* Publish only private log settings. HTTP or WebSocket may already be
+     * servicing contexts, so the shared global log must remain immutable. */
     const char *level = getenv("CHEZPP_WS_LOGLEVEL");
     websocket_log_level = (uint32_t)(level == NULL ? 0 : strtol(level, NULL, 0)) &
                           ~LLLF_LOG_CONTEXT_AWARE;
-    chezpp_lws_set_log_level((int)websocket_log_level, NULL);
   }
   websocket_available_flag = 1;
 }
