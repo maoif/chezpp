@@ -67,6 +67,12 @@ ptr chezpp_lws_http_context_next_event(uintptr_t context_handle) {
   return chezpp_unavailable_status("websockets: disabled at build time");
 }
 
+int chezpp_lws_http_context_service(uintptr_t context_handle, int maximum_timeout_ms) {
+  (void)context_handle;
+  (void)maximum_timeout_ms;
+  return -1;
+}
+
 int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
                                        int maximum_timeout_ms) {
   (void)context_handle;

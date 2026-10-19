@@ -13,6 +13,7 @@
           lws-context-wakeup-fd
           lws-context-poll-snapshot
           lws-context-service-fd
+          lws-context-service
           lws-context-next-event
           lws-context-timeout-ms
           lws-context-wakeup
@@ -134,6 +135,8 @@
                 (native context-handle fd revents)))))
   (define ffi-lws-context-next-event
     (foreign-procedure "chezpp_lws_http_context_next_event" (uptr) scheme-object))
+  (define ffi-lws-context-service
+    (foreign-procedure "chezpp_lws_http_context_service" (uptr int) int))
   #|proc:ffi-lws-context-timeout-ms
   The `ffi-lws-context-timeout-ms` procedure calls the native websockets operation
   `chezpp_lws_http_context_timeout_ms`.
@@ -701,6 +704,24 @@ It returns the libwebsockets service result; servicing the wakeup descriptor ret
                [file-descriptor? descriptor]
                [event-mask? ready-events])
         (ffi-lws-context-service-fd context descriptor ready-events))))
+
+  #|proc:lws-context-service
+The `lws-context-service` procedure polls and services `context` once on its owner thread.
+`maximum-timeout-ms` bounds the wait in milliseconds; LWS timers can shorten it.
+It reuses native descriptor storage and lets other Scheme threads collect during the wait.
+It returns the count of ready descriptors, or zero after timer service. Poll failures raise
+a network condition. It must not run concurrently with another service call or context close.
+|#
+  (define-who lws-context-service
+    (lambda (context maximum-timeout-ms)
+      (pcheck ([lws-context? context] [natural? maximum-timeout-ms])
+        (unless (<= maximum-timeout-ms 2147483647)
+          (errorf who "timeout does not fit in a native integer: ~s" maximum-timeout-ms))
+        (require-optional-library who 'websockets)
+        (let ([ready (ffi-lws-context-service context maximum-timeout-ms)])
+          (when (negative? ready)
+            (raise-net-error who 'poll "native reactor poll failed" context))
+          ready))))
 
   #|proc:lws-context-next-event
 The `lws-context-next-event` procedure removes and returns the next copied event from `context`.

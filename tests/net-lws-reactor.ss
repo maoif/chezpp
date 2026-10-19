@@ -96,6 +96,26 @@
      (mat-requires (websockets)
        (concurrent-context-lifecycle #t)))
 
+(mat net-lws-native-service-wakeup-and-collection
+     ;; A native wait must release Chez so a peer can collect and wake the owner.
+     (mat-requires (websockets)
+       (guard (failure [else #f])
+         (let ([service (foreign-procedure "chezpp_lws_http_context_service" (uptr int) int)])
+           (call-with-lws-context
+            (lambda (context)
+              (let* ([worker (fork-thread
+                              (lambda ()
+                                (milisleep 10)
+                                (collect)
+                                (lws-context-wakeup context)))]
+                     [ready (service context 1000)])
+                (thread-join worker)
+      (and (positive? ready)
+                     (null? (poll-target-ready-events
+                             (car (poll (list (make-poll-target
+                                               (lws-context-wakeup-fd context) '(read)))
+                                         0))))))))))))
+
 (mat net-lws-copied-event-order
      (mat-requires (websockets)
        (call-with-lws-context

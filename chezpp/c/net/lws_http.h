@@ -157,6 +157,7 @@ struct lws_http_context {
 
   lws_poll_entry *poll_entries;
   lws_poll_entry *poll_free;
+  struct pollfd *service_pollfds;
   size_t poll_capacity;
   size_t poll_in_use;
   size_t poll_high_water;
@@ -212,6 +213,7 @@ ptr chezpp_lws_http_context_poll_snapshot(uintptr_t context_handle);
 int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
                                        int revents);
 ptr chezpp_lws_http_context_next_event(uintptr_t context_handle);
+int chezpp_lws_http_context_service(uintptr_t context_handle, int maximum_timeout_ms);
 int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
                                        int maximum_timeout_ms);
 int chezpp_lws_http_context_wakeup(uintptr_t context_handle);

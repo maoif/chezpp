@@ -1179,6 +1179,8 @@ static int initialize_pools(lws_http_context *context) {
       calloc(context->event_capacity, context->payload_capacity);
   context->poll_entries =
       calloc(context->poll_capacity, sizeof(*context->poll_entries));
+  context->service_pollfds =
+      calloc(context->poll_capacity + 1, sizeof(*context->service_pollfds));
   context->connections =
       calloc(context->connection_capacity, sizeof(*context->connections));
   context->streams = calloc(context->stream_capacity, sizeof(*context->streams));
@@ -1190,7 +1192,8 @@ static int initialize_pools(lws_http_context *context) {
   context->signals = calloc(context->signal_capacity, sizeof(*context->signals));
   context->drain_buffer = calloc(1, stream_slot_size);
   if (context->events == NULL || context->event_payloads == NULL ||
-      context->poll_entries == NULL || context->connections == NULL ||
+      context->poll_entries == NULL || context->service_pollfds == NULL ||
+      context->connections == NULL ||
       context->streams == NULL || context->stream_payloads == NULL ||
       context->stream_headers == NULL ||
       context->stream_terminal_payloads == NULL || context->signals == NULL ||
@@ -1252,6 +1255,7 @@ static void free_context_storage(lws_http_context *context) {
   free(context->streams);
   free(context->connections);
   free(context->poll_entries);
+  free(context->service_pollfds);
   free(context->event_payloads);
   free(context->events);
 #if LWS_MAX_SMP > 1
@@ -1555,6 +1559,58 @@ int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
   adjustment = chezpp_lws_service_adjust_timeout(context->lws, maximum_timeout_ms, 0);
   if (adjustment < 0) return -1;
   return adjustment == 0 ? 0 : maximum_timeout_ms;
+}
+
+int chezpp_lws_http_context_service(uintptr_t context_handle, int maximum_timeout_ms) {
+  lws_http_context *context = context_from_handle(context_handle);
+  struct pollfd *descriptors;
+  size_t count = 1;
+  size_t index;
+  int timeout_ms;
+  int ready;
+  int saved_errno;
+  if (context == NULL || context->lws == NULL || maximum_timeout_ms < 0) return -1;
+  timeout_ms = chezpp_lws_http_context_timeout_ms(context_handle, maximum_timeout_ms);
+  if (timeout_ms < 0) return -1;
+  if (timeout_ms == 0) {
+    (void)chezpp_lws_http_context_service_fd(context_handle, -1, 0);
+    return 0;
+  }
+  /* Only the context owner uses this preallocated wait buffer. Poll snapshots
+   * remain available on demand without allocating Scheme objects on every pass. */
+  descriptors = context->service_pollfds;
+  descriptors[0].fd = context->wakeup_pipe[0];
+  descriptors[0].events = POLLIN;
+  descriptors[0].revents = 0;
+  pthread_mutex_lock(&context->lock);
+  for (index = 0; index < context->poll_capacity; index++) {
+    lws_poll_entry *entry = &context->poll_entries[index];
+    if (entry->active) {
+      descriptors[count].fd = entry->fd;
+      descriptors[count].events = entry->events;
+      descriptors[count].revents = 0;
+      count++;
+    }
+  }
+  pthread_mutex_unlock(&context->lock);
+  /* As in net/poll.c, let the peer allocate and collect while the owner waits.
+   * All wait storage is native; no Scheme pointers are used until reactivation. */
+  Sdeactivate_thread();
+  ready = poll(descriptors, (nfds_t)count, timeout_ms);
+  saved_errno = errno;
+  Sactivate_thread();
+  if (ready < 0) {
+    errno = saved_errno;
+    return -1;
+  }
+  if (ready == 0)
+    (void)chezpp_lws_http_context_service_fd(context_handle, -1, 0);
+  else
+    for (index = 0; index < count; index++)
+      if (descriptors[index].revents != 0)
+        (void)chezpp_lws_http_context_service_fd(
+            context_handle, descriptors[index].fd, descriptors[index].revents);
+  return ready;
 }
 
 int chezpp_lws_http_context_wakeup(uintptr_t context_handle) {

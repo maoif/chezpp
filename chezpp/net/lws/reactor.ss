@@ -404,57 +404,10 @@
             (process-command! reactor command)
             (loop))))))
 
-  (define ready-event-mask
-    (lambda (event*)
-      (fold-left
-       (lambda (mask event)
-         (fxior mask
-                 (case event
-                   [(read) (net-pollin)]
-                   [(write) (net-pollout)]
-                   [(priority) (net-pollpri)]
-                   [(error) (net-pollerr)]
-                   [(hup) (net-pollhup)]
-                   [(invalid) (net-pollnval)]
-                   [else 0])))
-       0
-       event*)))
-
-  (define requested-event-list
-    (lambda (mask)
-      (append (if (fxzero? (fxlogand mask (net-pollin))) '() '(read))
-              (if (fxzero? (fxlogand mask (net-pollout))) '() '(write))
-              (if (fxzero? (fxlogand mask (net-pollpri))) '() '(priority)))))
-
   (define service-poll-pass!
     (lambda (reactor)
-      (let* ([context (lws-reactor-native-context reactor)]
-             [snapshot (lws-context-poll-snapshot context)]
-             [timeout-ms (lws-context-timeout-ms context 50)])
-        (with-mutex (lws-reactor-mutex reactor)
-          (lws-reactor-current-poll-snapshot-set! reactor snapshot))
-        (if (fxzero? timeout-ms)
-            (lws-context-service-fd context -1 0)
-            (let* ([target*
-                    (cons (make-poll-target (lws-context-wakeup-fd context) '(read))
-                          (map (lambda (item)
-                                 (make-poll-target
-                                  (vector-ref item 0)
-                                  (requested-event-list (vector-ref item 1))))
-                               (vector->list snapshot)))]
-                   [ready*
-                    (filter (lambda (target)
-                              (pair? (poll-target-ready-events target)))
-                            (poll target* (if (fxnegative? timeout-ms) 50 timeout-ms)))])
-              (if (null? ready*)
-                  (lws-context-service-fd context -1 0)
-                  (for-each
-                   (lambda (target)
-                     (lws-context-service-fd
-                      context (poll-target-fd target)
-                      (ready-event-mask (poll-target-ready-events target))))
-                   ready*))))
-        (drain-native-events! reactor))))
+      (lws-context-service (lws-reactor-native-context reactor) 50)
+      (drain-native-events! reactor)))
 
   ;; Must be called under the reactor mutex, before context storage is destroyed.
   (define close-operation-signal-locked!
@@ -510,6 +463,9 @@
                  (make-network-condition 'lws-reactor-shutdown!
                                          "reactor stopped" '()))])
         (fail-pending-operations! reactor failure))
+      (with-mutex (lws-reactor-mutex reactor)
+        (lws-reactor-current-poll-snapshot-set!
+         reactor (lws-context-poll-snapshot (lws-reactor-native-context reactor))))
       (lws-context-close (lws-reactor-native-context reactor))
       (with-mutex (lws-reactor-mutex reactor)
         (lws-reactor-lifecycle-set! reactor 'stopped)
@@ -656,6 +612,9 @@ owner requests shutdown and returns without joining itself. The return value is 
              (fail-pending-operations!
               reactor
               (make-network-condition 'lws-reactor-shutdown! "reactor stopped" '()))
+             (with-mutex (lws-reactor-mutex reactor)
+               (lws-reactor-current-poll-snapshot-set!
+                reactor (lws-context-poll-snapshot (lws-reactor-native-context reactor))))
              (lws-context-close (lws-reactor-native-context reactor))
              (with-mutex (lws-reactor-mutex reactor)
                (lws-reactor-lifecycle-set! reactor 'stopped)
@@ -1034,11 +993,17 @@ The `events` parameter is the native poll mask. It returns whether the command w
 
   #|proc:lws-reactor-poll-snapshot
 The `lws-reactor-poll-snapshot` procedure returns the latest native poll snapshot for `reactor`.
+After shutdown it returns the final snapshot captured before closing the native context.
 |#
   (define lws-reactor-poll-snapshot
     (lambda (reactor)
       (pcheck ([reactor? reactor])
         (with-mutex (lws-reactor-mutex reactor)
+          ;; Native descriptor storage changes under its own lock. Copy only for observers;
+          ;; after shutdown retain the final snapshot without touching freed storage.
+          (unless (memq (lws-reactor-lifecycle reactor) '(stopping stopped))
+            (lws-reactor-current-poll-snapshot-set!
+             reactor (lws-context-poll-snapshot (lws-reactor-native-context reactor))))
           (lws-reactor-current-poll-snapshot reactor)))))
 
   #|proc:lws-reactor-pool-metrics
