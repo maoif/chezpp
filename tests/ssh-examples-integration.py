@@ -6,7 +6,7 @@ All host keys, authorized keys and known-hosts files belong to a temporary direc
 
 import sys, os
 sys.path = [path for path in sys.path if path != os.path.dirname(__file__)]
-import contextlib, pathlib, pwd, select, shutil, socket, subprocess, tempfile, time
+import contextlib, pathlib, pwd, select, shutil, socket, stat, subprocess, tempfile, time
 
 
 def free_port():
@@ -169,6 +169,7 @@ def verify():
         assert p.returncode == 0 and b"shell-eof" in p.stdout, p
         verify_scp_directories(root, env, args)
         verify_scp_symlinks(root, env, args)
+        verify_scp_readonly_files(root, env, args)
         verify_scp_channel_reuse()
         source = root / "source"
         source.write_bytes(bytes(range(256)) * 1024)
@@ -452,6 +453,77 @@ def verify_scp_symlinks(root, env, args):
                      f"--local={source if direction == 'upload' else root / 'links-rejected'}",
                      f"--remote={root / 'links-reject-remote' if direction == 'upload' else remote}")
         assert result.returncode != 0 and b"reject" in result.stderr, result
+
+
+def verify_scp_readonly_files(root, env, args):
+    # Read-only Git objects must remain copyable on repeated replace transfers.
+    source, remote, copied = (root / name for name in ("readonly-source", "readonly-remote",
+                                                       "readonly-copy"))
+    source.mkdir()
+    (source / "object").write_bytes(b"read-only object")
+    (source / "object").chmod(0o444)
+    for direction in ("upload", "download"):
+        local = source if direction == "upload" else copied
+        destination = (remote if direction == "upload" else copied) / "object"
+        for attempt in range(2):
+            if attempt:
+                destination.chmod(0o644)
+                destination.write_bytes(b"old destination")
+                destination.chmod(0o444)
+                saved = root / ("readonly-hardlink-" + direction)
+                os.link(destination, saved)
+                for policy in ("skip", "error"):
+                    # Error case: read-only destinations still obey overwrite selection.
+                    result = run("scp", env, args, f"--direction={direction}",
+                                 "--kind=directory", f"--local={local}", f"--remote={remote}",
+                                 f"--overwrite={policy}")
+                    assert (result.returncode == 0) == (policy == "skip"), result.stderr
+                    assert destination.read_bytes() == b"old destination"
+            result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                         f"--local={local}",
+                         f"--remote={remote}", "--overwrite=replace")
+            assert result.returncode == 0, (direction, attempt, result.stderr)
+            assert destination.read_bytes() == b"read-only object"
+            if attempt:
+                assert saved.read_bytes() == b"old destination"
+                assert stat.S_IMODE(saved.stat().st_mode) == 0o444
+            destination.chmod(0o444)
+    verify_scp_readonly_namespace(root, env, args)
+
+
+def verify_scp_readonly_namespace(root, env, args):
+    # Error case: raw SCP paths must not delete files in SFTP's normalized namespace.
+    alias, physical, source = (root / name for name in ("alias", "physical", "raw-source"))
+    (alias / "dest").mkdir(parents=True)
+    (physical / "child").mkdir(parents=True)
+    (physical / "dest").mkdir()
+    source.mkdir()
+    (source / "object").write_bytes(b"replacement")
+    unrelated, target = alias / "dest/object", physical / "dest/object"
+    unrelated.write_bytes(b"unrelated normalized path")
+    target.write_bytes(b"existing read-only target")
+    target.chmod(0o444)
+    (alias / "link").symlink_to(physical / "child", target_is_directory=True)
+    script = root / "raw-scp-path.ss"
+    port = int(args[1].split("=", 1)[1])
+    user = pwd.getpwuid(os.getuid()).pw_name
+    script.write_text(f'''(import (chezpp) (chezpp net))
+(let ([session (ssh-open "127.0.0.1" {port} "{user}")])
+  (dynamic-wind
+    void
+    (lambda ()
+      (ssh-auth-publickey! session "{user}")
+      (call-with-scp-session session
+        (lambda (scp)
+          (scp-copy-directory scp 'upload "{source}" "{alias}/link/../dest"
+            (make-transfer-policy 'never 'replace 65536 #f) #f 'reject))))
+    (lambda () (ssh-close session))))
+''')
+    result = subprocess.run(["./chez++", "--script", str(script)], env=env,
+                            capture_output=True, timeout=20)
+    assert result.returncode != 0, result
+    assert unrelated.read_bytes() == b"unrelated normalized path"
+    assert target.read_bytes() == b"existing read-only target"
 
 
 def verify_scp_channel_reuse():
@@ -847,7 +919,13 @@ if __name__ == "__main__":
     import sys
 
     os.chdir(pathlib.Path(__file__).resolve().parent.parent)
-    if "--symlinks" in sys.argv:
+    if "--readonly-namespace" in sys.argv:
+        with fixture() as (root, env, args):
+            verify_scp_readonly_namespace(root, env, args)
+    elif "--readonly" in sys.argv:
+        with fixture() as (root, env, args):
+            verify_scp_readonly_files(root, env, args)
+    elif "--symlinks" in sys.argv:
         with fixture() as (root, env, args):
             verify_scp_symlinks(root, env, args)
     elif "--channels" in sys.argv:

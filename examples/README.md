@@ -64,6 +64,8 @@ directory. Directory copies accept `--symlinks=reject|preserve` (default: `rejec
 `preserve` copies literal links, including dangling links. Source and destination root paths and
 destination parent paths must not contain symlinks. For example, add `--symlinks=preserve` when
 copying a source checkout with links.
+For directory copies, `--overwrite=replace` recreates read-only regular destination files when
+their parent directory permits deletion, including read-only Git objects in an existing checkout.
 Unsupported resume modes are rejected. Recursive SCP copies reuse a channel
 for up to 32 sibling files at a time, while retaining per-file progress and overwrite policies.
 

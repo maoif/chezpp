@@ -400,6 +400,18 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
     (lambda (sftp path)
       (guard (condition [else #f]) (sftp-stat sftp path))))
 
+  (define scp-readonly-mode?
+    (lambda (mode)
+      (and (fixnum? mode) (fxzero? (fxand mode #o222)))))
+
+  (define scp-readonly-remote-file?
+    (lambda (attributes)
+      ;; Only the unchanged absolute namespace above uses SFTP attributes for stat.
+      ;; Raw SCP attributes must never authorize a lexically normalized SFTP delete.
+      (and (sftp-attributes? attributes)
+           (eq? (sftp-attributes-type attributes) 'regular)
+           (scp-readonly-mode? (sftp-attributes-permissions attributes)))))
+
   (define ensure-local-scp-directory
     (lambda (path)
       (cond [(file-directory? path) path]
@@ -528,9 +540,17 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                    [(skip) (void)]
                                    [(error) (errorf who "remote destination exists: ~a" remote-child)]
                                    [else
-                                    (batch name)
-                                    (set! batch-count (fx1+ batch-count))
-                                    (when (fx= batch-count 32) (flush-files!))]))]
+                                    (let ([recreate? (scp-readonly-remote-file? exists?)])
+                                      ;; Replace read-only files through their writable parent,
+                                      ;; without changing permissions on an existing inode.
+                                      ;; Transfer it immediately so later targets stay intact.
+                                      (when recreate?
+                                        (flush-files!)
+                                        (sftp-delete! sftp remote-child))
+                                      (batch name)
+                                      (set! batch-count (fx1+ batch-count))
+                                      (when (or recreate? (fx= batch-count 32))
+                                        (flush-files!)))]))]
                               [(symlink)
                                (flush-files!)
                                (case symlink-policy
@@ -598,15 +618,23 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                      [(skip) (void)]
                                      [(error) (errorf who "local destination exists: ~a" local-child)]
                                      [else
-                                      ;; Bound the shell command as well as its file count.
-                                      ;; Four bytes per UTF-8 byte covers single-quote escaping.
-                                      (let ([size (fx+ 8 (fx* 4 (bytevector-length
-                                                                (string->utf8 remote-child))))])
-                                        (when (fx> (fx+ command-size size) 65536) (flush-files!))
-                                        (set! command-size (fx+ command-size size)))
-                                      (batch name)
-                                      (set! batch-count (fx1+ batch-count))
-                                      (when (fx= batch-count 32) (flush-files!))])]
+                                      (let ([recreate?
+                                             (and (file-regular? local-child #f)
+                                                  (scp-readonly-mode?
+                                                   (file-mode local-child #f)))])
+                                        (when recreate?
+                                          (flush-files!)
+                                          (delete-file local-child))
+                                        ;; Bound the shell command as well as its file count.
+                                        ;; Four bytes per UTF-8 byte covers quote escaping.
+                                        (let ([size (fx+ 8 (fx* 4 (bytevector-length
+                                                                  (string->utf8 remote-child))))])
+                                          (when (fx> (fx+ command-size size) 65536) (flush-files!))
+                                          (set! command-size (fx+ command-size size)))
+                                        (batch name)
+                                        (set! batch-count (fx1+ batch-count))
+                                        (when (or recreate? (fx= batch-count 32))
+                                          (flush-files!)))])]
                                   [(symlink)
                                    (flush-files!)
                                    (case symlink-policy
@@ -807,6 +835,7 @@ controls overwrite and resume behavior. `filter` has signature
 `(protocol direction remote-path completed-bytes total-bytes-or-#f) -> unspecified` for each copied
 regular file. Skipped files do not invoke the hook. Consecutive selected regular files in one
 directory share a channel in bounded batches of at most 32 files; progress remains per file.
+With `replace`, read-only regular destinations can be recreated through a writable parent.
 |#
   (define-who scp-copy-directory
     (case-lambda
