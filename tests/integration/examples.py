@@ -100,9 +100,10 @@ def h2_request_body_errors():
         directory = Path(name)
         (directory / 'payload').write_bytes(b'listener-still-alive')
         with server('examples/net/http2-file-server.ss', directory, with_process=True) as (port, process):
-            for delayed in (False, True):
-                # Error case: LWS 4.5 can deliver a zero-byte callback for buffered DATA.
-                # Reject that request safely rather than aborting the entire listener.
+            for payload, delayed in ((b'abc', False), (b'abc', True),
+                                     (b'', False), (b'', True)):
+                # Error case: unknown-length POSTs can crash or hang inside LWS 4.5.
+                # Reject both nonempty and empty DATA without stalling the listener.
                 with socket.create_connection(('127.0.0.1', port), 3) as connection:
                     connection.settimeout(3)
                     authority = f'127.0.0.1:{port}'.encode()
@@ -114,7 +115,7 @@ def h2_request_body_errors():
                         connection.sendall(packet)
                         time.sleep(.1)
                         packet = b''
-                    connection.sendall(packet + frame(0, 1, 1, b'abc'))
+                    connection.sendall(packet + frame(0, 1, 1, payload))
                     received = bytearray()
                     while True:
                         chunk = connection.recv(65536)
@@ -595,7 +596,8 @@ def http():
                 for path in ['/subdir', '/missing', '/../etc/passwd', '/%2e%2e/etc/passwd',
                              '/escape', '/%2fetc/passwd']:
                     assert get(path).split(b'\n')[-1].startswith((b'400:', b'404:')), path
-                assert run(*curl, '-X', 'POST', '-w', '%{http_code}', base + '/payload').stdout == b'405'
+                assert run(*curl, '-X', 'POST', '-H', 'Content-Length: 0',
+                           '-w', '%{http_code}', base + '/payload').stdout == b'405'
                 assert run(*curl, '-X', 'POST', '-d', '', '-w', '%{http_code}',
                            base + '/payload').stdout == b'405'
                 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:

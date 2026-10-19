@@ -1034,6 +1034,13 @@ static int lws_http_callback(struct lws *wsi,
        * user slot is established. Keep the request identity on the WSI itself. */
       if (stream != NULL && stream->active && stream->server_stream && !stream->terminal)
         return 0;
+      /* LWS 4.5 cannot reliably deliver END_STREAM for unknown-length POSTs:
+       * buffered DATA may assert and an empty final DATA frame may never complete.
+       * Refuse before allocating/publishing a request that Scheme cannot finish. */
+      if (observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP2 &&
+          lws_hdr_total_length(wsi, WSI_TOKEN_POST_URI) > 0 &&
+          lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) == 0)
+        return -1;
       if (stream == NULL || stream->terminal) {
         uint64_t identity = fresh_identity(&next_server_identity);
         pthread_mutex_lock(&context->lock);
@@ -1050,11 +1057,6 @@ static int lws_http_callback(struct lws *wsi,
       {
         int has_body = (lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0 ||
                         lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0);
-        /* H2 POST bodies end at END_STREAM and do not require Content-Length.
-         * Wait for BODY_COMPLETION instead of exposing an empty request early. */
-        if (observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP2 &&
-            lws_hdr_total_length(wsi, WSI_TOKEN_POST_URI) > 0)
-          has_body = 1;
         if (stream != NULL) stream->server_request_complete = !has_body;
         if (stream != NULL) {
           char content_length[32];
