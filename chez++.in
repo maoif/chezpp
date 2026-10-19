@@ -76,9 +76,20 @@
            [label-style (rich-style 'bold 'default)]
            [author (rich-text "Author   " label-style)]
            [version (rich-text "Version  " label-style)]
+           [platform (rich-text "Platform " label-style)]
            [github (rich-text "Github   " label-style)])
       (rich-text-append! author "Maoif" (rich-style 'default))
       (rich-text-append! version (chezpp-version-string) (rich-style 'default))
+      (rich-text-append! platform
+                         (format "~a / ~a"
+                                 (case (system-platform)
+                                   [(linux) "Linux"]
+                                   [(darwin) "macOS"]
+                                   [(windows) "Windows"]
+                                   [else "Unknown"])
+                                 (let ([arch (cpu-arch)])
+                                   (if (string? arch) arch "unknown")))
+                         (rich-style 'default))
       (rich-text-append! github
                          "https://github.com/maoif/chezpp"
                          (rich-style 'underline 'default))
@@ -94,7 +105,7 @@
                                  content-width 'center)
                                 ""
                                 (make-rich-padding
-                                 (make-rich-layout 'column (list author version github))
+                                 (make-rich-layout 'column (list author version platform github))
                                  0 0 0 5)
                                 ""))
                    :box 'rounded :width panel-width)
