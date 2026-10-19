@@ -894,6 +894,9 @@ The `lws-stream-cancel` procedure resets the identified native stream and queues
 
   #|proc:lws-body-consumed
 The `lws-body-consumed` procedure acknowledges `byte-count` copied bytes for the identified stream.
+`context` owns the stream selected by `connection-id`, `stream-id`, and `generation`.
+Call it on the context owner; it resumes input and publishes deferred completion without waking
+that same owner. Reactor clients enqueue acknowledgements with `lws-reactor-consume-body!`.
 It returns whether the generation and byte count matched pending body data.
 |#
   (define-who lws-body-consumed

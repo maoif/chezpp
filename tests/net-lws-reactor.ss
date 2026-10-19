@@ -1,4 +1,5 @@
 (import (chezpp)
+        (chezpp net poll)
         (chezpp net lws ffi)
         (chezpp net lws reactor))
 
@@ -231,6 +232,18 @@
                (lws-context-inject-event! context 'readable 30 31 2 0 #vu8(4))
                (begin (lws-context-next-event context) #t)
                (lws-body-consumed context 30 31 2 1))))))
+
+(mat net-lws-consumption-does-not-wake-owner
+     ;; Consumption runs on the context owner; it must not leave a spurious poll wakeup.
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (and (lws-context-inject-event! context 'readable 32 33 2 0 #vu8(1 2 3))
+               (begin (lws-context-next-event context) #t)
+               (lws-body-consumed context 32 33 2 3)
+               (null? (poll-target-ready-events
+                       (car (poll (list (make-poll-target
+                                         (lws-context-wakeup-fd context) '(read))) 0)))))))))
 
 (mat net-lws-generation-filtering
      (mat-requires (websockets)

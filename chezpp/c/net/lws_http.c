@@ -1978,8 +1978,8 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
   if (resume_wsi != NULL) {
     chezpp_lws_rx_flow_control(resume_wsi, 1);
   }
-  if (resume)
-    (void)chezpp_lws_http_context_wakeup(context_handle);
+  /* The owner executes consumption commands and drains their resulting events
+   * before polling again. Waking that same owner adds a pipe round trip per chunk. */
   return 1;
 }
 
