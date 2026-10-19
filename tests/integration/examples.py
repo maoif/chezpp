@@ -91,6 +91,57 @@ def http_port_options():
             assert result.returncode != 0 and b'--port must be between 1 and 65535' in result.stderr, result
 
 
+def h2_request_body_errors():
+    def frame(kind, flags, stream, payload=b''):
+        return (len(payload).to_bytes(3, 'big') + bytes([kind, flags])
+                + stream.to_bytes(4, 'big') + payload)
+
+    with tempfile.TemporaryDirectory(prefix='chezpp-h2-request-body-') as name:
+        directory = Path(name)
+        (directory / 'payload').write_bytes(b'listener-still-alive')
+        with server('examples/net/http2-file-server.ss', directory, with_process=True) as (port, process):
+            for delayed in (False, True):
+                # Error case: LWS 4.5 can deliver a zero-byte callback for buffered DATA.
+                # Reject that request safely rather than aborting the entire listener.
+                with socket.create_connection(('127.0.0.1', port), 3) as connection:
+                    connection.settimeout(3)
+                    authority = f'127.0.0.1:{port}'.encode()
+                    headers = b'\x83\x86\x84\x01' + bytes([len(authority)]) + authority
+                    connection.sendall(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n' + frame(4, 0, 0))
+                    connection.recv(65536)
+                    packet = frame(4, 1, 0) + frame(1, 4, 1, headers)
+                    if delayed:
+                        connection.sendall(packet)
+                        time.sleep(.1)
+                        packet = b''
+                    connection.sendall(packet + frame(0, 1, 1, b'abc'))
+                    received = bytearray()
+                    while True:
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        received.extend(chunk)
+                        # Either the stream/connection is rejected or a supported LWS
+                        # implementation completes the request and responds normally.
+                        data = bytes(received)
+                        offset = 0
+                        terminal = False
+                        while offset + 9 <= len(data):
+                            size = int.from_bytes(data[offset:offset + 3], 'big')
+                            if offset + 9 + size > len(data):
+                                break
+                            kind, flags = data[offset + 3:offset + 5]
+                            stream = int.from_bytes(data[offset + 5:offset + 9], 'big')
+                            terminal |= kind in (3, 7) or (stream == 1 and kind in (0, 1) and flags & 1)
+                            offset += 9 + size
+                        if terminal:
+                            break
+                assert process.poll() is None, ('HTTP/2 request crashed the listener', process.returncode)
+                result = run('curl', '--noproxy', '*', '-sS', '--max-time', '3',
+                             '--http2-prior-knowledge', f'http://127.0.0.1:{port}/payload')
+                assert result.stdout == b'listener-still-alive', result
+
+
 def http_interrupt():
     with tempfile.TemporaryDirectory(prefix='chezpp-example-interrupt-') as name:
         directory = Path(name)
@@ -511,6 +562,7 @@ def h2_window():
 
 def http():
     http_port_options()
+    h2_request_body_errors()
     with tempfile.TemporaryDirectory(prefix='chezpp-example-http-') as name:
         directory = Path(name)
         data = bytes(range(256)) * 4096
@@ -699,7 +751,7 @@ if __name__ == '__main__':
     groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto,
               'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt,
               'wget-options': wget_options, 'wget-progress': wget_progress, 'wget-speed': wget_speed,
-              'http-ports': http_port_options,
+              'h2-request-body': h2_request_body_errors, 'http-ports': http_port_options,
               'http-streaming': http_streaming, 'h2-window': h2_window}
     for group in sys.argv[1:] or ['help', 'http', 'core', 'crypto', 'benchmarks']:
         groups[group]()

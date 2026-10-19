@@ -1050,6 +1050,11 @@ static int lws_http_callback(struct lws *wsi,
       {
         int has_body = (lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) > 0 ||
                         lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING) > 0);
+        /* H2 POST bodies end at END_STREAM and do not require Content-Length.
+         * Wait for BODY_COMPLETION instead of exposing an empty request early. */
+        if (observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP2 &&
+            lws_hdr_total_length(wsi, WSI_TOKEN_POST_URI) > 0)
+          has_body = 1;
         if (stream != NULL) stream->server_request_complete = !has_body;
         if (stream != NULL) {
           char content_length[32];
@@ -1083,6 +1088,18 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     case LWS_CALLBACK_HTTP_BODY:
       if (context == NULL || stream == NULL) return 0;
+      /* LWS 4.5 may drain an H2 POST's buffered DATA before initializing its
+       * unknown content length. It then calls us with zero bytes and asserts in
+       * lws_buflist_use_segment(0). Refuse this broken delivery before returning
+       * to that path; do not acknowledge nonexistent data or publish an empty body.
+       * Explicit Content-Length: 0 legitimately produces an empty callback. */
+      if (length == 0 && stream->server_body_remaining == SIZE_MAX &&
+          observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP2) {
+        static const char message[] = "LWS cannot deliver this unknown-length H2 request body";
+        (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_FAILED,
+                                    ENOTSUP, message, sizeof(message) - 1);
+        return -1;
+      }
       /* Reject LWS versions that include a pipelined request in the preceding body. */
       if (stream->server_body_remaining != SIZE_MAX) {
         if (length > stream->server_body_remaining) return -1;
