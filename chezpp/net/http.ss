@@ -123,6 +123,7 @@ Optional `finisher` has signature `() -> unspecified` and runs once when the sin
 Optional `headers-observer` has signature `(status header-alist) -> unspecified`. It runs once per
 response before its first body chunk, or at response completion for an empty body. Intermediate
 redirect responses followed by the client do not invoke it. Callback conditions fail the operation.
+Cancellation or client close from the observer suppresses subsequent body delivery.
 Returns a sink record. The default finisher and header observer do nothing.
 |#
   (define make-http-body-sink
@@ -435,10 +436,11 @@ retained for the client's lifetime, or `#f` for the default TLS policy.
                                     (exists (lambda (entry)
                                               (string-ci=? "location" (car entry)))
                                             response-headers))])
-                    (unless (or skip? headers-observed? (not sink))
+                    (unless (or skip? headers-observed? (not sink) (http-body-sink-finished? sink))
                       (set! headers-observed? #t)
                       ((http-body-sink-headers-observer sink) status response-headers))
-                    skip?)))]
+                    ;; The observer may cancel this request and finish its sink before returning.
+                    (or skip? (and sink (http-body-sink-finished? sink))))))]
              [sv (and sink
                       (vector (lambda (b i n) (http-body-sink-write! sink b i n))
                               void skip-response-body?))]

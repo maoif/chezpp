@@ -1026,3 +1026,35 @@
                  (lambda () (set! finished (fx1+ finished)))
                  (lambda (status headers) (error 'test "header observer failed")))))
               #f))))))
+
+(mat net-http-sink-header-observer-cancellation
+     ;; Error case: cancelling from a header observer must never deliver a body after finishing.
+     ;; Exercise both body and empty responses, and all public cancellation entry points.
+     (mat-requires (websockets)
+       (andmap
+        (lambda (action)
+          (andmap
+           (lambda (body)
+             (call-with-http1-response
+              (format "HTTP/1.1 200 OK\r\nContent-Length: ~a\r\nConnection: close\r\n\r\n~a"
+                      (string-length body) body)
+              (lambda (client uri)
+                (let ([events '()] [operation #f])
+                  (set! operation
+                        (http-send/nonblocking
+                         client (make-http-request 'get uri)
+                         (make-http-body-sink
+                          (lambda (bytes start count) (set! events (cons 'body events)))
+                          (lambda () (set! events (cons 'finished events)))
+                          (lambda (status headers)
+                            (set! events (cons 'headers events))
+                            (case action
+                              [(close) (http-close client)]
+                              [(cancel) (http-cancel-pending! client)]
+                              [(operation) (net-operation-cancel! operation)])))))
+                  (guard (failure [else (void)]) (net-operation-wait operation))
+                  (http-close client)
+                  (and (eq? 'cancelled (net-operation-state operation))
+                       (equal? '(headers finished) (reverse events)))))))
+           '("data" "")))
+        '(close cancel operation))))
