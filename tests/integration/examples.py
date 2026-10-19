@@ -80,6 +80,17 @@ def server(script, directory, *args, with_process=False):
             raise AssertionError('file server ignored shutdown signal')
 
 
+def http_port_options():
+    for script in ('http-file-server', 'http2-file-server', 'https-file-server'):
+        path = f'examples/net/{script}.ss'
+        help_text = example(path, '--help').stdout
+        assert b'1 through 65535' in help_text and b'free port' not in help_text, help_text
+        for port in ('0', '65536'):
+            # Error case: reject invalid listener ports before TLS setup or binding.
+            result = example(path, '--dir=.', f'--port={port}', ok=False)
+            assert result.returncode != 0 and b'--port must be between 1 and 65535' in result.stderr, result
+
+
 def http_interrupt():
     with tempfile.TemporaryDirectory(prefix='chezpp-example-interrupt-') as name:
         directory = Path(name)
@@ -499,6 +510,7 @@ def h2_window():
 
 
 def http():
+    http_port_options()
     with tempfile.TemporaryDirectory(prefix='chezpp-example-http-') as name:
         directory = Path(name)
         data = bytes(range(256)) * 4096
@@ -687,6 +699,7 @@ if __name__ == '__main__':
     groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto,
               'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt,
               'wget-options': wget_options, 'wget-progress': wget_progress, 'wget-speed': wget_speed,
+              'http-ports': http_port_options,
               'http-streaming': http_streaming, 'h2-window': h2_window}
     for group in sys.argv[1:] or ['help', 'http', 'core', 'crypto', 'benchmarks']:
         groups[group]()

@@ -53,6 +53,8 @@
            [root (path-render (path-normalize (path-absolute
                                                 (path-parse 'unix (current-directory))
                                                 (path-parse 'unix root-arg))))])
+      (unless (<= 1 port 65535)
+        (errorf 'http-file-server "--port must be between 1 and 65535"))
       (unless (and (file-directory? root) (not (reject-symlink-path? root)))
         (errorf 'http-file-server "directory is missing or contains a symlink: ~a" root))
       (let ([log (server-log)] [context #f] [server #f] [interrupted? #f]
