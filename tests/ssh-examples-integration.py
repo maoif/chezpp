@@ -16,7 +16,7 @@ def free_port():
 
 
 @contextlib.contextmanager
-def fixture():
+def fixture(log_sessions=False):
     with tempfile.TemporaryDirectory(prefix="chezpp-ssh-examples-") as d:
         root = pathlib.Path(d)
         home = root / "home"
@@ -39,8 +39,10 @@ def fixture():
         config.write_text(
             f"Port {port}\nListenAddress 127.0.0.1\nHostKey {host}\nPidFile {root}/sshd.pid\nAuthorizedKeysFile {key}.pub\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nStrictModes no\nAllowUsers {user}\nSubsystem sftp internal-sftp\nLogLevel ERROR\n"
         )
+        if log_sessions:
+            config.write_text(config.read_text().replace("LogLevel ERROR", "LogLevel VERBOSE"))
         server = subprocess.Popen(
-            [shutil.which("sshd") or "/usr/sbin/sshd", "-D", "-e", "-f", str(config)],
+            [shutil.which("sshd") or "/usr/sbin/sshd", "-D", "-E", str(root / "sshd.log"), "-f", str(config)],
             stderr=subprocess.PIPE,
         )
         try:
@@ -166,6 +168,7 @@ def verify():
         p = run("ssh-open-repl", env, args, "--pty=no", input=b"printf shell-eof\n")
         assert p.returncode == 0 and b"shell-eof" in p.stdout, p
         verify_scp_directories(root, env, args)
+        verify_scp_channel_reuse()
         source = root / "source"
         source.write_bytes(bytes(range(256)) * 1024)
         remote = root / "remote"
@@ -275,6 +278,7 @@ def verify():
         assert p.returncode != 0 and b"symlinks are rejected" in p.stderr, p
         verify_scp_path_links(root, env, args)
         verify_scp_interruption(root, env, args)
+        verify_scp_interruption(root, env, args, "directory")
         verify_forwarding(env, args)
         verify_forwarding_recovery(env, args)
         verify_forwarding_cancellation(env, args)
@@ -384,6 +388,44 @@ def verify_scp_directories(root, env, args):
     assert result.returncode != 0, result
 
 
+def verify_scp_channel_reuse():
+    # Real server sessions expose per-file setup overhead without timing assertions.
+    with fixture(log_sessions=True) as (root, env, args):
+        source = root / "many-files"
+        (source / "nested").mkdir(parents=True)
+        files = {f"file-{i:02d}": bytes([i]) * (4097 + i) for i in range(70)}
+        files.update({"nested/你好 'quoted'": b"unicode", "empty": b"",
+                      " leading space": b"space", "-dash": b"dash"})
+        for name, data in files.items():
+            (source / name).write_bytes(data)
+        remote, copied = root / "many-remote", root / "many-copy"
+        def session_count():
+            return (root / "sshd.log").read_text().count("Starting session:")
+        for direction in ("upload", "download"):
+            before = session_count()
+            result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                         f"--local={source if direction == 'upload' else copied}",
+                         f"--remote={remote}")
+            assert result.returncode == 0, result.stderr
+            output = remote if direction == "upload" else copied
+            for name, data in files.items():
+                assert (output / name).read_bytes() == data, (direction, name)
+            commands = session_count() - before
+            assert commands <= 9, (direction, "per-file SSH session setup", commands)
+            assert b"100%" in result.stderr, result.stderr
+            for name in files:
+                assert str(remote / name).encode() in result.stderr, name
+        # Existing selected files retain skip/error semantics across a batch boundary.
+        (remote / "file-00").write_bytes(b"keep remote")
+        result = run("scp", env, args, "--direction=upload", "--kind=directory",
+                     f"--local={source}", f"--remote={remote}", "--overwrite=skip")
+        assert result.returncode == 0 and (remote / "file-00").read_bytes() == b"keep remote", result
+        assert b"bytes" not in result.stderr, result.stderr
+        result = run("scp", env, args, "--direction=upload", "--kind=directory",
+                     f"--local={source}", f"--remote={remote}", "--overwrite=error")
+        assert result.returncode != 0 and (remote / "file-00").read_bytes() == b"keep remote", result
+
+
 def verify_scp_path_links(root, env, args):
     for direction in ("upload", "download"):
         for kind in ("file", "directory"):
@@ -478,13 +520,17 @@ def verify_forwarding_recovery(env, args):
                     process.wait(timeout=5)
 
 
-def verify_scp_interruption(root, env, args):
+def verify_scp_interruption(root, env, args, kind="file"):
     import signal
 
-    source = root / "large-remote"
-    destination = root / "interrupted-download"
-    with source.open("wb") as output:
-        output.truncate(256 * 1024 * 1024)
+    source = root / ("large-remote-" + kind)
+    destination = root / ("interrupted-download-" + kind)
+    if kind == "directory":
+        source.mkdir()
+    sources = [source] if kind == "file" else [source / "one", source / "two"]
+    for path in sources:
+        with path.open("wb") as output:
+            output.truncate(256 * 1024 * 1024)
     process = subprocess.Popen(
         [
             "./chez++",
@@ -492,7 +538,7 @@ def verify_scp_interruption(root, env, args):
             "examples/net/scp.ss",
             *args,
             "--direction=download",
-            "--kind=file",
+            f"--kind={kind}",
             f"--local={destination}",
             f"--remote={source}",
         ],
@@ -503,7 +549,10 @@ def verify_scp_interruption(root, env, args):
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            if destination.exists() and destination.stat().st_size > 0:
+            outputs = ([destination] if kind == "file" else
+                       list(destination.iterdir()) if destination.exists() else [])
+            partial = next((path for path in outputs if path.exists() and path.stat().st_size > 0), None)
+            if partial is not None:
                 break
             assert process.poll() is None, process.communicate(timeout=2)
             time.sleep(0.002)
@@ -513,13 +562,13 @@ def verify_scp_interruption(root, env, args):
         _, errors = process.communicate(timeout=10)
         assert process.returncode != 0 and b"closing SSH session" in errors, errors
         assert (
-            not destination.exists()
+            not partial.exists()
         ), "interrupted SCP download leaked a partial output"
     finally:
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
-        source.unlink()
+        shutil.rmtree(source) if kind == "directory" else source.unlink()
 
 
 def verify_forwarding(env, args):
@@ -732,7 +781,9 @@ if __name__ == "__main__":
     import sys
 
     os.chdir(pathlib.Path(__file__).resolve().parent.parent)
-    if "--password" in sys.argv:
+    if "--channels" in sys.argv:
+        verify_scp_channel_reuse()
+    elif "--password" in sys.argv:
         verify_password()
     else:
         verify()

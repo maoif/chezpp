@@ -107,6 +107,7 @@
           ffi-net-scp-download-directory
           ffi-net-scp-upload-directory
           ffi-net-scp-transfer-start
+          ffi-net-scp-transfer-start-many
           ffi-net-scp-transfer-step
           ffi-net-scp-transfer-cancel
           ffi-net-scp-transfer-close
@@ -515,6 +516,22 @@
     (foreign-procedure "chezpp_net_scp_upload_directory" (uptr string string int) scheme-object))
   (define ffi-net-scp-transfer-start
     (foreign-procedure "chezpp_net_scp_transfer_start" (uptr int string string) scheme-object))
+  #|proc:ffi-net-scp-transfer-start-many
+  The `ffi-net-scp-transfer-start-many` procedure starts a bounded SCP sibling-file batch.
+  `session-handle` identifies an authenticated native SSH session. `direction` is zero for
+  download or one for upload. `local-directory` and `remote-directory` contain the files.
+  `encoded-names` is a bytevector of up to 32 UTF-8 child names, each terminated by NUL.
+  It returns an `ok` status containing a native transfer handle, or an error status. Release
+  the handle with `ffi-net-scp-transfer-close`; step and cancel use the ordinary transfer APIs.
+  |#
+  (define ffi-net-scp-transfer-start-many
+    (let ([native (foreign-procedure "chezpp_net_scp_transfer_start_many"
+                                    (uptr int string string scheme-object) scheme-object)])
+      (lambda (session-handle direction local-directory remote-directory encoded-names)
+        (pcheck ([natural? session-handle] [fixnum? direction]
+                 [string? local-directory remote-directory] [bytevector? encoded-names])
+          (require-optional-library 'ffi-net-scp-transfer-start-many 'ssh)
+          (native session-handle direction local-directory remote-directory encoded-names)))))
   (define ffi-net-scp-transfer-step
     (foreign-procedure "chezpp_net_scp_transfer_step" (uptr) scheme-object))
   (define ffi-net-scp-transfer-cancel

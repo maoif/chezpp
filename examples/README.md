@@ -60,7 +60,8 @@ listens locally and connects the target through SSH, while remote mode listens r
 connects the target locally. `--listen-port=0` requests a free port, logged to stderr. It runs until
 Ctrl-C unless `--duration=MILLISECONDS` is supplied. SCP accepts both directions and kinds, plus
 `--overwrite=error|replace|skip`. Remote paths can be absolute or relative to the remote login
-directory. It rejects symlinks and unsupported resume modes.
+directory. It rejects symlinks and unsupported resume modes. Recursive SCP copies reuse a channel
+for up to 32 sibling files at a time, while retaining per-file progress and overwrite policies.
 
 `wget.ss` and `scp.ss` display progress bars on stderr by default. Pass `--progress=no` to disable
 progress, or `--progress=yes` to enable it explicitly; lifecycle logs remain enabled. SCP shows

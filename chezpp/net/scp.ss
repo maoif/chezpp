@@ -20,6 +20,7 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp file)
+          (chezpp list)
           (chezpp string)
           (chezpp net errors)
           (chezpp net ffi)
@@ -269,6 +270,52 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                (scp-session-pending-set! session operation)
                operation)))]))
 
+  ;; Bounded sibling batches use a single native channel and keep per-file progress.
+  (define scp-transfer-many/policy
+    (lambda (who session direction local-directory remote-directory names timeout-ms policy)
+      (let* ([encoded (string->utf8
+                       (apply string-append
+                              (map (lambda (name) (string-append name (string #\nul))) names)))]
+             [started (ensure-success
+                       who (ffi-net-scp-transfer-start-many
+                            (%ssh-session-handle (scp-session-ssh-session session))
+                            (if (eq? direction 'download) 0 1)
+                            local-directory remote-directory encoded))]
+             [handle (vector-ref started 1)]
+             [deadline (+ (scp-current-monotonic-ms) timeout-ms)]
+             [operation
+              (make-net-operation
+               'scp-directory-files
+               (lambda ()
+                 (guard (failure [else (net-operation-failed failure)])
+                   (let ([status (ffi-net-scp-transfer-step handle)])
+                     (if (and (vector? status) (= 4 (vector-length status)))
+                         (let ([tag (vector-ref status 0)] [counts (vector-ref status 2)])
+                           (transfer-report-progress! policy 'scp direction (vector-ref status 3)
+                                                      (car counts) (cdr counts))
+                           (case tag
+                             [(completed) (net-operation-completed remote-directory)]
+                             [(file-completed)
+                              (set! deadline (+ (scp-current-monotonic-ms) timeout-ms))
+                              (net-operation-pending
+                               (list (make-poll-target (vector-ref status 1) '(write))) deadline)]
+                             [(pending)
+                              (let ([target (vector-ref status 1)])
+                                (net-operation-pending
+                                 (list (make-poll-target (vector-ref target 0)
+                                                         (vector-ref target 1))) deadline))]
+                             [else (net-operation-failed
+                                    (make-net-error who 'scp "SCP batch transfer failed" status))]))
+                         (net-operation-failed
+                          (make-net-error who 'scp "SCP batch transfer failed" status))))))
+               (lambda () (ffi-net-scp-transfer-cancel handle))
+               (lambda () (ffi-net-scp-transfer-close handle)))])
+        (dynamic-wind void
+                      (lambda () (net-operation-wait operation))
+                      (lambda ()
+                        (when (eq? (net-operation-state operation) 'pending)
+                          (net-operation-cancel! operation)))))))
+
   (define scp-download*
     (lambda (who session remote-path local-path timeout-ms)
       (ensure-session-open who session)
@@ -427,7 +474,15 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                (ensure-remote-scp-directory sftp target-path)
                (let ([root (normalize-scp-path source-path)])
                  (let walk ([local source-path] [remote target-path] [prefix ""] [seen '()])
-                   (let ([normalized (normalize-scp-path local)])
+                   (let ([normalized (normalize-scp-path local)]
+                         [batch (make-list-builder)] [batch-count 0])
+                     (define flush-files!
+                       (lambda ()
+                         (when (fxpositive? batch-count)
+                           (scp-transfer-many/policy who session 'upload local remote
+                                                     (batch) timeout-ms policy)
+                           (set! batch (make-list-builder))
+                           (set! batch-count 0))))
                      (when (member normalized seen)
                        (raise-net-error who 'scp "recursive SCP upload found a cycle" local))
                      (for-each
@@ -440,12 +495,29 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                           (when (or (not filter) (filter relative attributes))
                             (case (scp-attributes-type attributes)
                               [(directory)
+                               (flush-files!)
                                (ensure-remote-scp-directory sftp remote-child)
                                (walk local-child remote-child relative (cons normalized seen))]
                               [(regular)
-                               (scp-upload-tree-file who session local-child remote-child
-                                                      timeout-ms policy)]
+                               (let ([exists?
+                                      ;; Reuse only names unchanged by SFTP normalization.
+                                      ;; Relative paths and dot components need raw server
+                                      ;; resolution, including '..' after a symbolic link.
+                                      (if (and (fxpositive? (string-length remote-child))
+                                               (char=? #\/ (string-ref remote-child 0))
+                                               (string=? remote-child
+                                                         (sftp-normalize-path sftp remote-child)))
+                                          (sftp-stat/maybe sftp remote-child)
+                                          (scp-stat session remote-child))])
+                                 (case (and exists? (transfer-policy-overwrite policy))
+                                   [(skip) (void)]
+                                   [(error) (errorf who "remote destination exists: ~a" remote-child)]
+                                   [else
+                                    (batch name)
+                                    (set! batch-count (fx1+ batch-count))
+                                    (when (fx= batch-count 32) (flush-files!))]))]
                               [(symlink)
+                               (flush-files!)
                                (case symlink-policy
                                  [(reject)
                                   (raise-net-error who 'scp
@@ -470,13 +542,23 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                               [else
                                (raise-net-error who 'scp "unsupported local file type"
                                                 local-child)]))))
-                      (directory-list local)))))
+                      (directory-list local))
+                     (flush-files!))))
                target-path]
               [(download)
                (ensure-local-scp-directory target-path)
                (let ([root (sftp-normalize-path sftp source-path)])
                  (let walk ([remote source-path] [local target-path] [prefix ""] [seen '()])
-                   (let ([normalized (sftp-normalize-path sftp remote)])
+                   (let ([normalized (sftp-normalize-path sftp remote)]
+                         [batch (make-list-builder)] [batch-count 0] [command-size 16])
+                     (define flush-files!
+                       (lambda ()
+                         (when (fxpositive? batch-count)
+                           (scp-transfer-many/policy who session 'download local remote
+                                                     (batch) timeout-ms policy)
+                           (set! batch (make-list-builder))
+                           (set! batch-count 0)
+                           (set! command-size 16))))
                      (when (member normalized seen)
                        (raise-net-error who 'scp "recursive SCP download found a cycle" remote))
                      (for-each
@@ -491,13 +573,27 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                               (when (or (not filter) (filter relative attributes))
                                 (case (scp-attributes-type attributes)
                                   [(directory)
+                                   (flush-files!)
                                    (ensure-local-scp-directory local-child)
                                    (walk remote-child local-child relative
                                          (cons normalized seen))]
                                   [(regular)
-                                   (scp-download-tree-file
-                                    who session remote-child local-child timeout-ms policy)]
+                                   (case (and (file-exists? local-child)
+                                              (transfer-policy-overwrite policy))
+                                     [(skip) (void)]
+                                     [(error) (errorf who "local destination exists: ~a" local-child)]
+                                     [else
+                                      ;; Bound the shell command as well as its file count.
+                                      ;; Four bytes per UTF-8 byte covers single-quote escaping.
+                                      (let ([size (fx+ 8 (fx* 4 (bytevector-length
+                                                                (string->utf8 remote-child))))])
+                                        (when (fx> (fx+ command-size size) 65536) (flush-files!))
+                                        (set! command-size (fx+ command-size size)))
+                                      (batch name)
+                                      (set! batch-count (fx1+ batch-count))
+                                      (when (fx= batch-count 32) (flush-files!))])]
                                   [(symlink)
+                                   (flush-files!)
                                    (case symlink-policy
                                      [(reject)
                                       (raise-net-error who 'scp
@@ -537,7 +633,8 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                   [else
                                    (raise-net-error who 'scp "unsupported remote file type"
                                                     remote-child)]))))))
-                      (sftp-list sftp remote)))))
+                      (sftp-list sftp remote))
+                     (flush-files!))))
                target-path]
               [else
                (errorf who "direction must be one of '(upload download), given ~s" direction)]))
@@ -693,7 +790,8 @@ controls overwrite and resume behavior. `filter` has signature
 `(relative-path scp-attributes) -> boolean`, and `symlink-policy` is `preserve`, `follow`, or
 `reject`. The default rejects links and includes every entry. The policy progress hook receives
 `(protocol direction remote-path completed-bytes total-bytes-or-#f) -> unspecified` for each copied
-regular file. Skipped files do not invoke the hook.
+regular file. Skipped files do not invoke the hook. Consecutive selected regular files in one
+directory share a channel in bounded batches of at most 32 files; progress remains per file.
 |#
   (define-who scp-copy-directory
     (case-lambda

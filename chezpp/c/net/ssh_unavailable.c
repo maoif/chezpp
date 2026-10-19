@@ -266,6 +266,14 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
   return chezpp_unavailable_status("ssh: disabled at build time");
 }
 
+ptr chezpp_net_scp_transfer_start_many(uptr handle, int direction,
+                                      const char *local_directory,
+                                      const char *remote_directory, ptr encoded_names) {
+  (void)handle; (void)direction; (void)local_directory; (void)remote_directory;
+  (void)encoded_names;
+  return chezpp_unavailable_status("ssh: disabled at build time");
+}
+
 ptr chezpp_net_scp_transfer_step(uptr handle) {
   (void)handle;
   return chezpp_unavailable_status("ssh: disabled at build time");

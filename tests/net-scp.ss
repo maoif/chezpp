@@ -348,3 +348,43 @@
                           (equal? '(262144 262144) (cdddr (car (reverse selected)))))))
                  '(upload download)))
               (lambda () (when (file-exists? local) (delete-file local)))))))))
+
+(mat net-scp-batch-progress-failure-keeps-completed-files
+     ;; Error case: a progress callback fails during a later file on a shared channel.
+     ;; Keep the completed file, remove the partial current file, and release the session.
+     (mat-requires (ssh)
+       (with-test-scp-session
+        (lambda (session remote-root)
+          (let* ([local (format "/tmp/chezpp-scp-batch-cleanup-~a" (get-process-id))]
+                 [source (string-append local "/source")]
+                 [output (string-append local "/output")]
+                 [remote (string-append remote-root "/batch-cleanup")]
+                 [payload (make-bytevector 524288 53)]
+                 [completed-name #f] [partial-name #f]
+                 [policy
+                  (make-transfer-policy
+                   'never 'replace 65536
+                   (lambda (protocol direction path completed total)
+                     (cond
+                      [(and completed-name (not (string=? completed-name (path-last path)))
+                            (positive? completed) total (< completed total))
+                       (set! partial-name (path-last path))
+                       (error 'batch-progress "stop during a later file")]
+                      [(and total (= completed total))
+                       (set! completed-name (path-last path))])))])
+            (dynamic-wind
+              (lambda ()
+                (mkdirs source)
+                (for-each (lambda (name) (write-u8vec! (string-append source "/" name) payload))
+                          '("one" "two" "three")))
+              (lambda ()
+                (scp-copy-directory session 'upload source remote)
+                (and (scp-error-message-contains?
+                      "stop during a later file"
+                      (lambda ()
+                        (scp-copy-directory session 'download remote output policy #f 'reject)))
+                     completed-name partial-name
+                     (equal? payload (read-u8vec (string-append output "/" completed-name)))
+                     (not (file-exists? (string-append output "/" partial-name)))
+                     (scp-attributes? (scp-stat session (string-append remote "/one")))))
+              (lambda () (when (file-exists? local) (file-removetree local #f)))))))))
