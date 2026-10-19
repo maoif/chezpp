@@ -227,7 +227,11 @@ Conditions from advancement or cleanup are stored as a failed result.
                   (unless (eq? 'pending (%net-operation-state operation))
                     (errorf who "cannot step an operation in state ~s"
                             (%net-operation-state operation)))
-                  (apply-update! operation (advance-operation who operation))
+                  (let ([update (advance-operation who operation)])
+                    ;; A user callback can cancel this operation while advance is running.
+                    ;; Its terminal state and cleanup must survive the stale returned update.
+                    (when (eq? 'pending (%net-operation-state operation))
+                      (apply-update! operation update)))
                   (when (operation-terminal? operation)
                     (cleanup-terminal-operation! operation)
                     (set! listener* (take-listeners! operation))))
