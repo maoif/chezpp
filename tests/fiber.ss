@@ -1529,3 +1529,17 @@
                  (string=? "" (process-result-stderr result))))))
       '(("1" . "rejected\n") ("2" . "rejected\n") ("99" . "rejected\n")
         ("100" . "completed\n"))))
+
+(mat fiber-forked-thread-timer-keeps-original-handler
+     ;; A foreign OS thread must never invoke a parent worker's scheduler escape.
+     ;; Discard stderr here: a broken escape can generate an unbounded error stream.
+     ;; Exact successful stdout and status still reject that subprocess failure.
+     (for-all
+      (lambda (mode)
+        (guard (failure [else #f])
+          (let ([result
+                 (capture-process "../chez++" "--script" "fiber-inherited-timer-process.ss"
+                   mode :timeout 5000 :stdin null :stdout capture :stderr null)])
+            (and (process-exit-success? (process-result-status result))
+                 (string=? "completed\n" (process-result-stdout result))))))
+      '("active" "raising" "late" "nested")))

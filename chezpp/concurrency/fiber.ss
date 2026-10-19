@@ -411,9 +411,22 @@
         (define interrupt
           (lambda ()
             (set-timer 0)
-            (fiber-task-ticks-set! current-fiber-task #f)
-            ;; The interrupted continuation is resumed once.
-            (call/1cc (lambda (resume) (scheduler-return 'time resume)))))
+            ;; `fork-thread` inherits this handler and `current-scheduler`, but
+            ;; its timer belongs to a different OS thread. Validate the captured
+            ;; worker before touching its task or invoking its one-shot escape.
+            (if (and (eq? current-scheduler sched)
+                     (eqv? (get-thread-id) (scheduler-thread-id sched)))
+                (begin
+                  (fiber-task-ticks-set! current-fiber-task #f)
+                  ;; The interrupted continuation is resumed once.
+                  (call/1cc (lambda (resume) (scheduler-return 'time resume))))
+                (begin
+                  ;; Restore the caller's handler on this foreign thread before
+                  ;; invoking it: it may rearm the timer, raise, or fork again.
+                  ;; An inherited ancestor handler delegates the same way, even
+                  ;; after its worker has stopped or a nested context has joined.
+                  (timer-interrupt-handler original-handler)
+                  (original-handler)))))
         (set-timer 0)
         (let loop ()
           (let ([task (await-task! sched)])
