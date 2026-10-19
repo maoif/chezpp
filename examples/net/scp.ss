@@ -41,10 +41,47 @@
            (errorf 'scp-example "remote symlinks are rejected: ~a" prefix))
          (and entry #t))))))
 
+;; Keep SCP exec paths and SFTP inspection paths in the same absolute namespace.
+;; Resolve only the login directory; preserve user path components for symlink checks.
+(define scp-example-remote-path
+  (lambda (session path)
+    (if (string-startswith? path "/")
+        path
+        ;; Query the remote shell's physical working directory for relative paths.
+        (call-with-ssh-channel
+         session 30000
+         (lambda (channel)
+           ;; Merge pwd diagnostics into stdout so one reader drains the command output.
+           (ssh-exec channel "pwd -P 2>&1" 30000)
+           ;; pwd does not consume input; finish stdin before reading its output.
+           (ssh-send-eof! channel)
+           (let-values ([(output extract) (open-bytevector-output-port)])
+             (dynamic-wind
+               void
+               (lambda ()
+                 (let read-output ([received 0])
+                   ;; Bound each wait and the amount of output accepted from pwd.
+                   (let ([bytes (ssh-read channel 4096 30000)])
+                     (unless (eof-object? bytes)
+                       (let ([received (fx+ received (bytevector-length bytes))])
+                         (when (fx> received 65536)
+                           (errorf 'scp-example "remote working directory output is too long"))
+                         (put-bytevector output bytes)
+                         (read-output received)))))
+                 (let* ([text (utf8->string (extract))] [length (string-length text)])
+                   ;; Require successful pwd output with its single terminating newline.
+                   (unless (and (zero? (ssh-channel-exit-status channel))
+                                (fx> length 1) (char=? (string-ref text 0) #\/)
+                                (char=? (string-ref text (fx1- length)) #\newline))
+                     (errorf 'scp-example "cannot determine remote working directory: ~s" text))
+                   (string-append (substring text 0 (fx1- length)) "/" path)))
+               (lambda () (close-port output)))))))))
+
 (define scp-example
   (lambda (session log direction kind local remote policy)
     ;; Wrap the authenticated SSH session; the outer helper owns its lifetime.
-    (let ([scp (scp-open session)])
+    (let ([remote (scp-example-remote-path session remote)]
+          [scp (scp-open session)])
       (dynamic-wind
         void
         (lambda ()
@@ -87,7 +124,7 @@
  (append ssh-example-options '((direction . "Required: upload (local to remote) or download (remote to local).")
    (kind . "Required: file or directory; directory copies are recursive.")
    (local . "Required: local source path for upload or destination path for download.")
-   (remote . "Required: remote destination path for upload or source path for download.")
+   (remote . "Required: remote destination for upload or source for download; relative to the remote login directory.")
    (overwrite . "Existing destination policy: error, replace, or skip (default: error).")
    (progress . "Show a progress bar per file on stderr: yes or no (default: yes).")
    (resume . "Resume policy: never is the only supported value (default: never).")))

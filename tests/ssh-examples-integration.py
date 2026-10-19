@@ -350,6 +350,34 @@ def verify_scp_directories(root, env, args):
             for name, data in files.items():
                 assert (output / name).read_bytes() == data, (direction, progress, name)
             assert (output / "nested/deeper/empty").is_dir()
+    # Remote paths are relative to the SSH login directory, including overwrite checks.
+    home = pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir)
+    with tempfile.TemporaryDirectory(prefix=".chezpp-scp-relative-", dir=home) as directory:
+        remote = pathlib.Path(directory) / "tree"
+        relative_remote = str(remote.relative_to(home))
+        copied = root / "relative-remote-copy"
+        for direction in ("upload", "download"):
+            result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                         f"--local={source if direction == 'upload' else copied}",
+                         f"--remote={relative_remote}")
+            assert result.returncode == 0, (direction, result.stderr)
+        for name, data in files.items():
+            assert (copied / name).read_bytes() == data, name
+        (remote / "root.txt").write_bytes(b"keep existing")
+        for policy in ("skip", "error"):
+            result = run("scp", env, args, "--direction=upload", "--kind=directory",
+                         f"--local={source}", f"--remote={relative_remote}",
+                         f"--overwrite={policy}")
+            assert (result.returncode == 0) == (policy == "skip"), (policy, result.stderr)
+            assert (remote / "root.txt").read_bytes() == b"keep existing", policy
+        # Error case: resolving the login directory must not hide symlinks before '..'.
+        link = pathlib.Path(directory) / "link"
+        link.symlink_to(remote, target_is_directory=True)
+        result = run("scp", env, args, "--direction=upload", "--kind=directory",
+                     f"--local={source}",
+                     f"--remote={link.relative_to(home)}/../escaped", "--overwrite=replace")
+        assert result.returncode != 0 and b"symlinks are rejected" in result.stderr, result
+        assert not (pathlib.Path(directory) / "escaped").exists()
     # A missing source must fail rather than leaving a successful empty copy.
     result = run("scp", env, args, "--direction=download", "--kind=directory",
                  f"--local={root / 'missing-copy'}", f"--remote={root / 'missing-source'}")
