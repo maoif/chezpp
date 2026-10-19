@@ -27,7 +27,8 @@
                              (if size (vector-ref size 1) 24) 30000)))
        ;; Start the remote user's shell on this channel.
        (ssh-shell channel 30000)
-       (let ([raw-handle #f] [stdin-open? #t] [last-size size] [last-size-check 0])
+       (let ([raw-handle #f] [stdin-open? #t] [last-size size] [last-size-check 0]
+             [input-buffer (make-bytevector 65536)] [input-end 0] [input-offset 0])
          (dynamic-wind
            (lambda ()
              (when (and pty? size)
@@ -36,40 +37,43 @@
                    (errorf 'ssh-open-repl "cannot enter raw terminal mode: ~s" status))
                  (set! raw-handle (vector-ref status 1)))))
            (lambda ()
-             ;; Open each port inside its owner's cleanup scope.
+             ;; Keep at most one bounded input chunk while draining remote output.
              (call-with-port
-              (open-ssh-channel-output-port channel)
-              (lambda (output)
-                (call-with-port
-                 (open-file-input-port "/proc/self/fd/0" (file-options) (buffer-mode none) #f)
-                 (lambda (input)
-                   (ssh-example-drain
-                    channel
-                    (lambda ()
-                      ;; Check periodically without installing a process-wide signal handler.
-                      (let* ([now (current-time 'time-monotonic)]
-                             [ms (+ (* (time-second now) 1000)
-                                    (quotient (time-nanosecond now) 1000000))])
-                        (when (and pty? size (>= (- ms last-size-check) 100))
-                          (set! last-size-check ms)
-                          (let ([new-size (ssh-example-terminal-size)])
-                            (when (and new-size (not (equal? new-size last-size)))
-                              ;; Notify the remote shell and editor when the local window changes.
-                              (ssh-change-pty-size! channel (vector-ref new-size 0)
-                                                    (vector-ref new-size 1) 30000)
-                              (set! last-size new-size)))))
-                      (when (and stdin-open?
-                                 (pair? (poll-target-ready-events
-                                         (car (poll (list (make-poll-target input '(read))) 0)))))
-                        (let ([chunk (get-bytevector-some input)])
-                          (if (eof-object? chunk)
-                              (begin
-                                (set! stdin-open? #f)
-                                (flush-output-port output)
-                                ;; Finish shell stdin while continuing to drain both streams.
-                                (ssh-send-eof! channel))
-                              (begin (put-bytevector output chunk)
-                                     (flush-output-port output))))))))))))
+              (open-file-input-port "/proc/self/fd/0" (file-options) (buffer-mode none) #f)
+              (lambda (input)
+                (ssh-example-drain
+                 channel
+                 (lambda ()
+                   ;; Check periodically without installing a process-wide signal handler.
+                   (let* ([now (current-time 'time-monotonic)]
+                          [ms (+ (* (time-second now) 1000)
+                                 (quotient (time-nanosecond now) 1000000))])
+                     (when (and pty? size (>= (- ms last-size-check) 100))
+                       (set! last-size-check ms)
+                       (let ([new-size (ssh-example-terminal-size)])
+                         (when (and new-size (not (equal? new-size last-size)))
+                           ;; Notify the remote shell and editor when the local window changes.
+                           (ssh-change-pty-size! channel (vector-ref new-size 0)
+                                                 (vector-ref new-size 1) 30000)
+                           (set! last-size new-size)))))
+                   (when (and stdin-open? (fx= input-offset input-end)
+                              (pair? (poll-target-ready-events
+                                      (car (poll (list (make-poll-target input '(read))) 0)))))
+                     (let ([count (get-bytevector-some! input input-buffer 0 65536)])
+                       (if (eof-object? count)
+                           (begin
+                             (set! stdin-open? #f)
+                             ;; All buffered stdin has been sent; keep draining both streams.
+                             (ssh-send-eof! channel))
+                           (begin (set! input-end count) (set! input-offset 0)))))
+                   (and (fx< input-offset input-end)
+                        ;; A blocked remote stdin must never stop draining stdout/stderr.
+                        (let ([answer (ssh-write/nonblocking channel input-buffer
+                                                            input-offset input-end)])
+                          (when (fixnum? answer)
+                            (set! input-offset (fx+ input-offset answer)))
+                          answer)))))))
+
            (lambda ()
              ;; Restore before channel/session shutdown or logging, including exceptions.
              (when raw-handle

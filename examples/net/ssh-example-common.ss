@@ -109,10 +109,17 @@
                 [err-eof? (or err-eof? (eof-object? stderr))])
            (when (bytevector? stdout) (put-bytevector out stdout) (flush-output-port out))
            (when (bytevector? stderr) (put-bytevector err stderr) (flush-output-port err))
-           (unless (and out-eof? err-eof?) (input-step))
-           (if (and out-eof? err-eof?)
-               ;; Exit-status retrieval can wait: drain both streams and finish stdin first.
-               (let ([status (ssh-channel-exit-status channel)])
-                 (if (>= status 0) status 255))
-               (begin (ssh-example-wait (list stdout stderr))
-                      (loop out-eof? err-eof?)))))))))
+           (let ([input (and (not (and out-eof? err-eof?)) (input-step))])
+             (if (and out-eof? err-eof?)
+                 ;; Drain both streams before retrieving the remote exit status.
+                 (let ([status (ssh-channel-exit-status channel)])
+                   (if (>= status 0) status 255))
+                 (begin
+                   ;; Wait only when neither direction moved bytes in this iteration.
+                   (unless (or (and (bytevector? stdout)
+                                    (fxpositive? (bytevector-length stdout)))
+                               (and (bytevector? stderr)
+                                    (fxpositive? (bytevector-length stderr)))
+                               (and (fixnum? input) (fx> input 0)))
+                     (ssh-example-wait (list stdout stderr input)))
+                   (loop out-eof? err-eof?))))))))))

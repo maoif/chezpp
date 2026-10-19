@@ -96,6 +96,38 @@ def verify_shell():
         assert result.returncode == 0 and result.stdout == b'pipe-ok', result
 
 
+def verify_bidirectional_backpressure():
+    # A full remote stdout window must not prevent forwarding a larger local stdin.
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='chezpp-shell-backpressure-') as directory:
+        root = pathlib.Path(directory)
+        worker = root / 'worker.py'
+        worker.write_text('import sys\n'
+                          'sys.stdout.buffer.write(b"x" * (8 * 1024 * 1024))\n'
+                          'sys.stdout.buffer.flush()\n'
+                          'data = sys.stdin.buffer.read()\n'
+                          'assert data == b"y" * (16 * 1024 * 1024)\n'
+                          'sys.stderr.write("input-complete\\n")\n')
+        source = root / 'input'
+        source.write_bytes(b'y' * (16 * 1024 * 1024))
+        with api['fixture'](shell_command=f'python3 {worker}') as (_, env, args):
+            with source.open('rb') as input_port, tempfile.TemporaryFile() as output:
+                process = subprocess.Popen(
+                    ['./chez++', '--script', 'examples/net/ssh-open-repl.ss', *args, '--pty=no'],
+                    env=env, stdin=input_port, stdout=output, stderr=subprocess.PIPE,
+                    start_new_session=True)
+                try:
+                    _, errors = process.communicate(timeout=15)
+                    assert process.returncode == 0 and b'input-complete' in errors, errors
+                    output.seek(0)
+                    assert output.read() == b'x' * (8 * 1024 * 1024)
+                finally:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.communicate()
+
+
 if __name__ == '__main__':
     os.chdir(ROOT)
     verify_shell()
+    verify_bidirectional_backpressure()
