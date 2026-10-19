@@ -106,7 +106,8 @@ static int callback(struct lws *wsi, enum lws_callback_reasons reason,
         fn_lws_callback_on_writable(wsi);
       return 0;
     case LWS_CALLBACK_HTTP_WRITEABLE: {
-      unsigned char buffer[LWS_PRE + 4096];
+      /* Send full-sized H2 DATA frames so tests can detect receive fragmentation. */
+      unsigned char buffer[LWS_PRE + 16384];
       unsigned char *start = buffer + LWS_PRE, *cursor = start;
       unsigned char *end = buffer + sizeof(buffer);
       char number[32];
@@ -128,7 +129,7 @@ static int callback(struct lws *wsi, enum lws_callback_reasons reason,
         return fn_lws_callback_on_writable(wsi) < 0 ? -1 : 0;
       }
       count = stream->length - stream->sent;
-      if (count > 4096) count = 4096;
+      if (count > 16384) count = 16384;
       allowance = fn_lws_get_peer_write_allowance(wsi);
       if (allowance != (size_t)-1 && count > allowance) count = allowance;
       if (count == 0) return 0;

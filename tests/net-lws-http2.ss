@@ -94,11 +94,12 @@
 
 (mat net-lws-http2-live-flow-control
      ;; A large response must cross repeated writable/acknowledgement boundaries intact.
+     ;; Avoid splitting every frame into 4 KiB callbacks despite the larger payload buffer.
      (mat-requires (websockets)
        (call-with-h2-fixture
         4
         (lambda (port command)
-          (let ([client (http-open)] [received 0])
+          (let ([client (http-open)] [received 0] [largest 0])
             (dynamic-wind
               void
               (lambda ()
@@ -111,9 +112,12 @@
                            (format "http://127.0.0.1:~a/large" port))
                          (make-http-body-sink
                           (lambda (bytes start count)
+                            (set! largest (max largest count))
                             (set! received (+ received count))))))])
                   (and (= 200 (http-response-status response))
-                       (= 262144 received))))
+                       (= 262144 received)
+                       (> largest 4096)
+                       (<= largest 65536))))
               (lambda () (http-close client))))))))
 
 (mat net-lws-http2-live-peer-settings-goaway
