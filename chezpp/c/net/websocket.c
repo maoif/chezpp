@@ -409,7 +409,7 @@ static void initialize_websocket_library(void) {
     const char *level = getenv("CHEZPP_WS_LOGLEVEL");
     websocket_log_level = (uint32_t)(level == NULL ? 0 : strtol(level, NULL, 0)) &
                           ~LLLF_LOG_CONTEXT_AWARE;
-    lws_set_log_level((int)websocket_log_level, NULL);
+    chezpp_lws_set_log_level((int)websocket_log_level, NULL);
   }
   websocket_available_flag = 1;
 }
@@ -575,8 +575,8 @@ static void service_context_ready_locked(struct lws_context *context) {
    * signal if forced work remains, so one call stays bounded and Scheme won't
    * sleep on a drained socket before advancing again. */
   while (read(state->wakeup_pipe[0], bytes, sizeof(bytes)) > 0) {}
-  (void)lws_service_tsi(context, -1, 0);
-  state->forced_pending = lws_service_adjust_timeout(context, 1, 0) == 0;
+  (void)chezpp_lws_service_tsi(context, -1, 0);
+  state->forced_pending = chezpp_lws_service_adjust_timeout(context, 1, 0) == 0;
   if (state->forced_pending) (void)write(state->wakeup_pipe[1], &byte, 1);
 }
 
@@ -656,7 +656,7 @@ static struct lws *connect_context(struct lws_context *context,
 
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context))
-    wsi = lws_client_connect_via_info(info);
+    wsi = chezpp_lws_client_connect_via_info(info);
   pthread_mutex_unlock(&context_list_mutex);
   return wsi;
 }
@@ -675,7 +675,7 @@ static void close_wsi(struct lws_context *context, struct lws *wsi,
   if (context_registered_unlocked(context) && wsi != NULL) {
     lws_close_reason(wsi, (enum lws_close_status)code,
                        (unsigned char *)reason, reason_len);
-    lws_set_timeout(wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
+    chezpp_lws_set_timeout(wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
   }
   pthread_mutex_unlock(&context_list_mutex);
 }
@@ -683,7 +683,7 @@ static void close_wsi(struct lws_context *context, struct lws *wsi,
 static void request_writable(struct lws_context *context, struct lws *wsi) {
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context) && wsi != NULL)
-    lws_callback_on_writable(wsi);
+    chezpp_lws_callback_on_writable(wsi);
   pthread_mutex_unlock(&context_list_mutex);
 }
 

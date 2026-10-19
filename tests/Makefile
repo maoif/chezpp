@@ -226,6 +226,16 @@ test-optional-native:
 	@python3 ../tools/test-optional-native.py --sentinels
 	@../chez++ --script=optional-library-runtime.ss
 
+.PHONY: test-lws-runtime-lock
+test-lws-runtime-lock: prepare-chezpp
+ifeq ($(WEBSOCKETS_ENABLED),1)
+	@CC='$(CC)' CPPFLAGS='$(CPPFLAGS)' LDFLAGS='$(LDFLAGS)' \
+	  LWS_CFLAGS='$(RESOLVED_WEBSOCKETS_CFLAGS) $(RESOLVED_OPENSSL_CFLAGS)' \
+	  LWS_LIBS='$(RESOLVED_WEBSOCKETS_LIBS) $(RESOLVED_OPENSSL_LIBS)' \
+	  CHEZ_INCLUDE_DIR='$(dir $(realpath ../.chezscheme-install/bin/scheme))' \
+	  sh ./test-lws-runtime-lock.sh
+endif
+
 .PHONY: clean
 clean:
 	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr lws-http2-fixture
