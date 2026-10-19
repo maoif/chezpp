@@ -109,7 +109,7 @@
                 [err-eof? (or err-eof? (eof-object? stderr))])
            (when (bytevector? stdout) (put-bytevector out stdout) (flush-output-port out))
            (when (bytevector? stderr) (put-bytevector err stderr) (flush-output-port err))
-           (input-step)
+           (unless (and out-eof? err-eof?) (input-step))
            (if (and out-eof? err-eof?)
                ;; Exit-status retrieval can wait: drain both streams and finish stdin first.
                (let ([status (ssh-channel-exit-status channel)])

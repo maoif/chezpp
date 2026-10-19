@@ -52,7 +52,10 @@ SSH takes a required positional `HOST`, before or after named options. `--user` 
 current local username and `--auth` defaults to `publickey` (discover keys in `~/.ssh`).
 SSH checks `$HOME/.ssh/known_hosts`. Use `--private-key=PATH` for an explicit key, or choose
 `--auth=password` or `--auth=agent`. Set `CHEZPP_SSH_PASSWORD` or `CHEZPP_SSH_PASSPHRASE`
-for secrets; agent authentication uses `SSH_AUTH_SOCK`. Use `--pty=no` for piped shell input.
+for secrets; agent authentication uses `SSH_AUTH_SOCK`. The shell uses `--pty=auto` by default:
+terminal input gets a remote PTY with the local TERM and window size; piped input uses no PTY.
+Use `--pty=yes|no` to override it. Terminal sessions forward keys and Ctrl-C to the remote shell,
+follow window resizing, and restore the local terminal settings when the session ends.
 Remote command stdout/stderr remain separate and its exit status becomes the local exit status.
 
 Forwarding accepts `--direction=local|remote`, `--listen-host`, and `--listen-port`; local mode

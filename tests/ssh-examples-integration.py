@@ -16,7 +16,7 @@ def free_port():
 
 
 @contextlib.contextmanager
-def fixture(log_sessions=False):
+def fixture(log_sessions=False, shell_command=None):
     with tempfile.TemporaryDirectory(prefix="chezpp-ssh-examples-") as d:
         root = pathlib.Path(d)
         home = root / "home"
@@ -41,6 +41,8 @@ def fixture(log_sessions=False):
         )
         if log_sessions:
             config.write_text(config.read_text().replace("LogLevel ERROR", "LogLevel VERBOSE"))
+        if shell_command:
+            config.write_text(config.read_text() + f"ForceCommand {shell_command}\n")
         server = subprocess.Popen(
             [shutil.which("sshd") or "/usr/sbin/sshd", "-D", "-E", str(root / "sshd.log"), "-f", str(config)],
             stderr=subprocess.PIPE,
@@ -167,6 +169,10 @@ def verify():
                 agent.wait(timeout=5)
         p = run("ssh-open-repl", env, args, "--pty=no", input=b"printf shell-eof\n")
         assert p.returncode == 0 and b"shell-eof" in p.stdout, p
+        # Exercise a real local terminal as well as the pipe-based command checks.
+        p = subprocess.run([sys.executable, "tests/ssh-shell-integration.py"],
+                           capture_output=True, timeout=45)
+        assert p.returncode == 0, p.stderr
         verify_scp_directories(root, env, args)
         verify_scp_symlinks(root, env, args)
         verify_scp_readonly_files(root, env, args)
