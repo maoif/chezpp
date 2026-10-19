@@ -42,6 +42,57 @@
                  (lws-context-service-fd context (lws-context-wakeup-fd context) 1)
                  #t))))))
 
+(define concurrent-context-lifecycle
+  (lambda (mixed?)
+    (let* ([worker-count 8] [rounds 100]
+           [mutex (make-mutex)] [ready (make-condition)] [started 0]
+           [results (make-vector worker-count #f)]
+           [workers
+            (map
+             (lambda (index)
+               (fork-thread
+                (lambda ()
+                  (with-mutex mutex
+                    (set! started (fx1+ started))
+                    (condition-broadcast ready)
+                    (let wait ()
+                      (unless (fx= started worker-count)
+                        (condition-wait ready mutex)
+                        (wait))))
+                  (vector-set! results index
+                    (guard (failure [else failure])
+                      (let loop ([remaining rounds])
+                        (or (fxzero? remaining)
+                            (and
+                             (if (and mixed? (odd? index))
+                                 (let ([server (websocket-listen "127.0.0.1" 0)])
+                                   (dynamic-wind
+                                     void
+                                     (lambda ()
+                                       (and (websocket-server? server)
+                                            (net-would-block?
+                                             (websocket-accept/nonblocking server))))
+                                     (lambda () (websocket-server-close server))))
+                                 (call-with-lws-context
+                                  (lambda (context)
+                                    (and (fx>= (lws-context-service-fd context -1 0) 0)
+                                         (vector? (lws-context-poll-snapshot context))))))
+                             (loop (fx1- remaining))))))))))
+             (iota worker-count))])
+      (for-each thread-join workers)
+      (for-all (lambda (result) (eq? #t result)) (vector->list results)))))
+
+(mat net-lws-independent-contexts-concurrent-lifecycle
+     ;; Independent reactors may create, service, and destroy contexts on different
+     ;; OS threads. Sharing LWS's unprotected default logging refcount can abort even
+     ;; with logging disabled when the dependency was built with `LWS_MAX_SMP=1`.
+     (mat-requires (websockets)
+       (concurrent-context-lifecycle #f))
+
+     ;; Separate lifecycle locks for HTTP and WebSocket would miss this race.
+     (mat-requires (websockets)
+       (concurrent-context-lifecycle #t)))
+
 (mat net-lws-copied-event-order
      (mat-requires (websockets)
        (call-with-lws-context

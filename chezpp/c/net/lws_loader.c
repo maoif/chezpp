@@ -3,6 +3,29 @@
 #include "../build-config.h"
 #if CHEZPP_WITH_WEBSOCKETS
 #include <libwebsockets.h>
+#include <pthread.h>
+
+/* Even with a private `log_cx`, LWS 4.5 creates its internal `system` vhost
+ * against the default logging context. With `LWS_MAX_SMP=1`, its refcount is
+ * non-atomic. Share this lock across HTTP, WebSocket, and lifetime contexts;
+ * separate adapter locks cannot protect the dependency's shared counter.
+ * Normal connections use private log contexts and need no lock here. */
+static pthread_mutex_t lws_context_lifecycle_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+struct lws_context *chezpp_lws_create_context(
+    const struct lws_context_creation_info *information) {
+  struct lws_context *context;
+  pthread_mutex_lock(&lws_context_lifecycle_mutex);
+  context = lws_create_context(information);
+  pthread_mutex_unlock(&lws_context_lifecycle_mutex);
+  return context;
+}
+
+void chezpp_lws_context_destroy(struct lws_context *context) {
+  pthread_mutex_lock(&lws_context_lifecycle_mutex);
+  lws_context_destroy(context);
+  pthread_mutex_unlock(&lws_context_lifecycle_mutex);
+}
 #endif
 int chezpp_lws_available(void) {
 #if CHEZPP_WITH_WEBSOCKETS
