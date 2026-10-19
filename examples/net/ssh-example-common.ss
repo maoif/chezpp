@@ -1,11 +1,44 @@
 ;; Shared SSH CLI, authentication, output draining, and lifecycle helpers.
+(import (chezpp system user))
 (load "examples/net/net-example-common.ss")
 
-(define ssh-example-options '((host . "Required: SSH server IP address or hostname; known_hosts verification is strict.")
-   (port . "SSH server port, 0 through 65535 (default: 22).")
-   (user . "Required: remote SSH username.")
-   (auth . "Authentication: agent, publickey, or password (default: agent). Password uses CHEZPP_SSH_PASSWORD; agent uses SSH_AUTH_SOCK.")
+(define ssh-example-options '((port . "SSH server port, 0 through 65535 (default: 22).")
+   (user . "Remote SSH username (default: current local user).")
+   (auth . "Authentication: publickey, agent, or password (default: publickey). Password uses CHEZPP_SSH_PASSWORD; agent uses SSH_AUTH_SOCK.")
    (private-key . "Private key path for publickey auth (default: discover keys in ~/.ssh). Passphrase uses CHEZPP_SSH_PASSPHRASE.")))
+
+;; All SSH examples share one required positional HOST and the same named options.
+(define ssh-example-command
+  (lambda (name overview option-spec* exec)
+    (let ([command (example-command name overview option-spec* exec)]
+          [host (example-make-option 'host
+                  "SSH server IP address or hostname; known_hosts verification is strict.")])
+      (option-positional?-set! host #t)
+      (command-options-add! command host)
+      command)))
+
+;; ChezPP CLI consumes the remaining arguments at the first positional. Move named
+;; options before HOST so either HOST --port=22 or --port=22 HOST works. Preserve
+;; everything after -- verbatim for remote command words and escaped positionals.
+(define ssh-example-arguments
+  (lambda (arguments)
+    (let ([options (make-list-builder)] [positionals (make-list-builder)])
+      (let loop ([remaining arguments])
+        (cond
+         [(null? remaining) (append (options) (positionals))]
+         [(string=? (car remaining) "--")
+          (append (options) (positionals) remaining)]
+         [else
+          (if (string-startswith? (car remaining) "-")
+              (options (car remaining))
+              (positionals (car remaining)))
+          (loop (cdr remaining))])))))
+
+(define ssh-example-run!
+  (lambda (name overview option-spec* exec arguments)
+    (run-cli-command!
+     (ssh-example-command name overview option-spec* exec)
+     (ssh-example-arguments arguments))))
 
 (define ssh-example-port
   (lambda (who ref name default)
@@ -15,10 +48,10 @@
 
 (define call-with-example-ssh
   (lambda (who ref proc)
-    (let* ([host (example-required who ref 'host)]
+    (let* ([host (ref 'host)]
            [port (ssh-example-port who ref 'port 22)]
-           [user (example-required who ref 'user)]
-           [auth (or (ref 'auth) "agent")]
+           [user (or (ref 'user) (uid->user-name (current-uid)))]
+           [auth (or (ref 'auth) "publickey")]
            [log (make-logger who)]
            [old-interrupt (keyboard-interrupt-handler)])
       (unless (member auth '("password" "publickey" "agent"))

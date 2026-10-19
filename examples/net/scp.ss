@@ -81,7 +81,7 @@
         ;; Cancel pending transfers and release the SCP wrapper on all exit paths.
         (lambda () (scp-close scp))))))
 
-(example-run!
+(ssh-example-run!
  'scp-example
  "Copy --kind=file|directory via SCP; --overwrite=error|replace|skip, --resume=never."
  (append ssh-example-options '((direction . "Required: upload (local to remote) or download (remote to local).")

@@ -5,7 +5,7 @@
 (define has-command-words? (and (member "--" (command-line-arguments)) #t))
 
 (define command
-  (example-command
+  (ssh-example-command
    'ssh-run-cmd "Run --command=text [-- remaining command words] over SSH."
    (append ssh-example-options '((command . "Remote shell command text; required unless command words follow --. Prints stdout/stderr and returns the remote exit status.")))
    (lambda (ref)
@@ -35,4 +35,4 @@
       (option-positional?-set! words #t)
       (option-sink?-set! words #t)
       (command-options-add! command words)))
-  (run-cli-command! command args))
+  (run-cli-command! command (ssh-example-arguments args)))

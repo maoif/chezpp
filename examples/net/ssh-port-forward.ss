@@ -155,7 +155,7 @@
             (if (socket? listener) (close-socket listener) (ssh-close-forwarding listener)))
           (with-logger log (log-info "forwarding stopped")))))))
 
-(example-run!
+(ssh-example-run!
  'ssh-port-forward
  "Relay TCP through SSH. --direction=local|remote; --duration=milliseconds (0 runs until Ctrl-C)."
  (append ssh-example-options '((direction . "Required: local (local listener to remote target) or remote (remote listener to local target).")

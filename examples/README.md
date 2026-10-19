@@ -43,13 +43,15 @@ that currently expose them.
 | `examples/net/http2-file-server.ss` | `--dir=examples/data --port=8443` | cleartext H2 with prior knowledge |
 | `examples/net/https-file-server.ss` | `--dir=examples/data --port=8443 --cert=cert.pem --key=key.pem` | TLS file server |
 | `examples/net/wget.ss` | `--uri=http://127.0.0.1:8080/sample.scm --output=sample.scm` | HTTP downloader |
-| `examples/net/ssh-open-repl.ss` | `--host=HOST --user=USER --auth=agent` | interactive remote shell |
-| `examples/net/ssh-run-cmd.ss` | `--host=HOST --port=22 --user=USER --auth=agent --command='uname -a'` | remote command and streams |
-| `examples/net/ssh-port-forward.ss` | `--host=HOST --user=USER --auth=agent --direction=local --target-host=127.0.0.1 --target-port=22` | SSH TCP forwarding |
-| `examples/net/scp.ss` | `--host=HOST --user=USER --auth=agent --direction=upload --kind=file --local=FILE --remote=PATH` | SCP files and directories |
+| `examples/net/ssh-open-repl.ss` | `HOST` | interactive remote shell |
+| `examples/net/ssh-run-cmd.ss` | `HOST --command='uname -a'` | remote command and streams |
+| `examples/net/ssh-port-forward.ss` | `HOST --direction=local --target-host=127.0.0.1 --target-port=22` | SSH TCP forwarding |
+| `examples/net/scp.ss` | `HOST --direction=upload --kind=file --local=FILE --remote=PATH` | SCP files and directories |
 
-SSH checks `$HOME/.ssh/known_hosts`. Select `--auth=publickey --private-key=PATH`,
-`--auth=password`, or `--auth=agent`. Set `CHEZPP_SSH_PASSWORD` or `CHEZPP_SSH_PASSPHRASE`
+SSH takes a required positional `HOST`, before or after named options. `--user` defaults to the
+current local username and `--auth` defaults to `publickey` (discover keys in `~/.ssh`).
+SSH checks `$HOME/.ssh/known_hosts`. Use `--private-key=PATH` for an explicit key, or choose
+`--auth=password` or `--auth=agent`. Set `CHEZPP_SSH_PASSWORD` or `CHEZPP_SSH_PASSPHRASE`
 for secrets; agent authentication uses `SSH_AUTH_SOCK`. Use `--pty=no` for piped shell input.
 Remote command stdout/stderr remain separate and its exit status becomes the local exit status.
 

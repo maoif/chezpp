@@ -57,10 +57,8 @@ def fixture():
             env = os.environ.copy()
             env["HOME"] = str(home)
             args = [
-                f"--host=127.0.0.1",
+                "127.0.0.1",
                 f"--port={port}",
-                f"--user={user}",
-                "--auth=publickey",
             ]
             yield root, env, args
         finally:
@@ -94,6 +92,10 @@ def wait_for_log(process, fragment, timeout=10):
 
 def verify():
     with fixture() as (root, env, args):
+        # Defaults must use the local account, even if login environment names disagree.
+        env["USER"] = "chezpp-not-the-local-account"
+        env["LOGNAME"] = "chezpp-not-the-local-account"
+        env.pop("SSH_AUTH_SOCK", None)
         p = run(
             "ssh-run-cmd",
             env,
@@ -115,8 +117,15 @@ def verify():
             and p.stdout == b"a" * 262144
             and b"b" * 262144 in p.stderr
         ), p.stderr
+        # Options can follow HOST; command words after -- must remain literal.
         p = run("ssh-run-cmd", env, args, "--command=printf", "--", "positional")
         assert p.returncode == 0 and p.stdout == b"positional", p
+        # HOST also works after options; an explicit user still overrides the default.
+        p = run("ssh-run-cmd", env, [args[1], f"--user={pwd.getpwuid(os.getuid()).pw_name}"],
+                "--command=printf host-last", args[0])
+        assert p.returncode == 0 and p.stdout == b"host-last", p
+        p = run("ssh-run-cmd", env, args, "--", "printf", "%s", "--literal")
+        assert p.returncode == 0 and p.stdout == b"--literal", p
         keyargs = [x for x in args if x != "--auth=publickey"] + [
             "--auth=publickey",
             f"--private-key={root}/home/.ssh/id_ed25519",
@@ -147,7 +156,7 @@ def verify():
                 p = run(
                     "ssh-run-cmd",
                     agentenv,
-                    [x if x != "--auth=publickey" else "--auth=agent" for x in args],
+                    [*args, "--auth=agent"],
                     "--command=printf agent",
                 )
                 assert p.returncode == 0 and p.stdout == b"agent", p
@@ -643,7 +652,7 @@ def verify_password():
                 "ssh-run-cmd",
                 env,
                 [
-                    "--host=127.0.0.1",
+                    "127.0.0.1",
                     f"--port={port}",
                     "--user=fixture",
                     "--auth=password",

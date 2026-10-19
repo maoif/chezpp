@@ -39,7 +39,7 @@
                           (flush-output-port output))))))))
            (lambda () (close-port input) (close-port output))))))))
 
-(example-run!
+(ssh-example-run!
  'ssh-open-repl
  "Open a remote shell. --pty=yes|no (default yes); credentials use environment variables."
  (append ssh-example-options '((pty . "Request a remote terminal: yes or no (default: yes); use no for piped input.")))
