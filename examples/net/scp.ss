@@ -15,31 +15,38 @@
           (cond
            [(string=? name "") (loop (cdr parts) parent)]
            [(member name '("." "..")) (loop (cdr parts) next)]
-           [(inspect parent name next) (loop (cdr parts) next)]
+           [(inspect parent name next
+                     (for-all (lambda (part) (string=? part "")) (cdr parts)))
+            (loop (cdr parts) next)]
            [(member ".." (cdr parts))
             (errorf 'scp-example "missing path component before '..': ~a" next)]))))))
 
 (define reject-local-scp-link!
-  (lambda (path)
+  (case-lambda
+   [(path) (reject-local-scp-link! path #f)]
+   [(path allow-leaf-link?)
     (check-scp-path!
      path
-     (lambda (parent name prefix)
-       (when (file-symbolic-link? prefix)
+     (lambda (parent name prefix last?)
+       (when (and (file-symbolic-link? prefix) (not (and last? allow-leaf-link?)))
          (errorf 'scp-example "local symlinks are rejected: ~a" prefix))
-       (file-exists? prefix)))))
+       (or (file-symbolic-link? prefix) (file-exists? prefix))))]))
 
 (define reject-remote-scp-link!
-  (lambda (sftp path)
+  (case-lambda
+   [(sftp path) (reject-remote-scp-link! sftp path #f)]
+   [(sftp path allow-leaf-link?)
     (check-scp-path!
      path
-     (lambda (parent name prefix)
+     (lambda (parent name prefix last?)
        ;; List each parent to inspect link attributes without following the child.
        (let ([entry (find (lambda (attributes)
                             (string=? name (sftp-attributes-name attributes)))
                           (sftp-list sftp parent))])
-         (when (and entry (eq? (sftp-attributes-type entry) 'symlink))
+         (when (and entry (eq? (sftp-attributes-type entry) 'symlink)
+                    (not (and last? allow-leaf-link?)))
            (errorf 'scp-example "remote symlinks are rejected: ~a" prefix))
-         (and entry #t))))))
+         (and entry #t))))]))
 
 ;; Keep SCP exec paths and SFTP inspection paths in the same absolute namespace.
 ;; Resolve only the login directory; preserve user path components for symlink checks.
@@ -78,7 +85,7 @@
                (lambda () (close-port output)))))))))
 
 (define scp-example
-  (lambda (session log direction kind local remote policy)
+  (lambda (session log direction kind local remote policy symlink-policy)
     ;; Wrap the authenticated SSH session; the outer helper owns its lifetime.
     (let ([remote (scp-example-remote-path session remote)]
           [scp (scp-open session)])
@@ -100,20 +107,25 @@
                    [(download)
                     ;; Download one file with the selected overwrite/resume policy.
                     (scp-download scp remote local policy)])
-                 ;; Copy a tree in the selected direction; reject symlinks in the tree.
+                 ;; Copy a tree using the chosen policy for source symlinks.
                  (scp-copy-directory scp direction
                                      (if (eq? direction 'upload) local remote)
                                      (if (eq? direction 'upload) remote local)
                                      policy
                                      (lambda (relative-path attributes)
                                        ;; Check each destination before the copier creates or replaces it.
-                                       (if (eq? direction 'download)
-                                           (reject-local-scp-link!
-                                            (string-append local "/" relative-path))
-                                           (reject-remote-scp-link!
-                                            sftp (string-append remote "/" relative-path)))
+                                       (let ([preserve-link?
+                                              (and (eq? symlink-policy 'preserve)
+                                                   (eq? (scp-attributes-type attributes) 'symlink))])
+                                         (if (eq? direction 'download)
+                                             (reject-local-scp-link!
+                                              (string-append local "/" relative-path)
+                                              preserve-link?)
+                                             (reject-remote-scp-link!
+                                              sftp (string-append remote "/" relative-path)
+                                              preserve-link?)))
                                        #t)
-                                     'reject))
+                                     symlink-policy))
              (void))))
         ;; Cancel pending transfers and release the SCP wrapper on all exit paths.
         (lambda () (scp-close scp))))))
@@ -123,6 +135,7 @@
  "Copy --kind=file|directory via SCP; --overwrite=error|replace|skip, --resume=never."
  (append ssh-example-options '((direction . "Required: upload (local to remote) or download (remote to local).")
    (kind . "Required: file or directory; directory copies are recursive.")
+   (symlinks . "Source links inside directory copies: reject (default) or preserve (copy literal links, including dangling links). Destination parent links are rejected.")
    (local . "Required: local source path for upload or destination path for download.")
    (remote . "Required: remote destination for upload or source for download; relative to the remote login directory.")
    (overwrite . "Existing destination policy: error, replace, or skip (default: error).")
@@ -131,6 +144,7 @@
  (lambda (ref)
    (let* ([direction (string->symbol (example-required 'scp-example ref 'direction))]
           [kind (string->symbol (example-required 'scp-example ref 'kind))]
+          [symlink-policy (string->symbol (or (ref 'symlinks) "reject"))]
           [local (example-required 'scp-example ref 'local)]
           [remote (example-required 'scp-example ref 'remote)]
           [overwrite (string->symbol (or (ref 'overwrite) "error"))]
@@ -140,6 +154,8 @@
        (errorf 'scp-example "--direction must be upload or download"))
      (unless (memq kind '(file directory))
        (errorf 'scp-example "--kind must be file or directory"))
+     (unless (memq symlink-policy '(reject preserve))
+       (errorf 'scp-example "--symlinks must be reject or preserve"))
      (unless (memq overwrite '(error replace skip))
        (errorf 'scp-example "--overwrite must be error, replace, or skip"))
      ;; Error case: native SCP cannot safely restart an interrupted transfer.
@@ -157,6 +173,7 @@
                          'never overwrite 65536
                          (and progress?
                               (lambda (protocol direction path completed total)
-                                (report path completed total)))))))
+                                (report path completed total))))
+                        symlink-policy)))
         (with-logger log (log-infof "SCP ~a completed" direction))))))
  (command-line-arguments))

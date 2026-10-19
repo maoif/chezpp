@@ -348,8 +348,9 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                   [(file-regular? path) 'regular]
                                   [else 'special])
                             (and (file-regular? path) (file-size path))
-                            (file-mode path)
-                            (time-second (file-modification-time path)))))
+                            ;; Inspect the link itself so dangling links can be preserved.
+                            (file-mode path #f)
+                            (time-second (file-modification-time path #f)))))
 
   (define scp-child-path
     (lambda (parent name)
@@ -418,11 +419,25 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
         (case (and exists? (transfer-policy-overwrite policy))
           [(skip) #f]
           [(error) (errorf who "local destination exists: ~a" link-path)]
-          [else (file-symlink! target link-path) #t]))))
+          [else
+           ;; Replace the leaf itself; directory-aware helpers can follow a directory link.
+           (when exists? (delete-file link-path))
+           (file-symlink target link-path)
+           #t]))))
 
   (define replace-remote-symlink!
     (lambda (who sftp target link-path policy)
-      (let ([exists? (sftp-stat/maybe sftp link-path)])
+      ;; Directory entries describe links without following dangling targets.
+      (let* ([slash (let find ([index (fx1- (string-length link-path))])
+                      (cond [(fx< index 0) #f]
+                            [(char=? (string-ref link-path index) #\/) index]
+                            [else (find (fx1- index))]))]
+             [parent (cond [(not slash) "."] [(fxzero? slash) "/"]
+                           [else (substring link-path 0 slash)])]
+             [name (substring link-path (if slash (fx1+ slash) 0)
+                              (string-length link-path))]
+             [exists? (find (lambda (entry) (string=? name (sftp-attributes-name entry)))
+                            (sftp-list sftp parent))])
         (case (and exists? (transfer-policy-overwrite policy))
           [(skip) #f]
           [(error) (errorf who "remote destination exists: ~a" link-path)]

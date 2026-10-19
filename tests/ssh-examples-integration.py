@@ -168,6 +168,7 @@ def verify():
         p = run("ssh-open-repl", env, args, "--pty=no", input=b"printf shell-eof\n")
         assert p.returncode == 0 and b"shell-eof" in p.stdout, p
         verify_scp_directories(root, env, args)
+        verify_scp_symlinks(root, env, args)
         verify_scp_channel_reuse()
         source = root / "source"
         source.write_bytes(bytes(range(256)) * 1024)
@@ -386,6 +387,71 @@ def verify_scp_directories(root, env, args):
     result = run("scp", env, args, "--direction=download", "--kind=directory",
                  f"--local={root / 'missing-copy'}", f"--remote={root / 'missing-source'}")
     assert result.returncode != 0, result
+
+
+def verify_scp_symlinks(root, env, args):
+    # Preserve literal link targets, including dangling links, without traversing them.
+    source = root / "links-source"
+    (source / "nested").mkdir(parents=True)
+    (source / "nested/file").write_bytes(b"original data")
+    links = {"COPYING": "nested/file", "directory-link": "nested",
+             "dangling": "missing", "nested/你好": "../missing"}
+    for name, target in links.items():
+        (source / name).symlink_to(target)
+    remote, copied = root / "links-remote", root / "links-copy"
+    for direction in ("upload", "download"):
+        local = source if direction == "upload" else copied
+        destination = remote if direction == "upload" else copied
+        for overwrite in ("error", "skip", "replace"):
+            if overwrite == "skip":
+                (destination / "dangling").unlink()
+                (destination / "dangling").symlink_to("keep missing target")
+            result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                         f"--local={local}", f"--remote={remote}",
+                         "--symlinks=preserve", f"--overwrite={overwrite}")
+            assert result.returncode == 0, (direction, overwrite, result.stderr)
+            for name, target in links.items():
+                if overwrite == "skip" and name == "dangling":
+                    target = "keep missing target"
+                assert (destination / name).is_symlink(), (direction, name)
+                assert os.readlink(destination / name) == target, (direction, name)
+            assert (destination / "nested/file").read_bytes() == b"original data"
+        # Error case: a pre-existing link is an existing destination, even if dangling.
+        result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                     f"--local={local}", f"--remote={remote}", "--symlinks=preserve")
+        assert result.returncode != 0, result
+        # Error regression: replacing a leaf link to a directory must not write into its target.
+        leaf_outside = root / ("leaf-outside-" + direction)
+        leaf_outside.mkdir()
+        (leaf_outside / "file").write_bytes(b"untouched leaf target")
+        (destination / "COPYING").unlink()
+        (destination / "COPYING").symlink_to(leaf_outside, target_is_directory=True)
+        result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                     f"--local={local}", f"--remote={remote}",
+                     "--symlinks=preserve", "--overwrite=replace")
+        assert result.returncode == 0, result.stderr
+        assert os.readlink(destination / "COPYING") == "nested/file", direction
+        assert (leaf_outside / "file").read_bytes() == b"untouched leaf target"
+        assert sorted(p.name for p in leaf_outside.iterdir()) == ["file"]
+        # Error case: preserving source links must not follow a destination directory link.
+        saved = root / ("saved-nested-" + direction)
+        (destination / "nested").rename(saved)
+        outside = root / ("outside-" + direction)
+        outside.mkdir()
+        (outside / "file").write_bytes(b"untouched")
+        (destination / "nested").symlink_to(outside, target_is_directory=True)
+        result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                     f"--local={local}", f"--remote={remote}",
+                     "--symlinks=preserve", "--overwrite=replace")
+        assert result.returncode != 0 and b"symlinks are rejected" in result.stderr, result
+        assert (outside / "file").read_bytes() == b"untouched"
+        (destination / "nested").unlink()
+        saved.rename(destination / "nested")
+        # Error case: source links still require explicit opt-in with the default policy.
+        result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                     f"--local={source if direction == 'upload' else root / 'links-rejected'}",
+                     f"--remote={root / 'links-reject-remote' if direction == 'upload' else remote}")
+        assert result.returncode != 0 and b"reject" in result.stderr, result
 
 
 def verify_scp_channel_reuse():
@@ -781,7 +847,10 @@ if __name__ == "__main__":
     import sys
 
     os.chdir(pathlib.Path(__file__).resolve().parent.parent)
-    if "--channels" in sys.argv:
+    if "--symlinks" in sys.argv:
+        with fixture() as (root, env, args):
+            verify_scp_symlinks(root, env, args)
+    elif "--channels" in sys.argv:
         verify_scp_channel_reuse()
     elif "--password" in sys.argv:
         verify_password()
