@@ -309,6 +309,9 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                'scp-directory-files
                (lambda ()
                  (guard (failure [else (net-operation-failed failure)])
+                   ;; A poll deadline only bounds waiting; the next step must enforce expiry.
+                   (when (>= (scp-current-monotonic-ms) deadline)
+                     (raise-net-error who 'timeout "SCP batch transfer timed out" remote-directory))
                    (let ([status (ffi-net-scp-transfer-step handle)])
                      (if (and (vector? status) (= 4 (vector-length status)))
                          (let ([tag (vector-ref status 0)] [counts (vector-ref status 2)])

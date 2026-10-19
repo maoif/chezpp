@@ -95,6 +95,7 @@ def wait_for_log(process, fragment, timeout=10):
 
 
 def verify():
+    verify_scp_batch_timeouts()
     with fixture() as (root, env, args):
         # Defaults must use the local account, even if login environment names disagree.
         env["USER"] = "chezpp-not-the-local-account"
@@ -342,6 +343,62 @@ def verify():
         pathlib.Path(badenv["HOME"]).mkdir()
         p = run("ssh-run-cmd", badenv, args, "--command=true")
         assert p.returncode != 0 and b"host key is not trusted" in p.stderr, p
+
+
+def verify_scp_batch_timeouts():
+    # Error case: an SCP peer accepts exec but never sends its protocol acknowledgement.
+    # SFTP stays responsive so the copy reaches the batched transfer, not an earlier stat.
+    sftp_server = shutil.which('sftp-server') or next(
+        (path for path in ('/usr/lib/ssh/sftp-server', '/usr/lib/openssh/sftp-server',
+                           '/usr/libexec/sftp-server', '/usr/libexec/openssh/sftp-server')
+         if pathlib.Path(path).is_file()), None)
+    assert sftp_server, 'SCP timeout fixture requires the OpenSSH sftp-server executable'
+    with tempfile.TemporaryDirectory(prefix='chezpp-scp-timeout-') as directory:
+        peer = pathlib.Path(directory) / 'peer.py'
+        peer.write_text(f'''import os, sys
+command = os.environ['SSH_ORIGINAL_COMMAND']
+if command == 'internal-sftp':
+    os.execv({sftp_server!r}, [{sftp_server!r}])
+elif command.startswith('scp '):
+    # Wait for client EOF without replying; cancellation must release this channel.
+    sys.stdin.buffer.read()
+else:
+    os.execv('/bin/sh', ['sh', '-c', command])
+''')
+        with fixture(shell_command=f'{sys.executable} {peer}') as (root, env, args):
+            user = pwd.getpwuid(os.getuid()).pw_name
+            port = args[1].split('=')[1]
+            for direction in ('upload', 'download'):
+                source, target = root / f'{direction}-source', root / f'{direction}-target'
+                source.mkdir()
+                (source / 'file').write_bytes(b'payload')
+                script = root / 'batch-timeout.ss'
+                script.write_text(f'''(import (chezpp) (chezpp net))
+(call-with-ssh-session "127.0.0.1" {port} "{user}"
+ (lambda (ssh)
+  (ssh-auth-publickey! ssh "{user}")
+  (call-with-scp-session ssh
+   (lambda (scp)
+    (let* ([progress? #f]
+           [policy (make-transfer-policy 'never 'replace 65536
+                     (lambda arguments (set! progress? #t)))]
+           [operation (scp-copy-directory/nonblocking scp '{direction}
+                        "{source}" "{target}" 100 policy #f 'reject)])
+     (guard (failure
+             [(and (net-error? failure) (eq? (net-error-kind failure) 'timeout)) (void)]
+             [else (raise failure)])
+      (net-operation-wait operation)
+      (error 'test "stalled SCP batch unexpectedly completed"))
+     (unless (and progress? (eq? (net-operation-state operation) 'failed)
+                  (scp-attributes? (scp-stat scp "{source}/file")))
+      (error 'test "timeout did not release the batch and preserve its session")))))))
+''')
+                result = subprocess.run(['./chez++', '--script', str(script)], env=env,
+                                        capture_output=True, timeout=5)
+                assert result.returncode == 0, (direction, result.stderr)
+                if direction == 'download':
+                    assert not (target / 'file').exists(), 'timed-out partial download remains'
+                assert (source / 'file').read_bytes() == b'payload'
 
 
 def verify_scp_callback_cancellation(root, env, args):
@@ -1160,7 +1217,9 @@ if __name__ == "__main__":
     import sys
 
     os.chdir(pathlib.Path(__file__).resolve().parent.parent)
-    if "--forwarding-timeout" in sys.argv:
+    if "--batch-timeouts" in sys.argv:
+        verify_scp_batch_timeouts()
+    elif "--forwarding-timeout" in sys.argv:
         with fixture() as (root, env, args):
             verify_forwarding_connect_timeout(env, args)
     elif "--blocked-forwarding" in sys.argv:
