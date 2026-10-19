@@ -1252,6 +1252,53 @@ ptr chezpp_net_ssh_channel_open_forward(uptr handle, const char *remote_host, in
   return make_ssh_handle((uptr)channel_wrapper);
 }
 
+/* A direct channel open must retain the same channel across SSH_AGAIN turns. */
+ptr chezpp_net_ssh_channel_forward_start(uptr handle) {
+  chezpp_ssh_session *owner = (chezpp_ssh_session *)TO_VOIDP(handle);
+  chezpp_ssh_channel *channel;
+  if (owner == NULL || owner->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  channel = calloc(1, sizeof(*channel));
+  if (channel == NULL) return make_errno_status();
+  channel->owner = owner;
+  channel->channel = ssh_channel_new(owner->session);
+  if (channel->channel == NULL) {
+    free(channel);
+    return ssh_error_status_from_wrapper(owner, "failed to allocate SSH forwarding channel");
+  }
+  return make_ssh_handle((uptr)channel);
+}
+
+ptr chezpp_net_ssh_channel_forward_step(uptr handle, const char *remote_host, int remote_port,
+                                       const char *source_host, int source_port) {
+  chezpp_ssh_channel *channel = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  int result, blocking;
+  if (channel == NULL || channel->owner == NULL || channel->owner->session == NULL)
+    return make_error_status_message("invalid ssh forwarding channel");
+  blocking = ssh_is_blocking(channel->owner->session);
+  ssh_set_blocking(channel->owner->session, 0);
+  result = ssh_channel_open_forward(channel->channel, remote_host, remote_port,
+                                    source_host, source_port);
+  ssh_set_blocking(channel->owner->session, blocking);
+  if (result == SSH_AGAIN)
+    return ssh_would_block_status(channel->owner->session, POLLIN);
+  if (result != SSH_OK)
+    return ssh_channel_error_status(channel, "failed to open SSH forwarding channel");
+  return Strue;
+}
+
+void chezpp_net_ssh_channel_forward_discard(uptr handle) {
+  chezpp_ssh_channel *channel = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  int blocking;
+  if (channel == NULL) return;
+  /* Cancellation must not wait for a remote open confirmation or close reply. */
+  blocking = ssh_is_blocking(channel->owner->session);
+  ssh_set_blocking(channel->owner->session, 0);
+  ssh_channel_free(channel->channel);
+  ssh_set_blocking(channel->owner->session, blocking);
+  free(channel);
+}
+
 ptr chezpp_net_ssh_remote_forward_listen(uptr handle, const char *address, int port) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   int bound_port = 0;

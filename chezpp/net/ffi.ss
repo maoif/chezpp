@@ -84,6 +84,9 @@
           ffi-net-ssh-known-host-update
           ffi-net-ssh-known-host-export
           ffi-net-ssh-channel-open
+          ffi-net-ssh-channel-forward-start
+          ffi-net-ssh-channel-forward-step
+          ffi-net-ssh-channel-forward-discard
           ffi-net-ssh-channel-open-forward
           ffi-net-ssh-remote-forward-listen
           ffi-net-ssh-remote-forward-accept
@@ -473,6 +476,13 @@
   (define ffi-net-ssh-channel-open-forward
     (foreign-procedure "chezpp_net_ssh_channel_open_forward"
                        (uptr string int string int int) scheme-object))
+  (define ffi-net-ssh-channel-forward-start
+    (foreign-procedure "chezpp_net_ssh_channel_forward_start" (uptr) scheme-object))
+  (define ffi-net-ssh-channel-forward-step
+    (foreign-procedure "chezpp_net_ssh_channel_forward_step"
+                       (uptr string int string int) scheme-object))
+  (define ffi-net-ssh-channel-forward-discard
+    (foreign-procedure "chezpp_net_ssh_channel_forward_discard" (uptr) void))
   (define ffi-net-ssh-remote-forward-listen
     (foreign-procedure "chezpp_net_ssh_remote_forward_listen"
                        (uptr string int) scheme-object))

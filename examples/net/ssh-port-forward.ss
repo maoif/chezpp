@@ -72,9 +72,18 @@
         (vector-set! relay 9 #t))
       (and (vector-ref relay 8) (vector-ref relay 9)))))
 
+;; Pending setup fields: local socket, network operation, accepted remote forwarding or #f.
+(define close-pending-forward!
+  (lambda (pending)
+    ;; Cancellation releases a pending native channel or socket before session shutdown.
+    (net-operation-cancel! (vector-ref pending 1))
+    (guard (condition [else #f]) (close-socket (vector-ref pending 0)))
+    (when (vector-ref pending 2)
+      (guard (condition [else #f]) (ssh-close-forwarding (vector-ref pending 2))))))
+
 (define serve-forwarding!
   (lambda (session log direction listen-host listen-port target-host target-port duration)
-    (let ([listener #f] [relay* '()] [stop? #f]
+    (let ([listener #f] [relay* '()] [pending* '()] [stop? #f]
           [deadline (and (> duration 0) (+ (monotonic-ms) duration))]
           [old-interrupt (keyboard-interrupt-handler)])
       (dynamic-wind
@@ -108,14 +117,15 @@
                             (guard (condition
                                     [else (close-socket answer)
                                           (forwarding-connection-error! log condition)])
-                              ;; Each accepted local socket gets its own direct SSH channel.
-                              (set! relay*
-                                    (cons (make-relay
+                              ;; Retain a pending direct channel across nonblocking setup turns.
+                              (set! pending*
+                                    (cons (vector
                                            answer
-                                           (ssh-open-local-forward session target-host target-port
-                                                                   listen-host listen-port))
-                                          relay*))))))
-                    ;; Accept one reverse connection and connect it to the local target.
+                                           (ssh-open-local-forward/nonblocking
+                                            session target-host target-port listen-host listen-port)
+                                           #f)
+                                          pending*))))))
+                    ;; Accept reverse channels immediately; connect local targets asynchronously.
                     (let ([answer (ssh-accept-remote-forward listener)])
                       (if (net-would-block? answer)
                           (wait! answer)
@@ -123,9 +133,50 @@
                             (guard (condition
                                     [else (close-relay! (make-relay socket answer))
                                           (forwarding-connection-error! log condition)])
-                              (socket-connect! socket
-                                               (make-socket-address 'inet target-host target-port))
-                              (set! relay* (cons (make-relay socket answer) relay*)))))))
+                              (set! pending*
+                                    (cons (vector
+                                           socket
+                                           (socket-connect/nonblocking
+                                            socket (make-socket-address 'inet target-host target-port)
+                                            30000)
+                                           answer)
+                                          pending*)))))))
+                (set! pending*
+                      (filter
+                       (lambda (pending)
+                         (guard (condition
+                                 [else (close-pending-forward! pending)
+                                       (forwarding-connection-error! log condition)
+                                       #f])
+                           (let ([operation (vector-ref pending 1)])
+                             ;; TCP connect needs readiness: SO_ERROR can be zero in SYN_SENT.
+                             ;; SSH may already have buffered replies read by another channel.
+                             (let ([targets (net-operation-poll-targets operation)])
+                               (when (or (not (vector-ref pending 2))
+                                         (null? targets)
+                                         (zero? (net-operation-remaining-timeout-ms operation))
+                                         (exists (lambda (target)
+                                                   (pair? (poll-target-ready-events target)))
+                                                 (poll targets 0)))
+                                 (net-operation-step! operation)))
+                             (case (net-operation-state operation)
+                               [(pending)
+                                (for-each
+                                 (lambda (target)
+                                   (wait! (make-net-would-block (poll-target-resource target)
+                                                               (poll-target-events target))))
+                                 (net-operation-poll-targets operation))
+                                #t]
+                               [(completed)
+                                (set! relay*
+                                      (cons (make-relay
+                                             (vector-ref pending 0)
+                                             (or (vector-ref pending 2)
+                                                 (net-operation-result operation)))
+                                            relay*))
+                                #f]
+                               [else (raise (net-operation-condition operation))]))))
+                       pending*))
                 (set! relay*
                       (filter
                        (lambda (relay)
@@ -150,6 +201,7 @@
                 (loop)))))
         (lambda ()
           (keyboard-interrupt-handler old-interrupt)
+          (for-each close-pending-forward! pending*)
           (for-each close-relay! relay*)
           (when listener
             (if (socket? listener) (close-socket listener) (ssh-close-forwarding listener)))

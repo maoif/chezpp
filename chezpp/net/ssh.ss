@@ -28,6 +28,7 @@
           ssh-forwarding-descriptor
           ssh-forwarding-closed?
           ssh-open-local-forward
+          ssh-open-local-forward/nonblocking
           ssh-request-remote-forward!
           ssh-accept-remote-forward
           ssh-cancel-remote-forward!
@@ -65,7 +66,8 @@
           (chezpp net errors)
           (chezpp net ffi)
           (chezpp net private)
-          (chezpp net operation))
+          (chezpp net operation)
+          (chezpp net poll))
 
   #|record:ssh-session
 The `ssh-session` record owns an authenticated or unauthenticated SSH transport.
@@ -699,6 +701,64 @@ the originator; and `timeout-ms` bounds setup. It returns an `ssh-forwarding` wi
                       [channel (%make-ssh-channel handle session #f)])
                  (%make-ssh-forwarding 'local session channel remote-host remote-port
                                        (channel-resource who channel) #f)))]))
+
+  #|proc:ssh-open-local-forward/nonblocking
+The `ssh-open-local-forward/nonblocking` procedure constructs a direct TCP/IP open operation.
+The authenticated `session` must remain open until the operation terminates and its result closes.
+The `remote-host` and `remote-port` parameters identify the destination resolved by the server.
+Optional `source-host` and `source-port` identify the originator (default: `127.0.0.1`, zero).
+Optional `timeout-ms` bounds setup in milliseconds (default: 30000, nonnegative fixnum).
+Returns a pending network operation. Each step attempts setup without waiting; completion returns
+an `ssh-forwarding` that the caller must close. Failure or cancellation frees the pending channel.
+|#
+  (define-who ssh-open-local-forward/nonblocking
+    (case-lambda
+      [(session remote-host remote-port)
+       (ssh-open-local-forward/nonblocking session remote-host remote-port "127.0.0.1" 0
+                                           ssh-default-timeout-ms)]
+      [(session remote-host remote-port source-host source-port)
+       (ssh-open-local-forward/nonblocking session remote-host remote-port source-host source-port
+                                           ssh-default-timeout-ms)]
+      [(session remote-host remote-port source-host source-port timeout-ms)
+       (pcheck ([ssh-session? session] [string? remote-host source-host]
+                [fixnum? remote-port source-port timeout-ms])
+         (ensure-session-open who session)
+         (check-port who remote-port)
+         (check-port who source-port)
+         (check-timeout-ms who timeout-ms)
+         (let* ([now-ms (lambda ()
+                          (let ([time (current-time 'time-monotonic)])
+                            (+ (* (time-second time) 1000)
+                               (quotient (time-nanosecond time) 1000000))))]
+                [deadline (+ (now-ms) timeout-ms)]
+                [handle (ensure-success who 'ssh
+                          (ffi-net-ssh-channel-forward-start (ssh-session-handle session)))]
+                [transferred? #f])
+           (make-net-operation
+            'ssh-open-local-forward
+            (lambda ()
+              (ensure-session-open who session)
+              (when (>= (now-ms) deadline)
+                (raise-net-error who 'timeout "SSH forwarding channel open timed out" session))
+              (let ([answer (ffi-net-ssh-channel-forward-step
+                             handle remote-host remote-port source-host source-port)])
+                (if (ffi-would-block? answer)
+                    (net-operation-pending
+                     (list (make-poll-target
+                            (ffi-net-ssh-session-fd (ssh-session-handle session))
+                            (ffi-would-block-events answer))) deadline)
+                    (begin
+                      (ensure-success who 'ssh answer)
+                      (let* ([channel (%make-ssh-channel handle session #f)]
+                             [forwarding (%make-ssh-forwarding
+                                          'local session channel remote-host remote-port
+                                          (channel-resource who channel) #f)])
+                        (set! transferred? #t)
+                        (net-operation-completed forwarding))))))
+            void
+            (lambda ()
+              (unless transferred?
+                (ffi-net-ssh-channel-forward-discard handle))))))]))
 
   #|proc:ssh-request-remote-forward!
 The `ssh-request-remote-forward!` procedure asks `session` to listen on `address` and `port` on the

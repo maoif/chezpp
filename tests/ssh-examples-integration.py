@@ -292,6 +292,9 @@ def verify():
         verify_forwarding(env, args)
         verify_forwarding_recovery(env, args)
         verify_forwarding_cancellation(env, args)
+        verify_forwarding_blocked_connect(env, args)
+        verify_forwarding_open_lifecycle(root, env, args)
+        verify_forwarding_connect_timeout(env, args)
         # Explicit encrypted private keys use a separate passphrase environment variable.
         key = root / "home/.ssh/id_ed25519"
         subprocess.run(
@@ -872,6 +875,148 @@ def verify_forwarding(env, args):
                 process.wait(timeout=5)
 
 
+def verify_forwarding_open_lifecycle(root, env, args):
+    user = pwd.getpwuid(os.getuid()).pw_name
+    port = args[1].split('=')[1]
+    with socket.socket() as target:
+        target.bind(('127.0.0.1', 0))
+        target.listen(1)
+        held = [socket.create_connection(target.getsockname(), .2) for _ in range(2)]
+        try:
+            script = root / 'forward-open-lifecycle.ss'
+            script.write_text(f'''(import (chezpp) (chezpp net))
+(call-with-ssh-session "127.0.0.1" {port} "{user}"
+ (lambda (ssh)
+  (ssh-auth-publickey! ssh "{user}")
+  (for-each
+   (lambda (action)
+    (let ([operation (ssh-open-local-forward/nonblocking
+                      ssh "127.0.0.1" {target.getsockname()[1]} "127.0.0.1" 0 100)])
+     (unless (eq? action 'unstarted)
+      (net-operation-step! operation)
+      (unless (and (eq? (net-operation-state operation) 'pending)
+                   (pair? (net-operation-poll-targets operation)))
+       (error 'test "expected pending forwarding setup")))
+     ;; Error cases: timeout and cancellation must release only this channel.
+     (if (eq? action 'timeout)
+         (begin
+          (guard (failure [else
+                           (unless (and (net-error? failure)
+                                        (eq? (net-error-kind failure) 'timeout))
+                            (raise failure))])
+           (net-operation-wait operation))
+          (unless (eq? (net-operation-state operation) 'failed)
+           (error 'test "expected forwarding timeout")))
+         (begin
+          (net-operation-cancel! operation)
+          (net-operation-cancel! operation)
+          (unless (eq? (net-operation-state operation) 'cancelled)
+           (error 'test "expected forwarding cancellation"))))
+     (call-with-ssh-channel ssh 1000
+      (lambda (channel)
+       (ssh-exec channel "printf alive" 1000)
+       (ssh-send-eof! channel)
+       (unless (equal? (ssh-read channel 5 1000) (string->utf8 "alive"))
+        (error 'test "forwarding cleanup damaged shared SSH session"))))))
+   '(timeout cancel unstarted))))
+''')
+            result = subprocess.run(['./chez++', '--script', str(script)], env=env,
+                                    capture_output=True, timeout=10)
+            assert result.returncode == 0, result.stderr
+        finally:
+            for connection in held:
+                connection.close()
+
+
+def verify_forwarding_connect_timeout(env, args, script='examples/net/ssh-port-forward.ss'):
+    import signal
+
+    with socket.socket() as target:
+        target.bind(('127.0.0.1', 0))
+        target.listen(1)
+        held = [socket.create_connection(target.getsockname(), .2) for _ in range(2)]
+        port = free_port()
+        process = subprocess.Popen(
+            ['./chez++', '--script', script, *args, '--direction=remote',
+             f'--listen-port={port}', f'--target-port={target.getsockname()[1]}'],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            wait_for_log(process, b'forwarding listening')
+            with socket.create_connection(('127.0.0.1', port), 3):
+                # Error case: a still-unconnected socket must retain its setup deadline.
+                started = time.monotonic()
+                wait_for_log(process, b'forwarded connection failed', timeout=33)
+                assert 29 <= time.monotonic() - started <= 33, 'setup deadline was lost'
+                assert process.poll() is None, 'one timeout stopped the shared listener'
+                process.send_signal(signal.SIGINT)
+                _, errors = process.communicate(timeout=3)
+                assert process.returncode == 0 and b'forwarding stopped' in errors, errors
+        finally:
+            for connection in held:
+                connection.close()
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)
+
+
+def verify_forwarding_blocked_connect(env, args):
+    import signal
+
+    for direction in ('local', 'remote'):
+        for ending in ('duration', 'interrupt', 'recover'):
+            with socket.socket() as target:
+                target.bind(('127.0.0.1', 0))
+                target.listen(1)
+                target.settimeout(3)
+                port = free_port()
+                duration = '1500' if ending == 'duration' else '0'
+                process = subprocess.Popen(
+                    ['./chez++', '--script', 'examples/net/ssh-port-forward.ss', *args,
+                     f'--direction={direction}', f'--listen-port={port}',
+                     f'--target-port={target.getsockname()[1]}', f'--duration={duration}'],
+                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                held = []
+                try:
+                    wait_for_log(process, b'forwarding listening')
+                    with socket.create_connection(('127.0.0.1', port), 3) as active:
+                        peer, _ = target.accept()
+                        with peer:
+                            # Fill the target accept queue, then request another connection.
+                            for _ in range(2):
+                                held.append(socket.create_connection(target.getsockname(), .2))
+                            with socket.create_connection(('127.0.0.1', port), 3) as blocked:
+                                time.sleep(.15)
+                                # Error case: stalled setup must not stall an existing relay.
+                                peer.sendall(b'active-during-connect')
+                                active.settimeout(1)
+                                assert active.recv(100) == b'active-during-connect', direction
+                                if ending == 'recover':
+                                    # A pending connection must survive until backlog space opens.
+                                    for _ in range(2):
+                                        queued, _ = target.accept()
+                                        queued.close()
+                                    target.settimeout(5)
+                                    recovered, _ = target.accept()
+                                    with recovered:
+                                        recovered.sendall(b'connected-after-backlog')
+                                        blocked.settimeout(3)
+                                        assert blocked.recv(100) == b'connected-after-backlog', direction
+                                if ending in ('interrupt', 'recover'):
+                                    process.send_signal(signal.SIGINT)
+                                # Error case: pending setup must honor duration and Ctrl-C.
+                                _, errors = process.communicate(timeout=3)
+                                assert process.returncode == 0 and b'forwarding stopped' in errors, errors
+                    with socket.socket() as probe:
+                        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        probe.bind(('127.0.0.1', port))
+                finally:
+                    for connection in held:
+                        connection.close()
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate(timeout=5)
+
+
 def verify_forwarding_cancellation(env, args):
     import signal
 
@@ -1015,7 +1160,14 @@ if __name__ == "__main__":
     import sys
 
     os.chdir(pathlib.Path(__file__).resolve().parent.parent)
-    if "--filter-cancellation" in sys.argv:
+    if "--forwarding-timeout" in sys.argv:
+        with fixture() as (root, env, args):
+            verify_forwarding_connect_timeout(env, args)
+    elif "--blocked-forwarding" in sys.argv:
+        with fixture() as (root, env, args):
+            verify_forwarding_blocked_connect(env, args)
+            verify_forwarding_open_lifecycle(root, env, args)
+    elif "--filter-cancellation" in sys.argv:
         with fixture() as (root, env, args):
             verify_scp_filter_cancellation(root, env, args)
     elif "--callback-cancellation" in sys.argv:
