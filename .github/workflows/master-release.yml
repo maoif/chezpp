@@ -24,41 +24,52 @@ jobs:
           - arch: x64
             platform: linux/amd64
             runner: ubuntu-24.04
+            image: ubuntu:24.04
           - arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
+            image: ubuntu:24.04
           - arch: riscv64
             platform: linux/riscv64
             runner: ubuntu-24.04
+            image: ubuntu:24.04
+            emulation: riscv64
+          - arch: loongarch64
+            platform: linux/loong64
+            runner: ubuntu-24.04
+            image: lcr.loongnix.cn/library/debian@sha256:c0aa9264c13b608f40a3bf7b9c7662720b6b93839013038df9c3b079835c228f
+            emulation: loong64
     steps:
       - name: Checkout source and pinned submodules
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           submodules: recursive
           persist-credentials: false
-      - name: Enable RISC-V emulation
-        if: matrix.arch == 'riscv64'
+      - name: Enable architecture emulation
+        if: matrix.emulation
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
-          platforms: riscv64
+          platforms: ${{ matrix.emulation }}
       - name: Build, run non-net tests, and package installed artifacts
         env:
           TARGET_ARCH: ${{ matrix.arch }}
           TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_IMAGE: ${{ matrix.image }}
         run: |
           docker run --rm --platform "$TARGET_PLATFORM" \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
             -w "$GITHUB_WORKSPACE" \
-            ubuntu:24.04 \
+            "$TARGET_IMAGE" \
             bash tools/ci-build.sh "$TARGET_ARCH" "$GITHUB_SHA"
-      - name: Smoke-test archive in a clean Ubuntu runtime
+      - name: Smoke-test archive in a clean runtime
         env:
           TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_IMAGE: ${{ matrix.image }}
         run: |
           docker run --rm --platform "$TARGET_PLATFORM" \
             -v "$GITHUB_WORKSPACE/dist:/packages:ro" \
             -v "$GITHUB_WORKSPACE/tools/package-smoke.ss:/smoke.ss:ro" \
-            ubuntu:24.04 bash -c '
+            "$TARGET_IMAGE" bash -c '
               set -euo pipefail
               archives=(/packages/*.tar.gz)
               test "${#archives[@]}" -eq 1
@@ -112,9 +123,10 @@ jobs:
           import glob, json, os, tarfile
           architectures = set()
           versions = set()
+          requirements = {}
           archives = glob.glob('*.tar.gz')
-          if len(archives) != 3:
-              raise SystemExit('expected three architecture archives')
+          if len(archives) != 4:
+              raise SystemExit('expected four architecture archives')
           for archive in archives:
               with tarfile.open(archive) as stream:
                   members = [m for m in stream.getmembers() if m.name.endswith('/BUILD-INFO.json')]
@@ -126,15 +138,19 @@ jobs:
                   raise SystemExit('package commit mismatch')
               architectures.add(info['arch'])
               versions.add(info['version'])
-          if architectures != {'x64', 'arm64', 'riscv64'} or len(versions) != 1:
+              requirements[info['arch']] = info['host_requirements']
+          if architectures != {'x64', 'arm64', 'riscv64', 'loongarch64'} or len(versions) != 1:
               raise SystemExit('package architecture/version mismatch')
           with open('release-notes.md', 'w') as notes:
               notes.write(f"Master snapshot of `{os.environ['GITHUB_SHA']}`.\n\n")
               notes.write(f"Chezpp version: `{versions.pop()}`.\n\n")
-              notes.write('Linux packages built on Ubuntu 24.04 for x64, arm64, and riscv64. '
-                          'All non-net tests passed on every architecture. RISC-V uses QEMU.\n\n')
-              notes.write('Extract an archive anywhere and run `bin/chez++`. Requires '
-                          'glibc >= 2.39 and the matching CPU architecture. Recursive shared '
+              notes.write('Linux packages built on Ubuntu 24.04 for x64, arm64, and riscv64, '
+                          'and Loongnix Debian for loongarch64. All non-net tests passed on '
+                          'every architecture. RISC-V and LoongArch use QEMU.\n\n')
+              for arch in sorted(requirements):
+                  notes.write(f"- `{arch}`: {', '.join(requirements[arch])}.\n")
+              notes.write('\nExtract an archive anywhere and run `bin/chez++` on the '
+                          'matching CPU architecture. Recursive shared '
                           'library dependencies are bundled, except host glibc and its loader. '
                           'Checksums and build metadata are included.\n')
           PY

@@ -1,17 +1,20 @@
 #!/bin/bash
-# Run inside Ubuntu 24.04 of the target architecture, with root access for setup.
+# Run inside the target architecture's CI image, with root access for setup.
 set -euo pipefail
 
-architecture=${1:?usage: ci-build.sh x64|arm64|riscv64 full-commit-sha}
+architecture=${1:?usage: ci-build.sh x64|arm64|riscv64|loongarch64 full-commit-sha}
 commit=${2:?missing commit SHA}
 case "$architecture:$(uname -m)" in
-    x64:x86_64|arm64:aarch64|riscv64:riscv64) ;;
+    x64:x86_64|arm64:aarch64|riscv64:riscv64|loongarch64:loongarch64) ;;
     *) echo "architecture mismatch: $architecture on $(uname -m)" >&2; exit 1 ;;
 esac
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid commit SHA' >&2; exit 1; }
 # shellcheck source=/dev/null
 source /etc/os-release
-[[ $ID == ubuntu && $VERSION_ID == 24.04 ]] || { echo 'requires Ubuntu 24.04' >&2; exit 1; }
+case "$architecture:$ID:${VERSION_ID:-}" in
+    loongarch64:debian:*|x64:ubuntu:24.04|arm64:ubuntu:24.04|riscv64:ubuntu:24.04) ;;
+    *) echo 'requires Ubuntu 24.04, or Loongnix Debian for loongarch64' >&2; exit 1 ;;
+esac
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -21,7 +24,7 @@ apt-get install -y --no-install-recommends \
     libssl-dev uuid-dev libxxhash-dev zlib1g-dev libc-ares-dev \
     libcurl4-openssl-dev libgrpc-dev libidn2-dev libssh-dev libwebsockets-dev
 
-# Ubuntu lacks BLAKE3 1.8.x. Pin and verify its portable C library on every architecture.
+# Pin and verify the same portable BLAKE3 C library on every architecture.
 workspace=$(mktemp -d)
 trap 'rm -rf "$workspace"' EXIT
 blake3_commit=df610ddc3b93841ffc59a87e3da659a15910eb46 # 1.8.2
