@@ -25,8 +25,8 @@
 
 ;; Larger defaults keep the optimized scheduler busy: sieve checks 100 million
 ;; numbers, Mandelbrot renders 19.7 million pixels with up to 2048 iterations,
-;; sort handles 262144 values per worker, and Monte Carlo samples 100 million
-;; points per worker. Full runtime includes the scalar checks below.
+;; sort handles 262144 values per worker in four runs, and Monte Carlo samples
+;; 100 million points per worker. Full runtime includes the scalar checks below.
 ;; The sieve's reference values are for primes strictly below its limit;
 ;; update both reference values when changing the limit. The 100-million count
 ;; and sum were also checked with an independent scalar byte-array sieve.
@@ -40,10 +40,14 @@
 (define fiber-stress-mandelbrot-height 3840)
 (define fiber-stress-mandelbrot-iterations 2048)
 (define fiber-stress-sort-items-per-worker 262144)
+;; A positive number of runs with earlier results live exercises GC between runs.
+;; Vector chunks avoid the long GC pauses that mixed-owner linked lists can cause.
+(define fiber-stress-sort-repetitions 4)
 (define fiber-stress-monte-carlo-samples-per-worker 100000000)
 
-;; Allow five minutes per parallel workload on slower machines. The watchdog
-;; bounds fiber work; scalar validation runs afterward on the calling thread.
+;; Allow five minutes per parallel run on slower machines. GC pauses delay the
+;; fiber watchdog too; use an external process timeout when investigating stalls.
+;; Scalar validation runs on the calling thread, outside this watchdog.
 (define fiber-stress-watchdog-milliseconds 300000)
 
 ;; Each stress result is checked exactly. Mandelbrot and Monte Carlo also run
@@ -311,20 +315,37 @@
 
 (define fiber-stress-merge-two
   (lambda (left right)
-    ;; Each chunk/pair has one consumer, and its sender never uses it again.
-    ;; `merge!` can relink those private pairs without a reversed accumulator,
-    ;; copied prefix or new list nodes. This removes most merge-stage GC work.
-    (merge! < left right)))
+    ;; Chez's parallel GC assigns segments to the threads that allocated them.
+    ;; Relinking pairs from different workers with `merge!` creates long chains
+    ;; that GC traverses by repeatedly waking another segment owner. A contiguous
+    ;; vector avoids that dependent traversal and allocates one object per merge.
+    ;; Source chunks remain read-only; only this fiber writes `merged`.
+    (let* ([left-size (vector-length left)] [right-size (vector-length right)]
+           [merged (make-vector (+ left-size right-size))])
+      (let merge ([left-index 0] [right-index 0] [output-index 0])
+        (cond
+         [(fx= left-index left-size)
+          (vector-copy! right right-index merged output-index
+                        (fx- right-size right-index))]
+         [(fx= right-index right-size)
+          (vector-copy! left left-index merged output-index
+                        (fx- left-size left-index))]
+         [(< (vector-ref left left-index) (vector-ref right right-index))
+          (vector-set! merged output-index (vector-ref left left-index))
+          (merge (fx1+ left-index) right-index (fx1+ output-index))]
+         [else
+          (vector-set! merged output-index (vector-ref right right-index))
+          (merge left-index (fx1+ right-index) (fx1+ output-index))]))
+      merged)))
 
 (define fiber-stress-merge-round
-  (lambda (sorted-lists)
-    (if (or (null? sorted-lists) (null? (cdr sorted-lists)))
-        (if (null? sorted-lists) '() (car sorted-lists))
+  (lambda (sorted-chunks)
+    (if (or (null? sorted-chunks) (null? (cdr sorted-chunks)))
+        (if (null? sorted-chunks) '#() (car sorted-chunks))
         (let ([outputs '()])
-          ;; Each pair owns disjoint lists, so concurrent destructive merges are safe.
+          ;; Each pair reads two complete chunks and publishes one private vector.
           ;; Later rounds have fewer pairs: the final merge still uses only one fiber.
-          ;; Retaining the original input vector below permits a full independent check.
-          (let loop ([rest sorted-lists])
+          (let loop ([rest sorted-chunks])
             (unless (null? rest)
               (let ([output (make-channel)])
                 (set! outputs (cons output outputs))
@@ -343,59 +364,88 @@
                          (cons (channel-get (car channels)) merged))))))))
 
 (mat fiber-stress-merge-boundaries
-     ;; Fresh input lists are owned by the merge and consumed exactly once.
-     ;; Duplicates, empty chunks and an odd tree width must conserve every item.
-     (equal? '(1 2 2 2 3 9)
-             (fiber-stress-merge-two (list 1 2 9) (list 2 2 3)))
+     ;; Merging preserves every duplicate and leaves both source chunks intact.
+     (let ([left (vector 1 2 9)] [right (vector 2 2 3)])
+       (and (equal? '#(1 2 2 2 3 9) (fiber-stress-merge-two left right))
+            (equal? '#(1 2 9) left)
+            (equal? '#(2 2 3) right)))
 
-     (equal? '(1 3) (fiber-stress-merge-two '() (list 1 3)))
+     (equal? '#(1 3) (fiber-stress-merge-two '#() '#(1 3)))
 
-     (equal? '(1 3) (fiber-stress-merge-two (list 1 3) '()))
+     (equal? '#(1 3) (fiber-stress-merge-two '#(1 3) '#()))
+
+     (equal? '#() (fiber-stress-merge-two '#() '#()))
 
      (fiber-stress-run
       (lambda ()
-        (and (null? (fiber-stress-merge-round '()))
-             (equal? '(1 2 2 3 9)
+        ;; An empty tree, a single chunk and an odd tree width must all work.
+        (and (equal? '#() (fiber-stress-merge-round '()))
+             (equal? '#(1 3) (fiber-stress-merge-round (list '#(1 3))))
+             (equal? '#(1 2 2 3 9)
                      (fiber-stress-merge-round
-                      (list (list 1 9) '() (list 2 2 3))))))))
+                      (list '#(1 9) '#() '#(2 2 3))))))))
+
+(define fiber-stress-sort
+  (lambda (input workers items-per-worker)
+    (fiber-stress-run
+     (lambda ()
+       (fiber-stress-watchdog)
+       (let ([results (make-channel)])
+         (do ([worker 0 (fx1+ worker)]) ((fx= worker workers))
+           (spawn-fiber
+            (lambda ()
+              ;; Copy the assigned range once. Sorting mutates only this fiber's
+              ;; chunk, while `input` stays available for independent validation.
+              (let ([chunk (make-vector items-per-worker)])
+                (vector-copy! input (* worker items-per-worker) chunk 0 items-per-worker)
+                (vector-sort! < chunk)
+                (channel-put! results chunk)))))
+         (let collect ([remaining workers] [chunks '()])
+           (if (fxzero? remaining)
+               (fiber-stress-merge-round chunks)
+               (collect (fx1- remaining) (cons (channel-get results) chunks)))))))))
+
+(mat fiber-stress-sort-small-partitions
+     ;; Empty chunks, one worker and odd merge trees must preserve the input and
+     ;; match a separate list sort, including duplicate values and partial tails.
+     (for-all
+      (lambda (workers)
+        (for-all
+         (lambda (items-per-worker)
+           (let* ([original (list->vector
+                             (map (lambda (index) (modulo (- 17 index) 7))
+                                  (iota (* workers items-per-worker))))]
+                  [input (vector-copy original)])
+             (and (equal? (list->vector (sort < (vector->list original)))
+                          (fiber-stress-sort input workers items-per-worker))
+                  (equal? original input))))
+         '(0 1 7)))
+      '(1 2 3 5)))
 
 (mat fiber-stress-parallel-merge-sort
-     (let* ([input (make-vector (* fiber-stress-workers fiber-stress-sort-items-per-worker))]
-            [result
-            (fiber-stress-run
-             (lambda ()
-               (fiber-stress-watchdog)
-               (let* ([workers fiber-stress-workers]
-                      [items-per-worker fiber-stress-sort-items-per-worker]
-                      [total (* workers items-per-worker)]
-                      [results (make-channel)])
-                 ;; Generate one deterministic input vector, then hand each
-                 ;; worker a disjoint chunk to sort independently.
-                 (let fill ([index 0] [state 17])
-                   (when (< index total)
-                     (vector-set! input index (modulo state 1000000))
-                     (fill (add1 index) (fiber-stress-lcg-step state))))
-                 (do ([worker 0 (add1 worker)])
-                     ((= worker workers))
-                   (spawn-fiber
-                    (lambda ()
-                      (let ([start (* worker items-per-worker)])
-                        (channel-put!
-                         results
-                         (sort <
-                               (let loop ([index start] [values '()])
-                                 (if (= index (+ start items-per-worker))
-                                     values
-                                     (loop (add1 index)
-                                           (cons (vector-ref input index) values))))))))))
-                 (let collect ([remaining workers] [chunks '()])
-                   (if (= remaining 0)
-                       (fiber-stress-merge-round chunks)
-                       (collect (sub1 remaining)
-                                (cons (channel-get results) chunks)))))))])
-       ;; Compare every element with a scalar sort of the original input. Sorted
-       ;; output with the right count and sum can still lose or duplicate values.
-       (equal? result (sort < (vector->list input)))))
+     (let ([input (make-vector (* fiber-stress-workers fiber-stress-sort-items-per-worker))])
+       (assert (positive-natural? fiber-stress-sort-repetitions))
+       (let fill ([index 0] [state 17])
+         (when (fx< index (vector-length input))
+           (vector-set! input index (modulo state 1000000))
+           (fill (fx1+ index) (fiber-stress-lcg-step state))))
+       ;; A scalar sort of the full input checks partitioning and our merge
+       ;; independently. Compare every element: count and sum can miss corruption.
+       ;; Compute the reference before any parallel run, so scalar validation
+       ;; cannot hide GC problems by normalizing the preceding run's allocations.
+       (let* ([expected (list->vector (sort < (vector->list input)))]
+              [first (fiber-stress-sort input fiber-stress-workers
+                                        fiber-stress-sort-items-per-worker)])
+         (and (equal? expected first)
+              (let repeat ([remaining (sub1 fiber-stress-sort-repetitions)])
+                (or (zero? remaining)
+                    (let ([result (fiber-stress-sort input fiber-stress-workers
+                                                    fiber-stress-sort-items-per-worker)])
+                      ;; Keep the first output alive while later contexts allocate
+                      ;; and collect; all repetitions must preserve the exact data.
+                      (and (equal? expected result)
+                           (equal? first result)
+                           (repeat (sub1 remaining))))))))))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Deterministic Monte Carlo pi
