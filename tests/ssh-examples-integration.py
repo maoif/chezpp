@@ -165,6 +165,7 @@ def verify():
                 agent.wait(timeout=5)
         p = run("ssh-open-repl", env, args, "--pty=no", input=b"printf shell-eof\n")
         assert p.returncode == 0 and b"shell-eof" in p.stdout, p
+        verify_scp_directories(root, env, args)
         source = root / "source"
         source.write_bytes(bytes(range(256)) * 1024)
         remote = root / "remote"
@@ -324,6 +325,35 @@ def verify():
         pathlib.Path(badenv["HOME"]).mkdir()
         p = run("ssh-run-cmd", badenv, args, "--command=true")
         assert p.returncode != 0 and b"host key is not trusted" in p.stderr, p
+
+
+def verify_scp_directories(root, env, args):
+    # Regressions: UTF-8 names survive SFTP enumeration; nested/empty trees and
+    # relative paths with trailing slashes work with either progress setting.
+    source = root / "directory-source"
+    (source / "nested" / "deeper" / "empty").mkdir(parents=True)
+    files = {"root.txt": b"root", "nested/spaces and 'quotes'.txt": b"quoted",
+             "nested/你好.txt": bytes(range(256)) * 257,
+             "nested/deeper/zero": b"", ".hidden": b"hidden"}
+    for name, data in files.items():
+        (source / name).write_bytes(data)
+    relative = os.path.relpath(source)
+    for progress in ("yes", "no"):
+        remote = root / ("directory-remote-" + progress)
+        copied = root / ("directory-copy-" + progress)
+        for direction in ("upload", "download"):
+            local = relative + "/" if direction == "upload" else str(copied) + "/"
+            result = run("scp", env, args, f"--direction={direction}", "--kind=directory",
+                         f"--local={local}", f"--remote={remote}/", f"--progress={progress}")
+            assert result.returncode == 0, (direction, progress, result.stderr)
+            output = remote if direction == "upload" else copied
+            for name, data in files.items():
+                assert (output / name).read_bytes() == data, (direction, progress, name)
+            assert (output / "nested/deeper/empty").is_dir()
+    # A missing source must fail rather than leaving a successful empty copy.
+    result = run("scp", env, args, "--direction=download", "--kind=directory",
+                 f"--local={root / 'missing-copy'}", f"--remote={root / 'missing-source'}")
+    assert result.returncode != 0, result
 
 
 def verify_scp_path_links(root, env, args):

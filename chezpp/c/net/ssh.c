@@ -259,7 +259,7 @@ static ptr wait_ssh_session_until(ssh_session session, short events, int64_t dea
 
 static ptr sftp_attr_to_vector(sftp_attributes attr) {
   ptr v = Smake_vector(8, Sfalse);
-  Svector_set(v, 0, attr->name == NULL ? Sfalse : Sstring(attr->name));
+  Svector_set(v, 0, attr->name == NULL ? Sfalse : Sstring_utf8(attr->name, (iptr)strlen(attr->name)));
   Svector_set(v, 1, Sfixnum((iptr)attr->type));
   Svector_set(v, 2, Sunsigned64(attr->size));
   Svector_set(v, 3, Sunsigned((uptr)attr->permissions));
@@ -1601,7 +1601,7 @@ ptr chezpp_net_sftp_list(uptr handle, const char *path) {
   while (!sftp_dir_eof(dir)) {
     sftp_attributes attr = sftp_readdir(wrapper->sftp, dir);
     if (attr == NULL) break;
-    out = Scons(attr->name == NULL ? Sfalse : Sstring(attr->name), out);
+    out = Scons(attr->name == NULL ? Sfalse : Sstring_utf8(attr->name, (iptr)strlen(attr->name)), out);
     sftp_attributes_free(attr);
   }
 
@@ -1715,7 +1715,7 @@ ptr chezpp_net_sftp_readlink(uptr handle, const char *path) {
     return make_error_status_message("invalid sftp session");
   target = sftp_readlink(wrapper->sftp, path);
   if (target == NULL) return sftp_error_status(wrapper, "failed to read sftp symlink");
-  out = Sstring(target);
+  out = Sstring_utf8(target, (iptr)strlen(target));
   ssh_string_free_char(target);
   return out;
 }
