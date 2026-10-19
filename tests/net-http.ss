@@ -124,6 +124,30 @@
             (and (eq? 'h1 (http-response-version response))
                  (equal? #vu8(101 111 102 45 98 111 100 121) (http-response-body response))))))))
 
+(mat net-http-live-streaming-receive-buffer
+     ;; Large responses should use the payload buffer instead of 4 KiB reactor handoffs.
+     (mat-requires (websockets)
+       (let ([body (make-string 262144 #\x)])
+         (call-with-http1-response
+          (string-append "HTTP/1.1 200 OK\r\nContent-Length: 262144\r\n"
+                         "Connection: close\r\n\r\n" body)
+          (lambda (client uri)
+            (let ([received (make-bytevector 262144)] [offset 0] [largest 0])
+              (let ([response
+                     (net-operation-wait
+                      (http-send/nonblocking
+                       client (make-http-request 'get uri)
+                       (make-http-body-sink
+                        (lambda (bytes start count)
+                          (bytevector-copy! bytes start received offset count)
+                          (set! offset (fx+ offset count))
+                          (set! largest (max largest count))))))])
+                (and (= 200 (http-response-status response))
+                     (= 262144 offset)
+                     (equal? received (string->utf8 body))
+                     (> largest 4096)
+                     (<= largest 65536)))))))))
+
 (mat net-http-live-truncated-body
      ;; Error case: EOF before Content-Length must not produce a successful response.
      (mat-requires (websockets)

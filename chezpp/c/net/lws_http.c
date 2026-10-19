@@ -1315,6 +1315,11 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
    * and destruction wrappers separately protect LWS's internal system vhost. */
   context->log_context.u.emit = lwsl_emit_stderr;
   information.log_cx = &context->log_context;
+  /* rx_buffer_size does not size the service scratch buffer. Grow it with the
+   * payload capacity to avoid 4 KiB body fragments and reactor handoffs, but
+   * retain LWS's default minimum for tiny pools and protocol scratch space. */
+  if (payload_capacity > 4096)
+    information.pt_serv_buf_size = (unsigned int)payload_capacity;
 #if defined(LWS_WITH_TLS)
   information.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 #endif
