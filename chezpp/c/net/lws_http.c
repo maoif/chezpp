@@ -48,6 +48,7 @@ extern int chezpp_net_tls_context_verifies_peer(uptr handle);
  */
 
 static struct lws_context *lws_http_lifetime_context;
+static lws_log_cx_t lws_http_lifetime_log_context = {.u.emit = lwsl_emit_stderr};
 static pthread_mutex_t lws_http_lifetime_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int ensure_lws_http_lifetime_context(void) {
@@ -56,10 +57,11 @@ static int ensure_lws_http_lifetime_context(void) {
   if (lws_http_lifetime_context == NULL) {
     memset(&information, 0, sizeof(information));
     information.port = CONTEXT_PORT_NO_LISTEN;
+    information.log_cx = &lws_http_lifetime_log_context;
 #if defined(LWS_WITH_TLS)
     information.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 #endif
-    lws_http_lifetime_context = lws_create_context(&information);
+    lws_http_lifetime_context = chezpp_lws_create_context(&information);
   }
   pthread_mutex_unlock(&lws_http_lifetime_mutex);
   return lws_http_lifetime_context != NULL;
@@ -69,7 +71,7 @@ __attribute__((destructor)) static void release_lws_http_lifetime_context(void) 
   pthread_mutex_lock(&lws_http_lifetime_mutex);
 
   if (lws_http_lifetime_context != NULL) {
-    lws_context_destroy(lws_http_lifetime_context);
+    chezpp_lws_context_destroy(lws_http_lifetime_context);
     lws_http_lifetime_context = NULL;
   }
   pthread_mutex_unlock(&lws_http_lifetime_mutex);
@@ -1223,6 +1225,11 @@ static void free_context_storage(lws_http_context *context) {
   free(context->poll_entries);
   free(context->event_payloads);
   free(context->events);
+#if LWS_MAX_SMP > 1
+  /* LWS initializes this mutex lazily but leaves its storage to the log owner. */
+  if (context->log_context.inited == 2)
+    pthread_mutex_destroy(&context->log_context.refcount_lock);
+#endif
   free(context);
 }
 
@@ -1239,7 +1246,6 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
       !chezpp_lws_available())
     return 0;
 
-  lws_set_log_level(0, NULL);
   if (!ensure_lws_http_lifetime_context()) return 0;
   context = calloc(1, sizeof(*context));
   if (context == NULL) return 0;
@@ -1272,6 +1278,15 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
   information.iface = interface_name;
   information.protocols = context->protocols;
   information.user = context;
+  /* LWS 4.3+ defaults to a process-wide logging context whose refcount is
+   * non-atomic when `LWS_MAX_SMP=1`, even if all log levels are disabled.
+   * Different reactors service and destroy WSIs concurrently, so sharing that
+   * counter loses updates and can assert during teardown. Keep `log_context`
+   * private to the reactor's serialized LWS calls, alive until after destroy.
+   * The lifetime context above also needs its own counter. The shared creation
+   * and destruction wrappers separately protect LWS's internal system vhost. */
+  context->log_context.u.emit = lwsl_emit_stderr;
+  information.log_cx = &context->log_context;
 #if defined(LWS_WITH_TLS)
   information.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 #endif
@@ -1301,7 +1316,7 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
 #endif
   information.fd_limit_per_thread = (unsigned int)context->poll_capacity;
   context->initializing = 1;
-  context->lws = lws_create_context(&information);
+  context->lws = chezpp_lws_create_context(&information);
   context->initializing = 0;
   if (context->lws == NULL) {
     close(context->wakeup_pipe[0]);
@@ -1338,7 +1353,7 @@ void chezpp_lws_http_context_close(uintptr_t context_handle) {
   if (context == NULL) return;
   context->closing = 1;
 
-  if (context->lws != NULL) lws_context_destroy(context->lws);
+  if (context->lws != NULL) chezpp_lws_context_destroy(context->lws);
   context->lws = NULL;
   close(context->wakeup_pipe[0]);
   close(context->wakeup_pipe[1]);
@@ -1385,7 +1400,7 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
     return 0;
   }
   if (fd < 0) {
-    return lws_service_tsi(context->lws, -1, 0);
+    return chezpp_lws_service_tsi(context->lws, -1, 0);
   }
 
   memset(&poll_descriptor, 0, sizeof(poll_descriptor));
@@ -1406,13 +1421,13 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
         if (stream->active && stream->server_stream && stream->server_request_complete &&
             stream->wsi != NULL && lws_get_socket_fd(stream->wsi) == fd &&
             observe_protocol(stream->wsi) == LWS_HTTP_PROTOCOL_HTTP1) {
-          lws_rx_flow_control(stream->wsi, 1);
+          chezpp_lws_rx_flow_control(stream->wsi, 1);
           poll_descriptor.revents &= (short)~POLLIN;
           break;
         }
       }
   }
-  return lws_service_fd(context->lws, &poll_descriptor);
+  return chezpp_lws_service_fd(context->lws, &poll_descriptor);
 }
 
 static ptr event_to_scheme_locked(lws_http_context *context,
@@ -1481,7 +1496,7 @@ int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
   if (context == NULL || context->lws == NULL || maximum_timeout_ms < 0)
     return -1;
 
-  adjustment = lws_service_adjust_timeout(context->lws, maximum_timeout_ms, 0);
+  adjustment = chezpp_lws_service_adjust_timeout(context->lws, maximum_timeout_ms, 0);
   if (adjustment < 0) return -1;
   return adjustment == 0 ? 0 : maximum_timeout_ms;
 }
@@ -1495,7 +1510,7 @@ int chezpp_lws_http_context_wakeup(uintptr_t context_handle) {
   written = write(context->wakeup_pipe[1], &byte, 1);
   if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK) return 0;
 
-  lws_cancel_service(context->lws);
+  chezpp_lws_cancel_service(context->lws);
   return 1;
 }
 
@@ -1676,7 +1691,7 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   information.opaque_user_data = stream;
   information.pwsi = &stream->wsi;
 
-  if (lws_client_connect_via_info(&information) == NULL) {
+  if (chezpp_lws_client_connect_via_info(&information) == NULL) {
     pthread_mutex_lock(&context->lock);
     (void)queue_event_locked(context, LWS_HTTP_EVENT_FAILED, connection_id,
                              stream_id, generation, ECONNREFUSED, NULL, 0);
@@ -1689,7 +1704,7 @@ int chezpp_lws_http_client_start(uintptr_t context_handle,
   stream->connection->wsi = stream->wsi;
   pthread_mutex_unlock(&context->lock);
   if (stream->h2) {
-    (void)lws_callback_on_writable(stream->wsi);
+    (void)chezpp_lws_callback_on_writable(stream->wsi);
   }
   return 1;
 }
@@ -1760,7 +1775,7 @@ int chezpp_lws_http_client_body_submit(uintptr_t context_handle,
   {
     int result = stream->wsi == NULL
                      ? -1
-                     : lws_callback_on_writable(stream->wsi);
+                     : chezpp_lws_callback_on_writable(stream->wsi);
     return result >= 0;
   }
 }
@@ -1786,7 +1801,7 @@ int chezpp_lws_http_client_body_drain(uintptr_t context_handle,
 
   buffer = (char *)context->drain_buffer + LWS_PRE;
   available = (int)context->payload_capacity;
-  return lws_http_client_read(stream->wsi, &buffer, &available) == 0;
+  return chezpp_lws_http_client_read(stream->wsi, &buffer, &available) == 0;
 }
 
 ptr chezpp_lws_http_server_request_dequeue(uintptr_t context_handle) {
@@ -1840,7 +1855,7 @@ int chezpp_lws_http_server_response_submit(
       context_handle, connection_id, stream_id, generation, payload,
       final_chunk);
   if (result && final_chunk && Sbytevector_length(payload) == 0) {
-    if (stream->wsi == NULL || lws_callback_on_writable(stream->wsi) < 0)
+    if (stream->wsi == NULL || chezpp_lws_callback_on_writable(stream->wsi) < 0)
       return 0;
   }
   return result;
@@ -1869,8 +1884,8 @@ int chezpp_lws_http_stream_cancel(uintptr_t context_handle,
   /* LWS owns the H2 stream WSI and emits RST_STREAM while closing it. */
 
   if (wsi != NULL)
-    lws_set_timeout(wsi, PENDING_TIMEOUT_AWAITING_SERVER_RESPONSE,
-                   LWS_TO_KILL_ASYNC);
+    chezpp_lws_set_timeout(wsi, PENDING_TIMEOUT_AWAITING_SERVER_RESPONSE,
+                           LWS_TO_KILL_ASYNC);
   (void)chezpp_lws_http_context_wakeup(context_handle);
   return result;
 }
@@ -1906,7 +1921,7 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
   }
   pthread_mutex_unlock(&context->lock);
   if (resume_wsi != NULL) {
-    lws_rx_flow_control(resume_wsi, 1);
+    chezpp_lws_rx_flow_control(resume_wsi, 1);
   }
   if (resume)
     (void)chezpp_lws_http_context_wakeup(context_handle);

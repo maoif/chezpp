@@ -10,7 +10,7 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
              list.ss string.ss regex.ss vector.ss array.ss dlist.ss stack.ss queue.ss heap.ss \
              hashset.ss treemap.ss treeset.ss rbtree-specialized.ss \
              bittree.ss bitvec.ss dset.ss \
-             concurrency.ss \
+             concurrency.ss fiber.ss \
              cli.ss rich.ss logging.ss benchmark.ss hash.ss crypto.ss optional-openssl.ss \
              optional-library.ss net-loader.ss uuid.ss \
              protobuf.ss protobuf-codegen.ss \
@@ -19,3 +19,7 @@ SRCS_TEST := test.ss record.ss datatype.ss match.ss for.ss control.ss system.ss 
              net-socket-datagram.ss net-uri.ss
 
 SRCS_NON_NET_TEST := $(filter-out net-%.ss,$(SRCS_TEST))
+
+# These workloads are intentionally opt-in because they consume all scheduler
+# worker threads for several seconds. Run one with `make test fiber-stress.ss`.
+STRESS_TESTS := fiber-stress.ss

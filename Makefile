@@ -216,7 +216,7 @@ package: chez++
 		NATIVE_OPTIONS_REPLAY=$(call build-shell-quote,$(abspath $(NATIVE_OPTIONS_FILE))); \
 	version=$$("$(CHEZ_SCHEME)" --script tools/print-library-version.ss chezpp.lib); \
 	version=$${version#ChezPP version: }; \
-	./chez++ --script tools/package-release.ss "$$workspace/installed" \
+	./chez++ --script=tools/package-release.ss "$$workspace/installed" \
 		--output $(call build-shell-quote,$(PACKAGE_DIR)) \
 		--arch "$$architecture" --version "$$version" \
 		--commit $(call build-shell-quote,$(PACKAGE_COMMIT))

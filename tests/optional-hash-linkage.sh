@@ -12,6 +12,6 @@ for dependency in xxhash blake3; do
             exit 1
         fi
     fi
-    "$project_root/chez++" --script "$project_root/tests/optional-hash-libs.ss" \
+    "$project_root/chez++" --script="$project_root/tests/optional-hash-libs.ss" \
         "$dependency" "$expected"
 done

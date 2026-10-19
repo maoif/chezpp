@@ -1,7 +1,7 @@
 #!@SCHEME_SCRIPT@ --script
 (putenv "LIBCHEZPP" "@LIBCHEZPP@")
 (load "@CHEZPP_LIB@")
-(import (chezpp))
+(import (chezpp) (chezpp cli))
 
 (define load-file*
   (lambda (file*)
@@ -101,62 +101,80 @@
                   (reset-style)
                   "\n\n"))))
 
-(define print-help
-  (lambda ()
-    (println "chez++ ~a - Chezpp REPL and script launcher" (chezpp-version-string))
-    (println "")
-    (println "Usage: chez++ [-q] [FILE ...]")
-    (println "       chez++ [-q] --script FILE [ARG ...]")
-    (println "       chez++ -h | --help")
-    (println "")
-    (println "Options:")
-    (println "  -h, --help     Show this help and exit.")
-    (println "  -q             Suppress the startup greeting and REPL prompt.")
-    (println "  --script FILE  Run FILE with the remaining arguments.")
-    (println "")
-    (println "Without --script, load FILEs in order before entering the REPL.")))
-
-(define stdin-interactive?
-  (lambda ()
-    (= 0 (system "test -t 0 >/dev/null 2>&1"))))
-
 (define configure-repl!
   (lambda (quiet?)
     (when quiet?
       (suppress-greeting #t)
       (waiter-prompt-string ""))))
 
-(define parse-args
-  (lambda (arg*)
-    (let loop ([rest arg*] [quiet? #f])
-      (cond
-       [(null? rest)
-        (values quiet? 'repl '() '())]
-       [(or (string=? (car rest) "--help") (string=? (car rest) "-h"))
-        (values quiet? 'help '() '())]
-       [(string=? (car rest) "-q")
-        (loop (cdr rest) #t)]
-       [(string=? (car rest) "--script")
-        (let ([script-rest (cdr rest)])
-          (unless (pair? script-rest)
-            (errorf 'chez++ "missing script file after --script"))
-          (values quiet? 'script (list (car script-rest)) (cdr script-rest)))]
-       [else
-        (values quiet? 'repl rest '())]))))
+(define run-code
+  (lambda (code arg*)
+    (command-line-arguments arg*)
+    (call-with-port (open-string-input-port code)
+      (lambda (port)
+        (let loop ()
+          (let ([form (read port)])
+            (unless (eof-object? form)
+              (eval form (interaction-environment))
+              (loop))))))))
 
 (define main
   (lambda ()
-    (let-values ([(quiet? mode file* script-arg*)
-                  (parse-args (command-line-arguments))])
-      (case mode
-        [(help) (print-help)]
-        [(script) (run-script (car file*) script-arg*)]
-        [(repl)
-         (command-line-arguments file*)
-         (load-file* file*)
-         (configure-repl! quiet?)
-         (unless quiet?
-           (print-greeting))
-         (new-cafe)]))))
+    (let ([code? #f])
+      (run-cli-command!
+       (cli-command chez++
+         :overview "Chezpp REPL and script launcher"
+         :version (chezpp-version-string)
+         :about
+         (string-append
+          "Modes:\n"
+          "  chez++ [-q] [FILE ...]              Load FILEs in order, then start the REPL.\n"
+          "  chez++ [-q] -s=FILE [-- ARG ...]    Run a script and exit.\n"
+          "  chez++ [-q] -c=CODE [-- ARG ...]    Evaluate Scheme forms and exit.\n"
+          "\n"
+          "Use -- to pass remaining arguments literally through command-line-arguments.\n"
+          "CODE prints only explicit output.\n"
+          "Use -- before REPL input filenames that start with '-'.\n"
+          "Use -h or --help to show this help and exit.\n"
+          "\nExamples:\n"
+          "  chez++ -q init.ss\n"
+          "  chez++ --script=app.ss arg1\n"
+          "  chez++ -c='(display (+ 1 2))'")
+         :exec
+         (lambda (ref)
+           (let ([arg* (ref 'args)])
+             (cond
+              [(ref 'version) (println "~a" (chezpp-version-string))]
+              [(ref 'script) (run-script (ref 'script) arg*)]
+              [code? (run-code (ref 'code) arg*)]
+              [else
+               (command-line-arguments arg*)
+               (load-file* arg*)
+               (configure-repl! (ref 'quiet))
+               (unless (ref 'quiet)
+                 (print-greeting))
+               (new-cafe)]))
+           (void))
+         :options
+         [quiet :short #\q :no-long
+          :help "Suppress the startup greeting and REPL prompt."]
+         [script :short #\s :value-parser string :value-name "FILE" :number ?
+          :conflicts (code version)
+          :help "Run FILE with the remaining arguments and exit."]
+         [code :short #\c :no-long :value-parser string :value-name "CODE" :number ?
+          ;; Keep an explicitly empty -c= distinct from an absent code option.
+          :value-number ? :default ""
+          :callback (lambda (command option value) (set! code? #t))
+          :conflicts (script version)
+          :help "Evaluate CODE with the remaining arguments and exit."]
+         [version :short #\v
+          :conflicts (script code)
+          :help "Show the Chezpp version and exit."]
+         [args :positional :sink :number * :default '() :value-name "ARG"
+          :help "Files to load, or arguments passed to the script or code."])
+       (command-line-arguments)))
+    ;; Script and code output can remain buffered when the top-level loader returns.
+    (flush-output-port (current-output-port))
+    (flush-output-port (current-error-port))))
 
 (main)

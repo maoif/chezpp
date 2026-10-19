@@ -136,6 +136,8 @@ struct lws_poll_entry {
 struct lws_http_context {
   uint64_t identity;
   struct lws_context *lws;
+  /* Private logging for the reactor's application vhost and connections. */
+  lws_log_cx_t log_context;
   struct lws_vhost *vhosts;
   struct lws_protocols protocols[2];
   int wakeup_pipe[2];

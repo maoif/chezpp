@@ -9,13 +9,13 @@
 (mat net-public-api-documentation
      (= 0
         (system
-         "../chez++ --script ../tools/check-public-api-docs.ss \
+         "../chez++ --script=../tools/check-public-api-docs.ss \
 ../chezpp/net ../chezpp/protobuf ../chezpp/optional-library.ss >/dev/null 2>&1")))
 
 (mat reviewed-data-structure-documentation
      (= 0
         (system
-         "../chez++ --script ../tools/check-public-api-docs.ss \
+         "../chez++ --script=../tools/check-public-api-docs.ss \
 ../chezpp/array.ss ../chezpp/bittree.ss ../chezpp/bitvec.ss ../chezpp/dlist.ss \
 ../chezpp/dset.ss ../chezpp/hashset.ss ../chezpp/heap.ss ../chezpp/list.ss \
 ../chezpp/queue.ss ../chezpp/stack.ss ../chezpp/treeset.ss ../chezpp/treemap.ss \
@@ -48,7 +48,7 @@
            (let* ([status
                    (system
                     (format
-                     "../chez++ --script ../tools/check-public-api-docs.ss ~a >~a 2>&1"
+                     "../chez++ --script=../tools/check-public-api-docs.ss ~a >~a 2>&1"
                      fixture output))]
                   [diagnostics (read-text-file output)])
              (and (not (= status 0))

@@ -66,7 +66,7 @@ run_variant() {
     export CHEZPP_TRANSFER_KEY=$key
     export CHEZPP_TRANSFER_ROLE=server
   fi
-  (cd "$project_root" && ./chez++ --script "$server_script" "$destination") \
+  (cd "$project_root" && ./chez++ --script="$server_script" "$destination") \
     >"$state_dir/$name.server.out" 2>"$state_dir/$name.server.err" &
   server_pid=$!
   server_pids="$server_pids $server_pid"
@@ -74,7 +74,7 @@ run_variant() {
   if [ "$secure" -eq 1 ]; then
     export CHEZPP_TRANSFER_ROLE=client
   fi
-  if ! (cd "$project_root" && ./chez++ --script "$client_script" "$source_file") \
+  if ! (cd "$project_root" && ./chez++ --script="$client_script" "$source_file") \
       >"$state_dir/$name.client.out" 2>"$state_dir/$name.client.err"; then
     cat "$state_dir/$name.client.out"
     cat "$state_dir/$name.client.err" >&2

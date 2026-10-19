@@ -23,6 +23,7 @@
 #include "../build-config.h"
 #include "../common.h"
 #include "../optional_library.h"
+#include "lws_loader.h"
 
 #if CHEZPP_WITH_WEBSOCKETS
 #include <libwebsockets.h>
@@ -117,6 +118,8 @@ struct chezpp_ws_connection {
 struct chezpp_ws_context_node {
   chezpp_ws_context_node *next;
   struct lws_context *context;
+  /* Keep the counter private until after all context destruction callbacks. */
+  lws_log_cx_t log_context;
 };
 
 
@@ -128,7 +131,9 @@ static chezpp_optional_library websocket_library =
 static pthread_once_t websocket_once = PTHREAD_ONCE_INIT;
 static int websocket_available_flag;
 static unsigned websocket_capabilities;
+static uint32_t websocket_log_level;
 static struct lws_context *websocket_lifetime_context = NULL;
+static lws_log_cx_t websocket_lifetime_log_context = {.u.emit = lwsl_emit_stderr};
 static int websocket_lifetime_state;
 static pthread_mutex_t websocket_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t websocket_runtime_cond = PTHREAD_COND_INITIALIZER;
@@ -401,8 +406,11 @@ static void initialize_websocket_library(void) {
   websocket_capabilities |= 1U;
 #endif
   {
+    /* Publish only private log settings. HTTP or WebSocket may already be
+     * servicing contexts, so the shared global log must remain immutable. */
     const char *level = getenv("CHEZPP_WS_LOGLEVEL");
-    lws_set_log_level(level == NULL ? 0 : (int)strtol(level, NULL, 0), NULL);
+    websocket_log_level = (uint32_t)(level == NULL ? 0 : strtol(level, NULL, 0)) &
+                          ~LLLF_LOG_CONTEXT_AWARE;
   }
   websocket_available_flag = 1;
 }
@@ -427,10 +435,12 @@ static int initialize_websocket_lifetime_context(void) {
 
   memset(&info, 0, sizeof(info));
   info.port = CONTEXT_PORT_NO_LISTEN;
+  info.log_cx = &websocket_lifetime_log_context;
+  info.log_cx->lll_flags = websocket_log_level;
   info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
   info.gid = (gid_t)-1;
   info.uid = (uid_t)-1;
-  websocket_lifetime_context = lws_create_context(&info);
+  websocket_lifetime_context = chezpp_lws_create_context(&info);
   return websocket_lifetime_context != NULL;
 }
 
@@ -462,7 +472,7 @@ __attribute__((destructor)) static void release_websocket_runtime(void) {
   pthread_mutex_lock(&context_list_mutex);
   if (context_list == NULL && websocket_lifetime_context != NULL &&
       1) {
-    lws_context_destroy(websocket_lifetime_context);
+    chezpp_lws_context_destroy(websocket_lifetime_context);
     websocket_lifetime_context = NULL;
   }
   pthread_mutex_unlock(&context_list_mutex);
@@ -480,6 +490,7 @@ static int context_registered_unlocked(struct lws_context *context) {
 
 static struct lws_context *create_registered_context(
     const struct lws_context_creation_info *info) {
+  struct lws_context_creation_info private_info = *info;
   chezpp_ws_context_node *node = (chezpp_ws_context_node *)calloc(1, sizeof(chezpp_ws_context_node));
   chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)info->user;
   struct lws_context *context;
@@ -504,11 +515,21 @@ static struct lws_context *create_registered_context(
     }
   }
   pthread_mutex_lock(&context_list_mutex);
-  context = lws_create_context(info);
+  /* HTTP reactors run outside `context_list_mutex`. Isolate connection log
+   * refcounts and use the shared lifecycle lock for LWS's system vhost. */
+  node->log_context.u.emit = lwsl_emit_stderr;
+  node->log_context.lll_flags = websocket_log_level;
+  private_info.log_cx = &node->log_context;
+  context = chezpp_lws_create_context(&private_info);
   if (context == NULL) {
     pthread_mutex_unlock(&context_list_mutex);
     close(state->wakeup_pipe[0]);
     close(state->wakeup_pipe[1]);
+#if LWS_MAX_SMP > 1
+    /* Context creation may initialize the log mutex before a later failure. */
+    if (node->log_context.inited == 2)
+      pthread_mutex_destroy(&node->log_context.refcount_lock);
+#endif
     free(node);
     return NULL;
   }
@@ -528,8 +549,12 @@ static void destroy_registered_context(struct lws_context *context) {
       chezpp_ws_context_node *node = *pp;
       chezpp_ws_poll_state *state = (chezpp_ws_poll_state *)lws_context_user(context);
       *pp = node->next;
+      chezpp_lws_context_destroy(context);
+#if LWS_MAX_SMP > 1
+      if (node->log_context.inited == 2)
+        pthread_mutex_destroy(&node->log_context.refcount_lock);
+#endif
       free(node);
-      lws_context_destroy(context);
       close(state->wakeup_pipe[0]);
       close(state->wakeup_pipe[1]);
       state->forced_pending = 0;
@@ -551,8 +576,8 @@ static void service_context_ready_locked(struct lws_context *context) {
    * signal if forced work remains, so one call stays bounded and Scheme won't
    * sleep on a drained socket before advancing again. */
   while (read(state->wakeup_pipe[0], bytes, sizeof(bytes)) > 0) {}
-  (void)lws_service_tsi(context, -1, 0);
-  state->forced_pending = lws_service_adjust_timeout(context, 1, 0) == 0;
+  (void)chezpp_lws_service_tsi(context, -1, 0);
+  state->forced_pending = chezpp_lws_service_adjust_timeout(context, 1, 0) == 0;
   if (state->forced_pending) (void)write(state->wakeup_pipe[1], &byte, 1);
 }
 
@@ -632,7 +657,7 @@ static struct lws *connect_context(struct lws_context *context,
 
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context))
-    wsi = lws_client_connect_via_info(info);
+    wsi = chezpp_lws_client_connect_via_info(info);
   pthread_mutex_unlock(&context_list_mutex);
   return wsi;
 }
@@ -651,7 +676,7 @@ static void close_wsi(struct lws_context *context, struct lws *wsi,
   if (context_registered_unlocked(context) && wsi != NULL) {
     lws_close_reason(wsi, (enum lws_close_status)code,
                        (unsigned char *)reason, reason_len);
-    lws_set_timeout(wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
+    chezpp_lws_set_timeout(wsi, PENDING_TIMEOUT_CLOSE_SEND, LWS_TO_KILL_SYNC);
   }
   pthread_mutex_unlock(&context_list_mutex);
 }
@@ -659,7 +684,7 @@ static void close_wsi(struct lws_context *context, struct lws *wsi,
 static void request_writable(struct lws_context *context, struct lws *wsi) {
   pthread_mutex_lock(&context_list_mutex);
   if (context_registered_unlocked(context) && wsi != NULL)
-    lws_callback_on_writable(wsi);
+    chezpp_lws_callback_on_writable(wsi);
   pthread_mutex_unlock(&context_list_mutex);
 }
 

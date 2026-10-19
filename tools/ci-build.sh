@@ -63,5 +63,5 @@ archive="chezpp-$version-linux-$architecture"
 mkdir "$workspace/relocated package"
 tar xzf "dist/$archive.tar.gz" -C "$workspace/relocated package"
 .chezscheme-install/bin/scheme --script tools/check-scheme-balance.ss tools/package-smoke.ss
-(cd / && "$workspace/relocated package/$archive/bin/chez++" --script "$repository/tools/package-smoke.ss")
+(cd / && "$workspace/relocated package/$archive/bin/chez++" --script="$repository/tools/package-smoke.ss")
 (cd dist && sha256sum --check "$archive.tar.gz.sha256")

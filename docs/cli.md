@@ -188,10 +188,20 @@ Only leaf commands consume positionals. A command cannot have both positionals
 and subcommands.
 
 A sink positional consumes all remaining positional argv entries and must be the
-last positional option. The sink stores a list of parsed values.
+last positional option. The sink stores a list of parsed values. Sinks require at
+least one argument by default. To permit zero arguments, configure the occurrence
+count after `:sink`:
+
+```scheme
+[args :positional :sink :number * :default '()]
+```
+
+Fixed positional arguments before the sink remain required.
 
 `--` is accepted only in leaf commands. It switches remaining argv entries to
-positional-only mode and is not included in the positional values.
+positional-only mode and is not included in the positional values. Later `--`
+arguments are preserved literally. If positional parsing starts before the
+separator, its first `--` is also consumed and subsequent ones are preserved.
 
 ### Subcommands
 
@@ -334,6 +344,7 @@ Help output includes:
 - positional arguments
 - non-positional options
 - subcommands
+- longer `:about` text after the options and subcommands, when provided
 
 Options and commands are grouped by category. Empty categories render as
 `OPTIONS` or `COMMANDS`; nonempty categories render using the category string.

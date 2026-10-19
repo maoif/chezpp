@@ -89,6 +89,53 @@
      (error? (run-cli-command! cmd '("-I=" "main.ss"))))
 
 
+(mat cli-sink-p
+
+     (begin
+       (define optional
+         (cli-command prog
+           :exec (lambda (ref) (ref 'args))
+           :options [args :positional :sink :number * :default '()]))
+       (define required
+         (cli-command prog
+           :exec (lambda (ref) (ref 'args))
+           :options [args :positional :sink]))
+       (define fixed-and-sink
+         (cli-command prog
+           :exec (lambda (ref) (list (ref 'file) (ref 'args)))
+           :options [file :positional] [args :positional :sink :number * :default '()]))
+       #t)
+
+     (equal? (run-cli-command! optional '()) '())
+
+     (equal? (run-cli-command! optional '("--")) '())
+
+     (equal? (run-cli-command! optional '("--" "--")) '("--"))
+
+     (equal? (run-cli-command! optional '("--" "a" "--" "b")) '("a" "--" "b"))
+
+     (equal? (run-cli-command! optional '("--" "-x" "" "a,b" "--help"))
+             '("-x" "" "a,b" "--help"))
+
+     (equal? (run-cli-command! optional '("a" "--" "-x" "--")) '("a" "-x" "--"))
+
+     (equal? (run-cli-command! fixed-and-sink '("main.ss")) '("main.ss" ()))
+
+     (equal? (run-cli-command! fixed-and-sink '("main.ss" "--")) '("main.ss" ()))
+
+     (equal? (run-cli-command! fixed-and-sink '("main.ss" "--" "--"))
+             '("main.ss" ("--")))
+
+     ;; Required sinks must reject an invocation with no arguments.
+     (error? (run-cli-command! required '()))
+
+     ;; An explicit separator does not satisfy a required sink.
+     (error? (run-cli-command! required '("--")))
+
+     ;; An optional sink does not make the preceding fixed argument optional.
+     (error? (run-cli-command! fixed-and-sink '("--"))))
+
+
 (mat cli-parsers-p
 
      (begin
@@ -295,6 +342,7 @@
        (define ran? #f)
        (define root (make-command 'prog))
        (command-overview-set! root "Program overview")
+       (command-about-set! root "Example: prog run input.ss")
        (command-version-set! root "1.0.0")
        (command-author-set! root "Maoif")
        (define opt-hidden (make-option 'secret))
@@ -305,6 +353,7 @@
        (option-value-parser-set! opt-config parser-string)
        (define sub (make-command 'run))
        (command-help-set! sub "Run the program")
+       (command-about-set! sub "Example: prog run main.ss")
        (command-category-set! sub "TASKS")
        (define opt-threads (make-option 'threads))
        (option-help-set! opt-threads "Worker count")
@@ -329,6 +378,7 @@
             (output-contains? (cdr ans) "GLOBAL")
             (output-contains? (cdr ans) "TASKS")
             (output-contains? (cdr ans) "--config=<CONFIG>")
+            (output-contains? (cdr ans) "Example: prog run input.ss")
             (not (output-contains? (cdr ans) "--secret"))))
      (let ([ans (capture-output (lambda () (run-cli-command! root '("--help-all"))))])
        (output-contains? (cdr ans) "--secret"))
@@ -342,8 +392,23 @@
             (output-contains? (cdr ans) "<INPUT>")
             (output-contains? (cdr ans) "OPTIONS")
             (output-contains? (cdr ans) "--threads=<THREADS>")
+            (output-contains? (cdr ans) "Example: prog run main.ss")
+            (not (output-contains? (cdr ans) "Example: prog run input.ss"))
             (not (output-contains? (cdr ans) "COMMANDS"))))
      )
+
+(mat cli-help-alignment-p
+
+     (let* ([cmd (cli-command prog
+                   :options
+                   [configuration :value-parser string :help "Configuration file"]
+                   [verbose :help "Verbose output"])]
+            [ans (capture-output (lambda () (run-cli-command! cmd '("--help"))))]
+            [lines (string-split (cdr ans) #\newline)]
+            [config-line (find (lambda (line) (string-search line "Configuration file")) lines)]
+            [verbose-line (find (lambda (line) (string-search line "Verbose output")) lines)])
+       (= (string-search config-line "Configuration file")
+          (string-search verbose-line "Verbose output"))))
 
 
 

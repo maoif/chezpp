@@ -23,4 +23,4 @@ for feature in CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH B
     fi
 done
 # Enabled integrations must reference real dependency APIs; disabled imports must stay safe.
-exec "$project_root/chez++" --script "$project_root/tests/optional-library-runtime.ss"
+exec "$project_root/chez++" --script="$project_root/tests/optional-library-runtime.ss"
