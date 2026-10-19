@@ -88,6 +88,7 @@ struct lws_http_stream {
   size_t headers_length;
   size_t terminal_payload_length;
   size_t pending_body_bytes;
+  int client_read_batching;
   int outbound_final;
   int has_request_body;
   int active;

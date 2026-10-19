@@ -17,6 +17,7 @@ import select
 from pathlib import Path
 import socket
 import signal
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -326,6 +327,84 @@ def wget_speed():
                 thread.join(5)
 
 
+def http_streaming():
+    # Exercise TLS record batching, chunk framing, and immediate partial delivery.
+    failures = []
+    body = bytes(range(256)) * 4096
+    with tempfile.TemporaryDirectory(prefix='chezpp-http-streaming-') as name:
+        directory = Path(name)
+        cert, key = directory / 'cert', directory / 'key'
+        marker = directory / 'first-chunk'
+        run('openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+            '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1',
+            '-keyout', str(key), '-out', str(cert))
+
+        class Handler(http_server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                try:
+                    self.send_response(200)
+                    if self.path == '/chunked':
+                        self.send_header('Transfer-Encoding', 'chunked')
+                    else:
+                        self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Connection', 'close')
+                    self.end_headers()
+                    if self.path == '/chunked':
+                        for start in range(0, len(body), 32779):
+                            chunk = body[start:start + 32779]
+                            self.wfile.write(f'{len(chunk):x}\r\n'.encode() + chunk + b'\r\n')
+                        self.wfile.write(b'0\r\n\r\n')
+                    elif self.path == '/pause':
+                        self.wfile.write(body[:17])
+                        self.wfile.flush()
+                        deadline = time.monotonic() + 3
+                        while not marker.exists() and time.monotonic() < deadline:
+                            time.sleep(.01)
+                        assert marker.exists(), 'consumer waited for a full receive batch'
+                        self.wfile.write(body[17:])
+                    elif self.path == '/truncated':
+                        # Error case: EOF partway through a batch must fail the operation.
+                        self.wfile.write(body[:32769])
+                    else:
+                        self.wfile.write(body)
+                except (AssertionError, BrokenPipeError, ConnectionResetError) as failure:
+                    failures.append(str(failure))
+
+            def log_message(self, *args):
+                pass
+
+        with http_server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as listener:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(cert, key)
+            listener.socket = context.wrap_socket(listener.socket, server_side=True)
+            thread = threading.Thread(target=listener.serve_forever, daemon=True)
+            thread.start()
+            env = dict(os.environ, SSL_CERT_FILE=str(cert))
+            try:
+                for path in ['/bulk', '/chunked', '/pause', '/truncated']:
+                    output = directory / 'output'
+                    output.unlink(missing_ok=True)
+                    marker.unlink(missing_ok=True)
+                    result = example('tests/integration/http-streaming.ss',
+                                     f'https://127.0.0.1:{listener.server_port}{path}',
+                                     str(output), str(marker), env=env, ok=path != '/truncated')
+                    if path == '/truncated':
+                        assert result.returncode != 0, result
+                        continue
+                    assert not result.stderr, result.stderr
+                    counts = re.fullmatch(rb'\((\d+) (\d+) (\d+)\)\s*', result.stdout)
+                    assert counts, result.stdout
+                    received, largest, chunks = map(int, counts.groups())
+                    assert received == len(body) and 0 < largest <= 65536 and chunks > 0
+                    if path == '/bulk':
+                        assert largest > 16384, 'TLS records were not batched'
+                    assert output.read_bytes() == body, path
+                assert not failures, failures
+            finally:
+                listener.shutdown()
+                thread.join(5)
+
+
 def h2_window():
     failures = []
     release = threading.Event()
@@ -478,6 +557,7 @@ def http():
         wget_options()
         wget_progress()
         wget_speed()
+        http_streaming()
         h2_window()
         http_interrupt()
         summary('HTTP examples: HTTP/1, cleartext H2, HTTPS/H2, trust, paths, concurrent requests, wget errors, shutdown passed')
@@ -606,6 +686,7 @@ def benchmarks():
 if __name__ == '__main__':
     groups = {'help': help_commands, 'http': http, 'core': core, 'crypto': crypto,
               'benchmarks': benchmarks, 'wget-errors': wget_errors, 'http-interrupt': http_interrupt,
-              'wget-options': wget_options, 'wget-progress': wget_progress, 'wget-speed': wget_speed, 'h2-window': h2_window}
+              'wget-options': wget_options, 'wget-progress': wget_progress, 'wget-speed': wget_speed,
+              'http-streaming': http_streaming, 'h2-window': h2_window}
     for group in sys.argv[1:] or ['help', 'http', 'core', 'crypto', 'benchmarks']:
         groups[group]()

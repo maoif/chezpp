@@ -375,6 +375,7 @@ static void stream_release_locked(lws_http_context *context,
   stream->headers_length = 0;
   stream->terminal_payload_length = 0;
   stream->pending_body_bytes = 0;
+  stream->client_read_batching = 0;
   stream->outbound_final = 0;
   stream->has_request_body = 0;
   stream->active = 0;
@@ -881,32 +882,79 @@ static int lws_http_callback(struct lws *wsi,
     case LWS_CALLBACK_RECEIVE_CLIENT_HTTP: {
       char *buffer;
       int available;
-      int result;
+      int result = 0;
+      unsigned pass;
+      uint64_t generation;
       if (context == NULL || stream == NULL || stream->terminal ||
           stream->pending_body_bytes)
         return 0;
-
-          buffer = (char *)context->drain_buffer + LWS_PRE;
-      available = (int)context->payload_capacity;
-      result = lws_http_client_read(wsi, &buffer, &available);
-      if (result >= 0 && available > 0 && buffer != NULL) {
-        if (!callback_queue_stream(context, stream, LWS_HTTP_EVENT_READABLE,
-                                   0, buffer, (size_t)available))
-          return -1;
-        pthread_mutex_lock(&context->lock);
-        stream->pending_body_bytes += (size_t)available;
-        pthread_mutex_unlock(&context->lock);
+      generation = stream->generation;
+      stream->client_read_batching = observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP1;
+      /* Read only immediately available input, at most one payload slot or four
+       * TLS records per turn. Partial batches are published without a timer delay. */
+      for (pass = 0; pass < 4; pass++) {
+        size_t before = stream->pending_body_bytes;
+        buffer = (char *)context->drain_buffer + LWS_PRE;
+        available = (int)(context->payload_capacity - before);
+        result = lws_http_client_read(wsi, &buffer, &available);
+        if (result < 0 || !stream->active || stream->generation != generation ||
+            stream->wsi != wsi || stream->terminal || stream->terminal_pending)
+          break;
+        if (available > 0 && buffer != NULL) {
+          if (!callback_queue_stream(context, stream, LWS_HTTP_EVENT_READABLE,
+                                     0, buffer, (size_t)available)) {
+            result = -1;
+            break;
+          }
+          pthread_mutex_lock(&context->lock);
+          stream->pending_body_bytes += (size_t)available;
+          pthread_mutex_unlock(&context->lock);
+        }
+        if (!stream->client_read_batching || stream->pending_body_bytes == before ||
+            stream->pending_body_bytes >= context->payload_capacity)
+          break;
+        {
+          int buffered = 0;
+          struct pollfd descriptor;
+#if defined(LWS_WITH_TLS) && CHEZPP_WITH_OPENSSL && !defined(LWS_WITH_MBEDTLS)
+          SSL *ssl = lws_get_ssl(wsi);
+          if (ssl != NULL) buffered = SSL_pending(ssl) > 0;
+#endif
+          descriptor.fd = lws_get_socket_fd(wsi);
+          descriptor.events = POLLIN;
+          descriptor.revents = 0;
+          if (!buffered && (poll(&descriptor, 1, 0) <= 0 ||
+                            !(descriptor.revents & POLLIN)))
+            break;
+        }
       }
+      stream->client_read_batching = 0;
+      if (result >= 0 && stream->active && stream->generation == generation &&
+          stream->wsi == wsi && !stream->terminal && !stream->terminal_pending &&
+          stream->pending_body_bytes)
+        lws_rx_flow_control(wsi, 0);
       /* A positive lws_http_client_read result is progress metadata, not a
        * callback failure.  Returning it from the callback makes LWS abort the
        * stream (the raw chunked path surfaced this as native status 103).
        * Only negative results should propagate as callback errors. */
       return result < 0 ? result : 0;
     }
-    case LWS_CALLBACK_RECEIVE_CLIENT_HTTP_READ:
+    case LWS_CALLBACK_RECEIVE_CLIENT_HTTP_READ: {
+      lws_http_event *tail;
       if (context == NULL || stream == NULL) return 0;
       pthread_mutex_lock(&context->lock);
-      if (!queue_event_metadata_locked(
+      tail = context->event_tail;
+      if (stream->client_read_batching && tail != NULL &&
+          tail->tag == LWS_HTTP_EVENT_READABLE &&
+          tail->connection_id == stream->connection->identity &&
+          tail->stream_id == stream->identity && tail->generation == stream->generation &&
+          tail->protocol == stream->observed_protocol &&
+          length <= context->payload_capacity - tail->payload_length &&
+          length <= context->body_byte_limit - context->queued_body_bytes) {
+        memcpy(tail->payload + tail->payload_length, input, length);
+        tail->payload_length += length;
+        context->queued_body_bytes += length;
+      } else if (!queue_event_metadata_locked(
               context, LWS_HTTP_EVENT_READABLE,
               stream->connection->identity, stream->identity,
               stream->generation, 0, input, length,
@@ -918,10 +966,9 @@ static int lws_http_callback(struct lws *wsi,
       }
       stream->pending_body_bytes += length;
       pthread_mutex_unlock(&context->lock);
-      {
-        lws_rx_flow_control(wsi, 0);
-      }
+      if (!stream->client_read_batching) lws_rx_flow_control(wsi, 0);
       return 0;
+    }
     case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE: {
       lws_http_protocol protocol;
       size_t outbound_length;
