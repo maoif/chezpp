@@ -961,8 +961,13 @@ static int lws_http_callback(struct lws *wsi,
               stream->observed_protocol, 0, stream->peer_h2_capacity,
               stream->peer_h2_capacity_known,
               LWS_HTTP_TERMINAL_SCOPE_NONE)) {
+        /* LWS has consumed this input. Report exhaustion instead of completing
+         * a response whose bytes could not be delivered to the Scheme sink. */
+        stream->terminal = 1;
+        stream->failure_pending = 1;
+        stream->failure_status = ENOBUFS;
         pthread_mutex_unlock(&context->lock);
-        return 0;
+        return -1;
       }
       stream->pending_body_bytes += length;
       pthread_mutex_unlock(&context->lock);

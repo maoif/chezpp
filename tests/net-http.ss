@@ -148,6 +148,52 @@
                      (> largest 4096)
                      (<= largest 65536)))))))))
 
+(mat net-http-live-receive-queue-exhaustion-fails
+     ;; Error case: a full event pool must fail a real body callback without losing bytes silently.
+     (mat-requires (websockets)
+       (let ([phase (box 0)] [context (lws-context-open 2 65536)])
+         (let-values ([(port worker)
+                       (start-http1-fixture
+                        (lambda (input output)
+                          (read-http-request-head input)
+                          (put-bytevector output
+                           (string->utf8 "HTTP/1.1 200 OK\r\nContent-Length: 32\r\n\r\n"))
+                          (flush-output-port output)
+                          (let wait ([remaining 3000])
+                            (when (and (zero? (unbox phase)) (positive? remaining))
+                              (milisleep 1) (wait (fx1- remaining))))
+                          (when (= 1 (unbox phase))
+                            (put-bytevector output (make-bytevector 16 120))
+                            (flush-output-port output)
+                            (let wait ([remaining 3000])
+                              (when (and (= 1 (unbox phase)) (positive? remaining))
+                                (milisleep 1) (wait (fx1- remaining)))))))])
+           (define await-metric
+             (lambda (index predicate)
+               (let loop ([remaining 100])
+                 (cond
+                  [(predicate (vector-ref (lws-context-pool-metrics context) index)) #t]
+                  [(zero? remaining) #f]
+                  [else (lws-context-service context 10) (loop (fx1- remaining))]))))
+           (dynamic-wind
+             void
+             (lambda ()
+               (and (lws-client-start context 1 1 1 "127.0.0.1" port #f
+                                      "GET" "127.0.0.1" "/")
+                    (await-metric 1 (lambda (count) (= count 2)))
+                    (begin (set-box! phase 1) #t)
+                    (await-metric 4 positive?)
+                    (let drain ([failed? #f])
+                      (let ([event (lws-context-next-event context)])
+                        (if event
+                            (and (not (eq? 'complete (vector-ref event 0)))
+                                 (drain (or failed? (eq? 'failed (vector-ref event 0)))))
+                            failed?)))))
+             (lambda ()
+               (set-box! phase 2)
+               (lws-context-close context)
+               (thread-join worker)))))))
+
 (mat net-http-live-truncated-body
      ;; Error case: EOF before Content-Length must not produce a successful response.
      (mat-requires (websockets)
