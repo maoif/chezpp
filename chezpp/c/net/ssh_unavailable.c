@@ -154,6 +154,12 @@ ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
   return chezpp_unavailable_status("ssh: disabled at build time");
 }
 
+ptr chezpp_net_ssh_channel_request_pty_size(uptr handle, const char *terminal,
+                                          int columns, int rows, int resize, int timeout_ms) {
+  (void)handle; (void)terminal; (void)columns; (void)rows; (void)resize; (void)timeout_ms;
+  return chezpp_unavailable_status("ssh: disabled at build time");
+}
+
 ptr chezpp_net_ssh_channel_request_environment(uptr handle, const char *name,
                                                 const char *value) {
   (void)handle;

@@ -1383,7 +1383,8 @@ ptr chezpp_net_ssh_channel_request_shell(uptr handle, int timeout_ms) {
   return Strue;
 }
 
-ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
+ptr chezpp_net_ssh_channel_request_pty_size(uptr handle, const char *terminal,
+                                          int columns, int rows, int resize, int timeout_ms) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   int rc;
   int use_nonblocking;
@@ -1397,7 +1398,8 @@ ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
   use_nonblocking = timeout_ms >= 0;
   if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 0);
   for (;;) {
-    rc = ssh_channel_request_pty(wrapper->channel);
+    rc = resize ? ssh_channel_change_pty_size(wrapper->channel, columns, rows) :
+                  ssh_channel_request_pty_size(wrapper->channel, terminal, columns, rows);
     if (rc != SSH_AGAIN || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN | POLLOUT, deadline,
@@ -1412,6 +1414,10 @@ ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
   if (rc != SSH_OK)
     return ssh_channel_error_status(wrapper, "failed to request ssh pty");
   return Strue;
+}
+
+ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
+  return chezpp_net_ssh_channel_request_pty_size(handle, "xterm", 80, 24, 0, timeout_ms);
 }
 
 ptr chezpp_net_ssh_channel_read(uptr handle, int size, int is_stderr, int nonblocking, int timeout_ms) {

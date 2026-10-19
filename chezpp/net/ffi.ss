@@ -93,6 +93,10 @@
           ffi-net-ssh-channel-request-exec
           ffi-net-ssh-channel-request-shell
           ffi-net-ssh-channel-request-pty
+          ffi-net-ssh-channel-request-pty-size
+          ffi-ssh-terminal-size
+          ffi-ssh-terminal-raw-start
+          ffi-ssh-terminal-raw-close
           ffi-net-ssh-channel-request-environment
           ffi-net-ssh-channel-request-subsystem
           ffi-net-ssh-channel-read
@@ -487,6 +491,41 @@
     (foreign-procedure "chezpp_net_ssh_channel_request_shell" (uptr int) scheme-object))
   (define ffi-net-ssh-channel-request-pty
     (foreign-procedure "chezpp_net_ssh_channel_request_pty" (uptr int) scheme-object))
+  #|proc:ffi-net-ssh-channel-request-pty-size
+  Request a PTY, or resize it when `resize?` is true, on native `channel-handle`.
+  `terminal` is its TERM value, `columns` and `rows` its size, and `timeout-ms` the wait bound.
+  Returns native success or an error status.
+  |#
+  (define ffi-net-ssh-channel-request-pty-size
+    (let ([native (foreign-procedure "chezpp_net_ssh_channel_request_pty_size"
+                                    (uptr string int int boolean int) scheme-object)])
+      (lambda (channel-handle terminal columns rows resize? timeout-ms)
+        (pcheck ([natural? channel-handle] [string? terminal] [fixnum? columns rows timeout-ms]
+                 [boolean? resize?])
+          (require-optional-library 'ffi-net-ssh-channel-request-pty-size 'ssh)
+          (native channel-handle terminal columns rows resize? timeout-ms)))))
+
+  #|proc:ffi-ssh-terminal-size
+  Return local `descriptor`'s #(columns rows), #f for a nonterminal, or an error status.
+  |#
+  (define ffi-ssh-terminal-size
+    (let ([native (foreign-procedure "chezpp_ssh_terminal_size" (int) scheme-object)])
+      (lambda (descriptor) (pcheck ([fixnum? descriptor]) (native descriptor)))))
+
+  #|proc:ffi-ssh-terminal-raw-start
+  Put local `descriptor` in raw mode, returning an ok status with an owned restoration handle,
+  or an error status. Release that handle with `ffi-ssh-terminal-raw-close`.
+  |#
+  (define ffi-ssh-terminal-raw-start
+    (let ([native (foreign-procedure "chezpp_ssh_terminal_raw_start" (int) scheme-object)])
+      (lambda (descriptor) (pcheck ([fixnum? descriptor]) (native descriptor)))))
+
+  #|proc:ffi-ssh-terminal-raw-close
+  Restore and release native `terminal-handle`. Return zero on success or an errno integer.
+  |#
+  (define ffi-ssh-terminal-raw-close
+    (let ([native (foreign-procedure "chezpp_ssh_terminal_raw_close" (uptr) int)])
+      (lambda (terminal-handle) (pcheck ([natural? terminal-handle]) (native terminal-handle)))))
   (define ffi-net-ssh-channel-request-environment
     (foreign-procedure "chezpp_net_ssh_channel_request_environment" (uptr string string)
                        scheme-object))

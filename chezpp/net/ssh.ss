@@ -50,6 +50,7 @@
           ssh-write/nonblocking
           ssh-write-all/nonblocking
           ssh-request-pty!
+          ssh-change-pty-size!
           ssh-request-environment!
           ssh-request-subsystem!
           ssh-channel-exit-status
@@ -60,6 +61,7 @@
           open-ssh-channel-error-port)
   (import (chezpp chez)
           (chezpp utils)
+          (chezpp string)
           (chezpp net errors)
           (chezpp net ffi)
           (chezpp net private)
@@ -907,21 +909,50 @@ The `ssh-shell` procedure requests an interactive shell on an SSH channel.
          (errorf who "expected ssh channel or session, given ~s" target)])]))
 
   #|proc:ssh-request-pty!
-The `ssh-request-pty!` procedure requests a pseudo-terminal on an SSH channel.
+The `ssh-request-pty!` procedure requests a pseudo-terminal on open `channel` and returns it.
+`terminal` names its TERM value, and positive `columns` and `rows` give the character size.
+The defaults are xterm, 80 columns, and 24 rows. `timeout-ms` bounds the wait in milliseconds;
+-1 waits without a deadline. Request the terminal before starting a shell or command.
 |#
   (define-who ssh-request-pty!
     (case-lambda
       [(channel)
        (ssh-request-pty! channel -1)]
       [(channel timeout-ms)
-       (pcheck ([ssh-channel? channel] [fixnum? timeout-ms])
+       (ssh-request-pty! channel "xterm" 80 24 timeout-ms)]
+      [(channel terminal columns rows)
+       (ssh-request-pty! channel terminal columns rows -1)]
+      [(channel terminal columns rows timeout-ms)
+       (pcheck ([ssh-channel? channel] [string? terminal] [fixnum? columns rows timeout-ms])
+               (when (or (string=? terminal "") (string-contains? terminal (string #\nul)))
+                 (errorf who "terminal must be nonempty and contain no NUL"))
+               (unless (and (fx<= 1 columns 65535) (fx<= 1 rows 65535))
+                 (errorf who "terminal columns and rows must be between 1 and 65535"))
                (when (fx>= timeout-ms 0)
                  (check-timeout-ms who timeout-ms))
                (ensure-channel-open who channel)
                (ensure-success who 'ssh
-                               (ffi-net-ssh-channel-request-pty (ssh-channel-handle channel)
-                                                                timeout-ms))
+                               (ffi-net-ssh-channel-request-pty-size
+                                (ssh-channel-handle channel) terminal columns rows #f timeout-ms))
                channel)]))
+
+  #|proc:ssh-change-pty-size!
+The `ssh-change-pty-size!` procedure updates the PTY on open `channel` and returns it.
+Positive `columns` and `rows` specify the new character size, each at most 65535.
+`timeout-ms` bounds the wait in milliseconds; its default -1 waits without a deadline.
+|#
+  (define-who ssh-change-pty-size!
+    (case-lambda
+      [(channel columns rows) (ssh-change-pty-size! channel columns rows -1)]
+      [(channel columns rows timeout-ms)
+       (pcheck ([ssh-channel? channel] [fixnum? columns rows timeout-ms])
+         (unless (and (fx<= 1 columns 65535) (fx<= 1 rows 65535))
+           (errorf who "terminal columns and rows must be between 1 and 65535"))
+         (when (fx>= timeout-ms 0) (check-timeout-ms who timeout-ms))
+         (ensure-channel-open who channel)
+         (ensure-success who 'ssh (ffi-net-ssh-channel-request-pty-size
+                                   (ssh-channel-handle channel) "" columns rows #t timeout-ms))
+         channel)]))
 
   #|proc:ssh-read
 The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout stream.
