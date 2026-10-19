@@ -329,7 +329,7 @@
 (define pkg-main
   (lambda (arguments)
     (if (equal? arguments '("--help"))
-        (display "Usage: package-release.ss PREFIX --output DIR --arch x64|arm64|riscv64 --version VERSION --commit SHA\n")
+        (display "Usage: package-release.ss PREFIX --output DIR --arch x64|arm64|riscv64|loongarch64 --version VERSION --commit SHA\n")
         (let ([options (make-hashtable string-hash string=?)])
           (unless (pair? arguments) (error 'package-release "missing installed prefix"))
           (let loop ([rest (cdr arguments)])
@@ -350,7 +350,7 @@
                  [arch (hashtable-ref options "--arch" "")]
                  [version (hashtable-ref options "--version" "")]
                  [commit (hashtable-ref options "--commit" "")])
-            (unless (member arch '("x64" "arm64" "riscv64"))
+            (unless (member arch '("x64" "arm64" "riscv64" "loongarch64"))
               (error 'package-release "unsupported architecture" arch))
             (unless (regex-matches? (string->regex "[0-9]+[.][0-9]+[.][0-9]+@[0-9]+-[0-9]+-[0-9]+") version)
               (error 'package-release "invalid Chezpp version" version))

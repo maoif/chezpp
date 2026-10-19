@@ -205,7 +205,8 @@ package: chez++
 		Linux:x86_64) architecture=x64 ;; \
 		Linux:aarch64|Linux:arm64) architecture=arm64 ;; \
 		Linux:riscv64) architecture=riscv64 ;; \
-		*) echo 'error: package supports Linux x64, arm64, and riscv64' >&2; exit 1 ;; \
+		Linux:loongarch64) architecture=loongarch64 ;; \
+		*) echo 'error: package supports Linux x64, arm64, riscv64, and loongarch64' >&2; exit 1 ;; \
 	esac; \
 	for tool in readelf ldd patchelf tar sha256sum realpath readlink cp getconf cc; do \
 		command -v "$$tool" >/dev/null || { echo "error: package requires $$tool" >&2; exit 1; }; \
