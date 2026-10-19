@@ -174,6 +174,7 @@ def verify():
                            capture_output=True, timeout=45)
         assert p.returncode == 0, p.stderr
         verify_scp_callback_cancellation(root, env, args)
+        verify_scp_filter_cancellation(root, env, args)
         verify_scp_directories(root, env, args)
         verify_scp_symlinks(root, env, args)
         verify_scp_readonly_files(root, env, args)
@@ -379,6 +380,53 @@ def verify_scp_callback_cancellation(root, env, args):
             assert result.returncode == 0, (direction, action, result.stderr)
             # Error case: cancellation must stop the current batch before later files.
             assert len(list(target.iterdir())) < 3, (direction, action)
+
+
+def verify_scp_filter_cancellation(root, env, args):
+    user = pwd.getpwuid(os.getuid()).pw_name
+    port = args[1].split('=')[1]
+    for direction in ('upload', 'download'):
+        for action in ('cancel', 'close', 'operation', 'close-owned'):
+            for selected in ('#t', '#f'):
+                suffix = f'{direction}-{action}-{selected[-1]}'
+                source = root / f'filter-source-{suffix}'
+                target = root / f'filter-target-{suffix}'
+                source.mkdir()
+                target.mkdir()
+                for name in ('a', 'b', 'c'):
+                    (source / name).write_bytes(b'new contents')
+                    (target / name).write_bytes(b'keep original')
+                script = root / 'filter-cancel.ss'
+                cancel = {'cancel': '(scp-cancel-pending! scp)', 'close': '(scp-close scp)',
+                          'operation': '(net-operation-cancel! operation)',
+                          'close-owned': '(scp-close scp)'}[action]
+                session_arg = (f"\"127.0.0.1\" {port} \"{user}\" 'publickey #f"
+                               if action == 'close-owned' else 'ssh')
+                script.write_text(f'''(import (chezpp) (chezpp net))
+(call-with-ssh-session "127.0.0.1" {port} "{user}"
+ (lambda (ssh)
+  (ssh-auth-publickey! ssh "{user}")
+  (call-with-scp-session {session_arg}
+   (lambda (scp)
+    (let ([called? #f] [operation #f])
+     (set! operation
+      (scp-copy-directory/nonblocking scp '{direction} "{source}" "{target}" 30000
+       (make-transfer-policy 'never 'replace 65536 #f)
+       (lambda (path attributes)
+        (unless called? (set! called? #t) {cancel})
+        {selected})
+       'reject))
+     (guard (failure [else (void)]) (net-operation-wait operation))
+     (unless (and called? (eq? (net-operation-state operation) 'cancelled))
+      (error 'test "filter cancellation did not survive" (net-operation-state operation))))))))
+''')
+                result = subprocess.run(['./chez++', '--script', str(script)], env=env,
+                                        capture_output=True, timeout=15)
+                assert result.returncode == 0, (suffix, result.stderr)
+                # Error case: cancelling inside a filter must prevent all later writes,
+                # even when the filter returns false and there is no active child yet.
+                assert sorted(p.name for p in target.iterdir()) == ['a', 'b', 'c']
+                assert all(p.read_bytes() == b'keep original' for p in target.iterdir()), suffix
 
 
 def verify_scp_directories(root, env, args):
@@ -967,7 +1015,10 @@ if __name__ == "__main__":
     import sys
 
     os.chdir(pathlib.Path(__file__).resolve().parent.parent)
-    if "--callback-cancellation" in sys.argv:
+    if "--filter-cancellation" in sys.argv:
+        with fixture() as (root, env, args):
+            verify_scp_filter_cancellation(root, env, args)
+    elif "--callback-cancellation" in sys.argv:
         with fixture() as (root, env, args):
             verify_scp_callback_cancellation(root, env, args)
     elif "--readonly-namespace" in sys.argv:

@@ -507,7 +507,22 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
         (errorf who "filter must be a procedure or #f, given ~s" filter))
       (unless (memq symlink-policy '(preserve follow reject))
         (errorf who "invalid SCP symlink policy ~s" symlink-policy))
-      (let ([sftp (sftp-open (scp-session-ssh-session session))])
+      (let ([sftp (sftp-open (scp-session-ssh-session session))]
+            [operation (scp-session-pending session)])
+        ;; Keep the parent identity: cancellation clears session-pending immediately.
+        (define check-active!
+          (lambda ()
+            (when (and operation
+                       (memq (net-operation-state operation) '(cancelled failed)))
+              (raise (net-operation-condition operation)))
+            (ensure-session-open who session)))
+        (define selected-entry?
+          (lambda (relative attributes)
+            (check-active!)
+            (let ([selected? (or (not filter) (filter relative attributes))])
+              ;; A filter may cancel/close the session and return either true or false.
+              (check-active!)
+              selected?)))
         (dynamic-wind
           (lambda () (scp-session-directory-active?-set! session #t))
           (lambda ()
@@ -522,6 +537,7 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                          [batch (make-list-builder)] [batch-count 0])
                      (define flush-files!
                        (lambda ()
+                         (check-active!)
                          (when (fxpositive? batch-count)
                            (scp-transfer-many/policy who session 'upload local remote
                                                      (batch) timeout-ms policy)
@@ -536,7 +552,7 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                [relative (if (string=? prefix "")
                                              name (scp-child-path prefix name))]
                                [attributes (local-scp-attributes local-child relative)])
-                          (when (or (not filter) (filter relative attributes))
+                          (when (selected-entry? relative attributes)
                             (case (scp-attributes-type attributes)
                               [(directory)
                                (flush-files!)
@@ -605,6 +621,7 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                          [batch (make-list-builder)] [batch-count 0] [command-size 16])
                      (define flush-files!
                        (lambda ()
+                         (check-active!)
                          (when (fxpositive? batch-count)
                            (scp-transfer-many/policy who session 'download local remote
                                                      (batch) timeout-ms policy)
@@ -622,7 +639,7 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                    [relative (if (string=? prefix "")
                                                  name (scp-child-path prefix name))]
                                    [attributes (remote-scp-attributes relative entry)])
-                              (when (or (not filter) (filter relative attributes))
+                              (when (selected-entry? relative attributes)
                                 (case (scp-attributes-type attributes)
                                   [(directory)
                                    (flush-files!)
