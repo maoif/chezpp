@@ -173,6 +173,7 @@ def verify():
         p = subprocess.run([sys.executable, "tests/ssh-shell-integration.py"],
                            capture_output=True, timeout=45)
         assert p.returncode == 0, p.stderr
+        verify_scp_callback_cancellation(root, env, args)
         verify_scp_directories(root, env, args)
         verify_scp_symlinks(root, env, args)
         verify_scp_readonly_files(root, env, args)
@@ -337,6 +338,47 @@ def verify():
         pathlib.Path(badenv["HOME"]).mkdir()
         p = run("ssh-run-cmd", badenv, args, "--command=true")
         assert p.returncode != 0 and b"host key is not trusted" in p.stderr, p
+
+
+def verify_scp_callback_cancellation(root, env, args):
+    user = pwd.getpwuid(os.getuid()).pw_name
+    port = args[1].split('=')[1]
+    for direction in ('upload', 'download'):
+        for action in ('cancel', 'close', 'operation', 'close-owned'):
+            source = root / f'callback-source-{direction}-{action}'
+            target = root / f'callback-target-{direction}-{action}'
+            source.mkdir()
+            for name in ('a', 'b', 'c'):
+                (source / name).write_bytes(b'x' * (4 * 1024 * 1024))
+            script = root / 'callback-cancel.ss'
+            cancel = {'cancel': '(scp-cancel-pending! scp)', 'close': '(scp-close scp)',
+                      'operation': '(net-operation-cancel! operation)',
+                      'close-owned': '(scp-close scp)'}[action]
+            session_arg = (f"\"127.0.0.1\" {port} \"{user}\" 'publickey #f"
+                           if action == 'close-owned' else 'ssh')
+            script.write_text(f'''(import (chezpp) (chezpp net))
+(call-with-ssh-session "127.0.0.1" {port} "{user}"
+ (lambda (ssh)
+  (ssh-auth-publickey! ssh "{user}")
+  (call-with-scp-session {session_arg}
+   (lambda (scp)
+    (let* ([called? #f] [operation #f]
+           [policy (make-transfer-policy 'never 'replace 65536
+             (lambda (protocol direction path completed total)
+              (unless called?
+               (set! called? #t)
+               {cancel})))])
+     (set! operation (scp-copy-directory/nonblocking scp '{direction}
+                      "{source}" "{target}" 30000 policy #f 'reject))
+     (guard (failure [else (void)]) (net-operation-wait operation))
+     (unless (and called? (eq? (net-operation-state operation) 'cancelled))
+      (error 'test "copy ignored cancellation" (net-operation-state operation))))))))
+''')
+            result = subprocess.run(['./chez++', '--script', str(script)], env=env,
+                                    capture_output=True, timeout=15)
+            assert result.returncode == 0, (direction, action, result.stderr)
+            # Error case: cancellation must stop the current batch before later files.
+            assert len(list(target.iterdir())) < 3, (direction, action)
 
 
 def verify_scp_directories(root, env, args):
@@ -925,7 +967,10 @@ if __name__ == "__main__":
     import sys
 
     os.chdir(pathlib.Path(__file__).resolve().parent.parent)
-    if "--readonly-namespace" in sys.argv:
+    if "--callback-cancellation" in sys.argv:
+        with fixture() as (root, env, args):
+            verify_scp_callback_cancellation(root, env, args)
+    elif "--readonly-namespace" in sys.argv:
         with fixture() as (root, env, args):
             verify_scp_readonly_namespace(root, env, args)
     elif "--readonly" in sys.argv:

@@ -45,7 +45,10 @@ pending work and closes the underlying SSH session only when ownership was reque
             (immutable timeout-ms scp-session-timeout-ms)
             (immutable owns-ssh? scp-session-owns-ssh?)
             (mutable pending scp-session-pending scp-session-pending-set!)
-            (mutable closed? scp-session-closed? scp-session-closed?-set!)))
+            (mutable closed? scp-session-closed? scp-session-closed?-set!)
+            (mutable child scp-session-child scp-session-child-set!)
+            (mutable directory-active? scp-session-directory-active?
+                     scp-session-directory-active?-set!)))
 
   #|record:scp-attributes
 The `scp-attributes` record is an immutable snapshot of a remote path. Its fields contain the
@@ -192,6 +195,23 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
       (scp-session-pending-set! session #f)
       session))
 
+  ;; The outer directory operation owns its currently executing child transfer.
+  ;; Cancelling it from a progress hook is safe after the native step has returned.
+  (define cancel-child!
+    (lambda (session)
+      (let ([child (scp-session-child session)])
+        (when child (net-operation-cancel! child)))))
+
+  (define scp-wait-child
+    (lambda (session operation)
+      (dynamic-wind
+        (lambda () (scp-session-child-set! session operation))
+        (lambda () (net-operation-wait operation))
+        (lambda ()
+          (when (eq? (net-operation-state operation) 'pending)
+            (net-operation-cancel! operation))
+          (scp-session-child-set! session #f)))))
+
   ;; A separate wrapper lets directory-copy operations run child transfers while pending.
   ;; The authenticated SSH session is borrowed, never closed by this wrapper.
   (define scp-transfer/policy
@@ -205,7 +225,7 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
         (dynamic-wind
           void
           (lambda ()
-            (net-operation-wait
+            (scp-wait-child session
              (scp-transfer/nonblocking who transfer-session kind
                                        (list source target timeout-ms) void policy)))
           (lambda () (when nested? (scp-close transfer-session)))))))
@@ -263,7 +283,8 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                   [else (net-operation-failed
                                          (make-net-error who 'scp "SCP transfer failed" status))]))
                               (net-operation-completed (thunk)))))
-                      (if native? (lambda () (ffi-net-scp-transfer-cancel handle)) void)
+                      (if native? (lambda () (ffi-net-scp-transfer-cancel handle))
+                          (lambda () (cancel-child! session)))
                       (lambda ()
                         (when native? (ffi-net-scp-transfer-close handle))
                         (scp-session-pending-set! session #f)))])
@@ -310,11 +331,7 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                           (make-net-error who 'scp "SCP batch transfer failed" status))))))
                (lambda () (ffi-net-scp-transfer-cancel handle))
                (lambda () (ffi-net-scp-transfer-close handle)))])
-        (dynamic-wind void
-                      (lambda () (net-operation-wait operation))
-                      (lambda ()
-                        (when (eq? (net-operation-state operation) 'pending)
-                          (net-operation-cancel! operation)))))))
+        (scp-wait-child session operation))))
 
   (define scp-download*
     (lambda (who session remote-path local-path timeout-ms)
@@ -492,7 +509,7 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
         (errorf who "invalid SCP symlink policy ~s" symlink-policy))
       (let ([sftp (sftp-open (scp-session-ssh-session session))])
         (dynamic-wind
-          void
+          (lambda () (scp-session-directory-active?-set! session #t))
           (lambda ()
             (case direction
               [(upload)
@@ -681,7 +698,10 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                target-path]
               [else
                (errorf who "direction must be one of '(upload download), given ~s" direction)]))
-          (lambda () (sftp-close sftp))))))
+          (lambda ()
+            (sftp-close sftp)
+            (scp-session-directory-active?-set! session #f)
+            (when (scp-session-closed? session) (close-owned-ssh! session)))))))
 
   #|proc:scp-open
 The `scp-open` procedure wraps an authenticated SSH session, or opens and authenticates one, for
@@ -694,7 +714,7 @@ subsequent SCP transfers.
       [(session timeout-ms)
        (pcheck ([ssh-session? session] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
-               (%make-scp-session session timeout-ms #f #f #f))]
+               (%make-scp-session session timeout-ms #f #f #f #f #f))]
       [(host port user auth-kind auth-arg)
        (scp-open host port user auth-kind auth-arg scp-default-timeout-ms)]
       [(host port user auth-kind auth-arg timeout-ms)
@@ -709,15 +729,23 @@ subsequent SCP transfers.
                    (lambda ()
                      (authenticate-ssh! who ssh-session user auth-kind auth-arg)
                      (set! ok? #t)
-                     (%make-scp-session ssh-session timeout-ms #t #f #f))
+                     (%make-scp-session ssh-session timeout-ms #t #f #f #f #f))
                    (lambda ()
                      (unless ok?
                        (guard (c [else #f])
                          (ssh-close ssh-session)))))))]))
 
+  (define close-owned-ssh!
+    (lambda (session)
+      (when (and (scp-session-owns-ssh? session)
+                 (guard (failure [else #f])
+                   (not (fxzero? (%ssh-session-handle (scp-session-ssh-session session))))))
+        (ssh-close (scp-session-ssh-session session)))))
+
   #|proc:scp-close
 The `scp-close` procedure closes an SCP session and, if it owns the wrapped SSH session, closes
-that SSH session as well.
+that SSH session as well. The `session` parameter is an SCP session; it is also returned.
+When called from a directory progress callback, owned SSH teardown waits for traversal to unwind.
 |#
   (define-who scp-close
     (lambda (session)
@@ -726,16 +754,15 @@ that SSH session as well.
                 (let ([pending (scp-session-pending session)])
                   (when pending
                     (cancel-pending! session pending)))
-                (when (and (scp-session-owns-ssh? session)
-                           (guard (c [else #f])
-                             (not (fx= 0 (%ssh-session-handle
-                                          (scp-session-ssh-session session))))))
-                  (ssh-close (scp-session-ssh-session session)))
+                ;; Directory traversal still owns an SFTP handle during progress callbacks.
+                ;; Its unwind closes that handle before releasing an owned SSH session.
+                (unless (scp-session-directory-active? session)
+                  (close-owned-ssh! session))
                 (scp-session-closed?-set! session #t))
               session)))
 
   #|proc:scp-cancel-pending!
-The `scp-cancel-pending!` procedure cancels the pending transfer on `session`, if any.
+The `scp-cancel-pending!` procedure cancels pending work, including an active directory child.
 The `session` parameter is an open SCP session.
 The return value is `session`; partial downloads are removed during cleanup.
 |#
