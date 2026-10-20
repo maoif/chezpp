@@ -266,7 +266,7 @@ and recursively resolved shared-library dependencies. Extract it anywhere and ru
 `bin/chez++`. The package requires the matching Linux architecture and the glibc version
 listed in its `README.txt` and `BUILD-INFO.json` (Ubuntu packages require glibc 2.39;
 the pinned Loongnix Debian package requires glibc 2.43). glibc and its dynamic loader
-come from the host. SHA-256 checksum files accompany the archives.
+come from the host. CI publishes only the archives; local packaging also writes SHA-256 checksums.
 `BUILD-INFO.json` records the source commit, version, build settings,
 and dependency provenance; bundled library licenses are under `share/licenses/`.
 
