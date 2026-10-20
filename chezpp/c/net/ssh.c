@@ -52,7 +52,6 @@ typedef struct {
   int cancelled;
   int local_fd;
   int completed;
-  int blocking_changed;
   int wait_events;
   size_t buffer_len;
   size_t buffer_pos;
@@ -2354,14 +2353,9 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
   t->local_path = dup_cstring(direction == 0 ? target : source);
   t->remote_name = dup_cstring(direction == 0 ? source : target);
   if (t->local_path == NULL || t->remote_name == NULL) goto oom;
-  {
-    ssh_set_blocking(owner->session, 0);
-    t->blocking_changed = 1;
-  }
   if (direction == 1) {
     if (stat(source, &st) != 0) goto errno_fail;
     if (!S_ISREG(st.st_mode)) {
-      if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
       free(t->local_path); free(t->remote_name); free(t);
       return make_path_error_status("local file expected", source);
     }
@@ -2371,7 +2365,6 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
     if (split_remote_path(target, &parent, &name) != Strue) goto fail;
     free(t->remote_name); t->remote_name = name; name = NULL;
     if (strchr(t->remote_name, '\n') != NULL || strchr(t->remote_name, '\r') != NULL) {
-      if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
       close(t->local_fd);
       free(parent); free(t->local_path); free(t->remote_name); free(t);
       return make_path_error_status("invalid remote file name", target);
@@ -2392,19 +2385,16 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
 oom:
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) ssh_channel_free(t->channel);
-  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return make_errno_status();
 errno_fail:
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) ssh_channel_free(t->channel);
-  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(parent); free(name); free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return make_errno_status();
 fail:
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) ssh_channel_free(t->channel);
-  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(parent); free(name); free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return ssh_error_status_from_wrapper(owner, "failed to allocate scp transfer");
 }
@@ -2777,8 +2767,7 @@ static ptr scp_transfer_step_once(chezpp_scp_transfer *t) {
   return make_error_status_message("scp transfer is already complete");
 }
 
-ptr chezpp_net_scp_transfer_step(uptr handle) {
-  chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
+static ptr scp_transfer_step(chezpp_scp_transfer *t) {
   unsigned pass;
   uint64_t initial_offset;
   if (t == NULL || t->cancelled || t->channel == NULL)
@@ -2811,6 +2800,21 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
   return scp_batch_status(t, scp_transfer_progress(t));
 }
 
+/* Keep the session in its caller's mode between steps: progress callbacks can
+ * open SFTP channels or inspect metadata on the same authenticated session. */
+ptr chezpp_net_scp_transfer_step(uptr handle) {
+  chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
+  int blocking;
+  ptr result;
+  if (t == NULL || t->owner == NULL || t->owner->session == NULL)
+    return make_error_status_message("invalid scp transfer");
+  blocking = ssh_is_blocking(t->owner->session);
+  ssh_set_blocking(t->owner->session, 0);
+  result = scp_transfer_step(t);
+  ssh_set_blocking(t->owner->session, blocking);
+  return result;
+}
+
 ptr chezpp_net_scp_transfer_cancel(uptr handle) {
   chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
   if (t != NULL) t->cancelled = 1;
@@ -2819,18 +2823,20 @@ ptr chezpp_net_scp_transfer_cancel(uptr handle) {
 
 void chezpp_net_scp_transfer_close(uptr handle) {
   chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
-  int remove_partial;
+  int remove_partial, blocking;
   if (t == NULL) return;
   /* A failed open must not unlink an existing destination we never opened. */
   remove_partial = t->direction == 0 && !t->completed && t->local_fd >= 0;
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) {
+    /* Cancellation and close must not wait for remote channel replies. */
+    blocking = ssh_is_blocking(t->owner->session);
+    ssh_set_blocking(t->owner->session, 0);
     (void)ssh_channel_send_eof(t->channel);
     (void)ssh_channel_close(t->channel);
     ssh_channel_free(t->channel);
+    ssh_set_blocking(t->owner->session, blocking);
   }
-  if (t->blocking_changed && t->owner != NULL && t->owner->session != NULL)
-    ssh_set_blocking(t->owner->session, 1);
   if (remove_partial && t->local_path != NULL)
     (void)unlink(t->local_path);
   scp_free_names(t->batch_names, t->batch_count);

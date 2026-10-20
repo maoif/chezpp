@@ -388,3 +388,48 @@
                      (not (file-exists? (string-append output "/" partial-name)))
                      (scp-attributes? (scp-stat session (string-append remote "/one")))))
               (lambda () (when (file-exists? local) (file-removetree local #f)))))))))
+
+(mat net-scp-progress-can-stat-same-session
+     ;; Progress hooks can inspect metadata without changing the transfer's native mode.
+     (mat-requires (ssh)
+       (with-test-scp-session
+        (lambda (session remote-root)
+          (let* ([local (format "/tmp/chezpp-scp-progress-stat-~a" (get-process-id))]
+                 [source (string-append local "/source")]
+                 [output (string-append local "/output")]
+                 [remote (string-append remote-root "/progress-stat")]
+                 [known (string-append remote-root "/hello.txt")]
+                 [payload (make-bytevector 524288 71)]
+                 [observed '()]
+                 [policy
+                  (make-transfer-policy
+                   'never 'replace 65536
+                   (lambda (protocol direction path completed total)
+                     (let ([key (list direction path (and total (= completed total)))])
+                       (unless (member key observed)
+                         (let ([attributes (scp-stat session known)])
+                           (unless (and (scp-attributes? attributes)
+                                        (eq? 'regular (scp-attributes-type attributes))
+                                        (= 10 (scp-attributes-size attributes)))
+                             (error 'progress-stat "metadata lookup failed")))
+                         (set! observed (cons key observed))))))])
+            (dynamic-wind
+              (lambda ()
+                (mkdirs source)
+                (for-each (lambda (name)
+                            (write-u8vec (string-append source "/" name) payload))
+                          '("one" "two")))
+              (lambda ()
+                ;; Cover both individual transfers and shared-channel directory batches.
+                (scp-upload session (string-append source "/one")
+                            (string-append remote-root "/single") policy)
+                (scp-download session (string-append remote-root "/single")
+                              (string-append local "/single") policy)
+                (scp-copy-directory session 'upload source remote policy #f 'reject)
+                (scp-copy-directory session 'download remote output policy #f 'reject)
+                (and (= 12 (length observed))
+                     (equal? payload (read-u8vec (string-append local "/single")))
+                     (andmap (lambda (name)
+                               (equal? payload (read-u8vec (string-append output "/" name))))
+                             '("one" "two"))))
+              (lambda () (when (file-exists? local) (file-removetree local #f)))))))))
