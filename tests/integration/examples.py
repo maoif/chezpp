@@ -23,6 +23,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 
 def summary(message):
     if os.environ.get('CHEZPP_EXAMPLE_TEST_VERBOSE'):
@@ -571,6 +572,9 @@ def http():
         (directory / 'empty').touch()
         (directory / 'escape').symlink_to('/etc/passwd')
         (directory / 'subdir').mkdir()
+        reserved_names = {'a?b': b'a?b', 'a#b': b'a#b', 'a%b': b'a%b', 'a%41': b'a%41'}
+        for name, contents in reserved_names.items():
+            (directory / name).write_bytes(contents)
         cert, key = directory / 'cert.pem', directory / 'key.pem'
         run('openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
             '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
@@ -592,6 +596,10 @@ def http():
                 expected = b'2' if script != 'http-file-server.ss' else b'1.1'
                 assert response == data + b'\n200:' + expected, response[-80:]
                 assert get('/empty') == b'\n200:' + expected
+                for name, contents in reserved_names.items():
+                    # Encoded reserved characters must identify the literal filename once.
+                    encoded = urllib.parse.quote(name, safe='')
+                    assert get('/' + encoded) == contents + b'\n200:' + expected, name
                 # Error cases: directories, missing files, traversal, and symlink escape.
                 for path in ['/subdir', '/missing', '/../etc/passwd', '/%2e%2e/etc/passwd',
                              '/escape', '/%2fetc/passwd']:

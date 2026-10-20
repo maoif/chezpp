@@ -11,7 +11,7 @@
           http-follow-redirects! http-set-header! http-set-timeout! http-cancel-pending! http-send/nonblocking http-request/nonblocking http-download/nonblocking http-upload/nonblocking
           http-server? http-listen http-server-close http-accept http-accept/nonblocking http-serve http-serve-loop http-register-handler! http-handler-ref http-unregister-handler!
           http-connection? http-connection-close http-read-request http-read-request/nonblocking http-write-response http-write-response/nonblocking)
-  (import (chezpp chez) (chezpp utils) (chezpp file) (chezpp net uri) (chezpp net errors) (chezpp net operation) (chezpp net ffi) (chezpp net tls) (chezpp net http private) (chezpp net lws client) (chezpp net lws server))
+  (import (chezpp chez) (chezpp utils) (chezpp file) (chezpp string) (chezpp net uri) (chezpp net errors) (chezpp net operation) (chezpp net ffi) (chezpp net tls) (chezpp net http private) (chezpp net lws client) (chezpp net lws server))
   #|record:http-request-record
 An immutable HTTP request containing a method, URI, header alist, and optional body.
 |#
@@ -81,6 +81,20 @@ An accepted HTTP connection handle managed by the server API.
   (define monotonic-ms (lambda () (let ([t (current-time 'time-monotonic)]) (+ (* (time-second t) 1000) (quotient (time-nanosecond t) 1000000)))))
   (define slice-bv (lambda (b i e) (let ([x (make-bytevector (- e i))]) (bytevector-copy! b i x 0 (- e i)) x)))
   (define request-path (lambda (u) (let ([p (or (uri-raw-path u) "/")] [q (uri-raw-query u)]) (if q (string-append (if (string=? p "") "/" p) "?" q) (if (string=? p "") "/" p)))))
+  ;; LWS exposes server paths after percent-decoding. Encode each segment again before
+  ;; parsing it as a URI so decoded ?, #, %, and other delimiters remain path data.
+  (define server-request-uri
+    (lambda (path)
+      (make-uri #f #f #f #f
+                (let ([output (open-output-string)])
+                  (let loop ([part* (string-split path #\/)] [first? #t])
+                    (if (null? part*)
+                        (get-output-string output)
+                        (begin
+                          (unless first? (put-char output #\/))
+                          (put-string output (uri-encode (car part*)))
+                          (loop (cdr part*) #f)))))
+                #f #f)))
   (define bytevector-slice
     (lambda (bv start stop)
       (let ([out (make-bytevector (- stop start) 0)])
@@ -963,7 +977,8 @@ The `http-read-request` procedure materializes and returns the request represent
             (let* ([handle (http-connection-request-handle connection)]
                    [request (make-http-request
                              (lws-http-request-method handle)
-                             (lws-http-request-path handle) (lws-http-request-headers handle)
+                             (server-request-uri (lws-http-request-path handle))
+                             (lws-http-request-headers handle)
                              (and (lws-http-request-has-body? handle)
                                   (lws-http-request-read-body handle)))])
               (http-connection-request-set! connection request)
