@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 
 
@@ -163,7 +163,7 @@
 
 (mat fs-directory-errors
      ;; Opening a missing directory must raise an error.
-     (error? (fs-open-directory "__chezpp_missing_directory__"))
+     (error? (fs-open-directory "__cspp_missing_directory__"))
 
      ;; The root is opened lazily; removal before the first next raises then.
      (error? ($with-fs-fixture
@@ -851,7 +851,7 @@
                    (file "test1.ss" (text testsrc1))
                    (file "test2.ss" (text testsrc2))
                    ;; file-symlink(!)
-                   (file "src1" (symlink "../src/src1.ss"))
+                   (file "src1" (symlink "../cspp/src1.ss"))
                    ;; link to link, simpler syntax
                    (symlink "src1" "src1.ln")))
 
@@ -872,33 +872,33 @@
 
      (file-directory? "./fstree")
      (file-directory? "./fstree/src")
-     (file-directory? "./fstree/src/native")
+     (file-directory? "./fstree/cspp/native")
      (file-directory? "./fstree/tests")
 
      (file-regular? "./fstree/README.md")
-     (file-regular? "./fstree/src/src1.ss")
-     (file-regular? "./fstree/src/src2.ss")
-     (file-regular? "./fstree/src/native/runtime.c")
-     (file-regular? "./fstree/src/native/ranstr")
+     (file-regular? "./fstree/cspp/src1.ss")
+     (file-regular? "./fstree/cspp/src2.ss")
+     (file-regular? "./fstree/cspp/native/runtime.c")
+     (file-regular? "./fstree/cspp/native/ranstr")
      (file-regular? "./fstree/tests/test1.ss")
      (file-regular? "./fstree/tests/test2.ss")
 
      (file-symbolic-link? "./fstree/tests/src1")
      (file-symbolic-link? "./fstree/tests/src1.ln")
-     (string=? "../src/src1.ss" (readlink "./fstree/tests/src1"))
+     (string=? "../cspp/src1.ss" (readlink "./fstree/tests/src1"))
      (string=? "src1" (readlink "./fstree/tests/src1.ln"))
 
      (string=? "This is a fancy project." (read-string "./fstree/README.md"))
 
-     (string=? "somestring" (read-string "./fstree/src/src1.ss"))
-     (= #o777 (get-mode "./fstree/src/src1.ss"))
+     (string=? "somestring" (read-string "./fstree/cspp/src1.ss"))
+     (= #o777 (get-mode "./fstree/cspp/src1.ss"))
      (string=? "somestring" (read-string "./fstree/tests/src1"))
      (string=? "somestring" (read-string "./fstree/tests/src1.ln"))
 
      (equal? '(a list of symbols)
-             (read-datum-fasl "./fstree/src/src2.ss"))
+             (read-datum-fasl "./fstree/cspp/src2.ss"))
 
-     (equal? lines (read-lines "./fstree/src/native/ranstr"))
+     (equal? lines (read-lines "./fstree/cspp/native/ranstr"))
      (equal? testsrc1 (read-string "./fstree/tests/test1.ss"))
      (equal? testsrc2 (read-string "./fstree/tests/test2.ss"))
 
@@ -1045,7 +1045,7 @@
               (dir "tests" (mode #o777)
                    (file "test1.ss" (text testsrc1))
                    (file "test2.ss" (text testsrc2))
-                   (file "src1" (symlink "../src/src1.ss"))
+                   (file "src1" (symlink "../cspp/src1.ss"))
                    (symlink "src1" "src1.ln")))
 
             #t)
@@ -1055,25 +1055,25 @@
      ;; src==dest
 
      ;; src is regular file
-     (= 1 (file-nlinks (atdir "src/src1.ss")))
-     (begin (file-link (atdir "src/src1.ss") (atdir "src/src1.cp"))
+     (= 1 (file-nlinks (atdir "cspp/src1.ss")))
+     (begin (file-link (atdir "cspp/src1.ss") (atdir "cspp/src1.cp"))
             #t)
-     (file-exists? (atdir "src/src1.cp"))
-     (= 2 (file-nlinks (atdir "src/src1.ss")))
-     (= 2 (file-nlinks (atdir "src/src1.cp")))
+     (file-exists? (atdir "cspp/src1.cp"))
+     (= 2 (file-nlinks (atdir "cspp/src1.ss")))
+     (= 2 (file-nlinks (atdir "cspp/src1.cp")))
 
      ;; src is symlink
      (begin (file-link (atdir "tests/src1") (atdir "src1.cp"))
             #t)
      (file-exists? (atdir "src1.cp"))
-     (= 3 (file-nlinks (atdir "src/src1.ss")))
+     (= 3 (file-nlinks (atdir "cspp/src1.ss")))
      (= 3 (file-nlinks (atdir "src1.cp")))
 
      ;; following a source symlink into a destination directory should use the link basename.
-     (begin (file-link (atdir "tests/src1") (atdir "src/native"))
-            (and (file-exists? (atdir "src/native/src1"))
-                 (= (file-nlinks (atdir "src/src1.ss"))
-                    (file-nlinks (atdir "src/native/src1")))))
+     (begin (file-link (atdir "tests/src1") (atdir "cspp/native"))
+            (and (file-exists? (atdir "cspp/native/src1"))
+                 (= (file-nlinks (atdir "cspp/src1.ss"))
+                    (file-nlinks (atdir "cspp/native/src1")))))
 
      ;; dest is file
      (error? (file-link (atdir "tests/src1") (atdir "src1.cp")))
@@ -1098,9 +1098,9 @@
                (readlink (atdir "tests/src2.ln")))
 
      ;; dest is symlink to dir
-     (error? (file-link (atdir "src/tests") (atdir "tests1")))
+     (error? (file-link (atdir "cspp/tests") (atdir "tests1")))
 
-     ;; path starting with ~ (test expand_pathname() in libchezpp)
+     ;; path starting with ~ (test expand_pathname() in libcspp)
 
      (file-removetree dir))
 
@@ -1124,9 +1124,9 @@
               (dir "tests" (mode #o777)
                    (file "test1.ss" (text (random-string 50 100)))
                    (file "test2.ss" (text (random-string 50 100)))
-                   (file "src1" (symlink "../src/src1.ss"))
+                   (file "src1" (symlink "../cspp/src1.ss"))
                    (symlink "src1" "src1.ln")
-                   (symlink "../src/native" "native")))
+                   (symlink "../cspp/native" "native")))
 
             #t)
 
@@ -1136,20 +1136,20 @@
      ;; src==dest
 
      ;; src is regular file
-     (begin (file-symlink "src/src1.ss" (atdir "src1"))
-            (string=? "src/src1.ss" (readlink (atdir "src1"))))
-     (string=? (read-string (atdir "src1")) (read-string (atdir "src/src1.ss")))
+     (begin (file-symlink "cspp/src1.ss" (atdir "src1"))
+            (string=? "cspp/src1.ss" (readlink (atdir "src1"))))
+     (string=? (read-string (atdir "src1")) (read-string (atdir "cspp/src1.ss")))
 
      (begin (file-symlink "src1" (atdir "tests/src2"))
             (and (string=? "src1" (readlink (atdir "tests/src2")))
                  (string=? (read-string (atdir "tests/src1")) (read-string (atdir "tests/src2")))))
 
      ;; dest is file
-     (error? (file-symlink "src/src1.ss" (atdir "src1")))
-     (error? (file-symlink "src/src1.ss" (atdir "src/src2.ss")))
+     (error? (file-symlink "cspp/src1.ss" (atdir "src1")))
+     (error? (file-symlink "cspp/src1.ss" (atdir "cspp/src2.ss")))
 
-     (begin (file-symlink! "src1.ss" (atdir "src/src2.ss"))
-            (string=? (read-string (atdir "src/src1.ss")) (read-string (atdir "src/src2.ss"))))
+     (begin (file-symlink! "src1.ss" (atdir "cspp/src2.ss"))
+            (string=? (read-string (atdir "cspp/src1.ss")) (read-string (atdir "cspp/src2.ss"))))
 
      ;; dest is dir
      (begin (file-symlink "tests/test1.ss" dir)
@@ -1157,9 +1157,9 @@
                  (string=? (read-string (atdir "test1.ss")) (read-string (atdir "tests/test1.ss")))))
 
      ;; dest is symlink to file
-     (error? (file-symlink "../src/src1.ss" (atdir "tests/test1.ss")))
-     (begin (file-symlink! "../src/src1.ss" (atdir "tests/test1.ss"))
-            (string=? (read-string (atdir "src/src1.ss")) (read-string (atdir "tests/test1.ss"))))
+     (error? (file-symlink "../cspp/src1.ss" (atdir "tests/test1.ss")))
+     (begin (file-symlink! "../cspp/src1.ss" (atdir "tests/test1.ss"))
+            (string=? (read-string (atdir "cspp/src1.ss")) (read-string (atdir "tests/test1.ss"))))
 
      ;; dest is symlink to dir
      (begin (file-symlink "../../README.md" (atdir "tests/native"))
@@ -1192,9 +1192,9 @@
                    (file "big" (fasl (random-list 99999 999999)))
                    (file "test1.ss" (text (random-string 50 100)))
                    (file "test2.ss" (text (random-string 50 100)))
-                   (file "src1" (symlink "../src/src1.ss"))
+                   (file "src1" (symlink "../cspp/src1.ss"))
                    (symlink "src1" "src1.ln")
-                   (symlink "../src/native" "native")))
+                   (symlink "../cspp/native" "native")))
 
             #t)
 
@@ -1203,12 +1203,12 @@
      ;; src==dest
 
      ;; src is regular file
-     (begin (file-copy (atdir "README.md") (atdir "src/md"))
-            (and (file-exists? (atdir "src/md"))
-                 (string=? (read-string (atdir "README.md")) (read-string (atdir "src/md")))))
-     (begin (file-copy (atdir "src/src2.ss") (atdir "tests/src2.ss"))
+     (begin (file-copy (atdir "README.md") (atdir "cspp/md"))
+            (and (file-exists? (atdir "cspp/md"))
+                 (string=? (read-string (atdir "README.md")) (read-string (atdir "cspp/md")))))
+     (begin (file-copy (atdir "cspp/src2.ss") (atdir "tests/src2.ss"))
             (and (file-exists? (atdir "tests/src2.ss"))
-                 (equal? (read-datum-fasl (atdir "src/src2.ss")) (read-datum-fasl (atdir "tests/src2.ss")))))
+                 (equal? (read-datum-fasl (atdir "cspp/src2.ss")) (read-datum-fasl (atdir "tests/src2.ss")))))
 
      ;; src is special file
      (error? (file-copy "/dev/tty" (atdir "tty")))
@@ -1220,15 +1220,15 @@
             (string=? (read-string (atdir "src11")) (read-string (atdir "tests/src1.ln"))))
 
      ;; following a source symlink into a destination directory should use the link basename.
-     (begin (file-copy (atdir "tests/src1") (atdir "src/native"))
-            (and (file-regular? (atdir "src/native/src1"))
+     (begin (file-copy (atdir "tests/src1") (atdir "cspp/native"))
+            (and (file-regular? (atdir "cspp/native/src1"))
                  (string=? (read-string (atdir "tests/src1"))
-                           (read-string (atdir "src/native/src1")))))
+                           (read-string (atdir "cspp/native/src1")))))
 
      ;; src is symlink to file, no follow
      (begin (file-copy (atdir "tests/src1") (atdir "src1.ln") #f)
             (and (file-symbolic-link? (atdir "src1.ln"))
-                 (string=? "../src/src1.ss" (readlink (atdir "src1.ln")))))
+                 (string=? "../cspp/src1.ss" (readlink (atdir "src1.ln")))))
 
      ;; dest is file
      (error? (file-copy (atdir "README.md") (atdir "tests/test2.ss")))
@@ -1239,9 +1239,9 @@
 
 
      ;; dest is dir
-     (begin (file-copy (atdir "README.md") (atdir "src/native"))
-            (file-exists? (atdir "src/native/README.md")))
-     (string=? (read-string (atdir "README.md")) (read-string (atdir "src/native/README.md")))
+     (begin (file-copy (atdir "README.md") (atdir "cspp/native"))
+            (file-exists? (atdir "cspp/native/README.md")))
+     (string=? (read-string (atdir "README.md")) (read-string (atdir "cspp/native/README.md")))
 
      ;; dest is symlink to file
      (error? (file-copy (atdir "README.md") (atdir "tests/src1")))
@@ -1250,15 +1250,15 @@
      (string=? (read-string (atdir "README.md")) (read-string (atdir "tests/src1")))
 
      ;; dest is symlink to dir
-     (begin (file-copy (atdir "README.md") (atdir "src/tests"))
-            (and (file-exists? (atdir "src/tests/README.md"))
+     (begin (file-copy (atdir "README.md") (atdir "cspp/tests"))
+            (and (file-exists? (atdir "cspp/tests/README.md"))
                  (file-exists? (atdir "tests/README.md"))))
      (string=? (read-string (atdir "README.md")) (read-string (atdir "tests/README.md")))
 
      ;; big file
      (begin (file-copy (atdir "tests/big") (atdir "src"))
-            (file-regular? (atdir "src/big")))
-     (equal? (read-datum-fasl (atdir "src/big")) (read-datum-fasl (atdir "tests/big")))
+            (file-regular? (atdir "cspp/big")))
+     (equal? (read-datum-fasl (atdir "cspp/big")) (read-datum-fasl (atdir "tests/big")))
 
      ;; path starting with ~
 
@@ -1283,26 +1283,26 @@
               (dir "tests" (mode #o777)
                    (file "test1.ss" (text (random-string 50 100)))
                    (file "test2.ss" (text (random-string 50 100)))
-                   (file "src1" (symlink "../src/src1.ss"))
+                   (file "src1" (symlink "../cspp/src1.ss"))
                    (symlink "src1" "src1.ln")
-                   (symlink "../src/native" "native")))
+                   (symlink "../cspp/native" "native")))
 
             #t)
 
      (not (file-directory? dir))
      (begin (create-fstree dir) #t)
 
-     (= #o777 (get-mode (atdir "src/src1.ss")))
-     (begin (file-copymode (atdir "src/src2.ss") (atdir "src/src1.ss"))
-            (= (symbols->file-mode '() '(r w x) '(w x) '(r x)) (get-mode (atdir "src/src1.ss"))))
+     (= #o777 (get-mode (atdir "cspp/src1.ss")))
+     (begin (file-copymode (atdir "cspp/src2.ss") (atdir "cspp/src1.ss"))
+            (= (symbols->file-mode '() '(r w x) '(w x) '(r x)) (get-mode (atdir "cspp/src1.ss"))))
 
      (= #o777 (get-mode (atdir "tests")))
      (begin (file-copymode (atdir "src") (atdir "tests"))
             (= (get-mode (atdir "src")) (get-mode (atdir "tests"))))
 
      (not (= #o777 (get-mode (atdir "tests/native") #t)))
-     (begin (file-copymode (atdir "src/src2.ss") (atdir "tests/native"))
-            (= (get-mode (atdir "src/src2.ss")) (get-mode (atdir "src/native"))))
+     (begin (file-copymode (atdir "cspp/src2.ss") (atdir "tests/native"))
+            (= (get-mode (atdir "cspp/src2.ss")) (get-mode (atdir "cspp/native"))))
 
      (file-removetree dir))
 
@@ -1324,9 +1324,9 @@
               (dir "tests" (mode #o777)
                    (file "test1.ss" (text (random-string 50 100)))
                    (file "test2.ss" (text (random-string 50 100)))
-                   (file "src1" (symlink "../src/src1.ss"))
+                   (file "src1" (symlink "../cspp/src1.ss"))
                    (symlink "src1" "src1.ln")
-                   (symlink "../src/native" "native")))
+                   (symlink "../cspp/native" "native")))
 
             #t)
 
@@ -1335,26 +1335,26 @@
 
      ;; times of files above may all be the same...
      (let* ([5s (make-time 'time-utc 0 5)]
-            [newt (time-difference (file-access-time (atdir "src/src1.ss")) 5s)])
+            [newt (time-difference (file-access-time (atdir "cspp/src1.ss")) 5s)])
        (set-time-type! newt 'time-utc)
        (file-touch-atime (atdir "tests/test1.ss") newt)
        (file-touch-mtime (atdir "tests/test1.ss") newt)
        #t)
 
      ;; compare atime, mtime and mode
-     (let ([mode1  (get-mode (atdir "src/src1.ss"))]
-           [atime1 (file-access-time (atdir "src/src1.ss"))]
-           [mtime1 (file-modification-time (atdir "src/src1.ss"))]
+     (let ([mode1  (get-mode (atdir "cspp/src1.ss"))]
+           [atime1 (file-access-time (atdir "cspp/src1.ss"))]
+           [mtime1 (file-modification-time (atdir "cspp/src1.ss"))]
            [mode2  (get-mode (atdir "tests/test1.ss"))]
            [atime2 (file-access-time (atdir "tests/test1.ss"))]
            [mtime2 (file-modification-time (atdir "tests/test1.ss"))])
        (and (not (= mode1 mode2))
             (not (time=? atime1 atime2))
             (not (time=? mtime1 mtime2))))
-     (begin (file-copymeta (atdir "src/src1.ss") (atdir "tests/test1.ss"))
-            (let ([mode1  (get-mode (atdir "src/src1.ss"))]
-                  [atime1 (file-access-time (atdir "src/src1.ss"))]
-                  [mtime1 (file-modification-time (atdir "src/src1.ss"))]
+     (begin (file-copymeta (atdir "cspp/src1.ss") (atdir "tests/test1.ss"))
+            (let ([mode1  (get-mode (atdir "cspp/src1.ss"))]
+                  [atime1 (file-access-time (atdir "cspp/src1.ss"))]
+                  [mtime1 (file-modification-time (atdir "cspp/src1.ss"))]
                   [mode2  (get-mode (atdir "tests/test1.ss"))]
                   [atime2 (file-access-time (atdir "tests/test1.ss"))]
                   [mtime2 (file-modification-time (atdir "tests/test1.ss"))])
@@ -1362,7 +1362,7 @@
                    (time=? atime1 atime2)
                    (time=? mtime1 mtime2))))
 
-     ;; TODO src/dest are symlinks
+     ;; TODO cspp/dest are symlinks
 
      (file-removetree dir)
      )
@@ -1393,9 +1393,9 @@
                    (file "big" (fasl (random-list 99999 999999)))
                    (file "test1.ss" (text (random-string 50 100)))
                    (file "test2.ss" (text (random-string 50 100)))
-                   (file "src1" (symlink "../src/src1.ss"))
+                   (file "src1" (symlink "../cspp/src1.ss"))
                    (symlink "src1" "src1.ln")
-                   (symlink "../src/native" "native")))
+                   (symlink "../cspp/native" "native")))
 
             #t)
 
@@ -1406,9 +1406,9 @@
 
      (same-file-contents? (atdir "README.md") (atdir1 "README.md"))
      (same-file-contents? (atdir "README.md") (atdir1 "README.md"))
-     (same-file-contents? (atdir "src/src1.ss") (atdir1 "src/src1.ss"))
-     (same-file-contents? (atdir "src/src2.ss") (atdir1 "src/src2.ss"))
-     (same-file-contents? (atdir "src/native/ranstr") (atdir1 "src/native/ranstr"))
+     (same-file-contents? (atdir "cspp/src1.ss") (atdir1 "cspp/src1.ss"))
+     (same-file-contents? (atdir "cspp/src2.ss") (atdir1 "cspp/src2.ss"))
+     (same-file-contents? (atdir "cspp/native/ranstr") (atdir1 "cspp/native/ranstr"))
      (same-file-contents? (atdir "tests/big") (atdir1 "tests/big"))
      (same-file-contents? (atdir "tests/test1.ss") (atdir1 "tests/test1.ss"))
      (same-file-contents? (atdir "tests/test2.ss") (atdir1 "tests/test2.ss"))
@@ -1416,10 +1416,10 @@
      (same-file-contents? (atdir "tests/src1.ln") (atdir1 "tests/src1.ln"))
      (same-file-contents? (atdir "tests/native/runtime.c") (atdir1 "tests/native/runtime.c"))
 
-     (file-symbolic-link? (atdir1 "src/tests"))
+     (file-symbolic-link? (atdir1 "cspp/tests"))
      (file-symbolic-link? (atdir1 "tests/src1.ln"))
      (file-symbolic-link? (atdir1 "tests/native"))
-     (string=? "../src/native" (readlink (atdir1 "tests/native")))
+     (string=? "../cspp/native" (readlink (atdir1 "tests/native")))
 
      ;; TODO another copy function, dest exists
 
@@ -1454,9 +1454,9 @@
                    (file "big" (fasl big))
                    (file "test1.ss" (text (random-string 50 100)))
                    (file "test2.ss" (text "str"))
-                   (file "src1" (symlink "../src/src1.ss"))
+                   (file "src1" (symlink "../cspp/src1.ss"))
                    (symlink "src1" "src1.ln")
-                   (symlink "../src/native" "native")))
+                   (symlink "../cspp/native" "native")))
 
             #t)
 
@@ -1464,18 +1464,18 @@
 
      ;; move files
      (begin (file-move (atdir "README.md") (atdir "src"))
-            (string=? "This is a fancy project." (read-string (atdir "src/README.md"))))
+            (string=? "This is a fancy project." (read-string (atdir "cspp/README.md"))))
      (not (file-exists? (atdir "README.md")))
 
-     (begin (file-move (atdir "tests/big") (atdir "src/big1"))
-            (equal? big (read-datum-fasl (atdir "src/big1"))))
+     (begin (file-move (atdir "tests/big") (atdir "cspp/big1"))
+            (equal? big (read-datum-fasl (atdir "cspp/big1"))))
      (not (file-exists? (atdir "tests/big")))
 
-     (error? (file-move (atdir "src/src2.ss") (atdir "tests/test2.ss")))
+     (error? (file-move (atdir "cspp/src2.ss") (atdir "tests/test2.ss")))
      ;; overwrite
-     (not (error? (file-move (atdir "src/src2.ss") (atdir "tests/test2.ss") file-copy!)))
+     (not (error? (file-move (atdir "cspp/src2.ss") (atdir "tests/test2.ss") file-copy!)))
      (file-exists? (atdir "tests/test2.ss"))
-     (not (file-exists? (atdir "src/src2.ss")))
+     (not (file-exists? (atdir "cspp/src2.ss")))
      (equal? str (read-string (atdir "tests/test2.ss")))
 
      ;; move tree
@@ -1483,11 +1483,11 @@
             (not (file-directory? dir)))
      (file-directory? (atdir1 "src"))
      (file-directory? (atdir1 "tests"))
-     (file-directory? (atdir1 "src/native"))
+     (file-directory? (atdir1 "cspp/native"))
 
      (file-exists? (atdir1 "tests/test2.ss"))
      (equal? str (read-string (atdir1 "tests/test2.ss")))
-     (equal? big (read-datum-fasl (atdir1 "src/big1")))
+     (equal? big (read-datum-fasl (atdir1 "cspp/big1")))
 
      ;; error case: moving a symlink to a directory must move the link, not remove the target tree.
      (let ([root "move_symlink_root"]
@@ -1766,7 +1766,7 @@
      (guard (failure [else #f])
        ($with-fs-fixture
         (lambda (root)
-          (let ([result (capture-process "../chez++" "--script=fswatcher-blocking-process.ss"
+          (let ([result (capture-process "../bin/cspp" "--script=fswatcher-blocking-process.ss"
                          (string-append root) "zero-timeout" :timeout 30000 :stdout capture :stderr capture)])
             (and (process-exit-success? (process-result-status result))
                  (string=? "" (process-result-stdout result))
@@ -1810,7 +1810,7 @@
      (guard (failure [else #f])
        ($with-fs-fixture
         (lambda (root)
-          (let ([result (capture-process "../chez++" "--script=fswatcher-blocking-process.ss"
+          (let ([result (capture-process "../bin/cspp" "--script=fswatcher-blocking-process.ss"
                          (string-append root) "finite-timeout"
                          :timeout 30000 :stdout capture :stderr capture)])
             (and (process-exit-success? (process-result-status result))
@@ -1822,7 +1822,7 @@
      (guard (failure [else #f])
        ($with-fs-fixture
         (lambda (root)
-          (let ([result (capture-process "../chez++" "--script=fswatcher-blocking-process.ss"
+          (let ([result (capture-process "../bin/cspp" "--script=fswatcher-blocking-process.ss"
                          (string-append root) :timeout 30000 :stdout capture :stderr capture)])
             (and (process-exit-success? (process-result-status result))
                  (string=? "" (process-result-stdout result))

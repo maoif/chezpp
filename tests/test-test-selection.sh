@@ -24,7 +24,7 @@ for directory in "$project_root/tests" "$project_root"; do
     # Direct tests use the existing build settings and keep nested build output quiet.
     expected_reports=0
     if [ "$directory" = "$project_root" ]; then expected_reports=1; fi
-    test "$(grep -c 'ChezPP build options' "$output")" -eq "$expected_reports"
+    test "$(grep -c 'CSPP build options' "$output")" -eq "$expected_reports"
     test "$(grep -c 'Optional libraries' "$output")" -eq "$expected_reports"
 
     # Helper sources, fixtures, missing files, names without .ss, and .so are invalid.

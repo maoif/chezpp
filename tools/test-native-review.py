@@ -9,11 +9,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def contracts():
-    source = (ROOT / 'chezpp/crypto/ffi.ss').read_text()
+    source = (ROOT / 'cspp/crypto/ffi.ss').read_text()
     # Use the real exported wrappers, replacing only native procedures with a safe stub.
     # Every invalid-object case must raise pcheck, before either availability or native entry.
     script = r'''
-(import (chezpp chez) (chezpp utils))
+(import (cspp chez) (cspp utils))
 (define require-optional-library (lambda (who library) (values)))
 (define replace-native
   (lambda (form)
@@ -22,9 +22,9 @@ def contracts():
       '(lambda arguments (error 'test-native-review "native-called"))]
      [(pair? form) (cons (replace-native (car form)) (replace-native (cdr form)))]
      [else form])))
-(define evaluation-environment (copy-environment (environment '(chezpp chez) '(chezpp utils)) #t))
+(define evaluation-environment (copy-environment (environment '(cspp chez) '(cspp utils)) #t))
 (eval '(define require-optional-library (lambda (who library) (values))) evaluation-environment)
-(call-with-input-file "chezpp/crypto/ffi.ss"
+(call-with-input-file "cspp/crypto/ffi.ss"
   (lambda (port)
     (let ([library (read port)])
       (for-each (lambda (form) (eval (replace-native form) evaluation-environment)) (cddddr library)))))
@@ -67,10 +67,10 @@ def contracts():
     ]
     if '--enabled' in sys.argv:
         script = r'''
-(import (chezpp chez) (chezpp crypto ffi) (chezpp optional-library))
+(import (cspp chez) (cspp crypto ffi) (cspp optional-library))
 (unless (optional-library-available? (optional-library-info 'openssl))
   (error 'test-native-review "OpenSSL must be enabled for real contract verification"))
-(define evaluation-environment (environment '(chezpp chez) '(chezpp crypto ffi)))
+(define evaluation-environment (environment '(cspp chez) '(cspp crypto ffi)))
 (define rejected-by-pcheck?
   (lambda (expression)
     (guard (condition
@@ -88,21 +88,21 @@ def contracts():
     for case in cases:
         script += f'\n;; Reject the invalid Scheme object before safe-stub native entry: {case}.\n'
         script += f'(unless (rejected-by-pcheck? \'{case}) (error \'test-native-review "missing object contract" \'{case}))\n'
-    result = subprocess.run(['./chez++', '--script=/dev/stdin'], input=script, text=True,
+    result = subprocess.run(['./bin/cspp', '--script=/dev/stdin'], input=script, text=True,
                             cwd=ROOT, capture_output=True)
     assert result.returncode == 0 and not result.stdout and not result.stderr, result.stdout + result.stderr
 
 
 def direct_calls():
-    source = (ROOT / 'chezpp/c/net/lws_http.c').read_text()
+    source = (ROOT / 'cspp/c/net/lws_http.c').read_text()
     assert not re.search(r'\blws_\w+_fn\b|\bdynamic_(?:get_context|context_user|get_opaque_user_data)\b', source), \
         'HTTP backend retains a separate function-pointer ABI layer'
     assert 'ensure_lws_http_lifetime_context(void)' in source
     assert 'copied = lws_hdr_custom_copy(state->wsi,' in source
     assert 'defined(LWS_ROLE_H2)' in source
     for filename in ['ftp.c', 'grpc.c', 'websocket.c']:
-        assert not re.search(r'typedef[^;]+\(\*\w+_fn\)', (ROOT / 'chezpp/c/net' / filename).read_text())
-    assert not re.search(r'typedef[^;]+\(\*\w+_fn\)', (ROOT / 'chezpp/c/zlib_loader.c').read_text())
+        assert not re.search(r'typedef[^;]+\(\*\w+_fn\)', (ROOT / 'cspp/c/net' / filename).read_text())
+    assert not re.search(r'typedef[^;]+\(\*\w+_fn\)', (ROOT / 'cspp/c/zlib_loader.c').read_text())
 
 
 if __name__ == '__main__':

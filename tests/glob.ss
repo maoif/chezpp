@@ -1,10 +1,10 @@
-(import (chezpp) (chezpp glob))
+(import (cspp) (cspp glob))
 
 (mat glob-default-flavor
      ;; The one-argument API follows the host OS path syntax.
      (if (eq? (system-platform) 'windows)
          (glob-match? (make-glob "src\\*.ss") "src\\file.ss")
-         (glob-match? (make-glob "src/*.ss") "src/file.ss")))
+         (glob-match? (make-glob "cspp/*.ss") "cspp/file.ss")))
 
 (mat glob-literals-and-wildcards
      (glob-match? (make-glob "foo.txt") "foo.txt")
@@ -23,9 +23,9 @@
      (glob-match? (make-glob "a.+(b).txt") "a.+(b).txt"))
 
 (mat glob-recursive-and-path-components
-     (glob-match? (make-glob "src/**/test?.ss") "src/test1.ss")
-     (glob-match? (make-glob "src/**/test?.ss") "src/a/b/test2.ss")
-     (not (glob-match? (make-glob "src/*/test?.ss") "src/a/b/test2.ss")))
+     (glob-match? (make-glob "cspp/**/test?.ss") "cspp/test1.ss")
+     (glob-match? (make-glob "cspp/**/test?.ss") "cspp/a/b/test2.ss")
+     (not (glob-match? (make-glob "cspp/*/test?.ss") "cspp/a/b/test2.ss")))
 
 (mat glob-braces-and-ranges
      (glob-match? (make-glob "*.{ss,sls}") "file.ss")
@@ -58,9 +58,9 @@
 
 (mat glob-filesystem-expansion
      (pair? (glob "*.ss"))
-     (equal? '() (glob "__chezpp_missing_glob_file__"))
-     (equal? '("__chezpp_missing_glob_file__")
-             (glob* "__chezpp_missing_glob_file__" #f #f 'literal)))
+     (equal? '() (glob "__cspp_missing_glob_file__"))
+     (equal? '("__cspp_missing_glob_file__")
+             (glob* "__cspp_missing_glob_file__" #f #f 'literal)))
 
 (mat glob-filesystem-iterator
      (let ([iter (glob->iter "*.ss")])
@@ -74,7 +74,7 @@
      (glob-match? (make-glob "[]a]") "]")
      (glob-match? (make-glob "[^a]") "b")
      (glob-match? (make-glob "a{b,{c,d}}") "ad")
-     (glob-match? (make-glob 'windows "C:/SRC/*.SS") "c:/src/file.ss")
+     (glob-match? (make-glob 'windows "C:/SRC/*.SS") "c:/cspp/file.ss")
      (glob-match? (make-glob "\\~user") "~user")
      (glob-match? (make-glob "a/~/b") "a/~/b")
      ;; Descending classes and malformed ranges must fail during compilation.

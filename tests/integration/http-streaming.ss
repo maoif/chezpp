@@ -1,4 +1,4 @@
-(import (chezpp) (chezpp net http))
+(import (cspp) (cspp net http))
 
 ;; The Python fixture supplies URI, output, and a first-chunk acknowledgement path.
 (let* ([arguments (command-line-arguments)]

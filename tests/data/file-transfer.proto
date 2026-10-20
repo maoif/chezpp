@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package chezpp.examples.transfer;
+package cspp.examples.transfer;
 
 message FileChunk {
   string name = 1;

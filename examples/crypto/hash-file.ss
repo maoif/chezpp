@@ -1,6 +1,6 @@
-(import (chezpp)
-        (chezpp digest)
-        (rename (chezpp crypto hash) (hash-file crypto-hash-file)))
+(import (cspp)
+        (cspp digest)
+        (rename (cspp crypto hash) (hash-file crypto-hash-file)))
 (load "examples/common.ss")
 
 (define file-hash

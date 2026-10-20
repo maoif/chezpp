@@ -1,6 +1,6 @@
-(import (chezpp)
-        (chezpp concurrency fiber)
-        (chezpp system))
+(import (cspp)
+        (cspp concurrency fiber)
+        (cspp system))
 
 ;;;;===----------------------------------------------------------------------===
 ;;;; Configurable CPU stress workloads

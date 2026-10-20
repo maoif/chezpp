@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net private))
+(import (cspp)
+        (cspp net private))
 
 (define internal-ffi-error?
   (lambda (thunk)

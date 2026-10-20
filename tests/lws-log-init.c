@@ -1,16 +1,16 @@
 /* Observe and forward real LWS calls: adapter startup must finish configuring
  * global logging before any context exists, then leave it immutable during
  * service. Private WebSocket logging may still use a different log level. */
-#include "../chezpp/c/net/lws_http.h"
-#include "../chezpp/c/net/lws_loader.h"
-#include "../chezpp/c/optional_library.h"
+#include "../cspp/c/net/lws_http.h"
+#include "../cspp/c/net/lws_loader.h"
+#include "../cspp/c/optional_library.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-extern const chezpp_optional_library *chezpp_net_websocket_library(void);
+extern const cspp_optional_library *cspp_net_websocket_library(void);
 extern void __real_lws_set_log_level(int flags, lws_log_emit_t emit);
 extern struct lws_context *__real_lws_create_context(
     const struct lws_context_creation_info *information);
@@ -37,13 +37,13 @@ struct lws_context *__wrap_lws_create_context(
 }
 
 static void initialize_http(void) {
-  uintptr_t context = chezpp_lws_http_context_open(32, 4096, 0, NULL, 0);
+  uintptr_t context = cspp_lws_http_context_open(32, 4096, 0, NULL, 0);
   if (!context) abort();
-  chezpp_lws_http_context_close(context);
+  cspp_lws_http_context_close(context);
 }
 
 static void initialize_websocket(void) {
-  const chezpp_optional_library *library = chezpp_net_websocket_library();
+  const cspp_optional_library *library = cspp_net_websocket_library();
   if (library->state < 0) abort();
 }
 
@@ -64,7 +64,7 @@ static void initialize_peer(lws_sorted_usec_list_t *timer) {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 2 || setenv("CHEZPP_WS_LOGLEVEL", "1", 1)) return 2;
+  if (argc != 2 || setenv("CSPP_WS_LOGLEVEL", "1", 1)) return 2;
   if (!strcmp(argv[1], "concurrent")) {
     pthread_t threads[8];
     if (pthread_barrier_init(&start, NULL, 8)) return 2;
@@ -83,12 +83,12 @@ int main(int argc, char **argv) {
     information.port = CONTEXT_PORT_NO_LISTEN;
     information.log_cx = &log_context;
     information.fd_limit_per_thread = 16;
-    context = chezpp_lws_create_context(&information);
+    context = cspp_lws_create_context(&information);
     if (!context) return 2;
     lws_sul_schedule(context, 0, &timer, initialize_peer, 1);
     for (int remaining = 1000; remaining && !callback_ran; remaining--)
-      if (chezpp_lws_service_tsi(context, -1, 0) < 0) return 2;
-    chezpp_lws_context_destroy(context);
+      if (cspp_lws_service_tsi(context, -1, 0) < 0) return 2;
+    cspp_lws_context_destroy(context);
 #if LWS_MAX_SMP > 1
     if (log_context.inited == 2) pthread_mutex_destroy(&log_context.refcount_lock);
 #endif

@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (define benchmark-summary-has?
   (lambda (summary key)

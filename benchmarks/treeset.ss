@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 (load "benchmarks/common.ss")
 
 (define make-set-case

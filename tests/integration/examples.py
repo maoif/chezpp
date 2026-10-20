@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run actual ChezPP examples against temporary files and loopback listeners.
+"""Run actual CSPP examples against temporary files and loopback listeners.
 
 Run from the repository root: python3 tests/integration/examples.py [http|core|crypto|benchmarks]
 Requires curl with HTTP/2 and openssl for the HTTP group. No public hosts are contacted.
@@ -26,7 +26,7 @@ import time
 import urllib.parse
 
 def summary(message):
-    if os.environ.get('CHEZPP_EXAMPLE_TEST_VERBOSE'):
+    if os.environ.get('CSPP_EXAMPLE_TEST_VERBOSE'):
         print(message)
 
 
@@ -42,7 +42,7 @@ def run(*args, ok=True, **kwargs):
 
 
 def example(path, *args, **kwargs):
-    return run('./chez++', f'--script={path}', '--', *args, **kwargs)
+    return run('./bin/cspp', f'--script={path}', '--', *args, **kwargs)
 
 
 def reserve_port():
@@ -54,7 +54,7 @@ def reserve_port():
 @contextlib.contextmanager
 def server(script, directory, *args, with_process=False):
     port = reserve_port()
-    process = subprocess.Popen(['./chez++', f'--script={script}', '--', f'--dir={directory}',
+    process = subprocess.Popen(['./bin/cspp', f'--script={script}', '--', f'--dir={directory}',
                                 f'--port={port}', *args], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
     try:
@@ -97,7 +97,7 @@ def h2_request_body_errors():
         return (len(payload).to_bytes(3, 'big') + bytes([kind, flags])
                 + stream.to_bytes(4, 'big') + payload)
 
-    with tempfile.TemporaryDirectory(prefix='chezpp-h2-request-body-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-h2-request-body-') as name:
         directory = Path(name)
         (directory / 'payload').write_bytes(b'listener-still-alive')
         with server('examples/net/http2-file-server.ss', directory, with_process=True) as (port, process):
@@ -145,7 +145,7 @@ def h2_request_body_errors():
 
 
 def http_interrupt():
-    with tempfile.TemporaryDirectory(prefix='chezpp-example-interrupt-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-example-interrupt-') as name:
         directory = Path(name)
         with (directory / 'large').open('wb') as output:
             output.truncate(32 * 1024 * 1024)
@@ -163,7 +163,7 @@ def http_interrupt():
 
 
 def wget_errors():
-    with tempfile.TemporaryDirectory(prefix='chezpp-example-wget-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-example-wget-') as name:
         directory = Path(name)
         with server('examples/net/http-file-server.ss', directory) as port:
             for exists in (False, True):
@@ -218,7 +218,7 @@ def wget_options():
         def log_message(self, *args):
             pass
 
-    with tempfile.TemporaryDirectory(prefix='chezpp-wget-options-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-wget-options-') as name:
         output = Path(name) / 'output'
         with http_server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as listener:
             thread = threading.Thread(target=listener.serve_forever, daemon=True)
@@ -228,11 +228,11 @@ def wget_options():
                 result = example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}')
                 assert b'100%' in result.stderr and b'7/7 bytes' in result.stderr, result.stderr
                 assert not result.stdout, result.stdout
-                assert received[-1].startswith('chezpp-wget'), received
+                assert received[-1].startswith('cspp-wget'), received
                 assert output.read_bytes() == b'payload'
                 example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}',
-                        '--user-agent=Chezpp-test/1.0')
-                assert received[-1] == 'Chezpp-test/1.0', received
+                        '--user-agent=CSPP-test/1.0')
+                assert received[-1] == 'CSPP-test/1.0', received
                 result = example('examples/net/wget.ss', f'--uri={base}/', f'--output={output}',
                                  '--progress=no')
                 assert b'bytes' not in result.stderr and b'100%' not in result.stderr, result.stderr
@@ -287,14 +287,14 @@ def wget_progress():
             def log_message(self, *args):
                 pass
 
-        with tempfile.TemporaryDirectory(prefix='chezpp-wget-progress-') as name:
+        with tempfile.TemporaryDirectory(prefix='cspp-wget-progress-') as name:
             output = Path(name) / 'output'
             with http_server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as listener:
                 thread = threading.Thread(target=listener.serve_forever, daemon=True)
                 thread.start()
                 path = 'redirect' if mode == 'redirect' else 'payload'
                 process = subprocess.Popen(
-                    ['./chez++', '--script=examples/net/wget.ss', '--',
+                    ['./bin/cspp', '--script=examples/net/wget.ss', '--',
                      f'--uri=http://127.0.0.1:{listener.server_port}/{path}', f'--output={output}'],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 captured = bytearray()
@@ -352,13 +352,13 @@ def wget_speed():
         def log_message(self, *args):
             pass
 
-    with tempfile.TemporaryDirectory(prefix='chezpp-wget-speed-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-wget-speed-') as name:
         output = Path(name) / 'output'
         with http_server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as listener:
             thread = threading.Thread(target=listener.serve_forever, daemon=True)
             thread.start()
             process = subprocess.Popen(
-                ['./chez++', '--script=examples/net/wget.ss', '--',
+                ['./bin/cspp', '--script=examples/net/wget.ss', '--',
                  f'--uri=http://127.0.0.1:{listener.server_port}/', f'--output={output}'],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             captured = bytearray()
@@ -395,7 +395,7 @@ def http_streaming():
     # Exercise TLS record batching, chunk framing, and immediate partial delivery.
     failures = []
     body = bytes(range(256)) * 4096
-    with tempfile.TemporaryDirectory(prefix='chezpp-http-streaming-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-http-streaming-') as name:
         directory = Path(name)
         cert, key = directory / 'cert', directory / 'key'
         marker = directory / 'first-chunk'
@@ -522,7 +522,7 @@ def h2_window():
         except Exception as error:
             failures.append(error)
 
-    with socket.socket() as listener, tempfile.TemporaryDirectory(prefix='chezpp-h2-window-') as name:
+    with socket.socket() as listener, tempfile.TemporaryDirectory(prefix='cspp-h2-window-') as name:
         listener.bind(('127.0.0.1', 0))
         listener.listen()
         listener.settimeout(5)
@@ -530,7 +530,7 @@ def h2_window():
         thread.start()
         output = Path(name) / 'output'
         process = subprocess.Popen(
-            ['./chez++', '--script=examples/net/wget.ss', '--',
+            ['./bin/cspp', '--script=examples/net/wget.ss', '--',
              f'--uri=http://127.0.0.1:{listener.getsockname()[1]}/',
              f'--output={output}', '--version=h2'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -565,7 +565,7 @@ def h2_window():
 def http():
     http_port_options()
     h2_request_body_errors()
-    with tempfile.TemporaryDirectory(prefix='chezpp-example-http-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-example-http-') as name:
         directory = Path(name)
         data = bytes(range(256)) * 4096
         (directory / 'payload').write_bytes(data)
@@ -646,7 +646,7 @@ def help_commands():
             result = example(path, flag)
             assert result.stdout and not result.stderr, (path, flag, result)
             # Help must reach the script instead of stopping at the launcher.
-            assert b'Chezpp REPL and script launcher' not in result.stdout, (path, flag, result)
+            assert b'CSPP REPL and script launcher' not in result.stdout, (path, flag, result)
     summary('Library examples and benchmarks: both CLI help flags passed')
 
 
@@ -664,7 +664,7 @@ def core():
     }.items():
         assert example('examples/' + path + '.ss', *arguments).stdout
     # Error cases: each parser rejects a missing file and a malformed input.
-    with tempfile.TemporaryDirectory(prefix='chezpp-example-parser-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-example-parser-') as name:
         for parser, invalid in {'xml': b'<bad', 'json': b'{', 'toml': b'[',
                                 'scheme': b'(', 'elf': b'not ELF'}.items():
             path = Path(name) / parser
@@ -676,11 +676,11 @@ def core():
 
 
 def crypto():
-    with tempfile.TemporaryDirectory(prefix='chezpp-example-crypto-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-example-crypto-') as name:
         directory = Path(name)
         source = directory / 'input'
         source.write_bytes(bytes(range(256)) * 20)
-        env = dict(os.environ, CHEZPP_EXAMPLE_PASSWORD='test-only-secret')
+        env = dict(os.environ, CSPP_EXAMPLE_PASSWORD='test-only-secret')
         for method in ['aes-256-gcm', 'chacha20-poly1305']:
             encrypted, decrypted = directory / method, directory / (method + '.plain')
             example('examples/crypto/encrypt-file.ss', f'--input={source}',
@@ -693,7 +693,7 @@ def crypto():
                 raw = bytearray(encrypted.read_bytes())
                 bad_env = env.copy()
                 if changed == b'wrong-password':
-                    bad_env['CHEZPP_EXAMPLE_PASSWORD'] = 'wrong'
+                    bad_env['CSPP_EXAMPLE_PASSWORD'] = 'wrong'
                 elif changed == b'header': raw[raw.index(b'\n') + 1] ^= 1
                 elif changed == b'payload': raw[-30] ^= 1
                 elif changed == b'tag': raw[-1] ^= 1
@@ -714,7 +714,7 @@ def crypto():
         for mode, source_path in [('encrypt', race_source), ('decrypt', race_encrypted)]:
             output = directory / ('race-' + mode + '-output')
             process = subprocess.Popen(
-                ['./chez++', '--script=examples/crypto/encrypt-file.ss', '--',
+                ['./bin/cspp', '--script=examples/crypto/encrypt-file.ss', '--',
                  f'--mode={mode}', f'--input={source_path}', f'--output={output}'],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             deadline = time.monotonic() + 8
@@ -742,10 +742,10 @@ def crypto():
             assert process.returncode != 0, (mode, stdout, stderr)
             assert output.read_bytes() == marker, (mode, output.read_bytes())
         methods = ['sha256', 'md5']
-        features = Path('chezpp/c/build-config.h').read_text()
-        if '#define CHEZPP_WITH_XXHASH 1' in features:
+        features = Path('cspp/c/build-config.h').read_text()
+        if '#define CSPP_WITH_XXHASH 1' in features:
             methods += ['xxhash32', 'xxhash64']
-        if '#define CHEZPP_WITH_BLAKE3 1' in features:
+        if '#define CSPP_WITH_BLAKE3 1' in features:
             methods += ['blake3']
         for method in methods:
             output = example('examples/crypto/hash-file.ss', f'--file={source}', f'--method={method}').stdout
@@ -760,7 +760,7 @@ def benchmarks():
                   'treemap': ['populate', 'lookup', 'traverse', 'update', 'delete'],
                   'vectors': ['fill', 'read', 'map', 'fold'],
                   'arrays': ['append', 'index', 'map', 'fold']}
-    with tempfile.TemporaryDirectory(prefix='chezpp-example-benchmarks-') as name:
+    with tempfile.TemporaryDirectory(prefix='cspp-example-benchmarks-') as name:
         for script, expected in operations.items():
             for fmt in ['text', 'csv', 'json', 'datum']:
                 output = Path(name) / (script + '.' + fmt)

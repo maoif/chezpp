@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 ;; Yield during readiness output so a prematurely started stdin reader takes the console mutex.
 (let ([stdout (current-output-port)])

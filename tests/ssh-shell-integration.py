@@ -1,4 +1,4 @@
-"""Real local/remote PTY checks for ssh-open-repl.ss; requires a built chez++."""
+"""Real local/remote PTY checks for ssh-open-repl.ss; requires a built cspp."""
 import sys, os
 sys.path = [p for p in sys.path if p != os.path.dirname(__file__)]
 import fcntl, pathlib, pty, runpy, select, signal, struct, subprocess, termios, time
@@ -8,7 +8,7 @@ api = runpy.run_path(str(ROOT / 'tests/ssh-examples-integration.py'), run_name='
 
 
 def verify_shell():
-    with api['fixture'](shell_command="env 'PS1=CHEZPP-PROMPT>' /bin/bash --noprofile --norc -i") as (_, env, args):
+    with api['fixture'](shell_command="env 'PS1=CSPP-PROMPT>' /bin/bash --noprofile --norc -i") as (_, env, args):
         env['TERM'] = 'xterm-256color'
         master, slave = pty.openpty()
         original = termios.tcgetattr(slave)
@@ -17,7 +17,7 @@ def verify_shell():
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
         process = subprocess.Popen(
-            ['./chez++', '--script=examples/net/ssh-open-repl.ss', '--', *args], env=env,
+            ['./bin/cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args], env=env,
             stdin=slave, stdout=slave, stderr=slave, preexec_fn=controlling_terminal)
         transcript = bytearray()
         def until(predicate, description, timeout=8):
@@ -37,7 +37,7 @@ def verify_shell():
                 assert process.poll() is None, (description, process.returncode, bytes(transcript))
             raise AssertionError((description, bytes(received), bytes(transcript)))
         try:
-            until(lambda data: b'CHEZPP-PROMPT>' in data, 'remote prompt')
+            until(lambda data: b'CSPP-PROMPT>' in data, 'remote prompt')
             flags = termios.tcgetattr(slave)[3]
             assert not flags & (termios.ICANON | termios.ECHO | termios.ISIG), (
                 'local terminal must relay input immediately without echo or signals', flags)
@@ -45,19 +45,19 @@ def verify_shell():
             os.write(master, b'printf "shell-%s\\n" OK')
             until(lambda data: b'printf' in data, 'key echo before Enter')
             os.write(master, b'\r')
-            data = until(lambda data: b'CHEZPP-PROMPT>' in data, 'command completion')
+            data = until(lambda data: b'CSPP-PROMPT>' in data, 'command completion')
             assert b'shell-OK' in data and b'\r\r\n' not in transcript, bytes(transcript)
             os.write(master, b'printf "term=%s\\n" "$TERM"; stty size\r')
-            data = until(lambda data: b'CHEZPP-PROMPT>' in data, 'terminal type and size')
+            data = until(lambda data: b'CSPP-PROMPT>' in data, 'terminal type and size')
             assert b'term=xterm-256color' in data and b'37 119' in data, data
             # Backspace and cursor movement belong to the remote line editor.
             os.write(master, b'printf "edit-%s\\n" OKX\x7f\x1b[D\x1b[C\r')
-            data = until(lambda data: b'CHEZPP-PROMPT>' in data, 'remote line editing')
+            data = until(lambda data: b'CSPP-PROMPT>' in data, 'remote line editing')
             assert b'edit-OK\r\n' in data, data
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 43, 101, 0, 0))
             time.sleep(0.3)
             os.write(master, b'stty size\r')
-            data = until(lambda data: b'43 101' in data and b'CHEZPP-PROMPT>' in data,
+            data = until(lambda data: b'43 101' in data and b'CSPP-PROMPT>' in data,
                          'terminal resize')
             assert b'43 101' in data, data
             # Error case: Ctrl-C interrupts the remote foreground command, keeping SSH open.
@@ -65,15 +65,15 @@ def verify_shell():
             until(lambda data: b'sleep 30' in data, 'remote sleep started')
             time.sleep(0.1)
             os.write(master, b'\x03')
-            until(lambda data: b'CHEZPP-PROMPT>' in data, 'prompt after remote Ctrl-C')
+            until(lambda data: b'CSPP-PROMPT>' in data, 'prompt after remote Ctrl-C')
             os.write(master, b'exit 7\r')
             assert process.wait(timeout=8) == 7
             assert termios.tcgetattr(slave) == original, 'terminal not restored after exit'
             for ending in ('eof', 'interrupt', 'terminate', 'hangup', 'quit'):
                 process = subprocess.Popen(
-                    ['./chez++', '--script=examples/net/ssh-open-repl.ss', '--', *args], env=env,
+                    ['./bin/cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args], env=env,
                     stdin=slave, stdout=slave, stderr=slave, preexec_fn=controlling_terminal)
-                until(lambda data: b'CHEZPP-PROMPT>' in data, 'prompt before ' + ending)
+                until(lambda data: b'CSPP-PROMPT>' in data, 'prompt before ' + ending)
                 if ending == 'eof':
                     os.write(master, b'\x04')
                 else:
@@ -99,7 +99,7 @@ def verify_shell():
 def verify_bidirectional_backpressure():
     # A full remote stdout window must not prevent forwarding a larger local stdin.
     import tempfile
-    with tempfile.TemporaryDirectory(prefix='chezpp-shell-backpressure-') as directory:
+    with tempfile.TemporaryDirectory(prefix='cspp-shell-backpressure-') as directory:
         root = pathlib.Path(directory)
         worker = root / 'worker.py'
         worker.write_text('import sys\n'
@@ -113,7 +113,7 @@ def verify_bidirectional_backpressure():
         with api['fixture'](shell_command=f'python3 {worker}') as (_, env, args):
             with source.open('rb') as input_port, tempfile.TemporaryFile() as output:
                 process = subprocess.Popen(
-                    ['./chez++', '--script=examples/net/ssh-open-repl.ss', '--', *args, '--pty=no'],
+                    ['./bin/cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args, '--pty=no'],
                     env=env, stdin=input_port, stdout=output, stderr=subprocess.PIPE,
                     start_new_session=True)
                 try:

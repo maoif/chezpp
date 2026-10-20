@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (define (benchmark-test-config)
   (benchmark-config-with (default-benchmark-config)
@@ -484,7 +484,7 @@
          (lambda ()
            (benchmark-write-datum-file
             path
-            `((format . chezpp-benchmark-baseline)
+            `((format . cspp-benchmark-baseline)
               (version . 1)
               (results . (((name . legacy-error)
                             (args . ())
@@ -507,7 +507,7 @@
          (lambda ()
            (benchmark-write-datum-file
             path
-            '((format . chezpp-benchmark-baseline)
+            '((format . cspp-benchmark-baseline)
               (version . two)
               (results . ())))
            (guard (exn

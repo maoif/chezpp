@@ -1,17 +1,17 @@
-(import (chezpp))
+(import (cspp))
 (load "generated/file-transfer.pb.ss")
 (load "generated/codegen-features.pb.ss")
 
 (define generated-environment
-  (environment '(chezpp) '(chezpp examples transfer file-transfer protobuf)))
+  (environment '(cspp) '(cspp examples transfer file-transfer protobuf)))
 
 (define generated-eval
   (lambda (expression)
     (eval expression generated-environment)))
 
 (define feature-environment
-  (environment '(except (chezpp) envelope?)
-               '(chezpp tests codegen codegen-features protobuf)))
+  (environment '(except (cspp) envelope?)
+               '(cspp tests codegen codegen-features protobuf)))
 
 (define feature-eval
   (lambda (expression)
@@ -47,10 +47,10 @@
          (and (= 8192 (transfer-result-size decoded))
               (equal? #vu8(4 3 2 1) (transfer-result-sha256 decoded)))))
 
-     (string=? "/chezpp.examples.transfer.FileTransfer/Upload"
+     (string=? "/cspp.examples.transfer.FileTransfer/Upload"
                (generated-eval 'file-transfer-upload-method))
 
-     (string=? "/chezpp.examples.transfer.FileTransfer/Download"
+     (string=? "/cspp.examples.transfer.FileTransfer/Download"
                (generated-eval 'file-transfer-download-method))
 
      (feature-eval
@@ -72,8 +72,8 @@
                 (= (bytevector-length encoded) (envelope-encoded-size message))))))
 
      (feature-eval
-      '(and (string=? "/chezpp.tests.codegen.Shapes/Unary" shapes-unary-method)
-            (string=? "/chezpp.tests.codegen.Shapes/Server" shapes-server-method)
-            (string=? "/chezpp.tests.codegen.Shapes/Client" shapes-client-method)
-            (string=? "/chezpp.tests.codegen.Shapes/Bidi" shapes-bidi-method)
+      '(and (string=? "/cspp.tests.codegen.Shapes/Unary" shapes-unary-method)
+            (string=? "/cspp.tests.codegen.Shapes/Server" shapes-server-method)
+            (string=? "/cspp.tests.codegen.Shapes/Client" shapes-client-method)
+            (string=? "/cspp.tests.codegen.Shapes/Bidi" shapes-bidi-method)
             (positive? (bytevector-length protobuf-file-descriptor-bytes)))))

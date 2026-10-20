@@ -1,6 +1,6 @@
 """Loopback SSH CLI integration; run --password with optional Paramiko installed.
 
-The default run needs sshd, ssh-keygen, ssh-agent, ssh-add and a built chez++.
+The default run needs sshd, ssh-keygen, ssh-agent, ssh-add and a built cspp.
 All host keys, authorized keys and known-hosts files belong to a temporary directory.
 """
 
@@ -17,7 +17,7 @@ def free_port():
 
 @contextlib.contextmanager
 def fixture(log_sessions=False, shell_command=None):
-    with tempfile.TemporaryDirectory(prefix="chezpp-ssh-examples-") as d:
+    with tempfile.TemporaryDirectory(prefix="cspp-ssh-examples-") as d:
         root = pathlib.Path(d)
         home = root / "home"
         ssh = home / ".ssh"
@@ -72,7 +72,7 @@ def fixture(log_sessions=False, shell_command=None):
 
 def run(script, env, args, *extra, input=None):
     return subprocess.run(
-        ["./chez++", "--script=examples/net/" + script + ".ss", "--", *args, *extra],
+        ["./bin/cspp", "--script=examples/net/" + script + ".ss", "--", *args, *extra],
         env=env,
         input=input,
         capture_output=True,
@@ -98,8 +98,8 @@ def verify():
     verify_scp_batch_timeouts()
     with fixture() as (root, env, args):
         # Defaults must use the local account, even if login environment names disagree.
-        env["USER"] = "chezpp-not-the-local-account"
-        env["LOGNAME"] = "chezpp-not-the-local-account"
+        env["USER"] = "cspp-not-the-local-account"
+        env["LOGNAME"] = "cspp-not-the-local-account"
         env.pop("SSH_AUTH_SOCK", None)
         p = run(
             "ssh-run-cmd",
@@ -137,7 +137,7 @@ def verify():
         ]
         p = run("ssh-run-cmd", env, keyargs, "--command=printf explicit-key")
         assert p.returncode == 0 and p.stdout == b"explicit-key", p
-        with tempfile.TemporaryDirectory(prefix="chezpp-agent-") as agentdir:
+        with tempfile.TemporaryDirectory(prefix="cspp-agent-") as agentdir:
             sock = str(pathlib.Path(agentdir) / "agent.sock")
             agent = subprocess.Popen(
                 ["ssh-agent", "-D", "-a", sock],
@@ -315,7 +315,7 @@ def verify():
             capture_output=True,
         )
         keyenv = env.copy()
-        keyenv["CHEZPP_SSH_PASSPHRASE"] = "fixture-passphrase"
+        keyenv["CSPP_SSH_PASSPHRASE"] = "fixture-passphrase"
         p = run("ssh-run-cmd", keyenv, keyargs, "--command=printf encrypted-key")
         assert p.returncode == 0 and p.stdout == b"encrypted-key", p
         for script in ("ssh-run-cmd", "ssh-open-repl", "ssh-port-forward", "scp"):
@@ -353,7 +353,7 @@ def verify_scp_batch_timeouts():
                            '/usr/libexec/sftp-server', '/usr/libexec/openssh/sftp-server')
          if pathlib.Path(path).is_file()), None)
     assert sftp_server, 'SCP timeout fixture requires the OpenSSH sftp-server executable'
-    with tempfile.TemporaryDirectory(prefix='chezpp-scp-timeout-') as directory:
+    with tempfile.TemporaryDirectory(prefix='cspp-scp-timeout-') as directory:
         peer = pathlib.Path(directory) / 'peer.py'
         peer.write_text(f'''import os, sys
 command = os.environ['SSH_ORIGINAL_COMMAND']
@@ -373,7 +373,7 @@ else:
                 source.mkdir()
                 (source / 'file').write_bytes(b'payload')
                 script = root / 'batch-timeout.ss'
-                script.write_text(f'''(import (chezpp) (chezpp net))
+                script.write_text(f'''(import (cspp) (cspp net))
 (call-with-ssh-session "127.0.0.1" {port} "{user}"
  (lambda (ssh)
   (ssh-auth-publickey! ssh "{user}")
@@ -393,7 +393,7 @@ else:
                   (scp-attributes? (scp-stat scp "{source}/file")))
       (error 'test "timeout did not release the batch and preserve its session")))))))
 ''')
-                result = subprocess.run(['./chez++', f'--script={script}', '--'], env=env,
+                result = subprocess.run(['./bin/cspp', f'--script={script}', '--'], env=env,
                                         capture_output=True, timeout=5)
                 assert result.returncode == 0, (direction, result.stderr)
                 if direction == 'download':
@@ -417,7 +417,7 @@ def verify_scp_callback_cancellation(root, env, args):
                       'close-owned': '(scp-close scp)'}[action]
             session_arg = (f"\"127.0.0.1\" {port} \"{user}\" 'publickey #f"
                            if action == 'close-owned' else 'ssh')
-            script.write_text(f'''(import (chezpp) (chezpp net))
+            script.write_text(f'''(import (cspp) (cspp net))
 (call-with-ssh-session "127.0.0.1" {port} "{user}"
  (lambda (ssh)
   (ssh-auth-publickey! ssh "{user}")
@@ -435,7 +435,7 @@ def verify_scp_callback_cancellation(root, env, args):
      (unless (and called? (eq? (net-operation-state operation) 'cancelled))
       (error 'test "copy ignored cancellation" (net-operation-state operation))))))))
 ''')
-            result = subprocess.run(['./chez++', f'--script={script}', '--'], env=env,
+            result = subprocess.run(['./bin/cspp', f'--script={script}', '--'], env=env,
                                     capture_output=True, timeout=15)
             assert result.returncode == 0, (direction, action, result.stderr)
             # Error case: cancellation must stop the current batch before later files.
@@ -462,7 +462,7 @@ def verify_scp_filter_cancellation(root, env, args):
                           'close-owned': '(scp-close scp)'}[action]
                 session_arg = (f"\"127.0.0.1\" {port} \"{user}\" 'publickey #f"
                                if action == 'close-owned' else 'ssh')
-                script.write_text(f'''(import (chezpp) (chezpp net))
+                script.write_text(f'''(import (cspp) (cspp net))
 (call-with-ssh-session "127.0.0.1" {port} "{user}"
  (lambda (ssh)
   (ssh-auth-publickey! ssh "{user}")
@@ -480,7 +480,7 @@ def verify_scp_filter_cancellation(root, env, args):
      (unless (and called? (eq? (net-operation-state operation) 'cancelled))
       (error 'test "filter cancellation did not survive" (net-operation-state operation))))))))
 ''')
-                result = subprocess.run(['./chez++', f'--script={script}', '--'], env=env,
+                result = subprocess.run(['./bin/cspp', f'--script={script}', '--'], env=env,
                                         capture_output=True, timeout=15)
                 assert result.returncode == 0, (suffix, result.stderr)
                 # Error case: cancelling inside a filter must prevent all later writes,
@@ -514,7 +514,7 @@ def verify_scp_directories(root, env, args):
             assert (output / "nested/deeper/empty").is_dir()
     # Remote paths are relative to the SSH login directory, including overwrite checks.
     home = pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir)
-    with tempfile.TemporaryDirectory(prefix=".chezpp-scp-relative-", dir=home) as directory:
+    with tempfile.TemporaryDirectory(prefix=".cspp-scp-relative-", dir=home) as directory:
         remote = pathlib.Path(directory) / "tree"
         relative_remote = str(remote.relative_to(home))
         copied = root / "relative-remote-copy"
@@ -663,7 +663,7 @@ def verify_scp_readonly_namespace(root, env, args):
     script = root / "raw-scp-path.ss"
     port = int(args[1].split("=", 1)[1])
     user = pwd.getpwuid(os.getuid()).pw_name
-    script.write_text(f'''(import (chezpp) (chezpp net))
+    script.write_text(f'''(import (cspp) (cspp net))
 (let ([session (ssh-open "127.0.0.1" {port} "{user}")])
   (dynamic-wind
     void
@@ -675,7 +675,7 @@ def verify_scp_readonly_namespace(root, env, args):
             (make-transfer-policy 'never 'replace 65536 #f) #f 'reject))))
     (lambda () (ssh-close session))))
 ''')
-    result = subprocess.run(["./chez++", f"--script={script}", "--"], env=env,
+    result = subprocess.run(["./bin/cspp", f"--script={script}", "--"], env=env,
                             capture_output=True, timeout=20)
     assert result.returncode != 0, result
     assert unrelated.read_bytes() == b"unrelated normalized path"
@@ -776,7 +776,7 @@ def verify_forwarding_recovery(env, args):
             target.bind(("127.0.0.1", 0))
             port = free_port()
             process = subprocess.Popen(
-                ["./chez++", "--script=examples/net/ssh-port-forward.ss", "--", *args,
+                ["./bin/cspp", "--script=examples/net/ssh-port-forward.ss", "--", *args,
                  f"--direction={direction}", f"--listen-port={port}",
                  f"--target-port={target.getsockname()[1]}", "--duration=4000"],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -827,7 +827,7 @@ def verify_scp_interruption(root, env, args, kind="file"):
             output.truncate(256 * 1024 * 1024)
     process = subprocess.Popen(
         [
-            "./chez++",
+            "./bin/cspp",
             "--script=examples/net/scp.ss",
             "--",
             *args,
@@ -890,7 +890,7 @@ def verify_forwarding(env, args):
         port = free_port()
         process = subprocess.Popen(
             [
-                "./chez++",
+                "./bin/cspp",
                 "--script=examples/net/ssh-port-forward.ss",
                 "--",
                 *args,
@@ -941,7 +941,7 @@ def verify_forwarding_open_lifecycle(root, env, args):
         held = [socket.create_connection(target.getsockname(), .2) for _ in range(2)]
         try:
             script = root / 'forward-open-lifecycle.ss'
-            script.write_text(f'''(import (chezpp) (chezpp net))
+            script.write_text(f'''(import (cspp) (cspp net))
 (call-with-ssh-session "127.0.0.1" {port} "{user}"
  (lambda (ssh)
   (ssh-auth-publickey! ssh "{user}")
@@ -977,7 +977,7 @@ def verify_forwarding_open_lifecycle(root, env, args):
         (error 'test "forwarding cleanup damaged shared SSH session"))))))
    '(timeout cancel unstarted))))
 ''')
-            result = subprocess.run(['./chez++', f'--script={script}', '--'], env=env,
+            result = subprocess.run(['./bin/cspp', f'--script={script}', '--'], env=env,
                                     capture_output=True, timeout=10)
             assert result.returncode == 0, result.stderr
         finally:
@@ -994,7 +994,7 @@ def verify_forwarding_connect_timeout(env, args, script='examples/net/ssh-port-f
         held = [socket.create_connection(target.getsockname(), .2) for _ in range(2)]
         port = free_port()
         process = subprocess.Popen(
-            ['./chez++', f'--script={script}', '--', *args, '--direction=remote',
+            ['./bin/cspp', f'--script={script}', '--', *args, '--direction=remote',
              f'--listen-port={port}', f'--target-port={target.getsockname()[1]}'],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
@@ -1028,7 +1028,7 @@ def verify_forwarding_blocked_connect(env, args):
                 port = free_port()
                 duration = '1500' if ending == 'duration' else '0'
                 process = subprocess.Popen(
-                    ['./chez++', '--script=examples/net/ssh-port-forward.ss', '--', *args,
+                    ['./bin/cspp', '--script=examples/net/ssh-port-forward.ss', '--', *args,
                      f'--direction={direction}', f'--listen-port={port}',
                      f'--target-port={target.getsockname()[1]}', f'--duration={duration}'],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1084,7 +1084,7 @@ def verify_forwarding_cancellation(env, args):
         port = free_port()
         process = subprocess.Popen(
             [
-                "./chez++",
+                "./bin/cspp",
                 "--script=examples/net/ssh-port-forward.ss",
                 "--",
                 *args,
@@ -1154,7 +1154,7 @@ def verify_password():
             self.command.set()
             return True
 
-    with tempfile.TemporaryDirectory(prefix="chezpp-password-") as directory:
+    with tempfile.TemporaryDirectory(prefix="cspp-password-") as directory:
         home = pathlib.Path(directory)
         (home / ".ssh").mkdir()
         key = paramiko.RSAKey.generate(2048)
@@ -1190,7 +1190,7 @@ def verify_password():
         try:
             env = os.environ.copy()
             env["HOME"] = str(home)
-            env["CHEZPP_SSH_PASSWORD"] = "fixture-secret"
+            env["CSPP_SSH_PASSWORD"] = "fixture-secret"
             p = run(
                 "ssh-run-cmd",
                 env,

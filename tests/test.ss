@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp test))
+(import (cspp)
+        (cspp test))
 
 (mat test-legacy-optional-requirements
   (begin (load "mat-requires-fixture.ss") #t))
@@ -340,7 +340,7 @@
   (test-true #t))
 
 (test-case requirement/file-skip
-  :requires-file "missing-chezpp-test-file"
+  :requires-file "missing-cspp-test-file"
   (test-fail "must be skipped"))
 
 (mat test-requirement-configs
@@ -416,13 +416,13 @@
       'replace)))
 
 (mat test-run-files
-  (let ([path "tmp-chezpp-test-run-file.ss"])
+  (let ([path "tmp-cspp-test-run-file.ss"])
     (dynamic-wind
       (lambda () #f)
       (lambda ()
         (test-write-file
          path
-         "(import (chezpp) (chezpp test))\n(test-clear-registry! (current-test-registry))\n(test-case loaded (test-true #t))\n")
+         "(import (cspp) (cspp test))\n(test-clear-registry! (current-test-registry))\n(test-case loaded (test-true #t))\n")
         (let ([results (test-run-files (list path) (test-silent-config))])
           (and (= (length results) 1)
                (eq? (test-result-status (car results)) 'passed))))
@@ -431,13 +431,13 @@
           (delete-file path))))))
 
 (mat test-main-api
-  (let ([path "tmp-chezpp-test-main-file.ss"])
+  (let ([path "tmp-cspp-test-main-file.ss"])
     (dynamic-wind
       (lambda () #f)
       (lambda ()
         (test-write-file
          path
-         "(import (chezpp) (chezpp test))\n(test-clear-registry! (current-test-registry))\n(test-case main-loaded (test-true #t))\n")
+         "(import (cspp) (cspp test))\n(test-clear-registry! (current-test-registry))\n(test-case main-loaded (test-true #t))\n")
         (let ([out (open-output-string)])
           (= (parameterize ([current-output-port out])
                (test-main (list "--reporter" "datum" path)))

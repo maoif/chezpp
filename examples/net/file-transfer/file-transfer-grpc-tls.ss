@@ -1,7 +1,7 @@
-(import (chezpp) (chezpp net))
+(import (cspp) (cspp net))
 
 (load "examples/net/legacy-example-common.ss")
-(net-example-help! 'file-transfer-grpc-tls "Transfer a file over TLS gRPC. Positional argument: FILE-OR-DIRECTORY; CHEZPP_TRANSFER_ROLE=server|client.")
+(net-example-help! 'file-transfer-grpc-tls "Transfer a file over TLS gRPC. Positional argument: FILE-OR-DIRECTORY; CSPP_TRANSFER_ROLE=server|client.")
 
 (load "examples/net/file-transfer/file-transfer-common.ss")
 (load "examples/net/file-transfer/file-transfer-grpc.ss")
@@ -18,9 +18,9 @@
    (let ([arg* (command-line-arguments)])
      (unless (= (length arg*) 1)
        (errorf 'file-transfer-grpc-tls "expected one directory or file path"))
-     (let ([server? (string=? (getenv "CHEZPP_TRANSFER_ROLE") "server")]
-           [cert (getenv "CHEZPP_TRANSFER_CERT")]
-           [key (getenv "CHEZPP_TRANSFER_KEY")])
+     (let ([server? (string=? (getenv "CSPP_TRANSFER_ROLE") "server")]
+           [cert (getenv "CSPP_TRANSFER_CERT")]
+           [key (getenv "CSPP_TRANSFER_KEY")])
        (unless (and (string? cert) (string? key))
          (errorf 'file-transfer-grpc-tls "TLS certificate and key environment variables are required"))
        (if server?

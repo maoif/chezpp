@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 (load "examples/net/legacy-example-common.ss")
 (net-example-help! 'ftp-client "Open an interactive FTP client. Positional arguments: HOST PORT USER PASSWORD.")
 

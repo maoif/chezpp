@@ -1,4 +1,4 @@
-(define sftp-state-environment-variable "CHEZPP_SFTP_EXAMPLE_STATE")
+(define sftp-state-environment-variable "CSPP_SFTP_EXAMPLE_STATE")
 
 (define sftp-home-path
   (lambda (state-root)
@@ -136,7 +136,7 @@
 #|proc:sftp-file-server
 The `sftp-file-server` procedure starts a localhost `sshd`-backed SFTP service,
 waits until the client uploads the end-marker file into `dir`, then stops the
-server and removes the marker. `CHEZPP_SFTP_EXAMPLE_STATE` must name a new
+server and removes the marker. `CSPP_SFTP_EXAMPLE_STATE` must name a new
 private state directory shared with the client process.
 |#
 (define sftp-file-server
@@ -163,7 +163,7 @@ private state directory shared with the client process.
 #|proc:sftp-file-client
 The `sftp-file-client` procedure uploads each file in `path*` to the localhost
 SFTP example server and then uploads the end-marker file. The client reads the
-server state named by `CHEZPP_SFTP_EXAMPLE_STATE`.
+server state named by `CSPP_SFTP_EXAMPLE_STATE`.
 |#
 (define sftp-file-client
   (lambda (path*)

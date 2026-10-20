@@ -1,4 +1,4 @@
-# ChezPP Data-Structure API Review
+# CSPP Data-Structure API Review
 
 ## Scope
 
@@ -54,7 +54,7 @@ review:
    hashtable values to a vector. Implement one path and make both dispatchers agree on
    value traversal and unspecified ordering.
 4. **Clarify the source-conversion API.** The plan names the iterator-library helper
-   `source->iter`, but `(chezpp iter)` exports `iter-source->iter` because transducer
+   `source->iter`, but `(cspp iter)` exports `iter-source->iter` because transducer
    already exports `source->iter`. Keep the split only if it is intentional and document
    it; otherwise provide an unambiguous alias so users do not need to know the layering.
 5. **Resolve port ownership.** `iter.ss` says callers open and close ports, but the
@@ -107,7 +107,7 @@ predicates retain newest-first precedence.
 
 ## Iter, Transducer, and Navigator Design
 
-Add a source-adapter registry to `(chezpp iter)` with a predicate and iterator-maker:
+Add a source-adapter registry to `(cspp iter)` with a predicate and iterator-maker:
 
 ```scheme
 (iter-register-source!

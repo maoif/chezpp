@@ -1,8 +1,8 @@
-# chezpp
+# Chez Scheme Programming Platform (CSPP)
 
-Chezpp is a collection of ChezScheme libraries and a Make-based build that produces the
-`chez++` launcher. The public umbrella library is `(chezpp)`; individual libraries can be
-imported when a smaller dependency set is useful.
+Chez Scheme Programming Platform (CSPP) is a collection of Chez Scheme libraries and a
+Make-based build that produces the `cspp` launcher. The public umbrella library is
+`(cspp)`; individual libraries can be imported when a smaller dependency set is useful.
 
 ## ✨ Features
 
@@ -21,11 +21,11 @@ imported when a smaller dependency set is useful.
 - **Application support:** command-line parsing, logging, terminal rendering, benchmarking, and
   test helpers.
 - **Concurrency:** threads, thread pools, atomic boxes, spinlocks, futures, and fiber libraries.
-  Fibers and fiber-aware network operations are available as `(chezpp concurrency fiber)` and
-  `(chezpp concurrency fiber-net)`.
+  Fibers and fiber-aware network operations are available as `(cspp concurrency fiber)` and
+  `(cspp concurrency fiber-net)`.
 
 Some networking, cryptography, hashing, compression, and UUID features use optional native
-libraries selected at build time. `(chezpp optional-library)` reports which features were enabled.
+libraries selected at build time. `(cspp optional-library)` reports which features were enabled.
 
 ## 🔧 Build
 
@@ -37,14 +37,14 @@ Build requirements:
 - ncurses headers and libraries, for ChezScheme's terminal expression editor
 - X11 headers and client libraries, for ChezScheme's X11 clipboard support
 
-`pkg-config` is recommended for detecting optional Chezpp libraries. The bundled ChezScheme
+`pkg-config` is recommended for detecting optional CSPP libraries. The bundled ChezScheme
 build enables ncurses and X11 support by default and builds its own zlib and LZ4 from submodules.
 You do not need to install a system ChezScheme package.
 
 ### Install dependencies on Linux
 
 Install the packages for your distribution, then follow [Build and run](#build-and-run).
-These packages cover the build tools and bundled ChezScheme dependencies; optional Chezpp
+These packages cover the build tools and bundled ChezScheme dependencies; optional CSPP
 features are described under [Optional native libraries](#optional-native-libraries).
 
 #### Ubuntu / Debian
@@ -100,22 +100,22 @@ the library and launcher. The following steps apply to all distributions above:
 
 ```sh
 git --version  # Must be 2.36.0 or newer.
-git clone --depth=1 https://github.com/maoif/chezpp.git
-cd chezpp
+git clone --depth=1 https://github.com/maoif/cspp.git
+cd cspp
 git submodule update --init --depth=1 --filter=blob:none --recursive
 make clean && make -j8
 make run
 ```
 
 `-j8` allows up to eight parallel build jobs; adjust the number for your machine. Run the build
-as your normal user. `make run` starts the Chezpp REPL; exit it with `(exit)` or Ctrl + d.
+as your normal user. `make run` starts the CSPP REPL; exit it with `(exit)` or Ctrl + d.
 See [Test](#-test) to run the test suites and [Install](#-install) to install the built toolchain.
 
 The repository pins a release ChezScheme in `vendor/ChezScheme`. `make -j8` builds and
 installs that bundled compiler under `.chezscheme-build` and `.chezscheme-install` before building
-Chezpp. Make checks Git’s recursive submodule status and initializes missing submodules with a
+CSPP. Make checks Git’s recursive submodule status and initializes missing submodules with a
 filtered shallow checkout, so the explicit submodule update above can also be omitted.
-A `scheme` symlink beside `chez++` points at the generated compiler.
+A `scheme` symlink in the repository root points at the generated compiler.
 
 Use a different C compiler when needed:
 
@@ -124,13 +124,13 @@ make clean && make -j8 CC=clang
 ```
 
 The bundled ChezScheme build supplies its compiler and matching development header together.
-`make clean` removes Chezpp outputs while preserving the submodule and generated ChezScheme
+`make clean` removes CSPP outputs while preserving the submodule and generated ChezScheme
 toolchain. `make clean-all` performs that cleanup and removes `.chezscheme-build`,
 `.chezscheme-install`, and the generated root `scheme` symlink.
 
 ### Optional native libraries
 
-Optional development packages are not required to build or import Chezpp. Each dependency has
+Optional development packages are not required to build or import CSPP. Each dependency has
 a `WITH_<NAME>` switch: `auto` (the default) enables it when its headers and library pass a
 compile/link probe, `1` requires it and reports a build error if unavailable, and `0` disables
 it without probing or linking it.
@@ -177,27 +177,27 @@ the requested and resolved choices.
 
 ## ▶️ Use
 
-Start a Chezpp REPL:
+Start a CSPP REPL:
 
 ```sh
 make run
 ```
 
-The generated `chez++` launcher also runs scripts and inline code:
+The generated `bin/cspp` launcher also runs scripts and inline code:
 
 ```sh
-./chez++ --script=path/to/program.ss
-./chez++ -c='(display "Hello from Chezpp") (newline)'
-./chez++ --version
+./bin/cspp --script=path/to/program.ss
+./bin/cspp -c='(display "Hello from CSPP") (newline)'
+./bin/cspp --version
 ```
 
-Use `./chez++ --help` (or `-h`) to show launcher options. Use `-q` to suppress the
+Use `./bin/cspp --help` (or `-h`) to show launcher options. Use `-q` to suppress the
 startup greeting and REPL prompt. `-s` is an alias for `--script`.
 
 A transducer example:
 
 ```scheme
-(import (chezpp))
+(import (cspp))
 
 (displayln
   (into 'list
@@ -220,15 +220,15 @@ make install PREFIX=/absolute/path/to/install
 ```
 
 `PREFIX` must be an absolute path. The install includes the bundled ChezScheme compiler and
-runtime alongside Chezpp: `<prefix>/bin/scheme`, `<prefix>/bin/petite`,
-`<prefix>/bin/chez++`, and the upstream `lib/csv10.4.1/<machine>` boot and header files,
-plus `<prefix>/lib/chezpp.lib` and `<prefix>/lib/libchezpp.so`. The generated launcher uses
+runtime alongside CSPP: `<prefix>/bin/scheme`, `<prefix>/bin/petite`,
+`<prefix>/bin/cspp`, and the upstream `lib/csv10.4.1/<machine>` boot and header files,
+plus `<prefix>/lib/cspp.lib` and `<prefix>/lib/libcspp.so`. The generated launcher uses
 these installed paths and does not refer back to the source checkout. The bundled compiler's
 relative runtime links are preserved.
 
-`make clean` removes local Chezpp build outputs while preserving the generated bundled compiler.
+`make clean` removes local CSPP build outputs while preserving the generated bundled compiler.
 `make clean-all` also removes `.chezscheme-build`, `.chezscheme-install`, and the generated
-root `scheme` link. Removing the installation prefix removes both Chezpp and the bundled
+root `scheme` link. Removing the installation prefix removes both CSPP and the bundled
 ChezScheme files installed by this target.
 
 ### Linux master snapshots
@@ -246,7 +246,7 @@ make package PACKAGE_DIR=/absolute/path/to/packages
 archive and SHA-256 checksum to `dist/` by default. It detects Linux x64, arm64,
 riscv64, or loongarch64 and records the current Git commit, build host, and glibc requirement.
 It requires
-`readelf`, `ldd`, `patchelf`, GNU `tar`, and GNU coreutils. Packaging runs through `chez++`
+`readelf`, `ldd`, `patchelf`, GNU `tar`, and GNU coreutils. Packaging runs through `bin/cspp`
 using `tools/package-release.ss`. Dependencies are collected recursively,
 including ChezScheme's X11 runtime library; host glibc and its loader remain external.
 The target packages the selected build configuration; run tests before packaging as needed.
@@ -258,12 +258,12 @@ Every push to `master` builds and runs all non-net tests on Ubuntu 24.04 for x64
 arm64, and riscv64, and on a pinned Loongnix Debian image for loongarch64. x64 and arm64
 use native runners; riscv64 and loongarch64 use QEMU. Only after
 all four jobs pass does CI update the rolling
-[`master` prerelease](https://github.com/maoif/chezpp/releases/tag/master).
+[`master` prerelease](https://github.com/maoif/cspp/releases/tag/master).
 The workflow can also be run manually against `master`.
 
 Each `.tar.gz` contains the `make install` artifacts, including bundled ChezScheme,
 and recursively resolved shared-library dependencies. Extract it anywhere and run
-`bin/chez++`. The package requires the matching Linux architecture and the glibc version
+`bin/cspp`. The package requires the matching Linux architecture and the glibc version
 listed in its `README.txt` and `BUILD-INFO.json` (Ubuntu packages require glibc 2.39;
 the pinned Loongnix Debian package requires glibc 2.43). glibc and its dynamic loader
 come from the host. CI publishes only the archives; local packaging also writes SHA-256 checksums.

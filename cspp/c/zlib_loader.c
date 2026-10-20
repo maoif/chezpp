@@ -1,0 +1,159 @@
+#include "zlib_loader.h"
+
+#include <pthread.h>
+#include <stdio.h>
+#if CSPP_WITH_ZLIB
+#include <zlib.h>
+#endif
+
+static cspp_optional_library zlib_library =
+    CSPP_OPTIONAL_LIBRARY_INIT("zlib");
+static pthread_once_t zlib_once = PTHREAD_ONCE_INIT;
+static int zlib_available;
+
+
+typedef struct {
+  z_stream stream;
+  int compress;
+  int closed;
+  int ended;
+} cspp_zlib_stream;
+
+
+static ptr zlib_status(const char *tag, const char *message) {
+  ptr result = Smake_vector(2, Sfalse);
+  Svector_set(result, 0, Sstring_to_symbol(tag));
+  Svector_set(result, 1, Sstring(message));
+  return result;
+}
+
+
+
+static void initialize_zlib(void) {
+  const char *version = zlibVersion();
+  unsigned major = 0, minor = 0, patch = 0;
+  cspp_optional_library_set_version(&zlib_library, version);
+  if (version == NULL || sscanf(version, "%u.%u.%u", &major, &minor, &patch) < 2 ||
+      major != 1 || minor < 2 || (minor == 2 && patch < 11)) {
+    cspp_optional_library_fail(&zlib_library,
+      "zlib runtime %s; requires ABI 1 and version >= 1.2.11", version == NULL ? "unknown" : version);
+    return;
+  }
+  zlib_available = 1;
+}
+int cspp_zlib_require(void) {
+  pthread_once(&zlib_once, initialize_zlib);
+  return zlib_available;
+}
+
+const cspp_optional_library *cspp_zlib_library(void) {
+  (void)cspp_zlib_require();
+  return &zlib_library;
+}
+
+static void close_stream(cspp_zlib_stream *state) {
+  if (state == NULL || state->closed) return;
+  if (state->compress)
+    (void)deflateEnd(&state->stream);
+  else
+    (void)inflateEnd(&state->stream);
+  state->closed = 1;
+}
+
+uptr cspp_zlib_stream_open(int compress, int gzip) {
+  cspp_zlib_stream *state;
+  int rc;
+  int window_bits = gzip ? 15 + 16 : 15;
+
+  if (!cspp_zlib_require()) return 0;
+  state = (cspp_zlib_stream *)calloc(1, sizeof(cspp_zlib_stream));
+  if (state == NULL) return 0;
+  state->compress = compress ? 1 : 0;
+  if (state->compress)
+    rc = deflateInit2_(&state->stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                         window_bits, 8, Z_DEFAULT_STRATEGY,
+                         zlibVersion(), (int)sizeof(z_stream));
+  else
+    rc = inflateInit2_(&state->stream, window_bits,
+                         zlibVersion(), (int)sizeof(z_stream));
+  if (rc != Z_OK) {
+    free(state);
+    return 0;
+  }
+  return (uptr)state;
+}
+
+ptr cspp_zlib_stream_process(uptr handle, ptr input, int start, int stop,
+                               int finish, int maximum_output) {
+  cspp_zlib_stream *state = (cspp_zlib_stream *)TO_VOIDP(handle);
+  unsigned char *output;
+  size_t produced;
+  int rc = Z_OK;
+  ptr result;
+  ptr bytes;
+
+  if (state == NULL || state->closed)
+    return zlib_status("error", "zlib stream is closed");
+  if (start < 0 || stop < start || stop > Sbytevector_length(input) || maximum_output <= 0)
+    return zlib_status("error", "invalid zlib stream bounds");
+  if (state->ended) {
+    if (stop != start)
+      return zlib_status("error", "data follows the end of the zlib stream");
+    bytes = Smake_bytevector(0, 0);
+    result = Smake_vector(2, Sfalse);
+    Svector_set(result, 0, bytes);
+    Svector_set(result, 1, Strue);
+    if (finish) close_stream(state);
+    return result;
+  }
+  output = (unsigned char *)malloc((size_t)maximum_output);
+  if (output == NULL) return zlib_status("error", "failed to allocate zlib output");
+  state->stream.next_in = Sbytevector_data(input) + start;
+  state->stream.avail_in = (uInt)(stop - start);
+  state->stream.next_out = output;
+  state->stream.avail_out = (uInt)maximum_output;
+  do {
+    uLong before_in = state->stream.total_in;
+    uLong before_out = state->stream.total_out;
+    rc = state->compress
+             ? deflate(&state->stream, finish ? Z_FINISH : Z_NO_FLUSH)
+             : inflate(&state->stream, finish ? Z_FINISH : Z_NO_FLUSH);
+    if (rc != Z_OK && rc != Z_STREAM_END && rc != Z_BUF_ERROR) break;
+    if (state->stream.avail_out == 0 && (state->stream.avail_in > 0 || finish)) {
+      free(output);
+      return zlib_status("limit", "zlib output exceeds configured limit");
+    }
+    if (state->stream.total_in == before_in && state->stream.total_out == before_out) break;
+  } while (state->stream.avail_in > 0 || (finish && rc != Z_STREAM_END));
+  if (rc != Z_OK && rc != Z_STREAM_END && !(rc == Z_BUF_ERROR && !finish)) {
+    char message[256];
+    snprintf(message, sizeof(message), "%s",
+             state->stream.msg == NULL ? "zlib stream processing failed"
+                                       : state->stream.msg);
+    free(output);
+    close_stream(state);
+    return zlib_status("error", message);
+  }
+  if (rc == Z_STREAM_END && state->stream.avail_in > 0) {
+    free(output);
+    close_stream(state);
+    return zlib_status("error", "data follows the end of the zlib stream");
+  }
+  if (rc == Z_STREAM_END) state->ended = 1;
+  produced = (size_t)maximum_output - state->stream.avail_out;
+  bytes = Smake_bytevector((iptr)produced, 0);
+  if (produced > 0) memcpy(Sbytevector_data(bytes), output, produced);
+  free(output);
+  result = Smake_vector(2, Sfalse);
+  Svector_set(result, 0, bytes);
+  Svector_set(result, 1, rc == Z_STREAM_END ? Strue : Sfalse);
+  if (finish) close_stream(state);
+  return result;
+}
+
+void cspp_zlib_stream_close(uptr handle) {
+  cspp_zlib_stream *state = (cspp_zlib_stream *)TO_VOIDP(handle);
+  if (state == NULL) return;
+  close_stream(state);
+  free(state);
+}

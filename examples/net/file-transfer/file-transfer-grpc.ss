@@ -3,7 +3,7 @@
 
 (define grpc-transfer-request-count
   (lambda ()
-    (let ([text (getenv "CHEZPP_TRANSFER_REQUESTS")])
+    (let ([text (getenv "CSPP_TRANSFER_REQUESTS")])
       (if (and text (string->number text))
           (string->number text)
           1))))
@@ -11,7 +11,7 @@
 #|proc:grpc-file-server
 The `grpc-file-server` procedure serves generated streaming upload and download RPCs from `dir`.
 Each upload enforces contiguous offsets and SHA-256; each download emits bounded FileChunk messages.
-The request count defaults to one and may be set through `CHEZPP_TRANSFER_REQUESTS`.
+The request count defaults to one and may be set through `CSPP_TRANSFER_REQUESTS`.
 |#
 (define grpc-file-server
   (lambda (dir)
@@ -141,7 +141,7 @@ The request count defaults to one and may be set through `CHEZPP_TRANSFER_REQUES
 
 #|proc:grpc-file-client
 The `grpc-file-client` procedure uploads every file in `path*` with generated FileChunk messages.
-When `CHEZPP_TRANSFER_DOWNLOAD` names a destination, it downloads the first uploaded file there and
+When `CSPP_TRANSFER_DOWNLOAD` names a destination, it downloads the first uploaded file there and
 verifies contiguous offsets and SHA-256. The return value is `path*`.
 |#
 (define grpc-file-client
@@ -156,7 +156,7 @@ verifies contiguous offsets and SHA-256. The return value is `path*`.
              (let ([rss-before (current-peak-rss-kib)])
                (for-each (lambda (path) (grpc-upload-path! client path)) path*)
                (let ([after-upload (current-peak-rss-kib)]
-                     [destination (getenv "CHEZPP_TRANSFER_DOWNLOAD")])
+                     [destination (getenv "CSPP_TRANSFER_DOWNLOAD")])
                  (when (and destination (not (string=? destination "")))
                    (grpc-download-path! client (path-basename (car path*)) destination))
                  (write-transfer-rss-growth-value!

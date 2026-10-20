@@ -10,15 +10,15 @@ DEPENDENCIES = 'CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH 
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='chezpp-native-metadata-') as scratch:
+    with tempfile.TemporaryDirectory(prefix='cspp-native-metadata-') as scratch:
         directory = Path(scratch)
         for filename in ['common.h', 'optional_library.h', 'optional_library_info.c']:
-            shutil.copy2(ROOT / 'chezpp/c' / filename, directory / filename)
+            shutil.copy2(ROOT / 'cspp/c' / filename, directory / filename)
         (directory / 'build-config.h').write_text('\n'.join(
-            f'#define CHEZPP_WITH_{name} {int(name == "OPENSSL")}' for name in DEPENDENCIES) + '\n')
+            f'#define CSPP_WITH_{name} {int(name == "OPENSSL")}' for name in DEPENDENCIES) + '\n')
         (directory / 'failed-helper.c').write_text('''#include "optional_library.h"
-static chezpp_optional_library failed = CHEZPP_OPTIONAL_LIBRARY_INIT("openssl");
-const chezpp_optional_library *chezpp_openssl_library(void) {
+static cspp_optional_library failed = CSPP_OPTIONAL_LIBRARY_INIT("openssl");
+const cspp_optional_library *cspp_openssl_library(void) {
   failed.state = -1;
   failed.error[0] = '\\0';
   /* A real native helper can fail initialization after its library has linked. */
@@ -36,7 +36,7 @@ const chezpp_optional_library *chezpp_openssl_library(void) {
         assert compiled.returncode == 0 and not compiled.stdout and not compiled.stderr, compiled.stdout + compiled.stderr
         script = f'''(import (chezscheme))
 (load-shared-object "{artifact}")
-(define info (foreign-procedure "chezpp_optional_library_info" (string) scheme-object))
+(define info (foreign-procedure "cspp_optional_library_info" (string) scheme-object))
 ;; Initialization failure must keep its real reason, rather than become a version error.
 (let ([result (info "openssl")])
   (unless (and (not (vector-ref result 1))

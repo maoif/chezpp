@@ -41,7 +41,7 @@ download is requested, sends bounded FileChunk messages for the completed file i
                              dir)
                            (begin
                              (if (handle-chunk! chunk)
-                                 (if (getenv "CHEZPP_TRANSFER_DOWNLOAD")
+                                 (if (getenv "CSPP_TRANSFER_DOWNLOAD")
                                      (begin (set! upload-complete? #t) (loop))
                                      dir)
                                  (loop)))))))))
@@ -52,7 +52,7 @@ download is requested, sends bounded FileChunk messages for the completed file i
 
 #|proc:websocket-file-client
 The `websocket-file-client` procedure sends FileChunk uploads for `path*`. If
-`CHEZPP_TRANSFER_DOWNLOAD` is set, it requests and streams the first file to that destination.
+`CSPP_TRANSFER_DOWNLOAD` is set, it requests and streams the first file to that destination.
 |#
 (define websocket-file-client
   (lambda (path*)
@@ -61,7 +61,7 @@ The `websocket-file-client` procedure sends FileChunk uploads for `path*`. If
                  (format "~a://~a:~a/"
                          (if websocket-file-transfer-options "wss" "ws")
                          file-transfer-host websocket-file-transfer-port)
-                 (or websocket-file-transfer-options "chezpp-websocket"))])
+                 (or websocket-file-transfer-options "cspp-websocket"))])
       (dynamic-wind
         void
         (lambda ()
@@ -74,7 +74,7 @@ The `websocket-file-client` procedure sends FileChunk uploads for `path*`. If
               path))
            path*)
           (let ([after-upload (current-peak-rss-kib)]
-                [destination (getenv "CHEZPP_TRANSFER_DOWNLOAD")])
+                [destination (getenv "CSPP_TRANSFER_DOWNLOAD")])
             (when (and destination (not (string=? destination "")))
               (websocket-send-binary
                conn

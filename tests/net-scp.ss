@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "net-common.ss")
 (load "net-ssh-common.ss")
@@ -23,7 +23,7 @@
 
 (define run-net-scp-basic-test
   (lambda (remote-root home port user)
-    (let ([local-root (format "/tmp/chezpp-net-scp-basic-~a" port)])
+    (let ([local-root (format "/tmp/cspp-net-scp-basic-~a" port)])
       (when (file-exists? local-root)
         (file-removetree local-root #f))
       (mkdirs local-root)
@@ -88,7 +88,7 @@
 
 (define run-net-scp-nonblocking-test
   (lambda (remote-root home port user)
-    (let ([local-root (format "/tmp/chezpp-net-scp-nonblocking-~a" port)])
+    (let ([local-root (format "/tmp/cspp-net-scp-nonblocking-~a" port)])
       (when (file-exists? local-root)
         (file-removetree local-root #f))
       (mkdirs local-root)
@@ -178,7 +178,7 @@
 
 (define run-net-scp-convenience-open-test
   (lambda (remote-root home port user)
-    (let ([local-root (format "/tmp/chezpp-net-scp-open-~a" port)])
+    (let ([local-root (format "/tmp/cspp-net-scp-open-~a" port)])
       (when (file-exists? local-root)
         (file-removetree local-root #f))
       (mkdirs local-root)
@@ -255,7 +255,7 @@
      (mat-requires (ssh)
        (with-test-scp-session
         (lambda (session remote-root)
-          (let ([local-path "/tmp/chezpp-net-scp-policy.txt"])
+          (let ([local-path "/tmp/cspp-net-scp-policy.txt"])
             (dynamic-wind
               (lambda () (write-u8vec! local-path (string->utf8 "keep")))
               (lambda ()
@@ -323,7 +323,7 @@
      (mat-requires (ssh)
        (with-test-scp-session
         (lambda (session remote-root)
-          (let* ([local (format "/tmp/chezpp-scp-progress-~a" (get-process-id))]
+          (let* ([local (format "/tmp/cspp-scp-progress-~a" (get-process-id))]
                  [remote (string-append remote-root "/progress")]
                  [events '()]
                  [policy (make-transfer-policy
@@ -355,7 +355,7 @@
      (mat-requires (ssh)
        (with-test-scp-session
         (lambda (session remote-root)
-          (let* ([local (format "/tmp/chezpp-scp-batch-cleanup-~a" (get-process-id))]
+          (let* ([local (format "/tmp/cspp-scp-batch-cleanup-~a" (get-process-id))]
                  [source (string-append local "/source")]
                  [output (string-append local "/output")]
                  [remote (string-append remote-root "/batch-cleanup")]
@@ -394,7 +394,7 @@
      (mat-requires (ssh)
        (with-test-scp-session
         (lambda (session remote-root)
-          (let* ([local (format "/tmp/chezpp-scp-progress-stat-~a" (get-process-id))]
+          (let* ([local (format "/tmp/cspp-scp-progress-stat-~a" (get-process-id))]
                  [source (string-append local "/source")]
                  [output (string-append local "/output")]
                  [remote (string-append remote-root "/progress-stat")]

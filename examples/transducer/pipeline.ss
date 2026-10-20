@@ -1,4 +1,4 @@
-(import (chezpp) (chezpp transducer))
+(import (cspp) (cspp transducer))
 (load "examples/common.ss")
 
 (example-run!

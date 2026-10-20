@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (mat system-user-current
 
@@ -52,19 +52,19 @@
 (mat system-user-missing
 
      (guard (c [(system-not-found-error? c) #t] [else #f])
-       (user-ref "__chezpp_user_that_should_not_exist__")
+       (user-ref "__cspp_user_that_should_not_exist__")
        #f)
 
      (guard (c [(system-not-found-error? c) #t] [else #f])
-       (group-ref "__chezpp_group_that_should_not_exist__")
+       (group-ref "__cspp_group_that_should_not_exist__")
        #f)
 
-     (eq? 'missing (user-ref/default "__chezpp_user_that_should_not_exist__"
+     (eq? 'missing (user-ref/default "__cspp_user_that_should_not_exist__"
                                      'missing))
 
-     (eq? 'missing (group-ref/default "__chezpp_group_that_should_not_exist__"
+     (eq? 'missing (group-ref/default "__cspp_group_that_should_not_exist__"
                                       'missing))
 
-     (not (user-exists? "__chezpp_user_that_should_not_exist__"))
+     (not (user-exists? "__cspp_user_that_should_not_exist__"))
 
-     (not (group-exists? "__chezpp_group_that_should_not_exist__")))
+     (not (group-exists? "__cspp_group_that_should_not_exist__")))

@@ -1,7 +1,7 @@
-(import (chezpp)
-        (chezpp net lws reactor)
-        (chezpp net operation)
-        (chezpp concurrency fiber))
+(import (cspp)
+        (cspp net lws reactor)
+        (cspp net operation)
+        (cspp concurrency fiber))
 
 (mat net-operation-waiter-reuse-stress
      ;; Stress case: repeated fiber waits return pooled waiters without retaining operations.

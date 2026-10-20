@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Complete `(chezpp cli)` as a stable library-first command-line parser with procedural and macro APIs, deterministic parse semantics, help output, option relations, and passing tests.
+**Goal:** Complete `(cspp cli)` as a stable library-first command-line parser with procedural and macro APIs, deterministic parse semantics, help output, option relations, and passing tests.
 
-**Architecture:** Keep the implementation in `chezpp/cli.ss` because the library already exists and is imported by `chezpp.ss`. Add small internal helpers for normalization, command validation, parse state, value parsing, help formatting, and macro expansion, but keep the public surface compatible with the existing exports plus the missing stable-core exports called out below. Use tests in `tests/cli.ss` as executable behavior documentation and keep successful tests silent.
+**Architecture:** Keep the implementation in `cspp/cli.ss` because the library already exists and is imported by `cspp.ss`. Add small internal helpers for normalization, command validation, parse state, value parsing, help formatting, and macro expansion, but keep the public surface compatible with the existing exports plus the missing stable-core exports called out below. Use tests in `tests/cli.ss` as executable behavior documentation and keep successful tests silent.
 
-**Tech Stack:** ChezScheme libraries, Chezpp helpers from `(chezpp utils)`, `(chezpp list)`, `(chezpp string)`, `(chezpp vector)`, and the existing `mat` test harness.
+**Tech Stack:** ChezScheme libraries, CSPP helpers from `(cspp utils)`, `(cspp list)`, `(cspp string)`, `(cspp vector)`, and the existing `mat` test harness.
 
 ---
 
@@ -19,16 +19,16 @@
 
 ## File Map
 
-- Modify: `chezpp/cli.ss`
+- Modify: `cspp/cli.ss`
   - Public record constructors, accessors, setters, and macros.
   - Internal validation, parse state, parse loop, relation checking, and help rendering.
   - Public documentation blocks above exported APIs.
 - Modify: `tests/cli.ss`
   - Replace WIP/debug tests with stable-core tests for procedural API, parsers, relations, help, subcommands, and macros.
   - Capture help output with string ports so the test run remains silent.
-- No change expected: `chezpp.ss`
-  - `(chezpp cli)` is already imported/exported.
-- Optional cleanup only if needed: `chezpp/cmdline.ss`
+- No change expected: `cspp.ss`
+  - `(cspp cli)` is already imported/exported.
+- Optional cleanup only if needed: `cspp/cmdline.ss`
   - Leave empty or delete only with explicit approval. It is unrelated to stable core.
 
 ## Public API Target
@@ -52,7 +52,7 @@ Do not add a separate `parse-result` public record. Exec callbacks continue to r
 
 - [ ] **Step 1: Write test helpers at the top of `tests/cli.ss`**
 
-Add helpers after `(import (chezpp))`:
+Add helpers after `(import (cspp))`:
 
 ```scheme
 (define capture-output
@@ -316,14 +316,14 @@ Run:
 cd tests && make test-some TEST='cli'
 ```
 
-Expected: FAIL while `chezpp/cli.ss` still has unfinished stubs and old behavior.
+Expected: FAIL while `cspp/cli.ss` still has unfinished stubs and old behavior.
 
 ---
 
 ### Task 2: Normalize Records, Defaults, Setters, and Public Documentation
 
 **Files:**
-- Modify: `chezpp/cli.ss`
+- Modify: `cspp/cli.ss`
 
 - [ ] **Step 1: Update the export list**
 
@@ -536,7 +536,7 @@ Expected: build succeeds; CLI tests still fail because parsing/help/macros are n
 ### Task 3: Implement Built-In Value Parsers
 
 **Files:**
-- Modify: `chezpp/cli.ss`
+- Modify: `cspp/cli.ss`
 - Modify: `tests/cli.ss`
 
 - [ ] **Step 1: Implement `parser-bool`**
@@ -642,7 +642,7 @@ Expected: parser-specific failures disappear; parse-loop/help/macro failures may
 ### Task 4: Add Internal Validation and Parse State Helpers
 
 **Files:**
-- Modify: `chezpp/cli.ss`
+- Modify: `cspp/cli.ss`
 
 - [ ] **Step 1: Add an internal parsed-option record**
 
@@ -761,7 +761,7 @@ Expected: build succeeds; tests still fail until the parse loop uses these helpe
 ### Task 5: Rework `run-cli-command!` Parse Loop
 
 **Files:**
-- Modify: `chezpp/cli.ss`
+- Modify: `cspp/cli.ss`
 
 - [ ] **Step 1: Remove unconditional debug output**
 
@@ -917,7 +917,7 @@ Expected: procedural parse tests, parser tests, relation tests, subcommand tests
 ### Task 6: Finish Help Rendering
 
 **Files:**
-- Modify: `chezpp/cli.ss`
+- Modify: `cspp/cli.ss`
 - Modify: `tests/cli.ss`
 
 - [ ] **Step 1: Replace `print-help-and-quit` with parse-error-free helpers**
@@ -980,7 +980,7 @@ Expected: help tests pass and normal successful tests remain silent.
 ### Task 7: Implement Macro API
 
 **Files:**
-- Modify: `chezpp/cli.ss`
+- Modify: `cspp/cli.ss`
 - Modify: `tests/cli.ss`
 
 - [ ] **Step 1: Implement parser symbol resolution for macros**
@@ -1134,7 +1134,7 @@ Expected: all CLI tests pass silently.
 ### Task 8: Final Verification, Balance Check, and Cleanup
 
 **Files:**
-- Modify: `chezpp/cli.ss`
+- Modify: `cspp/cli.ss`
 - Modify: `tests/cli.ss`
 
 - [ ] **Step 1: Search for unfinished stubs in CLI files**
@@ -1142,12 +1142,12 @@ Expected: all CLI tests pass silently.
 Run:
 
 ```bash
-rg -n 'todo|TODO|quit-or-what|trace-define|println "' chezpp/cli.ss tests/cli.ss docs/ai/notes_cli_command.md
+rg -n 'todo|TODO|quit-or-what|trace-define|println "' cspp/cli.ss tests/cli.ss docs/ai/notes_cli_command.md
 ```
 
 Expected:
 
-- No `todo` or `quit-or-what` in `chezpp/cli.ss`.
+- No `todo` or `quit-or-what` in `cspp/cli.ss`.
 - No unconditional debug `println` in normal parse paths.
 - Unfinished markers may remain in `docs/ai/notes_cli_command.md` because it is a rough design note, but stable-core exclusions must be clear in this plan and in any added comments.
 
@@ -1194,24 +1194,24 @@ Expected: exit status 0.
 Use commit messages like:
 
 ```bash
-git add tests/cli.ss chezpp/cli.ss
+git add tests/cli.ss cspp/cli.ss
 git commit -m "cli: add stable core parser tests"
 ```
 
 ```bash
-git add chezpp/cli.ss
+git add cspp/cli.ss
 git commit -m "cli: implement stable core parser"
 ```
 
 ```bash
-git add chezpp/cli.ss tests/cli.ss
+git add cspp/cli.ss tests/cli.ss
 git commit -m "cli: add command macro API"
 ```
 
 If the whole change is completed in one commit, use:
 
 ```bash
-git add chezpp/cli.ss tests/cli.ss
+git add cspp/cli.ss tests/cli.ss
 git commit -m "cli: complete stable core command parser"
 ```
 

@@ -11,7 +11,7 @@ contract before extending individual protocols. Build protocol parity and stream
 features on those foundations, then finish the remaining net modules and run full transfer,
 documentation, and compatibility gates.
 
-**Tech Stack:** ChezScheme 10, Chezpp libraries and `pcheck`, C11/POSIX FFI shims, OpenSSL 3,
+**Tech Stack:** ChezScheme 10, CSPP libraries and `pcheck`, C11/POSIX FFI shims, OpenSSL 3,
 libcurl multi, libssh, libwebsockets, gRPC C core, nghttp2, c-ares, libidn2, `mat`, and GNU Make.
 
 ## Current Status (2026-08-23)
@@ -57,40 +57,40 @@ Execute these plans in order. Do not start a later plan until the prior release 
 ### Build And Shared Runtime
 
 - Modify: `Makefile`
-- Modify: `chezpp.ss`
-- Modify: `chezpp/net.ss`
+- Modify: `cspp.ss`
+- Modify: `cspp/net.ss`
 - Modify: `tests/Makefile`
 - Modify: `Makefile` to include the `scheme.h` beside the selected ChezScheme runtime.
-- Create: `chezpp/c/optional_library.h`
-- Create: `chezpp/c/optional_library.c`
-- Create: `chezpp/optional-library.ss`
-- Create: `chezpp/net/operation.ss`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/private.ss`
+- Create: `cspp/c/optional_library.h`
+- Create: `cspp/c/optional_library.c`
+- Create: `cspp/optional-library.ss`
+- Create: `cspp/net/operation.ss`
+- Modify: `cspp/net/ffi.ss`
+- Modify: `cspp/net/private.ss`
 
 ### Native Protocol Shims
 
-- Modify: `chezpp/c/crypto.c`
-- Modify: `chezpp/c/digest.c`
-- Modify: `chezpp/c/optional_hash.c`
-- Modify: `chezpp/c/net/ftp.c`
-- Modify: `chezpp/c/net/grpc.c`
-- Modify: `chezpp/c/net/poll.c`
-- Modify: `chezpp/c/net/socket.c`
-- Modify: `chezpp/c/net/ssh.c`
-- Modify: `chezpp/c/net/tls.c`
-- Modify: `chezpp/c/net/websocket.c`
-- Create: `chezpp/c/net/dns.c`
-- Create: `chezpp/c/net/http2.c`
-- Create: `chezpp/c/net/idna.c`
+- Modify: `cspp/c/crypto.c`
+- Modify: `cspp/c/digest.c`
+- Modify: `cspp/c/optional_hash.c`
+- Modify: `cspp/c/net/ftp.c`
+- Modify: `cspp/c/net/grpc.c`
+- Modify: `cspp/c/net/poll.c`
+- Modify: `cspp/c/net/socket.c`
+- Modify: `cspp/c/net/ssh.c`
+- Modify: `cspp/c/net/tls.c`
+- Modify: `cspp/c/net/websocket.c`
+- Create: `cspp/c/net/dns.c`
+- Create: `cspp/c/net/http2.c`
+- Create: `cspp/c/net/idna.c`
 
 ### Scheme Protocol Libraries
 
-- Modify every library under `chezpp/net/` listed in the Follow-Up Roadmap.
-- Create: `chezpp/protobuf.ss`
-- Create: `chezpp/protobuf/descriptor.ss`
-- Create: `chezpp/protobuf/wire.ss`
-- Create: `tools/protoc-gen-chezpp.ss`
+- Modify every library under `cspp/net/` listed in the Follow-Up Roadmap.
+- Create: `cspp/protobuf.ss`
+- Create: `cspp/protobuf/descriptor.ss`
+- Create: `cspp/protobuf/wire.ss`
+- Create: `tools/protoc-gen-cspp.ss`
 
 ### Tests And Examples
 
@@ -117,7 +117,7 @@ Run:
 ```bash
 git rev-parse --show-toplevel
 git branch --show-current
-git -C /home/maoif/SSD/Projects/chezpp status --short -- chezpp/c/scheme.h examples/net
+git -C /home/maoif/SSD/Projects/cspp status --short -- cspp/c/scheme.h examples/net
 ```
 
 Expected: the current branch is the implementation branch created from `net-hardening-plan`. The
@@ -130,7 +130,7 @@ Run from the implementation worktree:
 
 ```bash
 mkdir -p examples/net
-cp -a /home/maoif/SSD/Projects/chezpp/examples/net/. examples/net/
+cp -a /home/maoif/SSD/Projects/cspp/examples/net/. examples/net/
 ```
 
 Expected: `git status --short` lists only `examples/net/` before phase-specific edits.
@@ -159,7 +159,7 @@ check-scheme-header:
 
 CFLAGS += -I$(SCHEME_INCLUDE_DIR)
 
-libchezpp.so: check-scheme-header
+libcspp.so: check-scheme-header
 ```
 
 - [ ] **Step 4: Add a Scheme source balance checker**
@@ -184,7 +184,7 @@ Create `tools/check-scheme-balance.ss`:
 Run it against representative library files:
 
 ```bash
-scheme --script tools/check-scheme-balance.ss chezpp/net/http.ss chezpp/net/grpc.ss
+scheme --script tools/check-scheme-balance.ss cspp/net/http.ss cspp/net/grpc.ss
 ```
 
 Expected: exit 0. The Scheme reader reports unbalanced delimiters and unterminated strings/comments
@@ -248,8 +248,8 @@ scheduler-neutral loop is:
      (loop operation)]))
 ```
 
-No phase may reintroduce `fork-thread` into `chezpp/net/ftp.ss`, `chezpp/net/scp.ss`,
-`chezpp/net/grpc.ss`, or `chezpp/net/http.ss`.
+No phase may reintroduce `fork-thread` into `cspp/net/ftp.ss`, `cspp/net/scp.ss`,
+`cspp/net/grpc.ss`, or `cspp/net/http.ss`.
 
 ## Commit Policy
 

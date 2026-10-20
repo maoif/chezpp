@@ -1,14 +1,14 @@
-(import (chezpp chez)
-        (chezpp net http private))
+(import (cspp chez)
+        (cspp net http private))
 
 (define net-environment
-  (environment '(chezpp net)))
+  (environment '(cspp net)))
 
 (define net-ffi-environment
-  (environment '(chezpp net ffi)))
+  (environment '(cspp net ffi)))
 
 (define net-private-environment
-  (environment '(chezpp net private)))
+  (environment '(cspp net private)))
 
 (define retained-http-exports
   '(http-request? make-http-request http-request-method http-request-uri http-request-headers
@@ -103,7 +103,7 @@
        #f))
 
 (mat net-http2-private-api-contract
-     ;; Error case: the low-level HTTP/2 session API is not exported by `(chezpp net)`.
+     ;; Error case: the low-level HTTP/2 session API is not exported by `(cspp net)`.
      (guard (condition [else #t])
        (eval 'http2-open net-environment)
        #f))

@@ -10,7 +10,7 @@
 
 (define start-ftp-test-server
   (lambda ()
-    (let ([root "/tmp/chezpp-net-ftp-root"])
+    (let ([root "/tmp/cspp-net-ftp-root"])
       (let ([connection-count-path (string-append root ".control-connections")])
         (when (file-exists? connection-count-path)
           (delete-file connection-count-path)))
@@ -26,7 +26,7 @@
       (write-bytevector-file (string-append root "/slow/wait.txt") (string->utf8 "slow file"))
       (let-values ([(to-stdin from-stdout from-stderr pid)
                     (open-process-ports
-                     (format "../chez++ --script=net-ftp-server-process.ss ~s" root)
+                     (format "../bin/cspp --script=net-ftp-server-process.ss ~s" root)
                      (buffer-mode block)
                      (native-transcoder))])
         (let ([port

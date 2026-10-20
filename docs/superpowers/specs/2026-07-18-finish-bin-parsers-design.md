@@ -7,7 +7,7 @@ tests.
 ## Architecture
 
 Each format is split into a public facade, typed records, parser implementation, and validation
-helpers. Binary parsing is expressed through Chezpp parser combinators, using bounded sub-parsers
+helpers. Binary parsing is expressed through CSPP parser combinators, using bounded sub-parsers
 for format-length-delimited structures. Format-specific semantic validation runs immediately after
 the relevant structure is decoded so failures retain useful offsets.
 

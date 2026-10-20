@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the lazy Linux filesystem iterator in `(chezpp file)` and the `(chezpp glob)` brace/tilde expander, compiler, matcher, filesystem expander, and lazy glob iterator described in the glob design.
+**Goal:** Implement the lazy Linux filesystem iterator in `(cspp file)` and the `(cspp glob)` brace/tilde expander, compiler, matcher, filesystem expander, and lazy glob iterator described in the glob design.
 
-**Architecture:** Extend `(chezpp file)` with Linux `readdir` wrappers and lazy stack traversal, then make `(chezpp glob)` use those APIs for unsorted lazy matching while retaining eager list expansion. Reuse `(chezpp path)`, `(chezpp regex)`, and `(chezpp iter)`.
+**Architecture:** Extend `(cspp file)` with Linux `readdir` wrappers and lazy stack traversal, then make `(cspp glob)` use those APIs for unsorted lazy matching while retaining eager list expansion. Reuse `(cspp path)`, `(cspp regex)`, and `(cspp iter)`.
 
-**Tech Stack:** ChezScheme libraries, Linux `opendir`/`readdir`/`closedir`, Chez foreign procedures, `(chezpp regex)` (`sre->regex`, `regex-matches?`), `pcheck`, path objects, `file-type`, `file-stat`, and `(chezpp iter)`.
+**Tech Stack:** ChezScheme libraries, Linux `opendir`/`readdir`/`closedir`, Chez foreign procedures, `(cspp regex)` (`sre->regex`, `regex-matches?`), `pcheck`, path objects, `file-type`, `file-stat`, and `(cspp iter)`.
 
 **Spec:** `docs/superpowers/specs/2026-10-01-glob-design.md`
 
@@ -19,21 +19,21 @@
 - Keep source ASCII, balance every Scheme file, and use `make-list-builder` for collected results.
 - Create feature worktrees under `.worktrees` with a date-prefixed name if isolation is used.
 - Reuse existing `FT_*` symbols and add `FT_unknown` for `DT_UNKNOWN`.
-- `chezpp_fs_read_directory` and the Scheme `fs-read-directory` wrapper return
+- `cspp_fs_read_directory` and the Scheme `fs-read-directory` wrapper return
   `(entry-name . entry-type)` or `#f` at EOF.
 - `fs->iter` and `glob->iter` are unsorted and must not collect the complete tree.
 
-### Task 1: Lazy filesystem stream and traversal in `(chezpp file)`
+### Task 1: Lazy filesystem stream and traversal in `(cspp file)`
 
 **Files:**
-- Modify: `chezpp/file.ss`
-- Modify: `chezpp/c/file.c`
+- Modify: `cspp/file.ss`
+- Modify: `cspp/c/file.c`
 - Test: `tests/fs.ss`
 
 **Interfaces:**
 - Produce `fs-open-directory`, `fs-read-directory`, `fs-close-directory`,
   `fs-directory?`, `fs-directory-closed?`, and `fs->iter`.
-- Reuse `FT_*` symbols from `(chezpp file)` and add/export `FT_unknown`.
+- Reuse `FT_*` symbols from `(cspp file)` and add/export `FT_unknown`.
 
 - [x] **Step 1: Add tests in `tests/file.ss`** for pair/EOF reads, idempotent close,
   file-type mapping including `FT_unknown`, lazy traversal, symlink policy, and
@@ -41,7 +41,7 @@
 - [x] **Step 2: Add C FFI functions** wrapping Linux `opendir`, one-entry
   `readdir`, and `closedir`; return an `uptr` directory handle and a Scheme
   pair `(entry-name . d-type)` without a public entry record allocation.
-- [x] **Step 3: Add `(chezpp file)` wrappers** with `pcheck`, pair-returning
+- [x] **Step 3: Add `(cspp file)` wrappers** with `pcheck`, pair-returning
   `fs-read-directory`, and explicit unsupported-platform errors.
 - [x] **Step 4: Implement `fs->iter`** with a stack of open directory records,
   lazy one-entry reads, `follow-link?`, `top-down?`, and finalization cleanup.
@@ -51,12 +51,12 @@
 ### Task 2: Parser and lexical matcher
 
 **Files:**
-- Create: `chezpp/glob.ss`
+- Create: `cspp/glob.ss`
 - Test: `tests/glob.ss`
 
 **Interfaces:**
 - Produce `make-glob`, `glob?`, `glob-match?` and internal expansion/parsed-token records.
-- Consume `path-parse`, `path-components`, `path-flavor`, `(chezpp regex)`, and `pcheck`.
+- Consume `path-parse`, `path-components`, `path-flavor`, `(cspp regex)`, and `pcheck`.
 
 - [x] **Step 1: Add matching tests** for literals, `*`, `?`, classes,
   escapes, `**`, braces, numeric ranges, leading tilde, hidden names,
@@ -67,7 +67,7 @@
   comma alternatives, ascending/descending numeric ranges with optional steps,
   reject empty or malformed forms, and expand only a leading current-user `~`
   through `path-expand-user`; reject `~user`.
-- [x] **Step 4: Implement the `(chezpp regex)` component compiler.** Translate
+- [x] **Step 4: Implement the `(cspp regex)` component compiler.** Translate
   literal runs to literal S-expression strings, `*` to repetition, `?` to a
   single-character atom, and validated bracket classes to S-expression
   character sets; compile each ordinary component with `sre->regex` and match
@@ -83,7 +83,7 @@
 ### Task 3: Filesystem expansion
 
 **Files:**
-- Modify: `chezpp/glob.ss`
+- Modify: `cspp/glob.ss`
 - Modify: `tests/glob.ss`
 
 **Interfaces:**
@@ -107,9 +107,9 @@
 ### Task 4: Lazy iterator and integration
 
 **Files:**
-- Modify: `chezpp/glob.ss`
+- Modify: `cspp/glob.ss`
 - Modify: `tests/glob.ss`
-- Modify: `chezpp.ss`
+- Modify: `cspp.ss`
 - Modify: `tests/Makefile`
 
 **Interfaces:**
@@ -121,7 +121,7 @@
 - [x] **Step 2: Fix `glob->iter` root selection and validate it on the test
   working directory; it must use the longest literal prefix and avoid traversing
   unrelated generated directories.
-- [x] **Step 3: Add `(chezpp glob)` to `chezpp.ss`** and register `glob.ss` in
+- [x] **Step 3: Add `(cspp glob)` to `cspp.ss`** and register `glob.ss` in
   `tests/Makefile`.
 - [x] **Step 4: Run focused tests** with `cd tests && make test-some TEST='glob path file'`.
 - [x] **Step 5: Run full project verification** with `make clean && make` from

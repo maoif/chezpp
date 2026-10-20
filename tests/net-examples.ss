@@ -1,4 +1,4 @@
-(import (chezpp) (chezpp net lws ffi))
+(import (cspp) (cspp net lws ffi))
 
 (define example-entry-point*
   '("examples/net/echo-client-grpc.ss"
@@ -82,11 +82,11 @@
            [sftp (file-text "../examples/net/file-transfer/file-transfer-sftp.ss")])
        (and (not (contains? common "/home/maoif/"))
             (not (contains? common "normalize-script-arguments"))
-            (not (contains? sftp "/tmp/chezpp-example-sftp"))
+            (not (contains? sftp "/tmp/cspp-example-sftp"))
             (not (contains? sftp "make-uuid"))
             (not (contains? sftp "kill $(cat"))
             (not (contains? sftp " & echo $!"))
-            (contains? sftp "CHEZPP_SFTP_EXAMPLE_STATE")
+            (contains? sftp "CSPP_SFTP_EXAMPLE_STATE")
             (contains? sftp "sftp-ready-path")
             (contains? sftp "spawn-process")
             (contains? sftp "process-running?")
@@ -146,18 +146,18 @@
 
 (mat net-example-sftp-state-coordination
      (with-env
-      "CHEZPP_SFTP_EXAMPLE_STATE"
-      "/tmp/explicit-chezpp-sftp-state"
+      "CSPP_SFTP_EXAMPLE_STATE"
+      "/tmp/explicit-cspp-sftp-state"
       (lambda ()
         (let ([state-root
                ((top-level-value 'required-sftp-state-root) 'net-example-sftp)])
-          (and (string=? state-root "/tmp/explicit-chezpp-sftp-state")
+          (and (string=? state-root "/tmp/explicit-cspp-sftp-state")
                (string=? ((top-level-value 'sftp-ready-path) state-root)
-                         "/tmp/explicit-chezpp-sftp-state/ready")))))
+                         "/tmp/explicit-cspp-sftp-state/ready")))))
 
      ;; Error case: server and client must not fall back to an undiscoverable state path.
      (with-env
-      "CHEZPP_SFTP_EXAMPLE_STATE"
+      "CSPP_SFTP_EXAMPLE_STATE"
       ""
       required-sftp-state-root/error?))
 

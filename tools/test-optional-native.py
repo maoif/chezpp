@@ -6,8 +6,8 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-FILES = ['chezpp/net/ffi.ss', 'chezpp/net/lws/ffi.ss', 'chezpp/crypto/ffi.ss',
-         'chezpp/digest.ss', 'chezpp/hash.ss', 'chezpp/uuid.ss']
+FILES = ['cspp/net/ffi.ss', 'cspp/net/lws/ffi.ss', 'cspp/crypto/ffi.ss',
+         'cspp/digest.ss', 'cspp/hash.ss', 'cspp/uuid.ss']
 PATTERN = re.compile(r'\(foreign-procedure\s+"([^"]+)"\s+\(([^()]*)\)\s+([^()\s]+)\)')
 
 
@@ -23,46 +23,46 @@ def declarations():
 
 
 def library(symbol):
-    if symbol.startswith(('crypto_', 'chezpp_net_tls', 'digester_', 'digest_')):
+    if symbol.startswith(('crypto_', 'cspp_net_tls', 'digester_', 'digest_')):
         return 'blake3' if 'blake3' in symbol else 'openssl'
-    if symbol.startswith(('hash_', 'hasher_', 'chezpp_xxhash')):
+    if symbol.startswith(('hash_', 'hasher_', 'cspp_xxhash')):
         return 'xxhash'
-    if symbol.startswith('chezpp_blake3'):
+    if symbol.startswith('cspp_blake3'):
         return 'blake3'
-    if symbol.startswith(('chezpp_generate_uuid', 'chezpp_uuid', 'chezpp_string_to_uuid')):
+    if symbol.startswith(('cspp_generate_uuid', 'cspp_uuid', 'cspp_string_to_uuid')):
         return 'uuid'
-    for prefix, dependency in [('chezpp_zlib', 'zlib'), ('chezpp_net_dns', 'cares'),
-                               ('chezpp_net_idna', 'idn2'), ('chezpp_net_ftp', 'curl'),
-                               ('chezpp_net_ssh', 'ssh'), ('chezpp_net_sftp', 'ssh'),
-                               ('chezpp_net_scp', 'ssh'), ('chezpp_net_ws', 'websockets'), ('chezpp_net_websocket', 'websockets'),
-                               ('chezpp_lws', 'websockets'), ('chezpp_net_grpc', 'grpc')]:
+    for prefix, dependency in [('cspp_zlib', 'zlib'), ('cspp_net_dns', 'cares'),
+                               ('cspp_net_idna', 'idn2'), ('cspp_net_ftp', 'curl'),
+                               ('cspp_net_ssh', 'ssh'), ('cspp_net_sftp', 'ssh'),
+                               ('cspp_net_scp', 'ssh'), ('cspp_net_ws', 'websockets'), ('cspp_net_websocket', 'websockets'),
+                               ('cspp_lws', 'websockets'), ('cspp_net_grpc', 'grpc')]:
         if symbol.startswith(prefix):
             return dependency
     return None
 
 
 def main():
-    sources = list((ROOT / 'chezpp/c').rglob('*.c')) + list((ROOT / 'chezpp/c').rglob('*.h'))
+    sources = list((ROOT / 'cspp/c').rglob('*.c')) + list((ROOT / 'cspp/c').rglob('*.h'))
     for source in sources:
         if source.name == 'lws_http2_fixture.c':
             continue
         assert not re.search(r'\b(dl(?:open|close)|dlsym)\s*\(', source.read_text()), source
     symbols = declarations()
-    exports = subprocess.check_output(['nm', '-D', '--defined-only', str(ROOT / 'libchezpp.so')], text=True)
+    exports = subprocess.check_output(['nm', '-D', '--defined-only', str(ROOT / 'libcspp.so')], text=True)
     exported = {line.split()[-1] for line in exports.splitlines()}
     missing = sorted(set(symbols) - exported)
     assert not missing, f'Missing FFI exports: {missing}'
     if '--sentinels' not in sys.argv:
         return
-    config = (ROOT / 'chezpp/c/build-config.h').read_text()
+    config = (ROOT / 'cspp/c/build-config.h').read_text()
     mapping = {'ssh': 'LIBSSH', 'websockets': 'WEBSOCKETS'}
-    tests = ['(import (chezscheme))', '(load-shared-object "./libchezpp.so")']
+    tests = ['(import (chezscheme))', '(load-shared-object "./libcspp.so")']
     for symbol, (arguments, returns) in symbols.items():
         dependency = library(symbol)
-        if not dependency or 'load_error' in symbol or symbol == 'chezpp_lws_status':
+        if not dependency or 'load_error' in symbol or symbol == 'cspp_lws_status':
             continue
         macro = mapping.get(dependency, dependency.upper())
-        if not re.search(rf'#define CHEZPP_WITH_{macro}\s+0\b', config):
+        if not re.search(rf'#define CSPP_WITH_{macro}\s+0\b', config):
             continue
         values = ['"disabled.example"' if argument == 'string' else
                   '#vu8(0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0)' if argument in ('ptr', 'scheme-object') else

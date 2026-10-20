@@ -1,6 +1,6 @@
-(import (chezpp)
-        (chezpp parser elf)
-        (chezpp parser elf types))
+(import (cspp)
+        (cspp parser elf)
+        (cspp parser elf types))
 
 (include "parser-external-tools.ss")
 
@@ -393,7 +393,7 @@
 
 (mat parse-elf-file
 
-     (let* ([file (parse-elf-file "../libchezpp.so")]
+     (let* ([file (parse-elf-file "../libcspp.so")]
             [identification (elf-file-identification file)]
             [header (elf-file-header file)]
             [program-headers (elf-file-program-headers file)]
@@ -414,11 +414,11 @@
               (elf-raw-section-bytes (elf-section-content text-section))))))
 
      (or (not (external-tool-available? "readelf"))
-         (let* ([file (parse-elf-file "../libchezpp.so")]
+         (let* ([file (parse-elf-file "../libcspp.so")]
                 [result
                  (capture-process "/bin/sh" "-c"
                                   "LC_ALL=C exec readelf -h -W \"$1\""
-                                  "sh" "../libchezpp.so"
+                                  "sh" "../libcspp.so"
                    :stdout capture
                    :stderr capture
                    :timeout 10000)]

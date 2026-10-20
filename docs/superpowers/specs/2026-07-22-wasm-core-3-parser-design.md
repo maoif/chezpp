@@ -29,19 +29,19 @@ the Core specification.
 
 ## Library Structure
 
-- `chezpp/parser/wasm.ss` provides the documented, type-checked public API.
-- `chezpp/parser/wasm/types.ss` defines documented checked public records.
-- `chezpp/parser/wasm/opcodes.ss` defines the shared Core 3.0 instruction descriptors.
-- `chezpp/parser/wasm/binary.ss` parses binary modules and standard sections.
-- `chezpp/parser/wasm/binary/instructions.ss` parses binary opcodes and immediates.
-- `chezpp/parser/wasm/text/lexical.ss` parses WAT lexical forms.
-- `chezpp/parser/wasm/text.ss` parses WAT types, fields, and instructions.
-- `chezpp/parser/wasm/normalize.ss` resolves WAT names and expands abbreviations.
-- `chezpp/parser/wasm/validate.ss` performs shared decoding-time structural checks.
+- `cspp/parser/wasm.ss` provides the documented, type-checked public API.
+- `cspp/parser/wasm/types.ss` defines documented checked public records.
+- `cspp/parser/wasm/opcodes.ss` defines the shared Core 3.0 instruction descriptors.
+- `cspp/parser/wasm/binary.ss` parses binary modules and standard sections.
+- `cspp/parser/wasm/binary/instructions.ss` parses binary opcodes and immediates.
+- `cspp/parser/wasm/text/lexical.ss` parses WAT lexical forms.
+- `cspp/parser/wasm/text.ss` parses WAT types, fields, and instructions.
+- `cspp/parser/wasm/normalize.ss` resolves WAT names and expands abbreviations.
+- `cspp/parser/wasm/validate.ss` performs shared decoding-time structural checks.
 
 ## Binary Parsing
 
-All binary recognition is built from Chezpp parser combinators. The module parser consumes the
+All binary recognition is built from CSPP parser combinators. The module parser consumes the
 magic and version followed by length-delimited sections. Each payload is parsed through
 `<bounded>`, preserving absolute error offsets and rejecting truncated or under-consumed payloads.
 

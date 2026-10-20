@@ -1,5 +1,5 @@
-(import (chezpp)
-        (only (chezpp private rbtree) $rbtree-verify *dummy-v* rbtree-visit
+(import (cspp)
+        (only (cspp private rbtree) $rbtree-verify *dummy-v* rbtree-visit
               rbtree-search rbtree-successor rbtree-predecessor
               rbtree-min rbtree-max rbtree-inorder-cursor))
 

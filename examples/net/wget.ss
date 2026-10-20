@@ -1,4 +1,4 @@
-(import (chezpp) (chezpp net http) (chezpp logging) (chezpp rich))
+(import (cspp) (cspp net http) (cspp logging) (cspp rich))
 (load "examples/common.ss")
 (load "examples/net/transfer-progress.ss")
 
@@ -64,7 +64,7 @@
 (define download-file!
   (lambda (client uri output report)
     ;; Create a sibling file exclusively so failed requests cannot damage the destination.
-    (let* ([temporary (format "~a.chezpp-download-~a-~a"
+    (let* ([temporary (format "~a.cspp-download-~a-~a"
                               output (get-process-id) (random (most-positive-fixnum)))]
            [port (open-file-output-port temporary (file-options) (buffer-mode block) #f)]
            [completed 0]
@@ -96,7 +96,7 @@
                  [response (net-operation-wait (http-send/nonblocking client request sink))]
                  [status (http-response-status response)])
             (unless (<= 200 status 299)
-              (errorf 'chezpp-wget "download failed: HTTP ~a for ~a" status uri))
+              (errorf 'cspp-wget "download failed: HTTP ~a for ~a" status uri))
             (close-port port)
             ;; Publish only a complete successful download, replacing any existing output.
             (rename-file temporary output)
@@ -107,31 +107,31 @@
           (when (file-exists? temporary) (delete-file temporary)))))))
 
 (example-run!
- 'chezpp-wget
+ 'cspp-wget
  "Download a URI to a file using HTTP or HTTP/2."
  '((uri . "Required: HTTP or HTTPS URI to download.")
    (output . "Required: destination file path.")
    (version . "HTTP policy: auto, http/1.1, or h2 (default: auto).")
    (timeout . "Total request timeout in seconds, a positive integer (default: 3600).")
    (progress . "Show progress and current download speed on stderr: yes or no (default: yes).")
-   (user-agent . "User-Agent sent to the server (default: chezpp-wget)."))
+   (user-agent . "User-Agent sent to the server (default: cspp-wget)."))
  (lambda (ref)
-   (let* ([uri (example-required 'chezpp-wget ref 'uri)]
-          [output (example-required 'chezpp-wget ref 'output)]
+   (let* ([uri (example-required 'cspp-wget ref 'uri)]
+          [output (example-required 'cspp-wget ref 'output)]
           [version (string->symbol (or (ref 'version) "auto"))]
-          [timeout (example-option-natural 'chezpp-wget ref 'timeout 3600)]
-          [user-agent (or (ref 'user-agent) "chezpp-wget")]
-          [progress? (example-progress-enabled? 'chezpp-wget ref)]
+          [timeout (example-option-natural 'cspp-wget ref 'timeout 3600)]
+          [user-agent (or (ref 'user-agent) "cspp-wget")]
+          [progress? (example-progress-enabled? 'cspp-wget ref)]
           [client (http-open)]
-          [log (make-logger 'chezpp-wget)])
+          [log (make-logger 'cspp-wget)])
      (logger-add-sink! log (make-log-port-sink 'stderr (current-error-port)))
      (dynamic-wind
        void
        (lambda ()
          (unless (memq version '(auto http/1.1 h2))
-           (errorf 'chezpp-wget "version must be auto, http/1.1, or h2"))
+           (errorf 'cspp-wget "version must be auto, http/1.1, or h2"))
          (unless (<= 1 timeout (fxquotient (most-positive-fixnum) 1000))
-           (errorf 'chezpp-wget "timeout must be positive and fit in milliseconds as a fixnum"))
+           (errorf 'cspp-wget "timeout must be positive and fit in milliseconds as a fixnum"))
          ;; Allow large downloads to finish within the selected total request deadline.
          (http-set-timeout! client (* timeout 1000))
          ;; Identify the downloader; mirrors may reject requests without a User-Agent.

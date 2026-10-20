@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "net-common.ss")
 
@@ -433,23 +433,23 @@
             100))))
 
 (mat net-websocket-options
-     (let ([options (make-websocket-options #f '("chezpp.v2" "chezpp.v1") 65536 #f 500)])
+     (let ([options (make-websocket-options #f '("cspp.v2" "cspp.v1") 65536 #f 500)])
        (and (websocket-options? options)
             (not (websocket-options-tls-context options))
-            (equal? '("chezpp.v2" "chezpp.v1") (websocket-options-subprotocols options))
+            (equal? '("cspp.v2" "cspp.v1") (websocket-options-subprotocols options))
             (= 65536 (websocket-options-fragment-size options))
             (not (websocket-options-ping-interval-ms options))
             (= 500 (websocket-options-pong-timeout-ms options))))
 
      ;; Error case: the removed compression parameter is no longer an accepted argument.
      (guard (condition [else #t])
-       (apply make-websocket-options (list #f '("chezpp-websocket") #t 65536 #f 500))
+       (apply make-websocket-options (list #f '("cspp-websocket") #t 65536 #f 500))
        #f))
 
 (mat net-websocket-subprotocols-fragments-and-close
      (mat-requires (websockets)
        (let* ([port (reserve-loopback-port)]
-              [options (make-websocket-options #f '("chezpp.v2" "chezpp.v1")
+              [options (make-websocket-options #f '("cspp.v2" "cspp.v1")
                                                65536 #f 500)]
               [server (websocket-listen "127.0.0.1" port options)]
               [uri (format "ws://127.0.0.1:~a/features" port)]
@@ -470,8 +470,8 @@
                (and (websocket-message? message)
                     (eq? (websocket-message-type message) 'text)
                     (equal? (websocket-message-data message) "one-two-three")
-                    (equal? (websocket-negotiated-subprotocol client) "chezpp.v2")
-                    (equal? (websocket-negotiated-subprotocol accepted) "chezpp.v2")
+                    (equal? (websocket-negotiated-subprotocol client) "cspp.v2")
+                    (equal? (websocket-negotiated-subprotocol accepted) "cspp.v2")
                     (= (websocket-send-ping client #vu8(1 2 3) 500) 3)
                     (begin
                       (websocket-close client 1000 "message complete")
@@ -550,7 +550,7 @@
                     (socket-connect! ready (make-socket-address 'inet "127.0.0.1" port))
                     (socket-send-all ready
                       (string->utf8
-                       "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: chezpp-websocket\r\n\r\n"))))))
+                       "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: cspp-websocket\r\n\r\n"))))))
              (set! accepted (websocket-accept server 1000))
              (thread-join worker)
              (and (not failure) (websocket-connection? accepted)))
@@ -699,16 +699,16 @@
            (dynamic-wind
              (lambda ()
                (tls-context-load-cert! server-context
-                                       "/tmp/chezpp-net-test-san-cert.pem")
+                                       "/tmp/cspp-net-test-san-cert.pem")
                (tls-context-load-private-key! server-context
-                                              "/tmp/chezpp-net-test-san-key.pem")
+                                              "/tmp/cspp-net-test-san-key.pem")
                (tls-context-load-ca-file! client-context
-                                          "/tmp/chezpp-net-test-san-cert.pem")
+                                          "/tmp/cspp-net-test-san-cert.pem")
                (set! server-options
-                     (make-websocket-options server-context '("chezpp-wss")
+                     (make-websocket-options server-context '("cspp-wss")
                                              65536 #f 500))
                (set! client-options
-                     (make-websocket-options client-context '("chezpp-wss")
+                     (make-websocket-options client-context '("cspp-wss")
                                              65536 #f 500))
                (set! server (websocket-listen "127.0.0.1" port server-options)))
              (lambda ()

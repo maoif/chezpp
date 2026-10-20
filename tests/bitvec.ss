@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp bitvec))
+(import (cspp)
+        (cspp bitvec))
 
 (define iota50000 (iota 50000))
 (define n-1e5-1 (nums 0 #e1e5 1))

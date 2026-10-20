@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 ;; Run this same script against the baseline and optimized libraries.
 ;; Compile the procedures before the measurement; use retained graph size as the primary metric.

@@ -50,8 +50,8 @@
   (lambda ()
     (let ([server (open-socket 'inet 'stream)]
           [ctx (make-tls-context 'server)]
-          [cert-path "/tmp/chezpp-net-test-cert.pem"]
-          [key-path "/tmp/chezpp-net-test-key.pem"])
+          [cert-path "/tmp/cspp-net-test-cert.pem"]
+          [key-path "/tmp/cspp-net-test-key.pem"])
       (write-bytevector-file cert-path tls-test-certificate)
       (write-bytevector-file key-path tls-test-private-key)
       (tls-context-load-cert! ctx cert-path)
@@ -84,14 +84,14 @@
           [default-ctx (make-tls-context 'server)]
           [selected-ctx (make-tls-context 'server)]
           [selected-name #f])
-      (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
-      (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)
-      (write-bytevector-file "/tmp/chezpp-net-test-san-cert.pem" tls-test-san-certificate)
-      (write-bytevector-file "/tmp/chezpp-net-test-san-key.pem" tls-test-san-private-key)
-      (tls-context-load-cert! default-ctx "/tmp/chezpp-net-test-cert.pem")
-      (tls-context-load-private-key! default-ctx "/tmp/chezpp-net-test-key.pem")
-      (tls-context-load-cert! selected-ctx "/tmp/chezpp-net-test-san-cert.pem")
-      (tls-context-load-private-key! selected-ctx "/tmp/chezpp-net-test-san-key.pem")
+      (write-bytevector-file "/tmp/cspp-net-test-cert.pem" tls-test-certificate)
+      (write-bytevector-file "/tmp/cspp-net-test-key.pem" tls-test-private-key)
+      (write-bytevector-file "/tmp/cspp-net-test-san-cert.pem" tls-test-san-certificate)
+      (write-bytevector-file "/tmp/cspp-net-test-san-key.pem" tls-test-san-private-key)
+      (tls-context-load-cert! default-ctx "/tmp/cspp-net-test-cert.pem")
+      (tls-context-load-private-key! default-ctx "/tmp/cspp-net-test-key.pem")
+      (tls-context-load-cert! selected-ctx "/tmp/cspp-net-test-san-cert.pem")
+      (tls-context-load-private-key! selected-ctx "/tmp/cspp-net-test-san-key.pem")
       (tls-context-sni-selector-set!
        default-ctx
        (lambda (server-name)
@@ -123,10 +123,10 @@
   (lambda ()
     (let ([server (open-socket 'inet 'stream)]
           [ctx (make-tls-context 'server)])
-      (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
-      (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)
-      (tls-context-load-cert! ctx "/tmp/chezpp-net-test-cert.pem")
-      (tls-context-load-private-key! ctx "/tmp/chezpp-net-test-key.pem")
+      (write-bytevector-file "/tmp/cspp-net-test-cert.pem" tls-test-certificate)
+      (write-bytevector-file "/tmp/cspp-net-test-key.pem" tls-test-private-key)
+      (tls-context-load-cert! ctx "/tmp/cspp-net-test-cert.pem")
+      (tls-context-load-private-key! ctx "/tmp/cspp-net-test-key.pem")
       (socket-set-option! server 'reuse-address #t)
       (socket-bind! server (make-socket-address 'inet "127.0.0.1" 0))
       (socket-listen! server 8)
@@ -164,13 +164,13 @@
 
 (define write-test-cert-files
   (lambda ()
-    (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-certificate)
-    (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-private-key)))
+    (write-bytevector-file "/tmp/cspp-net-test-cert.pem" tls-test-certificate)
+    (write-bytevector-file "/tmp/cspp-net-test-key.pem" tls-test-private-key)))
 
 (define write-test-san-cert-files
   (lambda ()
-    (write-bytevector-file "/tmp/chezpp-net-test-san-cert.pem" tls-test-san-certificate)
-    (write-bytevector-file "/tmp/chezpp-net-test-san-key.pem" tls-test-san-private-key)))
+    (write-bytevector-file "/tmp/cspp-net-test-san-cert.pem" tls-test-san-certificate)
+    (write-bytevector-file "/tmp/cspp-net-test-san-key.pem" tls-test-san-private-key)))
 
 (define read-crlf-line
   (lambda (ip)
@@ -284,16 +284,16 @@
   (lambda ()
     (write-test-cert-files)
     (let ([ctx (make-tls-context 'server)])
-      (tls-context-load-cert! ctx "/tmp/chezpp-net-test-cert.pem")
-      (tls-context-load-private-key! ctx "/tmp/chezpp-net-test-key.pem")
+      (tls-context-load-cert! ctx "/tmp/cspp-net-test-cert.pem")
+      (tls-context-load-private-key! ctx "/tmp/cspp-net-test-key.pem")
       ctx)))
 
 (define make-test-http-verified-server-context
   (lambda ()
     (write-test-san-cert-files)
     (let ([ctx (make-tls-context 'server)])
-      (tls-context-load-cert! ctx "/tmp/chezpp-net-test-san-cert.pem")
-      (tls-context-load-private-key! ctx "/tmp/chezpp-net-test-san-key.pem")
+      (tls-context-load-cert! ctx "/tmp/cspp-net-test-san-cert.pem")
+      (tls-context-load-private-key! ctx "/tmp/cspp-net-test-san-key.pem")
       ctx)))
 
 (define make-test-http-client-context
@@ -307,7 +307,7 @@
   (lambda ()
     (write-test-san-cert-files)
     (let ([ctx (make-tls-context 'client)])
-      (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-san-cert.pem")
+      (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-san-cert.pem")
       (tls-context-set-verify! ctx #t)
       ctx)))
 
@@ -315,7 +315,7 @@
   (lambda ()
     (write-test-cert-files)
     (let ([ctx (make-tls-context 'client)])
-      (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+      (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
       (tls-context-set-verify! ctx #t)
       ctx)))
 

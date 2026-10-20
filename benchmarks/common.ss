@@ -1,4 +1,4 @@
-(import (chezpp benchmark) (chezpp cli))
+(import (cspp benchmark) (cspp cli))
 
 (define benchmark-option
   (lambda (name parser help)
@@ -96,11 +96,11 @@
 
 (define benchmark-metadata
   (lambda ()
-    `((chezpp-version . ,(library-version '(chezpp)))
+    `((cspp-version . ,(library-version '(cspp)))
       (scheme-version . ,(scheme-version))
       (machine . ,(machine-type))
       (build . ,(find (lambda (option) (string-startswith? option "VARIANT="))
-                      (string-split (call-with-input-file ".chezpp-build-options" get-string-all)
+                      (string-split (call-with-input-file ".cspp-build-options" get-string-all)
                                     #\space)))
       (date . ,(date-and-time)))))
 

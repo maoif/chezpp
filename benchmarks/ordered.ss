@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 ;; Deterministic permutation, generated outside measured regions.
 (define keys

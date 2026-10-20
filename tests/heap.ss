@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp heap))
+(import (cspp)
+        (cspp heap))
 
 
 (mat heap

@@ -1,7 +1,7 @@
 # HTTP Transport Support
 
-Chezpp uses dynamically loaded libwebsockets for HTTP. The live integration suite is verified
-against LWS 4.5.8. `libchezpp.so` has no direct LWS or nghttp2 dependency.
+CSPP uses dynamically loaded libwebsockets for HTTP. The live integration suite is verified
+against LWS 4.5.8. `libcspp.so` has no direct LWS or nghttp2 dependency.
 
 Use `http-client-version-set!` with `http/1.1` or `h2` to require a protocol, and inspect
 `http-response-version` for the observed `h1` or `h2` result. Cleartext H2 uses prior knowledge.
@@ -12,7 +12,7 @@ HTTP/1 ALPN, and H2 ALPN with a local certificate.
 HTTP/1 client connections are intentionally not reused. LWS 4.5.8 closes completed client
 transactions and offers no supported restart API. Pool idle settings do not imply physical reuse.
 Fixed-length, EOF-delimited, and ordinary chunked responses are supported. LWS 4.5.8 rejects
-chunk trailers; Chezpp propagates that failure and does not parse residual wire bytes itself.
+chunk trailers; CSPP propagates that failure and does not parse residual wire bytes itself.
 
 Redirects share one deadline. Cross-origin redirects strip explicit authorization and cookie
 headers; target cookies are selected again. A consumed one-shot source cannot be replayed for
@@ -26,7 +26,7 @@ its declared length is also rejected. Unknown-length response sources are unsupp
 
 H2 POST requests require `Content-Length`, including `Content-Length: 0` for empty bodies.
 LWS 4.5.8 can assert while draining buffered unknown-length POST DATA, or fail to report body
-completion for an empty final DATA frame. Chezpp rejects these requests at headers, before
+completion for an empty final DATA frame. CSPP rejects these requests at headers, before
 publishing a request to Scheme. The listener remains usable; the rejected stream is closed.
 
 H2 SETTINGS and GOAWAY remain owned by LWS. Its public API exposes neither peer maximum streams

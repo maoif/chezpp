@@ -1,12 +1,12 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "examples/net/legacy-example-common.ss")
 (net-example-help! 'grpc-echo-server "Serve gRPC echo requests. Positional arguments: [HOST PORT].")
 
 (load "examples/net/net-example-common.ss")
 
-(define grpc-echo-method "/chezpp.examples.Echo/Unary")
+(define grpc-echo-method "/cspp.examples.Echo/Unary")
 
 #|proc:grpc-echo-server
 The `grpc-echo-server` procedure listens for unary gRPC echo requests, prints

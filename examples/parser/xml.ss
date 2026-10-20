@@ -1,4 +1,4 @@
-(import (chezpp) (chezpp parser xml))
+(import (cspp) (cspp parser xml))
 (load "examples/common.ss")
 
 (example-run!

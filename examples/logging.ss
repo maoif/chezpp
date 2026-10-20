@@ -1,7 +1,7 @@
 #!chezscheme
-(import (chezpp))
+(import (cspp))
 
-(define demo-log-file "chezpp-logging-example.log")
+(define demo-log-file "cspp-logging-example.log")
 
 (define delete-if-exists
   (lambda (path)

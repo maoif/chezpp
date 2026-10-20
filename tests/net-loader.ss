@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net lws ffi))
+(import (cspp)
+        (cspp net lws ffi))
 
 (define check-unavailable
   (lambda (name expected)

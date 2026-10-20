@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "examples/net/file-transfer/file-transfer-common.ss")
 (load "examples/net/file-transfer/file-transfer-tcp.ss")

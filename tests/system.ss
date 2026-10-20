@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (mat system-errors
 

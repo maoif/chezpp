@@ -1,4 +1,4 @@
-(import (chezpp) (chezpp net http) (chezpp net tls) (chezpp logging))
+(import (cspp) (cspp net http) (cspp net tls) (cspp logging))
 (load "examples/net/http-file-server-common.ss")
 
 (example-run!

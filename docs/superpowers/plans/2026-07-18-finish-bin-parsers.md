@@ -6,20 +6,20 @@
 
 **Architecture:** Use typed immutable records per format and parser-combinator entry points with bounded binary sub-parsers. Keep binary and textual WebAssembly parsing on one canonical record model, and run structural validation before returning a public value.
 
-**Tech Stack:** ChezScheme bytevectors, Chezpp parser combinators, JVMS SE 26, ELF specification, WebAssembly Core specification, and the existing `mat` test harness.
+**Tech Stack:** ChezScheme bytevectors, CSPP parser combinators, JVMS SE 26, ELF specification, WebAssembly Core specification, and the existing `mat` test harness.
 
 ---
 
 ### Task 1: Establish Parser Facades And Shared Fixture Paths
 
 **Files:**
-- Modify: `chezpp/parser.ss`
-- Modify: `chezpp/parser/elf.ss`
-- Modify: `chezpp/parser/jclass.ss`
-- Modify: `chezpp/parser/wasm.ss`
+- Modify: `cspp/parser.ss`
+- Modify: `cspp/parser/elf.ss`
+- Modify: `cspp/parser/jclass.ss`
+- Modify: `cspp/parser/wasm.ss`
 - Test: `tests/parser.ss`
 
-- [ ] Restore the three parser-library imports in `chezpp/parser.ss` and keep the experimental parser-combinator import behavior unchanged.
+- [ ] Restore the three parser-library imports in `cspp/parser.ss` and keep the experimental parser-combinator import behavior unchanged.
 - [ ] Define documented public entry points for bytevectors and files, preserving the existing one-argument names with bytevector/path dispatch and adding explicit `parse-elf-file`, `parse-java-class-file`, `parse-wasm-binary-module-file`, and `parse-wasm-text-module-file` procedures.
 - [ ] Add type checks for every public entry point and route all parsing through `run-binary-parser`, `run-textual-parser`, `parse-binary-file`, or `parse-textual-file`.
 - [ ] Extend `tests/parser.ss` with a minimal bytevector/path smoke clause for each facade and an error clause for non-bytevector, non-file arguments.
@@ -27,10 +27,10 @@
 ### Task 2: Implement Typed ELF32/ELF64 Parsing
 
 **Files:**
-- Create: `chezpp/parser/elf/types.ss`
-- Create: `chezpp/parser/elf/binary.ss`
-- Create: `chezpp/parser/elf/validate.ss`
-- Modify: `chezpp/parser/elf.ss`
+- Create: `cspp/parser/elf/types.ss`
+- Create: `cspp/parser/elf/binary.ss`
+- Create: `cspp/parser/elf/validate.ss`
+- Modify: `cspp/parser/elf.ss`
 - Test: `tests/parser-elf.ss`
 
 - [ ] Define documented immutable records for ELF files, identification, headers, program headers, sections, symbols, relocations, dynamic entries, notes, and typed section payloads.
@@ -38,16 +38,16 @@
 - [ ] Parse program and section tables through `<pos-at>`, `<rep>`, and `<bounded>`; validate table offsets, entry sizes, extended counts, `PN_XNUM`, `e_shnum == 0`, and `SHN_XINDEX`.
 - [ ] Resolve section names from a validated string table and decode `SHT_STRTAB`, symbol tables, `REL`/`RELA`, `RELR`, `HASH`, `GROUP`, `SYMTAB_SHNDX`, init/fini arrays, dynamic tables, and notes. Preserve raw bytes for unknown section types.
 - [ ] Reject truncated ranges, invalid string offsets, invalid linked-section types, malformed note alignment, `PT_LOAD` size violations, and unsupported identification values with parser errors.
-- [ ] Add synthetic ELF32/ELF64 little/big-endian fixtures, typed-section fixtures, malformed inputs, and a relative smoke test against `../libchezpp.so`.
+- [ ] Add synthetic ELF32/ELF64 little/big-endian fixtures, typed-section fixtures, malformed inputs, and a relative smoke test against `../libcspp.so`.
 
 ### Task 3: Implement Java Class Structure And Constant Pool
 
 **Files:**
-- Create: `chezpp/parser/jclass/types.ss`
-- Create: `chezpp/parser/jclass/reader.ss`
-- Create: `chezpp/parser/jclass/binary.ss`
-- Create: `chezpp/parser/jclass/validate.ss`
-- Modify: `chezpp/parser/jclass.ss`
+- Create: `cspp/parser/jclass/types.ss`
+- Create: `cspp/parser/jclass/reader.ss`
+- Create: `cspp/parser/jclass/binary.ss`
+- Create: `cspp/parser/jclass/validate.ss`
+- Modify: `cspp/parser/jclass.ss`
 - Test: `tests/parser-jclass.ss`
 
 - [ ] Define documented records for `jclass-file`, fields, methods, interfaces, raw attributes, and every JVMS constant-pool tag. Preserve index-zero and long/double reserved slots in the pool vector.
@@ -60,11 +60,11 @@
 ### Task 4: Implement Standard Java Attributes And Bytecode
 
 **Files:**
-- Create: `chezpp/parser/jclass/attributes.ss`
-- Create: `chezpp/parser/jclass/bytecode.ss`
-- Modify: `chezpp/parser/jclass/types.ss`
-- Modify: `chezpp/parser/jclass/binary.ss`
-- Modify: `chezpp/parser/jclass/validate.ss`
+- Create: `cspp/parser/jclass/attributes.ss`
+- Create: `cspp/parser/jclass/bytecode.ss`
+- Modify: `cspp/parser/jclass/types.ss`
+- Modify: `cspp/parser/jclass/binary.ss`
+- Modify: `cspp/parser/jclass/validate.ss`
 - Test: `tests/parser-jclass.ss`
 
 - [ ] Add typed records and bounded parsers for fixed and variable attributes, annotations, parameter/type annotations, module and record attributes, nest/permitted attributes, bootstrap methods, code, exception tables, and stack-map tables.
@@ -75,11 +75,11 @@
 ### Task 5: Implement WebAssembly Binary Records And Sections
 
 **Files:**
-- Create: `chezpp/parser/wasm/types.ss`
-- Create: `chezpp/parser/wasm/instructions.ss`
-- Create: `chezpp/parser/wasm/binary.ss`
-- Create: `chezpp/parser/wasm/validate.ss`
-- Modify: `chezpp/parser/wasm.ss`
+- Create: `cspp/parser/wasm/types.ss`
+- Create: `cspp/parser/wasm/instructions.ss`
+- Create: `cspp/parser/wasm/binary.ss`
+- Create: `cspp/parser/wasm/validate.ss`
+- Modify: `cspp/parser/wasm.ss`
 - Test: `tests/parser-wasm.ss`
 
 - [ ] Define documented canonical records for modules, standard/custom sections, types, imports, functions, limits, globals, exports, elements, data segments, and instructions.
@@ -91,9 +91,9 @@
 ### Task 6: Implement Textual WAT Parsing
 
 **Files:**
-- Create: `chezpp/parser/wasm/text.ss`
-- Modify: `chezpp/parser/wasm/types.ss`
-- Modify: `chezpp/parser/wasm.ss`
+- Create: `cspp/parser/wasm/text.ss`
+- Modify: `cspp/parser/wasm/types.ss`
+- Modify: `cspp/parser/wasm.ss`
 - Create or modify: `tests/data/example.wat`
 - Test: `tests/parser-wasm.ss`
 

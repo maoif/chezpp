@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp bittree))
+(import (cspp)
+        (cspp bittree))
 
 
 (define iota50000 (iota 50000))

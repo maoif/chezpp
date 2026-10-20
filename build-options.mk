@@ -1,12 +1,12 @@
-# Shared ChezPP build-profile resolution for the root and tests Makefiles.
+# Shared CSPP build-profile resolution for the root and tests Makefiles.
 
 BUILD_ROOT ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-BUILD_OPTIONS_SIGNATURE_FILE ?= $(BUILD_ROOT)/.chezpp-build-options
+BUILD_OPTIONS_SIGNATURE_FILE ?= $(BUILD_ROOT)/.cspp-build-options
 
 BUILD_OPTION_NAMES := o d cl i cp0 fc xf xl p xp bp xbp c loadspd dumpspd \
                       loadbpd dumpbpd compile pdhtml gac gic pps psi wpo
 _PROFILE_SIGNATURE_NAMES := VARIANT $(BUILD_OPTION_NAMES)
-BUILD_SIGNATURE_NAMES := CHEZPP_BUILD_SCRIPT_SIGNATURE $(_PROFILE_SIGNATURE_NAMES)
+BUILD_SIGNATURE_NAMES := CSPP_BUILD_SCRIPT_SIGNATURE $(_PROFILE_SIGNATURE_NAMES)
 
 # Quote values before passing user-supplied flags through a shell.
 build-shell-quote = '$(subst ','"'"',$(1))'
@@ -81,7 +81,7 @@ BUILD_VARIANT_LABEL := coverage
 endif
 
 define print-build-options
-	@printf '\033[1;36mChezPP build options\033[0m'; \
+	@printf '\033[1;36mCSPP build options\033[0m'; \
 	if [ -n '$(BUILD_VARIANT_LABEL)' ]; then printf ' (variant=%s)' '$(BUILD_VARIANT_LABEL)'; fi; \
 	printf '\n'; \
 	printf '\033[2m%s\033[0m\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)); \

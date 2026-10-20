@@ -1,5 +1,5 @@
 #!chezscheme
-(import (chezpp))
+(import (cspp))
 
 (define-record-type (dashboard-lines make-dashboard-lines dashboard-lines?)
   (fields (immutable lines dashboard-lines-lines)))

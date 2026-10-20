@@ -1,6 +1,6 @@
-(import (chezpp)
-        (chezpp concurrency fiber)
-        (chezpp net operation))
+(import (cspp)
+        (cspp concurrency fiber)
+        (cspp net operation))
 
 (load "net-common.ss")
 (load "net-lws-fixture.ss")
@@ -196,7 +196,7 @@
             (dynamic-wind
               void
               (lambda ()
-                (tls-context-load-ca-file! tls "/tmp/chezpp-net-test-cert.pem")
+                (tls-context-load-ca-file! tls "/tmp/cspp-net-test-cert.pem")
                 (tls-context-set-verify! tls #t)
                 (http-client-version-set! http1 'http/1.1)
                 (http-client-version-set! http2 'h2)

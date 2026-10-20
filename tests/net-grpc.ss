@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "net-common.ss")
 
@@ -99,8 +99,8 @@
   (lambda (mutual? register proc)
     (write-test-san-cert-files)
     (let* ([port (reserve-loopback-port)]
-           [certificate (read-test-pem "/tmp/chezpp-net-test-san-cert.pem")]
-           [private-key (read-test-pem "/tmp/chezpp-net-test-san-key.pem")]
+           [certificate (read-test-pem "/tmp/cspp-net-test-san-cert.pem")]
+           [private-key (read-test-pem "/tmp/cspp-net-test-san-key.pem")]
            [server-credentials
             (make-grpc-server-credentials
              (and mutual? certificate) certificate private-key)]
@@ -174,7 +174,7 @@
   (lambda (client)
     (let ([stream (grpc-call/server-stream
                    client
-                   "/chezpp.test.Echo/ServerStream"
+                   "/cspp.test.Echo/ServerStream"
                    "watch"
                    '()
                    2000)])
@@ -193,7 +193,7 @@
   (lambda (client)
     (let ([stream (grpc-call/client-stream
                    client
-                   "/chezpp.test.Echo/ClientStream"
+                   "/cspp.test.Echo/ClientStream"
                    '()
                    2000)])
       (let ([ok?
@@ -213,7 +213,7 @@
   (lambda (client)
     (let ([stream (grpc-call/bidi-stream
                    client
-                   "/chezpp.test.Echo/Bidi"
+                   "/cspp.test.Echo/Bidi"
                    '()
                    2000)])
       (let ([ok?
@@ -238,7 +238,7 @@
                    (lambda ()
                      (grpc-call/server-stream/nonblocking
                       client
-                      "/chezpp.test.Echo/ServerStream"
+                      "/cspp.test.Echo/ServerStream"
                       "watch"
                       '()
                       2000)))])
@@ -259,7 +259,7 @@
                    (lambda ()
                      (grpc-call/client-stream/nonblocking
                       client
-                      "/chezpp.test.Echo/ClientStream"
+                      "/cspp.test.Echo/ClientStream"
                       '()
                       2000)))])
       (let ([ok?
@@ -280,7 +280,7 @@
                    (lambda ()
                      (grpc-call/bidi-stream/nonblocking
                       client
-                      "/chezpp.test.Echo/Bidi"
+                      "/cspp.test.Echo/Bidi"
                       '()
                       2000)))])
       (let ([ok?
@@ -322,10 +322,10 @@
             (eq? registry
                  (grpc-reflection-register-file!
                   registry "file-transfer.proto" #vu8(10 0)
-                  '("chezpp.examples.transfer.FileChunk")
-                  '("chezpp.examples.transfer.FileTransfer")))))
+                  '("cspp.examples.transfer.FileChunk")
+                  '("cspp.examples.transfer.FileTransfer")))))
 
-     (let ([req (grpc-request "/chezpp.test.Meta/Inspect"
+     (let ([req (grpc-request "/cspp.test.Meta/Inspect"
                               "payload"
                               '(("x-id" . "42")
                                 ("x-bin" . #vu8(1 2 3))))])
@@ -379,19 +379,19 @@
                  [extension
                   (protobuf-encode-message
                    (list (list 1 'string "extra")
-                         (list 2 'string ".chezpp.test.Base")
+                         (list 2 'string ".cspp.test.Base")
                          (list 3 'uint32 100)))]
                  [root
                   (protobuf-encode-message
                    (list (list 1 'string "root.proto")
-                         (list 2 'string "chezpp.test")
+                         (list 2 'string "cspp.test")
                          (list 3 'string "dependency.proto")
                          (list 7 'message extension)))]
                  [registry (make-grpc-reflection-registry)])
             (grpc-reflection-register-file!
-             registry "dependency.proto" dependency '("chezpp.test.Base") '())
+             registry "dependency.proto" dependency '("cspp.test.Base") '())
             (grpc-reflection-register-file!
-             registry "root.proto" root '("chezpp.test.Root") '())
+             registry "root.proto" root '("cspp.test.Root") '())
             (call-with-grpc-peer
              1
              (lambda (server) (grpc-register-reflection! server registry))
@@ -404,7 +404,7 @@
                        2000)])
                  (grpc-stream-send
                   stream
-                  (protobuf-encode-message (list (list 4 'string "chezpp.test.Root"))))
+                  (protobuf-encode-message (list (list 4 'string "cspp.test.Root"))))
                  (let ([symbol-descriptor*
                         (grpc-reflection-descriptor* (grpc-stream-recv stream))])
                    (grpc-stream-send
@@ -413,7 +413,7 @@
                      (list
                       (list 5 'message
                             (protobuf-encode-message
-                             (list (list 1 'string "chezpp.test.Base")
+                             (list (list 1 'string "cspp.test.Base")
                                    (list 2 'uint32 100)))))))
                    (let ([extension-descriptor*
                           (grpc-reflection-descriptor* (grpc-stream-recv stream))])
@@ -434,7 +434,7 @@
              (lambda (server)
                (grpc-register-service!
                 server
-                "/chezpp.test.Echo/Unary"
+                "/cspp.test.Echo/Unary"
                 (lambda (req)
                   (set! seen (cons (grpc-metadata-ref req "x-mode" #f) seen))
                   (grpc-response
@@ -447,7 +447,7 @@
                (grpc-channel? server)
                (grpc-channel? client)
                 (let ([resp (grpc-call client
-                                       "/chezpp.test.Echo/Unary"
+                                       "/cspp.test.Echo/Unary"
                                        "hello grpc"
                                        '(("x-mode" . "blocking"))
                                        2000)])
@@ -459,7 +459,7 @@
                    (equal? (grpc-metadata-ref resp "x-reply") "ok")))
                 (let ([resp (wait-grpc-call/nonblocking
                              client
-                             "/chezpp.test.Echo/Unary"
+                             "/cspp.test.Echo/Unary"
                              #vu8(1 2 3 4)
                              '(("x-mode" . "nonblocking"))
                              2000)])
@@ -470,13 +470,13 @@
                    (equal? (grpc-metadata-ref resp "x-reply") "ok")))
                 (let ([resp
                        (grpc-call
-                        client "/chezpp.test.Echo/Unary" "compressed"
+                        client "/cspp.test.Echo/Unary" "compressed"
                         (make-grpc-call-options '(("x-mode" . "gzip")) 2000 'gzip))])
                   (and
                    (equal? (utf8->string (grpc-response-payload resp)) "compressed")
                    (equal? (grpc-metadata-ref resp "grpc-encoding") "gzip")))
                 (let ([resp (grpc-call client
-                                       "/chezpp.test.Echo/Missing"
+                                       "/cspp.test.Echo/Missing"
                                        #f
                                        '()
                                        2000)])
@@ -496,7 +496,7 @@
            (lambda (server)
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/ServerStream"
+              "/cspp.test.Echo/ServerStream"
               'server
               (lambda (stream)
                 (let ([payload (grpc-stream-recv stream)])
@@ -507,7 +507,7 @@
                   #f)))
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/ClientStream"
+              "/cspp.test.Echo/ClientStream"
               'client
               (lambda (stream)
                 (let loop ([parts '()])
@@ -521,7 +521,7 @@
                         (loop (cons (utf8->string payload) parts)))))))
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/Bidi"
+              "/cspp.test.Echo/Bidi"
               'bidi
               (lambda (stream)
                 (let loop ()
@@ -552,14 +552,14 @@
            (lambda (server)
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/UnarySlow"
+              "/cspp.test.Echo/UnarySlow"
               (lambda (req)
                 (when (equal? (utf8->string (grpc-request-payload req)) "slow")
                   (milisleep 100))
                 (grpc-response (grpc-request-payload req) '() 0 "")))
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/ServerStream"
+              "/cspp.test.Echo/ServerStream"
               'server
               (lambda (stream)
                 (let ([payload (grpc-stream-recv stream)])
@@ -570,7 +570,7 @@
                   #f)))
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/ClientStream"
+              "/cspp.test.Echo/ClientStream"
               'client
               (lambda (stream)
                 (let loop ([total 0])
@@ -585,23 +585,23 @@
               (eq? (grpc-cancel-pending! client) client)
               (net-operation? (grpc-call/nonblocking
                     client
-                    "/chezpp.test.Echo/UnarySlow"
+                    "/cspp.test.Echo/UnarySlow"
                     "slow"
                     '()
                     500))
               (eq? (grpc-cancel-pending! client) client)
               (let ([resp (grpc-call
                            client
-                           "/chezpp.test.Echo/UnarySlow"
+                           "/cspp.test.Echo/UnarySlow"
                            "fast"
                            '()
                            500)])
                 (and (grpc-response? resp)
                      (equal? (utf8->string (grpc-response-payload resp)) "fast")))
               (let ([slow (grpc-call/nonblocking
-                           client "/chezpp.test.Echo/UnarySlow" "slow" '() 500)]
+                           client "/cspp.test.Echo/UnarySlow" "slow" '() 500)]
                     [fast (grpc-call/nonblocking
-                           client "/chezpp.test.Echo/UnarySlow" "fast" '() 500)])
+                           client "/cspp.test.Echo/UnarySlow" "fast" '() 500)])
                 (and (net-operation? slow)
                      (net-operation? fast)
                      (let ([slow-response (net-operation-wait slow)]
@@ -612,7 +612,7 @@
                                      (grpc-response-payload fast-response)) "fast")))))
               (let ([stream (grpc-call/client-stream
                              client
-                             "/chezpp.test.Echo/ClientStream"
+                             "/cspp.test.Echo/ClientStream"
                              '()
                              5000)])
                 (let ([ok-stream?
@@ -634,7 +634,7 @@
                   ok-stream?))
               (let ([stream (grpc-call/server-stream
                              client
-                             "/chezpp.test.Echo/ServerStream"
+                             "/cspp.test.Echo/ServerStream"
                              "watch"
                              '()
                              5000)])
@@ -661,17 +661,17 @@
                   (and
                    (net-operation? (grpc-call/server-stream/nonblocking
                          client
-                         "/chezpp.test.Echo/ServerStream"
+                         "/cspp.test.Echo/ServerStream"
                          "x"
                          '()
                          100))
                    (eq? (grpc-cancel-pending! client) client)
                    (net-operation? (grpc-call/server-stream/nonblocking
                                     client
-                                    "/chezpp.test.Echo/ServerStream"
+                                    "/cspp.test.Echo/ServerStream"
                                     "x" '() 100))
                    (net-operation? (grpc-call/bidi-stream/nonblocking
-                                    client "/chezpp.test.Echo/Bidi" '() 100))
+                                    client "/cspp.test.Echo/Bidi" '() 100))
                    (eq? (grpc-cancel-pending! client) client)))
                 (lambda ()
                   (guard (c [else #f])
@@ -683,7 +683,7 @@
                   (and
                    (net-operation? (grpc-call/server-stream/nonblocking
                          client
-                         "/chezpp.test.Echo/ServerStream"
+                         "/cspp.test.Echo/ServerStream"
                          "x"
                          '()
                          100))
@@ -692,7 +692,7 @@
                     "gRPC channel is closed"
                     (lambda ()
                       (grpc-call client
-                                 "/chezpp.test.Echo/Unary"
+                                 "/cspp.test.Echo/Unary"
                                  "x"
                                  '()
                                  100)))))
@@ -709,7 +709,7 @@
              (lambda (server)
                (grpc-register-service!
                 server
-                "/chezpp.test.Echo/UnaryMany"
+                "/cspp.test.Echo/UnaryMany"
                 (lambda (request)
                   (grpc-response (grpc-request-payload request)))))
              (lambda (server client)
@@ -723,7 +723,7 @@
                              (cons
                               (grpc-call/nonblocking
                                client
-                               "/chezpp.test.Echo/UnaryMany"
+                               "/cspp.test.Echo/UnaryMany"
                                (number->string i)
                                '()
                                5000)
@@ -756,23 +756,23 @@
               (grpc-error-message-contains?
                "timeout must be non-negative"
                (lambda ()
-                 (grpc-call client "/chezpp.test.Echo/Unary" "x" '() -1)))
+                 (grpc-call client "/cspp.test.Echo/Unary" "x" '() -1)))
               (grpc-error-message-contains?
                "timeout must be non-negative"
                (lambda ()
-                 (grpc-call/nonblocking client "/chezpp.test.Echo/Unary" "x" '() -1)))
+                 (grpc-call/nonblocking client "/cspp.test.Echo/Unary" "x" '() -1)))
               (grpc-error-message-contains?
                "timeout must be non-negative"
                (lambda ()
-                 (grpc-call/server-stream client "/chezpp.test.Echo/ServerStream" "x" '() -1)))
+                 (grpc-call/server-stream client "/cspp.test.Echo/ServerStream" "x" '() -1)))
               (grpc-error-message-contains?
                "timeout must be non-negative"
                (lambda ()
-                 (grpc-call/client-stream client "/chezpp.test.Echo/ClientStream" '() -1)))
+                 (grpc-call/client-stream client "/cspp.test.Echo/ClientStream" '() -1)))
               (grpc-error-message-contains?
                "timeout must be non-negative"
                (lambda ()
-                 (grpc-call/bidi-stream/nonblocking client "/chezpp.test.Echo/Bidi" '() -1))))))))))
+                 (grpc-call/bidi-stream/nonblocking client "/cspp.test.Echo/Bidi" '() -1))))))))))
 
 (mat net-grpc-port-validation
      (mat-requires (grpc)
@@ -795,11 +795,11 @@
            (lambda (server)
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/Unary"
+              "/cspp.test.Echo/Unary"
               (lambda (request)
                 (grpc-response (grpc-request-payload request)))))
            (lambda (server client)
-             (let ([response (grpc-call client "/chezpp.test.Echo/Unary" "tls-ok" '() 3000)])
+             (let ([response (grpc-call client "/cspp.test.Echo/Unary" "tls-ok" '() 3000)])
                (and (grpc-response? response)
                     (= (grpc-status-code response) 0)
                     (equal? (utf8->string (grpc-response-payload response)) "tls-ok"))))))))
@@ -812,12 +812,12 @@
            (lambda (server)
              (grpc-register-service!
               server
-              "/chezpp.test.Echo/MutualTLS"
+              "/cspp.test.Echo/MutualTLS"
               (lambda (request)
                 (grpc-response (grpc-request-payload request)))))
            (lambda (server client)
              (let ([response
-                    (grpc-call client "/chezpp.test.Echo/MutualTLS" "mtls-ok" '() 3000)])
+                    (grpc-call client "/cspp.test.Echo/MutualTLS" "mtls-ok" '() 3000)])
                (and (grpc-response? response)
                     (= (grpc-status-code response) 0)
                     (equal? (utf8->string (grpc-response-payload response))

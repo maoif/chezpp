@@ -9,7 +9,7 @@ if [ "${1:-}" != "" ]; then
   mkdir -p "$state_dir"
   owned_state=0
 else
-  state_dir=$(mktemp -d "${TMPDIR:-/tmp}/chezpp-external-download.XXXXXX")
+  state_dir=$(mktemp -d "${TMPDIR:-/tmp}/cspp-external-download.XXXXXX")
   owned_state=1
 fi
 cleanup() {
@@ -28,8 +28,8 @@ if command -v curl >/dev/null 2>&1; then
     expected=${spec##* }
     name=${uri##*/}
     if [ "$name" = archlinux-2026.07.01-x86_64.iso ] && \
-        [ -n "${CHEZPP_ARCH_MIRROR:-}" ]; then
-      uri=$CHEZPP_ARCH_MIRROR
+        [ -n "${CSPP_ARCH_MIRROR:-}" ]; then
+      uri=$CSPP_ARCH_MIRROR
     fi
     destination=$state_dir/$name
     started=$(date +%s)
@@ -52,6 +52,6 @@ if command -v curl >/dev/null 2>&1; then
       "$(( $(date +%s) - started ))"
   done
 else
-  (cd "$project_root" && ./chez++ \
+  (cd "$project_root" && ./bin/cspp \
     --script=examples/net/file-transfer/verify-external-downloads.ss "$state_dir")
 fi

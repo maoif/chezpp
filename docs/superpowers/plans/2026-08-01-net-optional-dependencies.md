@@ -5,7 +5,7 @@
 > checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make every external native dependency except libc and `libuuid` lazy, version-checked,
-capability-reporting, and non-fatal at Chezpp import time.
+capability-reporting, and non-fatal at CSPP import time.
 
 **Architecture:** A shared C loader owns synchronization, SONAME probing, symbol resolution,
 version validation, and diagnostics. Protocol-specific function tables remain in their owning C
@@ -19,8 +19,8 @@ libssh, libwebsockets, gRPC/gpr, BLAKE3, xxHash, shell linkage tests, and `reade
 ### Task 1: Shared Optional-Library Loader
 
 **Files:**
-- Create: `chezpp/c/optional_library.h`
-- Create: `chezpp/c/optional_library.c`
+- Create: `cspp/c/optional_library.h`
+- Create: `cspp/c/optional_library.c`
 - Create: `tests/optional-library-loader.c`
 - Create: `tests/optional-library-loader.sh`
 - Modify: `Makefile`
@@ -33,20 +33,20 @@ a small C harness against each isolated `LD_LIBRARY_PATH`:
 
 ```c
 /* tests/optional-library-loader.c */
-#include "../chezpp/c/optional_library.h"
+#include "../cspp/c/optional_library.h"
 #include <stdio.h>
 
 int main(int argc, char **argv) {
   const char *names[] = {argv[1], NULL};
-  chezpp_optional_library library =
-      CHEZPP_OPTIONAL_LIBRARY_INIT("fixture", names);
+  cspp_optional_library library =
+      CSPP_OPTIONAL_LIBRARY_INIT("fixture", names);
   void *value = NULL;
-  if (!chezpp_optional_library_open(&library)) {
-    puts(chezpp_optional_library_error(&library));
+  if (!cspp_optional_library_open(&library)) {
+    puts(cspp_optional_library_error(&library));
     return 2;
   }
-  if (!chezpp_optional_library_symbol(&library, "fixture_value", &value)) {
-    puts(chezpp_optional_library_error(&library));
+  if (!cspp_optional_library_symbol(&library, "fixture_value", &value)) {
+    puts(cspp_optional_library_error(&library));
     return 3;
   }
   return value == NULL;
@@ -56,13 +56,13 @@ int main(int argc, char **argv) {
 The shell assertions are:
 
 ```bash
-./tests/optional-library-loader /missing/libchezpp-fixture.so >missing.out
+./tests/optional-library-loader /missing/libcspp-fixture.so >missing.out
 test $? -eq 2
 grep -F 'fixture: unable to load' missing.out
 
-LD_LIBRARY_PATH="$good_dir" ./tests/optional-library-loader libchezpp-fixture.so
+LD_LIBRARY_PATH="$good_dir" ./tests/optional-library-loader libcspp-fixture.so
 
-LD_LIBRARY_PATH="$bad_dir" ./tests/optional-library-loader libchezpp-fixture.so >symbol.out
+LD_LIBRARY_PATH="$bad_dir" ./tests/optional-library-loader libcspp-fixture.so >symbol.out
 test $? -eq 3
 grep -F 'fixture: missing symbol fixture_value' symbol.out
 ```
@@ -75,15 +75,15 @@ Run:
 ./tests/optional-library-loader.sh
 ```
 
-Expected: compilation fails because `chezpp/c/optional_library.h` does not exist.
+Expected: compilation fails because `cspp/c/optional_library.h` does not exist.
 
 - [ ] **Step 3: Define the loader contract**
 
-Create `chezpp/c/optional_library.h` with this public C-internal API:
+Create `cspp/c/optional_library.h` with this public C-internal API:
 
 ```c
-#ifndef CHEZPP_OPTIONAL_LIBRARY_H
-#define CHEZPP_OPTIONAL_LIBRARY_H
+#ifndef CSPP_OPTIONAL_LIBRARY_H
+#define CSPP_OPTIONAL_LIBRARY_H
 
 #include <pthread.h>
 #include <stddef.h>
@@ -97,20 +97,20 @@ typedef struct {
   char loaded_name[128];
   char version[128];
   char error[512];
-} chezpp_optional_library;
+} cspp_optional_library;
 
-#define CHEZPP_OPTIONAL_LIBRARY_INIT(label, candidates) \
+#define CSPP_OPTIONAL_LIBRARY_INIT(label, candidates) \
   {label, candidates, NULL, PTHREAD_MUTEX_INITIALIZER, 0, "", "", ""}
 
-int chezpp_optional_library_open(chezpp_optional_library *library);
-int chezpp_optional_library_symbol(chezpp_optional_library *library,
+int cspp_optional_library_open(cspp_optional_library *library);
+int cspp_optional_library_symbol(cspp_optional_library *library,
                                    const char *name, void **target);
-void chezpp_optional_library_fail(chezpp_optional_library *library,
+void cspp_optional_library_fail(cspp_optional_library *library,
                                   const char *format, ...);
-void chezpp_optional_library_set_version(chezpp_optional_library *library,
+void cspp_optional_library_set_version(cspp_optional_library *library,
                                          const char *version);
-const char *chezpp_optional_library_error(chezpp_optional_library *library);
-void chezpp_optional_library_reset_for_test(chezpp_optional_library *library);
+const char *cspp_optional_library_error(cspp_optional_library *library);
+void cspp_optional_library_reset_for_test(cspp_optional_library *library);
 
 #endif
 ```
@@ -142,7 +142,7 @@ test-optional-library-loader:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Makefile chezpp/c/optional_library.h chezpp/c/optional_library.c \
+git add Makefile cspp/c/optional_library.h cspp/c/optional_library.c \
   tests/Makefile tests/optional-library-loader.c tests/optional-library-loader.sh
 git commit -m "build: add shared optional library loader"
 ```
@@ -150,7 +150,7 @@ git commit -m "build: add shared optional library loader"
 ### Task 2: Migrate BLAKE3 And xxHash To The Shared Loader
 
 **Files:**
-- Modify: `chezpp/c/optional_hash.c`
+- Modify: `cspp/c/optional_hash.c`
 - Modify: `tests/optional-hash-linkage.sh`
 - Test: `tests/optional-hash-libs.ss`
 
@@ -183,24 +183,24 @@ Expected: FAIL because the existing loader has no shared synchronized descriptor
 
 - [ ] **Step 3: Replace private loader state**
 
-Replace the local `optional_library` implementation in `chezpp/c/optional_hash.c` with:
+Replace the local `optional_library` implementation in `cspp/c/optional_hash.c` with:
 
 ```c
 #include "optional_library.h"
 
 static const char *const xxhash_names[] = {
     "libxxhash.so.0", "libxxhash.so", NULL};
-static chezpp_optional_library xxhash_library =
-    CHEZPP_OPTIONAL_LIBRARY_INIT("xxhash", xxhash_names);
+static cspp_optional_library xxhash_library =
+    CSPP_OPTIONAL_LIBRARY_INIT("xxhash", xxhash_names);
 
 static const char *const blake3_names[] = {
     "libblake3.so.1", "libblake3.so", NULL};
-static chezpp_optional_library blake3_library =
-    CHEZPP_OPTIONAL_LIBRARY_INIT("blake3", blake3_names);
+static cspp_optional_library blake3_library =
+    CSPP_OPTIONAL_LIBRARY_INIT("blake3", blake3_names);
 ```
 
 Keep the existing exact major/minor policies and ABI tables. Route errors through
-`chezpp_optional_library_fail` and record successful runtime versions.
+`cspp_optional_library_fail` and record successful runtime versions.
 
 - [ ] **Step 4: Run focused tests**
 
@@ -215,18 +215,18 @@ Expected: exit 0; Scheme test stdout/stderr are empty.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add chezpp/c/optional_hash.c tests/optional-hash-libs.ss tests/optional-hash-linkage.sh
+git add cspp/c/optional_hash.c tests/optional-hash-libs.ss tests/optional-hash-linkage.sh
 git commit -m "hash: use shared optional library loader"
 ```
 
 ### Task 3: Dynamically Load OpenSSL For Crypto, Digest, And TLS
 
 **Files:**
-- Create: `chezpp/c/openssl_loader.h`
-- Create: `chezpp/c/openssl_loader.c`
-- Modify: `chezpp/c/crypto.c`
-- Modify: `chezpp/c/digest.c`
-- Modify: `chezpp/c/net/tls.c`
+- Create: `cspp/c/openssl_loader.h`
+- Create: `cspp/c/openssl_loader.c`
+- Modify: `cspp/c/crypto.c`
+- Modify: `cspp/c/digest.c`
+- Modify: `cspp/c/net/tls.c`
 - Modify: `Makefile`
 - Create: `tests/optional-openssl.sh`
 - Modify: `tests/crypto.ss`
@@ -245,15 +245,15 @@ const char *OpenSSL_version(int kind) { (void)kind; return "OpenSSL 2.0 fixture"
 The script assertions are:
 
 ```bash
-printf '%s\n' '(import (chezpp)) (display "ok")' | \
-  env LD_LIBRARY_PATH="$fixture_dir" ../chez++ -q >import.out 2>import.err
+printf '%s\n' '(import (cspp)) (display "ok")' | \
+  env LD_LIBRARY_PATH="$fixture_dir" ../bin/cspp -q >import.out 2>import.err
 test "$(cat import.out)" = ok
 test ! -s import.err
 
 printf '%s\n' \
-  '(import (chezpp))' \
+  '(import (cspp))' \
   '(guard (c [else (display-condition c)]) (random-bytes 8))' | \
-  env LD_LIBRARY_PATH="$fixture_dir" ../chez++ -q >use.out 2>use.err
+  env LD_LIBRARY_PATH="$fixture_dir" ../bin/cspp -q >use.out 2>use.err
 grep -F 'OpenSSL runtime ABI major 2; requires major 3' use.out
 ```
 
@@ -262,7 +262,7 @@ grep -F 'OpenSSL runtime ABI major 2; requires major 3' use.out
 Run:
 
 ```bash
-readelf -d libchezpp.so | rg 'libssl|libcrypto'
+readelf -d libcspp.so | rg 'libssl|libcrypto'
 cd tests && ./optional-openssl.sh
 ```
 
@@ -273,10 +273,10 @@ Expected: `readelf` reports direct OpenSSL dependencies and the fixture test can
 Define one version-checked handle pair shared by crypto, digest, and TLS:
 
 ```c
-int chezpp_openssl_require(void);
-int chezpp_openssl_crypto_symbol(const char *name, void **target);
-int chezpp_openssl_ssl_symbol(const char *name, void **target);
-const chezpp_optional_library *chezpp_openssl_library(void);
+int cspp_openssl_require(void);
+int cspp_openssl_crypto_symbol(const char *name, void **target);
+int cspp_openssl_ssl_symbol(const char *name, void **target);
+const cspp_optional_library *cspp_openssl_library(void);
 ```
 
 The initialization sequence loads `libcrypto.so.3` and `libssl.so.3`, resolves version functions
@@ -291,22 +291,22 @@ installed OpenSSL headers and resolve each pointer during that module's initiali
 ```c
 #define OSSL_DECL(name) static __typeof__(&name) p_##name = NULL
 #define OSSL_LOAD(name) \
-  chezpp_openssl_crypto_symbol(#name, (void **)&p_##name)
+  cspp_openssl_crypto_symbol(#name, (void **)&p_##name)
 
 OSSL_DECL(EVP_MD_CTX_new);
 OSSL_DECL(EVP_MD_CTX_free);
 
-if (!chezpp_openssl_require())
+if (!cspp_openssl_require())
   return make_error_status_message(
-      chezpp_optional_library_error(chezpp_openssl_library()));
+      cspp_optional_library_error(cspp_openssl_library()));
 if (!OSSL_LOAD(EVP_MD_CTX_new) || !OSSL_LOAD(EVP_MD_CTX_free))
   return make_error_status_message(
-      chezpp_optional_library_error(chezpp_openssl_library()));
+      cspp_optional_library_error(cspp_openssl_library()));
 ctx = p_EVP_MD_CTX_new();
 ```
 
 Apply this mechanical declaration/load/call conversion to every OpenSSL identifier reported by
-`nm -D --undefined-only libchezpp.so` before removing linkage. Do not leave direct OpenSSL
+`nm -D --undefined-only libcspp.so` before removing linkage. Do not leave direct OpenSSL
 undefined symbols. Remove `-lssl -lcrypto` from `LDLIBS`.
 
 - [ ] **Step 5: Run the undefined-symbol audit**
@@ -315,7 +315,7 @@ Run:
 
 ```bash
 make clean && make
-nm -D --undefined-only libchezpp.so | rg ' (SSL_|OPENSSL_|EVP_|X509_|RAND_|PEM_)'
+nm -D --undefined-only libcspp.so | rg ' (SSL_|OPENSSL_|EVP_|X509_|RAND_|PEM_)'
 ```
 
 Expected: `rg` exits 1 with no matches.
@@ -331,8 +331,8 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Makefile chezpp/c/openssl_loader.h chezpp/c/openssl_loader.c chezpp/c/crypto.c \
-  chezpp/c/digest.c chezpp/c/net/tls.c tests/optional-openssl.sh tests/crypto.ss \
+git add Makefile cspp/c/openssl_loader.h cspp/c/openssl_loader.c cspp/c/crypto.c \
+  cspp/c/digest.c cspp/c/net/tls.c tests/optional-openssl.sh tests/crypto.ss \
   tests/net-core.ss
 git commit -m "crypto: load OpenSSL dynamically"
 ```
@@ -340,10 +340,10 @@ git commit -m "crypto: load OpenSSL dynamically"
 ### Task 4: Unify libcurl, libssh, libwebsockets, And gRPC Loading
 
 **Files:**
-- Modify: `chezpp/c/net/ftp.c`
-- Modify: `chezpp/c/net/ssh.c`
-- Modify: `chezpp/c/net/websocket.c`
-- Modify: `chezpp/c/net/grpc.c`
+- Modify: `cspp/c/net/ftp.c`
+- Modify: `cspp/c/net/ssh.c`
+- Modify: `cspp/c/net/websocket.c`
+- Modify: `cspp/c/net/grpc.c`
 - Create: `tests/net-loader.ss`
 - Create: `tests/optional-library-linkage.sh`
 - Modify: `tests/Makefile`
@@ -397,7 +397,7 @@ Every `ensure_*_loaded` failure returns the descriptor error instead of a generi
 ```c
 if (!ensure_curl_loaded())
   return make_error_status_message(
-      chezpp_optional_library_error(&curl_library));
+      cspp_optional_library_error(&curl_library));
 ```
 
 Apply the same pattern to SSH, WebSocket, gRPC, and gpr.
@@ -414,17 +414,17 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add chezpp/c/net/ftp.c chezpp/c/net/ssh.c chezpp/c/net/websocket.c \
-  chezpp/c/net/grpc.c tests/net-loader.ss tests/optional-library-linkage.sh tests/Makefile
+git add cspp/c/net/ftp.c cspp/c/net/ssh.c cspp/c/net/websocket.c \
+  cspp/c/net/grpc.c tests/net-loader.ss tests/optional-library-linkage.sh tests/Makefile
 git commit -m "net: validate optional protocol libraries"
 ```
 
 ### Task 5: Public Capability Records
 
 **Files:**
-- Create: `chezpp/optional-library.ss`
-- Modify: `chezpp.ss`
-- Modify: `chezpp/net/ffi.ss`
+- Create: `cspp/optional-library.ss`
+- Modify: `cspp.ss`
+- Modify: `cspp/net/ffi.ss`
 - Modify: `tests/net-loader.ss`
 
 - [ ] **Step 1: Define and test the public record contract**
@@ -472,8 +472,8 @@ vector `(name available? version capabilities error)`.
 
 - [ ] **Step 4: Register the library**
 
-Import and export `(chezpp optional-library)` from `chezpp.ss`. Add its source automatically through
-the existing `SRCS_CHEZPP` Makefile discovery.
+Import and export `(cspp optional-library)` from `cspp.ss`. Add its source automatically through
+the existing `SRCS_CSPP` Makefile discovery.
 
 - [ ] **Step 5: Build and test**
 
@@ -487,7 +487,7 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add chezpp/optional-library.ss chezpp.ss chezpp/net/ffi.ss tests/net-loader.ss
+git add cspp/optional-library.ss cspp.ss cspp/net/ffi.ss tests/net-loader.ss
 git commit -m "net: expose optional library capabilities"
 ```
 
@@ -507,7 +507,7 @@ Expected: exit 0.
 - [ ] **Step 2: Verify direct dependencies**
 
 ```bash
-readelf -d libchezpp.so | rg 'NEEDED'
+readelf -d libcspp.so | rg 'NEEDED'
 ```
 
 Expected: among scoped libraries, only `libc.so` and `libuuid.so` appear. No OpenSSL, curl,
@@ -528,8 +528,8 @@ Expected: every command exits 0; Scheme test stdout/stderr are empty.
 - [ ] **Step 4: Check changed Scheme files**
 
 ```bash
-../chez++ --script=../tools/check-scheme-balance.ss -- \
-  ../chezpp/optional-library.ss ../chezpp/net/ffi.ss
+../bin/cspp --script=../tools/check-scheme-balance.ss -- \
+  ../cspp/optional-library.ss ../cspp/net/ffi.ss
 ```
 
 Expected: balanced parentheses for both files.

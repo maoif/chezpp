@@ -1,6 +1,6 @@
 syntax = "proto2";
 
-package chezpp.tests.codegen;
+package cspp.tests.codegen;
 
 message Envelope {
   enum State {

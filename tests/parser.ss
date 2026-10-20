@@ -1,11 +1,11 @@
-(import (chezpp chez)
-        (chezpp file)
-        (chezpp list)
-        (chezpp string)
-        (chezpp system process)
-        (chezpp utils)
-        (chezpp parser combinator)
-        (chezpp parser wasm))
+(import (cspp chez)
+        (cspp file)
+        (cspp list)
+        (cspp string)
+        (cspp system process)
+        (cspp utils)
+        (cspp parser combinator)
+        (cspp parser wasm))
 
 (include "parser-external-tools.ss")
 
@@ -13,7 +13,7 @@
 
      (external-tool-available? "sh")
 
-     (not (external-tool-available? "chezpp-intentionally-missing-command"))
+     (not (external-tool-available? "cspp-intentionally-missing-command"))
 
      )
 
@@ -91,7 +91,7 @@
      ;; error: define-parser requires an ordinary parser body.
      (error?
       (eval '(let () (define-parser invalid) #t)
-            (environment '(chezpp chez) '(chezpp parser combinator))))
+            (environment '(cspp chez) '(cspp parser combinator))))
 
      )
 

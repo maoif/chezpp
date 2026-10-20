@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "net-common.ss")
 (load "net-ssh-common.ss")
@@ -83,8 +83,8 @@
      (mat-requires (ssh)
        (with-test-sftp-session
         (lambda (session remote-root)
-          (let ([source "/tmp/chezpp-net-sftp-tree-source"]
-                [dest "/tmp/chezpp-net-sftp-tree-dest"]
+          (let ([source "/tmp/cspp-net-sftp-tree-source"]
+                [dest "/tmp/cspp-net-sftp-tree-dest"]
                 [remote (string-append remote-root "/tree")])
             (dynamic-wind
               (lambda ()
@@ -110,7 +110,7 @@
      (mat-requires (ssh)
        (with-test-sftp-session
         (lambda (session remote-root)
-          (let ([source "/tmp/chezpp-net-sftp-link-source"])
+          (let ([source "/tmp/cspp-net-sftp-link-source"])
             (dynamic-wind
               (lambda ()
                 (when (file-exists? source) (file-removetree source #f))

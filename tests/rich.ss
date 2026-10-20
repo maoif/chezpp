@@ -1,6 +1,6 @@
 #!chezscheme
-(import (chezpp)
-        (chezpp rich private common))
+(import (cspp)
+        (cspp rich private common))
 
 (mat rich-import
 

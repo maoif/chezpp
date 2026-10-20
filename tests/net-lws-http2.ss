@@ -1,7 +1,7 @@
-(import (chezpp)
-        (chezpp net lws http2)
-        (chezpp net lws ffi)
-        (chezpp net http private))
+(import (cspp)
+        (cspp net lws http2)
+        (cspp net lws ffi)
+        (cspp net http private))
 
 (load "net-common.ss")
 
@@ -235,7 +235,7 @@
                 (dynamic-wind
                   void
                   (lambda ()
-                    (tls-context-load-ca-file! tls "/tmp/chezpp-net-test-cert.pem")
+                    (tls-context-load-ca-file! tls "/tmp/cspp-net-test-cert.pem")
                     (tls-context-set-verify! tls #t)
                     (set! client (make-lws-http2-client 64 65536 64
                                                           (tls-context-native-handle tls)
@@ -259,7 +259,7 @@
             (dynamic-wind
               void
               (lambda ()
-                (tls-context-load-ca-file! tls "/tmp/chezpp-net-test-cert.pem")
+                (tls-context-load-ca-file! tls "/tmp/cspp-net-test-cert.pem")
                 (tls-context-set-verify! tls #t)
                 (set! client (http-open tls))
                 (http-client-version-set! client 'http/1.1)

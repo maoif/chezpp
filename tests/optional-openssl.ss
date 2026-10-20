@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (mat optional-openssl-fixture
      ;; The fixture supplies an incompatible OpenSSL runtime and expects lazy-load errors.

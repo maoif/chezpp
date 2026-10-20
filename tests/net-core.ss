@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "net-common.ss")
 
@@ -60,8 +60,8 @@
     (let ([release? #f]
           [listener (open-socket 'inet 'stream)]
           [ctx (make-tls-context 'server)]
-          [cert-path "/tmp/chezpp-net-test-cert.pem"]
-          [key-path "/tmp/chezpp-net-test-key.pem"])
+          [cert-path "/tmp/cspp-net-test-cert.pem"]
+          [key-path "/tmp/cspp-net-test-key.pem"])
       (write-bytevector-file cert-path tls-test-certificate)
       (write-bytevector-file key-path tls-test-private-key)
       (tls-context-load-cert! ctx cert-path)
@@ -183,10 +183,10 @@
             (equal? (socket-address-host addr) "127.0.0.1")
             (= (socket-address-port addr) 8080)
             (not (socket-address-path addr))))
-     (let ([addr (make-socket-address 'unix "/tmp/chezpp-net.sock")])
+     (let ([addr (make-socket-address 'unix "/tmp/cspp-net.sock")])
        (and (socket-address? addr)
             (eq? (socket-address-family addr) 'unix)
-            (equal? (socket-address-path addr) "/tmp/chezpp-net.sock")))
+            (equal? (socket-address-path addr) "/tmp/cspp-net.sock")))
      (let ([addr (resolve-address "127.0.0.1" 80 'inet 'stream)])
        (and (socket-address? addr)
             (eq? (socket-address-family addr) 'inet)))
@@ -530,7 +530,7 @@
        (let-values ([(server server-ctx port th) (start-tls-echo-server)])
          (let ([client (open-socket 'inet 'stream)]
                [ctx (make-tls-context 'client)])
-           (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+           (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
            (tls-context-set-verify! ctx #t)
            (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
            (let ([session (tls-connect ctx client "localhost")]
@@ -554,7 +554,7 @@
        (let-values ([(server server-ctx port th) (start-tls-echo-server)])
          (let ([client (open-socket 'inet 'stream)]
                [ctx (make-tls-context 'client)])
-           (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+           (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
            (tls-context-set-verify! ctx #t)
            (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
            (let ([session (tls-connect ctx client "localhost")])
@@ -575,7 +575,7 @@
        (let-values ([(server server-ctx port th) (start-tls-echo-server)])
          (let ([client (open-socket 'inet 'stream)]
                [ctx (make-tls-context 'client)])
-           (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+           (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
            (tls-context-set-verify! ctx #t)
            (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
            (let ([session (tls-connect ctx client "localhost")]
@@ -656,7 +656,7 @@
              void
              (lambda ()
                (socket-set-option! client 'send-buffer 1024)
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
                (tls-context-set-verify! ctx #t)
                (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
                (set! session (tls-connect ctx client "localhost"))
@@ -707,8 +707,8 @@
        (let ([listener (open-socket 'inet 'stream)]
              [server-ctx (make-tls-context 'server)])
          (write-test-cert-files)
-         (tls-context-load-cert! server-ctx "/tmp/chezpp-net-test-cert.pem")
-         (tls-context-load-private-key! server-ctx "/tmp/chezpp-net-test-key.pem")
+         (tls-context-load-cert! server-ctx "/tmp/cspp-net-test-cert.pem")
+         (tls-context-load-private-key! server-ctx "/tmp/cspp-net-test-key.pem")
          (socket-set-option! listener 'reuse-address #t)
          (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
          (socket-listen! listener 4)
@@ -773,7 +773,7 @@
            (dynamic-wind
              void
              (lambda ()
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
                (tls-context-set-verify! ctx #t)
                (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
                (let ([session (tls-connect ctx client "localhost")])
@@ -828,7 +828,7 @@
            (dynamic-wind
              void
              (lambda ()
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
                (tls-context-set-verify! ctx #t)
                (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
                (let ([session (tls-connect ctx client "localhost")])
@@ -859,7 +859,7 @@
            (dynamic-wind
              void
              (lambda ()
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
                (tls-context-set-verify! ctx #t)
                (tls-context-policy-set!
                 ctx (make-tls-policy 'tls1.2 #f #f #f '() 'required))
@@ -882,7 +882,7 @@
            (dynamic-wind
              void
              (lambda ()
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
                (tls-context-set-verify! ctx #t)
                (do ([i 0 (fx1+ i)])
                    ((fx= i 2))
@@ -924,8 +924,8 @@
            (dynamic-wind
              void
              (lambda ()
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-san-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-san-cert.pem")
                (tls-context-set-verify! ctx #t)
                (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
                (let ([session (tls-connect ctx client "localhost" 3000)])
@@ -954,7 +954,7 @@
            (dynamic-wind
              void
              (lambda ()
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
                (tls-context-set-verify! ctx #t)
                (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
                (let ([session (tls-connect ctx client "localhost")])
@@ -985,7 +985,7 @@
            (dynamic-wind
              void
              (lambda ()
-               (tls-context-load-ca-file! ctx "/tmp/chezpp-net-test-cert.pem")
+               (tls-context-load-ca-file! ctx "/tmp/cspp-net-test-cert.pem")
                (tls-context-set-verify! ctx #t)
                (socket-connect! client (make-socket-address 'inet "127.0.0.1" port))
                (let ([session (tls-connect ctx client "localhost")])

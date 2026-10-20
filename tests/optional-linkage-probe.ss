@@ -3,10 +3,10 @@
 (define probe-arguments (command-line-arguments))
 (unless (= (length probe-arguments) 4)
   (error 'optional-linkage-probe "expected native library, Scheme library, mode, and tests path"))
-(putenv "LIBCHEZPP" (car probe-arguments))
+(putenv "LIBCSPP" (car probe-arguments))
 (load (cadr probe-arguments))
 
-(import (chezpp))
+(import (cspp))
 
 (define probe-check
   (lambda (value message)

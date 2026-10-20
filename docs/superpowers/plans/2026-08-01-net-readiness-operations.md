@@ -19,10 +19,10 @@ libssh SSH_AGAIN, libcurl multi socket callbacks, gRPC completion queues, and `m
 ### Task 1: Common Operation And Would-Block Records
 
 **Files:**
-- Create: `chezpp/net/operation.ss`
-- Create: `chezpp/net/operation/private.ss`
-- Modify: `chezpp/net.ss`
-- Modify: `chezpp.ss`
+- Create: `cspp/net/operation.ss`
+- Create: `cspp/net/operation/private.ss`
+- Modify: `cspp/net.ss`
+- Modify: `cspp.ss`
 - Create: `tests/net-operation.ss`
 - Modify: `tests/Makefile`
 
@@ -66,7 +66,7 @@ cleanup, and invalid result access:
 cd tests && make test-some TEST='net-operation'
 ```
 
-Expected: FAIL because `(chezpp net operation)` does not exist.
+Expected: FAIL because `(cspp net operation)` does not exist.
 
 - [ ] **Step 3: Implement operation updates**
 
@@ -97,7 +97,7 @@ Define private immutable update records and constructors:
 
 - [ ] **Step 4: Implement the public operation record**
 
-Use this field contract in `chezpp/net/operation.ss`:
+Use this field contract in `cspp/net/operation.ss`:
 
 ```scheme
 (define-record-type (net-operation %make-net-operation net-operation?)
@@ -153,8 +153,8 @@ helper allowed to call blocking `poll`.
 ```bash
 make clean && make
 cd tests && make test-some TEST='net-operation'
-../chez++ --script=../tools/check-scheme-balance.ss -- \
-  ../chezpp/net/operation.ss ../chezpp/net/operation/private.ss
+../bin/cspp --script=../tools/check-scheme-balance.ss -- \
+  ../cspp/net/operation.ss ../cspp/net/operation/private.ss
 ```
 
 Expected: exit 0 and empty Scheme test stdout/stderr.
@@ -162,7 +162,7 @@ Expected: exit 0 and empty Scheme test stdout/stderr.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add chezpp/net/operation.ss chezpp/net/operation/private.ss chezpp/net.ss chezpp.ss \
+git add cspp/net/operation.ss cspp/net/operation/private.ss cspp/net.ss cspp.ss \
   tests/net-operation.ss tests/Makefile
 git commit -m "net: add readiness operation contract"
 ```
@@ -170,10 +170,10 @@ git commit -m "net: add readiness operation contract"
 ### Task 2: Poll And Socket Readiness Primitives
 
 **Files:**
-- Modify: `chezpp/c/net/socket.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/poll.ss`
-- Modify: `chezpp/net/socket.ss`
+- Modify: `cspp/c/net/socket.c`
+- Modify: `cspp/net/ffi.ss`
+- Modify: `cspp/net/poll.ss`
+- Modify: `cspp/net/socket.ss`
 - Modify: `tests/net-core.ss`
 - Modify: `tests/net-operation.ss`
 
@@ -263,7 +263,7 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add chezpp/c/net/socket.c chezpp/net/ffi.ss chezpp/net/poll.ss chezpp/net/socket.ss \
+git add cspp/c/net/socket.c cspp/net/ffi.ss cspp/net/poll.ss cspp/net/socket.ss \
   tests/net-core.ss tests/net-operation.ss
 git commit -m "net: expose socket readiness explicitly"
 ```
@@ -271,14 +271,14 @@ git commit -m "net: expose socket readiness explicitly"
 ### Task 3: TLS, SSH, SFTP, And WebSocket Readiness
 
 **Files:**
-- Modify: `chezpp/c/net/tls.c`
-- Modify: `chezpp/c/net/ssh.c`
-- Modify: `chezpp/c/net/websocket.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/tls.ss`
-- Modify: `chezpp/net/ssh.ss`
-- Modify: `chezpp/net/sftp.ss`
-- Modify: `chezpp/net/websocket.ss`
+- Modify: `cspp/c/net/tls.c`
+- Modify: `cspp/c/net/ssh.c`
+- Modify: `cspp/c/net/websocket.c`
+- Modify: `cspp/net/ffi.ss`
+- Modify: `cspp/net/tls.ss`
+- Modify: `cspp/net/ssh.ss`
+- Modify: `cspp/net/sftp.ss`
+- Modify: `cspp/net/websocket.ss`
 - Modify: `tests/net-core.ss`
 - Modify: `tests/net-ssh.ss`
 - Modify: `tests/net-ssh-common.ss`
@@ -322,7 +322,7 @@ underlying SSH session descriptor and libwebsockets service descriptors as poll 
 
 - [ ] **Step 4: Remove sleep polling**
 
-Delete `wait-nonblocking` and every `milisleep` retry loop in `chezpp/net/websocket.ss`. Blocking
+Delete `wait-nonblocking` and every `milisleep` retry loop in `cspp/net/websocket.ss`. Blocking
 wrappers create an operation and call `net-operation-wait`; nonblocking calls perform one attempt.
 
 - [ ] **Step 5: Add SSH stderr one-attempt APIs**
@@ -352,8 +352,8 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add chezpp/c/net/tls.c chezpp/c/net/ssh.c chezpp/c/net/websocket.c chezpp/net/ffi.ss \
-  chezpp/net/tls.ss chezpp/net/ssh.ss chezpp/net/sftp.ss chezpp/net/websocket.ss \
+git add cspp/c/net/tls.c cspp/c/net/ssh.c cspp/c/net/websocket.c cspp/net/ffi.ss \
+  cspp/net/tls.ss cspp/net/ssh.ss cspp/net/sftp.ss cspp/net/websocket.ss \
   tests/net-core.ss tests/net-ssh.ss tests/net-sftp.ss tests/net-websocket.ss
 git commit -m "net: expose transport readiness and SSH stderr"
 ```
@@ -361,9 +361,9 @@ git commit -m "net: expose transport readiness and SSH stderr"
 ### Task 4: libcurl Multi FTP Operations
 
 **Files:**
-- Modify: `chezpp/c/net/ftp.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/ftp.ss`
+- Modify: `cspp/c/net/ftp.c`
+- Modify: `cspp/net/ffi.ss`
+- Modify: `cspp/net/ftp.ss`
 - Modify: `tests/net-ftp.ss`
 - Modify: `tests/net-ftp-common.ss`
 
@@ -447,7 +447,7 @@ handled according to policy and the session can immediately start another transf
 make clean && make
 cd tests && make test-some TEST='net-ftp net-operation'
 cd ..
-git add chezpp/c/net/ftp.c chezpp/net/ffi.ss chezpp/net/ftp.ss tests/net-ftp.ss \
+git add cspp/c/net/ftp.c cspp/net/ffi.ss cspp/net/ftp.ss tests/net-ftp.ss \
   tests/net-ftp-common.ss
 git commit -m "net: drive FTP with libcurl multi readiness"
 ```
@@ -455,7 +455,7 @@ git commit -m "net: drive FTP with libcurl multi readiness"
 ### Task 5: Incremental HTTP Operations And Hashtable Handlers
 
 **Files:**
-- Modify: `chezpp/net/http.ss`
+- Modify: `cspp/net/http.ss`
 - Modify: `tests/net-http.ss`
 
 - [ ] **Step 1: Add incremental request and handler replacement tests**
@@ -513,7 +513,7 @@ to the caller or fiber scheduler.
 
 - [ ] **Step 6: Remove worker-thread code**
 
-Delete notifier records, `fork-thread`, and `thread-join` from `chezpp/net/http.ss`. Update all
+Delete notifier records, `fork-thread`, and `thread-join` from `cspp/net/http.ss`. Update all
 nonblocking docs to return `net-operation` records and state exact final values.
 
 - [ ] **Step 7: Build, test, and commit**
@@ -522,16 +522,16 @@ nonblocking docs to return `net-operation` records and state exact final values.
 make clean && make
 cd tests && make test-some TEST='net-http net-operation'
 cd ..
-git add chezpp/net/http.ss tests/net-http.ss
+git add cspp/net/http.ss tests/net-http.ss
 git commit -m "net: make HTTP readiness-driven and hash handlers"
 ```
 
 ### Task 6: SCP State Machines
 
 **Files:**
-- Modify: `chezpp/c/net/ssh.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/scp.ss`
+- Modify: `cspp/c/net/ssh.c`
+- Modify: `cspp/net/ffi.ss`
+- Modify: `cspp/net/scp.ss`
 - Modify: `tests/net-scp.ss`
 
 - [ ] **Step 1: Add a multi-step SCP transfer test**
@@ -565,16 +565,16 @@ once; completed upload/download returns the destination path.
 make clean && make
 cd tests && make test-some TEST='net-scp net-ssh net-operation'
 cd ..
-git add chezpp/c/net/ssh.c chezpp/net/ffi.ss chezpp/net/scp.ss tests/net-scp.ss
+git add cspp/c/net/ssh.c cspp/net/ffi.ss cspp/net/scp.ss tests/net-scp.ss
 git commit -m "net: make SCP transfers readiness-driven"
 ```
 
 ### Task 7: Shared gRPC Completion Driver
 
 **Files:**
-- Modify: `chezpp/c/net/grpc.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/grpc.ss`
+- Modify: `cspp/c/net/grpc.c`
+- Modify: `cspp/net/ffi.ss`
+- Modify: `cspp/net/grpc.ss`
 - Modify: `tests/net-grpc.ss`
 
 - [ ] **Step 1: Add concurrent operation and thread-count tests**
@@ -616,7 +616,7 @@ explicit would-block values.
 make clean && make
 cd tests && make test-some TEST='net-grpc net-operation'
 cd ..
-git add chezpp/c/net/grpc.c chezpp/net/ffi.ss chezpp/net/grpc.ss tests/net-grpc.ss
+git add cspp/c/net/grpc.c cspp/net/ffi.ss cspp/net/grpc.ss tests/net-grpc.ss
 git commit -m "net: share gRPC completion readiness"
 ```
 
@@ -629,7 +629,7 @@ git commit -m "net: share gRPC completion readiness"
 
 ```bash
 rg -n 'fork-thread|spawn-thread|thread-join|open-pending-notifier' \
-  chezpp/net/{ftp,scp,grpc,http}.ss
+  cspp/net/{ftp,scp,grpc,http}.ss
 ```
 
 Expected: no matches.
@@ -637,7 +637,7 @@ Expected: no matches.
 - [ ] **Step 2: Prohibit hidden sleep polling**
 
 ```bash
-rg -n 'milisleep|sleep.*loop|poll/nonblocking.*loop' chezpp/net
+rg -n 'milisleep|sleep.*loop|poll/nonblocking.*loop' cspp/net
 ```
 
 Expected: no protocol retry loops; examples and explicit blocking helpers are outside this audit.
@@ -654,11 +654,11 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 4: Check parentheses**
 
 ```bash
-../chez++ --script=../tools/check-scheme-balance.ss -- \
-  ../chezpp/net/operation.ss ../chezpp/net/operation/private.ss \
-  ../chezpp/net/poll.ss ../chezpp/net/socket.ss ../chezpp/net/tls.ss ../chezpp/net/ssh.ss \
-  ../chezpp/net/sftp.ss ../chezpp/net/scp.ss ../chezpp/net/ftp.ss ../chezpp/net/http.ss \
-  ../chezpp/net/websocket.ss ../chezpp/net/grpc.ss
+../bin/cspp --script=../tools/check-scheme-balance.ss -- \
+  ../cspp/net/operation.ss ../cspp/net/operation/private.ss \
+  ../cspp/net/poll.ss ../cspp/net/socket.ss ../cspp/net/tls.ss ../cspp/net/ssh.ss \
+  ../cspp/net/sftp.ss ../cspp/net/scp.ss ../cspp/net/ftp.ss ../cspp/net/http.ss \
+  ../cspp/net/websocket.ss ../cspp/net/grpc.ss
 ```
 
 Expected: every file is balanced. `git status --short` is empty before Phase 3.

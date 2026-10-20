@@ -1,14 +1,14 @@
-(import (chezpp)
-        (chezpp crypto aead)
-        (chezpp crypto kdf)
-        (chezpp crypto random)
-        (chezpp crypto encoding))
+(import (cspp)
+        (cspp crypto aead)
+        (cspp crypto kdf)
+        (cspp crypto random)
+        (cspp crypto encoding))
 (load "examples/common.ss")
 
 (define aead-file-header
   (lambda (algorithm salt nonce)
     (string->utf8
-     (format "CHEZPP-AEAD-1\n~a\n~a\n~a\n\n"
+     (format "CSPP-AEAD-1\n~a\n~a\n~a\n\n"
              algorithm (bytevector->hex salt) (bytevector->hex nonce)))))
 
 (define bytevector-copy-range
@@ -71,7 +71,7 @@
     (let ([data (read-u8vec input)])
       (let-values ([(line* body-start) (split-aead-header data)])
         (unless (and (= (length line*) 4)
-                     (string=? (car line*) "CHEZPP-AEAD-1"))
+                     (string=? (car line*) "CSPP-AEAD-1"))
           (errorf 'encrypt-file "unsupported or malformed envelope"))
         (let* ([method (string->symbol (cadr line*))]
                [salt (hex->bytevector (caddr line*))]
@@ -106,13 +106,13 @@
    (input . "Required: path to the plaintext or encrypted input file.")
    (output . "Required: new output path, distinct from input; existing files are rejected.")
    (method . "Encryption algorithm: aes-256-gcm or chacha20-poly1305 (default: aes-256-gcm); decryption reads it from the envelope.")
-   (password-env . "Environment variable containing a nonempty password (default: CHEZPP_EXAMPLE_PASSWORD)."))
+   (password-env . "Environment variable containing a nonempty password (default: CSPP_EXAMPLE_PASSWORD)."))
  (lambda (ref)
    (let* ([mode (string->symbol (or (ref 'mode) "encrypt"))]
           [input (example-required 'encrypt-file ref 'input)]
           [output (example-required 'encrypt-file ref 'output)]
           [method (string->symbol (or (ref 'method) "aes-256-gcm"))]
-          [password-name (or (ref 'password-env) "CHEZPP_EXAMPLE_PASSWORD")]
+          [password-name (or (ref 'password-env) "CSPP_EXAMPLE_PASSWORD")]
           [password (getenv password-name)])
      (unless (memq method '(aes-256-gcm chacha20-poly1305))
        (errorf 'encrypt-file "method must be aes-256-gcm or chacha20-poly1305"))

@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 ;; Native Linux packaging. All process arguments are quoted individually; package paths
 ;; and filenames are data, including when they contain spaces or shell metacharacters.
@@ -252,32 +252,32 @@
 
 (define pkg-relocate-launcher
   (lambda (prefix)
-    (let* ([launcher (string-append prefix "/bin/chez++")]
+    (let* ([launcher (string-append prefix "/bin/cspp")]
            [lines (string-split (read-string launcher) #\newline)]
            [boots (file-find-all (lambda (path) (string=? (path-last path) "scheme.boot"))
                                  (string-append prefix "/lib"))])
       (unless (and (>= (length lines) 3) (pkg-prefix? "#!" (car lines))
-                   (pkg-prefix? "(putenv \"LIBCHEZPP\" " (cadr lines))
+                   (pkg-prefix? "(putenv \"LIBCSPP\" " (cadr lines))
                    (pkg-prefix? "(load " (caddr lines)))
-        (error 'package-release "unrecognized installed chez++ launcher"))
+        (error 'package-release "unrecognized installed cspp launcher"))
       (unless (= (length boots) 1)
         (error 'package-release "expected exactly one installed ChezScheme boot directory"))
-      (write-string! (string-append prefix "/lib/chez++.ss")
+      (write-string! (string-append prefix "/lib/cspp.ss")
                      (string-append
-                      "(putenv \"LIBCHEZPP\" (getenv \"CHEZPP_PACKAGE_NATIVE\"))\n"
-                      "(load (getenv \"CHEZPP_PACKAGE_LIBRARY\"))\n"
+                      "(putenv \"LIBCSPP\" (getenv \"CSPP_PACKAGE_NATIVE\"))\n"
+                      "(load (getenv \"CSPP_PACKAGE_LIBRARY\"))\n"
                       (pkg-join (cdddr lines) "\n")))
       (write-string! launcher
                      (string-append
                       "#!/bin/sh\nset -eu\n"
                       "package_root=$(dirname \"$(dirname \"$(readlink -f -- \"$0\")\")\")\n"
-                      "export CHEZPP_PACKAGE_NATIVE=\"$package_root/lib/libchezpp.so\"\n"
-                      "export CHEZPP_PACKAGE_LIBRARY=\"$package_root/lib/chezpp.lib\"\n"
+                      "export CSPP_PACKAGE_NATIVE=\"$package_root/lib/libcspp.so\"\n"
+                      "export CSPP_PACKAGE_LIBRARY=\"$package_root/lib/cspp.lib\"\n"
                       "export LD_LIBRARY_PATH=\"$package_root/lib/deps${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n"
                       "export SCHEMEHEAPDIR=\"$package_root/"
                       (pkg-trim (pkg-command "realpath" (string-append "--relative-to=" prefix)
                                              "--" (path-parent (car boots)))) "\"\n"
-                      "exec \"$package_root/bin/scheme\" --script \"$package_root/lib/chez++.ss\" \"$@\"\n"))
+                      "exec \"$package_root/bin/scheme\" --script \"$package_root/lib/cspp.ss\" \"$@\"\n"))
       (file-chmod launcher #o755))))
 
 (define pkg-command-exists?
@@ -294,7 +294,7 @@
          (let ([source (string-append repository "/" (cdr entry))])
            (when (file-regular? source)
              (pkg-command "cp" "-p" "--" source (string-append destination "/" (car entry))))))
-       '(("chezpp" . "LICENSE") ("ChezScheme" . "vendor/ChezScheme/NOTICE")
+       '(("cspp" . "LICENSE") ("ChezScheme" . "vendor/ChezScheme/NOTICE")
          ("ChezScheme-license" . "vendor/ChezScheme/LICENSE")))
       (when (pkg-command-exists? "dpkg-query")
         (for-each
@@ -353,7 +353,7 @@
             (unless (member arch '("x64" "arm64" "riscv64" "loongarch64"))
               (error 'package-release "unsupported architecture" arch))
             (unless (regex-matches? (string->regex "[0-9]+[.][0-9]+[.][0-9]+@[0-9]+-[0-9]+-[0-9]+") version)
-              (error 'package-release "invalid Chezpp version" version))
+              (error 'package-release "invalid CSPP version" version))
             (unless (regex-matches? (string->regex "[0-9a-f]{40}") commit)
               (error 'package-release "commit must be a full Git SHA" commit))
             (let ([x11 (pkg-trim (pkg-command "cc" "-print-file-name=libX11.so"))])
@@ -366,15 +366,15 @@
                                   "baseline" (hashtable-ref host "baseline" "")
                                   "host_requirements" (hashtable-ref host "host_requirements" '#())
                                   "dependencies" (list->vector dependencies)
-                                  "build_options" (pkg-trim (read-string (string-append repository "/.chezpp-build-options"))))]
-                     [name (string-append "chezpp-" version "-linux-" arch)])
+                                  "build_options" (pkg-trim (read-string (string-append repository "/.cspp-build-options"))))]
+                     [name (string-append "cspp-" version "-linux-" arch)])
                 (pkg-patch-runpaths prefix)
                 (pkg-relocate-launcher prefix)
                 (pkg-copy-licenses prefix repository dependencies)
                 (write-string! (string-append prefix "/BUILD-INFO.json") (string-append (pkg-json metadata) "\n"))
                 (write-string! (string-append prefix "/README.txt")
                                (string-append
-                                "Extract this directory anywhere and run bin/chez++.\nRequires "
+                                "Extract this directory anywhere and run bin/cspp.\nRequires "
                                 (pkg-join (vector->list (hashtable-ref host "host_requirements" '#())) ", ")
                                 ".\nNon-glibc ELF dependencies are bundled recursively in lib/deps.\n"
                                 "Build provenance and enabled features are in BUILD-INFO.json.\n"))

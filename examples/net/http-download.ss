@@ -1,4 +1,4 @@
-(import (except (chezpp) http-download))
+(import (except (cspp) http-download))
 
 (load "examples/net/legacy-example-common.ss")
 (net-example-help! 'http-download "Download URI bytes to stdout. Positional arguments: URI [auto|http/1.1|h2].")

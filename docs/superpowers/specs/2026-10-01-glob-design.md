@@ -1,14 +1,14 @@
-# Chezpp Globbing Library Design
+# CSPP Globbing Library Design
 
 ## Goal
 
-Add a `(chezpp glob)` library for matching path strings against Unix-style glob
+Add a `(cspp glob)` library for matching path strings against Unix-style glob
 patterns and expanding those patterns against the filesystem. The library will
-reuse `(chezpp path)` for lexical path parsing/rendering, `(chezpp regex)` for
-compiled component matching, and `(chezpp file)` for filesystem conventions,
-then be re-exported by `(chezpp)`.
+reuse `(cspp path)` for lexical path parsing/rendering, `(cspp regex)` for
+compiled component matching, and `(cspp file)` for filesystem conventions,
+then be re-exported by `(cspp)`.
 
-The lazy filesystem layer adds `fs-*` APIs to `(chezpp file)`, backed by Linux
+The lazy filesystem layer adds `fs-*` APIs to `(cspp file)`, backed by Linux
 `opendir`/`readdir`/`closedir`. Directory reads return two values,
 `(values entry-name entry-type)`, to avoid allocating an entry record per read.
 The existing `FT_*` file-type symbols are reused, with `FT_unknown` added for
@@ -43,12 +43,12 @@ bracket class. A leading dot is ordinary text; hidden entries are included when
 the pattern permits them.
 
 Patterns are parsed using an explicit path flavor. The default flavor is `'unix`;
-the Windows flavor uses the separator and case rules of `(chezpp path)`. Matching
+the Windows flavor uses the separator and case rules of `(cspp path)`. Matching
 is lexical and does not normalize `.` or `..` components, resolve symlinks, or
 consult the filesystem.
 
 Each non-recursive component is translated to an S-expression regex and compiled
-once with `(chezpp regex)`'s `sre->regex`. Literal runs become literal SRE
+once with `(cspp regex)`'s `sre->regex`. Literal runs become literal SRE
 strings, `*` and `?` become regex repetition and single-character atoms, and
 parsed bracket classes become regex character sets. `regex-matches?` then
 performs the complete-component match. Regex is not used for path splitting,
@@ -124,7 +124,7 @@ pattern when no path matches.
 (glob->iter flavor pattern)
 ```
 
-Return a `(chezpp iter)` iterator that lazily enumerates the same matches as
+Return a `(cspp iter)` iterator that lazily enumerates the same matches as
 `glob`, in the same order. Directory handles are opened only during iteration
 and are closed when exhausted or finalized. Filesystem errors other than a
 missing/inaccessible candidate raise the underlying Chez condition.
@@ -132,7 +132,7 @@ missing/inaccessible candidate raise the underlying Chez condition.
 The lazy iterator variant may omit deterministic sorting: it yields entries in
 filesystem order and never materializes the complete tree.
 
-## Filesystem iterator API in `(chezpp file)`
+## Filesystem iterator API in `(cspp file)`
 
 ```scheme
 (fs-open-directory path)
@@ -145,8 +145,8 @@ filesystem order and never materializes the complete tree.
 (fs->iter path follow-link? top-down?)
 ```
 
-`chezpp_fs_read_directory` returns a pair `(entry-name . d-type)` from C, or
-`#f` at end of stream. The `(chezpp file)` wrapper returns the pair
+`cspp_fs_read_directory` returns a pair `(entry-name . d-type)` from C, or
+`#f` at end of stream. The `(cspp file)` wrapper returns the pair
 `(entry-name . entry-type)` directly, or `#f`. `entry-type`
 reuses the existing `FT_*` symbols and adds `FT_unknown` for `DT_UNKNOWN`. Unknown
 entries are stat'ed only when traversal needs to determine whether they are
@@ -163,7 +163,7 @@ and after children when false.
 component tokens and validates syntax after a separate expansion phase. The
 expander handles nested brace alternatives, numeric ranges, and leading tilde
 before parsing. The matcher compiles each ordinary component to a reusable
-`(chezpp regex)` object and evaluates those objects against path components;
+`(cspp regex)` object and evaluates those objects against path components;
 `**` uses memoized component positions to avoid exponential backtracking. The expander walks only branches
 whose next component can match, using `directory-list` and the existing path
 constructors. It does not call `walk-files`, because pruning non-matching
@@ -203,5 +203,5 @@ symlink policy; and iterator exhaustion/finalization. Tests create temporary
 trees with `dynamic-wind` cleanup and use `mat` cases, with comments preceding
 negative cases.
 
-Update `chezpp.ss` to import `(chezpp glob)`, and run the project-required
+Update `cspp.ss` to import `(cspp glob)`, and run the project-required
 `make clean && make`, followed by `cd tests && make test-some TEST='glob path file'`.

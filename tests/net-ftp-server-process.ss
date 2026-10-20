@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "net-common.ss")
 
@@ -91,7 +91,7 @@
                   (lambda (path)
                     (map (lambda (name) (mlsd-line path name))
                          (directory-list path))))
-                (send-crlf-line op "220 chezpp ftp test server")
+                (send-crlf-line op "220 cspp ftp test server")
                 (let loop ()
                   (let ([line (read-crlf-line ip)])
                     (when line

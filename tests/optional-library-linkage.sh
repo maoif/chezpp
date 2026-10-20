@@ -16,11 +16,11 @@ for feature in CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH B
         XXHASH) library=xxhash ;;
         BLAKE3) library=blake3 ;;
     esac
-    if grep -q "^#define CHEZPP_WITH_${feature} 0$" "$project_root/chezpp/c/build-config.h" && \
-       readelf -d "$project_root/libchezpp.so" | grep -Eq "NEEDED.*lib${library}"; then
+    if grep -q "^#define CSPP_WITH_${feature} 0$" "$project_root/cspp/c/build-config.h" && \
+       readelf -d "$project_root/libcspp.so" | grep -Eq "NEEDED.*lib${library}"; then
         printf 'disabled %s remains a linker dependency\n' "$feature" >&2
         exit 1
     fi
 done
 # Enabled integrations must reference real dependency APIs; disabled imports must stay safe.
-exec "$project_root/chez++" --script="$project_root/tests/optional-library-runtime.ss"
+exec "$project_root/bin/cspp" --script="$project_root/tests/optional-library-runtime.ss"

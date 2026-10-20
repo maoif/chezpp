@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (mat process-macro-syntax
 
@@ -53,8 +53,8 @@
        (and (process-exit-success? (process-result-status r))
             (string=? "bytes" (process-result-stdout r))))
 
-     (let ([r (capture-process "/bin/sh" "-c" "printf \"$CHEZPP_PROCESS_TEST\""
-                :env '(("CHEZPP_PROCESS_TEST" . "env-ok"))
+     (let ([r (capture-process "/bin/sh" "-c" "printf \"$CSPP_PROCESS_TEST\""
+                :env '(("CSPP_PROCESS_TEST" . "env-ok"))
                 :env-mode replace
                 :stdout capture
                 :stderr capture)])
@@ -145,23 +145,23 @@
 ;; Error case: a missing executable should return an errno tagged result.
 (mat process-ffi-result-tags
 
-     (let ([raw ((foreign-procedure "chezpp_spawn_capture"
+     (let ([raw ((foreign-procedure "cspp_spawn_capture"
                                     (ptr ptr string ptr int int int int int int)
                                     ptr)
                  (list "sh" "-c" "true") #f "" #f 0 0 0 0 0 -1)])
        (and (vector? raw)
             (eq? 'ok (vector-ref raw 0))))
 
-     (let ([spawn (foreign-procedure "chezpp_spawn_capture"
+     (let ([spawn (foreign-procedure "cspp_spawn_capture"
                                      (ptr ptr string ptr int int int int int int)
                                      ptr)])
-       (let ([missing (spawn (list "definitely-not-a-chezpp-test-command")
+       (let ([missing (spawn (list "definitely-not-a-cspp-test-command")
                              #f "" #f 0 0 0 0 0 -1)])
          (and (vector? missing)
               (eq? 'errno (vector-ref missing 0))
               (positive? (vector-ref missing 2))
               ;; Error case: preserve path errors other than a missing executable.
-              (let* ([path (format "/tmp/chezpp-process-file-~a" (get-process-id))]
+              (let* ([path (format "/tmp/cspp-process-file-~a" (get-process-id))]
                      [port (open-output-file path)]
                      [raw #f])
                 (put-string port "not-a-directory")
@@ -174,14 +174,14 @@
 
      ;; Error case: live spawning must report a missing executable as an error.
      (guard (c [(system-error? c) #t] [else #f])
-       (spawn-process "definitely-not-a-chezpp-test-command" '() '())
+       (spawn-process "definitely-not-a-cspp-test-command" '() '())
        #f)
 
      ;; Error case: an executable script with a missing interpreter must fail to spawn.
-     (let* ([path (format "/tmp/chezpp-missing-interpreter-~a" (get-process-id))]
+     (let* ([path (format "/tmp/cspp-missing-interpreter-~a" (get-process-id))]
             [chmod (foreign-procedure "chmod" (string unsigned-32) int)]
             [port (open-output-file path)])
-       (put-string port "#!/definitely-no-such-chezpp-interpreter\n")
+       (put-string port "#!/definitely-no-such-cspp-interpreter\n")
        (close-output-port port)
        (chmod path #o700)
        (dynamic-wind
@@ -233,13 +233,13 @@
 
      ;; Error case: a pipeline member that cannot exec must raise a system error.
      (guard (c [(system-error? c) #t] [else #f])
-       (capture-pipeline (list (list "definitely-not-a-chezpp-test-command")))
+       (capture-pipeline (list (list "definitely-not-a-cspp-test-command")))
        #f)
 
      ;; Error case: live pipeline startup must clean up when a member cannot exec.
      (guard (c [(system-error? c) #t] [else #f])
        (pipe-processes (list (list "true")
-                             (list "definitely-not-a-chezpp-test-command"))
+                             (list "definitely-not-a-cspp-test-command"))
                        '())
        #f)
 
