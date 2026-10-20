@@ -56,10 +56,11 @@
                     (aead-encrypt/aad method key nonce
                                       (aead-file-header method salt nonce) plaintext)])
         ;; Store algorithm, salt, nonce, ciphertext, and authentication tag.
-        (write-u8vec! output
-                      (bytevector-concatenate
-                       (list (aead-file-header method salt nonce)
-                             ciphertext tag)))
+        ;; Create the destination exclusively so a concurrent creator cannot be overwritten.
+        (write-u8vec output
+                     (bytevector-concatenate
+                      (list (aead-file-header method salt nonce)
+                            ciphertext tag)))
         (bytevector-fill! key 0)
         output))))
 
@@ -94,7 +95,8 @@
               (unless plaintext
                 (errorf 'encrypt-file "authentication failed; wrong password or corrupt file"))
               ;; Write plaintext only after AEAD authentication has succeeded.
-              (write-u8vec! output plaintext)
+              ;; Create the destination exclusively so a concurrent creator cannot be overwritten.
+              (write-u8vec output plaintext)
               output)))))))
 
 (example-run!

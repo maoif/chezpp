@@ -693,6 +693,36 @@ def crypto():
                 result = example('examples/crypto/encrypt-file.ss', '--mode=decrypt',
                                  f'--input={corrupt}', f'--output={output}', env=bad_env, ok=False)
                 assert result.returncode and not output.exists()
+        # Error case: an output created after the initial validation must not be replaced.
+        # The example reads the input before it writes, so watching its input descriptor
+        # gives the competing process a deterministic window between the old check and write.
+        race_source = directory / 'race-input'
+        race_source.write_bytes(b'\0' * (32 * 1024 * 1024))
+        race_encrypted = directory / 'race-encrypted'
+        example('examples/crypto/encrypt-file.ss', f'--input={race_source}',
+                f'--output={race_encrypted}', env=env)
+        for mode, source_path in [('encrypt', race_source), ('decrypt', race_encrypted)]:
+            output = directory / ('race-' + mode + '-output')
+            process = subprocess.Popen(
+                ['./chez++', '--script', 'examples/crypto/encrypt-file.ss',
+                 f'--mode={mode}', f'--input={source_path}', f'--output={output}'],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            deadline = time.monotonic() + 8
+            while process.poll() is None and time.monotonic() < deadline:
+                descriptors = Path(f'/proc/{process.pid}/fd').glob('*')
+                if any(os.path.islink(descriptor) and
+                       os.readlink(descriptor) == str(source_path) for descriptor in descriptors):
+                    break
+                time.sleep(.001)
+            else:
+                process.kill()
+                process.communicate()
+                raise AssertionError((mode, 'input was not opened'))
+            marker = b'created by another process'
+            output.write_bytes(marker)
+            stdout, stderr = process.communicate(timeout=20)
+            assert process.returncode != 0, (mode, stdout, stderr)
+            assert output.read_bytes() == marker, (mode, output.read_bytes())
         methods = ['sha256', 'md5']
         features = Path('chezpp/c/build-config.h').read_text()
         if '#define CHEZPP_WITH_XXHASH 1' in features:
