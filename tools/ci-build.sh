@@ -20,7 +20,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
     build-essential git pkg-config libncurses-dev libx11-dev \
-    patchelf cmake curl ca-certificates \
+    patchelf cmake curl ca-certificates python3 \
     libssl-dev uuid-dev libxxhash-dev zlib1g-dev libc-ares-dev \
     libcurl4-openssl-dev libgrpc-dev libidn2-dev libssh-dev libwebsockets-dev
 
