@@ -24,27 +24,27 @@
 
 Create:
 
-- `cspp/c/net/lws_loader.h`, `cspp/c/net/lws_loader.c`: optional symbol loading, version checks, and capability bits.
-- `cspp/c/net/lws_http.h`, `cspp/c/net/lws_http.c`: native context, external-poll registration, callback event queues, request/stream handles, bounded body buffers, and FFI entry points.
-- `cspp/net/lws/ffi.ss`: private FFI bindings and validation.
-- `cspp/net/lws/reactor.ss`: reactor ownership, command queue, wakeup, polling, event publication, and shutdown.
-- `cspp/net/lws/http1.ss`: HTTP/1.x client state, uploads/downloads, redirects, and pooling.
-- `cspp/net/lws/http2.ss`: H2 stream scheduling, flow control, reset, GOAWAY, and stream routing.
-- `cspp/net/lws/server.ss`: logical request queues and HTTP/1.x/H2 server dispatch.
-- `cspp/concurrency/fiber-net.ss`: network-operation events and fiber waiter lifecycle.
+- `src/cspp/c/net/lws_loader.h`, `src/cspp/c/net/lws_loader.c`: optional symbol loading, version checks, and capability bits.
+- `src/cspp/c/net/lws_http.h`, `src/cspp/c/net/lws_http.c`: native context, external-poll registration, callback event queues, request/stream handles, bounded body buffers, and FFI entry points.
+- `src/cspp/net/lws/ffi.ss`: private FFI bindings and validation.
+- `src/cspp/net/lws/reactor.ss`: reactor ownership, command queue, wakeup, polling, event publication, and shutdown.
+- `src/cspp/net/lws/http1.ss`: HTTP/1.x client state, uploads/downloads, redirects, and pooling.
+- `src/cspp/net/lws/http2.ss`: H2 stream scheduling, flow control, reset, GOAWAY, and stream routing.
+- `src/cspp/net/lws/server.ss`: logical request queues and HTTP/1.x/H2 server dispatch.
+- `src/cspp/concurrency/fiber-net.ss`: network-operation events and fiber waiter lifecycle.
 - `tests/net-lws-reactor.ss`, `tests/net-lws-server.ss`, `tests/net-http-fiber.ss`: focused tests.
 
 Rewrite or update:
 
-- `cspp/net/http.ss`: retain public API/data records; delegate all transport work to the new modules.
-- `cspp/net.ss`: stop exporting the low-level HTTP/2 library.
-- `cspp/net/ffi.ss`: remove old memory-session bindings and expose only required private native bindings.
-- `cspp/concurrency/fiber.ss`: add scheduler-safe cross-thread task posting and wakeup.
+- `src/cspp/net/http.ss`: retain public API/data records; delegate all transport work to the new modules.
+- `src/cspp/net.ss`: stop exporting the low-level HTTP/2 library.
+- `src/cspp/net/ffi.ss`: remove old memory-session bindings and expose only required private native bindings.
+- `src/cspp/concurrency/fiber.ss`: add scheduler-safe cross-thread task posting and wakeup.
 - `tests/net-http.ss`, `tests/net-loader.ss`, `tests/net-operation.ss`, `tests/Makefile`, and public API checks.
 
 ## Task 1: Lock the public API boundary
 
-**Files:** `cspp/net.ss`, `cspp/net/http.ss`, `cspp/net/http2.ss`, `tests/net-loader.ss`, `tests/net-core.ss`, create `tests/net-http-contract.ss`.
+**Files:** `src/cspp/net.ss`, `src/cspp/net/http.ss`, `src/cspp/net/http2.ss`, `tests/net-loader.ss`, `tests/net-core.ss`, create `tests/net-http-contract.ss`.
 
 - [ ] **Step 1: Add contract tests before implementation.** Assert that `http-open`, `http-send`, `http-send/nonblocking`, `http-download/nonblocking`, `http-listen`, and `http-serve-loop` remain procedures. Evaluate `http2-open` in the `(cspp net)` environment and assert that lookup fails.
 - [ ] **Step 2: Run the contract test.** Run `make clean && make` followed by `make -C tests test-some TEST=net-http-contract`. Record the repository's existing `cspp parser elf` missing-library failure separately from the expected API red result.
@@ -55,7 +55,7 @@ Rewrite or update:
 
 ## Task 2: Add optional libwebsockets loading
 
-**Files:** create `cspp/c/net/lws_loader.h`, `cspp/c/net/lws_loader.c`; modify `cspp/c/optional_library.[ch]`, `cspp/net/lws/ffi.ss`, `cspp/net/ffi.ss`, `tests/net-loader.ss`, `tests/optional-library-linkage.sh`.
+**Files:** create `src/cspp/c/net/lws_loader.h`, `src/cspp/c/net/lws_loader.c`; modify `src/cspp/c/optional_library.[ch]`, `src/cspp/net/lws/ffi.ss`, `src/cspp/net/ffi.ss`, `tests/net-loader.ss`, `tests/optional-library-linkage.sh`.
 
 - [ ] **Step 1: Define capability bits.** Use `CSPP_LWS_CAP_HTTP1`, `CSPP_LWS_CAP_HTTP2`, `CSPP_LWS_CAP_TLS`, `CSPP_LWS_CAP_SOCKS5`, and `CSPP_LWS_CAP_EXTERNAL_POLL`. Expose `cspp_lws_ensure_loaded()`, `cspp_lws_capabilities()`, and `cspp_lws_error()`.
 - [ ] **Step 2: Load required symbols.** Dynamically load context creation/destruction, client connect, `lws_service_fd`, `lws_service_adjust_timeout`, `lws_cancel_service`, `lws_callback_on_writable`, `lws_get_socket_fd`, `lws_http_client_read`, `lws_client_http_body_pending`, header accessors, opaque-user-data accessors, and external-poll callbacks. Load H2 and SOCKS5 capabilities conditionally.
@@ -65,7 +65,7 @@ Rewrite or update:
 
 ## Task 3: Implement the native nonblocking LWS adapter
 
-**Files:** create `cspp/c/net/lws_http.[ch]`; modify `cspp/net/lws/ffi.ss`; test in `tests/net-lws-reactor.ss`.
+**Files:** create `src/cspp/c/net/lws_http.[ch]`; modify `src/cspp/net/lws/ffi.ss`; test in `tests/net-lws-reactor.ss`.
 
 - [ ] **Step 1: Define ownership records.** Add native `lws_http_context`, `lws_http_connection`, `lws_http_stream`, `lws_http_event`, and `lws_poll_entry` records. The context owns the LWS context, vhosts, wakeup pipe, poll entries, event queue, and live-handle count.
 - [ ] **Step 2: Define copied event tags.** Use tags for poll add/change/delete, connected, headers, readable, writable, complete, closed, failed, reset, and GOAWAY. Every event carries context/connection/stream identity, generation, status/error metadata, and copied payload bytes.
@@ -77,7 +77,7 @@ Rewrite or update:
 
 ## Task 4: Build the serialized CSPP reactor
 
-**Files:** create `cspp/net/lws/reactor.ss`; modify `cspp/net/lws/ffi.ss`, `cspp/net/poll.ss`, `cspp/net/operation.ss`; test `tests/net-lws-reactor.ss`.
+**Files:** create `src/cspp/net/lws/reactor.ss`; modify `src/cspp/net/lws/ffi.ss`, `src/cspp/net/poll.ss`, `src/cspp/net/operation.ss`; test `tests/net-lws-reactor.ss`.
 
 - [ ] **Step 1: Define reactor records.** Store native context, owner thread id, command mutex/condition variable, command queue, waiter table, current poll snapshot, lifecycle, and shutdown condition. Reject owner-only mutation from non-owner callers.
 - [ ] **Step 2: Implement command submission.** Support `start`, `submit-body`, `consume-body`, `cancel`, `close-stream`, `register-waiter`, and `unregister-waiter`. Enqueue under a lock and wake the native context immediately.
@@ -89,7 +89,7 @@ Rewrite or update:
 
 ## Task 5: Implement HTTP/1.x client behavior
 
-**Files:** create `cspp/net/lws/http1.ss`; modify `cspp/net/http.ss` and `cspp/net/lws/reactor.ss`; test `tests/net-http.ss`.
+**Files:** create `src/cspp/net/lws/http1.ss`; modify `src/cspp/net/http.ss` and `src/cspp/net/lws/reactor.ss`; test `tests/net-http.ss`.
 
 - [ ] **Step 1: Define request and connection state.** Track method, URI, normalized headers, source/sink, response metadata, connection, lifecycle, deadline, redirect count, generation, and waiters. Track pool origin, LWS handle, idle timestamp, active transaction, and close state.
 - [ ] **Step 2: Normalize and start requests.** Apply method/URI/host, proxy, auth, cookie, content length, chunked transfer, TLS/ALPN, and timeout policy before submitting a reactor start command. Set LWS no-follow-redirect behavior so CSPP owns redirect policy.
@@ -102,7 +102,7 @@ Rewrite or update:
 
 ## Task 6: Implement HTTP/2 client multiplexing
 
-**Files:** create `cspp/net/lws/http2.ss`; modify `cspp/net/lws/reactor.ss`, `cspp/net/http.ss`, and TLS ALPN integration if required; test `tests/net-http.ss`.
+**Files:** create `src/cspp/net/lws/http2.ss`; modify `src/cspp/net/lws/reactor.ss`, `src/cspp/net/http.ss`, and TLS ALPN integration if required; test `tests/net-http.ss`.
 
 - [ ] **Step 1: Define transport and stream records.** Transport state includes one LWS connection, origin, queued requests, active stream table, peer capacity, receive-buffer accounting, lifecycle, and GOAWAY state. Stream state includes logical request, LWS identity, headers, sink, byte counters, lifecycle, deadline, and generation.
 - [ ] **Step 2: Select H2 explicitly.** Configure ALPN for `h2`; support cleartext prior knowledge; fail if `h2` was required but HTTP/1.1 was negotiated; never silently downgrade.
@@ -115,7 +115,7 @@ Rewrite or update:
 
 ## Task 7: Implement HTTP/1.x and HTTP/2 servers
 
-**Files:** create `cspp/net/lws/server.ss`, `tests/net-lws-server.ss`; modify `cspp/net/http.ss`, `cspp/net/lws/ffi.ss`, `tests/net-http.ss`.
+**Files:** create `src/cspp/net/lws/server.ss`, `tests/net-lws-server.ss`; modify `src/cspp/net/http.ss`, `src/cspp/net/lws/ffi.ss`, `tests/net-http.ss`.
 
 - [ ] **Step 1: Define logical request records.** An accepted value represents a logical HTTP request/stream, not a raw socket. Store method, URI, headers, body stream, protocol version, physical connection, logical stream, lifecycle, and response state.
 - [ ] **Step 2: Queue callback events.** Queue a request only after headers are complete; deliver body chunks incrementally; queue writable events for response output; apply receive flow control if a handler is not consuming.
@@ -125,7 +125,7 @@ Rewrite or update:
 
 ## Task 8: Integrate network operations with fibers
 
-**Files:** create `cspp/concurrency/fiber-net.ss`, `tests/net-http-fiber.ss`; modify `cspp/concurrency/fiber.ss`, `cspp/concurrency.ss`, `cspp/net/operation.ss`, and `cspp/net/lws/reactor.ss`.
+**Files:** create `src/cspp/concurrency/fiber-net.ss`, `tests/net-http-fiber.ss`; modify `src/cspp/concurrency/fiber.ss`, `src/cspp/concurrency.ss`, `src/cspp/net/operation.ss`, and `src/cspp/net/lws/reactor.ss`.
 
 - [ ] **Step 1: Add scheduler-safe posting.** Implement an internal `fiber-post!` callable from any reactor thread. It selects a live scheduler without reading `current-scheduler` on the posting thread, enqueues under scheduler locks, and signals a scheduler condition/wakeup descriptor.
 - [ ] **Step 2: Add `net-operation-event`.** Its try function returns a result thunk only for terminal operations. Its block function registers one reactor waiter. Reactor completion invokes `fiber-post!`, and the posted task claims an atomic waiter flag before calling the event resume function.
@@ -136,7 +136,7 @@ Rewrite or update:
 
 ## Task 9: Remove obsolete adapters and update examples
 
-**Files:** modify `cspp/net.ss`, `cspp/net/ffi.ss`, `cspp/net/http.ss`, examples, docs, and tests; delete old HTTP/2 adapter files after references are gone.
+**Files:** modify `src/cspp/net.ss`, `src/cspp/net/ffi.ss`, `src/cspp/net/http.ss`, examples, docs, and tests; delete old HTTP/2 adapter files after references are gone.
 
 - [ ] **Step 1: Prove no old imports remain.** Run `rg -n '\\(cspp net http2\\)|http2-(open|send|receive|next-event)' cspp tests examples`; remove every result.
 - [ ] **Step 2: Remove direct nghttp2 adapter code.** Delete the old CSPP memory-session implementation and its loader only when no other feature uses it. Keep nghttp2 as an indirect libwebsockets build dependency and do not add a direct link.

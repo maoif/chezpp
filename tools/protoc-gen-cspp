@@ -2,4 +2,4 @@
 set -eu
 
 tool_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$tool_dir/../bin/cspp" --script="$tool_dir/protoc-gen-cspp.ss"
+exec "$tool_dir/../cspp" --script="$tool_dir/protoc-gen-cspp.ss"

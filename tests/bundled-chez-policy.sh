@@ -6,7 +6,7 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
 cp "$project_root/Makefile" "$project_root/build-options.mk" \
    "$project_root/optional-libraries.mk" "$fixture/"
-mkdir -p "$fixture/tools" "$fixture/cspp/c" "$fixture/tests"
+mkdir -p "$fixture/tools" "$fixture/src/cspp/c" "$fixture/tests"
 cp "$project_root/tools/probe-optional-libraries.sh" "$fixture/tools/"
 cd "$fixture"
 
@@ -91,7 +91,7 @@ test ! -e .chezscheme-build/configure-called
 
 # A missing generated Makefile must invalidate otherwise complete compiler artifacts.
 rm .chezscheme-build/Makefile
-touch libcspp.so cspp.lib cspp/stale.so cspp/stale.wpo
+touch libcspp.so cspp.lib src/cspp/stale.so src/cspp/stale.wpo
 if make --no-print-directory bundled-chez PKG_CONFIG=/missing \
     > invalid.stdout 2> invalid.stderr; then
     printf '%s\n' 'missing ChezScheme Makefile did not trigger reconfiguration' >&2
@@ -100,5 +100,5 @@ fi
 test -e .chezscheme-build/configure-called
 test ! -e libcspp.so
 test ! -e cspp.lib
-test ! -e cspp/stale.so
-test ! -e cspp/stale.wpo
+test ! -e src/cspp/stale.so
+test ! -e src/cspp/stale.wpo

@@ -17,7 +17,7 @@ def verify_shell():
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
         process = subprocess.Popen(
-            ['./bin/cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args], env=env,
+            ['./cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args], env=env,
             stdin=slave, stdout=slave, stderr=slave, preexec_fn=controlling_terminal)
         transcript = bytearray()
         def until(predicate, description, timeout=8):
@@ -71,7 +71,7 @@ def verify_shell():
             assert termios.tcgetattr(slave) == original, 'terminal not restored after exit'
             for ending in ('eof', 'interrupt', 'terminate', 'hangup', 'quit'):
                 process = subprocess.Popen(
-                    ['./bin/cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args], env=env,
+                    ['./cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args], env=env,
                     stdin=slave, stdout=slave, stderr=slave, preexec_fn=controlling_terminal)
                 until(lambda data: b'CSPP-PROMPT>' in data, 'prompt before ' + ending)
                 if ending == 'eof':
@@ -113,7 +113,7 @@ def verify_bidirectional_backpressure():
         with api['fixture'](shell_command=f'python3 {worker}') as (_, env, args):
             with source.open('rb') as input_port, tempfile.TemporaryFile() as output:
                 process = subprocess.Popen(
-                    ['./bin/cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args, '--pty=no'],
+                    ['./cspp', '--script=examples/net/ssh-open-repl.ss', '--', *args, '--pty=no'],
                     env=env, stdin=input_port, stdout=output, stderr=subprocess.PIPE,
                     start_new_session=True)
                 try:

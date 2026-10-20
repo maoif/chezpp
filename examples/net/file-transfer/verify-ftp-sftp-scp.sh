@@ -18,7 +18,7 @@ dd if=/dev/zero of="$source_file" bs=1048576 count="$transfer_mib" status=none
 
 actual=$(
   cd "$project_root/tests"
-  ../bin/cspp --script=../examples/net/file-transfer/verify-ftp-sftp-scp.ss \
+  ../cspp --script=../examples/net/file-transfer/verify-ftp-sftp-scp.ss \
     "$source_file" "$ftp_file" "$sftp_file" "$scp_file"
 )
 expected=$(sha256sum "$source_file" | awk '{print $1}')

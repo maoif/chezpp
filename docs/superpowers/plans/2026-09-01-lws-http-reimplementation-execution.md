@@ -578,7 +578,7 @@ and close accepted sockets, ports, and listeners through `dynamic-wind`. Fixture
 reported through a synchronization object before the test joins the thread, so a failed client
 cannot leave an unbounded `thread-join`.
 
-Create `cspp/c/net/lws_http2_fixture.c` only as a test-only libwebsockets server fixture. It must
+Create `src/cspp/c/net/lws_http2_fixture.c` only as a test-only libwebsockets server fixture. It must
 not use, link, or load nghttp2. It should support cleartext prior knowledge and TLS ALPN,
 configurable SETTINGS, delayed response consumption, stream reset, GOAWAY, and connection close.
 It writes physical accept count, stream ids, peak concurrency, received body bytes, and terminal
@@ -596,8 +596,8 @@ remains explicitly blocked rather than introducing an nghttp2 dependency.
 
 ## Task 1: Restore the Public HTTP API and a Runnable Focused Harness
 
-**Files:** create `cspp/net/http/private.ss`; rewrite `cspp/net/http.ss`; modify `cspp.ss`,
-`cspp/net/operation.ss`, `tests/net-operation.ss`, `tests/net-http.ss`,
+**Files:** create `src/cspp/net/http/private.ss`; rewrite `src/cspp/net/http.ss`; modify `src/cspp.ss`,
+`src/cspp/net/operation.ss`, `tests/net-operation.ss`, `tests/net-http.ss`,
 `tests/net-http-contract.ss`, and `tests/Makefile` only where required.
 
 **Interfaces:**
@@ -643,8 +643,8 @@ remains explicitly blocked rather than introducing an nghttp2 dependency.
 
 ## Task 2: Correct the Native LWS Connection and Transaction Boundary
 
-**Files:** rewrite as needed `cspp/c/net/lws_http.[ch]`, `cspp/net/lws/ffi.ss`, and
-`cspp/net/lws/reactor.ss`; modify `tests/net-lws-reactor.ss`.
+**Files:** rewrite as needed `src/cspp/c/net/lws_http.[ch]`, `src/cspp/net/lws/ffi.ss`, and
+`src/cspp/net/lws/reactor.ss`; modify `tests/net-lws-reactor.ss`.
 
 **Interfaces:**
 
@@ -688,8 +688,8 @@ remains explicitly blocked rather than introducing an nghttp2 dependency.
 
 ## Task 3: Implement and Finish HTTP/1 on Libwebsockets
 
-**Files:** create `cspp/net/lws/client.ss`; rewrite `cspp/net/lws/http1.ss`; modify
-`cspp/net/http.ss`, `cspp.ss`, `cspp/c/net/lws_http.[ch]`, `tests/net-http.ss`, and the
+**Files:** create `src/cspp/net/lws/client.ss`; rewrite `src/cspp/net/lws/http1.ss`; modify
+`src/cspp/net/http.ss`, `src/cspp.ss`, `src/cspp/c/net/lws_http.[ch]`, `tests/net-http.ss`, and the
 bounded HTTP/1 fixture helper.
 
 **Interfaces:**
@@ -743,9 +743,9 @@ bounded HTTP/1 fixture helper.
 
 ## Task 4: Implement Genuine HTTP/2 Multiplexing on Libwebsockets
 
-**Files:** create `cspp/c/net/lws_http2_fixture.c`; rewrite `cspp/net/lws/http2.ss` and H2
-parts of `cspp/c/net/lws_http.[ch]`; modify `cspp/net/lws/client.ss`,
-`cspp/net/lws/reactor.ss`, `cspp/net/http.ss`, `tests/net-http.ss`, and `tests/Makefile`.
+**Files:** create `src/cspp/c/net/lws_http2_fixture.c`; rewrite `src/cspp/net/lws/http2.ss` and H2
+parts of `src/cspp/c/net/lws_http.[ch]`; modify `src/cspp/net/lws/client.ss`,
+`src/cspp/net/lws/reactor.ss`, `src/cspp/net/http.ss`, `tests/net-http.ss`, and `tests/Makefile`.
 
 **Interfaces:**
 
@@ -787,7 +787,7 @@ parts of `cspp/c/net/lws_http.[ch]`; modify `cspp/net/lws/client.ss`,
 
 ## Task 5: Remove Obsolete HTTP Adapters and Consolidate Tests
 
-**Files:** remove obsolete portions of `cspp/net/ffi.ss`, `cspp/c/net/http2.c`, and nghttp2
+**Files:** remove obsolete portions of `src/cspp/net/ffi.ss`, `src/cspp/c/net/http2.c`, and nghttp2
 loader integration when unused; modify `Makefile`, `tests/Makefile`, examples, and docs.
 
 - [ ] Classify every match from:
@@ -799,7 +799,7 @@ loader integration when unused; modify `Makefile`, `tests/Makefile`, examples, a
   ```
 - [ ] Delete low-level Scheme FFI bindings, memory-session C code, and tests that exercise
   serialized nghttp2 sessions. Retain high-level H2 behavior MATs through `(cspp net http)`.
-- [ ] Retain `cspp/c/net/lws_http2_fixture.c` as test-only libwebsockets code only. It must not
+- [ ] Retain `src/cspp/c/net/lws_http2_fixture.c` as test-only libwebsockets code only. It must not
   use, link, or load nghttp2, and it must not add any optional protocol dependency to `libcspp.so`.
 - [x] Remove all CSPP nghttp2 adapters, loader entries, FFI bindings, and build references.
   No CSPP feature may depend on nghttp2, even when libwebsockets is built with optional HTTP/2
@@ -810,9 +810,9 @@ loader integration when unused; modify `Makefile`, `tests/Makefile`, examples, a
 
 ## Task 6: Implement LWS HTTP/1 and HTTP/2 Servers
 
-**Files:** create `cspp/net/lws/server.ss` and `tests/net-lws-server.ss`; extend
-`cspp/c/net/lws_http.[ch]`, `cspp/net/lws/ffi.ss`, `cspp/net/lws/reactor.ss`,
-`cspp/net/http.ss`, and `tests/Makefile`.
+**Files:** create `src/cspp/net/lws/server.ss` and `tests/net-lws-server.ss`; extend
+`src/cspp/c/net/lws_http.[ch]`, `src/cspp/net/lws/ffi.ss`, `src/cspp/net/lws/reactor.ss`,
+`src/cspp/net/http.ss`, and `tests/Makefile`.
 
 - [x] Add a separate LWS listening-context lifecycle; do not treat the existing
   `CONTEXT_PORT_NO_LISTEN` client context as a server.
@@ -828,8 +828,8 @@ loader integration when unused; modify `Makefile`, `tests/Makefile`, examples, a
 
 ## Task 7: Integrate Fiber Waiting After HTTP Is Stable
 
-**Files:** modify `cspp/concurrency/fiber.ss`, `cspp/net/operation.ss`, and
-`cspp/net/lws/reactor.ss`; create `cspp/concurrency/fiber-net.ss` and
+**Files:** modify `src/cspp/concurrency/fiber.ss`, `src/cspp/net/operation.ss`, and
+`src/cspp/net/lws/reactor.ss`; create `src/cspp/concurrency/fiber-net.ss` and
 `tests/net-http-fiber.ss`; modify `tests/Makefile`.
 
 - [x] Complete the separately specified fiber lifecycle fixes before making HTTP depend on fibers.

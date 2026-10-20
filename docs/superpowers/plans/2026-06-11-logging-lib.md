@@ -4,7 +4,7 @@
 `docs/superpowers/specs/2026-06-10-logging-design.md`.
 
 **Current status:** Implemented and integrated. The library exists under
-`cspp/logging/`, is re-exported by `(cspp logging)`, and is included in the
+`src/cspp/logging/`, is re-exported by `(cspp logging)`, and is included in the
 aggregate `(cspp)` library. The focused logging tests are registered in
 `tests/Makefile` as `logging.ss`.
 
@@ -20,22 +20,22 @@ project build through `make clean && make`.
 
 ## Implemented File Structure
 
-- `cspp/logging/private/common.ss`: shared predicates, message conversion,
+- `src/cspp/logging/private/common.ss`: shared predicates, message conversion,
   newline normalization, current timestamp, and current Chez thread id lookup.
-- `cspp/logging/level.ss`: level predicates, conversions, ordering, and
+- `src/cspp/logging/level.ss`: level predicates, conversions, ordering, and
   string parsing.
-- `cspp/logging/formatter.ss`: formatter records, pattern formatter, rich
+- `src/cspp/logging/formatter.ss`: formatter records, pattern formatter, rich
   formatter, rich palettes, JSON-line formatter, default formatter, and direct
   field formatting.
-- `cspp/logging/sink.ss`: sink record, sink configuration APIs, port/file/
+- `src/cspp/logging/sink.ss`: sink record, sink configuration APIs, port/file/
   rotating-file/procedure/null/tee/rich-console sink constructors, write, flush,
   close, locking, filtering, and close-state behavior.
-- `cspp/logging/logger.ss`: logger record, configuration APIs, filtering,
+- `src/cspp/logging/logger.ss`: logger record, configuration APIs, filtering,
   level checks, sink dispatch, current logger parameter, `with-logger`, error
   policies, flush, close, and sink-list snapshotting.
-- `cspp/logging/macros.ss`: `logger` constructor macro, sink constructor
+- `src/cspp/logging/macros.ss`: `logger` constructor macro, sink constructor
   macros, current-logger logging macros, and explicit-logger logging macros.
-- `cspp/logging.ss`: facade that re-exports level, formatter, sink, logger,
+- `src/cspp/logging.ss`: facade that re-exports level, formatter, sink, logger,
   and macro APIs.
 - `tests/logging.ss`: regression tests for levels, formatters, sinks, loggers,
   macros, files, rotation, rich console output, error policy, and concurrency.
@@ -248,15 +248,15 @@ Parenthesis check for logging-related Scheme files:
 
 ```bash
 python3 check_parentheses.py \
-  cspp/logging/private/common.ss \
-  cspp/logging/level.ss \
-  cspp/logging/formatter.ss \
-  cspp/logging/sink.ss \
-  cspp/logging/logger.ss \
-  cspp/logging/macros.ss \
-  cspp/logging.ss \
+  src/cspp/logging/private/common.ss \
+  src/cspp/logging/level.ss \
+  src/cspp/logging/formatter.ss \
+  src/cspp/logging/sink.ss \
+  src/cspp/logging/logger.ss \
+  src/cspp/logging/macros.ss \
+  src/cspp/logging.ss \
   tests/logging.ss \
-  cspp.ss
+  src/cspp.ss
 ```
 
 ## Current Assessment

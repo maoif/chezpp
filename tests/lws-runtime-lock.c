@@ -1,8 +1,8 @@
 /* Real LWS timer callbacks exercise the adapter's conditional runtime lock.
  * Feature-selection headers used by the runner change only the guard policy,
  * after the dependency has declared its ABI. No LWS functions are mocked. */
-#include "../cspp/c/net/lws_http.h"
-#include "../cspp/c/net/lws_loader.h"
+#include "../src/cspp/c/net/lws_http.h"
+#include "../src/cspp/c/net/lws_loader.h"
 
 #include <stdatomic.h>
 #include <stdio.h>

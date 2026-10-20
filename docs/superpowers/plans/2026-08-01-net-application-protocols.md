@@ -30,9 +30,9 @@ with the documented Emacs and Arch SHA-256 values.
 ### Task 1: Protobuf Wire Codec
 
 **Files:**
-- Create: `cspp/protobuf/wire.ss`
-- Create: `cspp/protobuf.ss`
-- Modify: `cspp.ss`
+- Create: `src/cspp/protobuf/wire.ss`
+- Create: `src/cspp/protobuf.ss`
+- Modify: `src/cspp.ss`
 - Create: `tests/protobuf.ss`
 - Modify: `tests/Makefile`
 
@@ -79,14 +79,14 @@ configurable through an explicit constructor arity.
 make clean && make
 cd tests && make test-some TEST='protobuf'
 cd ..
-git add cspp/protobuf.ss cspp/protobuf/wire.ss cspp.ss tests/protobuf.ss tests/Makefile
+git add src/cspp/protobuf.ss src/cspp/protobuf/wire.ss src/cspp.ss tests/protobuf.ss tests/Makefile
 git commit -m "protobuf: add wire codec"
 ```
 
 ### Task 2: Descriptor Decoder And protoc Plugin
 
 **Files:**
-- Create: `cspp/protobuf/descriptor.ss`
+- Create: `src/cspp/protobuf/descriptor.ss`
 - Create: `tools/protoc-gen-cspp.ss`
 - Create: `tools/protoc-gen-cspp`
 - Create: `tests/data/file-transfer.proto`
@@ -169,7 +169,7 @@ make clean && make
 make protobuf-generate
 cd tests && make test-some TEST='protobuf protobuf-codegen'
 cd ..
-git add cspp/protobuf/descriptor.ss tools/protoc-gen-cspp.ss tools/protoc-gen-cspp \
+git add src/cspp/protobuf/descriptor.ss tools/protoc-gen-cspp.ss tools/protoc-gen-cspp \
   tests/data/file-transfer.proto tests/protobuf-codegen.ss Makefile
 git commit -m "protobuf: generate records and gRPC bindings"
 ```
@@ -177,7 +177,7 @@ git commit -m "protobuf: generate records and gRPC bindings"
 ### Task 3: HTTP Streaming Bodies
 
 **Files:**
-- Modify: `cspp/net/http.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-http.ss`
 - Modify: `tests/net-common.ss`
 
@@ -234,17 +234,17 @@ blocking versions wait on those operations.
 make clean && make
 cd tests && make test-some TEST='net-http net-operation'
 cd ..
-git add cspp/net/http.ss tests/net-http.ss tests/net-common.ss
+git add src/cspp/net/http.ss tests/net-http.ss tests/net-common.ss
 git commit -m "net: stream HTTP request and response bodies"
 ```
 
 ### Task 4: HTTP Compression, Cookies, Auth, Proxy, Multipart, And Pool Controls
 
 **Files:**
-- Create: `cspp/c/zlib_loader.h`
-- Create: `cspp/c/zlib_loader.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/http.ss`
+- Create: `src/cspp/c/zlib_loader.h`
+- Create: `src/cspp/c/zlib_loader.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-loader.ss`
 - Modify: `tests/net-http.ss`
 
@@ -299,7 +299,7 @@ compression-ratio limits to prevent resource exhaustion.
 make clean && make
 cd tests && make test-some TEST='net-http net-loader'
 cd ..
-git add cspp/c/zlib_loader.h cspp/c/zlib_loader.c cspp/net/ffi.ss cspp/net/http.ss \
+git add src/cspp/c/zlib_loader.h src/cspp/c/zlib_loader.c src/cspp/net/ffi.ss src/cspp/net/http.ss \
   tests/net-loader.ss tests/net-http.ss
 git commit -m "net: add HTTP client and body features"
 ```
@@ -307,11 +307,11 @@ git commit -m "net: add HTTP client and body features"
 ### Task 5: HTTP/2 Client And Server Adapter
 
 **Files:**
-- Create: `cspp/c/nghttp2_loader.h`
-- Create: `cspp/c/nghttp2_loader.c`
-- Create: `cspp/c/net/http2.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/http.ss`
+- Create: `src/cspp/c/nghttp2_loader.h`
+- Create: `src/cspp/c/nghttp2_loader.c`
+- Create: `src/cspp/c/net/http2.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-loader.ss`
 - Modify: `tests/net-http.ss`
 - Modify: `tests/net-common.ss`
@@ -361,17 +361,17 @@ streams complete.
 make clean && make
 cd tests && make test-some TEST='net-http net-loader net-core'
 cd ..
-git add cspp/c/nghttp2_loader.h cspp/c/nghttp2_loader.c cspp/c/net/http2.c \
-  cspp/net/ffi.ss cspp/net/http.ss tests/net-loader.ss tests/net-http.ss tests/net-common.ss
+git add src/cspp/c/nghttp2_loader.h src/cspp/c/nghttp2_loader.c src/cspp/c/net/http2.c \
+  src/cspp/net/ffi.ss src/cspp/net/http.ss tests/net-loader.ss tests/net-http.ss tests/net-common.ss
 git commit -m "net: add HTTP/2 client and server support"
 ```
 
 ### Task 6: WebSocket TLS, Compression, Negotiation, Fragmentation, And Liveness
 
 **Files:**
-- Modify: `cspp/c/net/websocket.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/websocket.ss`
+- Modify: `src/cspp/c/net/websocket.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/websocket.ss`
 - Modify: `tests/net-websocket.ss`
 - Modify: `tests/net-common.ss`
 
@@ -423,7 +423,7 @@ raises `unsupported` only when requested.
 make clean && make
 cd tests && make test-some TEST='net-websocket net-loader net-core'
 cd ..
-git add cspp/c/net/websocket.c cspp/net/ffi.ss cspp/net/websocket.ss \
+git add src/cspp/c/net/websocket.c src/cspp/net/ffi.ss src/cspp/net/websocket.ss \
   tests/net-websocket.ss tests/net-common.ss
 git commit -m "net: complete WebSocket negotiation and liveness"
 ```
@@ -431,11 +431,11 @@ git commit -m "net: complete WebSocket negotiation and liveness"
 ### Task 7: gRPC TLS, Compression, Deadlines, Status, Metadata, And Reflection
 
 **Files:**
-- Modify: `cspp/c/net/grpc.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/grpc.ss`
-- Create: `cspp/net/grpc/reflection.ss`
-- Modify: `cspp/net.ss`
+- Modify: `src/cspp/c/net/grpc.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/grpc.ss`
+- Create: `src/cspp/net/grpc/reflection.ss`
+- Modify: `src/cspp/net.ss`
 - Modify: `tests/net-grpc.ss`
 - Modify: `tests/protobuf-codegen.ss`
 
@@ -488,8 +488,8 @@ Deduplicate transitive descriptor dependencies.
 make clean && make
 cd tests && make test-some TEST='net-grpc protobuf protobuf-codegen net-loader'
 cd ..
-git add cspp/c/net/grpc.c cspp/net/ffi.ss cspp/net/grpc.ss \
-  cspp/net/grpc/reflection.ss cspp/net.ss tests/net-grpc.ss tests/protobuf-codegen.ss
+git add src/cspp/c/net/grpc.c src/cspp/net/ffi.ss src/cspp/net/grpc.ss \
+  src/cspp/net/grpc/reflection.ss src/cspp/net.ss tests/net-grpc.ss tests/protobuf-codegen.ss
 git commit -m "net: add secure generated gRPC services"
 ```
 
@@ -572,9 +572,9 @@ Expected: all six protocol variants upload and download with matching hashes.
 
 ```bash
 readelf -d libcspp.so | rg 'libnghttp2|libz|libssl|libcrypto|libwebsockets|libgrpc'
-./bin/cspp --script=tools/check-scheme-balance.ss -- \
-  cspp/protobuf.ss cspp/protobuf/*.ss cspp/net/http.ss \
-  cspp/net/websocket.ss cspp/net/grpc.ss cspp/net/grpc/reflection.ss
+./cspp --script=tools/check-scheme-balance.ss -- \
+  src/cspp/protobuf.ss src/cspp/protobuf/*.ss src/cspp/net/http.ss \
+  src/cspp/net/websocket.ss src/cspp/net/grpc.ss src/cspp/net/grpc/reflection.ss
 git status --short
 ```
 

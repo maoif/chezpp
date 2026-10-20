@@ -68,10 +68,10 @@ HTTP_ERROR_SOAK_TESTS := net-http net-lws-http2 net-lws-server
 HTTP_ERROR_SOAK_OBJS := $(addsuffix .so,$(HTTP_ERROR_SOAK_TESTS))
 
 WEBSOCKETS_ENABLED := $(shell sed -n 's/^\#define CSPP_WITH_WEBSOCKETS //p' \
-                                   $(ROOT_DIR)/cspp/c/build-config.h)
+                                   $(ROOT_DIR)/src/cspp/c/build-config.h)
 ifeq ($(WEBSOCKETS_ENABLED),1)
 .SECONDARY: lws-http2-fixture
-lws-http2-fixture: ../cspp/c/net/lws_http2_fixture.c
+lws-http2-fixture: ../src/cspp/c/net/lws_http2_fixture.c
 	$(CC) $(CPPFLAGS) $(RESOLVED_WEBSOCKETS_CFLAGS) -Wall -Wextra -O2 \
 	  $< -o $@ $(LDFLAGS) $(RESOLVED_WEBSOCKETS_LIBS) -ldl
 
@@ -82,17 +82,17 @@ mat.so: mat.sls $(TEST_COMPILER_SCRIPTS) | prepare-cspp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' "== compiling mat.sls =="; \
-	../bin/cspp --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- mat.sls >"$$stdout" 2>"$$stderr"; \
+	../cspp --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- mat.sls >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
 $(OBJS_TEST) $(STRESS_TESTS:.ss=.so): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../cspp.lib \
-	../bin/cspp $(TEST_COMPILER_SCRIPTS) | prepare-cspp
+	../cspp $(TEST_COMPILER_SCRIPTS) | prepare-cspp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
-	../bin/cspp --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- \
+	../cspp --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- \
 	  "$(basename $@).ss" mat.so >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
@@ -117,7 +117,7 @@ test-non-net:
 
 .PHONY: test-release-package
 test-release-package: prepare-cspp
-	@cd .. && ./bin/cspp --script=tests/release-package.ss
+	@cd .. && ./cspp --script=tests/release-package.ss
 
 test: prepare-cspp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	@cleanup() { \
@@ -138,10 +138,10 @@ test: prepare-cspp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$item =="; \
 	  if [ -n "$(COVERAGE_ENABLED)" ]; then \
-	    covin_files=$$(find ../cspp -type f -name '*.covin' -print); \
-	    ../bin/cspp --script=coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
+	    covin_files=$$(find ../src/cspp -type f -name '*.covin' -print); \
+	    ../cspp --script=coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
 	  else \
-	    ../bin/cspp --script=../tools/run-test.ss "$$item" >"$$stdout" 2>"$$stderr"; \
+	    ../cspp --script=../tools/run-test.ss "$$item" >"$$stdout" 2>"$$stderr"; \
 	  fi; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
@@ -150,10 +150,10 @@ test: prepare-cspp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
 	 done; \
 	 if [ -n "$(COVERAGE_ENABLED)" ]; then \
-	   covin_files=$$(find ../cspp -type f -name '*.covin' -print); \
+	   covin_files=$$(find ../src/cspp -type f -name '*.covin' -print); \
 	   covout_files=$$(find . -maxdepth 1 -type f -name '*.covout' -print); \
 	   set -- $$covin_files; covin_count=$$#; \
-	   ../bin/cspp --script=coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
+	   ../cspp --script=coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
 	   report_code=$$?; if [ $$report_code -ne 0 ]; then status=1; fi; \
 	 fi; \
 	 exit $$status
@@ -186,7 +186,7 @@ test-http-error-soak: prepare-cspp mat.so $(HTTP_ERROR_SOAK_OBJS) ../tools/run-t
 	    stdout="$$base.stdout"; stderr="$$base.stderr"; \
 	    rm -f "$$stdout" "$$stderr"; \
 	    printf '%s\n' "== soak round $$round: $$base.so =="; \
-	    ../bin/cspp --script=../tools/run-test.ss "$$base.so" >"$$stdout" 2>"$$stderr"; \
+	    ../cspp --script=../tools/run-test.ss "$$base.so" >"$$stdout" 2>"$$stderr"; \
 	    code=$$?; \
 	    if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	    if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -224,7 +224,7 @@ test-optional-library-build:
 .PHONY: test-optional-native
 test-optional-native:
 	@python3 ../tools/test-optional-native.py --sentinels
-	@../bin/cspp --script=optional-library-runtime.ss
+	@../cspp --script=optional-library-runtime.ss
 
 .PHONY: test-lws-runtime-lock
 test-lws-runtime-lock: prepare-cspp

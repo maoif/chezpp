@@ -19,7 +19,7 @@ make clean && make
 cd tests && make test-some TEST='net-ftp net-transfer'
 cd ..
 scheme --script tools/check-scheme-balance.ss \
-  cspp/net/ftp.ss cspp/net/ffi.ss tests/net-ftp.ss \
+  src/cspp/net/ftp.ss src/cspp/net/ffi.ss tests/net-ftp.ss \
   tests/net-ftp-common.ss tests/net-ftp-server-process.ss
 git diff --check
 ```

@@ -28,9 +28,9 @@ TLS/cancellation regressions pass. The two pinned external downloads also pass w
 ### Task 1: Structured Net Errors And Private FFI Invariants
 
 **Files:**
-- Modify: `cspp/net/errors.ss`
-- Modify: `cspp/net/private.ss`
-- Modify: `cspp/net/ffi.ss`
+- Modify: `src/cspp/net/errors.ss`
+- Modify: `src/cspp/net/private.ss`
+- Modify: `src/cspp/net/ffi.ss`
 - Create: `tests/net-errors.ss`
 - Modify: `tests/Makefile`
 
@@ -87,20 +87,20 @@ on malformed vectors. Do not export raw FFI predicates from `(cspp net)`.
 make clean && make
 cd tests && make test-some TEST='net-errors net-core net-http net-ftp net-ssh net-sftp net-scp net-websocket net-grpc'
 cd ..
-git add cspp/net/errors.ss cspp/net/private.ss cspp/net/ffi.ss tests/net-errors.ss tests/Makefile
+git add src/cspp/net/errors.ss src/cspp/net/private.ss src/cspp/net/ffi.ss tests/net-errors.ss tests/Makefile
 git commit -m "net: add structured transport errors"
 ```
 
 ### Task 2: Scheduler-Friendly DNS And Address Selection
 
 **Files:**
-- Create: `cspp/c/cares_loader.h`
-- Create: `cspp/c/cares_loader.c`
-- Create: `cspp/c/net/dns.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/dns.ss`
-- Modify: `cspp/net/address.ss`
-- Modify: `cspp/net/private.ss`
+- Create: `src/cspp/c/cares_loader.h`
+- Create: `src/cspp/c/cares_loader.c`
+- Create: `src/cspp/c/net/dns.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/dns.ss`
+- Modify: `src/cspp/net/address.ss`
+- Modify: `src/cspp/net/private.ss`
 - Modify: `tests/net-loader.ss`
 - Create: `tests/net-dns.ss`
 - Create: `tests/net-address.ss`
@@ -169,8 +169,8 @@ Unix-domain round trip, service `http -> 80`, and cleanup after the first succes
 make clean && make
 cd tests && make test-some TEST='net-dns net-address net-loader net-operation'
 cd ..
-git add cspp/c/cares_loader.h cspp/c/cares_loader.c cspp/c/net/dns.c \
-  cspp/net/ffi.ss cspp/net/dns.ss cspp/net/address.ss cspp/net/private.ss \
+git add src/cspp/c/cares_loader.h src/cspp/c/cares_loader.c src/cspp/c/net/dns.c \
+  src/cspp/net/ffi.ss src/cspp/net/dns.ss src/cspp/net/address.ss src/cspp/net/private.ss \
   tests/net-loader.ss tests/net-dns.ss tests/net-address.ss tests/Makefile
 git commit -m "net: add asynchronous DNS and address selection"
 ```
@@ -178,11 +178,11 @@ git commit -m "net: add asynchronous DNS and address selection"
 ### Task 3: Poll And Socket Completion
 
 **Files:**
-- Modify: `cspp/c/net/socket.c`
-- Modify: `cspp/c/net/poll.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/poll.ss`
-- Modify: `cspp/net/socket.ss`
+- Modify: `src/cspp/c/net/socket.c`
+- Modify: `src/cspp/c/net/poll.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/poll.ss`
+- Modify: `src/cspp/net/socket.ss`
 - Modify: `tests/net-core.ss`
 - Modify: `examples/net/file-transfer/file-transfer-tcp*.ss`
 
@@ -230,15 +230,15 @@ partial writes/reads and EOF without assuming one call transfers the entire fram
 make clean && make
 cd tests && make test-some TEST='net-core net-operation'
 cd ..
-git add cspp/c/net/socket.c cspp/c/net/poll.c cspp/net/ffi.ss cspp/net/poll.ss \
-  cspp/net/socket.ss tests/net-core.ss examples/net/file-transfer/file-transfer-tcp*.ss
+git add src/cspp/c/net/socket.c src/cspp/c/net/poll.c src/cspp/net/ffi.ss src/cspp/net/poll.ss \
+  src/cspp/net/socket.ss tests/net-core.ss examples/net/file-transfer/file-transfer-tcp*.ss
 git commit -m "net: complete socket and poll readiness"
 ```
 
 ### Task 4: IP Classification And CIDR Algebra
 
 **Files:**
-- Modify: `cspp/net/ip.ss`
+- Modify: `src/cspp/net/ip.ss`
 - Create: `tests/net-ip.ss`
 - Modify: `tests/Makefile`
 
@@ -282,18 +282,18 @@ named special-use predicates, `cidr-split`, `cidr-merge`, `cidr-address-count`, 
 make clean && make
 cd tests && make test-some TEST='net-ip net-core'
 cd ..
-git add cspp/net/ip.ss tests/net-ip.ss tests/Makefile
+git add src/cspp/net/ip.ss tests/net-ip.ss tests/Makefile
 git commit -m "net: complete IP and CIDR operations"
 ```
 
 ### Task 5: URI Construction, Raw Components, RFC Coverage, And IDNA
 
 **Files:**
-- Create: `cspp/c/idn2_loader.h`
-- Create: `cspp/c/idn2_loader.c`
-- Create: `cspp/c/net/idna.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/uri.ss`
+- Create: `src/cspp/c/idn2_loader.h`
+- Create: `src/cspp/c/idn2_loader.c`
+- Create: `src/cspp/c/net/idna.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/uri.ss`
 - Modify: `tests/net-loader.ss`
 - Create: `tests/net-uri.ss`
 - Modify: `tests/Makefile`
@@ -339,19 +339,19 @@ Export `make-uri`, `uri-with-scheme`, `uri-with-authority`, `uri-with-path`, `ur
 make clean && make
 cd tests && make test-some TEST='net-uri net-loader net-http net-websocket'
 cd ..
-git add cspp/c/idn2_loader.h cspp/c/idn2_loader.c cspp/c/net/idna.c \
-  cspp/net/ffi.ss cspp/net/uri.ss tests/net-loader.ss tests/net-uri.ss tests/Makefile
+git add src/cspp/c/idn2_loader.h src/cspp/c/idn2_loader.c src/cspp/c/net/idna.c \
+  src/cspp/net/ffi.ss src/cspp/net/uri.ss tests/net-loader.ss tests/net-uri.ss tests/Makefile
 git commit -m "net: complete URI construction and IDNA"
 ```
 
 ### Task 6: TLS Policy, ALPN, OCSP, Sessions, SNI, And Chain Inspection
 
 **Files:**
-- Modify: `cspp/c/openssl_loader.h`
-- Modify: `cspp/c/openssl_loader.c`
-- Modify: `cspp/c/net/tls.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/tls.ss`
+- Modify: `src/cspp/c/openssl_loader.h`
+- Modify: `src/cspp/c/openssl_loader.c`
+- Modify: `src/cspp/c/net/tls.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/tls.ss`
 - Modify: `tests/net-core.ss`
 - Modify: `tests/net-common.ss`
 
@@ -399,8 +399,8 @@ signature, status, and validity interval.
 make clean && make
 cd tests && make test-some TEST='net-core net-http net-websocket net-grpc'
 cd ..
-git add cspp/c/openssl_loader.h cspp/c/openssl_loader.c cspp/c/net/tls.c \
-  cspp/net/ffi.ss cspp/net/tls.ss tests/net-core.ss tests/net-common.ss
+git add src/cspp/c/openssl_loader.h src/cspp/c/openssl_loader.c src/cspp/c/net/tls.c \
+  src/cspp/net/ffi.ss src/cspp/net/tls.ss tests/net-core.ss tests/net-common.ss
 git commit -m "net: complete TLS policy and session APIs"
 ```
 
@@ -408,8 +408,8 @@ git commit -m "net: complete TLS policy and session APIs"
 
 **Files:**
 - Create: `tools/check-public-api-docs.ss`
-- Modify: every changed public Scheme library under `cspp/net/`, `cspp/protobuf/`, and
-  `cspp/optional-library.ss`
+- Modify: every changed public Scheme library under `src/cspp/net/`, `src/cspp/protobuf/`, and
+  `src/cspp/optional-library.ss`
 - Create: `tests/net-docs.ss`
 - Modify: `tests/Makefile`
 
@@ -423,7 +423,7 @@ all documentation lines are <= 100 characters and reject the vague return phrase
 - [ ] **Step 2: Run and capture failures**
 
 ```bash
-./bin/cspp --script=tools/check-public-api-docs.ss -- cspp/net cspp/protobuf cspp/optional-library.ss
+./cspp --script=tools/check-public-api-docs.ss -- src/cspp/net src/cspp/protobuf src/cspp/optional-library.ss
 ```
 
 Expected before the audit: nonzero exit listing existing records/accessors and procedures whose
@@ -444,7 +444,7 @@ Every exported procedure uses meaningful parameter names and `pcheck`.
 - [ ] **Step 5: Run checker, build, and tests**
 
 ```bash
-./bin/cspp --script=tools/check-public-api-docs.ss -- cspp/net cspp/protobuf cspp/optional-library.ss
+./cspp --script=tools/check-public-api-docs.ss -- src/cspp/net src/cspp/protobuf src/cspp/optional-library.ss
 make clean && make
 cd tests && make test-some TEST='net-docs'
 ```
@@ -454,8 +454,8 @@ Expected: checker and tests exit 0 with no output.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/check-public-api-docs.ss tests/net-docs.ss tests/Makefile cspp/net \
-  cspp/protobuf cspp/optional-library.ss
+git add tools/check-public-api-docs.ss tests/net-docs.ss tests/Makefile src/cspp/net \
+  src/cspp/protobuf src/cspp/optional-library.ss
 git commit -m "net: document public records and return values"
 ```
 
@@ -588,7 +588,7 @@ Expected: loader tests pass. Scoped direct dependencies contain only libc and ex
 
 ```bash
 rg -n 'fork-thread|spawn-thread|thread-join|open-pending-notifier' \
-  cspp/net/{ftp,scp,grpc,http}.ss
+  src/cspp/net/{ftp,scp,grpc,http}.ss
 ```
 
 Expected: no matches.
@@ -597,7 +597,7 @@ Expected: no matches.
 
 ```bash
 git diff --name-only master...HEAD -- '*.ss' | \
-  xargs ./bin/cspp --script=tools/check-scheme-balance.ss --
+  xargs ./cspp --script=tools/check-scheme-balance.ss --
 ```
 
 Expected: all files have balanced parentheses.
@@ -621,7 +621,7 @@ Expected: both supplied SHA-256 values match.
 - [ ] **Step 8: Run documentation audit and inspect status**
 
 ```bash
-./bin/cspp --script=tools/check-public-api-docs.ss -- cspp/net cspp/protobuf cspp/optional-library.ss
+./cspp --script=tools/check-public-api-docs.ss -- src/cspp/net src/cspp/protobuf src/cspp/optional-library.ss
 git status --short
 ```
 

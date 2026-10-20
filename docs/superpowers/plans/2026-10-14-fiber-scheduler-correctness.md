@@ -115,7 +115,7 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `cspp net poll
 ### Task 2: Introduce Per-Run Scheduler Context and Safe Parking
 
 **Files:**
-- Modify: `cspp/concurrency/fiber.ss:35-353`
+- Modify: `src/cspp/concurrency/fiber.ss:35-353`
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -191,14 +191,14 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `cspp net poll
 - [ ] **Step 7: Commit the scheduler context change**
 
   ```sh
-  git add cspp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: park idle schedulers and isolate run contexts"
   ```
 
 ### Task 3: Define Error and Return-Value Propagation
 
 **Files:**
-- Modify: `cspp/concurrency/fiber.ss:231-353`
+- Modify: `src/cspp/concurrency/fiber.ss:231-353`
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -231,14 +231,14 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `cspp net poll
   Run `cd tests && make test fiber.ss`, then:
 
   ```sh
-  git add cspp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: propagate context errors and values"
   ```
 
 ### Task 4: Make Event Construction Immutable and Cancellation-Safe
 
 **Files:**
-- Modify: `cspp/concurrency/fiber.ss:384-545, 728-1000`
+- Modify: `src/cspp/concurrency/fiber.ss:384-545, 728-1000`
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -280,14 +280,14 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `cspp net poll
 - [ ] **Step 6: Commit event changes**
 
   ```sh
-  git add cspp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: make event selection cancellation-safe"
   ```
 
 ### Task 5: Repair Fiber Mutex and Cvar Atomicity
 
 **Files:**
-- Modify: `cspp/concurrency/fiber.ss:1004-1165`
+- Modify: `src/cspp/concurrency/fiber.ss:1004-1165`
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -332,14 +332,14 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `cspp net poll
   Run `cd tests && make test fiber.ss concurrency.ss`, then:
 
   ```sh
-  git add cspp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: fix mutex ownership and cvar wakeups"
   ```
 
 ### Task 6: Implement Scheduler-Owned Timer Events
 
 **Files:**
-- Modify: `cspp/concurrency/fiber.ss:1168-1214` and the run-context scheduler code from Task 2
+- Modify: `src/cspp/concurrency/fiber.ss:1168-1214` and the run-context scheduler code from Task 2
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -374,7 +374,7 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `cspp net poll
   Run `cd tests && make test fiber.ss net-http-fiber.ss`, then:
 
   ```sh
-  git add cspp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: add scheduler timer events"
   ```
 
@@ -432,7 +432,7 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `cspp net poll
 
   ```sh
   .chezscheme-install/bin/scheme --script /dev/stdin \
-    cspp/concurrency/fiber.ss tests/fiber.ss <<'EOF'
+    src/cspp/concurrency/fiber.ss tests/fiber.ss <<'EOF'
   (import (chezscheme))
   (for-each
    (lambda (path)

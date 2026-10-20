@@ -42,7 +42,7 @@ def run(*args, ok=True, **kwargs):
 
 
 def example(path, *args, **kwargs):
-    return run('./bin/cspp', f'--script={path}', '--', *args, **kwargs)
+    return run('./cspp', f'--script={path}', '--', *args, **kwargs)
 
 
 def reserve_port():
@@ -54,7 +54,7 @@ def reserve_port():
 @contextlib.contextmanager
 def server(script, directory, *args, with_process=False):
     port = reserve_port()
-    process = subprocess.Popen(['./bin/cspp', f'--script={script}', '--', f'--dir={directory}',
+    process = subprocess.Popen(['./cspp', f'--script={script}', '--', f'--dir={directory}',
                                 f'--port={port}', *args], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
     try:
@@ -294,7 +294,7 @@ def wget_progress():
                 thread.start()
                 path = 'redirect' if mode == 'redirect' else 'payload'
                 process = subprocess.Popen(
-                    ['./bin/cspp', '--script=examples/net/wget.ss', '--',
+                    ['./cspp', '--script=examples/net/wget.ss', '--',
                      f'--uri=http://127.0.0.1:{listener.server_port}/{path}', f'--output={output}'],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 captured = bytearray()
@@ -358,7 +358,7 @@ def wget_speed():
             thread = threading.Thread(target=listener.serve_forever, daemon=True)
             thread.start()
             process = subprocess.Popen(
-                ['./bin/cspp', '--script=examples/net/wget.ss', '--',
+                ['./cspp', '--script=examples/net/wget.ss', '--',
                  f'--uri=http://127.0.0.1:{listener.server_port}/', f'--output={output}'],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             captured = bytearray()
@@ -530,7 +530,7 @@ def h2_window():
         thread.start()
         output = Path(name) / 'output'
         process = subprocess.Popen(
-            ['./bin/cspp', '--script=examples/net/wget.ss', '--',
+            ['./cspp', '--script=examples/net/wget.ss', '--',
              f'--uri=http://127.0.0.1:{listener.getsockname()[1]}/',
              f'--output={output}', '--version=h2'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -714,7 +714,7 @@ def crypto():
         for mode, source_path in [('encrypt', race_source), ('decrypt', race_encrypted)]:
             output = directory / ('race-' + mode + '-output')
             process = subprocess.Popen(
-                ['./bin/cspp', '--script=examples/crypto/encrypt-file.ss', '--',
+                ['./cspp', '--script=examples/crypto/encrypt-file.ss', '--',
                  f'--mode={mode}', f'--input={source_path}', f'--output={output}'],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             deadline = time.monotonic() + 8
@@ -742,7 +742,7 @@ def crypto():
             assert process.returncode != 0, (mode, stdout, stderr)
             assert output.read_bytes() == marker, (mode, output.read_bytes())
         methods = ['sha256', 'md5']
-        features = Path('cspp/c/build-config.h').read_text()
+        features = Path('src/cspp/c/build-config.h').read_text()
         if '#define CSPP_WITH_XXHASH 1' in features:
             methods += ['xxhash32', 'xxhash64']
         if '#define CSPP_WITH_BLAKE3 1' in features:

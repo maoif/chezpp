@@ -19,19 +19,19 @@ test harness, and WABT 1.0.41 for development-time fixture generation and inspec
 
 ## File Map
 
-- Create `cspp/parser/wasm/types.ss`: checked public canonical records and value predicates.
-- Create `cspp/parser/wasm/opcodes.ss`: internal Core 3.0 mnemonic/opcode/immediate descriptors.
-- Create `cspp/parser/wasm/binary/values.ss`: bounded LEB128, names, bytes, and vector combinators.
-- Create `cspp/parser/wasm/binary/types.ss`: Core 3.0 binary type combinators.
-- Create `cspp/parser/wasm/binary/instructions.ss`: binary instruction and expression combinators.
-- Replace `cspp/parser/wasm/binary.ss`: bounded standard-section and module combinators.
-- Create `cspp/parser/wasm/text/lexical.ss`: WAT trivia, token, string, identifier, and number parsers.
-- Create `cspp/parser/wasm/text/types.ss`: private positioned WAT syntax records and type parsers.
-- Create `cspp/parser/wasm/text/instructions.ss`: flat and folded WAT instruction parsers.
-- Create `cspp/parser/wasm/text.ss`: one-module WAT grammar and intermediate module parser.
-- Create `cspp/parser/wasm/normalize.ss`: namespace resolution and abbreviation expansion.
-- Create `cspp/parser/wasm/validate.ss`: positioned structural issues and shared invariants.
-- Replace `cspp/parser/wasm.ss`: documented public facade and record re-exports.
+- Create `src/cspp/parser/wasm/types.ss`: checked public canonical records and value predicates.
+- Create `src/cspp/parser/wasm/opcodes.ss`: internal Core 3.0 mnemonic/opcode/immediate descriptors.
+- Create `src/cspp/parser/wasm/binary/values.ss`: bounded LEB128, names, bytes, and vector combinators.
+- Create `src/cspp/parser/wasm/binary/types.ss`: Core 3.0 binary type combinators.
+- Create `src/cspp/parser/wasm/binary/instructions.ss`: binary instruction and expression combinators.
+- Replace `src/cspp/parser/wasm/binary.ss`: bounded standard-section and module combinators.
+- Create `src/cspp/parser/wasm/text/lexical.ss`: WAT trivia, token, string, identifier, and number parsers.
+- Create `src/cspp/parser/wasm/text/types.ss`: private positioned WAT syntax records and type parsers.
+- Create `src/cspp/parser/wasm/text/instructions.ss`: flat and folded WAT instruction parsers.
+- Create `src/cspp/parser/wasm/text.ss`: one-module WAT grammar and intermediate module parser.
+- Create `src/cspp/parser/wasm/normalize.ss`: namespace resolution and abbreviation expansion.
+- Create `src/cspp/parser/wasm/validate.ss`: positioned structural issues and shared invariants.
+- Replace `src/cspp/parser/wasm.ss`: documented public facade and record re-exports.
 - Create `tests/parser-wasm.ss`: content-level positive, negative, contract, and fixture tests.
 - Modify `tests/parser.ss`: update the aggregate parser smoke test for the canonical API.
 - Modify `tests/Makefile`: include `parser-wasm.ss` in `PARSER_TESTS`.
@@ -47,7 +47,7 @@ test harness, and WABT 1.0.41 for development-time fixture generation and inspec
 
 Run: `git status --short --branch`
 
-Expected: branch `finish-parsers-1`; preserve the pre-existing untracked `cspp/c/scheme.h`,
+Expected: branch `finish-parsers-1`; preserve the pre-existing untracked `src/cspp/c/scheme.h`,
 `tests/parser-xml.stdout`, and `tests/parser-xml.stderr` files throughout implementation.
 
 - [ ] **Step 2: Run the mandatory clean baseline build**
@@ -66,8 +66,8 @@ recorded and separated from failures introduced by the WASM tasks.
 ### Task 1: Establish The Canonical Public Record Model
 
 **Files:**
-- Create: `cspp/parser/wasm/types.ss`
-- Modify: `cspp/parser/wasm.ss:1-298`
+- Create: `src/cspp/parser/wasm/types.ss`
+- Modify: `src/cspp/parser/wasm.ss:1-298`
 - Create: `tests/parser-wasm.ss`
 - Modify: `tests/Makefile:3-5`
 
@@ -193,15 +193,15 @@ Expected: exit 0; `parser-wasm.stdout` and `parser-wasm.stderr` are empty.
 - [ ] **Step 6: Commit the record model**
 
 ```bash
-git add cspp/parser/wasm/types.ss cspp/parser/wasm.ss tests/parser-wasm.ss tests/Makefile
+git add src/cspp/parser/wasm/types.ss src/cspp/parser/wasm.ss tests/parser-wasm.ss tests/Makefile
 git commit -m "wasm: define Core 3.0 parser data structures"
 ```
 
 ### Task 2: Implement Core Binary Values And Types
 
 **Files:**
-- Create: `cspp/parser/wasm/binary/values.ss`
-- Create: `cspp/parser/wasm/binary/types.ss`
+- Create: `src/cspp/parser/wasm/binary/values.ss`
+- Create: `src/cspp/parser/wasm/binary/types.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Add failing binary value and type tests**
@@ -335,7 +335,7 @@ Expected: exit 0 with empty test stdout/stderr.
 - [ ] **Step 6: Commit binary values and types**
 
 ```bash
-git add cspp/parser/wasm/binary/values.ss cspp/parser/wasm/binary/types.ss \
+git add src/cspp/parser/wasm/binary/values.ss src/cspp/parser/wasm/binary/types.ss \
   tests/parser-wasm.ss
 git commit -m "wasm: parse Core 3.0 binary values and types"
 ```
@@ -343,7 +343,7 @@ git commit -m "wasm: parse Core 3.0 binary values and types"
 ### Task 3: Define The Shared Core 3.0 Opcode Table
 
 **Files:**
-- Create: `cspp/parser/wasm/opcodes.ss`
+- Create: `src/cspp/parser/wasm/opcodes.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Add failing descriptor completeness tests**
@@ -421,14 +421,14 @@ Expected: exit 0; the explicit mnemonic list and descriptor vector agree exactly
 - [ ] **Step 5: Commit opcode metadata**
 
 ```bash
-git add cspp/parser/wasm/opcodes.ss tests/parser-wasm.ss
+git add src/cspp/parser/wasm/opcodes.ss tests/parser-wasm.ss
 git commit -m "wasm: define Core 3.0 instruction metadata"
 ```
 
 ### Task 4: Decode Scalar And Structured Binary Instructions
 
 **Files:**
-- Create: `cspp/parser/wasm/binary/instructions.ss`
+- Create: `src/cspp/parser/wasm/binary/instructions.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Add failing tests for immediate shapes and control trees**
@@ -526,14 +526,14 @@ Run: `cd tests && make test-some TEST='parser-wasm'`
 Expected: exit 0 with empty stdout/stderr.
 
 ```bash
-git add cspp/parser/wasm/binary/instructions.ss tests/parser-wasm.ss
+git add src/cspp/parser/wasm/binary/instructions.ss tests/parser-wasm.ss
 git commit -m "wasm: decode Core 3.0 scalar and control instructions"
 ```
 
 ### Task 5: Decode Core 3.0 Aggregate And Vector Instructions
 
 **Files:**
-- Modify: `cspp/parser/wasm/binary/instructions.ss`
+- Modify: `src/cspp/parser/wasm/binary/instructions.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Add failing aggregate and vector instruction tests**
@@ -583,16 +583,16 @@ Run: `cd tests && make test-some TEST='parser-wasm'`
 Expected: exit 0 with empty stdout/stderr.
 
 ```bash
-git add cspp/parser/wasm/binary/instructions.ss tests/parser-wasm.ss
+git add src/cspp/parser/wasm/binary/instructions.ss tests/parser-wasm.ss
 git commit -m "wasm: decode Core 3.0 aggregate and vector instructions"
 ```
 
 ### Task 6: Parse Every Binary Module Section
 
 **Files:**
-- Create: `cspp/parser/wasm/validate.ss`
-- Create: `cspp/parser/wasm/binary.ss`
-- Modify: `cspp/parser/wasm.ss:1-298`
+- Create: `src/cspp/parser/wasm/validate.ss`
+- Create: `src/cspp/parser/wasm/binary.ss`
+- Modify: `src/cspp/parser/wasm.ss:1-298`
 - Modify: `tests/parser-wasm.ss`
 - Modify: `tests/parser.ss:108-120`
 
@@ -684,15 +684,15 @@ Run: `cd tests && make test-some TEST='parser parser-wasm'`
 Expected: exit 0; all generated stdout/stderr files are empty.
 
 ```bash
-git add cspp/parser/wasm/validate.ss cspp/parser/wasm/binary.ss \
-  cspp/parser/wasm.ss tests/parser-wasm.ss tests/parser.ss
+git add src/cspp/parser/wasm/validate.ss src/cspp/parser/wasm/binary.ss \
+  src/cspp/parser/wasm.ss tests/parser-wasm.ss tests/parser.ss
 git commit -m "wasm: parse Core 3.0 binary modules"
 ```
 
 ### Task 7: Parse WAT Lexical Forms And Numeric Values
 
 **Files:**
-- Create: `cspp/parser/wasm/text/lexical.ss`
+- Create: `src/cspp/parser/wasm/text/lexical.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Add failing lexical tests**
@@ -752,15 +752,15 @@ Expected: exit 0 with empty stdout/stderr.
 - [ ] **Step 6: Commit the WAT lexer**
 
 ```bash
-git add cspp/parser/wasm/text/lexical.ss tests/parser-wasm.ss
+git add src/cspp/parser/wasm/text/lexical.ss tests/parser-wasm.ss
 git commit -m "wasm: parse Core 3.0 WAT lexical forms"
 ```
 
 ### Task 8: Parse WAT Types And Module Fields
 
 **Files:**
-- Create: `cspp/parser/wasm/text/types.ss`
-- Create: `cspp/parser/wasm/text.ss`
+- Create: `src/cspp/parser/wasm/text/types.ss`
+- Create: `src/cspp/parser/wasm/text.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Add failing WAT type and field tests**
@@ -825,15 +825,15 @@ Expected: exit 0 with empty stdout/stderr.
 - [ ] **Step 7: Commit WAT types and fields**
 
 ```bash
-git add cspp/parser/wasm/text/types.ss cspp/parser/wasm/text.ss tests/parser-wasm.ss
+git add src/cspp/parser/wasm/text/types.ss src/cspp/parser/wasm/text.ss tests/parser-wasm.ss
 git commit -m "wasm: parse Core 3.0 WAT types and module fields"
 ```
 
 ### Task 9: Parse Flat And Folded WAT Instructions
 
 **Files:**
-- Create: `cspp/parser/wasm/text/instructions.ss`
-- Modify: `cspp/parser/wasm/text.ss`
+- Create: `src/cspp/parser/wasm/text/instructions.ss`
+- Modify: `src/cspp/parser/wasm/text.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Add failing instruction syntax tests**
@@ -892,7 +892,7 @@ Run: `cd tests && make test-some TEST='parser-wasm'`
 Expected: exit 0 with empty stdout/stderr.
 
 ```bash
-git add cspp/parser/wasm/text/instructions.ss cspp/parser/wasm/text.ss \
+git add src/cspp/parser/wasm/text/instructions.ss src/cspp/parser/wasm/text.ss \
   tests/parser-wasm.ss
 git commit -m "wasm: parse Core 3.0 WAT instructions"
 ```
@@ -900,10 +900,10 @@ git commit -m "wasm: parse Core 3.0 WAT instructions"
 ### Task 10: Normalize WAT Into The Canonical Module
 
 **Files:**
-- Create: `cspp/parser/wasm/normalize.ss`
-- Modify: `cspp/parser/wasm/validate.ss`
-- Modify: `cspp/parser/wasm/text.ss`
-- Modify: `cspp/parser/wasm.ss`
+- Create: `src/cspp/parser/wasm/normalize.ss`
+- Modify: `src/cspp/parser/wasm/validate.ss`
+- Modify: `src/cspp/parser/wasm/text.ss`
+- Modify: `src/cspp/parser/wasm.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Add failing normalization and public API tests**
@@ -974,8 +974,8 @@ Run: `cd tests && make test-some TEST='parser-wasm'`
 Expected: exit 0 with empty stdout/stderr.
 
 ```bash
-git add cspp/parser/wasm/normalize.ss cspp/parser/wasm/validate.ss \
-  cspp/parser/wasm/text.ss cspp/parser/wasm.ss tests/parser-wasm.ss
+git add src/cspp/parser/wasm/normalize.ss src/cspp/parser/wasm/validate.ss \
+  src/cspp/parser/wasm/text.ss src/cspp/parser/wasm.ss tests/parser-wasm.ss
 git commit -m "wasm: normalize Core 3.0 WAT modules"
 ```
 
@@ -1052,18 +1052,18 @@ git commit -m "wasm: add Core 3.0 parser fixtures and integration tests"
 ### Task 12: Harden Errors, Contracts, And Resource Behavior
 
 **Files:**
-- Modify: `cspp/parser/wasm/types.ss`
-- Modify: `cspp/parser/wasm/binary/values.ss`
-- Modify: `cspp/parser/wasm/binary/types.ss`
-- Modify: `cspp/parser/wasm/binary/instructions.ss`
-- Modify: `cspp/parser/wasm/binary.ss`
-- Modify: `cspp/parser/wasm/text/lexical.ss`
-- Modify: `cspp/parser/wasm/text/types.ss`
-- Modify: `cspp/parser/wasm/text/instructions.ss`
-- Modify: `cspp/parser/wasm/text.ss`
-- Modify: `cspp/parser/wasm/normalize.ss`
-- Modify: `cspp/parser/wasm/validate.ss`
-- Modify: `cspp/parser/wasm.ss`
+- Modify: `src/cspp/parser/wasm/types.ss`
+- Modify: `src/cspp/parser/wasm/binary/values.ss`
+- Modify: `src/cspp/parser/wasm/binary/types.ss`
+- Modify: `src/cspp/parser/wasm/binary/instructions.ss`
+- Modify: `src/cspp/parser/wasm/binary.ss`
+- Modify: `src/cspp/parser/wasm/text/lexical.ss`
+- Modify: `src/cspp/parser/wasm/text/types.ss`
+- Modify: `src/cspp/parser/wasm/text/instructions.ss`
+- Modify: `src/cspp/parser/wasm/text.ss`
+- Modify: `src/cspp/parser/wasm/normalize.ss`
+- Modify: `src/cspp/parser/wasm/validate.ss`
+- Modify: `src/cspp/parser/wasm.ss`
 - Modify: `tests/parser-wasm.ss`
 
 - [ ] **Step 1: Audit public documentation and type checks**
@@ -1107,7 +1107,7 @@ Expected: both commands exit 0; every generated `.stdout` and `.stderr` file is 
 - [ ] **Step 6: Commit hardening changes**
 
 ```bash
-git add cspp/parser/wasm.ss cspp/parser/wasm tests/parser-wasm.ss
+git add src/cspp/parser/wasm.ss src/cspp/parser/wasm tests/parser-wasm.ss
 git commit -m "wasm: harden parser errors and public contracts"
 ```
 
@@ -1122,12 +1122,12 @@ Run:
 
 ```bash
 python3 ../../check_parentheses.py \
-  cspp/parser/wasm.ss cspp/parser/wasm/types.ss cspp/parser/wasm/opcodes.ss \
-  cspp/parser/wasm/binary/values.ss cspp/parser/wasm/binary/types.ss \
-  cspp/parser/wasm/binary/instructions.ss cspp/parser/wasm/binary.ss \
-  cspp/parser/wasm/text/lexical.ss cspp/parser/wasm/text/types.ss \
-  cspp/parser/wasm/text/instructions.ss cspp/parser/wasm/text.ss \
-  cspp/parser/wasm/normalize.ss cspp/parser/wasm/validate.ss \
+  src/cspp/parser/wasm.ss src/cspp/parser/wasm/types.ss src/cspp/parser/wasm/opcodes.ss \
+  src/cspp/parser/wasm/binary/values.ss src/cspp/parser/wasm/binary/types.ss \
+  src/cspp/parser/wasm/binary/instructions.ss src/cspp/parser/wasm/binary.ss \
+  src/cspp/parser/wasm/text/lexical.ss src/cspp/parser/wasm/text/types.ss \
+  src/cspp/parser/wasm/text/instructions.ss src/cspp/parser/wasm/text.ss \
+  src/cspp/parser/wasm/normalize.ss src/cspp/parser/wasm/validate.ss \
   tests/parser-wasm.ss tests/parser.ss
 ```
 
@@ -1181,7 +1181,7 @@ implementation commits follow the subsystem commit-message format.
 If a verification-only correction was necessary, commit it separately:
 
 ```bash
-git add cspp/parser/wasm.ss cspp/parser/wasm tests/parser-wasm.ss tests/parser.ss \
+git add src/cspp/parser/wasm.ss src/cspp/parser/wasm tests/parser-wasm.ss tests/parser.ss \
   tests/Makefile tests/data/example.wasm tests/data/fibonacci.wasm \
   tests/data/wasm-core3.wat tests/data/wasm-core3.wasm
 git commit -m "wasm: fix final Core 3.0 parser verification issues"

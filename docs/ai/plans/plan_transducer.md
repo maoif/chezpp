@@ -40,7 +40,7 @@ Private/internal libraries, if the implementation grows:
 
 Compatibility entrypoint:
 
-- `cspp.ss` should import and export `(cspp transducer)` after the library is
+- `src/cspp.ss` should import and export `(cspp transducer)` after the library is
   implemented and tested.
 
 

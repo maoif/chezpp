@@ -87,15 +87,15 @@ For sub-agent execution, only spwan one agent at a one.
 
 ## Build cspp
 
-When a new lib is finished under `cspp/`, add an import entry
-in `cspp.ss` so it can be automatically compiled when compiling
-`cspp.ss`.
+When a new lib is finished under `src/cspp/`, add an import entry
+in `src/cspp.ss` so it can be automatically compiled when compiling
+`src/cspp.ss`.
 
-C code should be put under `cspp/c/`.
+C code should be put under `src/cspp/c/`.
 
 In project root directory, **always** run `make clean && make` to build project.
 Run `make run` to enter the CSPP REPL, or alternatively,
-run the `bin/cspp` script.
+run the `cspp` script.
 
 By default, `make` is equal to `make release`.
 `make debug` and `make coverage` is also available.
@@ -175,27 +175,27 @@ Always comment the use of `call/cc` using `;;`.
 
 ## About some files
 
-`cspp.ss`:
+`src/cspp.ss`:
 this is the main file through which users can import the entirety of cspp and the ChezScheme compiler can
 recursively compile all cspp libs imported when just compiling this file (when `(compile-imported-libraries #t)`
 is set).
 
-When a new lib is written under `cspp/`, say, `new-lib`, its import entry can be added in `cspp.ss`
+When a new lib is written under `src/cspp/`, say, `new-lib`, its import entry can be added in `src/cspp.ss`
 as `(cspp new-lib)`.
 
 Specifically, `(cspp concurrency fiber)` and `(cspp parser combinator)` are two *experimental* libs that
 are imported but NOT exported, just so they can be compiled when building cspp. A consequence of this is
 that their wpo (whole program optimization) files have to be seperately fed into `compile-whole-library` in
-`Makefile` and the resulting `fiber.lib` and `combinator.lib` have to be seperately loaded in `cspp.ss` for
+`Makefile` and the resulting `fiber.lib` and `combinator.lib` have to be seperately loaded in `src/cspp.ss` for
 them to be used.
 
-`cspp.ss`:
+`src/cspp.ss`:
 this file is convenience wrapper that just loads `cspp.lib` and other experimental libs for `cspp` to use.
 
 `cspp`:
-a shell script that use ssystem ChezScheme executable to load `cspp.ss` and thus making cspp available to users.
+a shell script that uses the system ChezScheme executable to load `src/cspp.ss` and make CSPP available.
 
-You as an agent usually do not have to modify `cspp.ss` and `bin/cspp`.
+You as an agent usually do not have to modify `src/cspp.ss` and `cspp`.
 
 
 ## Bytevector APIs

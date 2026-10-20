@@ -5,7 +5,7 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_root"
 
-make --no-print-directory -W cspp.ss cspp.lib >/dev/null
+make --no-print-directory -W src/cspp.ss cspp.lib >/dev/null
 test -s cspp.lib
 test "$(./.chezscheme-install/bin/scheme --version 2>&1)" = '10.4.1'
 
@@ -13,7 +13,7 @@ test "$(./.chezscheme-install/bin/scheme --version 2>&1)" = '10.4.1'
 (import (chezscheme))
 
 (define expected-version '(0 0 0 10 4 1))
-(call-with-input-file "cspp.ss"
+(call-with-input-file "src/cspp.ss"
   (lambda (port)
     (let ([declaration (read port)])
       (unless (and (eq? (car declaration) 'library)

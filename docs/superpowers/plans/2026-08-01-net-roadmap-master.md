@@ -57,39 +57,39 @@ Execute these plans in order. Do not start a later plan until the prior release 
 ### Build And Shared Runtime
 
 - Modify: `Makefile`
-- Modify: `cspp.ss`
-- Modify: `cspp/net.ss`
+- Modify: `src/cspp.ss`
+- Modify: `src/cspp/net.ss`
 - Modify: `tests/Makefile`
 - Modify: `Makefile` to include the `scheme.h` beside the selected ChezScheme runtime.
-- Create: `cspp/c/optional_library.h`
-- Create: `cspp/c/optional_library.c`
-- Create: `cspp/optional-library.ss`
-- Create: `cspp/net/operation.ss`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/private.ss`
+- Create: `src/cspp/c/optional_library.h`
+- Create: `src/cspp/c/optional_library.c`
+- Create: `src/cspp/optional-library.ss`
+- Create: `src/cspp/net/operation.ss`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/private.ss`
 
 ### Native Protocol Shims
 
-- Modify: `cspp/c/crypto.c`
-- Modify: `cspp/c/digest.c`
-- Modify: `cspp/c/optional_hash.c`
-- Modify: `cspp/c/net/ftp.c`
-- Modify: `cspp/c/net/grpc.c`
-- Modify: `cspp/c/net/poll.c`
-- Modify: `cspp/c/net/socket.c`
-- Modify: `cspp/c/net/ssh.c`
-- Modify: `cspp/c/net/tls.c`
-- Modify: `cspp/c/net/websocket.c`
-- Create: `cspp/c/net/dns.c`
-- Create: `cspp/c/net/http2.c`
-- Create: `cspp/c/net/idna.c`
+- Modify: `src/cspp/c/crypto.c`
+- Modify: `src/cspp/c/digest.c`
+- Modify: `src/cspp/c/optional_hash.c`
+- Modify: `src/cspp/c/net/ftp.c`
+- Modify: `src/cspp/c/net/grpc.c`
+- Modify: `src/cspp/c/net/poll.c`
+- Modify: `src/cspp/c/net/socket.c`
+- Modify: `src/cspp/c/net/ssh.c`
+- Modify: `src/cspp/c/net/tls.c`
+- Modify: `src/cspp/c/net/websocket.c`
+- Create: `src/cspp/c/net/dns.c`
+- Create: `src/cspp/c/net/http2.c`
+- Create: `src/cspp/c/net/idna.c`
 
 ### Scheme Protocol Libraries
 
-- Modify every library under `cspp/net/` listed in the Follow-Up Roadmap.
-- Create: `cspp/protobuf.ss`
-- Create: `cspp/protobuf/descriptor.ss`
-- Create: `cspp/protobuf/wire.ss`
+- Modify every library under `src/cspp/net/` listed in the Follow-Up Roadmap.
+- Create: `src/cspp/protobuf.ss`
+- Create: `src/cspp/protobuf/descriptor.ss`
+- Create: `src/cspp/protobuf/wire.ss`
 - Create: `tools/protoc-gen-cspp.ss`
 
 ### Tests And Examples
@@ -117,7 +117,7 @@ Run:
 ```bash
 git rev-parse --show-toplevel
 git branch --show-current
-git -C /home/maoif/SSD/Projects/cspp status --short -- cspp/c/scheme.h examples/net
+git -C /home/maoif/SSD/Projects/cspp status --short -- src/cspp/c/scheme.h examples/net
 ```
 
 Expected: the current branch is the implementation branch created from `net-hardening-plan`. The
@@ -130,7 +130,7 @@ Run from the implementation worktree:
 
 ```bash
 mkdir -p examples/net
-cp -a /home/maoif/SSD/Projects/cspp/examples/net/. examples/net/
+cp -a /home/maoif/SSD/Projects/src/cspp/examples/net/. examples/net/
 ```
 
 Expected: `git status --short` lists only `examples/net/` before phase-specific edits.
@@ -184,7 +184,7 @@ Create `tools/check-scheme-balance.ss`:
 Run it against representative library files:
 
 ```bash
-scheme --script tools/check-scheme-balance.ss cspp/net/http.ss cspp/net/grpc.ss
+scheme --script tools/check-scheme-balance.ss src/cspp/net/http.ss src/cspp/net/grpc.ss
 ```
 
 Expected: exit 0. The Scheme reader reports unbalanced delimiters and unterminated strings/comments
@@ -248,8 +248,8 @@ scheduler-neutral loop is:
      (loop operation)]))
 ```
 
-No phase may reintroduce `fork-thread` into `cspp/net/ftp.ss`, `cspp/net/scp.ss`,
-`cspp/net/grpc.ss`, or `cspp/net/http.ss`.
+No phase may reintroduce `fork-thread` into `src/cspp/net/ftp.ss`, `src/cspp/net/scp.ss`,
+`src/cspp/net/grpc.ss`, or `src/cspp/net/http.ss`.
 
 ## Commit Policy
 

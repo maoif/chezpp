@@ -9,17 +9,17 @@
 (mat net-public-api-documentation
      (= 0
         (system
-         "../bin/cspp --script=../tools/check-public-api-docs.ss \
-../cspp/net ../cspp/protobuf ../cspp/optional-library.ss >/dev/null 2>&1")))
+         "../cspp --script=../tools/check-public-api-docs.ss \
+../src/cspp/net ../src/cspp/protobuf ../src/cspp/optional-library.ss >/dev/null 2>&1")))
 
 (mat reviewed-data-structure-documentation
      (= 0
         (system
-         "../bin/cspp --script=../tools/check-public-api-docs.ss \
-../cspp/array.ss ../cspp/bittree.ss ../cspp/bitvec.ss ../cspp/dlist.ss \
-../cspp/dset.ss ../cspp/hashset.ss ../cspp/heap.ss ../cspp/list.ss \
-../cspp/queue.ss ../cspp/stack.ss ../cspp/treeset.ss ../cspp/treemap.ss \
-../cspp/vector.ss ../cspp/string.ss >/dev/null 2>&1")))
+         "../cspp --script=../tools/check-public-api-docs.ss \
+../src/cspp/array.ss ../src/cspp/bittree.ss ../src/cspp/bitvec.ss ../src/cspp/dlist.ss \
+../src/cspp/dset.ss ../src/cspp/hashset.ss ../src/cspp/heap.ss ../src/cspp/list.ss \
+../src/cspp/queue.ss ../src/cspp/stack.ss ../src/cspp/treeset.ss ../src/cspp/treemap.ss \
+../src/cspp/vector.ss ../src/cspp/string.ss >/dev/null 2>&1")))
 
 (mat net-public-api-documentation-errors
      ;; Error cases: detached documentation, an overlong line, and vague return wording are rejected.
@@ -48,7 +48,7 @@
            (let* ([status
                    (system
                     (format
-                     "../bin/cspp --script=../tools/check-public-api-docs.ss ~a >~a 2>&1"
+                     "../cspp --script=../tools/check-public-api-docs.ss ~a >~a 2>&1"
                      fixture output))]
                   [diagnostics (read-text-file output)])
              (and (not (= status 0))

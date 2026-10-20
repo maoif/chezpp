@@ -14,7 +14,7 @@
 make clean && make
 cd tests && make test-some TEST='net-ssh'
 cd ..
-scheme --script tools/check-scheme-balance.ss cspp/net/ssh.ss tests/net-ssh.ss
+scheme --script tools/check-scheme-balance.ss src/cspp/net/ssh.ss tests/net-ssh.ss
 ```
 
 The SSH test captures were empty. The installed libssh headers expose `ssh_send_keepalive` only in

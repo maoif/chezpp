@@ -845,7 +845,7 @@
      ;; Error case: reading stdin before announcing readiness deadlocks the shared console port.
      (let-values ([(input output errors pid)
                    (open-process-ports
-                    "timeout 5s ../bin/cspp --script=net-ftp-startup-process.ss /tmp/cspp-ftp-startup"
+                    "timeout 5s ../cspp --script=net-ftp-startup-process.ss /tmp/cspp-ftp-startup"
                     (buffer-mode block) (native-transcoder))])
        (dynamic-wind
          void

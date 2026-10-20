@@ -26,7 +26,7 @@
       (write-bytevector-file (string-append root "/slow/wait.txt") (string->utf8 "slow file"))
       (let-values ([(to-stdin from-stdout from-stderr pid)
                     (open-process-ports
-                     (format "../bin/cspp --script=net-ftp-server-process.ss ~s" root)
+                     (format "../cspp --script=net-ftp-server-process.ss ~s" root)
                      (buffer-mode block)
                      (native-transcoder))])
         (let ([port

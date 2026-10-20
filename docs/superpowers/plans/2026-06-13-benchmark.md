@@ -4,9 +4,9 @@
 
 **Goal:** Build `(cspp benchmark)` as an in-process benchmark definition, execution, reporting, baseline, and comparison library.
 
-**Current status:** Implemented. `(cspp benchmark)` is imported by `cspp.ss`, covered by `tests/benchmark.ss`, and demonstrated by `examples/benchmark.ss`. The original v1 core is complete, and several v2 items are also implemented: aligned text output, a customizable Rich table reporter, CSV/JSON reporters, Scheme-data baselines, comparison helpers, confidence intervals, measured pause/resume subtraction, baseline error round-tripping, and JSON safety fixes.
+**Current status:** Implemented. `(cspp benchmark)` is imported by `src/cspp.ss`, covered by `tests/benchmark.ss`, and demonstrated by `examples/benchmark.ss`. The original v1 core is complete, and several v2 items are also implemented: aligned text output, a customizable Rich table reporter, CSV/JSON reporters, Scheme-data baselines, comparison helpers, confidence intervals, measured pause/resume subtraction, baseline error round-tripping, and JSON safety fixes.
 
-**Architecture:** The library lives in `cspp/benchmark.ss` as a single public library split by internal comment sections for records, option parsing, expansion, runner, summaries, reporters, baselines, comparisons, and macros. The runner uses Chez `statistics`/`sstats-difference` and `black-box`, returns structured records, and keeps cost-center-specific instrumentation deferred. Text and Rich reporters share internal result formatting helpers, with Rich output rendered through `(cspp rich)`.
+**Architecture:** The library lives in `src/cspp/benchmark.ss` as a single public library split by internal comment sections for records, option parsing, expansion, runner, summaries, reporters, baselines, comparisons, and macros. The runner uses Chez `statistics`/`sstats-difference` and `black-box`, returns structured records, and keeps cost-center-specific instrumentation deferred. Text and Rich reporters share internal result formatting helpers, with Rich output rendered through `(cspp rich)`.
 
 **Tech Stack:** ChezScheme libraries, Chez records, Chez `statistics`, `black-box`, CSPP `pcheck`, existing `mat` test harness, `make clean && make`, and `tests/make test-some`.
 
@@ -16,7 +16,7 @@
 
 ### Implemented Core
 
-- Public library `(cspp benchmark)` imported from `cspp.ss`.
+- Public library `(cspp benchmark)` imported from `src/cspp.ss`.
 - Opaque records and public accessors for benchmark descriptors, fixtures, suites, states, samples, results, configs, and reporters.
 - Procedural registration APIs with a parameterized default registry.
 - Macro APIs for `define-benchmark`, `define-benchmark-fixture`, `define-fixture-benchmark`, `define-benchmark-suite`, `define-benchmark-template`, `instantiate-benchmark-template`, and `benchmark-options`.
@@ -44,8 +44,8 @@
 
 - Create `tests/benchmark.ss`: deterministic tests for descriptors, option parsing, expansion, lifecycle, runner output shape, reporters, and error capture.
 - Modify `tests/Makefile`: add `benchmark.ss` to `SRCS_TEST`.
-- Modify `cspp/benchmark.ss`: replace the empty shell with the full public implementation.
-- Modify `cspp.ss`: import/export `(cspp benchmark)` from the aggregate CSPP library.
+- Modify `src/cspp/benchmark.ss`: replace the empty shell with the full public implementation.
+- Modify `src/cspp.ss`: import/export `(cspp benchmark)` from the aggregate CSPP library.
 - Create `examples/benchmark.ss`: runnable console example for multiple inputs, templates, fixtures, suites, reporters, and comparisons.
 - Keep implementation in one file for v1. Split into `(cspp benchmark core)`, `(cspp benchmark runner)`, `(cspp benchmark reporter)`, and `(cspp benchmark syntax)` only if the file becomes hard to maintain after v1.
 
@@ -247,11 +247,11 @@ Historical red-step result: compilation failed because `(cspp benchmark)` did no
 ### Task 2: Core Records, Configs, Registry, And Options
 
 **Files:**
-- Modify: `cspp/benchmark.ss`
+- Modify: `src/cspp/benchmark.ss`
 
 - [x] **Step 1: Implement public exports, records, accessors, constructors, registry, and option parsing**
 
-Replace `cspp/benchmark.ss` with a full library exporting the v1 API. Implement records with stable public accessors and internal `$` constructors. Use public documentation comments immediately above exported procedures and macros. Use `pcheck` on public procedures.
+Replace `src/cspp/benchmark.ss` with a full library exporting the v1 API. Implement records with stable public accessors and internal `$` constructors. Use public documentation comments immediately above exported procedures and macros. Use `pcheck` on public procedures.
 
 Core record fields:
 
@@ -313,7 +313,7 @@ Historical red-step result: constructor and predicate errors were gone, while ma
 ### Task 3: Macros And Argument Expansion
 
 **Files:**
-- Modify: `cspp/benchmark.ss`
+- Modify: `src/cspp/benchmark.ss`
 
 - [x] **Step 1: Implement option macros**
 
@@ -393,7 +393,7 @@ Historical red-step result: expansion and registry tests passed, while runner/re
 ### Task 4: Runner, Lifecycle, Summaries, And Reporters
 
 **Files:**
-- Modify: `cspp/benchmark.ss`
+- Modify: `src/cspp/benchmark.ss`
 
 - [x] **Step 1: Implement measurement helpers**
 
@@ -443,20 +443,20 @@ Expected: benchmark tests pass with empty stdout/stderr except the test harness 
 ### Task 5: Aggregate Import, Build, Parentheses, And Final Verification
 
 **Files:**
-- Modify: `cspp.ss`
-- Modify: `cspp/benchmark.ss`
+- Modify: `src/cspp.ss`
+- Modify: `src/cspp/benchmark.ss`
 - Modify: `tests/benchmark.ss`
 
 - [x] **Step 1: Add aggregate import**
 
-Add `(cspp benchmark)` to the `cspp.ss` export import list near `logging`.
+Add `(cspp benchmark)` to the `src/cspp.ss` export import list near `logging`.
 
 - [x] **Step 2: Check Scheme parentheses**
 
 Run:
 
 ```bash
-python3 check_parentheses.py cspp/benchmark.ss tests/benchmark.ss
+python3 check_parentheses.py src/cspp/benchmark.ss tests/benchmark.ss
 ```
 
 Expected: balanced parentheses reported for both files, or no error output depending on script behavior.
@@ -486,7 +486,7 @@ Expected: exit 0 and no `Bug` or `Error` output.
 Run:
 
 ```bash
-git diff -- docs/superpowers/specs/2026-06-10-benchmark-design.md docs/superpowers/plans/2026-06-13-benchmark.md cspp/benchmark.ss cspp.ss tests/Makefile tests/benchmark.ss
+git diff -- docs/superpowers/specs/2026-06-10-benchmark-design.md docs/superpowers/plans/2026-06-13-benchmark.md src/cspp/benchmark.ss src/cspp.ss tests/Makefile tests/benchmark.ss
 ```
 
 Expected: roadmap v1/v2 is explicit in the plan, benchmark APIs are documented and exported, implementation matches v1 scope, and unrelated files are untouched.
@@ -496,7 +496,7 @@ Expected: roadmap v1/v2 is explicit in the plan, benchmark APIs are documented a
 ### Current Status Update: Follow-Up Work Completed
 
 **Files:**
-- Modified: `cspp/benchmark.ss`
+- Modified: `src/cspp/benchmark.ss`
 - Modified: `tests/benchmark.ss`
 - Created: `examples/benchmark.ss`
 
@@ -525,11 +525,11 @@ Baseline files still use version `1`. New files serialize benchmark errors as st
 Fresh verification used during the latest updates:
 
 ```bash
-python3 check_parentheses.py cspp/benchmark.ss tests/benchmark.ss
+python3 check_parentheses.py src/cspp/benchmark.ss tests/benchmark.ss
 python3 check_parentheses.py examples/benchmark.ss
 make clean && make
 cd tests && make test-some TEST='benchmark'
-./bin/cspp -q --script=examples/benchmark.ss --
+./cspp -q --script=examples/benchmark.ss --
 ```
 
 ---
@@ -537,7 +537,7 @@ cd tests && make test-some TEST='benchmark'
 ### Current Status Update: Rich And Text Reporter Follow-Up
 
 **Files:**
-- Modified and committed: `cspp/benchmark.ss`
+- Modified and committed: `src/cspp/benchmark.ss`
 - Modified and committed: `tests/benchmark.ss`
 - Modified locally by request, not committed: `examples/benchmark.ss`
 
@@ -558,11 +558,11 @@ cd tests && make test-some TEST='benchmark'
 Fresh verification used for the reporter updates:
 
 ```bash
-python3 check_parentheses.py cspp/benchmark.ss tests/benchmark.ss
+python3 check_parentheses.py src/cspp/benchmark.ss tests/benchmark.ss
 make clean && make
 cd tests && make clean && make test-some TEST='benchmark'
 python3 check_parentheses.py examples/benchmark.ss
-./bin/cspp -q --script=examples/benchmark.ss --
+./cspp -q --script=examples/benchmark.ss --
 ```
 
 ---
@@ -571,4 +571,4 @@ python3 check_parentheses.py examples/benchmark.ss
 
 - Spec coverage: v1 core is covered by Tasks 1-5. Implemented v2 follow-up work is captured in the current status updates. Remaining deferred work is limited to optional JSON baseline format, cost-center instrumentation, and deeper deterministic pause/resume tests.
 - Placeholder scan: no `TBD`, `TODO`, or unspecified implementation steps remain in this plan.
-- Type consistency: public names in tests match the names exported by `cspp/benchmark.ss`; config and result accessors match the design document.
+- Type consistency: public names in tests match the names exported by `src/cspp/benchmark.ss`; config and result accessors match the design document.

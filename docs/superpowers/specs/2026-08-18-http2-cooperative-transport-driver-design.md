@@ -196,9 +196,9 @@ the experimental HTTP/2 server implementation remain unchanged.
 
 ## File Boundaries
 
-- `cspp/c/net/http2.c` queries the peer's current maximum concurrent-stream setting.
-- `cspp/c/nghttp2_loader.c` loads the required nghttp2 remote-settings symbol.
-- `cspp/net/ffi.ss` binds the new internal C query.
-- `cspp/net/http2.ss` wraps the query for the internal HTTP client.
-- `cspp/net/http.ss` owns request states, scheduling, cancellation, and connection failure.
+- `src/cspp/c/net/http2.c` queries the peer's current maximum concurrent-stream setting.
+- `src/cspp/c/nghttp2_loader.c` loads the required nghttp2 remote-settings symbol.
+- `src/cspp/net/ffi.ss` binds the new internal C query.
+- `src/cspp/net/http2.ss` wraps the query for the internal HTTP client.
+- `src/cspp/net/http.ss` owns request states, scheduling, cancellation, and connection failure.
 - `tests/net-http.ss` contains scheduler and multiplexing regression mats.

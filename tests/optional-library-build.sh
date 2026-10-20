@@ -12,7 +12,7 @@ mkdir -p "$fixture_project" "$fixture_directory/include"
 tar -C "$project_root" --exclude=.git --exclude=.worktrees --exclude=.superpowers \
     --exclude='*.so' --exclude='*.wpo' --exclude='*.lib' --exclude='*.covin' \
     --exclude='*.covout' --exclude='*.stdout' --exclude='*.stderr' \
-    --exclude=cspp --exclude=cspp.ss --exclude=.cspp-build-options \
+    --exclude=./cspp --exclude=.cspp-build-options \
     --exclude=.cspp-native-options.mk --exclude=build-config.h -cf - . | \
   tar -C "$fixture_project" -xf -
 

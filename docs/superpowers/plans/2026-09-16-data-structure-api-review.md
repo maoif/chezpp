@@ -57,16 +57,16 @@ existing public-documentation checker in `tools/check-public-api-docs.ss`.
 ### Task 1: Normalize size, membership, and deletion contracts
 
 **Files:**
-- Modify: `cspp/array.ss`
-- Modify: `cspp/dlist.ss`
-- Modify: `cspp/queue.ss`
-- Modify: `cspp/heap.ss`
-- Modify: `cspp/hashset.ss`
-- Modify: `cspp/treeset.ss`
-- Modify: `cspp/treemap.ss`
-- Modify: `cspp/bitvec.ss`
-- Modify: `cspp/bittree.ss`
-- Modify: `cspp/concurrency/fiber.ss`
+- Modify: `src/cspp/array.ss`
+- Modify: `src/cspp/dlist.ss`
+- Modify: `src/cspp/queue.ss`
+- Modify: `src/cspp/heap.ss`
+- Modify: `src/cspp/hashset.ss`
+- Modify: `src/cspp/treeset.ss`
+- Modify: `src/cspp/treemap.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/bittree.ss`
+- Modify: `src/cspp/concurrency/fiber.ss`
 - Modify: `tests/array.ss`
 - Modify: `tests/dlist.ss`
 - Modify: `tests/queue.ss`
@@ -106,7 +106,7 @@ existing public-documentation checker in `tools/check-public-api-docs.ss`.
 ```
 
 Update all existing `array-length`/`dlist-length` assertions to the new names in the
-same test files and in `cspp/concurrency/fiber.ss`.
+same test files and in `src/cspp/concurrency/fiber.ss`.
 
 - [ ] **Step 2: Run the focused tests and verify the old API failures are visible.**
 
@@ -156,19 +156,19 @@ git commit -m "data-structure: normalize sizes and membership contracts"
 ### Task 2: Add and consume the iter source-adapter registry
 
 **Files:**
-- Modify: `cspp/iter.ss`
-- Modify: `cspp/transducer.ss`
-- Modify: `cspp/array.ss`
-- Modify: `cspp/dlist.ss`
-- Modify: `cspp/queue.ss`
-- Modify: `cspp/stack.ss`
-- Modify: `cspp/heap.ss`
-- Modify: `cspp/hashset.ss`
-- Modify: `cspp/treeset.ss`
-- Modify: `cspp/treemap.ss`
-- Modify: `cspp/bitvec.ss`
-- Modify: `cspp/bittree.ss`
-- Modify: `cspp/dset.ss`
+- Modify: `src/cspp/iter.ss`
+- Modify: `src/cspp/transducer.ss`
+- Modify: `src/cspp/array.ss`
+- Modify: `src/cspp/dlist.ss`
+- Modify: `src/cspp/queue.ss`
+- Modify: `src/cspp/stack.ss`
+- Modify: `src/cspp/heap.ss`
+- Modify: `src/cspp/hashset.ss`
+- Modify: `src/cspp/treeset.ss`
+- Modify: `src/cspp/treemap.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/bittree.ss`
+- Modify: `src/cspp/dset.ss`
 - Modify: `tests/iter.ss`
 - Modify: `tests/transducer.ss`
 
@@ -205,7 +205,7 @@ Run: `make -C tests test-some TEST='iter transducer'`
 
 Expected: FAIL because `source->iter` and `transducible?` reject custom sources.
 
-- [ ] **Step 3: Implement the registry in `cspp/iter.ss`.** Store newest registrations
+- [ ] **Step 3: Implement the registry in `src/cspp/iter.ss`.** Store newest registrations
   first, validate both procedures with `pcheck`, provide a private lookup procedure, and
   document the public registration procedure. Keep built-in conversion procedures
   unchanged and make `source->iter` call the registered maker only after built-in cases.
@@ -253,16 +253,16 @@ git commit -m "iter: register custom data-structure sources"
 ### Task 3: Expose navigator extension APIs and self-register adapters
 
 **Files:**
-- Modify: `cspp/navigator/private/data.ss`
-- Modify: `cspp/navigator/private/basic.ss`
-- Modify: `cspp/navigator.ss`
-- Modify: `cspp/array.ss`
-- Modify: `cspp/dlist.ss`
-- Modify: `cspp/hashset.ss`
-- Modify: `cspp/treeset.ss`
-- Modify: `cspp/treemap.ss`
-- Modify: `cspp/bitvec.ss`
-- Modify: `cspp/bittree.ss`
+- Modify: `src/cspp/navigator/private/data.ss`
+- Modify: `src/cspp/navigator/private/basic.ss`
+- Modify: `src/cspp/navigator.ss`
+- Modify: `src/cspp/array.ss`
+- Modify: `src/cspp/dlist.ss`
+- Modify: `src/cspp/hashset.ss`
+- Modify: `src/cspp/treeset.ss`
+- Modify: `src/cspp/treemap.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/bittree.ss`
 - Modify: `tests/navigator.ss`
 
 **Interfaces:**
@@ -364,8 +364,8 @@ git commit -m "navigator: register data structures with set protocol"
 ### Task 4: Complete bit-set algebra and bounds APIs
 
 **Files:**
-- Modify: `cspp/bitvec.ss`
-- Modify: `cspp/bittree.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/bittree.ss`
 - Modify: `tests/bitvec.ss`
 - Modify: `tests/bittree.ss`
 
@@ -420,7 +420,7 @@ git commit -m "bitset: expose bounds and align sparse algebra"
 ### Task 5: Review and complete the string library
 
 **Files:**
-- Modify: `cspp/string.ss`
+- Modify: `src/cspp/string.ss`
 - Modify: `tests/string.ss`
 
 **Interfaces:**
@@ -438,7 +438,7 @@ git commit -m "bitset: expose bounds and align sparse algebra"
 - Documents all four traversal/mapping procedures, `string-split`, search, containment,
   prefix/suffix, empty, and trim procedures with the repository's required tags and parameter
   meanings.
-- Keeps character operations in ChezScheme; does not create `cspp/char.ss`.
+- Keeps character operations in ChezScheme; does not create `src/cspp/char.ss`.
 - Preserves current search conventions (`#f` when no match; overlapping matches for
   `string-search-all`) and accepts either a character or non-empty string pattern where
   currently documented.
@@ -502,34 +502,34 @@ the old `#|doc` blocks.
 
 Run: `make -C tests test-some TEST='string'`
 
-Run: `scheme --script tools/check-public-api-docs.ss cspp/string.ss`
+Run: `scheme --script tools/check-public-api-docs.ss src/cspp/string.ss`
 
 Expected: PASS with no string documentation diagnostics.
 
 - [ ] **Step 6: Commit the string review.**
 
 ```bash
-git add cspp/string.ss tests/string.ss
+git add src/cspp/string.ss tests/string.ss
 git commit -m "string: complete edit distance and public API docs"
 ```
 
 ### Task 6: Normalize public documentation across the reviewed data structures
 
 **Files:**
-- Modify: `cspp/array.ss`
-- Modify: `cspp/bittree.ss`
-- Modify: `cspp/bitvec.ss`
-- Modify: `cspp/dlist.ss`
-- Modify: `cspp/dset.ss`
-- Modify: `cspp/hashset.ss`
-- Modify: `cspp/heap.ss`
-- Modify: `cspp/list.ss`
-- Modify: `cspp/queue.ss`
-- Modify: `cspp/stack.ss`
-- Modify: `cspp/treeset.ss`
-- Modify: `cspp/treemap.ss`
-- Modify: `cspp/vector.ss`
-- Modify: `cspp/string.ss`
+- Modify: `src/cspp/array.ss`
+- Modify: `src/cspp/bittree.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/dlist.ss`
+- Modify: `src/cspp/dset.ss`
+- Modify: `src/cspp/hashset.ss`
+- Modify: `src/cspp/heap.ss`
+- Modify: `src/cspp/list.ss`
+- Modify: `src/cspp/queue.ss`
+- Modify: `src/cspp/stack.ss`
+- Modify: `src/cspp/treeset.ss`
+- Modify: `src/cspp/treemap.ss`
+- Modify: `src/cspp/vector.ss`
+- Modify: `src/cspp/string.ss`
 - Modify: `tests/net-docs.ss`
 
 **Interfaces:**
@@ -544,10 +544,10 @@ Run:
 
 ```bash
 scheme --script tools/check-public-api-docs.ss \
-  cspp/array.ss cspp/bittree.ss cspp/bitvec.ss cspp/dlist.ss \
-  cspp/dset.ss cspp/hashset.ss cspp/heap.ss cspp/list.ss \
-  cspp/queue.ss cspp/stack.ss cspp/treeset.ss cspp/treemap.ss \
-  cspp/vector.ss cspp/string.ss
+  src/cspp/array.ss src/cspp/bittree.ss src/cspp/bitvec.ss src/cspp/dlist.ss \
+  src/cspp/dset.ss src/cspp/hashset.ss src/cspp/heap.ss src/cspp/list.ss \
+  src/cspp/queue.ss src/cspp/stack.ss src/cspp/treeset.ss src/cspp/treemap.ss \
+  src/cspp/vector.ss src/cspp/string.ss
 ```
 
 Save the command output in the terminal only; do not add a generated report file.
@@ -567,10 +567,10 @@ Run:
 
 ```bash
 scheme --script tools/check-public-api-docs.ss \
-  cspp/array.ss cspp/bittree.ss cspp/bitvec.ss cspp/dlist.ss \
-  cspp/dset.ss cspp/hashset.ss cspp/heap.ss cspp/list.ss \
-  cspp/queue.ss cspp/stack.ss cspp/treeset.ss cspp/treemap.ss \
-  cspp/vector.ss cspp/string.ss
+  src/cspp/array.ss src/cspp/bittree.ss src/cspp/bitvec.ss src/cspp/dlist.ss \
+  src/cspp/dset.ss src/cspp/hashset.ss src/cspp/heap.ss src/cspp/list.ss \
+  src/cspp/queue.ss src/cspp/stack.ss src/cspp/treeset.ss src/cspp/treemap.ss \
+  src/cspp/vector.ss src/cspp/string.ss
 ```
 
 Run:
@@ -592,7 +592,7 @@ git commit -m "docs: normalize reviewed data-structure APIs"
 ### Task 7: Final integration verification
 
 **Files:**
-- Verify: `cspp/c/scheme.h` (copied into this worktree before implementation)
+- Verify: `src/cspp/c/scheme.h` (copied into this worktree before implementation)
 - Verify: `docs/data-structure-api-review.md`
 - Verify: `docs/superpowers/plans/2026-09-16-data-structure-api-review.md`
 
@@ -603,7 +603,7 @@ git commit -m "docs: normalize reviewed data-structure APIs"
 - [ ] **Step 1: Verify the requested header copy.**
 
 ```bash
-cmp -s /home/maoif/SSD/Projects/cspp/cspp/c/scheme.h cspp/c/scheme.h
+cmp -s /home/maoif/SSD/Projects/src/cspp/src/cspp/c/scheme.h src/cspp/c/scheme.h
 ```
 
 Expected: exit status 0.
@@ -631,15 +631,15 @@ Expected: no test errors and no unexpected stdout/stderr diagnostics.
 Run:
 
 ```bash
-python3 check_parentheses.py cspp/iter.ss cspp/transducer.ss \
-  cspp/navigator/private/data.ss \
-  cspp/navigator/private/basic.ss cspp/string.ss
+python3 check_parentheses.py src/cspp/iter.ss src/cspp/transducer.ss \
+  src/cspp/navigator/private/data.ss \
+  src/cspp/navigator/private/basic.ss src/cspp/string.ss
 ```
 
 Run: `git status --short --branch`
 
 Expected: balanced Scheme files, only intentional implementation/test/docs changes, and
-the copied `cspp/c/scheme.h` present in the worktree.
+the copied `src/cspp/c/scheme.h` present in the worktree.
 
 - [ ] **Step 5: Commit the verified integration state.**
 

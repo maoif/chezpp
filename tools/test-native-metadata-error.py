@@ -13,7 +13,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='cspp-native-metadata-') as scratch:
         directory = Path(scratch)
         for filename in ['common.h', 'optional_library.h', 'optional_library_info.c']:
-            shutil.copy2(ROOT / 'cspp/c' / filename, directory / filename)
+            shutil.copy2(ROOT / 'src/cspp/c' / filename, directory / filename)
         (directory / 'build-config.h').write_text('\n'.join(
             f'#define CSPP_WITH_{name} {int(name == "OPENSSL")}' for name in DEPENDENCIES) + '\n')
         (directory / 'failed-helper.c').write_text('''#include "optional_library.h"

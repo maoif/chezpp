@@ -183,15 +183,15 @@ Start a CSPP REPL:
 make run
 ```
 
-The generated `bin/cspp` launcher also runs scripts and inline code:
+The generated `cspp` launcher also runs scripts and inline code:
 
 ```sh
-./bin/cspp --script=path/to/program.ss
-./bin/cspp -c='(display "Hello from CSPP") (newline)'
-./bin/cspp --version
+./cspp --script=path/to/program.ss
+./cspp -c='(display "Hello from CSPP") (newline)'
+./cspp --version
 ```
 
-Use `./bin/cspp --help` (or `-h`) to show launcher options. Use `-q` to suppress the
+Use `./cspp --help` (or `-h`) to show launcher options. Use `-q` to suppress the
 startup greeting and REPL prompt. `-s` is an alias for `--script`.
 
 A transducer example:
@@ -246,7 +246,7 @@ make package PACKAGE_DIR=/absolute/path/to/packages
 archive and SHA-256 checksum to `dist/` by default. It detects Linux x64, arm64,
 riscv64, or loongarch64 and records the current Git commit, build host, and glibc requirement.
 It requires
-`readelf`, `ldd`, `patchelf`, GNU `tar`, and GNU coreutils. Packaging runs through `bin/cspp`
+`readelf`, `ldd`, `patchelf`, GNU `tar`, and GNU coreutils. Packaging runs through `cspp`
 using `tools/package-release.ss`. Dependencies are collected recursively,
 including ChezScheme's X11 runtime library; host glibc and its loader remain external.
 The target packages the selected build configuration; run tests before packaging as needed.

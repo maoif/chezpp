@@ -6,7 +6,7 @@
 
 **Goal:** Add keyword-based predicate and mutability options to `record` and `datatype` fields.
 
-**Architecture:** Extend the field grammars in `cspp/adt.ss` and normalize keyword options into
+**Architecture:** Extend the field grammars in `src/cspp/adt.ss` and normalize keyword options into
 the existing internal field representation before generating record types, constructor checks,
 getters, or setters. The option form uses `:predicate pred` and at most one of `:mutable` or
 `:immutable`; omission of both mutability options means immutable.
@@ -35,7 +35,7 @@ project build via `make clean && make`.
 ### Task 1: Add keyword options to `record`
 
 **Files:**
-- Modify: `cspp/adt.ss`
+- Modify: `src/cspp/adt.ss`
 - Test: `tests/record.ss`
 
 **Interfaces:**
@@ -83,7 +83,7 @@ Expected: PASS; bare and keyword record cases pass and positional annotated form
 ### Task 2: Add keyword options to `datatype` variant fields
 
 **Files:**
-- Modify: `cspp/adt.ss`
+- Modify: `src/cspp/adt.ss`
 - Test: `tests/datatype.ss`
 
 **Interfaces:**
@@ -145,6 +145,6 @@ Run: `make -C tests test-some TEST='record datatype'`
 Expected: all ADT tests pass, including keyword parsing, positional rejection, predicates,
 mutability defaults, and negative syntax diagnostics.
 
-- [x] **Step 3: Review the final diff.** Confirm only `cspp/adt.ss`, `tests/record.ss`,
+- [x] **Step 3: Review the final diff.** Confirm only `src/cspp/adt.ss`, `tests/record.ss`,
   `tests/datatype.ss`, and this plan contain task changes; verify no generated build artifacts
   are included and all new docs meet the 100-character line limit.

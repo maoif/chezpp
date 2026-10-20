@@ -51,7 +51,7 @@ an identifier. Mutators remain ordinary procedures.
 
 ## Module Map
 
-`(cspp rich)` is the public Rich facade. `cspp.ss` imports and exports it so
+`(cspp rich)` is the public Rich facade. `src/cspp.ss` imports and exports it so
 users can also import the complete `(cspp)` surface.
 
 Implementation libraries:
@@ -313,7 +313,7 @@ Important coverage:
 - Negative tests include comments explaining the expected error case.
 
 Scheme files touched by Rich changes should pass the repository parenthesis
-checker. Examples should run through `./bin/cspp --script=... --` after a rebuild.
+checker. Examples should run through `./cspp --script=... --` after a rebuild.
 
 Full project validation is:
 

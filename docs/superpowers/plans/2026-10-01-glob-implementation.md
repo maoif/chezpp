@@ -26,8 +26,8 @@
 ### Task 1: Lazy filesystem stream and traversal in `(cspp file)`
 
 **Files:**
-- Modify: `cspp/file.ss`
-- Modify: `cspp/c/file.c`
+- Modify: `src/cspp/file.ss`
+- Modify: `src/cspp/c/file.c`
 - Test: `tests/fs.ss`
 
 **Interfaces:**
@@ -51,7 +51,7 @@
 ### Task 2: Parser and lexical matcher
 
 **Files:**
-- Create: `cspp/glob.ss`
+- Create: `src/cspp/glob.ss`
 - Test: `tests/glob.ss`
 
 **Interfaces:**
@@ -83,7 +83,7 @@
 ### Task 3: Filesystem expansion
 
 **Files:**
-- Modify: `cspp/glob.ss`
+- Modify: `src/cspp/glob.ss`
 - Modify: `tests/glob.ss`
 
 **Interfaces:**
@@ -107,9 +107,9 @@
 ### Task 4: Lazy iterator and integration
 
 **Files:**
-- Modify: `cspp/glob.ss`
+- Modify: `src/cspp/glob.ss`
 - Modify: `tests/glob.ss`
-- Modify: `cspp.ss`
+- Modify: `src/cspp.ss`
 - Modify: `tests/Makefile`
 
 **Interfaces:**
@@ -121,7 +121,7 @@
 - [x] **Step 2: Fix `glob->iter` root selection and validate it on the test
   working directory; it must use the longest literal prefix and avoid traversing
   unrelated generated directories.
-- [x] **Step 3: Add `(cspp glob)` to `cspp.ss`** and register `glob.ss` in
+- [x] **Step 3: Add `(cspp glob)` to `src/cspp.ss`** and register `glob.ss` in
   `tests/Makefile`.
 - [x] **Step 4: Run focused tests** with `cd tests && make test-some TEST='glob path file'`.
 - [x] **Step 5: Run full project verification** with `make clean && make` from

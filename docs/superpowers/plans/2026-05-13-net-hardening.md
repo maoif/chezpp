@@ -4,7 +4,7 @@
 
 **Goal:** Harden the `(cspp net)` security defaults, add practical HTTP chunked support for reading and writing, and clarify public API semantics without expanding into the full network-feature backlog.
 
-**Architecture:** Keep the existing Scheme/C split: transport policy and public API shape live in `cspp/net/*.ss`, while OpenSSL, libssh, and libcurl integration stays in `cspp/c/net/*.c` behind `cspp/net/ffi.ss`. Preserve existing APIs where possible, make secure behavior the default for new sessions, and keep explicit opt-out APIs for tests and local development.
+**Architecture:** Keep the existing Scheme/C split: transport policy and public API shape live in `src/cspp/net/*.ss`, while OpenSSL, libssh, and libcurl integration stays in `src/cspp/c/net/*.c` behind `src/cspp/net/ffi.ss`. Preserve existing APIs where possible, make secure behavior the default for new sessions, and keep explicit opt-out APIs for tests and local development.
 
 **Tech Stack:** ChezScheme libraries, CSPP `(cspp utils)` `pcheck`, OpenSSL, libssh, libcurl, existing `mat` tests under `tests/`, and project build via `make clean && make`.
 
@@ -44,39 +44,39 @@ The broad "What is left out" list is treated as roadmap material. It is not part
 
 ## File Map
 
-- Modify: `cspp/c/net/tls.c`
+- Modify: `src/cspp/c/net/tls.c`
   - Default client verification.
   - Default CA loading helper.
   - Hostname verification in `cspp_net_tls_connect`.
-- Modify: `cspp/net/ffi.ss`
+- Modify: `src/cspp/net/ffi.ss`
   - Add FFI binding for default CA loading.
   - Change SSH open binding if the C signature gains a host-key policy argument.
-- Modify: `cspp/net/tls.ss`
+- Modify: `src/cspp/net/tls.ss`
   - Export and document `tls-context-load-default-ca!`.
   - Keep `tls-context-set-verify!` as the explicit opt-out.
-- Modify: `cspp/net/http.ss`
+- Modify: `src/cspp/net/http.ss`
   - Stop disabling HTTPS verification in the default client path.
   - Add transfer-encoding helpers and chunked request/response body readers.
   - Add chunked response writer support.
   - Add `http-serve-loop`.
   - Clarify nonblocking and server lifecycle docs.
-- Modify: `cspp/c/net/ssh.c`
+- Modify: `src/cspp/c/net/ssh.c`
   - Load libssh known-host APIs.
   - Verify server host keys after `ssh_connect`.
   - Support strict, accept-new, and insecure policies.
-- Modify: `cspp/net/ssh.ss`
+- Modify: `src/cspp/net/ssh.ss`
   - Add public policy API while preserving existing `ssh-open` arities.
   - Document host-key behavior.
-- Modify: `cspp/net/ftp.ss`
+- Modify: `src/cspp/net/ftp.ss`
   - Default FTPS sessions to verify peer and host.
   - Add documented public getters/setter for TLS verification.
-- Delete: `cspp/net/rpc.ss`
+- Delete: `src/cspp/net/rpc.ss`
   - Remove the older custom RPC public library.
-- Delete: `cspp/net/private/rpc.ss`
+- Delete: `src/cspp/net/private/rpc.ss`
   - Remove private helpers used only by the older custom RPC layer.
 - Delete: `tests/net-rpc.ss`
   - Remove tests for the deleted custom RPC layer.
-- Modify: `cspp/net.ss`
+- Modify: `src/cspp/net.ss`
   - Stop re-exporting `(cspp net rpc)`.
 - Modify: `tests/Makefile`
   - Remove `net-rpc.ss` from the net test set.
@@ -97,10 +97,10 @@ The broad "What is left out" list is treated as roadmap material. It is not part
 ### Task 1: TLS And HTTPS Verification Defaults
 
 **Files:**
-- Modify: `cspp/c/net/tls.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/tls.ss`
-- Modify: `cspp/net/http.ss`
+- Modify: `src/cspp/c/net/tls.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/tls.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-common.ss`
 - Modify: `tests/net-http.ss`
 
@@ -196,7 +196,7 @@ Expected before implementation: the new HTTPS verification tests fail because ho
 
 - [x] **Step 3: Add OpenSSL default CA FFI**
 
-In `cspp/c/net/tls.c`, add:
+In `src/cspp/c/net/tls.c`, add:
 
 ```c
 ptr cspp_net_tls_context_load_default_ca(uptr handle) {
@@ -208,7 +208,7 @@ ptr cspp_net_tls_context_load_default_ca(uptr handle) {
 }
 ```
 
-In `cspp/net/ffi.ss`, export and bind:
+In `src/cspp/net/ffi.ss`, export and bind:
 
 ```scheme
 ffi-net-tls-context-load-default-ca
@@ -221,7 +221,7 @@ ffi-net-tls-context-load-default-ca
 
 - [x] **Step 4: Make client TLS contexts verify by default**
 
-In `cspp/c/net/tls.c`, change `cspp_net_tls_context_create` so:
+In `src/cspp/c/net/tls.c`, change `cspp_net_tls_context_create` so:
 
 ```c
 if (mode == 0) {
@@ -252,7 +252,7 @@ If the project must support an OpenSSL variant without `SSL_set1_host`, stop and
 
 - [x] **Step 6: Add public Scheme wrapper and docs**
 
-In `cspp/net/tls.ss`, export and document:
+In `src/cspp/net/tls.ss`, export and document:
 
 ```scheme
 #|proc:tls-context-load-default-ca!
@@ -270,7 +270,7 @@ certificate locations into a TLS context.
 
 - [x] **Step 7: Stop disabling HTTPS verification by default**
 
-In `cspp/net/http.ss`, replace the fallback HTTPS context creation:
+In `src/cspp/net/http.ss`, replace the fallback HTTPS context creation:
 
 ```scheme
 (let ([ctx (make-tls-context 'client)])
@@ -305,7 +305,7 @@ Expected in an unrestricted environment: build succeeds and net tests are silent
 - [x] **Step 9: Commit**
 
 ```bash
-git add cspp/c/net/tls.c cspp/net/ffi.ss cspp/net/tls.ss cspp/net/http.ss tests/net-common.ss tests/net-http.ss
+git add src/cspp/c/net/tls.c src/cspp/net/ffi.ss src/cspp/net/tls.ss src/cspp/net/http.ss tests/net-common.ss tests/net-http.ss
 git commit -m "net: enable TLS verification by default"
 ```
 
@@ -314,9 +314,9 @@ git commit -m "net: enable TLS verification by default"
 ### Task 2: SSH Known-Host Verification
 
 **Files:**
-- Modify: `cspp/c/net/ssh.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/ssh.ss`
+- Modify: `src/cspp/c/net/ssh.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/ssh.ss`
 - Modify: `tests/net-ssh-common.ss`
 - Modify: `tests/net-ssh.ss`
 
@@ -376,7 +376,7 @@ Expected before implementation: strict host-key test fails because `ssh-open` ac
 
 - [x] **Step 3: Add libssh known-host function pointers**
 
-In `cspp/c/net/ssh.c`, add dynamic function pointer typedefs and symbols for:
+In `src/cspp/c/net/ssh.c`, add dynamic function pointer typedefs and symbols for:
 
 ```c
 typedef enum ssh_known_hosts_e (*ssh_session_is_known_server_fn)(ssh_session);
@@ -437,7 +437,7 @@ if (hostkey_policy != 2) {
 
 - [x] **Step 5: Add Scheme policy API**
 
-In `cspp/net/ssh.ss`, keep existing `ssh-open` arities and make them pass strict policy. Add:
+In `src/cspp/net/ssh.ss`, keep existing `ssh-open` arities and make them pass strict policy. Add:
 
 ```scheme
 #|proc:ssh-open-with-policy
@@ -468,7 +468,7 @@ Export `ssh-open-with-policy`. Update `ssh-open` to call `ssh-open-with-policy` 
 
 - [x] **Step 6: Update FFI binding**
 
-In `cspp/net/ffi.ss`, change:
+In `src/cspp/net/ffi.ss`, change:
 
 ```scheme
 (foreign-procedure "cspp_net_ssh_open" (string int string int) scheme-object)
@@ -497,7 +497,7 @@ cd tests && make test-some TEST='net'
 - [x] **Step 8: Commit**
 
 ```bash
-git add cspp/c/net/ssh.c cspp/net/ffi.ss cspp/net/ssh.ss tests/net-ssh-common.ss tests/net-ssh.ss
+git add src/cspp/c/net/ssh.c src/cspp/net/ffi.ss src/cspp/net/ssh.ss tests/net-ssh-common.ss tests/net-ssh.ss
 git commit -m "net: verify SSH host keys"
 ```
 
@@ -506,7 +506,7 @@ git commit -m "net: verify SSH host keys"
 ### Task 3: FTPS Verification Defaults And Public Controls
 
 **Files:**
-- Modify: `cspp/net/ftp.ss`
+- Modify: `src/cspp/net/ftp.ss`
 - Modify: `tests/net-ftp.ss`
 
 - [x] **Step 1: Add failing FTPS verification API tests**
@@ -548,7 +548,7 @@ Expected before implementation: `ftp-verify-peer?`, `ftp-verify-host?`, and `ftp
 
 - [x] **Step 3: Export and document verification accessors**
 
-In `cspp/net/ftp.ss`, export:
+In `src/cspp/net/ftp.ss`, export:
 
 ```scheme
 ftp-verify-peer?
@@ -627,7 +627,7 @@ cd tests && make test-some TEST='net'
 - [x] **Step 6: Commit**
 
 ```bash
-git add cspp/net/ftp.ss tests/net-ftp.ss
+git add src/cspp/net/ftp.ss tests/net-ftp.ss
 git commit -m "net: expose FTPS verification controls"
 ```
 
@@ -636,7 +636,7 @@ git commit -m "net: expose FTPS verification controls"
 ### Task 4: HTTP Chunked Transfer Decoding And Writing
 
 **Files:**
-- Modify: `cspp/net/http.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-http.ss`
 
 - [x] **Step 1: Add failing chunked response test**
@@ -770,7 +770,7 @@ Expected before implementation: chunked response body is not decoded, chunked re
 
 - [x] **Step 5: Add transfer-encoding helpers**
 
-In `cspp/net/http.ss`, add helpers near `response-body-length`:
+In `src/cspp/net/http.ss`, add helpers near `response-body-length`:
 
 ```scheme
 (define header-token-member?
@@ -803,7 +803,7 @@ If `string-trim` is not available from `(cspp string)`, add a local helper in `h
 
 - [x] **Step 6: Add chunked body reader**
 
-In `cspp/net/http.ss`, add:
+In `src/cspp/net/http.ss`, add:
 
 ```scheme
 (define read-http-body/chunked
@@ -838,7 +838,7 @@ In `cspp/net/http.ss`, add:
 
 - [x] **Step 7: Add chunked response writer**
 
-In `cspp/net/http.ss`, add:
+In `src/cspp/net/http.ss`, add:
 
 ```scheme
 (define write-http-body/chunked
@@ -947,7 +947,7 @@ cd tests && make test-some TEST='net'
 - [x] **Step 12: Commit**
 
 ```bash
-git add cspp/net/http.ss tests/net-http.ss
+git add src/cspp/net/http.ss tests/net-http.ss
 git commit -m "net: decode HTTP chunked bodies"
 ```
 
@@ -956,7 +956,7 @@ git commit -m "net: decode HTTP chunked bodies"
 ### Task 5: HTTP Server Lifecycle Helper
 
 **Files:**
-- Modify: `cspp/net/http.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-http.ss`
 
 - [x] **Step 1: Add failing `http-serve-loop` test**
@@ -991,7 +991,7 @@ Add to `tests/net-http.ss`:
 
 - [x] **Step 2: Export and document `http-serve-loop`**
 
-In `cspp/net/http.ss`, add `http-serve-loop` to the export list and document:
+In `src/cspp/net/http.ss`, add `http-serve-loop` to the export list and document:
 
 ```scheme
 #|proc:http-serve-loop
@@ -1052,7 +1052,7 @@ cd tests && make test-some TEST='net'
 - [x] **Step 4: Commit**
 
 ```bash
-git add cspp/net/http.ss tests/net-http.ss
+git add src/cspp/net/http.ss tests/net-http.ss
 git commit -m "net: add HTTP serve loop helper"
 ```
 
@@ -1061,14 +1061,14 @@ git commit -m "net: add HTTP serve loop helper"
 ### Task 6: Public Documentation, RPC Removal, And Nonblocking Semantics
 
 **Files:**
-- Modify: `cspp/net/http.ss`
-- Modify: `cspp/net/ftp.ss`
-- Modify: `cspp/net/ssh.ss`
-- Modify: `cspp/net/tls.ss`
-- Modify: `cspp/net.ss`
+- Modify: `src/cspp/net/http.ss`
+- Modify: `src/cspp/net/ftp.ss`
+- Modify: `src/cspp/net/ssh.ss`
+- Modify: `src/cspp/net/tls.ss`
+- Modify: `src/cspp/net.ss`
 - Modify: `tests/Makefile`
-- Delete: `cspp/net/rpc.ss`
-- Delete: `cspp/net/private/rpc.ss`
+- Delete: `src/cspp/net/rpc.ss`
+- Delete: `src/cspp/net/private/rpc.ss`
 - Delete: `tests/net-rpc.ss`
 
 - [x] **Step 1: Remove custom RPC support**
@@ -1077,15 +1077,15 @@ The custom CSPP RPC layer was removed instead of documenting the exported RPC ma
 
 Completed changes:
 
-- Deleted `cspp/net/rpc.ss`.
-- Deleted `cspp/net/private/rpc.ss`.
+- Deleted `src/cspp/net/rpc.ss`.
+- Deleted `src/cspp/net/private/rpc.ss`.
 - Deleted `tests/net-rpc.ss`.
-- Removed `(cspp net rpc)` from `cspp/net.ss`.
+- Removed `(cspp net rpc)` from `src/cspp/net.ss`.
 - Removed `net-rpc.ss` from `tests/Makefile`.
 
 - [x] **Step 2: Clarify HTTP nonblocking docs**
 
-Update docs above these exports in `cspp/net/http.ss`:
+Update docs above these exports in `src/cspp/net/http.ss`:
 
 ```scheme
 http-send/nonblocking
@@ -1118,7 +1118,7 @@ The RPC nonblocking docs and internal RPC helper comments are no longer needed b
 Run:
 
 ```bash
-rg -n "define-syntax define-rpc|#\\|macro:define-rpc|#\\|proc:http-send/nonblocking|#\\|proc:ftp-list/nonblocking|unary-pending-key|cspp net rpc" cspp/net tests/Makefile
+rg -n "define-syntax define-rpc|#\\|macro:define-rpc|#\\|proc:http-send/nonblocking|#\\|proc:ftp-list/nonblocking|unary-pending-key|cspp net rpc" src/cspp/net tests/Makefile
 ```
 
 Expected: no RPC library references remain; touched nonblocking APIs have updated docs.
@@ -1134,8 +1134,8 @@ make clean && make
 - [x] **Step 7: Commit**
 
 ```bash
-git add cspp/net/http.ss cspp/net/ftp.ss cspp/net/ssh.ss cspp/net/tls.ss cspp/net.ss tests/Makefile
-git add -u cspp/net/rpc.ss cspp/net/private/rpc.ss tests/net-rpc.ss
+git add src/cspp/net/http.ss src/cspp/net/ftp.ss src/cspp/net/ssh.ss src/cspp/net/tls.ss src/cspp/net.ss tests/Makefile
+git add -u src/cspp/net/rpc.ss src/cspp/net/private/rpc.ss tests/net-rpc.ss
 git commit -m "net: remove custom RPC support"
 ```
 
@@ -1171,7 +1171,7 @@ Expected in an unrestricted environment: stdout and stderr are empty. If the san
 Run:
 
 ```bash
-rg -n "ssh-open-with-policy|ftp-set-tls-verification!|ftp-verify-peer\\?|ftp-verify-host\\?|tls-context-load-default-ca!|http-serve-loop|define-rpc-message|define-rpc-service" cspp/net
+rg -n "ssh-open-with-policy|ftp-set-tls-verification!|ftp-verify-peer\\?|ftp-verify-host\\?|tls-context-load-default-ca!|http-serve-loop|define-rpc-message|define-rpc-service" src/cspp/net
 ```
 
 Expected: each new public API is exported, documented with `#|proc:...|#` or `#|macro:...|#`, implemented with `pcheck` where applicable, and tested.
@@ -1181,7 +1181,7 @@ Expected: each new public API is exported, documented with `#|proc:...|#` or `#|
 Run:
 
 ```bash
-rg -n "set-verify! ctx #f|insecure|SSL_VERIFY_NONE|VERIFYHOST, 0|VERIFYPEER, 0|hostkey_policy" cspp/net cspp/c/net tests
+rg -n "set-verify! ctx #f|insecure|SSL_VERIFY_NONE|VERIFYHOST, 0|VERIFYPEER, 0|hostkey_policy" src/cspp/net src/cspp/c/net tests
 ```
 
 Expected: insecure TLS/SSH/FTPS behavior is reachable only through explicit APIs or test helpers. Default HTTPS, FTPS, and SSH paths should be secure.
@@ -1191,7 +1191,7 @@ Expected: insecure TLS/SSH/FTPS behavior is reachable only through explicit APIs
 If final verification requires cleanup changes, commit them:
 
 ```bash
-git add cspp/c/net/tls.c cspp/c/net/ssh.c cspp/net/ffi.ss cspp/net/tls.ss cspp/net/http.ss cspp/net/ssh.ss cspp/net/ftp.ss cspp/net/rpc.ss tests/net-common.ss tests/net-http.ss tests/net-ssh-common.ss tests/net-ssh.ss tests/net-ftp.ss
+git add src/cspp/c/net/tls.c src/cspp/c/net/ssh.c src/cspp/net/ffi.ss src/cspp/net/tls.ss src/cspp/net/http.ss src/cspp/net/ssh.ss src/cspp/net/ftp.ss src/cspp/net/rpc.ss tests/net-common.ss tests/net-http.ss tests/net-ssh-common.ss tests/net-ssh.ss tests/net-ftp.ss
 git commit -m "net: finish transport hardening"
 ```
 

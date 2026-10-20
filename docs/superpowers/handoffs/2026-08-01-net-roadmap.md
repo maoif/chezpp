@@ -9,7 +9,7 @@ and end-to-end file transfer verification.
 
 ## Workspace
 
-- Worktree: `/home/maoif/SSD/Projects/cspp/.worktrees/net-hardening-plan`
+- Worktree: `/home/maoif/SSD/Projects/src/cspp/.worktrees/net-hardening-plan`
 - Branch: `net-hardening-plan`
 - Base commit: `4451414`
 - Design commit: `2e0abab net: document follow-up roadmap design`
@@ -22,15 +22,15 @@ Planning is complete. Implementation has not started.
 At handoff creation, `git status --short` reports:
 
 ```text
- M cspp/parser.ss
-?? cspp/c/scheme.h
+ M src/cspp/parser.ss
+?? src/cspp/c/scheme.h
 ```
 
 These changes appeared after the planning commits and were not created as part of this net work.
 Preserve them. Inspect and work around them; do not revert, overwrite, stage, or commit them unless
 the maintainer explicitly assigns them to this task.
 
-The untracked `cspp/c/scheme.h` must not be assumed correct. The copy previously observed in the
+The untracked `src/cspp/c/scheme.h` must not be assumed correct. The copy previously observed in the
 main checkout identifies itself as ChezScheme 10.0.0, while the selected runtime is
 10.5.0-pre-release.1. Phase 0 deliberately changes the Makefile to locate `scheme.h` beside the
 selected runtime instead of tracking a stale copy.
@@ -80,7 +80,7 @@ required external download hashes are covered.
 
 1. Enter this worktree and confirm the branch and dirty files.
 2. Read the design, master plan, and optional-dependencies plan completely.
-3. Determine the ownership of `cspp/parser.ss` and `cspp/c/scheme.h`; preserve them meanwhile.
+3. Determine the ownership of `src/cspp/parser.ss` and `src/cspp/c/scheme.h`; preserve them meanwhile.
 4. Execute Phase 0 from the master plan without copying the stale 10.0 `scheme.h`.
 5. Import only the approved `examples/net/` inputs from the main checkout.
 6. Run `make clean && make` and the committed net baseline tests.
@@ -97,7 +97,7 @@ The first isolated build was run before the unexpected untracked header appeared
 make clean && make
 ```
 
-It failed because `cspp/c/common.h` could not include `scheme.h`. The plans do not claim a passing
+It failed because `src/cspp/c/common.h` could not include `scheme.h`. The plans do not claim a passing
 baseline. Phase 0 resolves header discovery and requires a fresh clean build before implementation.
 
 Runtime/header discovery was checked successfully:

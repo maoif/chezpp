@@ -36,10 +36,10 @@ Tasks:
    behavior and commented negative cases for public boundary errors.
 3. Run `cd tests && make test-some TEST='transducer'` and confirm the new tests
    fail because the API is not implemented/exported yet.
-4. Implement `cspp/transducer.ss` with documented public APIs, `pcheck`
+4. Implement `src/cspp/transducer.ss` with documented public APIs, `pcheck`
    boundary validation, opaque sealed records, direct loops, reducer completion,
    and early termination handling.
-5. Export `(cspp transducer)` from `cspp.ss`.
+5. Export `(cspp transducer)` from `src/cspp.ss`.
 6. Check Scheme parentheses for modified Scheme files.
 7. Run `make clean && make`.
 8. Run `cd tests && make test-some TEST='transducer'`.

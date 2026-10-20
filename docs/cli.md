@@ -6,7 +6,7 @@ command tree, configure options and subcommands, and call
 failures signal Scheme errors. Built-in help prints to `current-output-port`
 and returns without running command actions.
 
-This document describes the stable core implemented in `cspp/cli.ss`.
+This document describes the stable core implemented in `src/cspp/cli.ss`.
 
 ## Scope
 

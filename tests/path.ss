@@ -111,7 +111,7 @@
 
 (mat path-absolute/relative/home
 
-     (same-path? (path-absolute (path-parse 'unix "/home/me") (path-parse 'unix "cspp/../cspp")) "/home/me/cspp")
+     (same-path? (path-absolute (path-parse 'unix "/home/me") (path-parse 'unix "src/cspp/../cspp")) "/home/me/src/cspp")
      (same-path? (path-absolute (path-parse 'windows "C:\\Users\\me") (path-parse 'windows "src")) "C:\\Users\\me\\src")
      (same-path? (path-absolute (path-parse 'windows "C:\\Users\\me") (path-parse 'windows "C:src")) "C:\\Users\\me\\src")
 
@@ -120,7 +120,7 @@
      (path-same-root? (path-parse 'windows "\\\\srv\\share\\a") (path-parse 'windows "\\\\SRV\\SHARE\\b"))
      (not (path-same-root? (path-parse 'windows "C:\\a") (path-parse 'windows "D:\\a")))
 
-     (same-path? (path-relative-to (path-parse 'unix "/home/me") (path-parse 'unix "/home/me/cspp/lib")) "cspp/lib")
+     (same-path? (path-relative-to (path-parse 'unix "/home/me") (path-parse 'unix "/home/me/src/cspp/lib")) "src/cspp/lib")
      (same-path? (path-relative-to (path-parse 'unix "/home/me/src") (path-parse 'unix "/home/me/doc")) "../doc")
      (same-path? (path-relative-to (path-parse 'windows "C:\\Users\\me") (path-parse 'windows "C:\\Users\\me\\src")) "src")
      (same-path? (path-relative-to (path-parse 'windows "\\\\srv\\share\\a") (path-parse 'windows "\\\\srv\\share\\a\\b")) "b")

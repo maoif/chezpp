@@ -64,7 +64,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   existing entry points only after it has an explicit allowlist during migration.
 - [x] **Step 3: Add the helper and README inventory.**
   Create `examples/common.ss`, following the project's CLI macro examples in `tests/cli.ss` and
-  option syntax from `cspp/cli.ss`. Use a script-local preamble and shared runner rather than
+  option syntax from `src/cspp/cli.ss`. Use a script-local preamble and shared runner rather than
   exporting a new library. Add the initial directories and naming convention to
   `examples/README.md`.
 - [x] **Step 4: Re-run the inventory test and CLI smoke checks.**
@@ -211,7 +211,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   portable examples. If the active public API cannot provide the named mode, keep the capability
   gate and request a library API task rather than presenting HTTP/1 as H2 or HTTPS.
 - [x] **Step 4: Add authenticated file encryption/decryption.**
-  Confirm AEAD signatures in `cspp/crypto/aead.ss`, KDF signature in `cspp/crypto/kdf.ss`,
+  Confirm AEAD signatures in `src/cspp/crypto/aead.ss`, KDF signature in `src/cspp/crypto/kdf.ss`,
   `random-bytes`, and `bytevector->hex`. Add round-trip tests for each method, wrong password,
   modified header/ciphertext/tag, truncated envelope, and same input/output path handling. Refuse
   to overwrite an input unless output is a distinct path.
@@ -259,7 +259,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   never use a public network host in automated tests.
 - [x] **Step 2: Repair SSH EOF and port lifecycle.**
   `ssh-write-all` currently treats empty bytevectors as zero-byte writes; inspect
-  `cspp/net/ssh.ss` and `cspp/c/net/ssh.c` for the supported channel EOF primitive and add a
+  `src/cspp/net/ssh.ss` and `src/cspp/c/net/ssh.c` for the supported channel EOF primitive and add a
   documented public procedure only if required. Close `open-ssh-channel-output-port` in the
   REPL's cleanup path, and ensure remote command loops do not wait forever after remote EOF/status.
   Add tests where the remote process waits for stdin EOF and where stdout and stderr arrive

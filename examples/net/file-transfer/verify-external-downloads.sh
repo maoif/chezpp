@@ -52,6 +52,6 @@ if command -v curl >/dev/null 2>&1; then
       "$(( $(date +%s) - started ))"
   done
 else
-  (cd "$project_root" && ./bin/cspp \
+  (cd "$project_root" && ./cspp \
     --script=examples/net/file-transfer/verify-external-downloads.ss "$state_dir")
 fi

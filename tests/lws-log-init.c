@@ -1,9 +1,9 @@
 /* Observe and forward real LWS calls: adapter startup must finish configuring
  * global logging before any context exists, then leave it immutable during
  * service. Private WebSocket logging may still use a different log level. */
-#include "../cspp/c/net/lws_http.h"
-#include "../cspp/c/net/lws_loader.h"
-#include "../cspp/c/optional_library.h"
+#include "../src/cspp/c/net/lws_http.h"
+#include "../src/cspp/c/net/lws_loader.h"
+#include "../src/cspp/c/optional_library.h"
 
 #include <stdatomic.h>
 #include <stdio.h>

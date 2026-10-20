@@ -90,26 +90,26 @@ BUILD_SIGNATURE_NAMES += CC CPPFLAGS CFLAGS LDFLAGS LDLIBS \
     RESOLVED_$(name)_CFLAGS RESOLVED_$(name)_LIBS RESOLVED_PACKAGE_VERSION_$(name))
 
 # Shared metadata helpers stay selected and must honor the generated feature macros.
-_OPTIONAL_CARES_SOURCES := cspp/c/net/dns.c
-_OPTIONAL_CURL_SOURCES := cspp/c/net/ftp.c
-_OPTIONAL_GRPC_SOURCES := cspp/c/net/grpc.c
-_OPTIONAL_IDN2_SOURCES := cspp/c/net/idna.c
-_OPTIONAL_LIBSSH_SOURCES := cspp/c/net/ssh.c
-_OPTIONAL_WEBSOCKETS_SOURCES := cspp/c/net/lws_http.c cspp/c/net/websocket.c
-_OPTIONAL_ZLIB_SOURCES := cspp/c/zlib_loader.c
-_OPTIONAL_OPENSSL_SOURCES := cspp/c/crypto.c cspp/c/net/tls.c
-_OPTIONAL_UUID_SOURCES := cspp/c/uuid.c
-_OPTIONAL_XXHASH_SOURCES := cspp/c/hash.c
+_OPTIONAL_CARES_SOURCES := src/cspp/c/net/dns.c
+_OPTIONAL_CURL_SOURCES := src/cspp/c/net/ftp.c
+_OPTIONAL_GRPC_SOURCES := src/cspp/c/net/grpc.c
+_OPTIONAL_IDN2_SOURCES := src/cspp/c/net/idna.c
+_OPTIONAL_LIBSSH_SOURCES := src/cspp/c/net/ssh.c
+_OPTIONAL_WEBSOCKETS_SOURCES := src/cspp/c/net/lws_http.c src/cspp/c/net/websocket.c
+_OPTIONAL_ZLIB_SOURCES := src/cspp/c/zlib_loader.c
+_OPTIONAL_OPENSSL_SOURCES := src/cspp/c/crypto.c src/cspp/c/net/tls.c
+_OPTIONAL_UUID_SOURCES := src/cspp/c/uuid.c
+_OPTIONAL_XXHASH_SOURCES := src/cspp/c/hash.c
 # digest.c implements both BLAKE3 and OpenSSL and guards their bodies independently.
 _OPTIONAL_BLAKE3_SOURCES :=
-_OPTIONAL_ZLIB_FALLBACKS := cspp/c/zlib_unavailable.c
+_OPTIONAL_ZLIB_FALLBACKS := src/cspp/c/zlib_unavailable.c
 $(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),\
   $(if $(filter 0,$(RESOLVED_WITH_$(name))),\
     $(eval SRCS_C := $(filter-out $(_OPTIONAL_$(name)_SOURCES),$(SRCS_C)) \
       $(or $(_OPTIONAL_$(name)_FALLBACKS),$(patsubst %.c,%_unavailable.c,$(_OPTIONAL_$(name)_SOURCES))))))
 
 .PHONY: force-build-config
-cspp/c/build-config.h: force-build-config | prepare-build
+src/cspp/c/build-config.h: force-build-config | prepare-build
 	@sh tools/probe-optional-libraries.sh header $@ \
 	  $(foreach name,$(OPTIONAL_DEPENDENCY_NAMES),$(name)=$(RESOLVED_WITH_$(name)))
 

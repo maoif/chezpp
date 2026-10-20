@@ -23,8 +23,8 @@ PREFIX := /usr
 PACKAGE_DIR ?= $(BUILD_ROOT)/dist
 PACKAGE_COMMIT ?= $(shell git rev-parse HEAD)
 
-SRCS_CSPP := $(shell find cspp/   -type f -name '*.ss')
-SRCS_C      := $(shell find cspp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c' ! -name '*_unavailable.c')
+SRCS_CSPP := $(shell find src/cspp/   -type f -name '*.ss')
+SRCS_C      := $(shell find src/cspp/c/ -type f -name '*.c' ! -name 'lws_http2_fixture.c' ! -name '*_unavailable.c')
 
 include tests/test-files.mk
 
@@ -50,7 +50,7 @@ LDLIBS ?=
 include optional-libraries.mk
 
 cspplibs = cspp.lib
-csppwpos = cspp.wpo
+csppwpos = src/cspp.wpo
 csppdeps = ${cspplibs}
 
 .PHONY: all cspp release debug coverage prepare-build print-build-options test test-non-net bundled-chez clean-all
@@ -77,7 +77,7 @@ prepare-build: bundled-chez
 			$(MAKE) --no-print-directory clean; \
 		fi; \
 	else \
-		if [ -e cspp.lib ] || [ -e libcspp.so ] || find cspp tests -name '*.so' -print -quit | grep -q .; then \
+		if [ -e cspp.lib ] || [ -e libcspp.so ] || find src/cspp tests -name '*.so' -print -quit | grep -q .; then \
 			printf '%s\n' 'build options signature missing; running make clean'; \
 			$(MAKE) --no-print-directory clean; \
 		fi; \
@@ -134,13 +134,13 @@ define generate_cspp_launcher
 	      -e 's|@LIBCSPP@|$(2)|g' \
 	      -e 's|@CSPP_LIB@|$(3)|g' \
 	      -e 's|@FIBER_LIB@|$(4)|g' \
-	      cspp.in > $(1)
+	      src/cspp-launcher.ss > $(1)
 	@chmod +x $(1)
 endef
 
 .PHONY: run
 run: cspp
-	@./bin/cspp
+	@./cspp
 
 .PHONY: protobuf-generate
 protobuf-generate: cspp
@@ -150,28 +150,25 @@ protobuf-generate: cspp
 	        --cspp_out=tests/generated --proto_path=tests/data \
 	        tests/data/file-transfer.proto tests/data/codegen-features.proto
 
-libcspp.so: ${SRCS_C} cspp/c/build-config.h $(CHEZ_TOOLCHAIN_SIGNATURE) | prepare-build
+libcspp.so: ${SRCS_C} src/cspp/c/build-config.h $(CHEZ_TOOLCHAIN_SIGNATURE) | prepare-build
 	$(CC) $(CPPFLAGS) -I$(CHEZ_INCLUDE_DIR) $(CFLAGS) $(OPTIONAL_CFLAGS) \
-	  -include cspp/c/build-config.h \
+	  -include src/cspp/c/build-config.h \
 	  -shared $(LDFLAGS) -o $@ $(SRCS_C) $(LDLIBS) $(OPTIONAL_LIBS)
 
 cspp.lib: Makefile build-options.mk optional-libraries.mk \
 	tools/probe-optional-libraries.sh tools/build-library.ss \
-	tools/compiler-options.ss tools/print-library-version.ss cspp.ss ${SRCS_CSPP} \
+	tools/compiler-options.ss tools/print-library-version.ss src/cspp.ss ${SRCS_CSPP} \
 	libcspp.so $(CHEZ_TOOLCHAIN_SIGNATURE) | prepare-build
-	@$(CHEZ_SCHEME) --script tools/build-library.ss \
+	@CHEZSCHEMELIBDIRS='$(abspath src)' $(CHEZ_SCHEME) --script tools/build-library.ss \
 		$(BUILD_SCRIPT_ARGUMENTS) --
 	@$(CHEZ_SCHEME) --script tools/print-library-version.ss cspp.lib
-	@rm -f cspp.so
-	@if [ "$(wpo)" != t ]; then rm -f cspp.wpo; fi
+	@rm -f src/cspp.so
+	@if [ "$(wpo)" != t ]; then rm -f src/cspp.wpo; fi
 	@tmp="$(BUILD_OPTIONS_SIGNATURE_FILE).tmp"; \
 	printf '%s\n' $(call build-shell-quote,$(BUILD_OPTIONS_SIGNATURE)) > "$$tmp"; \
 	mv "$$tmp" "$(BUILD_OPTIONS_SIGNATURE_FILE)"
-cspp: bin/cspp
-
-bin/cspp: bundled-chez prepare-build ${csppdeps} $(NATIVE_OPTIONS_FILE) cspp.in Makefile
-	@mkdir -p bin
-	$(call generate_cspp_launcher,bin/cspp,$(abspath libcspp.so),$(abspath cspp.lib),)
+cspp: bundled-chez prepare-build ${csppdeps} $(NATIVE_OPTIONS_FILE) src/cspp-launcher.ss Makefile
+	$(call generate_cspp_launcher,cspp,$(abspath libcspp.so),$(abspath cspp.lib),)
 	@rm -f scheme
 	@ln -s "$(CHEZ_SCHEME)" scheme
 
@@ -220,21 +217,21 @@ package: cspp
 		NATIVE_OPTIONS_REPLAY=$(call build-shell-quote,$(abspath $(NATIVE_OPTIONS_FILE))); \
 	version=$$("$(CHEZ_SCHEME)" --script tools/print-library-version.ss cspp.lib); \
 	version=$${version#CSPP version: }; \
-	./bin/cspp --script=tools/package-release.ss "$$workspace/installed" \
+	./cspp --script=tools/package-release.ss "$$workspace/installed" \
 		--output $(call build-shell-quote,$(PACKAGE_DIR)) \
 		--arch "$$architecture" --version "$$version" \
 		--commit $(call build-shell-quote,$(PACKAGE_COMMIT))
 
 .PHONY: clean
 clean:
-	@rm -f cspp.lib cspp.wpo bin/cspp cspp-launcher.ss libcspp.so \
+	@rm -f cspp.lib cspp.wpo src/cspp.so src/cspp.wpo cspp bin/cspp libcspp.so \
 		"$(BUILD_OPTIONS_SIGNATURE_FILE)" "$(BUILD_OPTIONS_SIGNATURE_FILE).tmp" \
 		"$(NATIVE_OPTIONS_FILE)" "$(NATIVE_OPTIONS_FILE)".tmp.* \
-		cspp/c/build-config.h cspp/c/build-config.h.tmp.*
-	@find cspp/ -name '*.so'  -delete
+		src/cspp/c/build-config.h src/cspp/c/build-config.h.tmp.*
+	@find src/cspp/ -name '*.so'  -delete
 	@find tests/  -name '*.so'  -delete
-	@find cspp/ -name '*.wpo' -delete
-	@find cspp/ tests/ \( -name '*.covin' -o -name '*.covout' \) -delete
+	@find src/cspp/ -name '*.wpo' -delete
+	@find src/cspp/ tests/ \( -name '*.covin' -o -name '*.covout' \) -delete
 	@rm -f *.covin *.covout
 
 clean-all: clean

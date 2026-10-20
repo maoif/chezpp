@@ -100,7 +100,7 @@
                           'column
                           (list "" logo ""
                                 (make-rich-align
-                                 (rich-text "Scheme power, beautifully packaged"
+                                 (rich-text "Chez Scheme Programming Platform"
                                             (rich-style 'italic 'default))
                                  content-width 'center)
                                 ""

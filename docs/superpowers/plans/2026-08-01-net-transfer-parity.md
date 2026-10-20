@@ -24,8 +24,8 @@ focused tests, clean build, and existing FTP/SSH/SFTP/SCP regression suites pass
 red-step command was not run separately. Task 2 is next.
 
 **Files:**
-- Create: `cspp/net/transfer.ss`
-- Modify: `cspp/net.ss`
+- Create: `src/cspp/net/transfer.ss`
+- Modify: `src/cspp/net.ss`
 - Create: `tests/net-transfer.ss`
 - Modify: `tests/Makefile`
 
@@ -84,7 +84,7 @@ document the record's immutable fields above its definition.
 make clean && make
 cd tests && make test-some TEST='net-transfer'
 cd ..
-git add cspp/net/transfer.ss cspp/net.ss tests/net-transfer.ss tests/Makefile
+git add src/cspp/net/transfer.ss src/cspp/net.ss tests/net-transfer.ss tests/Makefile
 git commit -m "net: add shared transfer policy"
 ```
 
@@ -96,9 +96,9 @@ the final server response, session close cancels active ownership, and the fixtu
 control connection is reused across sequential upload and download.
 
 **Files:**
-- Modify: `cspp/c/net/ftp.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/ftp.ss`
+- Modify: `src/cspp/c/net/ftp.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/ftp.ss`
 - Modify: `tests/net-ftp.ss`
 - Modify: `tests/net-ftp-server-process.ss`
 
@@ -192,7 +192,7 @@ through one session; assert the count remains one unless the server explicitly c
 make clean && make
 cd tests && make test-some TEST='net-transfer net-ftp'
 cd ..
-git add cspp/c/net/ftp.c cspp/net/ffi.ss cspp/net/ftp.ss tests/net-ftp.ss \
+git add src/cspp/c/net/ftp.c src/cspp/net/ffi.ss src/cspp/net/ftp.ss tests/net-ftp.ss \
   tests/net-ftp-server-process.ss
 git commit -m "net: add persistent FTP file transfers"
 ```
@@ -205,9 +205,9 @@ round trips plus symbolic-link rejection pass against the local fixture. The fin
 passes with empty captures.
 
 **Files:**
-- Modify: `cspp/c/net/ftp.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/ftp.ss`
+- Modify: `src/cspp/c/net/ftp.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/ftp.ss`
 - Modify: `tests/net-ftp.ss`
 - Modify: `tests/net-ftp-server-process.ss`
 - Modify: `tests/net-ftp-common.ss`
@@ -272,7 +272,7 @@ fixture coverage verifies both directions and recursive transfers.
 make clean && make
 cd tests && make test-some TEST='net-ftp net-transfer'
 cd ..
-git add cspp/c/net/ftp.c cspp/net/ffi.ss cspp/net/ftp.ss tests/net-ftp.ss \
+git add src/cspp/c/net/ftp.c src/cspp/net/ffi.ss src/cspp/net/ftp.ss tests/net-ftp.ss \
   tests/net-ftp-server-process.ss tests/net-ftp-common.ss
 git commit -m "net: add FTP metadata and resumable transfers"
 ```
@@ -284,9 +284,9 @@ client-side paths, metadata mutation/link APIs, and recursive transfer helpers a
 verified against the temporary sshd fixture. The focused SFTP suite passes with empty captures.
 
 **Files:**
-- Modify: `cspp/c/net/ssh.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/sftp.ss`
+- Modify: `src/cspp/c/net/ssh.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/sftp.ss`
 - Modify: `tests/net-sftp.ss`
 - Modify: `tests/net-ssh-common.ss`
 
@@ -368,7 +368,7 @@ helpers that preserve permissions and times when requested.
 make clean && make
 cd tests && make test-some TEST='net-sftp net-transfer net-ssh'
 cd ..
-git add cspp/c/net/ssh.c cspp/net/ffi.ss cspp/net/sftp.ss tests/net-sftp.ss \
+git add src/cspp/c/net/ssh.c src/cspp/net/ffi.ss src/cspp/net/sftp.ss tests/net-sftp.ss \
   tests/net-ssh-common.ss
 git commit -m "net: add structured SFTP filesystem APIs"
 ```
@@ -380,9 +380,9 @@ and explicit unsupported resume errors are implemented and verified against the 
 fixture. Existing recursive SCP behavior remains covered by the focused suite.
 
 **Files:**
-- Modify: `cspp/c/net/ssh.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/scp.ss`
+- Modify: `src/cspp/c/net/ssh.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/scp.ss`
 - Modify: `tests/net-scp.ss`
 
 - [ ] **Step 1: Add overwrite, metadata, and filter tests**
@@ -428,7 +428,7 @@ before creating each destination. Prevent followed links from escaping the selec
 make clean && make
 cd tests && make test-some TEST='net-scp net-transfer net-ssh'
 cd ..
-git add cspp/c/net/ssh.c cspp/net/ffi.ss cspp/net/scp.ss tests/net-scp.ss
+git add src/cspp/c/net/ssh.c src/cspp/net/ffi.ss src/cspp/net/scp.ss tests/net-scp.ss
 git commit -m "net: add SCP policy and metadata support"
 ```
 
@@ -439,9 +439,9 @@ verified. The installed libssh headers expose no client keepalive API; known-hos
 explicit-key/keyboard-interactive authentication, and forwarding remain follow-up work.
 
 **Files:**
-- Modify: `cspp/c/net/ssh.c`
-- Modify: `cspp/net/ffi.ss`
-- Modify: `cspp/net/ssh.ss`
+- Modify: `src/cspp/c/net/ssh.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/ssh.ss`
 - Modify: `tests/net-ssh.ss`
 - Modify: `tests/net-ssh-common.ss`
 - Modify: `examples/net/ssh-open-repl.ss`
@@ -505,7 +505,7 @@ lost.
 make clean && make
 cd tests && make test-some TEST='net-ssh net-sftp net-scp'
 cd ..
-git add cspp/c/net/ssh.c cspp/net/ffi.ss cspp/net/ssh.ss tests/net-ssh.ss \
+git add src/cspp/c/net/ssh.c src/cspp/net/ffi.ss src/cspp/net/ssh.ss tests/net-ssh.ss \
   tests/net-ssh-common.ss examples/net/ssh-open-repl.ss examples/net/ssh-run-cmd.ss
 git commit -m "net: add SSH forwarding and authentication controls"
 ```
@@ -597,8 +597,8 @@ Pipe a deterministic command transcript containing `pwd`, `ls`, `mkdir`, `put`, 
 - [ ] **Step 4: Audit docs and parentheses**
 
 ```bash
-rg -n '^  #\|(record|proc):' cspp/net/{transfer,ftp,sftp,scp,ssh}.ss
-./bin/cspp --script=tools/check-scheme-balance.ss -- cspp/net/{transfer,ftp,sftp,scp,ssh}.ss
+rg -n '^  #\|(record|proc):' src/cspp/net/{transfer,ftp,sftp,scp,ssh}.ss
+./cspp --script=tools/check-scheme-balance.ss -- src/cspp/net/{transfer,ftp,sftp,scp,ssh}.ss
 git status --short
 ```
 

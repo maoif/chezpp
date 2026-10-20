@@ -122,17 +122,17 @@ search = "VERSION {current_version}"
 src = "vcpkg.json"
 
 [[tool.tbump.file]]
-src = "cspp/runtime/HalideRuntime.h"
+src = "src/cspp/runtime/HalideRuntime.h"
 version_template = "{major}"
 search = "#define HALIDE_VERSION_MAJOR {current_version}"
 
 [[tool.tbump.file]]
-src = "cspp/runtime/HalideRuntime.h"
+src = "src/cspp/runtime/HalideRuntime.h"
 version_template = "{minor}"
 search = "#define HALIDE_VERSION_MINOR {current_version}"
 
 [[tool.tbump.file]]
-src = "cspp/runtime/HalideRuntime.h"
+src = "src/cspp/runtime/HalideRuntime.h"
 version_template = "{patch}"
 search = "#define HALIDE_VERSION_PATCH {current_version}"
 

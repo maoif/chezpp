@@ -7,7 +7,7 @@ cd "$project_root"
 
 make clean-all
 make
-test -x ./bin/cspp
+test -x ./cspp
 test -L ./scheme
 test -x "$(readlink -f ./scheme)"
 

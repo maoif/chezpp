@@ -29,15 +29,15 @@ the Core specification.
 
 ## Library Structure
 
-- `cspp/parser/wasm.ss` provides the documented, type-checked public API.
-- `cspp/parser/wasm/types.ss` defines documented checked public records.
-- `cspp/parser/wasm/opcodes.ss` defines the shared Core 3.0 instruction descriptors.
-- `cspp/parser/wasm/binary.ss` parses binary modules and standard sections.
-- `cspp/parser/wasm/binary/instructions.ss` parses binary opcodes and immediates.
-- `cspp/parser/wasm/text/lexical.ss` parses WAT lexical forms.
-- `cspp/parser/wasm/text.ss` parses WAT types, fields, and instructions.
-- `cspp/parser/wasm/normalize.ss` resolves WAT names and expands abbreviations.
-- `cspp/parser/wasm/validate.ss` performs shared decoding-time structural checks.
+- `src/cspp/parser/wasm.ss` provides the documented, type-checked public API.
+- `src/cspp/parser/wasm/types.ss` defines documented checked public records.
+- `src/cspp/parser/wasm/opcodes.ss` defines the shared Core 3.0 instruction descriptors.
+- `src/cspp/parser/wasm/binary.ss` parses binary modules and standard sections.
+- `src/cspp/parser/wasm/binary/instructions.ss` parses binary opcodes and immediates.
+- `src/cspp/parser/wasm/text/lexical.ss` parses WAT lexical forms.
+- `src/cspp/parser/wasm/text.ss` parses WAT types, fields, and instructions.
+- `src/cspp/parser/wasm/normalize.ss` resolves WAT names and expands abbreviations.
+- `src/cspp/parser/wasm/validate.ss` performs shared decoding-time structural checks.
 
 ## Binary Parsing
 

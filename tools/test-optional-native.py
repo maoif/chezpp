@@ -6,8 +6,8 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-FILES = ['cspp/net/ffi.ss', 'cspp/net/lws/ffi.ss', 'cspp/crypto/ffi.ss',
-         'cspp/digest.ss', 'cspp/hash.ss', 'cspp/uuid.ss']
+FILES = ['src/cspp/net/ffi.ss', 'src/cspp/net/lws/ffi.ss', 'src/cspp/crypto/ffi.ss',
+         'src/cspp/digest.ss', 'src/cspp/hash.ss', 'src/cspp/uuid.ss']
 PATTERN = re.compile(r'\(foreign-procedure\s+"([^"]+)"\s+\(([^()]*)\)\s+([^()\s]+)\)')
 
 
@@ -42,7 +42,7 @@ def library(symbol):
 
 
 def main():
-    sources = list((ROOT / 'cspp/c').rglob('*.c')) + list((ROOT / 'cspp/c').rglob('*.h'))
+    sources = list((ROOT / 'src/cspp/c').rglob('*.c')) + list((ROOT / 'src/cspp/c').rglob('*.h'))
     for source in sources:
         if source.name == 'lws_http2_fixture.c':
             continue
@@ -54,7 +54,7 @@ def main():
     assert not missing, f'Missing FFI exports: {missing}'
     if '--sentinels' not in sys.argv:
         return
-    config = (ROOT / 'cspp/c/build-config.h').read_text()
+    config = (ROOT / 'src/cspp/c/build-config.h').read_text()
     mapping = {'ssh': 'LIBSSH', 'websockets': 'WEBSOCKETS'}
     tests = ['(import (chezscheme))', '(load-shared-object "./libcspp.so")']
     for symbol, (arguments, returns) in symbols.items():

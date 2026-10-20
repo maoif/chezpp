@@ -22,7 +22,7 @@ The following passed on 2026-08-12:
 ```bash
 make clean && make
 cd tests && make test-some TEST='net-transfer net-ftp net-ssh net-sftp net-scp'
-scheme --script tools/check-scheme-balance.ss cspp/net/transfer.ss tests/net-transfer.ss
+scheme --script tools/check-scheme-balance.ss src/cspp/net/transfer.ss tests/net-transfer.ss
 git diff --check
 ```
 
@@ -57,4 +57,4 @@ only through the explicit raw-list API required by the plan.
 ## Preserved User-Owned Paths
 
 Do not modify, stage, or revert the paths listed in the Phase 2 completion handoff. In particular,
-`cspp/parser.ss` and the older untracked handoff documents remain user-owned.
+`src/cspp/parser.ss` and the older untracked handoff documents remain user-owned.

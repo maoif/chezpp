@@ -17,7 +17,7 @@ assert entries
 for entry in entries:
     for flag in ("-h", "--help"):
         result = subprocess.run(
-            [str(root / "bin/cspp"), f"--script={entry}", "--", flag],
+            [str(root / "cspp"), f"--script={entry}", "--", flag],
             cwd=root,
             capture_output=True,
             timeout=10,

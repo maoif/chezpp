@@ -19,7 +19,7 @@ into the isolated implementation worktree, preserve their useful command-line co
 harden or extend them rather than recreating them without review.
 
 The current isolated baseline does not build because committed `master` lacks
-`cspp/c/scheme.h`. The file exists untracked in the main checkout. This prerequisite must be
+`src/cspp/c/scheme.h`. The file exists untracked in the main checkout. This prerequisite must be
 resolved explicitly before implementation can establish a clean baseline.
 
 ## Scope And Decisions
@@ -240,7 +240,7 @@ not `mat` tests.
 
 Final release gates are:
 
-1. Resolve the missing `cspp/c/scheme.h` baseline prerequisite.
+1. Resolve the missing `src/cspp/c/scheme.h` baseline prerequisite.
 2. Run `make clean && make` from the project root.
 3. Run focused tests after every phase and the complete net test set at the end.
 4. Check every changed Scheme source for balanced parentheses.

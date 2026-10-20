@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def contracts():
-    source = (ROOT / 'cspp/crypto/ffi.ss').read_text()
+    source = (ROOT / 'src/cspp/crypto/ffi.ss').read_text()
     # Use the real exported wrappers, replacing only native procedures with a safe stub.
     # Every invalid-object case must raise pcheck, before either availability or native entry.
     script = r'''
@@ -24,7 +24,7 @@ def contracts():
      [else form])))
 (define evaluation-environment (copy-environment (environment '(cspp chez) '(cspp utils)) #t))
 (eval '(define require-optional-library (lambda (who library) (values))) evaluation-environment)
-(call-with-input-file "cspp/crypto/ffi.ss"
+(call-with-input-file "src/cspp/crypto/ffi.ss"
   (lambda (port)
     (let ([library (read port)])
       (for-each (lambda (form) (eval (replace-native form) evaluation-environment)) (cddddr library)))))
@@ -88,21 +88,21 @@ def contracts():
     for case in cases:
         script += f'\n;; Reject the invalid Scheme object before safe-stub native entry: {case}.\n'
         script += f'(unless (rejected-by-pcheck? \'{case}) (error \'test-native-review "missing object contract" \'{case}))\n'
-    result = subprocess.run(['./bin/cspp', '--script=/dev/stdin'], input=script, text=True,
+    result = subprocess.run(['./cspp', '--script=/dev/stdin'], input=script, text=True,
                             cwd=ROOT, capture_output=True)
     assert result.returncode == 0 and not result.stdout and not result.stderr, result.stdout + result.stderr
 
 
 def direct_calls():
-    source = (ROOT / 'cspp/c/net/lws_http.c').read_text()
+    source = (ROOT / 'src/cspp/c/net/lws_http.c').read_text()
     assert not re.search(r'\blws_\w+_fn\b|\bdynamic_(?:get_context|context_user|get_opaque_user_data)\b', source), \
         'HTTP backend retains a separate function-pointer ABI layer'
     assert 'ensure_lws_http_lifetime_context(void)' in source
     assert 'copied = lws_hdr_custom_copy(state->wsi,' in source
     assert 'defined(LWS_ROLE_H2)' in source
     for filename in ['ftp.c', 'grpc.c', 'websocket.c']:
-        assert not re.search(r'typedef[^;]+\(\*\w+_fn\)', (ROOT / 'cspp/c/net' / filename).read_text())
-    assert not re.search(r'typedef[^;]+\(\*\w+_fn\)', (ROOT / 'cspp/c/zlib_loader.c').read_text())
+        assert not re.search(r'typedef[^;]+\(\*\w+_fn\)', (ROOT / 'src/cspp/c/net' / filename).read_text())
+    assert not re.search(r'typedef[^;]+\(\*\w+_fn\)', (ROOT / 'src/cspp/c/zlib_loader.c').read_text())
 
 
 if __name__ == '__main__':

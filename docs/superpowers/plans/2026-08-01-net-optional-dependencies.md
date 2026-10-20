@@ -19,8 +19,8 @@ libssh, libwebsockets, gRPC/gpr, BLAKE3, xxHash, shell linkage tests, and `reade
 ### Task 1: Shared Optional-Library Loader
 
 **Files:**
-- Create: `cspp/c/optional_library.h`
-- Create: `cspp/c/optional_library.c`
+- Create: `src/cspp/c/optional_library.h`
+- Create: `src/cspp/c/optional_library.c`
 - Create: `tests/optional-library-loader.c`
 - Create: `tests/optional-library-loader.sh`
 - Modify: `Makefile`
@@ -33,7 +33,7 @@ a small C harness against each isolated `LD_LIBRARY_PATH`:
 
 ```c
 /* tests/optional-library-loader.c */
-#include "../cspp/c/optional_library.h"
+#include "../src/cspp/c/optional_library.h"
 #include <stdio.h>
 
 int main(int argc, char **argv) {
@@ -75,11 +75,11 @@ Run:
 ./tests/optional-library-loader.sh
 ```
 
-Expected: compilation fails because `cspp/c/optional_library.h` does not exist.
+Expected: compilation fails because `src/cspp/c/optional_library.h` does not exist.
 
 - [ ] **Step 3: Define the loader contract**
 
-Create `cspp/c/optional_library.h` with this public C-internal API:
+Create `src/cspp/c/optional_library.h` with this public C-internal API:
 
 ```c
 #ifndef CSPP_OPTIONAL_LIBRARY_H
@@ -142,7 +142,7 @@ test-optional-library-loader:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Makefile cspp/c/optional_library.h cspp/c/optional_library.c \
+git add Makefile src/cspp/c/optional_library.h src/cspp/c/optional_library.c \
   tests/Makefile tests/optional-library-loader.c tests/optional-library-loader.sh
 git commit -m "build: add shared optional library loader"
 ```
@@ -150,7 +150,7 @@ git commit -m "build: add shared optional library loader"
 ### Task 2: Migrate BLAKE3 And xxHash To The Shared Loader
 
 **Files:**
-- Modify: `cspp/c/optional_hash.c`
+- Modify: `src/cspp/c/optional_hash.c`
 - Modify: `tests/optional-hash-linkage.sh`
 - Test: `tests/optional-hash-libs.ss`
 
@@ -183,7 +183,7 @@ Expected: FAIL because the existing loader has no shared synchronized descriptor
 
 - [ ] **Step 3: Replace private loader state**
 
-Replace the local `optional_library` implementation in `cspp/c/optional_hash.c` with:
+Replace the local `optional_library` implementation in `src/cspp/c/optional_hash.c` with:
 
 ```c
 #include "optional_library.h"
@@ -215,18 +215,18 @@ Expected: exit 0; Scheme test stdout/stderr are empty.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cspp/c/optional_hash.c tests/optional-hash-libs.ss tests/optional-hash-linkage.sh
+git add src/cspp/c/optional_hash.c tests/optional-hash-libs.ss tests/optional-hash-linkage.sh
 git commit -m "hash: use shared optional library loader"
 ```
 
 ### Task 3: Dynamically Load OpenSSL For Crypto, Digest, And TLS
 
 **Files:**
-- Create: `cspp/c/openssl_loader.h`
-- Create: `cspp/c/openssl_loader.c`
-- Modify: `cspp/c/crypto.c`
-- Modify: `cspp/c/digest.c`
-- Modify: `cspp/c/net/tls.c`
+- Create: `src/cspp/c/openssl_loader.h`
+- Create: `src/cspp/c/openssl_loader.c`
+- Modify: `src/cspp/c/crypto.c`
+- Modify: `src/cspp/c/digest.c`
+- Modify: `src/cspp/c/net/tls.c`
 - Modify: `Makefile`
 - Create: `tests/optional-openssl.sh`
 - Modify: `tests/crypto.ss`
@@ -246,14 +246,14 @@ The script assertions are:
 
 ```bash
 printf '%s\n' '(import (cspp)) (display "ok")' | \
-  env LD_LIBRARY_PATH="$fixture_dir" ../bin/cspp -q >import.out 2>import.err
+  env LD_LIBRARY_PATH="$fixture_dir" ../cspp -q >import.out 2>import.err
 test "$(cat import.out)" = ok
 test ! -s import.err
 
 printf '%s\n' \
   '(import (cspp))' \
   '(guard (c [else (display-condition c)]) (random-bytes 8))' | \
-  env LD_LIBRARY_PATH="$fixture_dir" ../bin/cspp -q >use.out 2>use.err
+  env LD_LIBRARY_PATH="$fixture_dir" ../cspp -q >use.out 2>use.err
 grep -F 'OpenSSL runtime ABI major 2; requires major 3' use.out
 ```
 
@@ -331,8 +331,8 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Makefile cspp/c/openssl_loader.h cspp/c/openssl_loader.c cspp/c/crypto.c \
-  cspp/c/digest.c cspp/c/net/tls.c tests/optional-openssl.sh tests/crypto.ss \
+git add Makefile src/cspp/c/openssl_loader.h src/cspp/c/openssl_loader.c src/cspp/c/crypto.c \
+  src/cspp/c/digest.c src/cspp/c/net/tls.c tests/optional-openssl.sh tests/crypto.ss \
   tests/net-core.ss
 git commit -m "crypto: load OpenSSL dynamically"
 ```
@@ -340,10 +340,10 @@ git commit -m "crypto: load OpenSSL dynamically"
 ### Task 4: Unify libcurl, libssh, libwebsockets, And gRPC Loading
 
 **Files:**
-- Modify: `cspp/c/net/ftp.c`
-- Modify: `cspp/c/net/ssh.c`
-- Modify: `cspp/c/net/websocket.c`
-- Modify: `cspp/c/net/grpc.c`
+- Modify: `src/cspp/c/net/ftp.c`
+- Modify: `src/cspp/c/net/ssh.c`
+- Modify: `src/cspp/c/net/websocket.c`
+- Modify: `src/cspp/c/net/grpc.c`
 - Create: `tests/net-loader.ss`
 - Create: `tests/optional-library-linkage.sh`
 - Modify: `tests/Makefile`
@@ -414,17 +414,17 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cspp/c/net/ftp.c cspp/c/net/ssh.c cspp/c/net/websocket.c \
-  cspp/c/net/grpc.c tests/net-loader.ss tests/optional-library-linkage.sh tests/Makefile
+git add src/cspp/c/net/ftp.c src/cspp/c/net/ssh.c src/cspp/c/net/websocket.c \
+  src/cspp/c/net/grpc.c tests/net-loader.ss tests/optional-library-linkage.sh tests/Makefile
 git commit -m "net: validate optional protocol libraries"
 ```
 
 ### Task 5: Public Capability Records
 
 **Files:**
-- Create: `cspp/optional-library.ss`
-- Modify: `cspp.ss`
-- Modify: `cspp/net/ffi.ss`
+- Create: `src/cspp/optional-library.ss`
+- Modify: `src/cspp.ss`
+- Modify: `src/cspp/net/ffi.ss`
 - Modify: `tests/net-loader.ss`
 
 - [ ] **Step 1: Define and test the public record contract**
@@ -472,7 +472,7 @@ vector `(name available? version capabilities error)`.
 
 - [ ] **Step 4: Register the library**
 
-Import and export `(cspp optional-library)` from `cspp.ss`. Add its source automatically through
+Import and export `(cspp optional-library)` from `src/cspp.ss`. Add its source automatically through
 the existing `SRCS_CSPP` Makefile discovery.
 
 - [ ] **Step 5: Build and test**
@@ -487,7 +487,7 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cspp/optional-library.ss cspp.ss cspp/net/ffi.ss tests/net-loader.ss
+git add src/cspp/optional-library.ss src/cspp.ss src/cspp/net/ffi.ss tests/net-loader.ss
 git commit -m "net: expose optional library capabilities"
 ```
 
@@ -528,8 +528,8 @@ Expected: every command exits 0; Scheme test stdout/stderr are empty.
 - [ ] **Step 4: Check changed Scheme files**
 
 ```bash
-../bin/cspp --script=../tools/check-scheme-balance.ss -- \
-  ../cspp/optional-library.ss ../cspp/net/ffi.ss
+../cspp --script=../tools/check-scheme-balance.ss -- \
+  ../src/cspp/optional-library.ss ../src/cspp/net/ffi.ss
 ```
 
 Expected: balanced parentheses for both files.

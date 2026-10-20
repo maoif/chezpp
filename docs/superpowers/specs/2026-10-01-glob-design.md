@@ -203,5 +203,5 @@ symlink policy; and iterator exhaustion/finalization. Tests create temporary
 trees with `dynamic-wind` cleanup and use `mat` cases, with comments preceding
 negative cases.
 
-Update `cspp.ss` to import `(cspp glob)`, and run the project-required
+Update `src/cspp.ss` to import `(cspp glob)`, and run the project-required
 `make clean && make`, followed by `cd tests && make test-some TEST='glob path file'`.
