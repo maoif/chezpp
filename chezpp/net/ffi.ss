@@ -84,14 +84,22 @@
           ffi-net-ssh-known-host-update
           ffi-net-ssh-known-host-export
           ffi-net-ssh-channel-open
+          ffi-net-ssh-channel-forward-start
+          ffi-net-ssh-channel-forward-step
+          ffi-net-ssh-channel-forward-discard
           ffi-net-ssh-channel-open-forward
           ffi-net-ssh-remote-forward-listen
           ffi-net-ssh-remote-forward-accept
           ffi-net-ssh-remote-forward-cancel
           ffi-net-ssh-channel-close
+          ffi-net-ssh-channel-send-eof
           ffi-net-ssh-channel-request-exec
           ffi-net-ssh-channel-request-shell
           ffi-net-ssh-channel-request-pty
+          ffi-net-ssh-channel-request-pty-size
+          ffi-ssh-terminal-size
+          ffi-ssh-terminal-raw-start
+          ffi-ssh-terminal-raw-close
           ffi-net-ssh-channel-request-environment
           ffi-net-ssh-channel-request-subsystem
           ffi-net-ssh-channel-read
@@ -106,6 +114,7 @@
           ffi-net-scp-download-directory
           ffi-net-scp-upload-directory
           ffi-net-scp-transfer-start
+          ffi-net-scp-transfer-start-many
           ffi-net-scp-transfer-step
           ffi-net-scp-transfer-cancel
           ffi-net-scp-transfer-close
@@ -467,6 +476,13 @@
   (define ffi-net-ssh-channel-open-forward
     (foreign-procedure "chezpp_net_ssh_channel_open_forward"
                        (uptr string int string int int) scheme-object))
+  (define ffi-net-ssh-channel-forward-start
+    (foreign-procedure "chezpp_net_ssh_channel_forward_start" (uptr) scheme-object))
+  (define ffi-net-ssh-channel-forward-step
+    (foreign-procedure "chezpp_net_ssh_channel_forward_step"
+                       (uptr string int string int) scheme-object))
+  (define ffi-net-ssh-channel-forward-discard
+    (foreign-procedure "chezpp_net_ssh_channel_forward_discard" (uptr) void))
   (define ffi-net-ssh-remote-forward-listen
     (foreign-procedure "chezpp_net_ssh_remote_forward_listen"
                        (uptr string int) scheme-object))
@@ -475,6 +491,8 @@
   (define ffi-net-ssh-remote-forward-cancel
     (foreign-procedure "chezpp_net_ssh_remote_forward_cancel"
                        (uptr string int) scheme-object))
+  (define ffi-net-ssh-channel-send-eof
+    (foreign-procedure "chezpp_net_ssh_channel_send_eof" (uptr) scheme-object))
   (define ffi-net-ssh-channel-close
     (foreign-procedure "chezpp_net_ssh_channel_close" (uptr) scheme-object))
   (define ffi-net-ssh-channel-request-exec
@@ -483,6 +501,41 @@
     (foreign-procedure "chezpp_net_ssh_channel_request_shell" (uptr int) scheme-object))
   (define ffi-net-ssh-channel-request-pty
     (foreign-procedure "chezpp_net_ssh_channel_request_pty" (uptr int) scheme-object))
+  #|proc:ffi-net-ssh-channel-request-pty-size
+  Request a PTY, or resize it when `resize?` is true, on native `channel-handle`.
+  `terminal` is its TERM value, `columns` and `rows` its size, and `timeout-ms` the wait bound.
+  Returns native success or an error status.
+  |#
+  (define ffi-net-ssh-channel-request-pty-size
+    (let ([native (foreign-procedure "chezpp_net_ssh_channel_request_pty_size"
+                                    (uptr string int int boolean int) scheme-object)])
+      (lambda (channel-handle terminal columns rows resize? timeout-ms)
+        (pcheck ([natural? channel-handle] [string? terminal] [fixnum? columns rows timeout-ms]
+                 [boolean? resize?])
+          (require-optional-library 'ffi-net-ssh-channel-request-pty-size 'ssh)
+          (native channel-handle terminal columns rows resize? timeout-ms)))))
+
+  #|proc:ffi-ssh-terminal-size
+  Return local `descriptor`'s #(columns rows), #f for a nonterminal, or an error status.
+  |#
+  (define ffi-ssh-terminal-size
+    (let ([native (foreign-procedure "chezpp_ssh_terminal_size" (int) scheme-object)])
+      (lambda (descriptor) (pcheck ([fixnum? descriptor]) (native descriptor)))))
+
+  #|proc:ffi-ssh-terminal-raw-start
+  Put local `descriptor` in raw mode, returning an ok status with an owned restoration handle,
+  or an error status. Release that handle with `ffi-ssh-terminal-raw-close`.
+  |#
+  (define ffi-ssh-terminal-raw-start
+    (let ([native (foreign-procedure "chezpp_ssh_terminal_raw_start" (int) scheme-object)])
+      (lambda (descriptor) (pcheck ([fixnum? descriptor]) (native descriptor)))))
+
+  #|proc:ffi-ssh-terminal-raw-close
+  Restore and release native `terminal-handle`. Return zero on success or an errno integer.
+  |#
+  (define ffi-ssh-terminal-raw-close
+    (let ([native (foreign-procedure "chezpp_ssh_terminal_raw_close" (uptr) int)])
+      (lambda (terminal-handle) (pcheck ([natural? terminal-handle]) (native terminal-handle)))))
   (define ffi-net-ssh-channel-request-environment
     (foreign-procedure "chezpp_net_ssh_channel_request_environment" (uptr string string)
                        scheme-object))
@@ -512,6 +565,22 @@
     (foreign-procedure "chezpp_net_scp_upload_directory" (uptr string string int) scheme-object))
   (define ffi-net-scp-transfer-start
     (foreign-procedure "chezpp_net_scp_transfer_start" (uptr int string string) scheme-object))
+  #|proc:ffi-net-scp-transfer-start-many
+  The `ffi-net-scp-transfer-start-many` procedure starts a bounded SCP sibling-file batch.
+  `session-handle` identifies an authenticated native SSH session. `direction` is zero for
+  download or one for upload. `local-directory` and `remote-directory` contain the files.
+  `encoded-names` is a bytevector of up to 32 UTF-8 child names, each terminated by NUL.
+  It returns an `ok` status containing a native transfer handle, or an error status. Release
+  the handle with `ffi-net-scp-transfer-close`; step and cancel use the ordinary transfer APIs.
+  |#
+  (define ffi-net-scp-transfer-start-many
+    (let ([native (foreign-procedure "chezpp_net_scp_transfer_start_many"
+                                    (uptr int string string scheme-object) scheme-object)])
+      (lambda (session-handle direction local-directory remote-directory encoded-names)
+        (pcheck ([natural? session-handle] [fixnum? direction]
+                 [string? local-directory remote-directory] [bytevector? encoded-names])
+          (require-optional-library 'ffi-net-scp-transfer-start-many 'ssh)
+          (native session-handle direction local-directory remote-directory encoded-names)))))
   (define ffi-net-scp-transfer-step
     (foreign-procedure "chezpp_net_scp_transfer_step" (uptr) scheme-object))
   (define ffi-net-scp-transfer-cancel

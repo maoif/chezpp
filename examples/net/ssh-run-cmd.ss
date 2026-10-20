@@ -1,87 +1,38 @@
-(import (chezpp))
+(import (chezpp) (chezpp logging))
+(load "examples/common.ss")
+(load "examples/net/ssh-example-common.ss")
 
-(load "examples/net/net-example-common.ss")
+(define has-command-words? (and (member "--" (command-line-arguments)) #t))
 
-(define parse-ssh-run-cmd-arguments
-  (lambda (arg*)
-    (unless (>= (length arg*) 5)
-      (errorf 'ssh-run-cmd
-              "expected host port user auth-kind and command arguments, given ~s"
-              arg*))
-    (let ([host (car arg*)]
-          [port (parse-port-argument 'ssh-run-cmd (cadr arg*))]
-          [user (caddr arg*)]
-          [auth-kind (cadddr arg*)]
-          [rest (cddddr arg*)])
-      (cond
-       [(string=? auth-kind "agent")
-        (when (null? rest)
-          (errorf 'ssh-run-cmd "missing remote command"))
-        (values host port user auth-kind #f (join-command-arguments rest))]
-       [(or (string=? auth-kind "password")
-            (string=? auth-kind "publickey"))
-        (when (< (length rest) 2)
-          (errorf 'ssh-run-cmd
-                  "authentication kind ~s requires a secret/passphrase and command"
-                  auth-kind))
-        (values host
-                port
-                user
-                auth-kind
-                (car rest)
-                (join-command-arguments (cdr rest)))]
-       [else
-        (errorf 'ssh-run-cmd "invalid SSH auth kind ~s" auth-kind)]))))
+(define command
+  (ssh-example-command
+   'ssh-run-cmd "Run --command=text [-- remaining command words] over SSH."
+   (append ssh-example-options '((command . "Remote shell command text; required unless command words follow --. Prints stdout/stderr and returns the remote exit status.")))
+   (lambda (ref)
+     (let* ([words (if has-command-words? (ref 'command-words) '())]
+            [text (join-command-arguments
+                   (append (if (ref 'command) (list (ref 'command)) '()) words))])
+       (when (string=? text "") (errorf 'ssh-run-cmd "provide --command or command words"))
+       (exit
+        (call-with-example-ssh
+         'ssh-run-cmd ref
+         (lambda (session log)
+           ;; Execute command text in a fresh SSH channel.
+           (call-with-ssh-channel
+            session
+            (lambda (channel)
+              ;; Request execution of the assembled remote shell command.
+              (ssh-exec channel text)
+              ;; Commands receive stdin EOF so programs waiting for input can finish.
+              (ssh-send-eof! channel)
+              (ssh-example-drain channel void))))))))))
 
-#|proc:ssh-run-cmd
-The `ssh-run-cmd` procedure authenticates to `host:port`, runs `cmd`, and
-forwards the remote stdout and stderr streams to the local standard ports.
-|#
-(define ssh-run-cmd
-  (lambda (host port user auth-kind auth-arg cmd)
-    (pcheck ([string? host user auth-kind cmd] [fixnum? port])
-      (let ([session (ssh-open host port user)])
-        (dynamic-wind
-          void
-          (lambda ()
-            (ssh-authenticate! 'ssh-run-cmd session user auth-kind auth-arg)
-            (call-with-ssh-channel
-             session
-             (lambda (channel)
-               (ssh-exec channel cmd)
-               (call-with-example-output-ports
-                (lambda (out err)
-                  (let loop ([stdout-eof? #f] [stderr-eof? #f] [exit-status #f])
-                    (let* ([stdout (if stdout-eof? #t (ssh-read/nonblocking channel 65536))]
-                           [stderr (if stderr-eof? #t (ssh-read-stderr/nonblocking channel 65536))]
-                           [stdout-eof* (or stdout-eof? (eof-object? stdout))]
-                           [stderr-eof* (or stderr-eof? (eof-object? stderr))]
-                           [status (or exit-status
-                                       (guard (c [else #f])
-                                         (let ([x (ssh-channel-exit-status channel)])
-                                           (and (fixnum? x) (fx>= x 0) x))))]
-                           [targets
-                            (append
-                             (if (net-would-block? stdout)
-                                 (list (make-poll-target
-                                        (net-would-block-resource stdout)
-                                        (net-would-block-events stdout)))
-                                 '())
-                             (if (net-would-block? stderr)
-                                 (list (make-poll-target
-                                        (net-would-block-resource stderr)
-                                        (net-would-block-events stderr)))
-                                 '()))])
-                      (when (bytevector? stdout) (put-bytevector out stdout) (flush-output-port out))
-                      (when (bytevector? stderr) (put-bytevector err stderr) (flush-output-port err))
-                      (cond
-                       [(and stdout-eof* stderr-eof* status) status]
-                       [else
-                        (if (null? targets) (milisleep 5) (poll targets 100))
-                        (loop stdout-eof* stderr-eof* status)]))))))))
-          (lambda ()
-            (ssh-close session)))))))
-
-(let-values ([(host port user auth-kind auth-arg cmd)
-              (parse-ssh-run-cmd-arguments (command-line-arguments))])
-  (exit (ssh-run-cmd host port user auth-kind auth-arg cmd)))
+;; The CLI sink is needed only when positional words follow the named options.
+(let ([args (command-line-arguments)])
+  (when (member "--" args)
+    (let ([words (example-make-option 'command-words
+                                      "Remaining words joined as remote shell command text after --.")])
+      (option-positional?-set! words #t)
+      (option-sink?-set! words #t)
+      (command-options-add! command words)))
+  (run-cli-command! command (ssh-example-arguments args)))

@@ -124,6 +124,76 @@
             (and (eq? 'h1 (http-response-version response))
                  (equal? #vu8(101 111 102 45 98 111 100 121) (http-response-body response))))))))
 
+(mat net-http-live-streaming-receive-buffer
+     ;; Large responses should use the payload buffer instead of 4 KiB reactor handoffs.
+     (mat-requires (websockets)
+       (let ([body (make-string 262144 #\x)])
+         (call-with-http1-response
+          (string-append "HTTP/1.1 200 OK\r\nContent-Length: 262144\r\n"
+                         "Connection: close\r\n\r\n" body)
+          (lambda (client uri)
+            (let ([received (make-bytevector 262144)] [offset 0] [largest 0])
+              (let ([response
+                     (net-operation-wait
+                      (http-send/nonblocking
+                       client (make-http-request 'get uri)
+                       (make-http-body-sink
+                        (lambda (bytes start count)
+                          (bytevector-copy! bytes start received offset count)
+                          (set! offset (fx+ offset count))
+                          (set! largest (max largest count))))))])
+                (and (= 200 (http-response-status response))
+                     (= 262144 offset)
+                     (equal? received (string->utf8 body))
+                     (> largest 4096)
+                     (<= largest 65536)))))))))
+
+(mat net-http-live-receive-queue-exhaustion-fails
+     ;; Error case: a full event pool must fail a real body callback without losing bytes silently.
+     (mat-requires (websockets)
+       (let ([phase (box 0)] [context (lws-context-open 2 65536)])
+         (let-values ([(port worker)
+                       (start-http1-fixture
+                        (lambda (input output)
+                          (read-http-request-head input)
+                          (put-bytevector output
+                           (string->utf8 "HTTP/1.1 200 OK\r\nContent-Length: 32\r\n\r\n"))
+                          (flush-output-port output)
+                          (let wait ([remaining 3000])
+                            (when (and (zero? (unbox phase)) (positive? remaining))
+                              (milisleep 1) (wait (fx1- remaining))))
+                          (when (= 1 (unbox phase))
+                            (put-bytevector output (make-bytevector 16 120))
+                            (flush-output-port output)
+                            (let wait ([remaining 3000])
+                              (when (and (= 1 (unbox phase)) (positive? remaining))
+                                (milisleep 1) (wait (fx1- remaining)))))))])
+           (define await-metric
+             (lambda (index predicate)
+               (let loop ([remaining 100])
+                 (cond
+                  [(predicate (vector-ref (lws-context-pool-metrics context) index)) #t]
+                  [(zero? remaining) #f]
+                  [else (lws-context-service context 10) (loop (fx1- remaining))]))))
+           (dynamic-wind
+             void
+             (lambda ()
+               (and (lws-client-start context 1 1 1 "127.0.0.1" port #f
+                                      "GET" "127.0.0.1" "/")
+                    (await-metric 1 (lambda (count) (= count 2)))
+                    (begin (set-box! phase 1) #t)
+                    (await-metric 4 positive?)
+                    (let drain ([failed? #f])
+                      (let ([event (lws-context-next-event context)])
+                        (if event
+                            (and (not (eq? 'complete (vector-ref event 0)))
+                                 (drain (or failed? (eq? 'failed (vector-ref event 0)))))
+                            failed?)))))
+             (lambda ()
+               (set-box! phase 2)
+               (lws-context-close context)
+               (thread-join worker)))))))
+
 (mat net-http-live-truncated-body
      ;; Error case: EOF before Content-Length must not produce a successful response.
      (mat-requires (websockets)
@@ -896,3 +966,95 @@
                   (eq? 'pending (net-operation-state second))
                   (finish-h2-stream! reactor second 1 2 2 200 #vu8(2))))
            (lambda () (lws-http2-client-close! client))))))
+
+
+(mat net-http-sink-response-headers
+     (mat-requires (websockets)
+       (let ([events '()])
+         (call-with-http1-response
+          "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata"
+          (lambda (client uri)
+            (net-operation-wait
+             (http-send/nonblocking
+              client (make-http-request 'get uri)
+              (make-http-body-sink
+               (lambda (bytes start count) (set! events (cons 'body events)))
+               (lambda () (set! events (cons 'finished events)))
+               (lambda (status headers)
+                 (set! events (cons (list status (http-header-ref headers "Content-Length"))
+                                    events))))))
+            (let ([ordered (reverse events)])
+              (and (equal? '(200 "4") (car ordered))
+                   (eq? 'finished (car (reverse ordered)))
+                   (memq 'body ordered)
+                   (= 1 (length (filter pair? ordered))))))))))
+
+
+(mat net-http-sink-empty-response-headers
+     (mat-requires (websockets)
+       (let ([events '()])
+         (call-with-http1-response
+          "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+          (lambda (client uri)
+            (net-operation-wait
+             (http-send/nonblocking
+              client (make-http-request 'get uri)
+              (make-http-body-sink
+               (lambda (bytes start count) (set! events (cons 'body events)))
+               (lambda () (set! events (cons 'finished events)))
+               (lambda (status headers)
+                 (set! events (cons (list status (http-header-ref headers "Content-Length"))
+                                    events))))))
+            (equal? events '(finished (200 "0"))))))))
+
+(mat net-http-sink-header-observer-failure
+     ;; Error case: a header observer exception fails the operation and still finishes its sink.
+     (mat-requires (websockets)
+       (let ([finished 0] [body-seen? #f])
+         (call-with-http1-response
+          "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata"
+          (lambda (client uri)
+            (guard (condition
+                    [else (and (= 1 finished) (not body-seen?)
+                               (message-condition? condition)
+                               (string=? "header observer failed" (condition-message condition)))])
+              (net-operation-wait
+               (http-send/nonblocking
+                client (make-http-request 'get uri)
+                (make-http-body-sink
+                 (lambda (bytes start count) (set! body-seen? #t))
+                 (lambda () (set! finished (fx1+ finished)))
+                 (lambda (status headers) (error 'test "header observer failed")))))
+              #f))))))
+
+(mat net-http-sink-header-observer-cancellation
+     ;; Error case: cancelling from a header observer must never deliver a body after finishing.
+     ;; Exercise both body and empty responses, and all public cancellation entry points.
+     (mat-requires (websockets)
+       (andmap
+        (lambda (action)
+          (andmap
+           (lambda (body)
+             (call-with-http1-response
+              (format "HTTP/1.1 200 OK\r\nContent-Length: ~a\r\nConnection: close\r\n\r\n~a"
+                      (string-length body) body)
+              (lambda (client uri)
+                (let ([events '()] [operation #f])
+                  (set! operation
+                        (http-send/nonblocking
+                         client (make-http-request 'get uri)
+                         (make-http-body-sink
+                          (lambda (bytes start count) (set! events (cons 'body events)))
+                          (lambda () (set! events (cons 'finished events)))
+                          (lambda (status headers)
+                            (set! events (cons 'headers events))
+                            (case action
+                              [(close) (http-close client)]
+                              [(cancel) (http-cancel-pending! client)]
+                              [(operation) (net-operation-cancel! operation)])))))
+                  (guard (failure [else (void)]) (net-operation-wait operation))
+                  (http-close client)
+                  (and (eq? 'cancelled (net-operation-state operation))
+                       (equal? '(headers finished) (reverse events)))))))
+           '("data" "")))
+        '(close cancel operation))))

@@ -64,6 +64,40 @@
                   (and (= received 10) (= 200 (http-response-status response)))))
               (lambda () (http-close client))))))))
 
+(mat net-lws-http2-header-observer-cancellation
+     ;; Error case: cancellation in the header observer must suppress the current body chunk.
+     ;; A large response also checks that already queued later chunks stay suppressed.
+     (mat-requires (websockets)
+       (andmap
+        (lambda (action)
+          (call-with-h2-fixture
+           10
+           (lambda (port command)
+             (let ([client (http-open)] [events '()] [operation #f])
+               (dynamic-wind
+                 void
+                 (lambda ()
+                   (http-client-version-set! client 'h2)
+                   (http-set-timeout! client 2000)
+                   (set! operation
+                         (http-send/nonblocking
+                          client (make-http-request 'get (format "http://127.0.0.1:~a/large" port))
+                          (make-http-body-sink
+                           (lambda (bytes start count) (set! events (cons 'body events)))
+                           (lambda () (set! events (cons 'finished events)))
+                           (lambda (status headers)
+                             (set! events (cons 'headers events))
+                             (case action
+                               [(close) (http-close client)]
+                               [(cancel) (http-cancel-pending! client)]
+                               [(operation) (net-operation-cancel! operation)])))))
+                   (guard (failure [else (void)]) (net-operation-wait operation))
+                   (http-close client)
+                   (and (eq? 'cancelled (net-operation-state operation))
+                        (equal? '(headers finished) (reverse events))))
+                 (lambda () (http-close client)))))))
+        '(close cancel operation))))
+
 (mat net-lws-http2-live-concurrent-streams
      (mat-requires (websockets)
        (call-with-h2-fixture
@@ -94,11 +128,12 @@
 
 (mat net-lws-http2-live-flow-control
      ;; A large response must cross repeated writable/acknowledgement boundaries intact.
+     ;; Avoid splitting every frame into 4 KiB callbacks despite the larger payload buffer.
      (mat-requires (websockets)
        (call-with-h2-fixture
         4
         (lambda (port command)
-          (let ([client (http-open)] [received 0])
+          (let ([client (http-open)] [received 0] [largest 0])
             (dynamic-wind
               void
               (lambda ()
@@ -111,9 +146,12 @@
                            (format "http://127.0.0.1:~a/large" port))
                          (make-http-body-sink
                           (lambda (bytes start count)
+                            (set! largest (max largest count))
                             (set! received (+ received count))))))])
                   (and (= 200 (http-response-status response))
-                       (= 262144 received))))
+                       (= 262144 received)
+                       (> largest 4096)
+                       (<= largest 65536))))
               (lambda () (http-close client))))))))
 
 (mat net-lws-http2-live-peer-settings-goaway

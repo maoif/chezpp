@@ -88,6 +88,7 @@ struct lws_http_stream {
   size_t headers_length;
   size_t terminal_payload_length;
   size_t pending_body_bytes;
+  int client_read_batching;
   int outbound_final;
   int has_request_body;
   int active;
@@ -157,6 +158,7 @@ struct lws_http_context {
 
   lws_poll_entry *poll_entries;
   lws_poll_entry *poll_free;
+  struct pollfd *service_pollfds;
   size_t poll_capacity;
   size_t poll_in_use;
   size_t poll_high_water;
@@ -203,12 +205,16 @@ uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
                                               const char *interface_name,
                                               int port,
                                               uintptr_t tls_context_handle);
+uintptr_t chezpp_lws_http_server_context_open_version(size_t event_capacity,
+    size_t payload_capacity, const char *interface_name, int port,
+    uintptr_t tls_context_handle, int prior_knowledge);
 void chezpp_lws_http_context_close(uintptr_t context_handle);
 int chezpp_lws_http_context_wakeup_fd(uintptr_t context_handle);
 ptr chezpp_lws_http_context_poll_snapshot(uintptr_t context_handle);
 int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
                                        int revents);
 ptr chezpp_lws_http_context_next_event(uintptr_t context_handle);
+int chezpp_lws_http_context_service(uintptr_t context_handle, int maximum_timeout_ms);
 int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
                                        int maximum_timeout_ms);
 int chezpp_lws_http_context_wakeup(uintptr_t context_handle);

@@ -529,7 +529,7 @@ python3 check_parentheses.py chezpp/benchmark.ss tests/benchmark.ss
 python3 check_parentheses.py examples/benchmark.ss
 make clean && make
 cd tests && make test-some TEST='benchmark'
-./chez++ -q --script examples/benchmark.ss
+./chez++ -q --script=examples/benchmark.ss --
 ```
 
 ---
@@ -562,7 +562,7 @@ python3 check_parentheses.py chezpp/benchmark.ss tests/benchmark.ss
 make clean && make
 cd tests && make clean && make test-some TEST='benchmark'
 python3 check_parentheses.py examples/benchmark.ss
-./chez++ -q --script examples/benchmark.ss
+./chez++ -q --script=examples/benchmark.ss --
 ```
 
 ---

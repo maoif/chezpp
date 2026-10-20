@@ -95,6 +95,23 @@
               (error? (capture-condition (lambda () (net-operation-step! operation))))
               (error? (capture-condition (lambda () (net-operation-result operation)))))))
 
+     ;; Error case: cancellation during advancement must survive its returned update.
+     (let ([cleanup-count 0] [listener-count 0] [operation #f])
+       (set! operation
+         (make-net-operation
+          'cancel-during-advance
+          (lambda ()
+            (net-operation-cancel! operation)
+            (net-operation-completed 'unexpected))
+          void
+          (lambda () (set! cleanup-count (fx1+ cleanup-count)))))
+       (net-operation-register-listener!
+        operation (lambda (operation) (set! listener-count (fx1+ listener-count))))
+       (net-operation-step! operation)
+       (and (eq? 'cancelled (net-operation-state operation))
+            (= cleanup-count 1) (= listener-count 1)
+            (error? (capture-condition (lambda () (net-operation-wait operation))))))
+
      ;; Repeated cancellation invokes cancellation and cleanup procedures only once.
      (let ([cancel-count 0]
            [cleanup-count 0])

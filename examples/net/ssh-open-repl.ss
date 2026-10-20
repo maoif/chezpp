@@ -1,95 +1,108 @@
-(import (chezpp))
+(import (chezpp) (chezpp logging) (chezpp system signal)
+        (only (chezpp net ffi) ffi-ssh-terminal-size ffi-ssh-terminal-raw-start
+                              ffi-ssh-terminal-raw-close))
+(load "examples/common.ss")
+(load "examples/net/ssh-example-common.ss")
 
-(load "examples/net/net-example-common.ss")
+;; A local PTY owns line editing, echo and signals only when no remote PTY is in use.
+(define ssh-example-terminal-size
+  (lambda ()
+    (let ([size (ffi-ssh-terminal-size 0)])
+      (cond [(not size) #f]
+            [(and (vector? size) (fixnum? (vector-ref size 0))) size]
+            [else (errorf 'ssh-open-repl "cannot inspect local terminal: ~s" size)]))))
 
-(define parse-ssh-open-repl-arguments
-  (lambda (arg*)
-    (unless (>= (length arg*) 4)
-      (errorf 'ssh-open-repl
-              "expected host port user auth-kind arguments, given ~s"
-              arg*))
-    (let ([host (car arg*)]
-          [port (parse-port-argument 'ssh-open-repl (cadr arg*))]
-          [user (caddr arg*)]
-          [auth-kind (cadddr arg*)]
-          [rest (cddddr arg*)])
-      (cond
-       [(string=? auth-kind "agent")
-        (unless (null? rest)
-          (errorf 'ssh-open-repl
-                  "agent authentication does not take an extra argument, given ~s"
-                  rest))
-        (values host port user auth-kind #f)]
-       [(or (string=? auth-kind "password")
-            (string=? auth-kind "publickey"))
-        (unless (= (length rest) 1)
-          (errorf 'ssh-open-repl
-                  "authentication kind ~s requires exactly one secret/passphrase argument"
-                  auth-kind))
-        (values host port user auth-kind (car rest))]
-       [else
-        (errorf 'ssh-open-repl "invalid SSH auth kind ~s" auth-kind)]))))
+(define ssh-example-shell
+  (lambda (session log pty? size)
+    ;; Open a remote interactive shell; this is the remote user's shell.
+    (call-with-ssh-channel
+     session
+     (lambda (channel)
+       (when pty?
+         ;; Preserve the local terminal capabilities and dimensions for prompt rendering.
+         (let ([terminal (getenv "TERM")])
+           (ssh-request-pty! channel
+                             (if (and terminal (not (string=? terminal ""))) terminal "xterm")
+                             (if size (vector-ref size 0) 80)
+                             (if size (vector-ref size 1) 24) 30000)))
+       ;; Start the remote user's shell on this channel.
+       (ssh-shell channel 30000)
+       (let ([raw-handle #f] [stdin-open? #t] [last-size size] [last-size-check 0]
+             [input-buffer (make-bytevector 65536)] [input-end 0] [input-offset 0])
+         (dynamic-wind
+           (lambda ()
+             (when (and pty? size)
+               (let ([status (ffi-ssh-terminal-raw-start 0)])
+                 (unless (and (vector? status) (eq? (vector-ref status 0) 'ok))
+                   (errorf 'ssh-open-repl "cannot enter raw terminal mode: ~s" status))
+                 (set! raw-handle (vector-ref status 1)))))
+           (lambda ()
+             ;; Keep at most one bounded input chunk while draining remote output.
+             (call-with-port
+              (open-file-input-port "/proc/self/fd/0" (file-options) (buffer-mode none) #f)
+              (lambda (input)
+                (ssh-example-drain
+                 channel
+                 (lambda ()
+                   ;; Check periodically without installing a process-wide signal handler.
+                   (let* ([now (current-time 'time-monotonic)]
+                          [ms (+ (* (time-second now) 1000)
+                                 (quotient (time-nanosecond now) 1000000))])
+                     (when (and pty? size (>= (- ms last-size-check) 100))
+                       (set! last-size-check ms)
+                       (let ([new-size (ssh-example-terminal-size)])
+                         (when (and new-size (not (equal? new-size last-size)))
+                           ;; Notify the remote shell and editor when the local window changes.
+                           (ssh-change-pty-size! channel (vector-ref new-size 0)
+                                                 (vector-ref new-size 1) 30000)
+                           (set! last-size new-size)))))
+                   (when (and stdin-open? (fx= input-offset input-end)
+                              (pair? (poll-target-ready-events
+                                      (car (poll (list (make-poll-target input '(read))) 0)))))
+                     (let ([count (get-bytevector-some! input input-buffer 0 65536)])
+                       (if (eof-object? count)
+                           (begin
+                             (set! stdin-open? #f)
+                             ;; All buffered stdin has been sent; keep draining both streams.
+                             (ssh-send-eof! channel))
+                           (begin (set! input-end count) (set! input-offset 0)))))
+                   (and (fx< input-offset input-end)
+                        ;; A blocked remote stdin must never stop draining stdout/stderr.
+                        (let ([answer (ssh-write/nonblocking channel input-buffer
+                                                            input-offset input-end)])
+                          (when (fixnum? answer)
+                            (set! input-offset (fx+ input-offset answer)))
+                          answer)))))))
 
-#|proc:ssh-open-repl
-The `ssh-open-repl` procedure opens an authenticated interactive shell on
-`host:port` and forwards local terminal input/output to the remote shell.
-|#
-(define ssh-open-repl
-  (lambda (host port user auth-kind auth-arg)
-    (pcheck ([string? host user auth-kind] [fixnum? port])
-      (let ([session (ssh-open host port user)]
-            [stop? (vector #f)])
-        (dynamic-wind
-          void
-          (lambda ()
-            (ssh-authenticate! 'ssh-open-repl session user auth-kind auth-arg)
-            (call-with-ssh-channel
-             session
-             (lambda (channel)
-               (ssh-request-pty! channel)
-               (ssh-shell channel)
-               (call-with-example-output-ports
-                (lambda (out err)
-                  (let ([op (open-ssh-channel-output-port channel)]
-                        [stdin-open? #t])
-                    (let loop ([stdout-eof? #f] [stderr-eof? #f] [exit-status #f])
-                      (let* ([stdout (if stdout-eof? #t (ssh-read/nonblocking channel 65536))]
-                             [stderr (if stderr-eof? #t (ssh-read-stderr/nonblocking channel 65536))]
-                             [stdout-eof* (or stdout-eof? (eof-object? stdout))]
-                             [stderr-eof* (or stderr-eof? (eof-object? stderr))]
-                             [status (or exit-status
-                                         (guard (c [else #f])
-                                           (let ([x (ssh-channel-exit-status channel)])
-                                             (and (fixnum? x) (fx>= x 0) x))))]
-                             [targets
-                              (append
-                               (if (net-would-block? stdout)
-                                   (list (make-poll-target
-                                          (net-would-block-resource stdout)
-                                          (net-would-block-events stdout)))
-                                   '())
-                               (if (net-would-block? stderr)
-                                   (list (make-poll-target
-                                          (net-would-block-resource stderr)
-                                          (net-would-block-events stderr)))
-                                   '()))])
-                        (when (bytevector? stdout) (put-bytevector out stdout) (flush-output-port out))
-                        (when (bytevector? stderr) (put-bytevector err stderr) (flush-output-port err))
-                        (when (and stdin-open? (char-ready? (current-input-port)))
-                          (let ([ch (get-char (current-input-port))])
-                            (if (eof-object? ch)
-                                (begin (set! stdin-open? #f) (ssh-write-all channel #vu8()))
-                                (begin
-                                  (put-bytevector op (string->utf8 (string ch)))
-                                  (flush-output-port op)))))
-                        (cond
-                         [(and stdout-eof* stderr-eof* status) (vector-set! stop? 0 #t) channel]
-                         [else
-                          (if (null? targets) (milisleep 5) (poll targets 100))
-                          (loop stdout-eof* stderr-eof* status)])))))))))
-          (lambda ()
-            (ssh-close session)))))))
+           (lambda ()
+             ;; Restore before channel/session shutdown or logging, including exceptions.
+             (when raw-handle
+               (let ([result (ffi-ssh-terminal-raw-close raw-handle)])
+                 (set! raw-handle #f)
+                 (unless (zero? result)
+                   (errorf 'ssh-open-repl "cannot restore local terminal (errno ~a)" result)))))))))))
 
-(let-values ([(host port user auth-kind auth-arg)
-              (parse-ssh-open-repl-arguments (command-line-arguments))])
-  (ssh-open-repl host port user auth-kind auth-arg))
+(ssh-example-run!
+ 'ssh-open-repl
+ "Open a remote shell. PTY defaults to auto; credentials use environment variables."
+ (append ssh-example-options
+         '((pty . "Remote terminal: auto (default, when stdin is a terminal), yes, or no. Raw input and window resizing apply to terminal sessions.")))
+ (lambda (ref)
+   (let* ([pty (or (ref 'pty) "auto")] [size (ssh-example-terminal-size)])
+     (unless (member pty '("auto" "yes" "no"))
+       (errorf 'ssh-open-repl "--pty must be auto, yes, or no"))
+     ;; This standalone script owns its signal handlers for the rest of its lifetime.
+     ;; Convert catchable termination into Scheme unwinding so raw-mode cleanup runs.
+     (for-each
+      (lambda (name)
+        (register-signal-handler
+         (signal-number (string->signal name))
+         (lambda (number) (errorf 'ssh-open-repl "terminated by signal ~a" number))))
+      '("HUP" "TERM" "QUIT"))
+     (exit (call-with-example-ssh
+            'ssh-open-repl ref
+            (lambda (session log)
+              (ssh-example-shell session log
+                                 (or (string=? pty "yes")
+                                     (and (string=? pty "auto") (and size #t))) size))))))
+ (command-line-arguments))

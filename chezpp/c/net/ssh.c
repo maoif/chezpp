@@ -52,7 +52,7 @@ typedef struct {
   int cancelled;
   int local_fd;
   int completed;
-  int blocking_changed;
+  int wait_events;
   size_t buffer_len;
   size_t buffer_pos;
   size_t header_len;
@@ -62,6 +62,12 @@ typedef struct {
   char *local_path;
   char *remote_name;
   char *command;
+  /* Batch transfers share one channel for sibling files. No Scheme pointers persist. */
+  char **batch_names;
+  size_t batch_count;
+  size_t batch_index;
+  char *local_directory;
+  char *remote_directory;
   unsigned char header[1024];
   unsigned char buffer[65536];
 } chezpp_scp_transfer;
@@ -259,7 +265,7 @@ static ptr wait_ssh_session_until(ssh_session session, short events, int64_t dea
 
 static ptr sftp_attr_to_vector(sftp_attributes attr) {
   ptr v = Smake_vector(8, Sfalse);
-  Svector_set(v, 0, attr->name == NULL ? Sfalse : Sstring(attr->name));
+  Svector_set(v, 0, attr->name == NULL ? Sfalse : Sstring_utf8(attr->name, (iptr)strlen(attr->name)));
   Svector_set(v, 1, Sfixnum((iptr)attr->type));
   Svector_set(v, 2, Sunsigned64(attr->size));
   Svector_set(v, 3, Sunsigned((uptr)attr->permissions));
@@ -1245,6 +1251,53 @@ ptr chezpp_net_ssh_channel_open_forward(uptr handle, const char *remote_host, in
   return make_ssh_handle((uptr)channel_wrapper);
 }
 
+/* A direct channel open must retain the same channel across SSH_AGAIN turns. */
+ptr chezpp_net_ssh_channel_forward_start(uptr handle) {
+  chezpp_ssh_session *owner = (chezpp_ssh_session *)TO_VOIDP(handle);
+  chezpp_ssh_channel *channel;
+  if (owner == NULL || owner->session == NULL)
+    return make_error_status_message("invalid ssh session");
+  channel = calloc(1, sizeof(*channel));
+  if (channel == NULL) return make_errno_status();
+  channel->owner = owner;
+  channel->channel = ssh_channel_new(owner->session);
+  if (channel->channel == NULL) {
+    free(channel);
+    return ssh_error_status_from_wrapper(owner, "failed to allocate SSH forwarding channel");
+  }
+  return make_ssh_handle((uptr)channel);
+}
+
+ptr chezpp_net_ssh_channel_forward_step(uptr handle, const char *remote_host, int remote_port,
+                                       const char *source_host, int source_port) {
+  chezpp_ssh_channel *channel = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  int result, blocking;
+  if (channel == NULL || channel->owner == NULL || channel->owner->session == NULL)
+    return make_error_status_message("invalid ssh forwarding channel");
+  blocking = ssh_is_blocking(channel->owner->session);
+  ssh_set_blocking(channel->owner->session, 0);
+  result = ssh_channel_open_forward(channel->channel, remote_host, remote_port,
+                                    source_host, source_port);
+  ssh_set_blocking(channel->owner->session, blocking);
+  if (result == SSH_AGAIN)
+    return ssh_would_block_status(channel->owner->session, POLLIN);
+  if (result != SSH_OK)
+    return ssh_channel_error_status(channel, "failed to open SSH forwarding channel");
+  return Strue;
+}
+
+void chezpp_net_ssh_channel_forward_discard(uptr handle) {
+  chezpp_ssh_channel *channel = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  int blocking;
+  if (channel == NULL) return;
+  /* Cancellation must not wait for a remote open confirmation or close reply. */
+  blocking = ssh_is_blocking(channel->owner->session);
+  ssh_set_blocking(channel->owner->session, 0);
+  ssh_channel_free(channel->channel);
+  ssh_set_blocking(channel->owner->session, blocking);
+  free(channel);
+}
+
 ptr chezpp_net_ssh_remote_forward_listen(uptr handle, const char *address, int port) {
   chezpp_ssh_session *wrapper = (chezpp_ssh_session *)TO_VOIDP(handle);
   int bound_port = 0;
@@ -1254,7 +1307,8 @@ ptr chezpp_net_ssh_remote_forward_listen(uptr handle, const char *address, int p
                                    address != NULL && *address != 0 ? address : NULL,
                                    port, &bound_port) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to request SSH remote forwarding");
-  return Sfixnum(bound_port);
+  /* libssh fills bound_port only when the requested port was zero. */
+  return Sfixnum(port == 0 ? bound_port : port);
 }
 
 ptr chezpp_net_ssh_remote_forward_accept(uptr handle) {
@@ -1289,6 +1343,15 @@ ptr chezpp_net_ssh_remote_forward_cancel(uptr handle, const char *address, int p
                                    address != NULL && *address != 0 ? address : NULL,
                                    port) != SSH_OK)
     return ssh_error_status_from_wrapper(wrapper, "failed to cancel SSH remote forwarding");
+  return Strue;
+}
+
+ptr chezpp_net_ssh_channel_send_eof(uptr handle) {
+  chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
+  if (wrapper == NULL || wrapper->channel == NULL)
+    return make_error_status_message("invalid ssh channel");
+  if (ssh_channel_send_eof(wrapper->channel) != SSH_OK)
+    return ssh_error_status_from_wrapper(wrapper->owner, "failed to send SSH channel EOF");
   return Strue;
 }
 
@@ -1366,7 +1429,8 @@ ptr chezpp_net_ssh_channel_request_shell(uptr handle, int timeout_ms) {
   return Strue;
 }
 
-ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
+ptr chezpp_net_ssh_channel_request_pty_size(uptr handle, const char *terminal,
+                                          int columns, int rows, int resize, int timeout_ms) {
   chezpp_ssh_channel *wrapper = (chezpp_ssh_channel *)TO_VOIDP(handle);
   int rc;
   int use_nonblocking;
@@ -1380,7 +1444,8 @@ ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
   use_nonblocking = timeout_ms >= 0;
   if (use_nonblocking) ssh_set_blocking(wrapper->owner->session, 0);
   for (;;) {
-    rc = ssh_channel_request_pty(wrapper->channel);
+    rc = resize ? ssh_channel_change_pty_size(wrapper->channel, columns, rows) :
+                  ssh_channel_request_pty_size(wrapper->channel, terminal, columns, rows);
     if (rc != SSH_AGAIN || timeout_ms < 0) break;
     {
       ptr wait_status = wait_ssh_session_until(wrapper->owner->session, POLLIN | POLLOUT, deadline,
@@ -1395,6 +1460,10 @@ ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
   if (rc != SSH_OK)
     return ssh_channel_error_status(wrapper, "failed to request ssh pty");
   return Strue;
+}
+
+ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
+  return chezpp_net_ssh_channel_request_pty_size(handle, "xterm", 80, 24, 0, timeout_ms);
 }
 
 ptr chezpp_net_ssh_channel_read(uptr handle, int size, int is_stderr, int nonblocking, int timeout_ms) {
@@ -1591,7 +1660,7 @@ ptr chezpp_net_sftp_list(uptr handle, const char *path) {
   while (!sftp_dir_eof(dir)) {
     sftp_attributes attr = sftp_readdir(wrapper->sftp, dir);
     if (attr == NULL) break;
-    out = Scons(attr->name == NULL ? Sfalse : Sstring(attr->name), out);
+    out = Scons(attr->name == NULL ? Sfalse : Sstring_utf8(attr->name, (iptr)strlen(attr->name)), out);
     sftp_attributes_free(attr);
   }
 
@@ -1705,7 +1774,7 @@ ptr chezpp_net_sftp_readlink(uptr handle, const char *path) {
     return make_error_status_message("invalid sftp session");
   target = sftp_readlink(wrapper->sftp, path);
   if (target == NULL) return sftp_error_status(wrapper, "failed to read sftp symlink");
-  out = Sstring(target);
+  out = Sstring_utf8(target, (iptr)strlen(target));
   ssh_string_free_char(target);
   return out;
 }
@@ -2248,7 +2317,10 @@ static ptr scp_write_pending_buffer(chezpp_scp_transfer *t, const unsigned char 
   if (rc == 0) return scp_transfer_retry_pending(t, POLLOUT);
   if (rc < 0) return scp_channel_error(t, "scp channel write failed");
   *position += (size_t)rc;
-  if (*position < length) return scp_transfer_pending(t, POLLOUT);
+  if (*position < length) {
+    t->wait_events = POLLOUT;
+    return Sfalse;
+  }
   return Strue;
 }
 
@@ -2261,7 +2333,7 @@ static ptr scp_read_ack(chezpp_scp_transfer *t) {
   return Strue;
 }
 
-/* Incremental SCP file transfers.  One step performs at most one SSH channel operation. */
+/* Incremental SCP file transfers; native steps use bounded, nonblocking batches. */
 ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source,
                                   const char *target) {
   chezpp_ssh_session *owner = (chezpp_ssh_session *)TO_VOIDP(handle);
@@ -2281,14 +2353,9 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
   t->local_path = dup_cstring(direction == 0 ? target : source);
   t->remote_name = dup_cstring(direction == 0 ? source : target);
   if (t->local_path == NULL || t->remote_name == NULL) goto oom;
-  {
-    ssh_set_blocking(owner->session, 0);
-    t->blocking_changed = 1;
-  }
   if (direction == 1) {
     if (stat(source, &st) != 0) goto errno_fail;
     if (!S_ISREG(st.st_mode)) {
-      if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
       free(t->local_path); free(t->remote_name); free(t);
       return make_path_error_status("local file expected", source);
     }
@@ -2298,7 +2365,6 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
     if (split_remote_path(target, &parent, &name) != Strue) goto fail;
     free(t->remote_name); t->remote_name = name; name = NULL;
     if (strchr(t->remote_name, '\n') != NULL || strchr(t->remote_name, '\r') != NULL) {
-      if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
       close(t->local_fd);
       free(parent); free(t->local_path); free(t->remote_name); free(t);
       return make_path_error_status("invalid remote file name", target);
@@ -2319,21 +2385,162 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
 oom:
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) ssh_channel_free(t->channel);
-  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return make_errno_status();
 errno_fail:
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) ssh_channel_free(t->channel);
-  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(parent); free(name); free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return make_errno_status();
 fail:
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) ssh_channel_free(t->channel);
-  if (t->blocking_changed) ssh_set_blocking(owner->session, 1);
   free(parent); free(name); free(t->command); free(t->local_path); free(t->remote_name); free(t);
   return ssh_error_status_from_wrapper(owner, "failed to allocate scp transfer");
+}
+
+void chezpp_net_scp_transfer_close(uptr handle);
+
+static void scp_free_names(char **names, size_t count) {
+  size_t index;
+  for (index = 0; index < count; index++) free(names[index]);
+  free(names);
+}
+
+/* Names are UTF-8, NUL-delimited immediate children, bounded by the Scheme walker. */
+ptr chezpp_net_scp_transfer_start_many(uptr handle, int direction,
+                                      const char *local_directory,
+                                      const char *remote_directory, ptr encoded_names) {
+  char **names = NULL;
+  size_t count = 0, position = 0, length, index;
+  char *local = NULL, *remote = NULL, *command = NULL;
+  ptr result;
+  chezpp_scp_transfer *t;
+  if (!Sbytevectorp(encoded_names)) return make_error_status_message("invalid SCP batch names");
+  length = (size_t)Sbytevector_length(encoded_names);
+  if (length == 0 || length > 32768) return make_error_status_message("invalid SCP batch size");
+  names = calloc(32, sizeof(*names));
+  if (names == NULL) return make_errno_status();
+  while (position < length) {
+    const char *name = (const char *)Sbytevector_data(encoded_names) + position;
+    const char *end = memchr(name, 0, length - position);
+    if (end == NULL || end == name || count == 32 || !is_safe_scp_name(name) ||
+        strchr(name, '\n') != NULL || strchr(name, '\r') != NULL) {
+      scp_free_names(names, count);
+      return make_error_status_message("invalid SCP batch child name");
+    }
+    names[count] = dup_cstring(name);
+    if (names[count] == NULL) goto oom;
+    count++;
+    position += (size_t)(end - name) + 1;
+  }
+  local = join_paths(local_directory, names[0]);
+  remote = join_paths(remote_directory, names[0]);
+  if (local == NULL || remote == NULL) goto oom;
+  if (direction == 0) {
+    size_t command_length = 0;
+    for (index = 0; index < count; index++) {
+      char *path = join_paths(remote_directory, names[index]);
+      char *quoted = path == NULL ? NULL : scp_quote_command("-f", path);
+      char *grown;
+      const char *piece;
+      size_t piece_length;
+      free(path);
+      if (quoted == NULL) goto oom;
+      /* Keep the first command prefix; subsequent pieces are quoted operands. */
+      piece = quoted + (index == 0 ? 0 : strlen("scp -f -- "));
+      piece_length = strlen(piece);
+      if (command_length + piece_length + 2 > 131072) {
+        free(quoted);
+        free(local); free(remote); free(command); scp_free_names(names, count);
+        return make_error_status_message("SCP batch command is too long");
+      }
+      grown = realloc(command, command_length + piece_length + 2);
+      if (grown == NULL) { free(quoted); goto oom; }
+      command = grown;
+      if (index != 0) command[command_length++] = ' ';
+      memcpy(command + command_length, piece, piece_length + 1);
+      command_length += piece_length;
+      free(quoted);
+    }
+  }
+  /* All Scheme data has been copied before start allocates Scheme status objects. */
+  result = chezpp_net_scp_transfer_start(handle, direction,
+                                         direction == 0 ? remote : local,
+                                         direction == 0 ? local : remote);
+  free(local); free(remote);
+  if (!Svectorp(result) || Svector_ref(result, 0) != Sstring_to_symbol("ok")) {
+    free(command); scp_free_names(names, count);
+    return result;
+  }
+  t = (chezpp_scp_transfer *)TO_VOIDP(Sunsigned_value(Svector_ref(result, 1)));
+  t->batch_names = names;
+  t->batch_count = count;
+  t->local_directory = dup_cstring(local_directory);
+  t->remote_directory = dup_cstring(remote_directory);
+  if (command != NULL) { free(t->command); t->command = command; }
+  if (t->local_directory == NULL || t->remote_directory == NULL) {
+    chezpp_net_scp_transfer_close((uptr)t);
+    return make_errno_status();
+  }
+  return result;
+oom:
+  free(local); free(remote); free(command); scp_free_names(names, count);
+  return make_errno_status();
+}
+
+static ptr scp_batch_next_file(chezpp_scp_transfer *t) {
+  struct stat st;
+  if (t->local_fd >= 0) close(t->local_fd);
+  t->local_fd = -1;
+  free(t->local_path); free(t->remote_name);
+  t->local_path = NULL;
+  t->remote_name = NULL;
+  t->batch_index++;
+  t->local_path = join_paths(t->local_directory, t->batch_names[t->batch_index]);
+  t->remote_name = t->direction == 1 ? dup_cstring(t->batch_names[t->batch_index]) :
+                    join_paths(t->remote_directory, t->batch_names[t->batch_index]);
+  if (t->local_path == NULL || t->remote_name == NULL) return make_errno_status();
+  t->offset = 0;
+  t->remaining = 0;
+  t->buffer_len = t->buffer_pos = t->header_len = t->header_pos = 0;
+  t->completed = 0;
+  if (t->direction == 1) {
+    t->local_fd = open(t->local_path, O_RDONLY);
+    if (t->local_fd < 0) return make_errno_status();
+    if (fstat(t->local_fd, &st) != 0) return make_errno_status();
+    if (!S_ISREG(st.st_mode)) return make_error_status_message("local batch file is not regular");
+    t->remaining = (uint64_t)st.st_size;
+    t->phase = 2;
+  } else {
+    t->local_fd = open(t->local_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (t->local_fd < 0) return make_errno_status();
+    /* The previous file's final acknowledgement also requests the next header. */
+    t->phase = 4;
+  }
+  return Strue;
+}
+
+static ptr scp_batch_status(chezpp_scp_transfer *t, ptr status) {
+  ptr out;
+  if (t->batch_count == 0 || !Svectorp(status) || Svector_length(status) != 3) return status;
+  out = Smake_vector(4, Sfalse);
+  Svector_set(out, 0, Svector_ref(status, 0));
+  Svector_set(out, 1, Svector_ref(status, 1));
+  Svector_set(out, 2, Svector_ref(status, 2));
+  /* Reporting uses the remote path in both directions, like individual transfers. */
+  {
+    char *path = join_paths(t->remote_directory, t->batch_names[t->batch_index]);
+    if (path == NULL) return make_errno_status();
+    Svector_set(out, 3, Sstring_utf8(path, (iptr)strlen(path)));
+    free(path);
+  }
+  if (t->completed && t->batch_index + 1 < t->batch_count) {
+    Svector_set(out, 0, Sstring_to_symbol("file-completed"));
+    Svector_set(out, 1, Sfixnum(t->fd));
+    t->phase = 9;
+  }
+  return out;
 }
 
 static ptr scp_transfer_pending(chezpp_scp_transfer *t, int events) {
@@ -2348,7 +2555,12 @@ static ptr scp_transfer_pending(chezpp_scp_transfer *t, int events) {
   Svector_set(target, 1, event_ls);
   Svector_set(out, 0, Sstring_to_symbol("pending"));
   Svector_set(out, 1, target);
-  Svector_set(out, 2, Sfalse);
+  /* Offset counts bytes accepted by SSH (upload) or written to disk (download).
+     The remote download size is unknown until its file header has been parsed. */
+  Svector_set(out, 2,
+              Scons(Sunsigned64(t->offset),
+                    (t->direction == 1 || t->phase >= 5) ?
+                    Sunsigned64(t->offset + t->remaining) : Sfalse));
   return out;
 }
 
@@ -2357,11 +2569,11 @@ static ptr scp_transfer_retry_pending(chezpp_scp_transfer *t, int events) {
   int requested = 0;
   if ((flags & SSH_WRITE_PENDING) != 0) requested |= POLLOUT;
   if ((flags & SSH_READ_PENDING) != 0) requested |= POLLIN;
-  return scp_transfer_pending(t, requested == 0 ? events : requested);
+  t->wait_events = requested == 0 ? events : requested;
+  return Sfalse;
 }
 
-ptr chezpp_net_scp_transfer_step(uptr handle) {
-  chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
+static ptr scp_transfer_step_once(chezpp_scp_transfer *t) {
   int rc;
   if (t == NULL || t->cancelled || t->channel == NULL)
     return make_error_status_message("invalid or cancelled scp transfer");
@@ -2371,19 +2583,21 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     if (rc != SSH_OK) return scp_channel_error(t, "scp channel open failed");
     t->initialized = 1;
     t->phase = 1;
-    return scp_transfer_progress(t);
+    return Strue;
   }
   if (t->phase == 1) {
     rc = ssh_channel_request_exec(t->channel, t->command);
     if (rc == SSH_AGAIN) return scp_transfer_retry_pending(t, POLLIN | POLLOUT);
     if (rc != SSH_OK) return scp_channel_error(t, "scp exec request failed");
     t->phase = 2;
-    return scp_transfer_progress(t);
+    return Strue;
   }
   if (t->phase == 2) {
     if (t->direction == 1) {
-      ptr ans = scp_read_ack(t);
-      if (ans != Strue) return ans;
+      if (t->batch_index == 0) {
+        ptr ans = scp_read_ack(t);
+        if (ans != Strue) return ans;
+      }
       {
         struct stat st;
         if (stat(t->local_path, &st) != 0) return make_errno_status();
@@ -2399,14 +2613,14 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       t->header_len = 1;
     }
     t->phase = 3;
-    return scp_transfer_progress(t);
+    return Strue;
   }
   if (t->phase == 3) {
     if (t->direction == 1) {
       ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
       if (ans != Strue) return ans;
       t->phase = 4;
-      return scp_transfer_progress(t);
+      return Strue;
     }
     {
       ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
@@ -2414,7 +2628,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       t->header_len = 0;
       t->header_pos = 0;
       t->phase = 4;
-      return scp_transfer_progress(t);
+      return Strue;
     }
   }
   if (t->phase == 4) {
@@ -2422,7 +2636,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       ptr ans = scp_read_ack(t);
       if (ans != Strue) return ans;
       t->phase = 5;
-      return scp_transfer_progress(t);
+      return Strue;
     }
     rc = ssh_channel_read(t->channel, t->header + t->header_len, 1, 0);
     if (rc == SSH_AGAIN || rc == 0) return scp_transfer_retry_pending(t, POLLIN);
@@ -2430,27 +2644,32 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     t->header_len++;
     if (t->header_len >= sizeof(t->header))
       return make_error_status_message("scp file header is too long");
-    if (t->header[t->header_len - 1] != '\n') return scp_transfer_progress(t);
+    if (t->header[t->header_len - 1] != '\n') return Strue;
     t->header[t->header_len - 1] = '\0';
     {
       unsigned mode;
       unsigned long long size;
-      if (sscanf((char *)t->header, "C%o %llu", &mode, &size) != 2)
+      int name_start = 0;
+      if (sscanf((char *)t->header, "C%o %llu%n", &mode, &size, &name_start) != 2 ||
+          name_start <= 0 || t->header[name_start++] != ' ')
         return make_error_status_message("remote path is not a regular file");
+      if (t->batch_count != 0 &&
+          strcmp((char *)t->header + name_start, t->batch_names[t->batch_index]) != 0)
+        return make_error_status_message("unexpected SCP batch filename");
       t->remaining = (uint64_t)size;
       (void)fchmod(t->local_fd, (mode_t)mode);
       t->header[0] = 0;
       t->header_len = 1;
       t->header_pos = 0;
       t->phase = 5;
-      return scp_transfer_progress(t);
+      return Strue;
     }
   }
   if (t->phase == 5) {
     if (t->direction == 0 && t->header_pos < t->header_len) {
       ptr ans = scp_write_pending_buffer(t, t->header, t->header_len, &t->header_pos);
       if (ans != Strue) return ans;
-      return scp_transfer_progress(t);
+      return Strue;
     }
     if (t->direction == 1) {
       ssize_t n;
@@ -2459,7 +2678,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
         t->header_len = 1;
         t->header_pos = 0;
         t->phase = 6;
-        return scp_transfer_progress(t);
+        return Strue;
       }
       if (t->buffer_pos == t->buffer_len) {
         size_t want = t->remaining > sizeof(t->buffer) ?
@@ -2478,7 +2697,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
         if (ans != Strue) return ans;
         t->offset += (uint64_t)t->buffer_len;
         t->remaining -= (uint64_t)t->buffer_len;
-        return scp_transfer_pending(t, POLLOUT);
+        return Strue;
       }
     }
     if (t->remaining == 0) {
@@ -2491,7 +2710,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       t->header_len = 1;
       t->header_pos = 0;
       t->phase = 6;
-      return scp_transfer_progress(t);
+      return Strue;
     }
     {
       size_t want = t->remaining > sizeof(t->buffer) ? sizeof(t->buffer) : (size_t)t->remaining;
@@ -2512,7 +2731,7 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
       }
       t->offset += (uint64_t)rc;
       t->remaining -= (uint64_t)rc;
-      return scp_transfer_progress(t);
+      return Strue;
     }
   }
   if (t->phase == 6) {
@@ -2520,20 +2739,80 @@ ptr chezpp_net_scp_transfer_step(uptr handle) {
     if (ans != Strue) return ans;
     if (t->direction == 1) {
       t->phase = 7;
-      return scp_transfer_progress(t);
+      return Strue;
     }
     t->completed = 1;
     t->phase = 8;
-    return make_status("completed", Strue);
+    {
+      ptr out = Smake_vector(3, Sfalse);
+      Svector_set(out, 0, Sstring_to_symbol("completed"));
+      Svector_set(out, 1, Strue);
+      Svector_set(out, 2, Scons(Sunsigned64(t->offset), Sunsigned64(t->offset)));
+      return out;
+    }
   }
   if (t->phase == 7) {
     ptr ans = scp_read_ack(t);
     if (ans != Strue) return ans;
     t->completed = 1;
     t->phase = 8;
-    return make_status("completed", Strue);
+    {
+      ptr out = Smake_vector(3, Sfalse);
+      Svector_set(out, 0, Sstring_to_symbol("completed"));
+      Svector_set(out, 1, Strue);
+      Svector_set(out, 2, Scons(Sunsigned64(t->offset), Sunsigned64(t->offset)));
+      return out;
+    }
   }
   return make_error_status_message("scp transfer is already complete");
+}
+
+static ptr scp_transfer_step(chezpp_scp_transfer *t) {
+  unsigned pass;
+  uint64_t initial_offset;
+  if (t == NULL || t->cancelled || t->channel == NULL)
+    return make_error_status_message("invalid or cancelled scp transfer");
+  if (t->phase == 9) {
+    ptr result = scp_batch_next_file(t);
+    if (result != Strue) return result;
+  }
+  initial_offset = t->offset;
+  /* Drain buffered protocol input without allocating a Scheme update and polling
+   * after every SSH read. Stop at backpressure, 16 operations, or 128 KiB so
+   * callers still observe progress, deadlines, and cancellation regularly. */
+  for (pass = 0; pass < 16; pass++) {
+    ptr result = scp_transfer_step_once(t);
+    if (result == Sfalse) {
+      struct pollfd descriptor = {t->fd, (short)t->wait_events, 0};
+      int ready;
+      if (pass + 1 == 16) return scp_batch_status(t, scp_transfer_pending(t, t->wait_events));
+      /* A nonblocking SSH read can consume only a transport fragment and still
+       * return SSH_AGAIN. Retry ready input here instead of crossing the FFI
+       * with an allocated pending update for every fragment. Never wait here. */
+      ready = poll(&descriptor, 1, 0);
+      if (ready < 0 && errno != EINTR) return make_errno_status();
+      if (ready <= 0) return scp_batch_status(t, scp_transfer_pending(t, t->wait_events));
+    } else if (result != Strue) {
+      return scp_batch_status(t, result);
+    }
+    if (t->offset - initial_offset >= 131072) break;
+  }
+  return scp_batch_status(t, scp_transfer_progress(t));
+}
+
+/* Keep the session in its caller's mode between steps: progress callbacks can
+ * open SFTP channels or inspect metadata on the same authenticated session. */
+ptr chezpp_net_scp_transfer_step(uptr handle) {
+  chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
+  int blocking;
+  ptr result;
+  if (t == NULL || t->owner == NULL || t->owner->session == NULL)
+    return make_error_status_message("invalid scp transfer");
+  blocking = ssh_is_blocking(t->owner->session);
+  ssh_set_blocking(t->owner->session, 0);
+  result = scp_transfer_step(t);
+  ssh_set_blocking(t->owner->session, blocking);
+  return result;
 }
 
 ptr chezpp_net_scp_transfer_cancel(uptr handle) {
@@ -2544,17 +2823,24 @@ ptr chezpp_net_scp_transfer_cancel(uptr handle) {
 
 void chezpp_net_scp_transfer_close(uptr handle) {
   chezpp_scp_transfer *t = (chezpp_scp_transfer *)TO_VOIDP(handle);
+  int remove_partial, blocking;
   if (t == NULL) return;
+  /* A failed open must not unlink an existing destination we never opened. */
+  remove_partial = t->direction == 0 && !t->completed && t->local_fd >= 0;
   if (t->local_fd >= 0) close(t->local_fd);
   if (t->channel != NULL) {
+    /* Cancellation and close must not wait for remote channel replies. */
+    blocking = ssh_is_blocking(t->owner->session);
+    ssh_set_blocking(t->owner->session, 0);
     (void)ssh_channel_send_eof(t->channel);
     (void)ssh_channel_close(t->channel);
     ssh_channel_free(t->channel);
+    ssh_set_blocking(t->owner->session, blocking);
   }
-  if (t->blocking_changed && t->owner != NULL && t->owner->session != NULL)
-    ssh_set_blocking(t->owner->session, 1);
-  if (t->direction == 0 && !t->completed && t->local_path != NULL)
+  if (remove_partial && t->local_path != NULL)
     (void)unlink(t->local_path);
+  scp_free_names(t->batch_names, t->batch_count);
+  free(t->local_directory); free(t->remote_directory);
   free(t->command); free(t->local_path); free(t->remote_name); free(t);
 }
 

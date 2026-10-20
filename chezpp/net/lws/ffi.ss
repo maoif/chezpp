@@ -13,6 +13,7 @@
           lws-context-wakeup-fd
           lws-context-poll-snapshot
           lws-context-service-fd
+          lws-context-service
           lws-context-next-event
           lws-context-timeout-ms
           lws-context-wakeup
@@ -67,7 +68,8 @@
                 (native event-capacity payload-capacity tls-context-handle proxy-address proxy-port)))))
   #|proc:ffi-lws-server-context-open
   The `ffi-lws-server-context-open` procedure calls the native websockets operation
-  `chezpp_lws_http_server_context_open`.
+  `chezpp_lws_http_server_context_open_version`.
+  `prior-knowledge?` selects cleartext H2 when true.
   Parameters `event-capacity`, `payload-capacity`, `interface-name`, `port`, `tls-context-handle`
   are passed to the native operation in that order.
   `event-capacity` is a native handle.
@@ -79,11 +81,12 @@
   It raises an error when the dependency is unavailable.
   |#
   (define ffi-lws-server-context-open
-    (let ([native (foreign-procedure "chezpp_lws_http_server_context_open" (uptr uptr string int uptr) uptr)])
-      (lambda (event-capacity payload-capacity interface-name port tls-context-handle)
-        (pcheck ([natural? event-capacity] [natural? payload-capacity] [string? interface-name] [integer? port] [natural? tls-context-handle])
+    (let ([native (foreign-procedure "chezpp_lws_http_server_context_open_version" (uptr uptr string int uptr int) uptr)])
+      (lambda (event-capacity payload-capacity interface-name port tls-context-handle prior-knowledge?)
+        (pcheck ([natural? event-capacity] [natural? payload-capacity] [string? interface-name] [integer? port] [natural? tls-context-handle] [boolean? prior-knowledge?])
                 (require-optional-library 'ffi-lws-server-context-open 'websockets)
-                (native event-capacity payload-capacity interface-name port tls-context-handle)))))
+                (native event-capacity payload-capacity interface-name port tls-context-handle
+                        (if prior-knowledge? 1 0))))))
   #|proc:ffi-lws-context-close
   The `ffi-lws-context-close` procedure calls the native websockets operation
   `chezpp_lws_http_context_close`.
@@ -132,6 +135,8 @@
                 (native context-handle fd revents)))))
   (define ffi-lws-context-next-event
     (foreign-procedure "chezpp_lws_http_context_next_event" (uptr) scheme-object))
+  (define ffi-lws-context-service
+    (foreign-procedure "chezpp_lws_http_context_service" (uptr int) int))
   #|proc:ffi-lws-context-timeout-ms
   The `ffi-lws-context-timeout-ms` procedure calls the native websockets operation
   `chezpp_lws_http_context_timeout_ms`.
@@ -639,22 +644,29 @@ native context handle.
 The `lws-server-context-open` procedure creates a listening LWS context. `event-capacity` bounds
 events, `payload-capacity` bounds copied bytes, `interface-name` selects the local interface,
 `port` is the listening port, and `tls-context` is zero or a native TLS context handle. It returns
-a native context handle.
+a native context handle. Optional `version` is `h1` (the default) or `h2`; cleartext `h2`
+uses prior knowledge and a TLS listener negotiates H2 using ALPN.
 |#
   (define-who lws-server-context-open
-    (lambda (event-capacity payload-capacity interface-name port tls-context)
+    (case-lambda
+      [(event-capacity payload-capacity interface-name port tls-context)
+       (lws-server-context-open event-capacity payload-capacity interface-name port tls-context 'h1)]
+      [(event-capacity payload-capacity interface-name port tls-context version)
       (pcheck ([positive-size? event-capacity payload-capacity]
                [string? interface-name]
                [port-number? port]
-               [natural? tls-context])
+               [natural? tls-context] [symbol? version])
+        (unless (memq version '(h1 h2)) (errorf who "version must be h1 or h2"))
+        (when (eq? version 'h2) (lws-require-capability! lws-cap-http2 'http2))
         (lws-require-capability! lws-cap-http1 'http1)
         (lws-require-capability! lws-cap-external-poll 'external-poll)
         (let ([context (ffi-lws-server-context-open event-capacity payload-capacity
-                                                    interface-name port tls-context)])
+                                                    interface-name port tls-context
+                                                    (and (eq? version 'h2) (zero? tls-context)))])
           (when (zero? context)
             (raise-net-error who 'resource "could not create LWS HTTP server context"
                              (vector interface-name port)))
-          context))))
+          context))]))
 
   #|proc:lws-context-close
 The `lws-context-close` procedure closes `context`, its LWS context, and its wakeup descriptors.
@@ -692,6 +704,24 @@ It returns the libwebsockets service result; servicing the wakeup descriptor ret
                [file-descriptor? descriptor]
                [event-mask? ready-events])
         (ffi-lws-context-service-fd context descriptor ready-events))))
+
+  #|proc:lws-context-service
+The `lws-context-service` procedure polls and services `context` once on its owner thread.
+`maximum-timeout-ms` bounds the wait in milliseconds; LWS timers can shorten it.
+It reuses native descriptor storage and lets other Scheme threads collect during the wait.
+It returns the count of ready descriptors, or zero after timer service. Poll failures raise
+a network condition. It must not run concurrently with another service call or context close.
+|#
+  (define-who lws-context-service
+    (lambda (context maximum-timeout-ms)
+      (pcheck ([lws-context? context] [natural? maximum-timeout-ms])
+        (unless (<= maximum-timeout-ms 2147483647)
+          (errorf who "timeout does not fit in a native integer: ~s" maximum-timeout-ms))
+        (require-optional-library who 'websockets)
+        (let ([ready (ffi-lws-context-service context maximum-timeout-ms)])
+          (when (negative? ready)
+            (raise-net-error who 'poll "native reactor poll failed" context))
+          ready))))
 
   #|proc:lws-context-next-event
 The `lws-context-next-event` procedure removes and returns the next copied event from `context`.
@@ -885,6 +915,9 @@ The `lws-stream-cancel` procedure resets the identified native stream and queues
 
   #|proc:lws-body-consumed
 The `lws-body-consumed` procedure acknowledges `byte-count` copied bytes for the identified stream.
+`context` owns the stream selected by `connection-id`, `stream-id`, and `generation`.
+Call it on the context owner; it resumes input and publishes deferred completion without waking
+that same owner. Reactor clients enqueue acknowledgements with `lws-reactor-consume-body!`.
 It returns whether the generation and byte count matched pending body data.
 |#
   (define-who lws-body-consumed

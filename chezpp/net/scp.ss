@@ -20,6 +20,7 @@
   (import (chezpp chez)
           (chezpp utils)
           (chezpp file)
+          (chezpp list)
           (chezpp string)
           (chezpp net errors)
           (chezpp net ffi)
@@ -44,7 +45,10 @@ pending work and closes the underlying SSH session only when ownership was reque
             (immutable timeout-ms scp-session-timeout-ms)
             (immutable owns-ssh? scp-session-owns-ssh?)
             (mutable pending scp-session-pending scp-session-pending-set!)
-            (mutable closed? scp-session-closed? scp-session-closed?-set!)))
+            (mutable closed? scp-session-closed? scp-session-closed?-set!)
+            (mutable child scp-session-child scp-session-child-set!)
+            (mutable directory-active? scp-session-directory-active?
+                     scp-session-directory-active?-set!)))
 
   #|record:scp-attributes
 The `scp-attributes` record is an immutable snapshot of a remote path. Its fields contain the
@@ -162,8 +166,8 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
               [(and exists? (eq? overwrite 'error))
                (errorf who "local destination exists: ~a" local-path)]
               [else
-               (scp-download session remote-path local-path
-                             (scp-session-timeout-ms session))]))))
+               (scp-transfer/policy who session 'scp-download remote-path local-path
+                                    (scp-session-timeout-ms session) policy)]))))
 
   (define scp-upload/policy
     (lambda (who session local-path remote-path policy)
@@ -174,8 +178,8 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
               [(and attributes (eq? overwrite 'error))
                (errorf who "remote destination exists: ~a" remote-path)]
               [else
-               (scp-upload session local-path remote-path
-                           (scp-session-timeout-ms session))]))))
+               (scp-transfer/policy who session 'scp-upload local-path remote-path
+                                    (scp-session-timeout-ms session) policy)]))))
 
   (define ensure-no-pending-mismatch
     (lambda (who session kind args)
@@ -191,53 +195,146 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
       (scp-session-pending-set! session #f)
       session))
 
+  ;; The outer directory operation owns its currently executing child transfer.
+  ;; Cancelling it from a progress hook is safe after the native step has returned.
+  (define cancel-child!
+    (lambda (session)
+      (let ([child (scp-session-child session)])
+        (when child (net-operation-cancel! child)))))
+
+  (define scp-wait-child
+    (lambda (session operation)
+      (dynamic-wind
+        (lambda () (scp-session-child-set! session operation))
+        (lambda () (net-operation-wait operation))
+        (lambda ()
+          (when (eq? (net-operation-state operation) 'pending)
+            (net-operation-cancel! operation))
+          (scp-session-child-set! session #f)))))
+
+  ;; A separate wrapper lets directory-copy operations run child transfers while pending.
+  ;; The authenticated SSH session is borrowed, never closed by this wrapper.
+  (define scp-transfer/policy
+    (lambda (who session kind source target timeout-ms policy)
+      (let* ([pending (scp-session-pending session)]
+             [nested? (and pending (eq? 'pending (net-operation-state pending))
+                           (eq? 'scp-copy-directory (net-operation-kind pending)))]
+             [transfer-session (if nested?
+                                   (scp-open (scp-session-ssh-session session) timeout-ms)
+                                   session)])
+        (dynamic-wind
+          void
+          (lambda ()
+            (scp-wait-child session
+             (scp-transfer/nonblocking who transfer-session kind
+                                       (list source target timeout-ms) void policy)))
+          (lambda () (when nested? (scp-close transfer-session)))))))
+
   (define scp-transfer/nonblocking
-    (lambda (who session kind args thunk)
-      (ensure-session-open who session)
-      (ensure-no-pending-mismatch who session kind args)
-      (let ([pending (scp-session-pending session)])
-        (if (and pending (eq? 'pending (net-operation-state pending)))
-            pending
-            (let* ([native? (memq kind '(scp-download scp-upload))]
-                   [deadline-ms
-                    (and native?
-                         (+ (scp-current-monotonic-ms) (caddr args)))]
-                   [handle (and native?
-                                (let ([started
-                                       (ffi-net-scp-transfer-start
-                                        (%ssh-session-handle (scp-session-ssh-session session))
-                                        (if (eq? kind 'scp-download) 0 1)
-                                        (if (eq? kind 'scp-download) (car args) (car args))
-                                        (if (eq? kind 'scp-download) (cadr args) (cadr args)))])
-                                  (if (ffi-error? started)
-                                      (raise-net-error who 'scp (ffi-error-message started) started)
-                                      (vector-ref started 1))))]
-                   [operation
-                    (make-net-operation
-                     kind
-                     (lambda ()
-                       (guard (failure [else (net-operation-failed failure)])
-                         (if native?
-                             (let ([status (ffi-net-scp-transfer-step handle)])
-                               (case (and (vector? status) (vector-ref status 0))
-                                 [(pending)
-                                  (let ([target (vector-ref status 1)])
-                                    (net-operation-pending
-                                     (list (make-poll-target
-                                            (vector-ref target 0)
-                                            (vector-ref target 1)))
-                                     deadline-ms))]
-                                 [(completed) (net-operation-completed
-                                               (if (eq? kind 'scp-download) (cadr args) (cadr args)))]
-                                 [else (net-operation-failed
-                                        (make-net-error who 'scp "SCP transfer failed" status))]))
-                             (net-operation-completed (thunk)))))
-                     (if native? (lambda () (ffi-net-scp-transfer-cancel handle)) void)
-                     (lambda ()
-                       (when native? (ffi-net-scp-transfer-close handle))
-                       (scp-session-pending-set! session #f)))])
-              (scp-session-pending-set! session operation)
-              operation)))))
+    (case-lambda
+      [(who session kind args thunk)
+       (scp-transfer/nonblocking who session kind args thunk #f)]
+      [(who session kind args thunk policy)
+       (ensure-session-open who session)
+       (ensure-no-pending-mismatch who session kind args)
+       (let ([pending (scp-session-pending session)])
+         (if (and pending (eq? 'pending (net-operation-state pending)))
+             pending
+             (let* ([native? (memq kind '(scp-download scp-upload))]
+                    [deadline-ms
+                     (and native?
+                          (+ (scp-current-monotonic-ms) (caddr args)))]
+                    [handle (and native?
+                                 (let ([started
+                                        (ffi-net-scp-transfer-start
+                                         (%ssh-session-handle (scp-session-ssh-session session))
+                                         (if (eq? kind 'scp-download) 0 1)
+                                         (if (eq? kind 'scp-download) (car args) (car args))
+                                         (if (eq? kind 'scp-download) (cadr args) (cadr args)))])
+                                   (if (ffi-error? started)
+                                       (raise-net-error who 'scp (ffi-error-message started) started)
+                                       (vector-ref started 1))))]
+                    [operation
+                     (make-net-operation
+                      kind
+                      (lambda ()
+                        (guard (failure [else (net-operation-failed failure)])
+                          (if native?
+                              (let ([status (ffi-net-scp-transfer-step handle)])
+                                (when (and policy (vector? status)
+                                           (= 3 (vector-length status))
+                                           (memq (vector-ref status 0) '(pending completed)))
+                                  (let ([counts (vector-ref status 2)])
+                                    (transfer-report-progress!
+                                     policy 'scp
+                                     (if (eq? kind 'scp-download) 'download 'upload)
+                                     (if (eq? kind 'scp-download) (car args) (cadr args))
+                                     (car counts) (cdr counts))))
+                                (case (and (vector? status) (vector-ref status 0))
+                                  [(pending)
+                                   (let ([target (vector-ref status 1)])
+                                     (net-operation-pending
+                                      (list (make-poll-target
+                                             (vector-ref target 0)
+                                             (vector-ref target 1)))
+                                      deadline-ms))]
+                                  [(completed) (net-operation-completed
+                                                (if (eq? kind 'scp-download) (cadr args) (cadr args)))]
+                                  [else (net-operation-failed
+                                         (make-net-error who 'scp "SCP transfer failed" status))]))
+                              (net-operation-completed (thunk)))))
+                      (if native? (lambda () (ffi-net-scp-transfer-cancel handle))
+                          (lambda () (cancel-child! session)))
+                      (lambda ()
+                        (when native? (ffi-net-scp-transfer-close handle))
+                        (scp-session-pending-set! session #f)))])
+               (scp-session-pending-set! session operation)
+               operation)))]))
+
+  ;; Bounded sibling batches use a single native channel and keep per-file progress.
+  (define scp-transfer-many/policy
+    (lambda (who session direction local-directory remote-directory names timeout-ms policy)
+      (let* ([encoded (string->utf8
+                       (apply string-append
+                              (map (lambda (name) (string-append name (string #\nul))) names)))]
+             [started (ensure-success
+                       who (ffi-net-scp-transfer-start-many
+                            (%ssh-session-handle (scp-session-ssh-session session))
+                            (if (eq? direction 'download) 0 1)
+                            local-directory remote-directory encoded))]
+             [handle (vector-ref started 1)]
+             [deadline (+ (scp-current-monotonic-ms) timeout-ms)]
+             [operation
+              (make-net-operation
+               'scp-directory-files
+               (lambda ()
+                 (guard (failure [else (net-operation-failed failure)])
+                   ;; A poll deadline only bounds waiting; the next step must enforce expiry.
+                   (when (>= (scp-current-monotonic-ms) deadline)
+                     (raise-net-error who 'timeout "SCP batch transfer timed out" remote-directory))
+                   (let ([status (ffi-net-scp-transfer-step handle)])
+                     (if (and (vector? status) (= 4 (vector-length status)))
+                         (let ([tag (vector-ref status 0)] [counts (vector-ref status 2)])
+                           (transfer-report-progress! policy 'scp direction (vector-ref status 3)
+                                                      (car counts) (cdr counts))
+                           (case tag
+                             [(completed) (net-operation-completed remote-directory)]
+                             [(file-completed)
+                              (set! deadline (+ (scp-current-monotonic-ms) timeout-ms))
+                              (net-operation-pending
+                               (list (make-poll-target (vector-ref status 1) '(write))) deadline)]
+                             [(pending)
+                              (let ([target (vector-ref status 1)])
+                                (net-operation-pending
+                                 (list (make-poll-target (vector-ref target 0)
+                                                         (vector-ref target 1))) deadline))]
+                             [else (net-operation-failed
+                                    (make-net-error who 'scp "SCP batch transfer failed" status))]))
+                         (net-operation-failed
+                          (make-net-error who 'scp "SCP batch transfer failed" status))))))
+               (lambda () (ffi-net-scp-transfer-cancel handle))
+               (lambda () (ffi-net-scp-transfer-close handle)))])
+        (scp-wait-child session operation))))
 
   (define scp-download*
     (lambda (who session remote-path local-path timeout-ms)
@@ -271,8 +368,9 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                   [(file-regular? path) 'regular]
                                   [else 'special])
                             (and (file-regular? path) (file-size path))
-                            (file-mode path)
-                            (time-second (file-modification-time path)))))
+                            ;; Inspect the link itself so dangling links can be preserved.
+                            (file-mode path #f)
+                            (time-second (file-modification-time path #f)))))
 
   (define scp-child-path
     (lambda (parent name)
@@ -322,6 +420,18 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
     (lambda (sftp path)
       (guard (condition [else #f]) (sftp-stat sftp path))))
 
+  (define scp-readonly-mode?
+    (lambda (mode)
+      (and (fixnum? mode) (fxzero? (fxand mode #o222)))))
+
+  (define scp-readonly-remote-file?
+    (lambda (attributes)
+      ;; Only the unchanged absolute namespace above uses SFTP attributes for stat.
+      ;; Raw SCP attributes must never authorize a lexically normalized SFTP delete.
+      (and (sftp-attributes? attributes)
+           (eq? (sftp-attributes-type attributes) 'regular)
+           (scp-readonly-mode? (sftp-attributes-permissions attributes)))))
+
   (define ensure-local-scp-directory
     (lambda (path)
       (cond [(file-directory? path) path]
@@ -341,11 +451,25 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
         (case (and exists? (transfer-policy-overwrite policy))
           [(skip) #f]
           [(error) (errorf who "local destination exists: ~a" link-path)]
-          [else (file-symlink! target link-path) #t]))))
+          [else
+           ;; Replace the leaf itself; directory-aware helpers can follow a directory link.
+           (when exists? (delete-file link-path))
+           (file-symlink target link-path)
+           #t]))))
 
   (define replace-remote-symlink!
     (lambda (who sftp target link-path policy)
-      (let ([exists? (sftp-stat/maybe sftp link-path)])
+      ;; Directory entries describe links without following dangling targets.
+      (let* ([slash (let find ([index (fx1- (string-length link-path))])
+                      (cond [(fx< index 0) #f]
+                            [(char=? (string-ref link-path index) #\/) index]
+                            [else (find (fx1- index))]))]
+             [parent (cond [(not slash) "."] [(fxzero? slash) "/"]
+                           [else (substring link-path 0 slash)])]
+             [name (substring link-path (if slash (fx1+ slash) 0)
+                              (string-length link-path))]
+             [exists? (find (lambda (entry) (string=? name (sftp-attributes-name entry)))
+                            (sftp-list sftp parent))])
         (case (and exists? (transfer-policy-overwrite policy))
           [(skip) #f]
           [(error) (errorf who "remote destination exists: ~a" link-path)]
@@ -360,7 +484,11 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
         (cond [(and exists? (eq? (transfer-policy-overwrite policy) 'skip)) remote-path]
               [(and exists? (eq? (transfer-policy-overwrite policy) 'error))
                (errorf who "remote destination exists: ~a" remote-path)]
-              [else (scp-upload* who session local-path remote-path timeout-ms)]))))
+              [else
+               (if (transfer-policy-progress policy)
+                   (scp-transfer/policy who session 'scp-upload local-path remote-path
+                                        timeout-ms policy)
+                   (scp-upload* who session local-path remote-path timeout-ms))]))))
 
   (define scp-download-tree-file
     (lambda (who session remote-path local-path timeout-ms policy)
@@ -368,7 +496,11 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
         (cond [(and exists? (eq? (transfer-policy-overwrite policy) 'skip)) local-path]
               [(and exists? (eq? (transfer-policy-overwrite policy) 'error))
                (errorf who "local destination exists: ~a" local-path)]
-              [else (scp-download* who session remote-path local-path timeout-ms)]))))
+              [else
+               (if (transfer-policy-progress policy)
+                   (scp-transfer/policy who session 'scp-download remote-path local-path
+                                        timeout-ms policy)
+                   (scp-download* who session remote-path local-path timeout-ms))]))))
 
   (define scp-copy-directory*
     (lambda (who session direction source-path target-path timeout-ms policy filter symlink-policy)
@@ -378,9 +510,24 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
         (errorf who "filter must be a procedure or #f, given ~s" filter))
       (unless (memq symlink-policy '(preserve follow reject))
         (errorf who "invalid SCP symlink policy ~s" symlink-policy))
-      (let ([sftp (sftp-open (scp-session-ssh-session session))])
+      (let ([sftp (sftp-open (scp-session-ssh-session session))]
+            [operation (scp-session-pending session)])
+        ;; Keep the parent identity: cancellation clears session-pending immediately.
+        (define check-active!
+          (lambda ()
+            (when (and operation
+                       (memq (net-operation-state operation) '(cancelled failed)))
+              (raise (net-operation-condition operation)))
+            (ensure-session-open who session)))
+        (define selected-entry?
+          (lambda (relative attributes)
+            (check-active!)
+            (let ([selected? (or (not filter) (filter relative attributes))])
+              ;; A filter may cancel/close the session and return either true or false.
+              (check-active!)
+              selected?)))
         (dynamic-wind
-          void
+          (lambda () (scp-session-directory-active?-set! session #t))
           (lambda ()
             (case direction
               [(upload)
@@ -389,7 +536,16 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                (ensure-remote-scp-directory sftp target-path)
                (let ([root (normalize-scp-path source-path)])
                  (let walk ([local source-path] [remote target-path] [prefix ""] [seen '()])
-                   (let ([normalized (normalize-scp-path local)])
+                   (let ([normalized (normalize-scp-path local)]
+                         [batch (make-list-builder)] [batch-count 0])
+                     (define flush-files!
+                       (lambda ()
+                         (check-active!)
+                         (when (fxpositive? batch-count)
+                           (scp-transfer-many/policy who session 'upload local remote
+                                                     (batch) timeout-ms policy)
+                           (set! batch (make-list-builder))
+                           (set! batch-count 0))))
                      (when (member normalized seen)
                        (raise-net-error who 'scp "recursive SCP upload found a cycle" local))
                      (for-each
@@ -399,15 +555,40 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                [relative (if (string=? prefix "")
                                              name (scp-child-path prefix name))]
                                [attributes (local-scp-attributes local-child relative)])
-                          (when (or (not filter) (filter relative attributes))
+                          (when (selected-entry? relative attributes)
                             (case (scp-attributes-type attributes)
                               [(directory)
+                               (flush-files!)
                                (ensure-remote-scp-directory sftp remote-child)
                                (walk local-child remote-child relative (cons normalized seen))]
                               [(regular)
-                               (scp-upload-tree-file who session local-child remote-child
-                                                      timeout-ms policy)]
+                               (let ([exists?
+                                      ;; Reuse only names unchanged by SFTP normalization.
+                                      ;; Relative paths and dot components need raw server
+                                      ;; resolution, including '..' after a symbolic link.
+                                      (if (and (fxpositive? (string-length remote-child))
+                                               (char=? #\/ (string-ref remote-child 0))
+                                               (string=? remote-child
+                                                         (sftp-normalize-path sftp remote-child)))
+                                          (sftp-stat/maybe sftp remote-child)
+                                          (scp-stat session remote-child))])
+                                 (case (and exists? (transfer-policy-overwrite policy))
+                                   [(skip) (void)]
+                                   [(error) (errorf who "remote destination exists: ~a" remote-child)]
+                                   [else
+                                    (let ([recreate? (scp-readonly-remote-file? exists?)])
+                                      ;; Replace read-only files through their writable parent,
+                                      ;; without changing permissions on an existing inode.
+                                      ;; Transfer it immediately so later targets stay intact.
+                                      (when recreate?
+                                        (flush-files!)
+                                        (sftp-delete! sftp remote-child))
+                                      (batch name)
+                                      (set! batch-count (fx1+ batch-count))
+                                      (when (or recreate? (fx= batch-count 32))
+                                        (flush-files!)))]))]
                               [(symlink)
+                               (flush-files!)
                                (case symlink-policy
                                  [(reject)
                                   (raise-net-error who 'scp
@@ -432,13 +613,24 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                               [else
                                (raise-net-error who 'scp "unsupported local file type"
                                                 local-child)]))))
-                      (directory-list local)))))
+                      (directory-list local))
+                     (flush-files!))))
                target-path]
               [(download)
                (ensure-local-scp-directory target-path)
                (let ([root (sftp-normalize-path sftp source-path)])
                  (let walk ([remote source-path] [local target-path] [prefix ""] [seen '()])
-                   (let ([normalized (sftp-normalize-path sftp remote)])
+                   (let ([normalized (sftp-normalize-path sftp remote)]
+                         [batch (make-list-builder)] [batch-count 0] [command-size 16])
+                     (define flush-files!
+                       (lambda ()
+                         (check-active!)
+                         (when (fxpositive? batch-count)
+                           (scp-transfer-many/policy who session 'download local remote
+                                                     (batch) timeout-ms policy)
+                           (set! batch (make-list-builder))
+                           (set! batch-count 0)
+                           (set! command-size 16))))
                      (when (member normalized seen)
                        (raise-net-error who 'scp "recursive SCP download found a cycle" remote))
                      (for-each
@@ -450,16 +642,38 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                    [relative (if (string=? prefix "")
                                                  name (scp-child-path prefix name))]
                                    [attributes (remote-scp-attributes relative entry)])
-                              (when (or (not filter) (filter relative attributes))
+                              (when (selected-entry? relative attributes)
                                 (case (scp-attributes-type attributes)
                                   [(directory)
+                                   (flush-files!)
                                    (ensure-local-scp-directory local-child)
                                    (walk remote-child local-child relative
                                          (cons normalized seen))]
                                   [(regular)
-                                   (scp-download-tree-file
-                                    who session remote-child local-child timeout-ms policy)]
+                                   (case (and (file-exists? local-child)
+                                              (transfer-policy-overwrite policy))
+                                     [(skip) (void)]
+                                     [(error) (errorf who "local destination exists: ~a" local-child)]
+                                     [else
+                                      (let ([recreate?
+                                             (and (file-regular? local-child #f)
+                                                  (scp-readonly-mode?
+                                                   (file-mode local-child #f)))])
+                                        (when recreate?
+                                          (flush-files!)
+                                          (delete-file local-child))
+                                        ;; Bound the shell command as well as its file count.
+                                        ;; Four bytes per UTF-8 byte covers quote escaping.
+                                        (let ([size (fx+ 8 (fx* 4 (bytevector-length
+                                                                  (string->utf8 remote-child))))])
+                                          (when (fx> (fx+ command-size size) 65536) (flush-files!))
+                                          (set! command-size (fx+ command-size size)))
+                                        (batch name)
+                                        (set! batch-count (fx1+ batch-count))
+                                        (when (or recreate? (fx= batch-count 32))
+                                          (flush-files!)))])]
                                   [(symlink)
+                                   (flush-files!)
                                    (case symlink-policy
                                      [(reject)
                                       (raise-net-error who 'scp
@@ -499,11 +713,15 @@ The `scp-stat` procedure returns a stable `scp-attributes` record for remote `pa
                                   [else
                                    (raise-net-error who 'scp "unsupported remote file type"
                                                     remote-child)]))))))
-                      (sftp-list sftp remote)))))
+                      (sftp-list sftp remote))
+                     (flush-files!))))
                target-path]
               [else
                (errorf who "direction must be one of '(upload download), given ~s" direction)]))
-          (lambda () (sftp-close sftp))))))
+          (lambda ()
+            (sftp-close sftp)
+            (scp-session-directory-active?-set! session #f)
+            (when (scp-session-closed? session) (close-owned-ssh! session)))))))
 
   #|proc:scp-open
 The `scp-open` procedure wraps an authenticated SSH session, or opens and authenticates one, for
@@ -516,7 +734,7 @@ subsequent SCP transfers.
       [(session timeout-ms)
        (pcheck ([ssh-session? session] [fixnum? timeout-ms])
                (check-timeout-ms who timeout-ms)
-               (%make-scp-session session timeout-ms #f #f #f))]
+               (%make-scp-session session timeout-ms #f #f #f #f #f))]
       [(host port user auth-kind auth-arg)
        (scp-open host port user auth-kind auth-arg scp-default-timeout-ms)]
       [(host port user auth-kind auth-arg timeout-ms)
@@ -531,15 +749,23 @@ subsequent SCP transfers.
                    (lambda ()
                      (authenticate-ssh! who ssh-session user auth-kind auth-arg)
                      (set! ok? #t)
-                     (%make-scp-session ssh-session timeout-ms #t #f #f))
+                     (%make-scp-session ssh-session timeout-ms #t #f #f #f #f))
                    (lambda ()
                      (unless ok?
                        (guard (c [else #f])
                          (ssh-close ssh-session)))))))]))
 
+  (define close-owned-ssh!
+    (lambda (session)
+      (when (and (scp-session-owns-ssh? session)
+                 (guard (failure [else #f])
+                   (not (fxzero? (%ssh-session-handle (scp-session-ssh-session session))))))
+        (ssh-close (scp-session-ssh-session session)))))
+
   #|proc:scp-close
 The `scp-close` procedure closes an SCP session and, if it owns the wrapped SSH session, closes
-that SSH session as well.
+that SSH session as well. The `session` parameter is an SCP session; it is also returned.
+When called from a directory progress callback, owned SSH teardown waits for traversal to unwind.
 |#
   (define-who scp-close
     (lambda (session)
@@ -548,16 +774,15 @@ that SSH session as well.
                 (let ([pending (scp-session-pending session)])
                   (when pending
                     (cancel-pending! session pending)))
-                (when (and (scp-session-owns-ssh? session)
-                           (guard (c [else #f])
-                             (not (fx= 0 (%ssh-session-handle
-                                          (scp-session-ssh-session session))))))
-                  (ssh-close (scp-session-ssh-session session)))
+                ;; Directory traversal still owns an SFTP handle during progress callbacks.
+                ;; Its unwind closes that handle before releasing an owned SSH session.
+                (unless (scp-session-directory-active? session)
+                  (close-owned-ssh! session))
                 (scp-session-closed?-set! session #t))
               session)))
 
   #|proc:scp-cancel-pending!
-The `scp-cancel-pending!` procedure cancels the pending transfer on `session`, if any.
+The `scp-cancel-pending!` procedure cancels pending work, including an active directory child.
 The `session` parameter is an open SCP session.
 The return value is `session`; partial downloads are removed during cleanup.
 |#
@@ -570,7 +795,11 @@ The return value is `session`; partial downloads are removed during cleanup.
               session)))
 
   #|proc:scp-download
-The `scp-download` procedure downloads a single remote file to the exact local target path.
+The `scp-download` procedure downloads `remote-path` through SCP `session` to `local-path`.
+The optional fourth argument is a timeout in milliseconds or a transfer policy. A policy controls
+resume and overwrite behavior and receives byte progress through its progress hook, with signature
+`(protocol direction remote-path completed-bytes total-bytes-or-#f) -> unspecified`.
+The total is unknown until the remote file header arrives. Returns `local-path` on success.
 |#
   (define-who scp-download
     (case-lambda
@@ -586,7 +815,11 @@ The `scp-download` procedure downloads a single remote file to the exact local t
                       (scp-download/nonblocking session remote-path local-path timeout-ms)))))]))
 
   #|proc:scp-upload
-The `scp-upload` procedure uploads a single local file to the exact remote target path.
+The `scp-upload` procedure uploads `local-path` through SCP `session` to `remote-path`.
+The optional fourth argument is a timeout in milliseconds or a transfer policy. A policy controls
+resume and overwrite behavior and receives byte progress through its progress hook, with signature
+`(protocol direction remote-path completed-bytes total-bytes-or-#f) -> unspecified`.
+Returns `remote-path` on success. Skipped files do not invoke the progress hook.
 |#
   (define-who scp-upload
     (case-lambda
@@ -645,7 +878,11 @@ The return value is a `net-operation` whose successful result is `remote-path`.
 The `scp-copy-directory` procedure recursively copies a directory tree in `direction`. `policy`
 controls overwrite and resume behavior. `filter` has signature
 `(relative-path scp-attributes) -> boolean`, and `symlink-policy` is `preserve`, `follow`, or
-`reject`. The default rejects links and includes every entry.
+`reject`. The default rejects links and includes every entry. The policy progress hook receives
+`(protocol direction remote-path completed-bytes total-bytes-or-#f) -> unspecified` for each copied
+regular file. Skipped files do not invoke the hook. Consecutive selected regular files in one
+directory share a channel in bounded batches of at most 32 files; progress remains per file.
+With `replace`, read-only regular destinations can be recreated through a writable parent.
 |#
   (define-who scp-copy-directory
     (case-lambda

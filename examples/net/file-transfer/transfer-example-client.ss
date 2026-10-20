@@ -1,3 +1,6 @@
+(load "examples/net/legacy-example-common.ss")
+(net-example-help! 'transfer-example-client "Upload files. Positional arguments: tcp|http|ftp|sftp|websocket|grpc FILE ...")
+
 (load "examples/net/file-transfer/file-transfer-script-common.ss")
 
 (define lookup-client
@@ -14,9 +17,12 @@
                "unknown protocol ~s"
                name)])))
 
-(let ([arg* (command-line-arguments)])
-  (unless (>= (length arg*) 2)
-    (errorf 'transfer-example-client
-            "expected protocol and at least one file path, given ~s"
-            arg*))
-  ((lookup-client (car arg*)) (cdr arg*)))
+(call-with-legacy-example-log
+ 'transfer-example-client
+ (lambda ()
+   (let ([arg* (command-line-arguments)])
+     (unless (>= (length arg*) 2)
+       (errorf 'transfer-example-client
+               "expected protocol and at least one file path, given ~s"
+               arg*))
+     ((lookup-client (car arg*)) (cdr arg*)))))

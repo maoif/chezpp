@@ -528,7 +528,7 @@ Expected: every command exits 0; Scheme test stdout/stderr are empty.
 - [ ] **Step 4: Check changed Scheme files**
 
 ```bash
-../chez++ --script ../tools/check-scheme-balance.ss \
+../chez++ --script=../tools/check-scheme-balance.ss -- \
   ../chezpp/optional-library.ss ../chezpp/net/ffi.ss
 ```
 

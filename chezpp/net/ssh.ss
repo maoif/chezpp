@@ -28,12 +28,14 @@
           ssh-forwarding-descriptor
           ssh-forwarding-closed?
           ssh-open-local-forward
+          ssh-open-local-forward/nonblocking
           ssh-request-remote-forward!
           ssh-accept-remote-forward
           ssh-cancel-remote-forward!
           ssh-close-forwarding
           ssh-open-channel
           ssh-close-channel
+          ssh-send-eof!
           ssh-exec
           ssh-shell
           ssh-read
@@ -49,6 +51,7 @@
           ssh-write/nonblocking
           ssh-write-all/nonblocking
           ssh-request-pty!
+          ssh-change-pty-size!
           ssh-request-environment!
           ssh-request-subsystem!
           ssh-channel-exit-status
@@ -59,10 +62,12 @@
           open-ssh-channel-error-port)
   (import (chezpp chez)
           (chezpp utils)
+          (chezpp string)
           (chezpp net errors)
           (chezpp net ffi)
           (chezpp net private)
-          (chezpp net operation))
+          (chezpp net operation)
+          (chezpp net poll))
 
   #|record:ssh-session
 The `ssh-session` record owns an authenticated or unauthenticated SSH transport.
@@ -697,6 +702,64 @@ the originator; and `timeout-ms` bounds setup. It returns an `ssh-forwarding` wi
                  (%make-ssh-forwarding 'local session channel remote-host remote-port
                                        (channel-resource who channel) #f)))]))
 
+  #|proc:ssh-open-local-forward/nonblocking
+The `ssh-open-local-forward/nonblocking` procedure constructs a direct TCP/IP open operation.
+The authenticated `session` must remain open until the operation terminates and its result closes.
+The `remote-host` and `remote-port` parameters identify the destination resolved by the server.
+Optional `source-host` and `source-port` identify the originator (default: `127.0.0.1`, zero).
+Optional `timeout-ms` bounds setup in milliseconds (default: 30000, nonnegative fixnum).
+Returns a pending network operation. Each step attempts setup without waiting; completion returns
+an `ssh-forwarding` that the caller must close. Failure or cancellation frees the pending channel.
+|#
+  (define-who ssh-open-local-forward/nonblocking
+    (case-lambda
+      [(session remote-host remote-port)
+       (ssh-open-local-forward/nonblocking session remote-host remote-port "127.0.0.1" 0
+                                           ssh-default-timeout-ms)]
+      [(session remote-host remote-port source-host source-port)
+       (ssh-open-local-forward/nonblocking session remote-host remote-port source-host source-port
+                                           ssh-default-timeout-ms)]
+      [(session remote-host remote-port source-host source-port timeout-ms)
+       (pcheck ([ssh-session? session] [string? remote-host source-host]
+                [fixnum? remote-port source-port timeout-ms])
+         (ensure-session-open who session)
+         (check-port who remote-port)
+         (check-port who source-port)
+         (check-timeout-ms who timeout-ms)
+         (let* ([now-ms (lambda ()
+                          (let ([time (current-time 'time-monotonic)])
+                            (+ (* (time-second time) 1000)
+                               (quotient (time-nanosecond time) 1000000))))]
+                [deadline (+ (now-ms) timeout-ms)]
+                [handle (ensure-success who 'ssh
+                          (ffi-net-ssh-channel-forward-start (ssh-session-handle session)))]
+                [transferred? #f])
+           (make-net-operation
+            'ssh-open-local-forward
+            (lambda ()
+              (ensure-session-open who session)
+              (when (>= (now-ms) deadline)
+                (raise-net-error who 'timeout "SSH forwarding channel open timed out" session))
+              (let ([answer (ffi-net-ssh-channel-forward-step
+                             handle remote-host remote-port source-host source-port)])
+                (if (ffi-would-block? answer)
+                    (net-operation-pending
+                     (list (make-poll-target
+                            (ffi-net-ssh-session-fd (ssh-session-handle session))
+                            (ffi-would-block-events answer))) deadline)
+                    (begin
+                      (ensure-success who 'ssh answer)
+                      (let* ([channel (%make-ssh-channel handle session #f)]
+                             [forwarding (%make-ssh-forwarding
+                                          'local session channel remote-host remote-port
+                                          (channel-resource who channel) #f)])
+                        (set! transferred? #t)
+                        (net-operation-completed forwarding))))))
+            void
+            (lambda ()
+              (unless transferred?
+                (ffi-net-ssh-channel-forward-discard handle))))))]))
+
   #|proc:ssh-request-remote-forward!
 The `ssh-request-remote-forward!` procedure asks `session` to listen on `address` and `port` on the
 server. Port zero requests an available port. It returns an `ssh-forwarding` listener containing
@@ -808,6 +871,19 @@ The `ssh-request-subsystem!` procedure requests non-empty `subsystem` on open `c
                                (ssh-channel-handle channel) subsystem))
               channel)))
 
+  #|proc:ssh-send-eof!
+The `ssh-send-eof!` procedure half-closes the stdin stream of open `channel`.
+The `channel` parameter is an SSH channel. Remote stdout and stderr remain readable.
+It returns `channel` after sending EOF; later writes to the channel must be avoided.
+|#
+  (define-who ssh-send-eof!
+    (lambda (channel)
+      (pcheck ([ssh-channel? channel])
+              (ensure-channel-open who channel)
+              (ensure-success who 'ssh
+                              (ffi-net-ssh-channel-send-eof (ssh-channel-handle channel)))
+              channel)))
+
   #|proc:ssh-close-channel
 The `ssh-close-channel` procedure closes an SSH channel and releases its foreign resources.
 |#
@@ -893,21 +969,50 @@ The `ssh-shell` procedure requests an interactive shell on an SSH channel.
          (errorf who "expected ssh channel or session, given ~s" target)])]))
 
   #|proc:ssh-request-pty!
-The `ssh-request-pty!` procedure requests a pseudo-terminal on an SSH channel.
+The `ssh-request-pty!` procedure requests a pseudo-terminal on open `channel` and returns it.
+`terminal` names its TERM value, and positive `columns` and `rows` give the character size.
+The defaults are xterm, 80 columns, and 24 rows. `timeout-ms` bounds the wait in milliseconds;
+-1 waits without a deadline. Request the terminal before starting a shell or command.
 |#
   (define-who ssh-request-pty!
     (case-lambda
       [(channel)
        (ssh-request-pty! channel -1)]
       [(channel timeout-ms)
-       (pcheck ([ssh-channel? channel] [fixnum? timeout-ms])
+       (ssh-request-pty! channel "xterm" 80 24 timeout-ms)]
+      [(channel terminal columns rows)
+       (ssh-request-pty! channel terminal columns rows -1)]
+      [(channel terminal columns rows timeout-ms)
+       (pcheck ([ssh-channel? channel] [string? terminal] [fixnum? columns rows timeout-ms])
+               (when (or (string=? terminal "") (string-contains? terminal (string #\nul)))
+                 (errorf who "terminal must be nonempty and contain no NUL"))
+               (unless (and (fx<= 1 columns 65535) (fx<= 1 rows 65535))
+                 (errorf who "terminal columns and rows must be between 1 and 65535"))
                (when (fx>= timeout-ms 0)
                  (check-timeout-ms who timeout-ms))
                (ensure-channel-open who channel)
                (ensure-success who 'ssh
-                               (ffi-net-ssh-channel-request-pty (ssh-channel-handle channel)
-                                                                timeout-ms))
+                               (ffi-net-ssh-channel-request-pty-size
+                                (ssh-channel-handle channel) terminal columns rows #f timeout-ms))
                channel)]))
+
+  #|proc:ssh-change-pty-size!
+The `ssh-change-pty-size!` procedure updates the PTY on open `channel` and returns it.
+Positive `columns` and `rows` specify the new character size, each at most 65535.
+`timeout-ms` bounds the wait in milliseconds; its default -1 waits without a deadline.
+|#
+  (define-who ssh-change-pty-size!
+    (case-lambda
+      [(channel columns rows) (ssh-change-pty-size! channel columns rows -1)]
+      [(channel columns rows timeout-ms)
+       (pcheck ([ssh-channel? channel] [fixnum? columns rows timeout-ms])
+         (unless (and (fx<= 1 columns 65535) (fx<= 1 rows 65535))
+           (errorf who "terminal columns and rows must be between 1 and 65535"))
+         (when (fx>= timeout-ms 0) (check-timeout-ms who timeout-ms))
+         (ensure-channel-open who channel)
+         (ensure-success who 'ssh (ffi-net-ssh-channel-request-pty-size
+                                   (ssh-channel-handle channel) "" columns rows #t timeout-ms))
+         channel)]))
 
   #|proc:ssh-read
 The `ssh-read` procedure reads up to `size` bytes from an SSH channel's stdout stream.

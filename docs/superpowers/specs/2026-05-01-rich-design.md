@@ -313,7 +313,7 @@ Important coverage:
 - Negative tests include comments explaining the expected error case.
 
 Scheme files touched by Rich changes should pass the repository parenthesis
-checker. Examples should run through `./chez++ --script ...` after a rebuild.
+checker. Examples should run through `./chez++ --script=... --` after a rebuild.
 
 Full project validation is:
 

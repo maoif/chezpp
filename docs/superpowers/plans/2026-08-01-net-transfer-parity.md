@@ -598,7 +598,7 @@ Pipe a deterministic command transcript containing `pwd`, `ls`, `mkdir`, `put`, 
 
 ```bash
 rg -n '^  #\|(record|proc):' chezpp/net/{transfer,ftp,sftp,scp,ssh}.ss
-./chez++ --script tools/check-scheme-balance.ss chezpp/net/{transfer,ftp,sftp,scp,ssh}.ss
+./chez++ --script=tools/check-scheme-balance.ss -- chezpp/net/{transfer,ftp,sftp,scp,ssh}.ss
 git status --short
 ```
 

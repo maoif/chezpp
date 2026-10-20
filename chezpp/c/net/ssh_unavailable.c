@@ -106,6 +106,20 @@ ptr chezpp_net_ssh_channel_open_forward(uptr handle, const char *remote_host, in
   return chezpp_unavailable_status("ssh: disabled at build time");
 }
 
+ptr chezpp_net_ssh_channel_forward_start(uptr handle) {
+  (void)handle;
+  return chezpp_unavailable_status("ssh: disabled at build time");
+}
+
+ptr chezpp_net_ssh_channel_forward_step(uptr handle, const char *remote_host, int remote_port,
+                                       const char *source_host, int source_port) {
+  (void)handle; (void)remote_host; (void)remote_port;
+  (void)source_host; (void)source_port;
+  return chezpp_unavailable_status("ssh: disabled at build time");
+}
+
+void chezpp_net_ssh_channel_forward_discard(uptr handle) { (void)handle; }
+
 ptr chezpp_net_ssh_remote_forward_listen(uptr handle, const char *address, int port) {
   (void)handle;
   (void)address;
@@ -122,6 +136,11 @@ ptr chezpp_net_ssh_remote_forward_cancel(uptr handle, const char *address, int p
   (void)handle;
   (void)address;
   (void)port;
+  return chezpp_unavailable_status("ssh: disabled at build time");
+}
+
+ptr chezpp_net_ssh_channel_send_eof(uptr handle) {
+  (void)handle;
   return chezpp_unavailable_status("ssh: disabled at build time");
 }
 
@@ -146,6 +165,12 @@ ptr chezpp_net_ssh_channel_request_shell(uptr handle, int timeout_ms) {
 ptr chezpp_net_ssh_channel_request_pty(uptr handle, int timeout_ms) {
   (void)handle;
   (void)timeout_ms;
+  return chezpp_unavailable_status("ssh: disabled at build time");
+}
+
+ptr chezpp_net_ssh_channel_request_pty_size(uptr handle, const char *terminal,
+                                          int columns, int rows, int resize, int timeout_ms) {
+  (void)handle; (void)terminal; (void)columns; (void)rows; (void)resize; (void)timeout_ms;
   return chezpp_unavailable_status("ssh: disabled at build time");
 }
 
@@ -258,6 +283,14 @@ ptr chezpp_net_scp_transfer_start(uptr handle, int direction, const char *source
   (void)direction;
   (void)source;
   (void)target;
+  return chezpp_unavailable_status("ssh: disabled at build time");
+}
+
+ptr chezpp_net_scp_transfer_start_many(uptr handle, int direction,
+                                      const char *local_directory,
+                                      const char *remote_directory, ptr encoded_names) {
+  (void)handle; (void)direction; (void)local_directory; (void)remote_directory;
+  (void)encoded_names;
   return chezpp_unavailable_status("ssh: disabled at build time");
 }
 

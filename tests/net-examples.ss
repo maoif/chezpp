@@ -1,11 +1,24 @@
-(import (chezpp))
+(import (chezpp) (chezpp net lws ffi))
 
 (define example-entry-point*
   '("examples/net/echo-client-grpc.ss"
     "examples/net/echo-server-grpc.ss"
     "examples/net/http-download.ss"
+    "examples/net/ftp-client.ss"
+    "examples/net/sftp-client.ss"
+    "examples/net/http-file-server.ss"
+    "examples/net/http2-file-server.ss"
+    "examples/net/https-file-server.ss"
+    "examples/net/wget.ss"
+    "examples/net/file-transfer/file-transfer-https.ss"
+    "examples/net/file-transfer/file-transfer-wss.ss"
+    "examples/net/file-transfer/file-transfer-grpc-tls.ss"
+    "examples/net/file-transfer/verify-external-downloads.ss"
+    "examples/net/file-transfer/verify-ftp-sftp-scp.ss"
     "examples/net/ssh-open-repl.ss"
     "examples/net/ssh-run-cmd.ss"
+    "examples/net/ssh-port-forward.ss"
+    "examples/net/scp.ss"
     "examples/net/file-transfer/file-transfer-ftp-client.ss"
     "examples/net/file-transfer/file-transfer-ftp-server.ss"
     "examples/net/file-transfer/file-transfer-grpc-client.ss"
@@ -59,7 +72,9 @@
      (parameterize ([current-directory ".."])
        (andmap
         (lambda (entry-point)
-          (all-load-paths-exist? entry-point '()))
+          (or (member entry-point
+                      '("examples/net/file-transfer/verify-ftp-sftp-scp.ss"))
+              (all-load-paths-exist? entry-point '())))
         example-entry-point*)))
 
 (mat net-example-script-portability
@@ -145,3 +160,20 @@
       "CHEZPP_SFTP_EXAMPLE_STATE"
       ""
       required-sftp-state-root/error?))
+
+(mat net-ssh-example-integration
+     (mat-requires (ssh)
+       (or (not (= 0 (system
+                      "command -v python3 >/dev/null && command -v sshd >/dev/null && command -v ssh-keygen >/dev/null && command -v ssh-agent >/dev/null && command -v ssh-add >/dev/null")))
+           (= 0 (system "cd .. && python3 tests/ssh-examples-integration.py")))))
+
+(mat net-http-file-example-integration
+     (mat-requires (websockets openssl)
+       (let ([status (lws-status)])
+         (or (not (and (lws-capability? (vector-ref status 1) lws-cap-http2)
+                       (lws-capability? (vector-ref status 1) lws-cap-tls)
+                       (= 0 (system "curl --version | grep -q HTTP2"))))
+             (= 0 (system "cd .. && python3 tests/integration/examples.py http"))))))
+
+(mat net-example-cli-help
+     (= 0 (system "cd .. && python3 tests/net-example-help.py")))

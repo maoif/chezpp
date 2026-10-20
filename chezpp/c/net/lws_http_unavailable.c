@@ -26,6 +26,20 @@ uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
   return 0;
 }
 
+uintptr_t chezpp_lws_http_server_context_open_version(size_t event_capacity,
+                                              size_t payload_capacity,
+                                              const char *interface_name,
+                                              int port,
+                                              uintptr_t tls_context_handle, int prior_knowledge) {
+  (void)prior_knowledge;
+  (void)event_capacity;
+  (void)payload_capacity;
+  (void)interface_name;
+  (void)port;
+  (void)tls_context_handle;
+  return 0;
+}
+
 void chezpp_lws_http_context_close(uintptr_t context_handle) {
   (void)context_handle;
 }
@@ -51,6 +65,12 @@ int chezpp_lws_http_context_service_fd(uintptr_t context_handle, int fd,
 ptr chezpp_lws_http_context_next_event(uintptr_t context_handle) {
   (void)context_handle;
   return chezpp_unavailable_status("websockets: disabled at build time");
+}
+
+int chezpp_lws_http_context_service(uintptr_t context_handle, int maximum_timeout_ms) {
+  (void)context_handle;
+  (void)maximum_timeout_ms;
+  return -1;
 }
 
 int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,

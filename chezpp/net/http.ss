@@ -11,7 +11,7 @@
           http-follow-redirects! http-set-header! http-set-timeout! http-cancel-pending! http-send/nonblocking http-request/nonblocking http-download/nonblocking http-upload/nonblocking
           http-server? http-listen http-server-close http-accept http-accept/nonblocking http-serve http-serve-loop http-register-handler! http-handler-ref http-unregister-handler!
           http-connection? http-connection-close http-read-request http-read-request/nonblocking http-write-response http-write-response/nonblocking)
-  (import (chezpp chez) (chezpp utils) (chezpp file) (chezpp net uri) (chezpp net errors) (chezpp net operation) (chezpp net ffi) (chezpp net tls) (chezpp net http private) (chezpp net lws client) (chezpp net lws server))
+  (import (chezpp chez) (chezpp utils) (chezpp file) (chezpp string) (chezpp net uri) (chezpp net errors) (chezpp net operation) (chezpp net ffi) (chezpp net tls) (chezpp net http private) (chezpp net lws client) (chezpp net lws server))
   #|record:http-request-record
 An immutable HTTP request containing a method, URI, header alist, and optional body.
 |#
@@ -28,10 +28,12 @@ A pull-based request body source with a producer, optional length, and one-shot 
   (define-record-type (http-body-source %make-http-body-source http-body-source?) (sealed #t) (opaque #f)
     (fields (immutable producer http-body-source-producer) (immutable length http-body-source-length) (immutable closer http-body-source-closer) (mutable closed? http-body-source-closed? http-body-source-closed?-set!)))
   #|record:http-body-sink
-A push-based response body sink with a consumer and one-shot finisher.
+A push-based response body sink with a consumer, header observer, and one-shot finisher.
 |#
   (define-record-type (http-body-sink %make-http-body-sink http-body-sink?) (sealed #t) (opaque #f)
-    (fields (immutable consumer http-body-sink-consumer) (immutable finisher http-body-sink-finisher) (mutable finished? http-body-sink-finished? http-body-sink-finished?-set!)))
+    (fields (immutable consumer http-body-sink-consumer) (immutable finisher http-body-sink-finisher)
+            (immutable headers-observer http-body-sink-headers-observer)
+            (mutable finished? http-body-sink-finished? http-body-sink-finished?-set!)))
   #|record:http-cookie
 An immutable cookie with name, value, domain, path, and secure transport flag.
 |#
@@ -79,6 +81,20 @@ An accepted HTTP connection handle managed by the server API.
   (define monotonic-ms (lambda () (let ([t (current-time 'time-monotonic)]) (+ (* (time-second t) 1000) (quotient (time-nanosecond t) 1000000)))))
   (define slice-bv (lambda (b i e) (let ([x (make-bytevector (- e i))]) (bytevector-copy! b i x 0 (- e i)) x)))
   (define request-path (lambda (u) (let ([p (or (uri-raw-path u) "/")] [q (uri-raw-query u)]) (if q (string-append (if (string=? p "") "/" p) "?" q) (if (string=? p "") "/" p)))))
+  ;; LWS exposes server paths after percent-decoding. Encode each segment again before
+  ;; parsing it as a URI so decoded ?, #, %, and other delimiters remain path data.
+  (define server-request-uri
+    (lambda (path)
+      (make-uri #f #f #f #f
+                (let ([output (open-output-string)])
+                  (let loop ([part* (string-split path #\/)] [first? #t])
+                    (if (null? part*)
+                        (get-output-string output)
+                        (begin
+                          (unless first? (put-char output #\/))
+                          (put-string output (uri-encode (car part*)))
+                          (loop (cdr part*) #f)))))
+                #f #f)))
   (define bytevector-slice
     (lambda (bv start stop)
       (let ([out (make-bytevector (- stop start) 0)])
@@ -116,10 +132,22 @@ Reads at most `n` bytes from source `s`, returning bytes or end-of-file.
 |#
   (define http-body-source-read (lambda (s n) (pcheck ([http-body-source? s] [positive? n]) ((http-body-source-producer s) n))))
   #|proc:make-http-body-sink
-Creates a response sink from a consumer `(bytevector start count)` and optional finisher.
-Returns a sink record.
+Creates a response sink from `consumer`, with signature `(bytevector start count) -> unspecified`.
+Optional `finisher` has signature `() -> unspecified` and runs once when the sink finishes.
+Optional `headers-observer` has signature `(status header-alist) -> unspecified`. It runs once per
+response before its first body chunk, or at response completion for an empty body. Intermediate
+redirect responses followed by the client do not invoke it. Callback conditions fail the operation.
+Cancellation or client close from the observer suppresses subsequent body delivery.
+Returns a sink record. The default finisher and header observer do nothing.
 |#
-  (define make-http-body-sink (case-lambda [(c) (make-http-body-sink c void)] [(c f) (pcheck ([procedure? c f]) (%make-http-body-sink c f #f))]))
+  (define make-http-body-sink
+    (case-lambda
+      [(consumer) (make-http-body-sink consumer void)]
+      [(consumer finisher)
+       (make-http-body-sink consumer finisher (lambda (status headers) (void)))]
+      [(consumer finisher headers-observer)
+       (pcheck ([procedure? consumer finisher headers-observer])
+               (%make-http-body-sink consumer finisher headers-observer #f))]))
   #|proc:http-body-sink-write!
 Writes `count` bytes from `body` at `start` to sink `sink`; returns an unspecified value.
 |#
@@ -412,15 +440,24 @@ retained for the client's lifetime, or `#f` for the default TLS policy.
                    (http-request-method req) u (or (uri-scheme u) "http") host port tls?
                    (request-path u) headers source (body-length (http-request-body req))
                    policy-snapshot)]
+             ;; The transport checks this predicate before delivering response chunks.
+             ;; Notify the sink once, using headers from the GET itself, after redirects.
+             [skip-response-body?
+              (let ([headers-observed? #f])
+                (lambda (status response-headers)
+                  (let ([skip? (and follow-redirects?
+                                    (redirect-status? status)
+                                    (exists (lambda (entry)
+                                              (string-ci=? "location" (car entry)))
+                                            response-headers))])
+                    (unless (or skip? headers-observed? (not sink) (http-body-sink-finished? sink))
+                      (set! headers-observed? #t)
+                      ((http-body-sink-headers-observer sink) status response-headers))
+                    ;; The observer may cancel this request and finish its sink before returning.
+                    (or skip? (and sink (http-body-sink-finished? sink))))))]
              [sv (and sink
                       (vector (lambda (b i n) (http-body-sink-write! sink b i n))
-                              void
-                              (lambda (status response-headers)
-                                (and follow-redirects?
-                                     (redirect-status? status)
-                                     (exists (lambda (entry)
-                                               (string-ci=? "location" (car entry)))
-                                             response-headers)))))]
+                              void skip-response-body?))]
              [transport (http-client-transport c)]
              [inner (lws-client-request/nonblocking transport vec sv)]
              [outer #f])
@@ -440,6 +477,9 @@ retained for the client's lifetime, or `#f` for the default TLS policy.
                             (transport-response-body transport-response)
                             (transport-response-trailers transport-response)
                             (transport-response-version transport-response))])
+                      ;; Empty responses have no body callback to deliver their headers.
+                      (skip-response-body? (http-response-status response)
+                                           (http-response-headers response))
                       (store-response-cookies! c req (http-response-headers response))
                       (http-client-active-set! c (remq outer (http-client-active c)))
                       (net-operation-completed (decode-response-body response)))]
@@ -814,14 +854,17 @@ Encodes multipart parts `parts`. Returns a body source and its multipart content
 
   #|proc:http-listen
 The `http-listen` procedure opens an LWS HTTP server on `host` and `port`. `tls-context` is `#f`
-or a server TLS context, and `backlog` is retained for API compatibility. It returns the server.
+or a server TLS context, and `backlog` is retained for API compatibility. Optional `version` is
+`h1` (default) or `h2`. Cleartext H2 uses prior knowledge; TLS negotiates through ALPN. An H2
+request raises an error if the LWS build lacks HTTP/2 support. It returns the server.
 |#
   (define-who http-listen
     (case-lambda
       [(host port) (http-listen host port #f 128)]
       [(host port tls-context) (http-listen host port tls-context 128)]
-      [(host port tls-context backlog)
-       (pcheck ([string? host] [fixnum? port backlog])
+      [(host port tls-context backlog) (http-listen host port tls-context backlog 'h1)]
+      [(host port tls-context backlog version)
+       (pcheck ([string? host] [fixnum? port backlog] [symbol? version])
          (unless (and (fxpositive? port) (fx<= port 65535))
            (errorf who "invalid port ~s" port))
          (unless (fxpositive? backlog) (errorf who "invalid backlog ~s" backlog))
@@ -829,7 +872,7 @@ or a server TLS context, and `backlog` is retained for API compatibility. It ret
            (errorf who "expected #f or a TLS context"))
          (%make-http-server
           (make-lws-http-server host port (if tls-context
-                                              (tls-context-native-handle tls-context) 0))
+                                              (tls-context-native-handle tls-context) 0) version)
           (make-hashtable equal-hash equal?) (make-mutex 'http-server) #f))]))
 
   #|proc:http-server-close
@@ -934,7 +977,8 @@ The `http-read-request` procedure materializes and returns the request represent
             (let* ([handle (http-connection-request-handle connection)]
                    [request (make-http-request
                              (lws-http-request-method handle)
-                             (lws-http-request-path handle) (lws-http-request-headers handle)
+                             (server-request-uri (lws-http-request-path handle))
+                             (lws-http-request-headers handle)
                              (and (lws-http-request-has-body? handle)
                                   (lws-http-request-read-body handle)))])
               (http-connection-request-set! connection request)

@@ -1,3 +1,4 @@
+(load "examples/net/legacy-example-common.ss")
 (load "examples/net/file-transfer/file-transfer-common.ss")
 (load "examples/net/file-transfer/file-transfer-tcp.ss")
 (load "examples/net/file-transfer/file-transfer-http.ss")
@@ -15,10 +16,12 @@
 
 (define run-file-transfer-client-script
   (lambda (who proc)
+    (net-example-help! who "Upload one file. Positional argument: FILE.")
     (let ([path (require-single-command-argument who "file")])
-      (proc (list path)))))
+      (call-with-legacy-example-log who (lambda () (proc (list path)))))))
 
 (define run-file-transfer-server-script
   (lambda (who proc)
+    (net-example-help! who "Receive uploaded files. Positional argument: DIRECTORY.")
     (let ([dir (require-single-command-argument who "directory")])
-      (proc dir))))
+      (call-with-legacy-example-log who (lambda () (proc dir))))))

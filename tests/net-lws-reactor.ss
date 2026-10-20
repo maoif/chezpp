@@ -1,4 +1,7 @@
 (import (chezpp)
+        (chezpp net socket)
+        (chezpp net address)
+        (chezpp net poll)
         (chezpp net lws ffi)
         (chezpp net lws reactor))
 
@@ -92,6 +95,26 @@
      ;; Separate lifecycle locks for HTTP and WebSocket would miss this race.
      (mat-requires (websockets)
        (concurrent-context-lifecycle #t)))
+
+(mat net-lws-native-service-wakeup-and-collection
+     ;; A native wait must release Chez so a peer can collect and wake the owner.
+     (mat-requires (websockets)
+       (guard (failure [else #f])
+         (let ([service (foreign-procedure "chezpp_lws_http_context_service" (uptr int) int)])
+           (call-with-lws-context
+            (lambda (context)
+              (let* ([worker (fork-thread
+                              (lambda ()
+                                (milisleep 10)
+                                (collect)
+                                (lws-context-wakeup context)))]
+                     [ready (service context 1000)])
+                (thread-join worker)
+      (and (positive? ready)
+                     (null? (poll-target-ready-events
+                             (car (poll (list (make-poll-target
+                                               (lws-context-wakeup-fd context) '(read)))
+                                         0))))))))))))
 
 (mat net-lws-copied-event-order
      (mat-requires (websockets)
@@ -201,6 +224,23 @@
                             '(1 2 3))
                        '(poll-add poll-change poll-delete)))))))
 
+(mat net-lws-live-poll-keeps-application-event-pool-free
+     ;; Native descriptor changes update the snapshot without consuming body/event slots.
+     (mat-requires (websockets)
+       (let ([context (lws-context-open 8 65536)]
+             [listener (open-socket 'inet 'stream)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (socket-bind! listener (make-socket-address 'inet "127.0.0.1" 0))
+             (socket-listen! listener 1)
+             (let ([port (socket-address-port (socket-local-address listener))])
+               (and (lws-client-start context 1 1 1 "127.0.0.1" port #f
+                                      "GET" "127.0.0.1" "/")
+                    (positive? (vector-length (lws-context-poll-snapshot context)))
+                    (zero? (vector-ref (lws-context-pool-metrics context) 1)))))
+           (lambda () (lws-context-close context) (close-socket listener))))))
+
 (mat net-lws-stream-exhaustion-releases-connection
      ;; Error case: acquiring a connection before stream exhaustion must not leak the connection.
      (mat-requires (websockets)
@@ -231,6 +271,18 @@
                (lws-context-inject-event! context 'readable 30 31 2 0 #vu8(4))
                (begin (lws-context-next-event context) #t)
                (lws-body-consumed context 30 31 2 1))))))
+
+(mat net-lws-consumption-does-not-wake-owner
+     ;; Consumption runs on the context owner; it must not leave a spurious poll wakeup.
+     (mat-requires (websockets)
+       (call-with-lws-context
+        (lambda (context)
+          (and (lws-context-inject-event! context 'readable 32 33 2 0 #vu8(1 2 3))
+               (begin (lws-context-next-event context) #t)
+               (lws-body-consumed context 32 33 2 3)
+               (null? (poll-target-ready-events
+                       (car (poll (list (make-poll-target
+                                         (lws-context-wakeup-fd context) '(read))) 0)))))))))
 
 (mat net-lws-generation-filtering
      (mat-requires (websockets)
@@ -567,6 +619,36 @@
           (procedure? lws-reactor-consume-body!)
           (procedure? lws-reactor-close-stream!)))
 
+(mat net-lws-reactor-coalesces-body-consumption
+     ;; Error case: many consumed chunks must not exhaust the bounded acknowledgement queue.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 8 1024 2)]
+              [operation (make-lws-reactor-operation reactor 'consume 91 92 1 #f)])
+         (dynamic-wind
+           void
+           (lambda ()
+             (and (lws-reactor-inject-event! reactor 'readable 91 92 1 0
+                                             (make-bytevector 100 7))
+                  (for-all (lambda (index) (lws-reactor-consume-body! reactor 91 92 1 1))
+                           (iota 100))
+                  ;; Acknowledgements for another identity cannot merge into this stream.
+                  (not (lws-reactor-consume-body! reactor 91 93 1 1))
+
+                  ;; Error case: the same stream ID in a new generation is a separate lease.
+                  (not (lws-reactor-consume-body! reactor 91 92 2 1))
+                  (let ([metrics (lws-reactor-pool-metrics reactor)])
+                    (and (= 2 (vector-ref metrics 0)) (= 2 (vector-ref metrics 1))))
+                  (begin (lws-reactor-start! reactor) #t)
+                  (wait-until
+                   (lambda () (zero? (vector-ref (lws-reactor-pool-metrics reactor) 1))))
+                  (lws-reactor-inject-event! reactor 'complete 91 92 1 0 #vu8())
+                  (wait-until
+                   (lambda () (eq? 'completed
+                                    (lws-reactor-operation-lifecycle reactor operation))))
+                  (begin (net-operation-step! operation)
+                         (eq? 'completed (net-operation-state operation)))))
+           (lambda () (lws-reactor-shutdown! reactor))))))
+
 (mat net-lws-reactor-drain-operation-events-is-destructive
      ;; Draining copied events must remove them so retained payloads do not grow unbounded.
      (mat-requires (websockets)
@@ -641,4 +723,202 @@
                (and (eq? 'failed (net-operation-state operation))
                     (eq? 'timeout (net-error-kind condition-before))
                     (eq? condition-before (net-operation-condition operation)))))
+           (lambda () (lws-reactor-shutdown! reactor))))))
+
+(mat net-lws-reactor-poll-events-are-not-server-requests
+     ;; Poll bookkeeping must not accumulate in an idle client/server application queue.
+     (mat-requires (websockets)
+       (let ([reactor (make-lws-reactor 16 64 8)])
+         (dynamic-wind
+           (lambda () (lws-reactor-start! reactor))
+           (lambda ()
+             (lws-reactor-inject-poll! reactor 'add 901 1)
+             (and
+              (wait-until
+               (lambda () (poll-snapshot-find (lws-reactor-poll-snapshot reactor) 901)))
+              (let loop ([count 0])
+                (if (= count 100)
+                    #t
+                    (let ([mask (if (even? count) 5 1)])
+                      (and (lws-reactor-inject-poll! reactor 'change 901 mask)
+                           (wait-until
+                            (lambda ()
+                              (let ([entry (poll-snapshot-find
+                                            (lws-reactor-poll-snapshot reactor) 901)])
+                                (and entry (= mask (vector-ref entry 1))))))
+                           (loop (fx1+ count))))))
+              (begin (lws-reactor-inject-poll! reactor 'delete 901 0) #t)
+              (wait-until
+               (lambda ()
+                 (not (poll-snapshot-find (lws-reactor-poll-snapshot reactor) 901))))
+              (begin
+                ;; A logical server event is a barrier after the preceding poll commands.
+                (lws-reactor-inject-event! reactor 'headers 42 43 1 200 #vu8(1))
+                (lws-reactor-inject-event! reactor 'headers 42 44 1 200 #vu8(2))
+                #t)
+              (let ([first #f] [second #f])
+                (and (wait-until
+                      (lambda ()
+                        (set! first (lws-reactor-server-request-dequeue! reactor)) first))
+                     (wait-until
+                      (lambda ()
+                        (set! second (lws-reactor-server-request-dequeue! reactor)) second))
+                     (eq? 'headers (vector-ref first 0))
+                     (= 43 (vector-ref first 3))
+                     (eq? 'headers (vector-ref second 0))
+                     (= 44 (vector-ref second 3))
+                     (not (lws-reactor-server-request-dequeue! reactor))))))
+           (lambda () (lws-reactor-shutdown! reactor))))))
+
+(mat net-lws-reactor-shutdown-before-terminal-cleanup
+     ;; Error case: shutdown must invalidate signals before the context storage is freed.
+     (mat-requires (websockets)
+       (andmap
+        (lambda (outcome)
+          (let* ([reactor (make-lws-reactor 16 64 8)]
+                 [operation (make-lws-reactor-operation reactor 'shutdown 501 502 1 #f #t)])
+            (lws-reactor-start! reactor)
+            (unless (eq? outcome 'pending)
+              (lws-reactor-inject-event! reactor outcome 501 502 1 0 #vu8())
+              (unless (wait-until
+                       (lambda () (pair? (lws-reactor-operation-events reactor operation))))
+                (error 'shutdown-test "terminal event was not published")))
+            (lws-reactor-shutdown! reactor)
+            (net-operation-step! operation)
+            (let ([expected (if (eq? outcome 'complete) 'completed 'failed)])
+              (lws-reactor-release-operation! reactor operation)
+              (and (eq? expected (net-operation-state operation))
+                   (eq? reactor (lws-reactor-shutdown! reactor))))))
+        '(pending complete failed))))
+
+(mat net-lws-reactor-cancel-after-shutdown
+     ;; Error case: late cancellation must not close a signal from the destroyed context.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [operation (make-lws-reactor-operation reactor 'shutdown 601 602 1 #f)])
+         (lws-reactor-start! reactor)
+         (lws-reactor-shutdown! reactor)
+         (net-operation-cancel! operation)
+         (eq? 'cancelled (net-operation-state operation)))))
+
+(mat net-lws-reactor-concurrent-shutdown-before-start
+     ;; Error case: a second shutdown must wait for the first even without an owner thread.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [operation (make-lws-reactor-operation reactor 'shutdown 701 702 1 #f)]
+              [callback-entered? #f] [release? #f] [failure #f])
+         (lws-reactor-register-waiter!
+          reactor operation
+          (lambda (ignored)
+            (set! callback-entered? #t)
+            (let wait () (unless release? (milisleep 1) (wait)))))
+         (let ([first (fork-thread (lambda () (lws-reactor-shutdown! reactor)))])
+           (unless (wait-until (lambda () callback-entered?))
+             (error 'shutdown-test "first shutdown did not reach its callback"))
+           (let ([second
+                  (fork-thread
+                   (lambda ()
+                     (guard (condition [else (set! failure condition)])
+                       (lws-reactor-shutdown! reactor))))])
+             (milisleep 10)
+             (set! release? #t)
+             (thread-join first)
+             (thread-join second)
+             (and (not failure)
+                  (eq? 'stopped (lws-reactor-state reactor))
+                  (begin (net-operation-step! operation) #t)
+                  (eq? 'failed (net-operation-state operation))))))))
+
+(mat net-lws-reactor-shutdown-from-owner-callback
+     ;; Error case: a terminal waiter running on the owner must never join its own thread.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [operation (make-lws-reactor-operation reactor 'shutdown 801 802 1 #f #t)]
+              [returned? #f])
+         (lws-reactor-register-waiter!
+          reactor operation
+          (lambda (ignored)
+            (lws-reactor-shutdown! reactor)
+            (set! returned? #t)))
+         (lws-reactor-start! reactor)
+         (lws-reactor-inject-event! reactor 'complete 801 802 1 0 #vu8())
+         (and (wait-until (lambda () (eq? 'stopped (lws-reactor-state reactor))))
+              returned?
+              (begin (net-operation-step! operation) #t)
+              (eq? 'completed (net-operation-state operation))))))
+
+(mat net-lws-reactor-rejects-release-before-scheme-cleanup
+     ;; Error case: releasing before Scheme completion could drain a signal still used by waiters.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 1 64 8)]
+              [operation (make-lws-reactor-operation reactor 'release 901 902 1 #f #t)])
+         (dynamic-wind
+           (lambda () (lws-reactor-start! reactor))
+           (lambda ()
+             (lws-reactor-inject-event! reactor 'complete 901 902 1 0 #vu8())
+             (and (wait-until
+                   (lambda ()
+                     (eq? 'completed (lws-reactor-operation-lifecycle reactor operation))))
+                  (guard (condition
+                          [else (and (message-condition? condition)
+                                     (string-contains? (condition-message condition)
+                                                       "before Scheme completion") #t)])
+                    (lws-reactor-release-operation! reactor operation)
+                    #f)
+                  (begin
+                    (net-operation-step! operation)
+                    (lws-reactor-release-operation! reactor operation)
+                    ;; Normal terminal release leaves the one-slot signal pool reusable.
+                    (make-lws-reactor-operation reactor 'next 901 903 1 #f)
+                    #t)
+                  (eq? 'completed (net-operation-state operation))))
+           (lambda () (lws-reactor-shutdown! reactor))))))
+
+
+(mat net-lws-reactor-shutdown-survives-waiter-failure
+     ;; Error case: a user waiter throwing must not skip context release or the stopped broadcast.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [operation (make-lws-reactor-operation reactor 'shutdown 1001 1002 1 #f)]
+              [called? #f])
+         (lws-reactor-register-waiter!
+          reactor operation
+          (lambda (ignored)
+            (set! called? #t)
+            (error 'shutdown-waiter "deliberate callback failure")))
+         (guard (condition [else #f])
+           (and (eq? reactor (lws-reactor-shutdown! reactor))
+                called?
+                (eq? 'stopped (lws-reactor-state reactor))
+                (= -1 (lws-reactor-wakeup-fd reactor))
+                (eq? reactor (lws-reactor-shutdown! reactor)))))))
+
+
+(mat net-lws-reactor-waiter-failure-is-isolated
+     ;; Error case: a throwing observer must not stop publication or block later notifications.
+     (mat-requires (websockets)
+       (let* ([reactor (make-lws-reactor 16 64 8)]
+              [first (make-lws-reactor-operation reactor 'waiter 1101 1102 1 #f #t)]
+              [second (make-lws-reactor-operation reactor 'waiter 1101 1103 1 #f #t)]
+              [notified? #f] [immediate? #f])
+         (dynamic-wind
+           (lambda () (lws-reactor-start! reactor))
+           (lambda ()
+             (lws-reactor-register-waiter!
+              reactor first (lambda (ignored) (error 'waiter "deliberate callback failure")))
+             (lws-reactor-register-waiter!
+              reactor second (lambda (ignored) (set! notified? #t)))
+             (lws-reactor-inject-event! reactor 'complete 1101 1102 1 0 #vu8())
+             (lws-reactor-inject-event! reactor 'complete 1101 1103 1 0 #vu8())
+             (and (wait-until (lambda () notified?))
+                  (begin (net-operation-step! first) (net-operation-step! second) #t)
+                  (eq? 'completed (net-operation-state first))
+                  (eq? 'completed (net-operation-state second))
+                  (procedure?
+                   (lws-reactor-register-waiter!
+                    reactor first
+                    (lambda (ignored)
+                      (set! immediate? #t)
+                      (error 'waiter "deliberate immediate callback failure"))))
+                  immediate?))
            (lambda () (lws-reactor-shutdown! reactor))))))

@@ -24,6 +24,11 @@ streaming with known lengths, and concurrent H2 requests over TLS. Installed LWS
 chunked request bodies correctly; these requests are rejected. Pipelined POST data that exceeds
 its declared length is also rejected. Unknown-length response sources are unsupported.
 
+H2 POST requests require `Content-Length`, including `Content-Length: 0` for empty bodies.
+LWS 4.5.8 can assert while draining buffered unknown-length POST DATA, or fail to report body
+completion for an empty final DATA frame. Chezpp rejects these requests at headers, before
+publishing a request to Scheme. The listener remains usable; the rejected stream is closed.
+
 H2 SETTINGS and GOAWAY remain owned by LWS. Its public API exposes neither peer maximum streams
 nor GOAWAY last-stream IDs. Live oversubscription of a peer limit of two causes LWS 4.5.8 to
 schedule GOAWAY and close the connection; it does not queue excess client requests. The fixture

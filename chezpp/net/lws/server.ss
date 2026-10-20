@@ -73,15 +73,19 @@ An accepted logical HTTP request identified by connection, stream, and generatio
   #|proc:make-lws-http-server
 The `make-lws-http-server` procedure creates a listening server. `interface-name` and `port`
 select its address, while `tls-context-handle` is zero or a native TLS context handle. It returns
-an active server transport.
+an active server transport. Optional `version` selects `h1` (default) or `h2`; cleartext H2
+uses prior knowledge and TLS uses ALPN.
 |#
   (define make-lws-http-server
-    (lambda (interface-name port tls-context-handle)
-      (pcheck ([string? interface-name] [fixnum? port] [natural? tls-context-handle])
+    (case-lambda
+      [(interface-name port tls-context-handle)
+       (make-lws-http-server interface-name port tls-context-handle 'h1)]
+      [(interface-name port tls-context-handle version)
+      (pcheck ([string? interface-name] [fixnum? port] [natural? tls-context-handle] [symbol? version])
         (let ([reactor (make-lws-server-reactor 256 65536 256 interface-name port
-                                                tls-context-handle)])
+                                                tls-context-handle version)])
           (lws-reactor-start! reactor)
-          (%make-lws-http-server reactor (make-mutex 'lws-http-server) '() #f)))))
+          (%make-lws-http-server reactor (make-mutex 'lws-http-server) '() #f)))]))
 
   #|proc:lws-http-server-close!
 The `lws-http-server-close!` procedure closes `server` and all live logical requests. Closing is

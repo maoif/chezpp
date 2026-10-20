@@ -375,6 +375,7 @@ static void stream_release_locked(lws_http_context *context,
   stream->headers_length = 0;
   stream->terminal_payload_length = 0;
   stream->pending_body_bytes = 0;
+  stream->client_read_batching = 0;
   stream->outbound_final = 0;
   stream->has_request_body = 0;
   stream->active = 0;
@@ -820,8 +821,9 @@ static int lws_http_callback(struct lws *wsi,
                                          : LWS_HTTP_EVENT_POLL_DELETE;
       if (context == NULL || arguments == NULL) return 0;
       pthread_mutex_lock(&context->lock);
-      (void)poll_update_locked(context, tag, arguments->fd, arguments->events,
-                               !context->initializing);
+      /* The snapshot is authoritative. Descriptor bookkeeping is not an
+       * application event and must not occupy payload slots or cross the FFI. */
+      (void)poll_update_locked(context, tag, arguments->fd, arguments->events, 0);
       pthread_mutex_unlock(&context->lock);
       return 0;
     }
@@ -880,47 +882,98 @@ static int lws_http_callback(struct lws *wsi,
     case LWS_CALLBACK_RECEIVE_CLIENT_HTTP: {
       char *buffer;
       int available;
-      int result;
+      int result = 0;
+      unsigned pass;
+      uint64_t generation;
       if (context == NULL || stream == NULL || stream->terminal ||
           stream->pending_body_bytes)
         return 0;
-
-          buffer = (char *)context->drain_buffer + LWS_PRE;
-      available = (int)context->payload_capacity;
-      result = lws_http_client_read(wsi, &buffer, &available);
-      if (result >= 0 && available > 0 && buffer != NULL) {
-        if (!callback_queue_stream(context, stream, LWS_HTTP_EVENT_READABLE,
-                                   0, buffer, (size_t)available))
-          return -1;
-        pthread_mutex_lock(&context->lock);
-        stream->pending_body_bytes += (size_t)available;
-        pthread_mutex_unlock(&context->lock);
+      generation = stream->generation;
+      stream->client_read_batching = observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP1;
+      /* Read only immediately available input, at most one payload slot or four
+       * TLS records per turn. Partial batches are published without a timer delay. */
+      for (pass = 0; pass < 4; pass++) {
+        size_t before = stream->pending_body_bytes;
+        buffer = (char *)context->drain_buffer + LWS_PRE;
+        available = (int)(context->payload_capacity - before);
+        result = lws_http_client_read(wsi, &buffer, &available);
+        if (result < 0 || !stream->active || stream->generation != generation ||
+            stream->wsi != wsi || stream->terminal || stream->terminal_pending)
+          break;
+        if (available > 0 && buffer != NULL) {
+          if (!callback_queue_stream(context, stream, LWS_HTTP_EVENT_READABLE,
+                                     0, buffer, (size_t)available)) {
+            result = -1;
+            break;
+          }
+          pthread_mutex_lock(&context->lock);
+          stream->pending_body_bytes += (size_t)available;
+          pthread_mutex_unlock(&context->lock);
+        }
+        if (!stream->client_read_batching || stream->pending_body_bytes == before ||
+            stream->pending_body_bytes >= context->payload_capacity)
+          break;
+        {
+          int buffered = 0;
+          struct pollfd descriptor;
+#if defined(LWS_WITH_TLS) && CHEZPP_WITH_OPENSSL && !defined(LWS_WITH_MBEDTLS)
+          SSL *ssl = lws_get_ssl(wsi);
+          if (ssl != NULL) buffered = SSL_pending(ssl) > 0;
+#endif
+          descriptor.fd = lws_get_socket_fd(wsi);
+          descriptor.events = POLLIN;
+          descriptor.revents = 0;
+          if (!buffered && (poll(&descriptor, 1, 0) <= 0 ||
+                            !(descriptor.revents & POLLIN)))
+            break;
+        }
       }
+      stream->client_read_batching = 0;
+      if (result >= 0 && stream->active && stream->generation == generation &&
+          stream->wsi == wsi && !stream->terminal && !stream->terminal_pending &&
+          stream->pending_body_bytes)
+        lws_rx_flow_control(wsi, 0);
       /* A positive lws_http_client_read result is progress metadata, not a
        * callback failure.  Returning it from the callback makes LWS abort the
        * stream (the raw chunked path surfaced this as native status 103).
        * Only negative results should propagate as callback errors. */
       return result < 0 ? result : 0;
     }
-    case LWS_CALLBACK_RECEIVE_CLIENT_HTTP_READ:
+    case LWS_CALLBACK_RECEIVE_CLIENT_HTTP_READ: {
+      lws_http_event *tail;
       if (context == NULL || stream == NULL) return 0;
       pthread_mutex_lock(&context->lock);
-      if (!queue_event_metadata_locked(
+      tail = context->event_tail;
+      if (stream->client_read_batching && tail != NULL &&
+          tail->tag == LWS_HTTP_EVENT_READABLE &&
+          tail->connection_id == stream->connection->identity &&
+          tail->stream_id == stream->identity && tail->generation == stream->generation &&
+          tail->protocol == stream->observed_protocol &&
+          length <= context->payload_capacity - tail->payload_length &&
+          length <= context->body_byte_limit - context->queued_body_bytes) {
+        memcpy(tail->payload + tail->payload_length, input, length);
+        tail->payload_length += length;
+        context->queued_body_bytes += length;
+      } else if (!queue_event_metadata_locked(
               context, LWS_HTTP_EVENT_READABLE,
               stream->connection->identity, stream->identity,
               stream->generation, 0, input, length,
               stream->observed_protocol, 0, stream->peer_h2_capacity,
               stream->peer_h2_capacity_known,
               LWS_HTTP_TERMINAL_SCOPE_NONE)) {
+        /* LWS has consumed this input. Report exhaustion instead of completing
+         * a response whose bytes could not be delivered to the Scheme sink. */
+        stream->terminal = 1;
+        stream->failure_pending = 1;
+        stream->failure_status = ENOBUFS;
         pthread_mutex_unlock(&context->lock);
-        return 0;
+        return -1;
       }
       stream->pending_body_bytes += length;
       pthread_mutex_unlock(&context->lock);
-      {
-        lws_rx_flow_control(wsi, 0);
-      }
+      if (!stream->client_read_batching) lws_rx_flow_control(wsi, 0);
       return 0;
+    }
     case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE: {
       lws_http_protocol protocol;
       size_t outbound_length;
@@ -977,6 +1030,17 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     case LWS_CALLBACK_HTTP:
       if (context == NULL) return 0;
+      /* LWS can invoke HTTP twice for an empty H2 POST, before its per-session
+       * user slot is established. Keep the request identity on the WSI itself. */
+      if (stream != NULL && stream->active && stream->server_stream && !stream->terminal)
+        return 0;
+      /* LWS 4.5 cannot reliably deliver END_STREAM for unknown-length POSTs:
+       * buffered DATA may assert and an empty final DATA frame may never complete.
+       * Refuse before allocating/publishing a request that Scheme cannot finish. */
+      if (observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP2 &&
+          lws_hdr_total_length(wsi, WSI_TOKEN_POST_URI) > 0 &&
+          lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) == 0)
+        return -1;
       if (stream == NULL || stream->terminal) {
         uint64_t identity = fresh_identity(&next_server_identity);
         pthread_mutex_lock(&context->lock);
@@ -985,6 +1049,7 @@ static int lws_http_callback(struct lws *wsi,
           stream->wsi = wsi;
           stream->connection->wsi = wsi;
           stream->server_stream = 1;
+          lws_set_opaque_user_data(wsi, stream);
           if (user != NULL) *(lws_http_stream **)user = stream;
         }
         pthread_mutex_unlock(&context->lock);
@@ -1025,6 +1090,18 @@ static int lws_http_callback(struct lws *wsi,
       return 0;
     case LWS_CALLBACK_HTTP_BODY:
       if (context == NULL || stream == NULL) return 0;
+      /* LWS 4.5 may drain an H2 POST's buffered DATA before initializing its
+       * unknown content length. It then calls us with zero bytes and asserts in
+       * lws_buflist_use_segment(0). Refuse this broken delivery before returning
+       * to that path; do not acknowledge nonexistent data or publish an empty body.
+       * Explicit Content-Length: 0 legitimately produces an empty callback. */
+      if (length == 0 && stream->server_body_remaining == SIZE_MAX &&
+          observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP2) {
+        static const char message[] = "LWS cannot deliver this unknown-length H2 request body";
+        (void)callback_queue_stream(context, stream, LWS_HTTP_EVENT_FAILED,
+                                    ENOTSUP, message, sizeof(message) - 1);
+        return -1;
+      }
       /* Reject LWS versions that include a pipelined request in the preceding body. */
       if (stream->server_body_remaining != SIZE_MAX) {
         if (length > stream->server_body_remaining) return -1;
@@ -1056,6 +1133,9 @@ static int lws_http_callback(struct lws *wsi,
       }
       return 0;
     case LWS_CALLBACK_HTTP_WRITEABLE:
+      /* H2 may become writable before Scheme has submitted a response. */
+      if (stream != NULL && (stream->response_status == 0 ||
+          (stream->outbound_length == 0 && !stream->outbound_final))) return 0;
       if (context != NULL && stream != NULL && stream->outbound_length <=
                                                    context->payload_capacity) {
         int written = 0;
@@ -1080,14 +1160,33 @@ static int lws_http_callback(struct lws *wsi,
           if (lws_finalize_write_http_header(wsi, start, &cursor, end) != 0) return -1;
           stream->response_headers_sent = 1;
         }
-        if (stream->outbound_length != 0) {
-                    written = lws_write(wsi, stream->outbound + LWS_PRE,
-                             stream->outbound_length,
-                             stream->outbound_final ? LWS_WRITE_HTTP_FINAL
-                                                    : LWS_WRITE_HTTP);
+        if (stream->outbound_length != 0 || stream->outbound_final) {
+          size_t count = stream->outbound_length;
+          int h2 = observe_protocol(wsi) == LWS_HTTP_PROTOCOL_HTTP2;
+          if (h2) {
+            lws_filepos_t allowance = lws_get_peer_write_allowance(wsi);
+            /* Every H2 peer accepts 16 KiB DATA frames. Respect its flow-control
+             * window as well, retaining the rest until another writable callback. */
+            if (count > 16384) count = 16384;
+            if (allowance != (lws_filepos_t)-1 && count > allowance)
+              count = (size_t)allowance;
+            if (count == 0 && stream->outbound_length != 0) {
+              lws_callback_on_writable(wsi);
+              return 0;
+            }
+          }
+          written = lws_write(wsi, stream->outbound + LWS_PRE, count,
+                     stream->outbound_final && count == stream->outbound_length
+                       ? LWS_WRITE_HTTP_FINAL : LWS_WRITE_HTTP);
           if (written < 0) return -1;
-          memset(stream->outbound + LWS_PRE, 0, stream->outbound_length);
-          stream->outbound_length = 0;
+          size_t consumed = (size_t)written < count ? (size_t)written : count;
+          stream->outbound_length -= consumed;
+          memmove(stream->outbound + LWS_PRE,
+                  stream->outbound + LWS_PRE + consumed, stream->outbound_length);
+          if (stream->outbound_length != 0) {
+            lws_callback_on_writable(wsi);
+            return 0;
+          }
         }
         if (stream->outbound_final) {
           (void)callback_queue_stream(context, stream,
@@ -1097,6 +1196,7 @@ static int lws_http_callback(struct lws *wsi,
            * old request first so its cleanup cannot erase that request's user pointer. */
           pthread_mutex_lock(&context->lock);
           stream->wsi = NULL;
+          lws_set_opaque_user_data(wsi, NULL);
           if (user != NULL) *(lws_http_stream **)user = NULL;
           stream_release_locked(context, stream);
           pthread_mutex_unlock(&context->lock);
@@ -1150,6 +1250,8 @@ static int initialize_pools(lws_http_context *context) {
       calloc(context->event_capacity, context->payload_capacity);
   context->poll_entries =
       calloc(context->poll_capacity, sizeof(*context->poll_entries));
+  context->service_pollfds =
+      calloc(context->poll_capacity + 1, sizeof(*context->service_pollfds));
   context->connections =
       calloc(context->connection_capacity, sizeof(*context->connections));
   context->streams = calloc(context->stream_capacity, sizeof(*context->streams));
@@ -1161,7 +1263,8 @@ static int initialize_pools(lws_http_context *context) {
   context->signals = calloc(context->signal_capacity, sizeof(*context->signals));
   context->drain_buffer = calloc(1, stream_slot_size);
   if (context->events == NULL || context->event_payloads == NULL ||
-      context->poll_entries == NULL || context->connections == NULL ||
+      context->poll_entries == NULL || context->service_pollfds == NULL ||
+      context->connections == NULL ||
       context->streams == NULL || context->stream_payloads == NULL ||
       context->stream_headers == NULL ||
       context->stream_terminal_payloads == NULL || context->signals == NULL ||
@@ -1223,6 +1326,7 @@ static void free_context_storage(lws_http_context *context) {
   free(context->streams);
   free(context->connections);
   free(context->poll_entries);
+  free(context->service_pollfds);
   free(context->event_payloads);
   free(context->events);
 #if LWS_MAX_SMP > 1
@@ -1236,7 +1340,7 @@ static void free_context_storage(lws_http_context *context) {
 static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
                               uintptr_t tls_context_handle,
                               const char *proxy_address, int proxy_port,
-                              const char *interface_name, int listen_port) {
+                              const char *interface_name, int listen_port, int prior_knowledge) {
   lws_http_context *context;
   struct lws_context_creation_info information;
 
@@ -1287,12 +1391,31 @@ static uintptr_t context_open(size_t event_capacity, size_t payload_capacity,
    * and destruction wrappers separately protect LWS's internal system vhost. */
   context->log_context.u.emit = lwsl_emit_stderr;
   information.log_cx = &context->log_context;
+  /* rx_buffer_size does not size the service scratch buffer. Grow it with the
+   * payload capacity to avoid 4 KiB body fragments and reactor handoffs, but
+   * retain LWS's default minimum for tiny pools and protocol scratch space. */
+  if (payload_capacity > 4096)
+    information.pt_serv_buf_size = (unsigned int)payload_capacity;
 #if defined(LWS_WITH_TLS)
   information.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 #endif
 #if (defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2))
   information.alpn = "h2,http/1.1";
+  /* LWS 4.5 initializes client connection credit from SETTINGS_INITIAL_WINDOW_SIZE.
+   * nginx advertises 65536 for streams then raises connection credit from 65535 to
+   * INT32_MAX. Use LWS's supported clamp to tolerate its resulting one-byte overflow;
+   * all HTTP/2 frame and flow-control handling remains owned by LWS. */
+  if (listen_port < 0)
+    information.options |= LWS_SERVER_OPTION_H2_JUST_FIX_WINDOW_UPDATE_OVERFLOW;
+  if (prior_knowledge) information.options |= LWS_SERVER_OPTION_H2_PRIOR_KNOWLEDGE;
 #else
+  if (prior_knowledge) {
+    close(context->wakeup_pipe[0]);
+    close(context->wakeup_pipe[1]);
+    pthread_mutex_destroy(&context->lock);
+    free_context_storage(context);
+    return 0;
+  }
   information.alpn = "http/1.1";
 #endif
   if (proxy_address != NULL && proxy_address[0] != '\0') {
@@ -1334,7 +1457,7 @@ uintptr_t chezpp_lws_http_context_open(size_t event_capacity,
                                        const char *proxy_address,
                                        int proxy_port) {
   return context_open(event_capacity, payload_capacity, tls_context_handle,
-                      proxy_address, proxy_port, NULL, CONTEXT_PORT_NO_LISTEN);
+                      proxy_address, proxy_port, NULL, CONTEXT_PORT_NO_LISTEN, 0);
 }
 
 uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
@@ -1344,7 +1467,15 @@ uintptr_t chezpp_lws_http_server_context_open(size_t event_capacity,
                                               uintptr_t tls_context_handle) {
   if (interface_name == NULL || port <= 0 || port > 65535) return 0;
   return context_open(event_capacity, payload_capacity, tls_context_handle,
-                      NULL, 0, interface_name, port);
+                      NULL, 0, interface_name, port, 0);
+}
+
+uintptr_t chezpp_lws_http_server_context_open_version(size_t event_capacity,
+    size_t payload_capacity, const char *interface_name, int port,
+    uintptr_t tls_context_handle, int prior_knowledge) {
+  if (interface_name == NULL || port <= 0 || port > 65535) return 0;
+  return context_open(event_capacity, payload_capacity, tls_context_handle,
+                      NULL, 0, interface_name, port, prior_knowledge);
 }
 
 void chezpp_lws_http_context_close(uintptr_t context_handle) {
@@ -1499,6 +1630,58 @@ int chezpp_lws_http_context_timeout_ms(uintptr_t context_handle,
   adjustment = chezpp_lws_service_adjust_timeout(context->lws, maximum_timeout_ms, 0);
   if (adjustment < 0) return -1;
   return adjustment == 0 ? 0 : maximum_timeout_ms;
+}
+
+int chezpp_lws_http_context_service(uintptr_t context_handle, int maximum_timeout_ms) {
+  lws_http_context *context = context_from_handle(context_handle);
+  struct pollfd *descriptors;
+  size_t count = 1;
+  size_t index;
+  int timeout_ms;
+  int ready;
+  int saved_errno;
+  if (context == NULL || context->lws == NULL || maximum_timeout_ms < 0) return -1;
+  timeout_ms = chezpp_lws_http_context_timeout_ms(context_handle, maximum_timeout_ms);
+  if (timeout_ms < 0) return -1;
+  if (timeout_ms == 0) {
+    (void)chezpp_lws_http_context_service_fd(context_handle, -1, 0);
+    return 0;
+  }
+  /* Only the context owner uses this preallocated wait buffer. Poll snapshots
+   * remain available on demand without allocating Scheme objects on every pass. */
+  descriptors = context->service_pollfds;
+  descriptors[0].fd = context->wakeup_pipe[0];
+  descriptors[0].events = POLLIN;
+  descriptors[0].revents = 0;
+  pthread_mutex_lock(&context->lock);
+  for (index = 0; index < context->poll_capacity; index++) {
+    lws_poll_entry *entry = &context->poll_entries[index];
+    if (entry->active) {
+      descriptors[count].fd = entry->fd;
+      descriptors[count].events = entry->events;
+      descriptors[count].revents = 0;
+      count++;
+    }
+  }
+  pthread_mutex_unlock(&context->lock);
+  /* As in net/poll.c, let the peer allocate and collect while the owner waits.
+   * All wait storage is native; no Scheme pointers are used until reactivation. */
+  Sdeactivate_thread();
+  ready = poll(descriptors, (nfds_t)count, timeout_ms);
+  saved_errno = errno;
+  Sactivate_thread();
+  if (ready < 0) {
+    errno = saved_errno;
+    return -1;
+  }
+  if (ready == 0)
+    (void)chezpp_lws_http_context_service_fd(context_handle, -1, 0);
+  else
+    for (index = 0; index < count; index++)
+      if (descriptors[index].revents != 0)
+        (void)chezpp_lws_http_context_service_fd(
+            context_handle, descriptors[index].fd, descriptors[index].revents);
+  return ready;
 }
 
 int chezpp_lws_http_context_wakeup(uintptr_t context_handle) {
@@ -1923,8 +2106,8 @@ int chezpp_lws_http_body_consumed(uintptr_t context_handle,
   if (resume_wsi != NULL) {
     chezpp_lws_rx_flow_control(resume_wsi, 1);
   }
-  if (resume)
-    (void)chezpp_lws_http_context_wakeup(context_handle);
+  /* The owner executes consumption commands and drains their resulting events
+   * before polling again. Waking that same owner adds a pipe round trip per chunk. */
   return 1;
 }
 

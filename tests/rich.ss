@@ -500,6 +500,17 @@
 
      )
 
+(mat rich-progress-empty-task
+     (let ([progress (make-rich-progress 4 (rich-progress-default-columns))])
+       (rich-progress-add-task! progress "empty" 0)
+       (string=? "empty [####] 100% 0/0" (rich-export-text progress)))
+
+     (let* ([progress (make-rich-progress 4 (rich-progress-default-columns))]
+            [id (rich-progress-add-task! progress "empty" #f)])
+       (rich-progress-task-total-set! progress id 0)
+       (rich-progress-complete! progress id)
+       (string=? "empty [####] 100% 0/0" (rich-export-text progress))))
+
 (mat rich-progress-errors
 
      ;; Progress width must be positive.
@@ -509,9 +520,9 @@
      (error? (let ([p (make-rich-progress)])
                (rich-progress-update! p 999 1)))
 
-     ;; Task totals must be positive or #f.
+     ;; Error case: task totals must be nonnegative or #f.
      (error? (let ([p (make-rich-progress)])
-               (rich-progress-add-task! p "bad" 0)))
+               (rich-progress-add-task! p "bad" -1)))
 
      )
 

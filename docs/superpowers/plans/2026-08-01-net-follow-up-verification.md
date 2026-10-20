@@ -423,7 +423,7 @@ all documentation lines are <= 100 characters and reject the vague return phrase
 - [ ] **Step 2: Run and capture failures**
 
 ```bash
-./chez++ --script tools/check-public-api-docs.ss chezpp/net chezpp/protobuf chezpp/optional-library.ss
+./chez++ --script=tools/check-public-api-docs.ss -- chezpp/net chezpp/protobuf chezpp/optional-library.ss
 ```
 
 Expected before the audit: nonzero exit listing existing records/accessors and procedures whose
@@ -444,7 +444,7 @@ Every exported procedure uses meaningful parameter names and `pcheck`.
 - [ ] **Step 5: Run checker, build, and tests**
 
 ```bash
-./chez++ --script tools/check-public-api-docs.ss chezpp/net chezpp/protobuf chezpp/optional-library.ss
+./chez++ --script=tools/check-public-api-docs.ss -- chezpp/net chezpp/protobuf chezpp/optional-library.ss
 make clean && make
 cd tests && make test-some TEST='net-docs'
 ```
@@ -597,7 +597,7 @@ Expected: no matches.
 
 ```bash
 git diff --name-only master...HEAD -- '*.ss' | \
-  xargs ./chez++ --script tools/check-scheme-balance.ss
+  xargs ./chez++ --script=tools/check-scheme-balance.ss --
 ```
 
 Expected: all files have balanced parentheses.
@@ -621,7 +621,7 @@ Expected: both supplied SHA-256 values match.
 - [ ] **Step 8: Run documentation audit and inspect status**
 
 ```bash
-./chez++ --script tools/check-public-api-docs.ss chezpp/net chezpp/protobuf chezpp/optional-library.ss
+./chez++ --script=tools/check-public-api-docs.ss -- chezpp/net chezpp/protobuf chezpp/optional-library.ss
 git status --short
 ```
 

@@ -122,7 +122,7 @@ make -C tests test-optional-hash-linkage
 make -C tests test-optional-library-linkage
 make protobuf-generate
 git diff --exit-code -- tests/generated
-./chez++ --script tools/check-public-api-docs.ss \
+./chez++ --script=tools/check-public-api-docs.ss -- \
   chezpp/net chezpp/protobuf chezpp/optional-library.ss
 ./examples/net/file-transfer/verify-local-transfers.sh
 mkdir -p /tmp/chezpp-external-download-state
