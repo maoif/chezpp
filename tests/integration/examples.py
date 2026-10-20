@@ -42,7 +42,7 @@ def run(*args, ok=True, **kwargs):
 
 
 def example(path, *args, **kwargs):
-    return run('./chez++', '--script', path, *args, **kwargs)
+    return run('./chez++', f'--script={path}', '--', *args, **kwargs)
 
 
 def reserve_port():
@@ -54,7 +54,7 @@ def reserve_port():
 @contextlib.contextmanager
 def server(script, directory, *args, with_process=False):
     port = reserve_port()
-    process = subprocess.Popen(['./chez++', '--script', script, f'--dir={directory}',
+    process = subprocess.Popen(['./chez++', f'--script={script}', '--', f'--dir={directory}',
                                 f'--port={port}', *args], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
     try:
@@ -294,7 +294,7 @@ def wget_progress():
                 thread.start()
                 path = 'redirect' if mode == 'redirect' else 'payload'
                 process = subprocess.Popen(
-                    ['./chez++', '--script', 'examples/net/wget.ss',
+                    ['./chez++', '--script=examples/net/wget.ss', '--',
                      f'--uri=http://127.0.0.1:{listener.server_port}/{path}', f'--output={output}'],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 captured = bytearray()
@@ -358,7 +358,7 @@ def wget_speed():
             thread = threading.Thread(target=listener.serve_forever, daemon=True)
             thread.start()
             process = subprocess.Popen(
-                ['./chez++', '--script', 'examples/net/wget.ss',
+                ['./chez++', '--script=examples/net/wget.ss', '--',
                  f'--uri=http://127.0.0.1:{listener.server_port}/', f'--output={output}'],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             captured = bytearray()
@@ -530,7 +530,7 @@ def h2_window():
         thread.start()
         output = Path(name) / 'output'
         process = subprocess.Popen(
-            ['./chez++', '--script', 'examples/net/wget.ss',
+            ['./chez++', '--script=examples/net/wget.ss', '--',
              f'--uri=http://127.0.0.1:{listener.getsockname()[1]}/',
              f'--output={output}', '--version=h2'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -645,6 +645,8 @@ def help_commands():
         for flag in ['-h', '--help']:
             result = example(path, flag)
             assert result.stdout and not result.stderr, (path, flag, result)
+            # Help must reach the script instead of stopping at the launcher.
+            assert b'Chezpp REPL and script launcher' not in result.stdout, (path, flag, result)
     summary('Library examples and benchmarks: both CLI help flags passed')
 
 
@@ -712,14 +714,22 @@ def crypto():
         for mode, source_path in [('encrypt', race_source), ('decrypt', race_encrypted)]:
             output = directory / ('race-' + mode + '-output')
             process = subprocess.Popen(
-                ['./chez++', '--script', 'examples/crypto/encrypt-file.ss',
+                ['./chez++', '--script=examples/crypto/encrypt-file.ss', '--',
                  f'--mode={mode}', f'--input={source_path}', f'--output={output}'],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             deadline = time.monotonic() + 8
             while process.poll() is None and time.monotonic() < deadline:
                 descriptors = Path(f'/proc/{process.pid}/fd').glob('*')
-                if any(os.path.islink(descriptor) and
-                       os.readlink(descriptor) == str(source_path) for descriptor in descriptors):
+                input_open = False
+                for descriptor in descriptors:
+                    try:
+                        input_open = os.readlink(descriptor) == str(source_path)
+                    except FileNotFoundError:
+                        # Startup descriptors may close between directory listing and readlink.
+                        continue
+                    if input_open:
+                        break
+                if input_open:
                     break
                 time.sleep(.001)
             else:

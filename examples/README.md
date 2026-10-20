@@ -1,6 +1,6 @@
 # ChezPP Examples and Benchmarks
 
-Run commands from the repository root with `chez++ --script`. Every command accepts `-h` and
+Run commands from the repository root with `chez++ --script=FILE -- [OPTIONS]`. Every command accepts `-h` and
 `--help`. File arguments are paths relative to the current directory.
 
 ## Parsers

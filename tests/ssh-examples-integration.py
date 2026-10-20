@@ -72,7 +72,7 @@ def fixture(log_sessions=False, shell_command=None):
 
 def run(script, env, args, *extra, input=None):
     return subprocess.run(
-        ["./chez++", "--script", "examples/net/" + script + ".ss", *args, *extra],
+        ["./chez++", "--script=examples/net/" + script + ".ss", "--", *args, *extra],
         env=env,
         input=input,
         capture_output=True,
@@ -393,7 +393,7 @@ else:
                   (scp-attributes? (scp-stat scp "{source}/file")))
       (error 'test "timeout did not release the batch and preserve its session")))))))
 ''')
-                result = subprocess.run(['./chez++', '--script', str(script)], env=env,
+                result = subprocess.run(['./chez++', f'--script={script}', '--'], env=env,
                                         capture_output=True, timeout=5)
                 assert result.returncode == 0, (direction, result.stderr)
                 if direction == 'download':
@@ -435,7 +435,7 @@ def verify_scp_callback_cancellation(root, env, args):
      (unless (and called? (eq? (net-operation-state operation) 'cancelled))
       (error 'test "copy ignored cancellation" (net-operation-state operation))))))))
 ''')
-            result = subprocess.run(['./chez++', '--script', str(script)], env=env,
+            result = subprocess.run(['./chez++', f'--script={script}', '--'], env=env,
                                     capture_output=True, timeout=15)
             assert result.returncode == 0, (direction, action, result.stderr)
             # Error case: cancellation must stop the current batch before later files.
@@ -480,7 +480,7 @@ def verify_scp_filter_cancellation(root, env, args):
      (unless (and called? (eq? (net-operation-state operation) 'cancelled))
       (error 'test "filter cancellation did not survive" (net-operation-state operation))))))))
 ''')
-                result = subprocess.run(['./chez++', '--script', str(script)], env=env,
+                result = subprocess.run(['./chez++', f'--script={script}', '--'], env=env,
                                         capture_output=True, timeout=15)
                 assert result.returncode == 0, (suffix, result.stderr)
                 # Error case: cancelling inside a filter must prevent all later writes,
@@ -675,7 +675,7 @@ def verify_scp_readonly_namespace(root, env, args):
             (make-transfer-policy 'never 'replace 65536 #f) #f 'reject))))
     (lambda () (ssh-close session))))
 ''')
-    result = subprocess.run(["./chez++", "--script", str(script)], env=env,
+    result = subprocess.run(["./chez++", f"--script={script}", "--"], env=env,
                             capture_output=True, timeout=20)
     assert result.returncode != 0, result
     assert unrelated.read_bytes() == b"unrelated normalized path"
@@ -776,7 +776,7 @@ def verify_forwarding_recovery(env, args):
             target.bind(("127.0.0.1", 0))
             port = free_port()
             process = subprocess.Popen(
-                ["./chez++", "--script", "examples/net/ssh-port-forward.ss", *args,
+                ["./chez++", "--script=examples/net/ssh-port-forward.ss", "--", *args,
                  f"--direction={direction}", f"--listen-port={port}",
                  f"--target-port={target.getsockname()[1]}", "--duration=4000"],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -828,8 +828,8 @@ def verify_scp_interruption(root, env, args, kind="file"):
     process = subprocess.Popen(
         [
             "./chez++",
-            "--script",
-            "examples/net/scp.ss",
+            "--script=examples/net/scp.ss",
+            "--",
             *args,
             "--direction=download",
             f"--kind={kind}",
@@ -891,8 +891,8 @@ def verify_forwarding(env, args):
         process = subprocess.Popen(
             [
                 "./chez++",
-                "--script",
-                "examples/net/ssh-port-forward.ss",
+                "--script=examples/net/ssh-port-forward.ss",
+                "--",
                 *args,
                 f"--direction={direction}",
                 f"--listen-port={port}",
@@ -977,7 +977,7 @@ def verify_forwarding_open_lifecycle(root, env, args):
         (error 'test "forwarding cleanup damaged shared SSH session"))))))
    '(timeout cancel unstarted))))
 ''')
-            result = subprocess.run(['./chez++', '--script', str(script)], env=env,
+            result = subprocess.run(['./chez++', f'--script={script}', '--'], env=env,
                                     capture_output=True, timeout=10)
             assert result.returncode == 0, result.stderr
         finally:
@@ -994,7 +994,7 @@ def verify_forwarding_connect_timeout(env, args, script='examples/net/ssh-port-f
         held = [socket.create_connection(target.getsockname(), .2) for _ in range(2)]
         port = free_port()
         process = subprocess.Popen(
-            ['./chez++', '--script', script, *args, '--direction=remote',
+            ['./chez++', f'--script={script}', '--', *args, '--direction=remote',
              f'--listen-port={port}', f'--target-port={target.getsockname()[1]}'],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
@@ -1028,7 +1028,7 @@ def verify_forwarding_blocked_connect(env, args):
                 port = free_port()
                 duration = '1500' if ending == 'duration' else '0'
                 process = subprocess.Popen(
-                    ['./chez++', '--script', 'examples/net/ssh-port-forward.ss', *args,
+                    ['./chez++', '--script=examples/net/ssh-port-forward.ss', '--', *args,
                      f'--direction={direction}', f'--listen-port={port}',
                      f'--target-port={target.getsockname()[1]}', f'--duration={duration}'],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1085,8 +1085,8 @@ def verify_forwarding_cancellation(env, args):
         process = subprocess.Popen(
             [
                 "./chez++",
-                "--script",
-                "examples/net/ssh-port-forward.ss",
+                "--script=examples/net/ssh-port-forward.ss",
+                "--",
                 *args,
                 f"--direction={direction}",
                 f"--listen-port={port}",

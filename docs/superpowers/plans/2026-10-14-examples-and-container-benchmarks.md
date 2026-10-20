@@ -6,7 +6,7 @@
 
 **Architecture:** Add focused executable scripts under `examples/<library>/` and `benchmarks/`, with a shared example convention and a short examples index. Existing public library APIs remain the implementation surface; task 3 repairs SSH stream handling, HTTP protocol coverage, script invocation, and examples that fail verification. Benchmarks use `(chezpp benchmark)`, comparable workloads, and a common detailed text/CSV/JSON reporting convention.
 
-**Tech Stack:** ChezScheme, `chez++ --script`, `(chezpp cli)`, `(chezpp benchmark)`, existing ChezPP libraries, project Makefiles and Scheme test suite.
+**Tech Stack:** ChezScheme, `chez++ --script=FILE --`, `(chezpp cli)`, `(chezpp benchmark)`, existing ChezPP libraries, project Makefiles and Scheme test suite.
 
 **Spec:** User request in the current session; no separate design document was requested.
 
@@ -22,7 +22,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 ## Global Constraints
 
 - Create worktrees under `.worktrees`, use a date-prefixed name, and preserve the worktree after merging.
-- Every new Scheme script accepts `--help` and `-h` through `(chezpp cli)` and runs with `chez++ --script <script.ss>`.
+- Every new Scheme script accepts `--help` and `-h` through `(chezpp cli)` and runs with `chez++ --script=<script.ss> --`.
 - New examples use a uniform structure: imports, reusable helpers, CLI declaration, documented target API calls, then the command entry point.
 - Add a short comment immediately before each call to the library API being demonstrated.
 - Network examples use `(chezpp logging)` for operational logs; result payloads may be printed to stdout.
@@ -51,7 +51,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   `run-cli-command!` adds those aliases automatically.
 - `examples/README.md` lists the script, invocation, purpose, and optional dependencies for each
   example and benchmark. Scripts take paths exactly as supplied by the user, relative to the
-  caller's current directory, so `chez++ --script examples/parser/xml.ss --help` works at the
+  caller's current directory, so `chez++ --script=examples/parser/xml.ss -- --help` works at the
   repository root.
 
 - [x] **Step 1: Add the runnable-script inventory test.**
@@ -68,7 +68,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   exporting a new library. Add the initial directories and naming convention to
   `examples/README.md`.
 - [x] **Step 4: Re-run the inventory test and CLI smoke checks.**
-  Run `make test examples.ss cli.ss`; check `chez++ --script examples/README.md` is not suggested
+  Run `make test examples.ss cli.ss`; check `chez++ --script=examples/README.md` is not suggested
   as a command and that script invocations use actual `.ss` entry points.
 
 ### Task 2: Add parser and core data-processing examples
@@ -109,7 +109,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   after verifying `file`/`readelf` identifies it as ELF. Prefer `chezpp.lib` as ELF only if the
   parser accepts the platform's artifact. Every parser prints the complete returned value.
 - [x] **Step 2: Smoke-run each parser with fixture arguments.**
-  Run each script with `chez++ --script`; assert non-empty stdout, successful status, and a
+  Run each script with `chez++ --script=FILE --`; assert non-empty stdout, successful status, and a
   successful `--help` and `-h` invocation. Include malformed input and missing-file invocations
   in the test harness, and assert a nonzero exit status without an unclosed-port warning.
 - [x] **Step 3: Add navigator, transducer, and iterator examples.**

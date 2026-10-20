@@ -153,7 +153,7 @@ helper allowed to call blocking `poll`.
 ```bash
 make clean && make
 cd tests && make test-some TEST='net-operation'
-../chez++ --script ../tools/check-scheme-balance.ss \
+../chez++ --script=../tools/check-scheme-balance.ss -- \
   ../chezpp/net/operation.ss ../chezpp/net/operation/private.ss
 ```
 
@@ -654,7 +654,7 @@ Expected: exit 0 and empty test stdout/stderr.
 - [ ] **Step 4: Check parentheses**
 
 ```bash
-../chez++ --script ../tools/check-scheme-balance.ss \
+../chez++ --script=../tools/check-scheme-balance.ss -- \
   ../chezpp/net/operation.ss ../chezpp/net/operation/private.ss \
   ../chezpp/net/poll.ss ../chezpp/net/socket.ss ../chezpp/net/tls.ss ../chezpp/net/ssh.ss \
   ../chezpp/net/sftp.ss ../chezpp/net/scp.ss ../chezpp/net/ftp.ss ../chezpp/net/http.ss \

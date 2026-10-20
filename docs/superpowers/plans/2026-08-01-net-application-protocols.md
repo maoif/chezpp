@@ -572,7 +572,7 @@ Expected: all six protocol variants upload and download with matching hashes.
 
 ```bash
 readelf -d libchezpp.so | rg 'libnghttp2|libz|libssl|libcrypto|libwebsockets|libgrpc'
-./chez++ --script tools/check-scheme-balance.ss \
+./chez++ --script=tools/check-scheme-balance.ss -- \
   chezpp/protobuf.ss chezpp/protobuf/*.ss chezpp/net/http.ss \
   chezpp/net/websocket.ss chezpp/net/grpc.ss chezpp/net/grpc/reflection.ss
 git status --short
