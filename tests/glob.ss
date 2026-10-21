@@ -74,7 +74,12 @@
      (glob-match? (make-glob "[]a]") "]")
      (glob-match? (make-glob "[^a]") "b")
      (glob-match? (make-glob "a{b,{c,d}}") "ad")
-     (glob-match? (make-glob 'windows "C:/SRC/*.SS") "c:/src/cspp/file.ss")
+     ;; These paths are lexical fixtures, independent of the repository layout.
+     (glob-match? (make-glob 'windows "C:/SRC/*.SS") "c:/src/file.ss")
+
+     ;; A component wildcard must not match a nested directory, even on Windows.
+     (not (glob-match? (make-glob 'windows "C:/SRC/*.SS") "c:/src/nested/file.ss"))
+
      (glob-match? (make-glob "\\~user") "~user")
      (glob-match? (make-glob "a/~/b") "a/~/b")
      ;; Descending classes and malformed ranges must fail during compilation.
