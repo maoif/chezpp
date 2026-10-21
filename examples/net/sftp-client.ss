@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 (load "examples/net/legacy-example-common.ss")
 (net-example-help! 'sftp-client "Open an interactive SFTP client. Positional arguments: HOST PORT USER AGENT-OR-PRIVATE-KEY.")
 

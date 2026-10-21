@@ -2,7 +2,7 @@
 
 ## Workspace
 
-- Worktree: `/home/maoif/SSD/Projects/chezpp/.worktrees/net-hardening-plan`
+- Worktree: `/home/maoif/SSD/Projects/src/cspp/.worktrees/net-hardening-plan`
 - Branch: `net-hardening-plan`
 - HEAD: `b12b4ae net: record final hardening verification status`
 - Implementation: `4150676 net: add deterministic HTTP/2 lifecycle regressions`
@@ -14,8 +14,8 @@ changes and captures while staging the implementation and status-ledger commits.
 
 Preserve unrelated user-owned changes and captures. Do not stage, delete, or revert:
 
-- `chezpp/parser.ss`
-- `chezpp/c/scheme.h`
+- `src/cspp/parser.ss`
+- `src/cspp/c/scheme.h`
 - existing handoffs other than this file and unrelated plan edits
 - `tests/*.stdout` and `tests/*.stderr`
 
@@ -122,12 +122,12 @@ make -C tests test-optional-hash-linkage
 make -C tests test-optional-library-linkage
 make protobuf-generate
 git diff --exit-code -- tests/generated
-./chez++ --script=tools/check-public-api-docs.ss -- \
-  chezpp/net chezpp/protobuf chezpp/optional-library.ss
+./cspp --script=tools/check-public-api-docs.ss -- \
+  src/cspp/net src/cspp/protobuf src/cspp/optional-library.ss
 ./examples/net/file-transfer/verify-local-transfers.sh
-mkdir -p /tmp/chezpp-external-download-state
+mkdir -p /tmp/cspp-external-download-state
 ./examples/net/file-transfer/verify-external-downloads.sh \
-  /tmp/chezpp-external-download-state
+  /tmp/cspp-external-download-state
 git diff --check
 ```
 

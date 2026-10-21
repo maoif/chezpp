@@ -1,5 +1,5 @@
 #!chezscheme
-(import (chezpp))
+(import (cspp))
 
 (define logging-string-contains?
   (lambda (s . needles)

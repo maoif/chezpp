@@ -8,13 +8,13 @@ cd "$project_root"
 # Observe real adapter startup in fresh processes so each ordering starts with
 # unused once controls. Link only reachable native paths; no Scheme runtime runs.
 tls_source=
-if [ "$(sed -n 's/^#define CHEZPP_WITH_OPENSSL //p' chezpp/c/build-config.h)" = 1 ]; then
-  tls_source=chezpp/c/net/tls.c
+if [ "$(sed -n 's/^#define CSPP_WITH_OPENSSL //p' src/cspp/c/build-config.h)" = 1 ]; then
+  tls_source=src/cspp/c/net/tls.c
 fi
 ${CC:-cc} ${CPPFLAGS:-} ${LWS_CFLAGS:-} -pthread -Wall -Wextra -O2 \
   -ffunction-sections -fdata-sections -I "$CHEZ_INCLUDE_DIR" \
-  tests/lws-log-init.c chezpp/c/net/lws_loader.c chezpp/c/net/lws_http.c \
-  chezpp/c/net/websocket.c $tls_source chezpp/c/optional_library.c \
+  tests/lws-log-init.c src/cspp/c/net/lws_loader.c src/cspp/c/net/lws_http.c \
+  src/cspp/c/net/websocket.c $tls_source src/cspp/c/optional_library.c \
   -Wl,--gc-sections -Wl,--wrap=lws_set_log_level -Wl,--wrap=lws_create_context \
   ${LDFLAGS:-} ${LWS_LIBS:-} -o "$task_directory/log-init"
 for ordering in http-first websocket-first concurrent; do
@@ -32,11 +32,11 @@ for feature in none LWS_WITH_TLS_JIT_TRUST LWS_WITH_SYS_ASYNC_DNS \
   # Only loader policy uses the extra definitions. Adapter and test see real ABI headers.
   ${CC:-cc} ${CPPFLAGS:-} ${LWS_CFLAGS:-} -pthread -Wall -Wextra -O2 \
     -ffunction-sections -fdata-sections -I "$CHEZ_INCLUDE_DIR" \
-    -include "$task_directory/policy.h" -c chezpp/c/net/lws_loader.c \
+    -include "$task_directory/policy.h" -c src/cspp/c/net/lws_loader.c \
     -o "$task_directory/loader.o"
   ${CC:-cc} ${CPPFLAGS:-} ${LWS_CFLAGS:-} -pthread -Wall -Wextra -O2 \
     -ffunction-sections -fdata-sections -I "$CHEZ_INCLUDE_DIR" \
-    tests/lws-runtime-lock.c chezpp/c/net/lws_http.c "$task_directory/loader.o" \
+    tests/lws-runtime-lock.c src/cspp/c/net/lws_http.c "$task_directory/loader.o" \
     -Wl,--gc-sections ${LDFLAGS:-} ${LWS_LIBS:-} -o "$task_directory/check"
   expected=0
   if [ "$feature" != none ] && \

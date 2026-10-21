@@ -115,7 +115,7 @@
             (ftp-close-passive-listener passive-listener)
             (set! passive-listener #f)
             data)))
-      (send-crlf-line op "220 chezpp file transfer ftp server")
+      (send-crlf-line op "220 cspp file transfer ftp server")
       (let loop ()
         (let ([line (read-crlf-line ip)])
           (when line
@@ -229,7 +229,7 @@ FTP upload server and then uploads the done marker.
   (lambda (path*)
     (validate-file-list 'ftp-file-client path*)
     (let ([url (format "ftp://~a:~a/" file-transfer-host ftp-file-transfer-port)]
-          [done-path (path-join "/tmp" "chezpp-example-ftp-done-marker")])
+          [done-path (path-join "/tmp" "cspp-example-ftp-done-marker")])
       (define upload-one
         (lambda (local-path remote-path)
           (let ([session (ftp-open url 300000)])

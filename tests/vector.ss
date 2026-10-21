@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (mat bvector-widths
      (let ([bv (make-bytevector 2 0)])

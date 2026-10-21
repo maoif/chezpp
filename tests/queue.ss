@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp queue))
+(import (cspp)
+        (cspp queue))
 
 (mat queue
 

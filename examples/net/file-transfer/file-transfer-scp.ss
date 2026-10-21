@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 (load "examples/net/file-transfer/file-transfer-common.ss")
 
 #|proc:scp-transfer-once

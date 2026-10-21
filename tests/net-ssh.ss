@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "net-common.ss")
 (load "net-ssh-common.ss")
@@ -145,7 +145,7 @@
                           (lambda ()
                             (and
                              (eq? (ssh-request-environment!
-                                   channel "CHEZPP_TEST_ENV" "request-value") channel)
+                                   channel "CSPP_TEST_ENV" "request-value") channel)
                              (ssh-error-message-contains?
                               "subsystem must not be empty"
                               (lambda () (ssh-request-subsystem! subsystem-channel "")))
@@ -162,7 +162,7 @@
      ;; has no known_hosts entry.
      (mat-requires (ssh)
        (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
-         (let ([empty-home (format "/tmp/chezpp-net-ssh-empty-home-~a" port)])
+         (let ([empty-home (format "/tmp/cspp-net-ssh-empty-home-~a" port)])
            (dynamic-wind
              (lambda () (mkdirs (string-append empty-home "/.ssh")))
              (lambda ()
@@ -205,7 +205,7 @@
      ;; `insecure` is an explicit bypass that skips known-host verification.
      (mat-requires (ssh)
        (let-values ([(remote-root home port user stop-server) (start-ssh-test-server)])
-         (let ([empty-home (format "/tmp/chezpp-net-ssh-insecure-home-~a" port)])
+         (let ([empty-home (format "/tmp/cspp-net-ssh-insecure-home-~a" port)])
            (dynamic-wind
              (lambda () (mkdirs (string-append empty-home "/.ssh")))
              (lambda ()

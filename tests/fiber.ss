@@ -1,11 +1,11 @@
-(import (chezpp)
-        (chezpp concurrency fiber)
-        (chezpp net operation))
+(import (cspp)
+        (cspp concurrency fiber)
+        (cspp net operation))
 
 ;; Bounded adaptations of the older spawn/yield/channel cases from `fiber.ss.bak`.
 ;; That legacy file labels `loko-tests` as adapted from Loko, and the sieve and
 ;; merge-sort examples as Guile Fibers benchmarks. These cases retain that origin
-;; while using Chezpp APIs and finite result assertions.
+;; while using CSPP APIs and finite result assertions.
 ;; Loko: https://scheme.fail/ and https://gitlab.com/akkuscm/loko
 ;; Guile Fibers: https://github.com/wingo/fibers (benchmarks)
 (mat fiber-spawn-nested-completes
@@ -1522,7 +1522,7 @@
       (lambda (case)
         (guard (failure [else #f])
           (let ([result
-                 (capture-process "../chez++" "--script=fiber-quantum-process.ss" "--"
+                 (capture-process "../cspp" "--script=fiber-quantum-process.ss" "--"
                    (car case) :timeout 5000 :stdin null :stdout capture :stderr capture)])
             (and (process-exit-success? (process-result-status result))
                  (string=? (cdr case) (process-result-stdout result))
@@ -1538,7 +1538,7 @@
       (lambda (mode)
         (guard (failure [else #f])
           (let ([result
-                 (capture-process "../chez++" "--script=fiber-inherited-timer-process.ss" "--"
+                 (capture-process "../cspp" "--script=fiber-inherited-timer-process.ss" "--"
                    mode :timeout 5000 :stdin null :stdout capture :stderr null)])
             (and (process-exit-success? (process-result-status result))
                  (string=? "completed\n" (process-result-stdout result))))))

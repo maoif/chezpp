@@ -1,12 +1,12 @@
-# ChezPP Examples and Container Benchmarks Implementation Plan
+# CSPP Examples and Container Benchmarks Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add runnable, discoverable ChezPP examples and detailed generic-versus-specialized container benchmarks, and correct existing network examples.
+**Goal:** Add runnable, discoverable CSPP examples and detailed generic-versus-specialized container benchmarks, and correct existing network examples.
 
-**Architecture:** Add focused executable scripts under `examples/<library>/` and `benchmarks/`, with a shared example convention and a short examples index. Existing public library APIs remain the implementation surface; task 3 repairs SSH stream handling, HTTP protocol coverage, script invocation, and examples that fail verification. Benchmarks use `(chezpp benchmark)`, comparable workloads, and a common detailed text/CSV/JSON reporting convention.
+**Architecture:** Add focused executable scripts under `examples/<library>/` and `benchmarks/`, with a shared example convention and a short examples index. Existing public library APIs remain the implementation surface; task 3 repairs SSH stream handling, HTTP protocol coverage, script invocation, and examples that fail verification. Benchmarks use `(cspp benchmark)`, comparable workloads, and a common detailed text/CSV/JSON reporting convention.
 
-**Tech Stack:** ChezScheme, `chez++ --script=FILE --`, `(chezpp cli)`, `(chezpp benchmark)`, existing ChezPP libraries, project Makefiles and Scheme test suite.
+**Tech Stack:** ChezScheme, `cspp --script=FILE --`, `(cspp cli)`, `(cspp benchmark)`, existing CSPP libraries, project Makefiles and Scheme test suite.
 
 **Spec:** User request in the current session; no separate design document was requested.
 
@@ -22,12 +22,12 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 ## Global Constraints
 
 - Create worktrees under `.worktrees`, use a date-prefixed name, and preserve the worktree after merging.
-- Every new Scheme script accepts `--help` and `-h` through `(chezpp cli)` and runs with `chez++ --script=<script.ss> --`.
+- Every new Scheme script accepts `--help` and `-h` through `(cspp cli)` and runs with `cspp --script=<script.ss> --`.
 - New examples use a uniform structure: imports, reusable helpers, CLI declaration, documented target API calls, then the command entry point.
 - Add a short comment immediately before each call to the library API being demonstrated.
-- Network examples use `(chezpp logging)` for operational logs; result payloads may be printed to stdout.
+- Network examples use `(cspp logging)` for operational logs; result payloads may be printed to stdout.
 - Files opened by the examples are closed on success and on failure; use `dynamic-wind` or `call-with-port`.
-- Preserve APIs and container variants already in ChezPP; `heap` and `dlist` have no typed variants today, so do not add any.
+- Preserve APIs and container variants already in CSPP; `heap` and `dlist` have no typed variants today, so do not add any.
 - Work in focused groups; do not add generated docs, build artifacts, or unrelated edits to the source checkout.
 - Before completion, check parentheses of every new or edited Scheme script and run root `make clean && make`.
 
@@ -45,30 +45,30 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 - `examples/common.ss` provides local, non-library helpers loaded by examples: construct a
   `cli-command`, attach shared `--help`/`-h` behavior, parse command arguments, render a parsed
   Scheme value, and open/close a textual or binary input safely. Keep help text and path handling
-  within the supported `chezpp cli` and `chezpp path` APIs.
+  within the supported `cspp cli` and `cspp path` APIs.
 - Every example calls `run-cli-command!` with `(command-line-arguments)` and positional arguments
   or `--name=value` options. Declare help as a visible `-h`/`--help` flag; do not assume
   `run-cli-command!` adds those aliases automatically.
 - `examples/README.md` lists the script, invocation, purpose, and optional dependencies for each
   example and benchmark. Scripts take paths exactly as supplied by the user, relative to the
-  caller's current directory, so `chez++ --script=examples/parser/xml.ss -- --help` works at the
+  caller's current directory, so `cspp --script=examples/parser/xml.ss -- --help` works at the
   repository root.
 
 - [x] **Step 1: Add the runnable-script inventory test.**
   In `tests/examples.ss`, recursively or explicitly enumerate committed example and benchmark
   entry points, check each script is readable, and statically check for imports of
-  `(chezpp cli)` and a configured `help` option. Check the common layout markers and use a Scheme
+  `(cspp cli)` and a configured `help` option. Check the common layout markers and use a Scheme
   reader pass to reject unreadable/unbalanced sources. Register `examples.ss` in `SRCS_TEST`.
 - [x] **Step 2: Run the test against the current tree.**
-  Run `make test examples.ss` from `tests/` after building ChezPP; the inventory should pass for
+  Run `make test examples.ss` from `tests/` after building CSPP; the inventory should pass for
   existing entry points only after it has an explicit allowlist during migration.
 - [x] **Step 3: Add the helper and README inventory.**
   Create `examples/common.ss`, following the project's CLI macro examples in `tests/cli.ss` and
-  option syntax from `chezpp/cli.ss`. Use a script-local preamble and shared runner rather than
+  option syntax from `src/cspp/cli.ss`. Use a script-local preamble and shared runner rather than
   exporting a new library. Add the initial directories and naming convention to
   `examples/README.md`.
 - [x] **Step 4: Re-run the inventory test and CLI smoke checks.**
-  Run `make test examples.ss cli.ss`; check `chez++ --script=examples/README.md` is not suggested
+  Run `make test examples.ss cli.ss`; check `cspp --script=examples/README.md` is not suggested
   as a command and that script invocations use actual `.ss` entry points.
 
 ### Task 2: Add parser and core data-processing examples
@@ -106,10 +106,10 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   `tests/data/xml-basic.xml`, `tests/data/json5-example.json5`, `tests/data/pyproj.toml`,
   `tests/data/codegen-features.proto` is not Scheme input, and a built ELF executable. Add a small
   Scheme datum fixture under `examples/data/` and use the Chez executable as the ELF fixture only
-  after verifying `file`/`readelf` identifies it as ELF. Prefer `chezpp.lib` as ELF only if the
+  after verifying `file`/`readelf` identifies it as ELF. Prefer `cspp.lib` as ELF only if the
   parser accepts the platform's artifact. Every parser prints the complete returned value.
 - [x] **Step 2: Smoke-run each parser with fixture arguments.**
-  Run each script with `chez++ --script=FILE --`; assert non-empty stdout, successful status, and a
+  Run each script with `cspp --script=FILE --`; assert non-empty stdout, successful status, and a
   successful `--help` and `-h` invocation. Include malformed input and missing-file invocations
   in the test harness, and assert a nonzero exit status without an unclosed-port warning.
 - [x] **Step 3: Add navigator, transducer, and iterator examples.**
@@ -171,13 +171,13 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 
 **Interfaces:**
 - File server scripts accept `--host=value`, `--port=value`, and required `--dir=value`; log
-  start/address/shutdown details via `(chezpp logging)`. Serve the selected local directory with
+  start/address/shutdown details via `(cspp logging)`. Serve the selected local directory with
   GET-only regular-file responses. Resolve and validate requested paths under the selected root,
   reject traversal and symlink escape, close each file port when its body source finishes or the
   request fails, and close listener/context on exit.
-- HTTP/1 uses `(chezpp net http)`'s `http-listen`, handler registration, and serve loop. HTTP/2
+- HTTP/1 uses `(cspp net http)`'s `http-listen`, handler registration, and serve loop. HTTP/2
   and HTTPS availability is conditional: inspect and reuse the existing LWS server capability,
-  and require TLS/ALPN configuration supported by the installed Chezpp build. Do not name a
+  and require TLS/ALPN configuration supported by the installed CSPP build. Do not name a
   server `http2` unless an integration request negotiates protocol `h2`; do not silently label
   HTTP/1 responses as HTTP/2. If the API cannot provide a prior-knowledge H2 or HTTPS listener,
   record a prerequisite/API gap rather than claim a working example.
@@ -189,13 +189,13 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   random salt/nonce, and store a versioned envelope containing algorithm, salt, nonce, ciphertext,
   and tag. Decrypt verifies authentication before writing plaintext. Treat raw-key modes as a
   separately labeled advanced option and never print key/passphrase bytes.
-- Hash/checksum accepts a file and supported digest names. Use `chezpp crypto hash-file` for
-  modern crypto digests and `(chezpp digest)` file functions for its supported legacy/OpenSSL
+- Hash/checksum accepts a file and supported digest names. Use `cspp crypto hash-file` for
+  modern crypto digests and `(cspp digest)` file functions for its supported legacy/OpenSSL
   methods; optionally use `xxhash` names for fast non-cryptographic checksums. Validate the chosen
   method against the relevant API before invoking it and print algorithm, file, and hex digest.
 
 - [x] **Step 1: Probe server API capabilities and define supported matrix.**
-  Inspect `(chezpp net http)`, `(chezpp net lws server)`, HTTP/2 tests, OpenSSL feature flags,
+  Inspect `(cspp net http)`, `(cspp net lws server)`, HTTP/2 tests, OpenSSL feature flags,
   and TLS tests. Write a capability matrix in `examples/README.md` for HTTP/1, cleartext H2,
   TLS H2/ALPN, and HTTPS. Determine whether the existing public server API can select H2 or TLS
   H2 before writing corresponding scripts.
@@ -211,7 +211,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   portable examples. If the active public API cannot provide the named mode, keep the capability
   gate and request a library API task rather than presenting HTTP/1 as H2 or HTTPS.
 - [x] **Step 4: Add authenticated file encryption/decryption.**
-  Confirm AEAD signatures in `chezpp/crypto/aead.ss`, KDF signature in `chezpp/crypto/kdf.ss`,
+  Confirm AEAD signatures in `src/cspp/crypto/aead.ss`, KDF signature in `src/cspp/crypto/kdf.ss`,
   `random-bytes`, and `bytevector->hex`. Add round-trip tests for each method, wrong password,
   modified header/ciphertext/tag, truncated envelope, and same input/output path handling. Refuse
   to overwrite an input unless output is a distinct path.
@@ -239,7 +239,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 - All network CLI forms take `--host`, `--port`, `--user`, and `--auth=password|publickey|agent`;
   password and key passphrase are accepted from environment/file prompt rather than exposed in
   process arguments. Public-key mode accepts a private-key path. Use strict known-host checking by
-  default and log session and transfer lifecycle events with `(chezpp logging)`.
+  default and log session and transfer lifecycle events with `(cspp logging)`.
 - `ssh-open-repl.ss` means interactive remote shell, not a Scheme interpreter. It passes local
   input and remote stdout/stderr; EOF on local stdin sends SSH channel EOF using the channel API
   that actually signals it.
@@ -259,13 +259,13 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   never use a public network host in automated tests.
 - [x] **Step 2: Repair SSH EOF and port lifecycle.**
   `ssh-write-all` currently treats empty bytevectors as zero-byte writes; inspect
-  `chezpp/net/ssh.ss` and `chezpp/c/net/ssh.c` for the supported channel EOF primitive and add a
+  `src/cspp/net/ssh.ss` and `src/cspp/c/net/ssh.c` for the supported channel EOF primitive and add a
   documented public procedure only if required. Close `open-ssh-channel-output-port` in the
   REPL's cleanup path, and ensure remote command loops do not wait forever after remote EOF/status.
   Add tests where the remote process waits for stdin EOF and where stdout and stderr arrive
   concurrently before exit.
 - [x] **Step 3: Normalize argument parsing and authentication.**
-  Replace ad hoc `command-line-arguments` parsers in both existing scripts with `(chezpp cli)`;
+  Replace ad hoc `command-line-arguments` parsers in both existing scripts with `(cspp cli)`;
   use one common auth function, do not accept secrets as argv values, and retain their
   documented SSH operations. Add help and invalid-option checks.
 - [x] **Step 4: Implement local and remote forwarding modes.**
@@ -282,7 +282,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 - [x] **Step 6: Run all network example and SSH/SCP tests.**
   Run `make test net-ssh.ss net-scp.ss net-examples.ss` from `tests/`, then execute each network
   example's `-h` and `--help`. Run `examples/net/file-transfer/verify-local-transfers.sh` with a
-  small `CHEZPP_TRANSFER_MIB=1` as a regression check for shared network helpers.
+  small `CSPP_TRANSFER_MIB=1` as a regression check for shared network helpers.
 
 ### Task 6: Audit and repair existing network examples
 
@@ -293,8 +293,8 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 - Modify: `examples/README.md`
 
 **Interfaces:**
-- Existing public commands retain their core operation but adopt `chezpp cli` help, common layout,
-  cleanup, and logging where they perform network operations. Each target ChezPP call is preceded
+- Existing public commands retain their core operation but adopt `cspp cli` help, common layout,
+  cleanup, and logging where they perform network operations. Each target CSPP call is preceded
   by a concise comment explaining that call. Shared modules may contain helpers but are not
   executable entry points unless they accept the standard CLI help contract.
 - Test-only scripts can accept verifier-specific arguments, but must still support both help
@@ -313,7 +313,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 - [x] **Step 3: Run the existing network regression matrix.**
   Run `make test net-examples.ss net-ssh.ss net-scp.ss net-http.ss net-lws-server.ss
   net-lws-http2.ss net-transfer.ss net-ftp.ss net-sftp.ss` from `tests/`, then run
-  `examples/net/file-transfer/verify-local-transfers.sh` with `CHEZPP_TRANSFER_MIB=1`.
+  `examples/net/file-transfer/verify-local-transfers.sh` with `CSPP_TRANSFER_MIB=1`.
 - [x] **Step 4: Fix every reproduced example bug and rerun its narrow test.**
   For each failure, add a focused regression before editing its example/library helper. Verify
   option parsing, cwd-independent fixture paths, transfer direction, authentication, TLS
@@ -340,7 +340,7 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
 - Each benchmark accepts `-h`/`--help`, `--size=<natural>`, `--samples=<natural>`,
   `--warmup=<natural>`, `--min-time=<seconds>`, `--max-iterations=<natural>`, optional
   `--format=text|csv|json|datum`, `--output=<path>`, and `--cost-center`.
-- Each script uses `(chezpp benchmark)` (`make-benchmark`, `benchmark-config-with`,
+- Each script uses `(cspp benchmark)` (`make-benchmark`, `benchmark-config-with`,
   `benchmark-run`, and a built-in reporter) and deterministic input generated outside timed
   regions. Print exact case names, argument values, CPU/real nanoseconds, allocation bytes,
   GC count/bytes, median/mean/min/max/stddev/confidence interval, and optional cost-center
@@ -359,10 +359,10 @@ their optional libraries or an H2-capable curl are unavailable. Review notes are
   interval. Assert GC data and cost-center fields are present when the build/runtime supports
   them. Add the test to `SRCS_TEST` and run `make test benchmarks.ss`.
 - [x] **Step 2: Create shared benchmark CLI/configuration and reporter helpers.**
-  Parse options through `(chezpp cli)` and map them to `benchmark-config-with` keys. Select
+  Parse options through `(cspp cli)` and map them to `benchmark-config-with` keys. Select
   `benchmark-text-reporter`, `benchmark-csv-reporter`, `benchmark-json-reporter`, or
   `benchmark-datum-reporter`; pass an output port opened with dynamic cleanup when requested.
-  Include the ChezPP version, build profile, runtime version, workload size, and date in a report
+  Include the CSPP version, build profile, runtime version, workload size, and date in a report
   header if the reporter permits metadata without invalidating CSV/JSON. Otherwise emit a
   metadata record in the chosen format.
 - [x] **Step 3: Add treeset and treemap paired cases.**

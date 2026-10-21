@@ -38,5 +38,5 @@
 
   (elem (table $functions) (offset (i32.const 0)) func $identity $tail)
   (data (memory $memory32) (offset (i32.const 0)) "core3")
-  (@custom "chezpp.core3" (after data) "fixture")
+  (@custom "cspp.core3" (after data) "fixture")
 )

@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (define collect-iter
   (lambda (iter)

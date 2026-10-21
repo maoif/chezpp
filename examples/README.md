@@ -1,6 +1,6 @@
-# ChezPP Examples and Benchmarks
+# CSPP Examples and Benchmarks
 
-Run commands from the repository root with `chez++ --script=FILE -- [OPTIONS]`. Every command accepts `-h` and
+Run commands from the repository root with `cspp --script=FILE -- [OPTIONS]`. Every command accepts `-h` and
 `--help`. File arguments are paths relative to the current directory.
 
 ## Parsers
@@ -51,7 +51,7 @@ that currently expose them.
 SSH takes a required positional `HOST`, before or after named options. `--user` defaults to the
 current local username and `--auth` defaults to `publickey` (discover keys in `~/.ssh`).
 SSH checks `$HOME/.ssh/known_hosts`. Use `--private-key=PATH` for an explicit key, or choose
-`--auth=password` or `--auth=agent`. Set `CHEZPP_SSH_PASSWORD` or `CHEZPP_SSH_PASSPHRASE`
+`--auth=password` or `--auth=agent`. Set `CSPP_SSH_PASSWORD` or `CSPP_SSH_PASSPHRASE`
 for secrets; agent authentication uses `SSH_AUTH_SOCK`. The shell uses `--pty=auto` by default:
 terminal input gets a remote PTY with the local TERM and window size; piped input uses no PTY.
 Use `--pty=yes|no` to override it. Terminal sessions forward keys and Ctrl-C to the remote shell,
@@ -75,7 +75,7 @@ for up to 32 sibling files at a time, while retaining per-file progress and over
 `wget.ss` and `scp.ss` display progress bars on stderr by default. Pass `--progress=no` to disable
 progress, or `--progress=yes` to enable it explicitly; lifecycle logs remain enabled. SCP shows
 bytes and percentage per copied file, including recursive uploads and downloads. Wget uses
-`(chezpp rich)` progress tasks and a live display on stderr. It uses the GET response's
+`(cspp rich)` progress tasks and a live display on stderr. It uses the GET response's
 `Content-Length` to show current/total bytes and percentage during the download,
 including after redirects. If the server omits the length, it shows received bytes with an unknown
 total until the final size is known. Wget also shows current download speed in `B/s`, `KiB/s`, `MiB/s`,
@@ -95,16 +95,16 @@ negotiates HTTP/1 or H2 through ALPN. Tests verify the negotiated version and ce
 Server roots and requested paths reject symlinks and traversal, and only GET regular files are served.
 
 `wget.ss` streams into a temporary file beside the destination and publishes it only after a
-successful HTTP response. It sends `User-Agent: chezpp-wget` by default; override it with
+successful HTTP response. It sends `User-Agent: cspp-wget` by default; override it with
 `--user-agent=TEXT`. Its total request timeout is one hour; use `--timeout=SECONDS` with a positive
 integer for a different limit. Large files stream to disk without retaining the entire body in
 memory. Interrupted downloads are removed; resume is not supported.
 
-Existing positional examples also accept both help flags through `(chezpp cli)`. These include
+Existing positional examples also accept both help flags through `(cspp cli)`. These include
 `http-download.ss URI [auto|http/1.1|h2]`, `echo-{client,server}-grpc.ss [HOST PORT]`,
 `ftp-client.ss HOST PORT USER PASSWORD`, `sftp-client.ss HOST PORT USER AGENT-OR-PRIVATE-KEY`,
 and the commands under `examples/net/file-transfer/`. Their lifecycle logs are opt-in with
-`CHEZPP_EXAMPLE_LOG_LEVEL=debug`, preserving binary output and the transfer verifiers' quiet mode.
+`CSPP_EXAMPLE_LOG_LEVEL=debug`, preserving binary output and the transfer verifiers' quiet mode.
 The `*-common.ss` and protocol implementation modules are loaded helpers, not commands. The
 `verify-*.ss` and shell drivers under `file-transfer/` are test fixtures/verifiers.
 
@@ -115,7 +115,7 @@ The `*-common.ss` and protocol implementation modules are loaded helpers, not co
 | `examples/crypto/encrypt-file.ss` | `--mode=encrypt --input=input --output=input.enc --method=aes-256-gcm` | authenticated file encryption/decryption |
 | `examples/crypto/hash-file.ss` | `--file=input --method=sha256` | cryptographic hashes and checksums |
 
-Set `CHEZPP_EXAMPLE_PASSWORD` before encryption/decryption. Both methods authenticate the envelope
+Set `CSPP_EXAMPLE_PASSWORD` before encryption/decryption. Both methods authenticate the envelope
 and ciphertext before creating a plaintext output; output must be a new path. Modern digests use
 OpenSSL; BLAKE3 and xxhash checksums require their corresponding optional libraries.
 
@@ -147,8 +147,8 @@ runs parser/data/container/crypto/benchmark examples, both CLI help forms, and l
 fixtures. Network fixtures require curl with HTTP/2, OpenSSL tools, and OpenSSH tools. These
 checks use temporary files, host keys, certificates, loopback listeners, and bounded subprocesses.
 
-Run `CHEZPP_EXAMPLE_TEST_VERBOSE=1 python3 tests/integration/examples.py` for individual example
+Run `CSPP_EXAMPLE_TEST_VERBOSE=1 python3 tests/integration/examples.py` for individual example
 checks, `python3 tests/ssh-examples-integration.py` for SSH/SCP/forwarding, and
-`CHEZPP_TRANSFER_MIB=1 examples/net/file-transfer/verify-local-transfers.sh` for the existing ten
+`CSPP_TRANSFER_MIB=1 examples/net/file-transfer/verify-local-transfers.sh` for the existing ten
 protocol transfer matrix. `python3 tests/ssh-examples-integration.py --password` additionally uses
 the optional Python Paramiko package to verify password auth without modifying a system account.

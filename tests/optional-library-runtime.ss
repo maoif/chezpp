@@ -1,4 +1,4 @@
-(import (chezpp) (chezpp net ffi) (chezpp net lws ffi) (chezpp crypto ffi))
+(import (cspp) (cspp net ffi) (cspp net lws ffi) (cspp crypto ffi))
 
 (define dependencies '(openssl xxhash blake3 curl ssh websockets grpc zlib cares idn2 uuid))
 

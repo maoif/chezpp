@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (mat net-socket-datagram
      (let ([receiver (open-socket 'inet 'datagram)]

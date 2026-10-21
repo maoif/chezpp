@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Chezpp fibers correct under shutdown, blocking, event selection, timers, and
+**Goal:** Make CSPP fibers correct under shutdown, blocking, event selection, timers, and
 concurrent scheduler contexts, while documenting an IO design based on Go and Concurrent ML.
 
 **Architecture:** Each `run-fibers` invocation owns a run context containing its scheduler vector,
@@ -15,7 +15,7 @@ readiness poller with a wakeup descriptor for sockets/pipes, and worker executio
 regular-file operations.
 
 **Tech Stack:** ChezScheme threads, mutexes, condition variables, timer interrupts,
-continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net poll` and
+continuations, existing `dlist`/spinlock/abox utilities, existing `cspp net poll` and
 `net-operation` APIs, and the `mat` test framework.
 
 **Spec:** User-approved fiber review findings and decisions in the task conversation on 2026-10-14.
@@ -48,7 +48,7 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
 - Modify: `tests/test-files.mk`
 
 **Interfaces:**
-- Consumes the current public API from `(chezpp concurrency fiber)` through `(chezpp)`.
+- Consumes the current public API from `(cspp concurrency fiber)` through `(cspp)`.
 - Produces named `mat` cases that fail against the current implementation and remain as
   regression coverage for scheduler, event, mutex, cvar, timer, and context behavior.
 
@@ -115,7 +115,7 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
 ### Task 2: Introduce Per-Run Scheduler Context and Safe Parking
 
 **Files:**
-- Modify: `chezpp/concurrency/fiber.ss:35-353`
+- Modify: `src/cspp/concurrency/fiber.ss:35-353`
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -191,14 +191,14 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
 - [ ] **Step 7: Commit the scheduler context change**
 
   ```sh
-  git add chezpp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: park idle schedulers and isolate run contexts"
   ```
 
 ### Task 3: Define Error and Return-Value Propagation
 
 **Files:**
-- Modify: `chezpp/concurrency/fiber.ss:231-353`
+- Modify: `src/cspp/concurrency/fiber.ss:231-353`
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -231,14 +231,14 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
   Run `cd tests && make test fiber.ss`, then:
 
   ```sh
-  git add chezpp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: propagate context errors and values"
   ```
 
 ### Task 4: Make Event Construction Immutable and Cancellation-Safe
 
 **Files:**
-- Modify: `chezpp/concurrency/fiber.ss:384-545, 728-1000`
+- Modify: `src/cspp/concurrency/fiber.ss:384-545, 728-1000`
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -280,14 +280,14 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
 - [ ] **Step 6: Commit event changes**
 
   ```sh
-  git add chezpp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: make event selection cancellation-safe"
   ```
 
 ### Task 5: Repair Fiber Mutex and Cvar Atomicity
 
 **Files:**
-- Modify: `chezpp/concurrency/fiber.ss:1004-1165`
+- Modify: `src/cspp/concurrency/fiber.ss:1004-1165`
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -332,14 +332,14 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
   Run `cd tests && make test fiber.ss concurrency.ss`, then:
 
   ```sh
-  git add chezpp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: fix mutex ownership and cvar wakeups"
   ```
 
 ### Task 6: Implement Scheduler-Owned Timer Events
 
 **Files:**
-- Modify: `chezpp/concurrency/fiber.ss:1168-1214` and the run-context scheduler code from Task 2
+- Modify: `src/cspp/concurrency/fiber.ss:1168-1214` and the run-context scheduler code from Task 2
 - Test: `tests/fiber.ss`
 
 **Interfaces:**
@@ -374,7 +374,7 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
   Run `cd tests && make test fiber.ss net-http-fiber.ss`, then:
 
   ```sh
-  git add chezpp/concurrency/fiber.ss tests/fiber.ss
+  git add src/cspp/concurrency/fiber.ss tests/fiber.ss
   git commit -m "fiber: add scheduler timer events"
   ```
 
@@ -384,7 +384,7 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
 - Modify: `docs/superpowers/plans/2026-10-14-fiber-scheduler-correctness.md`
 
 **Interfaces:**
-- Consumes existing `chezpp net poll`, `poll-target`, `net-operation`, and fiber event APIs.
+- Consumes existing `cspp net poll`, `poll-target`, `net-operation`, and fiber event APIs.
 - Produces an explicit implementation boundary for a future IO plan; this task adds no runtime
   IO code and no new public API.
 
@@ -432,7 +432,7 @@ continuations, existing `dlist`/spinlock/abox utilities, existing `chezpp net po
 
   ```sh
   .chezscheme-install/bin/scheme --script /dev/stdin \
-    chezpp/concurrency/fiber.ss tests/fiber.ss <<'EOF'
+    src/cspp/concurrency/fiber.ss tests/fiber.ss <<'EOF'
   (import (chezscheme))
   (for-each
    (lambda (path)
@@ -483,7 +483,7 @@ This scheduler change does not implement socket, pipe, or regular-file IO. A fut
 implementation should give each run context one readiness poller and a wakeup descriptor.
 Nonblocking socket and pipe operations should expose their pending `poll-target` values through
 `net-operation-poll-targets`. Register one cancellable event waiter per descriptor and requested
-mode; readiness from `(chezpp net poll)` makes that waiter eligible to resume and retry its
+mode; readiness from `(cspp net poll)` makes that waiter eligible to resume and retry its
 operation. Readiness is permission to retry, not proof that the operation has completed.
 
 Publishing a waiter, publishing runnable work, and notifying the poller's wakeup descriptor

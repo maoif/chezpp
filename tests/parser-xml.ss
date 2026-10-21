@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp parser xml))
+(import (cspp)
+        (cspp parser xml))
 
 (include "parser-external-tools.ss")
 

@@ -28,11 +28,11 @@
 
 (define call-with-h2-tls-fixture
   (lambda (maximum-streams procedure)
-    (write-bytevector-file "/tmp/chezpp-net-test-cert.pem" tls-test-san-certificate)
-    (write-bytevector-file "/tmp/chezpp-net-test-key.pem" tls-test-san-private-key)
+    (write-bytevector-file "/tmp/cspp-net-test-cert.pem" tls-test-san-certificate)
+    (write-bytevector-file "/tmp/cspp-net-test-key.pem" tls-test-san-private-key)
     (let-values ([(input output errors pid)
                   (open-process-ports
-                   (format "timeout 15s ./lws-http2-fixture 0 ~a /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem"
+                   (format "timeout 15s ./lws-http2-fixture 0 ~a /tmp/cspp-net-test-cert.pem /tmp/cspp-net-test-key.pem"
                            maximum-streams)
                    (buffer-mode block) (native-transcoder))])
       (dynamic-wind

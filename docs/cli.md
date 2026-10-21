@@ -1,12 +1,12 @@
-# `(chezpp cli)` Stable Core
+# `(cspp cli)` Stable Core
 
-`(chezpp cli)` is a library-first command-line parser. Programs construct a
+`(cspp cli)` is a library-first command-line parser. Programs construct a
 command tree, configure options and subcommands, and call
 `run-cli-command!`. Successful parsing normally produces no output. Parse
 failures signal Scheme errors. Built-in help prints to `current-output-port`
 and returns without running command actions.
 
-This document describes the stable core implemented in `chezpp/cli.ss`.
+This document describes the stable core implemented in `src/cspp/cli.ss`.
 
 ## Scope
 

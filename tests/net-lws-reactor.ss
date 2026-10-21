@@ -1,9 +1,9 @@
-(import (chezpp)
-        (chezpp net socket)
-        (chezpp net address)
-        (chezpp net poll)
-        (chezpp net lws ffi)
-        (chezpp net lws reactor))
+(import (cspp)
+        (cspp net socket)
+        (cspp net address)
+        (cspp net poll)
+        (cspp net lws ffi)
+        (cspp net lws reactor))
 
 (define wait-until
   (lambda (predicate)
@@ -100,7 +100,7 @@
      ;; A native wait must release Chez so a peer can collect and wake the owner.
      (mat-requires (websockets)
        (guard (failure [else #f])
-         (let ([service (foreign-procedure "chezpp_lws_http_context_service" (uptr int) int)])
+         (let ([service (foreign-procedure "cspp_lws_http_context_service" (uptr int) int)])
            (call-with-lws-context
             (lambda (context)
               (let* ([worker (fork-thread

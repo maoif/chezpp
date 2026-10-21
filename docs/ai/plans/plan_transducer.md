@@ -1,13 +1,13 @@
-# ChezPP Transducer Library Plan
+# CSPP Transducer Library Plan
 
 This document specifies the public API, semantics, implementation strategy, and
-integration points for a new transducer library for ChezScheme in ChezPP.
+integration points for a new transducer library for ChezScheme in CSPP.
 
 Goals:
 
 - provide allocation-light sequence transformations that compose independently
   of the input and output collection type
-- interoperate with `(chezpp iter)`, lists, vectors, strings, bytevectors,
+- interoperate with `(cspp iter)`, lists, vectors, strings, bytevectors,
   hashtables, ports, and later streams
 - support early termination through a typed `reduced` protocol
 - represent transducers, reducers, eductions, and reduced values as opaque
@@ -19,7 +19,7 @@ Goals:
 
 Non-goals:
 
-- replacing `(chezpp iter)` or the `for` forms
+- replacing `(cspp iter)` or the `for` forms
 - providing lazy streams as the primary abstraction
 - implementing a full query language
 - requiring macros for ordinary use
@@ -29,18 +29,18 @@ Non-goals:
 
 Public library:
 
-- `(chezpp transducer)`
+- `(cspp transducer)`
 
 Private/internal libraries, if the implementation grows:
 
-- `(chezpp transducer private core)`
-- `(chezpp transducer private reducers)`
-- `(chezpp transducer private source)`
-- `(chezpp transducer private sequence)`
+- `(cspp transducer private core)`
+- `(cspp transducer private reducers)`
+- `(cspp transducer private source)`
+- `(cspp transducer private sequence)`
 
 Compatibility entrypoint:
 
-- `chezpp.ss` should import and export `(chezpp transducer)` after the library is
+- `src/cspp.ss` should import and export `(cspp transducer)` after the library is
   implemented and tested.
 
 
@@ -57,7 +57,7 @@ accumulator or a `reduced` value to request early termination.
 ```
 
 The parameter name `rf` means "reducing function" in transducer literature. In
-this ChezPP design, public APIs should prefer the parameter name `reducer`
+this CSPP design, public APIs should prefer the parameter name `reducer`
 because reducers are typed records. Names such as `rflist` use the `rf`
 prefix as a conventional abbreviation for "reducer factory" or "reducing
 function builder": `rflist` returns a reducer that accumulates a list.
@@ -156,7 +156,7 @@ typed.
 
 ## 5. Public API
 
-The APIs below are the target v1 surface for `(chezpp transducer)`.
+The APIs below are the target v1 surface for `(cspp transducer)`.
 
 ### Core Predicates And Reduced Values
 
@@ -322,7 +322,7 @@ design, each `rf...` procedure returns a reducer record, not a bare procedure.
 Basic `into`:
 
 ```scheme
-(import (chezpp transducer))
+(import (cspp transducer))
 
 (into 'vector
       (tcompose
@@ -536,7 +536,7 @@ Builtin source types should use direct loops by default:
 - eductions: run their stored source and transducer without materializing
 - iterators: use `iter-next!`
 
-Do not convert these source types to `(chezpp iter)` first in the default path.
+Do not convert these source types to `(cspp iter)` first in the default path.
 Iterator conversion is useful for interop, but it adds avoidable allocation and
 dispatch overhead for builtin collections.
 
@@ -675,5 +675,5 @@ Phase 3:
 - `sequence`
 - `eduction`
 - `source->iter` interop helper
-- deeper integration with `(chezpp iter)` pipelines
+- deeper integration with `(cspp iter)` pipelines
 - performance tuning and specialized loops

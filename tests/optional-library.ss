@@ -1,4 +1,4 @@
-(import (chezpp) (chezpp net ffi))
+(import (cspp) (cspp net ffi))
 
 (define disabled-api-error?
   (lambda (library operation)
@@ -32,7 +32,7 @@
    '(cares curl grpc idn2 ssh websockets zlib openssl uuid xxhash blake3)))
 
 (mat optional-library-call-time-errors
-  ;; Error case: disabled DNS fails at the API call after Chezpp has imported successfully.
+  ;; Error case: disabled DNS fails at the API call after CSPP has imported successfully.
   (disabled-api-error? 'cares (lambda () (dns-resolve "localhost")))
 
   ;; Error case: disabled FTP fails before opening a session or contacting a server.

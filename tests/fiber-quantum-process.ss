@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp concurrency fiber))
+(import (cspp)
+        (cspp concurrency fiber))
 
 ;; Run in a separate process: a dispatch livelock cannot run a fiber watchdog.
 (define quantum (string->number (car (command-line-arguments))))

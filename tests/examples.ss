@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (define example-entry-point*
   '("examples/parser/xml.ss"
@@ -68,7 +68,7 @@
         (lambda (path)
           (and (file-exists? path)
                (let ([text (call-with-input-file path get-string-all)])
-                 (and (or (example-contains? text "(chezpp cli)")
+                 (and (or (example-contains? text "(cspp cli)")
                           (example-contains? text "examples/common.ss")
                           (example-contains? text "benchmarks/common.ss")
                           (example-contains? text "http-file-server-common.ss"))

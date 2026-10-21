@@ -1,10 +1,10 @@
-# ChezPP Transducer Phase 1 Execution Plan
+# CSPP Transducer Phase 1 Execution Plan
 
 Source design: `docs/ai/plans/plan_transducer.md`
 
-Goal: implement and verify the Phase 1 `(chezpp transducer)` API with typed
+Goal: implement and verify the Phase 1 `(cspp transducer)` API with typed
 records, early termination, direct builtin source traversal, and integration
-through `(chezpp)`.
+through `(cspp)`.
 
 Scope:
 
@@ -36,10 +36,10 @@ Tasks:
    behavior and commented negative cases for public boundary errors.
 3. Run `cd tests && make test-some TEST='transducer'` and confirm the new tests
    fail because the API is not implemented/exported yet.
-4. Implement `chezpp/transducer.ss` with documented public APIs, `pcheck`
+4. Implement `src/cspp/transducer.ss` with documented public APIs, `pcheck`
    boundary validation, opaque sealed records, direct loops, reducer completion,
    and early termination handling.
-5. Export `(chezpp transducer)` from `chezpp.ss`.
+5. Export `(cspp transducer)` from `src/cspp.ss`.
 6. Check Scheme parentheses for modified Scheme files.
 7. Run `make clean && make`.
 8. Run `cd tests && make test-some TEST='transducer'`.

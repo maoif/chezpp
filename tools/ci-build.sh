@@ -57,14 +57,14 @@ make -C tests test-release-package
 
 # Use the public package target with the same native choices that passed testing.
 make package PACKAGE_COMMIT="$commit" \
-    NATIVE_OPTIONS_REPLAY="$repository/.chezpp-native-options.mk"
-version=$(.chezscheme-install/bin/scheme --script tools/print-library-version.ss chezpp.lib)
-version=${version#ChezPP version: }
+    NATIVE_OPTIONS_REPLAY="$repository/.cspp-native-options.mk"
+version=$(.chezscheme-install/bin/scheme --script tools/print-library-version.ss cspp.lib)
+version=${version#CSPP version: }
 
 # Run the archive from a different directory, independent of the install prefix and cwd.
-archive="chezpp-$version-linux-$architecture"
+archive="cspp-$version-linux-$architecture"
 mkdir "$workspace/relocated package"
 tar xzf "dist/$archive.tar.gz" -C "$workspace/relocated package"
 .chezscheme-install/bin/scheme --script tools/check-scheme-balance.ss tools/package-smoke.ss
-(cd / && "$workspace/relocated package/$archive/bin/chez++" --script="$repository/tools/package-smoke.ss")
+(cd / && "$workspace/relocated package/$archive/bin/cspp" --script="$repository/tools/package-smoke.ss")
 (cd dist && sha256sum --check "$archive.tar.gz.sha256")

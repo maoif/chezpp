@@ -1,4 +1,4 @@
-(import (chezpp cli))
+(import (cspp cli))
 
 (define example-make-option
   (lambda (name help)

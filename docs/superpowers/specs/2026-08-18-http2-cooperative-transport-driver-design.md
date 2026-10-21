@@ -54,7 +54,7 @@ alone did not resolve the regression during diagnosis.
 
 ## Architecture
 
-`http2-client-transport` remains internal to `(chezpp net http)` and becomes the sole owner of:
+`http2-client-transport` remains internal to `(cspp net http)` and becomes the sole owner of:
 
 - The HTTP connection, socket or TLS session, and nghttp2 session.
 - A FIFO queue of request-state records awaiting submission.
@@ -108,8 +108,8 @@ failure marks that request failed without corrupting sibling state.
 
 The internal HTTP/2 adapter will expose the peer's current
 `SETTINGS_MAX_CONCURRENT_STREAMS` value. The C adapter obtains it from nghttp2's remote-settings
-query and emits an internal settings event after receiving non-ACK `SETTINGS`. `(chezpp net ffi)`
-binds the query, and `(chezpp net http2)` exposes it only to internal consumers. The scheduler
+query and emits an internal settings event after receiving non-ACK `SETTINGS`. `(cspp net ffi)`
+binds the query, and `(cspp net http2)` exposes it only to internal consumers. The scheduler
 compares that value with its active request count before submission.
 
 If peer settings or GOAWAY prevent a request from opening, the request remains queued or receives
@@ -196,9 +196,9 @@ the experimental HTTP/2 server implementation remain unchanged.
 
 ## File Boundaries
 
-- `chezpp/c/net/http2.c` queries the peer's current maximum concurrent-stream setting.
-- `chezpp/c/nghttp2_loader.c` loads the required nghttp2 remote-settings symbol.
-- `chezpp/net/ffi.ss` binds the new internal C query.
-- `chezpp/net/http2.ss` wraps the query for the internal HTTP client.
-- `chezpp/net/http.ss` owns request states, scheduling, cancellation, and connection failure.
+- `src/cspp/c/net/http2.c` queries the peer's current maximum concurrent-stream setting.
+- `src/cspp/c/nghttp2_loader.c` loads the required nghttp2 remote-settings symbol.
+- `src/cspp/net/ffi.ss` binds the new internal C query.
+- `src/cspp/net/http2.ss` wraps the query for the internal HTTP client.
+- `src/cspp/net/http.ss` owns request states, scheduling, cancellation, and connection failure.
 - `tests/net-http.ss` contains scheduler and multiplexing regression mats.

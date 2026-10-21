@@ -1,10 +1,10 @@
-(import (chezpp net http) (chezpp net tls) (chezpp net uri)
-        (chezpp path) (chezpp logging))
+(import (cspp net http) (cspp net tls) (cspp net uri)
+        (cspp path) (cspp logging))
 (load "examples/common.ss")
 
 (define server-log
   (lambda ()
-    (let ([logger (make-logger 'chezpp-file-server)])
+    (let ([logger (make-logger 'cspp-file-server)])
       (logger-add-sink! logger
                         (make-log-port-sink 'stderr (current-error-port)))
       logger)))

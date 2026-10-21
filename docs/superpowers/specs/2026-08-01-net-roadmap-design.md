@@ -19,16 +19,16 @@ into the isolated implementation worktree, preserve their useful command-line co
 harden or extend them rather than recreating them without review.
 
 The current isolated baseline does not build because committed `master` lacks
-`chezpp/c/scheme.h`. The file exists untracked in the main checkout. This prerequisite must be
+`src/cspp/c/scheme.h`. The file exists untracked in the main checkout. This prerequisite must be
 resolved explicitly before implementation can establish a clean baseline.
 
 ## Scope And Decisions
 
-- All external shared libraries used by Chezpp are loaded lazily and checked at runtime, except
+- All external shared libraries used by CSPP are loaded lazily and checked at runtime, except
   libc and `libuuid`. `libuuid` remains directly linked by explicit maintainer decision.
 - OpenSSL/libcrypto, libcurl, libssh, libwebsockets, gRPC/gpr, BLAKE3, xxHash, and any newly
   introduced native dependencies use the optional loader.
-- Importing `(chezpp)` succeeds when optional dependencies are absent or incompatible. The first
+- Importing `(cspp)` succeeds when optional dependencies are absent or incompatible. The first
   API requiring an unavailable dependency fails with a structured diagnostic.
 - Thread-backed `/nonblocking` net operations are replaced by readiness-driven operation state
   machines suitable for manual polling and a future fiber scheduler.
@@ -57,7 +57,7 @@ Each dependency descriptor reports:
 - loader, symbol, initialization, or version failure details.
 
 Compatibility follows each upstream ABI contract. OpenSSL requires ABI major 3 and the minimum
-feature version used by Chezpp. libcurl and libssh require their stable ABI family and a minimum
+feature version used by CSPP. libcurl and libssh require their stable ABI family and a minimum
 runtime feature version. libwebsockets and gRPC enforce the supported ABI/SONAME family and a
 minimum tested version. BLAKE3 and xxHash retain their existing stricter major/minor checks.
 
@@ -198,7 +198,7 @@ to that contract.
 
 ## Error Handling And Cleanup
 
-Missing or incompatible optional libraries fail at feature use, never at `(chezpp)` import.
+Missing or incompatible optional libraries fail at feature use, never at `(cspp)` import.
 Partial initialization unwinds all native resources. Every operation has one idempotent cleanup
 path shared by completion, failure, cancellation, timeout, and explicit close. Ports, sockets,
 channels, sessions, directory streams, transfer handles, completion queues, and temporary files
@@ -216,7 +216,7 @@ blank lines between cases. Successful net tests produce no stdout or stderr.
 
 Loader tests build controlled stub libraries for absent dependencies, missing symbols,
 incompatible versions, compatible versions, concurrent initialization, and diagnostic text.
-`readelf` verifies that `libchezpp.so` directly needs only libc and the exempt `libuuid` among the
+`readelf` verifies that `libcspp.so` directly needs only libc and the exempt `libuuid` among the
 libraries in this design.
 
 Local integration fixtures start FTP/FTPS, SSH/SFTP/SCP, HTTP/HTTPS, WebSocket/WSS, and gRPC/TLS
@@ -240,7 +240,7 @@ not `mat` tests.
 
 Final release gates are:
 
-1. Resolve the missing `chezpp/c/scheme.h` baseline prerequisite.
+1. Resolve the missing `src/cspp/c/scheme.h` baseline prerequisite.
 2. Run `make clean && make` from the project root.
 3. Run focused tests after every phase and the complete net test set at the end.
 4. Check every changed Scheme source for balanced parentheses.

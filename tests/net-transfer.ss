@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net transfer))
+(import (cspp)
+        (cspp net transfer))
 
 (define capture-condition
   (lambda (thunk)

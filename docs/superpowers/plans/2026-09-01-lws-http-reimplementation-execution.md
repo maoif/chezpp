@@ -149,11 +149,11 @@ bounded deadline so unsupported environments skip without hanging.
 - Treat the current private HTTP transports and C adapter as reference code. Rewrite or delete them
   when their ownership model conflicts with the required design.
 - Preserve the exported names, parameter names, arities, return values, documentation blocks, and
-  `pcheck` validation of the high-level `(chezpp net http)` API.
-- Keep `(chezpp net http2)` removed. HTTP/2 is selected only through `(chezpp net http)` and
+  `pcheck` validation of the high-level `(cspp net http)` API.
+- Keep `(cspp net http2)` removed. HTTP/2 is selected only through `(cspp net http)` and
   reported by `http-response-version` as `h2`; HTTP/1.x is reported as `h1`.
-- Keep libwebsockets optional. `libchezpp.so` must not acquire a `libwebsockets` or `nghttp2`
-  dependency, and Chezpp source/build/test code must not reference nghttp2.
+- Keep libwebsockets optional. `libcspp.so` must not acquire a `libwebsockets` or `nghttp2`
+  dependency, and CSPP source/build/test code must not reference nghttp2.
 - One serialized owner services an LWS context. LWS callbacks copy events into bounded native
   storage and never invoke Scheme, user body producers, body consumers, or handlers.
 - Blocking and nonblocking helpers share one transport path and one absolute deadline across
@@ -188,7 +188,7 @@ http-client (Scheme policy, transport registry, and active-operation table)
   -> LWS context owned by one reactor
   -> native physical connection identified from its network WSI
        HTTP/1: one active transaction; idle reuse only after the LWS capability gate
-       HTTP/2: many logical streams; LWS enforces peer settings and Chezpp adds local bounds
+       HTTP/2: many logical streams; LWS enforces peer settings and CSPP adds local bounds
   -> logical transaction/stream operation
   -> copied headers/body/terminal events
   -> Scheme response or original user condition
@@ -203,8 +203,8 @@ lease id may select policy, but it must never be reported as physical identity.
 
 ### Public and Private Scheme APIs
 
-The exported `(chezpp net http)` API remains source-compatible. Internally, replace positional
-vectors with records from a new `(chezpp net http private)` library:
+The exported `(cspp net http)` API remains source-compatible. Internally, replace positional
+vectors with records from a new `(cspp net http private)` library:
 
 ```text
 http-request-policy
@@ -283,7 +283,7 @@ Private Scheme procedure contracts are:
 | `h2-origin-submit!` | `(origin operation request sink) -> h2-stream-state` |
 | `h2-reduce-event!` | `(h2-stream-state event) -> operation-update-or-#f` |
 
-`(chezpp net lws client)` owns one immutable LWS context and reactor for a transport key. The
+`(cspp net lws client)` owns one immutable LWS context and reactor for a transport key. The
 public library imports this shared client, not `http1.ss` or `http2.ss`. The shared client registers
 the operation before starting LWS, observes the negotiated protocol, and selects an HTTP/1 or H2
 event reducer. Both reducers consume the same named request and response records and reactor
@@ -337,15 +337,15 @@ The proposed native entry points have these responsibilities:
 
 | Native entry point | Result and ownership |
 | --- | --- |
-| `chezpp_lws_http_context_open` | Return a context handle or zero; preallocate all pools. |
-| `chezpp_lws_http_stream_start` | Copy a request into a free stream slot; return status. |
-| `chezpp_lws_http_body_submit` | Copy one outbound chunk; the writable callback owns its write. |
-| `chezpp_lws_http_body_consumed` | Release an inbound chunk and resume that WSI's receive flow. |
-| `chezpp_lws_http_stream_cancel` | Schedule asynchronous stream close; do not complete early. |
-| `chezpp_lws_http_stream_release` | Release only a detached terminal stream generation. |
-| `chezpp_lws_http_connection_close` | Schedule close of an idle authoritative network WSI. |
-| `chezpp_lws_http_context_next_event` | Remove and return one copied event wire vector. |
-| `chezpp_lws_http_context_close` | Stop admission, drain bounded close work, then destroy. |
+| `cspp_lws_http_context_open` | Return a context handle or zero; preallocate all pools. |
+| `cspp_lws_http_stream_start` | Copy a request into a free stream slot; return status. |
+| `cspp_lws_http_body_submit` | Copy one outbound chunk; the writable callback owns its write. |
+| `cspp_lws_http_body_consumed` | Release an inbound chunk and resume that WSI's receive flow. |
+| `cspp_lws_http_stream_cancel` | Schedule asynchronous stream close; do not complete early. |
+| `cspp_lws_http_stream_release` | Release only a detached terminal stream generation. |
+| `cspp_lws_http_connection_close` | Schedule close of an idle authoritative network WSI. |
+| `cspp_lws_http_context_next_event` | Remove and return one copied event wire vector. |
+| `cspp_lws_http_context_close` | Stop admission, drain bounded close work, then destroy. |
 
 `stream_start` receives operation id, logical stream id, generation, peer address, port, TLS flag,
 method, authority, path, encoded headers, body-presence flag, and ALPN policy. It does not receive a
@@ -413,16 +413,16 @@ Use the supported LWS callbacks and functions as follows:
 
 The optional loader requires every symbol used by the base HTTP/1 path, including
 `lws_get_network_wsi`, `lws_rx_flow_control`, and `lws_set_timeout`. Set
-`CHEZPP_LWS_CAP_HTTP2` only when the base symbols plus `lws_get_peer_write_allowance` and an
+`CSPP_LWS_CAP_HTTP2` only when the base symbols plus `lws_get_peer_write_allowance` and an
 H2-specific runtime symbol are present. `lws_h2_get_peer_txcredit_estimate` may serve as a compiled
 H2 feature probe, but it must never be called or interpreted as `SETTINGS_MAX_CONCURRENT_STREAMS`.
 
-`CHEZPP_LWS_CAP_HTTP2` means the runtime exposes the required H2 client surface; it does not mean a
+`CSPP_LWS_CAP_HTTP2` means the runtime exposes the required H2 client surface; it does not mean a
 peer supports H2. Observed ALPN or cleartext H2 readiness is the per-connection proof. The loader
-records the runtime version and exact missing symbol in its failure. Chezpp continues to load LWS
+records the runtime version and exact missing symbol in its failure. CSPP continues to load LWS
 dynamically, and linkage tests must show no direct `DT_NEEDED` entry for LWS or nghttp2.
 
-When `http-open` receives a Chezpp TLS context, pass its native `SSL_CTX` through
+When `http-open` receives a CSPP TLS context, pass its native `SSL_CTX` through
 `provided_client_ssl_ctx` while the LWS context is created. Retain the Scheme TLS context for at
 least the transport lifetime. Preserve its verification, CA, certificate, key, cipher, and ALPN
 configuration; do not reduce it to a boolean verification flag. The HTTP version policy may narrow
@@ -500,8 +500,8 @@ headers on a cross-origin redirect, then recompute policy headers and cookies fo
 
 ### HTTP/2 Architecture and Behavior
 
-`(chezpp net lws http2)` imports the reactor and private HTTP records directly. It must not import
-or wrap `(chezpp net lws http1)`. It is a reducer used by the shared LWS client. An H2 origin
+`(cspp net lws http2)` imports the reactor and private HTTP records directly. It must not import
+or wrap `(cspp net lws http1)`. It is a reducer used by the shared LWS client. An H2 origin
 scheduler owns queued operations and a set of native connection ids learned from callbacks. Each
 request is a distinct child WSI and logical stream; several child WSIs may map to one network WSI
 and therefore one connection id.
@@ -512,12 +512,12 @@ LWS maps their child WSIs onto an eligible network WSI. If `auto` observes HTTP/
 client routes that operation to the HTTP/1 reducer and applies HTTP/1 admission to later work.
 
 For the supported LWS 4.3+ public API, LWS parses peer SETTINGS and enforces remote stream
-admission. Chezpp applies a configured local stream bound in addition to LWS, but does not claim to
+admission. CSPP applies a configured local stream bound in addition to LWS, but does not claim to
 observe `SETTINGS_MAX_CONCURRENT_STREAMS`. `lws_get_peer_write_allowance` may bound bytes written on
 a writable callback; it is flow-control credit, not stream capacity.
 
 LWS also owns wire-level GOAWAY processing. The public API does not expose GOAWAY's last-stream id
-on the supported headers, so Chezpp must not synthesize it. When the network WSI enters closing or
+on the supported headers, so CSPP must not synthesize it. When the network WSI enters closing or
 is destroyed, stop admitting work to that connection. Preserve terminal results already delivered
 for child streams; fail or retry only work that LWS rejected before response headers, and retry only
 idempotent requests with replayable bodies and remaining deadline.
@@ -578,7 +578,7 @@ and close accepted sockets, ports, and listeners through `dynamic-wind`. Fixture
 reported through a synchronization object before the test joins the thread, so a failed client
 cannot leave an unbounded `thread-join`.
 
-Create `chezpp/c/net/lws_http2_fixture.c` only as a test-only libwebsockets server fixture. It must
+Create `src/cspp/c/net/lws_http2_fixture.c` only as a test-only libwebsockets server fixture. It must
 not use, link, or load nghttp2. It should support cleartext prior knowledge and TLS ALPN,
 configurable SETTINGS, delayed response consumption, stream reset, GOAWAY, and connection close.
 It writes physical accept count, stream ids, peak concurrency, received body bytes, and terminal
@@ -596,8 +596,8 @@ remains explicitly blocked rather than introducing an nghttp2 dependency.
 
 ## Task 1: Restore the Public HTTP API and a Runnable Focused Harness
 
-**Files:** create `chezpp/net/http/private.ss`; rewrite `chezpp/net/http.ss`; modify `chezpp.ss`,
-`chezpp/net/operation.ss`, `tests/net-operation.ss`, `tests/net-http.ss`,
+**Files:** create `src/cspp/net/http/private.ss`; rewrite `src/cspp/net/http.ss`; modify `src/cspp.ss`,
+`src/cspp/net/operation.ss`, `tests/net-operation.ss`, `tests/net-http.ss`,
 `tests/net-http-contract.ss`, and `tests/Makefile` only where required.
 
 **Interfaces:**
@@ -606,12 +606,12 @@ remains explicitly blocked rather than introducing an nghttp2 dependency.
 - Produces private named normalized-request, request-policy, and transport-response records. Do not
   use positional vectors or vector length as a versioned interface between public and transport
   libraries.
-- The public facade delegates to `(chezpp net lws client)` once Task 3 creates it. Protocol reducers
+- The public facade delegates to `(cspp net lws client)` once Task 3 creates it. Protocol reducers
   remain private behind that shared transport.
 
 - [x] Add a contract MAT that enumerates every retained export, checks representative arities and
-  record accessors, and confirms `http2-open` is absent from `(chezpp net)`.
-- [x] Remove `(chezpp net http2)` from `tests/net-http.ss`. Delete low-level memory-session MATs,
+  record accessors, and confirms `http2-open` is absent from `(cspp net)`.
+- [x] Remove `(cspp net http2)` from `tests/net-http.ss`. Delete low-level memory-session MATs,
   but retain all high-level H2 behavior MATs for Task 4.
 - [x] Run `make -C tests test-some TEST='net-http-contract net-http'` and confirm the expected red
   state is missing public procedures or behavior, not a missing Scheme library.
@@ -643,8 +643,8 @@ remains explicitly blocked rather than introducing an nghttp2 dependency.
 
 ## Task 2: Correct the Native LWS Connection and Transaction Boundary
 
-**Files:** rewrite as needed `chezpp/c/net/lws_http.[ch]`, `chezpp/net/lws/ffi.ss`, and
-`chezpp/net/lws/reactor.ss`; modify `tests/net-lws-reactor.ss`.
+**Files:** rewrite as needed `src/cspp/c/net/lws_http.[ch]`, `src/cspp/net/lws/ffi.ss`, and
+`src/cspp/net/lws/reactor.ss`; modify `tests/net-lws-reactor.ss`.
 
 **Interfaces:**
 
@@ -688,8 +688,8 @@ remains explicitly blocked rather than introducing an nghttp2 dependency.
 
 ## Task 3: Implement and Finish HTTP/1 on Libwebsockets
 
-**Files:** create `chezpp/net/lws/client.ss`; rewrite `chezpp/net/lws/http1.ss`; modify
-`chezpp/net/http.ss`, `chezpp.ss`, `chezpp/c/net/lws_http.[ch]`, `tests/net-http.ss`, and the
+**Files:** create `src/cspp/net/lws/client.ss`; rewrite `src/cspp/net/lws/http1.ss`; modify
+`src/cspp/net/http.ss`, `src/cspp.ss`, `src/cspp/c/net/lws_http.[ch]`, `tests/net-http.ss`, and the
 bounded HTTP/1 fixture helper.
 
 **Interfaces:**
@@ -743,9 +743,9 @@ bounded HTTP/1 fixture helper.
 
 ## Task 4: Implement Genuine HTTP/2 Multiplexing on Libwebsockets
 
-**Files:** create `chezpp/c/net/lws_http2_fixture.c`; rewrite `chezpp/net/lws/http2.ss` and H2
-parts of `chezpp/c/net/lws_http.[ch]`; modify `chezpp/net/lws/client.ss`,
-`chezpp/net/lws/reactor.ss`, `chezpp/net/http.ss`, `tests/net-http.ss`, and `tests/Makefile`.
+**Files:** create `src/cspp/c/net/lws_http2_fixture.c`; rewrite `src/cspp/net/lws/http2.ss` and H2
+parts of `src/cspp/c/net/lws_http.[ch]`; modify `src/cspp/net/lws/client.ss`,
+`src/cspp/net/lws/reactor.ss`, `src/cspp/net/http.ss`, `tests/net-http.ss`, and `tests/Makefile`.
 
 **Interfaces:**
 
@@ -754,7 +754,7 @@ parts of `chezpp/c/net/lws_http.[ch]`; modify `chezpp/net/lws/client.ss`,
 - Runs as a protocol reducer under the shared LWS client; it does not create a second context.
 - Produces one H2 transport per origin/policy key, with logical stream operations sharing its LWS
   network connection.
-- Uses LWS-observed ALPN and child/network WSI identity. LWS enforces peer SETTINGS; Chezpp applies
+- Uses LWS-observed ALPN and child/network WSI identity. LWS enforces peer SETTINGS; CSPP applies
   a local configured stream bound and does not report unavailable peer capacity.
 
 - [ ] Add failing MATs for TLS ALPN `h2`, cleartext prior knowledge, required-H2 refusal, two and
@@ -787,22 +787,22 @@ parts of `chezpp/c/net/lws_http.[ch]`; modify `chezpp/net/lws/client.ss`,
 
 ## Task 5: Remove Obsolete HTTP Adapters and Consolidate Tests
 
-**Files:** remove obsolete portions of `chezpp/net/ffi.ss`, `chezpp/c/net/http2.c`, and nghttp2
+**Files:** remove obsolete portions of `src/cspp/net/ffi.ss`, `src/cspp/c/net/http2.c`, and nghttp2
 loader integration when unused; modify `Makefile`, `tests/Makefile`, examples, and docs.
 
 - [ ] Classify every match from:
 
   ```bash
-  rg -n '\(chezpp net http2\)|http2-(open|send|receive|next-event|consume|reset|goaway)' \
-    chezpp tests examples docs
-  rg -n 'ffi-net-http2' chezpp tests examples docs
+  rg -n '\(cspp net http2\)|http2-(open|send|receive|next-event|consume|reset|goaway)' \
+    cspp tests examples docs
+  rg -n 'ffi-net-http2' cspp tests examples docs
   ```
 - [ ] Delete low-level Scheme FFI bindings, memory-session C code, and tests that exercise
-  serialized nghttp2 sessions. Retain high-level H2 behavior MATs through `(chezpp net http)`.
-- [ ] Retain `chezpp/c/net/lws_http2_fixture.c` as test-only libwebsockets code only. It must not
-  use, link, or load nghttp2, and it must not add any optional protocol dependency to `libchezpp.so`.
-- [x] Remove all Chezpp nghttp2 adapters, loader entries, FFI bindings, and build references.
-  No Chezpp feature may depend on nghttp2, even when libwebsockets is built with optional HTTP/2
+  serialized nghttp2 sessions. Retain high-level H2 behavior MATs through `(cspp net http)`.
+- [ ] Retain `src/cspp/c/net/lws_http2_fixture.c` as test-only libwebsockets code only. It must not
+  use, link, or load nghttp2, and it must not add any optional protocol dependency to `libcspp.so`.
+- [x] Remove all CSPP nghttp2 adapters, loader entries, FFI bindings, and build references.
+  No CSPP feature may depend on nghttp2, even when libwebsockets is built with optional HTTP/2
   support elsewhere.
 - [ ] Update examples to select protocol through the high-level client and inspect
   `http-response-version`.
@@ -810,9 +810,9 @@ loader integration when unused; modify `Makefile`, `tests/Makefile`, examples, a
 
 ## Task 6: Implement LWS HTTP/1 and HTTP/2 Servers
 
-**Files:** create `chezpp/net/lws/server.ss` and `tests/net-lws-server.ss`; extend
-`chezpp/c/net/lws_http.[ch]`, `chezpp/net/lws/ffi.ss`, `chezpp/net/lws/reactor.ss`,
-`chezpp/net/http.ss`, and `tests/Makefile`.
+**Files:** create `src/cspp/net/lws/server.ss` and `tests/net-lws-server.ss`; extend
+`src/cspp/c/net/lws_http.[ch]`, `src/cspp/net/lws/ffi.ss`, `src/cspp/net/lws/reactor.ss`,
+`src/cspp/net/http.ss`, and `tests/Makefile`.
 
 - [x] Add a separate LWS listening-context lifecycle; do not treat the existing
   `CONTEXT_PORT_NO_LISTEN` client context as a server.
@@ -828,8 +828,8 @@ loader integration when unused; modify `Makefile`, `tests/Makefile`, examples, a
 
 ## Task 7: Integrate Fiber Waiting After HTTP Is Stable
 
-**Files:** modify `chezpp/concurrency/fiber.ss`, `chezpp/net/operation.ss`, and
-`chezpp/net/lws/reactor.ss`; create `chezpp/concurrency/fiber-net.ss` and
+**Files:** modify `src/cspp/concurrency/fiber.ss`, `src/cspp/net/operation.ss`, and
+`src/cspp/net/lws/reactor.ss`; create `src/cspp/concurrency/fiber-net.ss` and
 `tests/net-http-fiber.ss`; modify `tests/Makefile`.
 
 - [x] Complete the separately specified fiber lifecycle fixes before making HTTP depend on fibers.
@@ -848,7 +848,7 @@ loader integration when unused; modify `Makefile`, `tests/Makefile`, examples, a
   timeouts; require empty stdout and stderr, not merely exit status zero.
 - [x] Run the complete network suite, public API/docs tests, optional-loader tests, and linkage
   tests.
-- [x] Verify with `ldd`, `nm -D`, and source/build scans that Chezpp has no LWS/nghttp2 dependency
+- [x] Verify with `ldd`, `nm -D`, and source/build scans that CSPP has no LWS/nghttp2 dependency
   and no nghttp2 references outside historical planning text.
 - [x] Audit connection, stream/transaction, event, signal, waiter, source, and sink lifetimes across
   success, failure, cancellation, timeout, close, reset, and GOAWAY using the focused live suites.

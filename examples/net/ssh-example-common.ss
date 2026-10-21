@@ -1,11 +1,11 @@
 ;; Shared SSH CLI, authentication, output draining, and lifecycle helpers.
-(import (chezpp system user))
+(import (cspp system user))
 (load "examples/net/net-example-common.ss")
 
 (define ssh-example-options '((port . "SSH server port, 0 through 65535 (default: 22).")
    (user . "Remote SSH username (default: current local user).")
-   (auth . "Authentication: publickey, agent, or password (default: publickey). Password uses CHEZPP_SSH_PASSWORD; agent uses SSH_AUTH_SOCK.")
-   (private-key . "Private key path for publickey auth (default: discover keys in ~/.ssh). Passphrase uses CHEZPP_SSH_PASSPHRASE.")))
+   (auth . "Authentication: publickey, agent, or password (default: publickey). Password uses CSPP_SSH_PASSWORD; agent uses SSH_AUTH_SOCK.")
+   (private-key . "Private key path for publickey auth (default: discover keys in ~/.ssh). Passphrase uses CSPP_SSH_PASSPHRASE.")))
 
 ;; All SSH examples share one required positional HOST and the same named options.
 (define ssh-example-command
@@ -17,7 +17,7 @@
       (command-options-add! command host)
       command)))
 
-;; ChezPP CLI consumes the remaining arguments at the first positional. Move named
+;; CSPP CLI consumes the remaining arguments at the first positional. Move named
 ;; options before HOST so either HOST --port=22 or --port=22 HOST works. Preserve
 ;; everything after -- verbatim for remote command words and escaped positionals.
 (define ssh-example-arguments
@@ -68,12 +68,12 @@
              (with-logger log (log-infof "opening SSH session to ~a:~a" host port))
              (cond
               [(string=? auth "password")
-               (let ([password (getenv "CHEZPP_SSH_PASSWORD")])
-                 (unless password (errorf who "set CHEZPP_SSH_PASSWORD for password auth"))
+               (let ([password (getenv "CSPP_SSH_PASSWORD")])
+                 (unless password (errorf who "set CSPP_SSH_PASSWORD for password auth"))
                  ;; Authenticate with an environment-supplied password.
                  (ssh-auth-password! session user password))]
               [(string=? auth "publickey")
-               (let ([key (ref 'private-key)] [passphrase (getenv "CHEZPP_SSH_PASSPHRASE")])
+               (let ([key (ref 'private-key)] [passphrase (getenv "CSPP_SSH_PASSPHRASE")])
                  (if key
                      ;; Load the explicitly selected private key, with optional passphrase.
                      (ssh-auth-private-key! session user #f key passphrase)

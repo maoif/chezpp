@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp digest))
+(import (cspp)
+        (cspp digest))
 
 (define fail
   (lambda (message)
@@ -43,10 +43,10 @@
      [(string=? dependency "xxhash")
       (if (string=? expected-fragment "success")
           (expect-loader-success dependency
-                                 (lambda () (xxhash32-string "chezpp"))
+                                 (lambda () (xxhash32-string "cspp"))
                                  integer?)
           (expect-loader-error dependency expected-fragment
-                               (lambda () (xxhash32-string "chezpp"))))]
+                               (lambda () (xxhash32-string "cspp"))))]
      [(string=? dependency "blake3")
       (if (string=? expected-fragment "success")
           (expect-loader-success dependency
@@ -75,5 +75,5 @@
                                                      (string=? digest expected))
                                                    result)))))
           (expect-loader-error dependency expected-fragment
-                               (lambda () (blake3-string "chezpp"))))]
+                               (lambda () (blake3-string "cspp"))))]
      [else (fail (format "unknown dependency: ~a" dependency))])))

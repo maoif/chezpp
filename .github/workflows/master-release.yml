@@ -75,7 +75,7 @@ jobs:
               test "${#archives[@]}" -eq 1
               mkdir -p "/tmp/relocated package"
               tar xzf "${archives[0]}" -C "/tmp/relocated package"
-              launchers=(/tmp/relocated\ package/*/bin/chez++)
+              launchers=(/tmp/relocated\ package/*/bin/cspp)
               test "${#launchers[@]}" -eq 1
               cd /
               "${launchers[0]}" --script=/smoke.ss
@@ -83,25 +83,25 @@ jobs:
       - name: Upload verified package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: chezpp-linux-${{ matrix.arch }}
+          name: cspp-linux-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
           retention-days: 7
 
   release:
-    name: Publish rolling master prerelease
+    name: Publish per-commit master prerelease
     needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     concurrency:
-      group: master-publish
+      group: master-publish-${{ github.sha }}
       cancel-in-progress: false
     steps:
       - name: Download all tested packages
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: chezpp-linux-*
+          pattern: cspp-linux-*
           merge-multiple: true
           path: dist
       - name: Verify and publish packages together
@@ -110,11 +110,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          current_master=$(gh api "repos/$GH_REPO/git/ref/heads/master" --jq '.object.sha')
-          if [ "$current_master" != "$GITHUB_SHA" ]; then
-            echo 'Skipping superseded master snapshot.'
-            exit 0
-          fi
           cd dist
           python3 - <<'PY'
           import glob, json, os, tarfile
@@ -140,43 +135,40 @@ jobs:
               raise SystemExit('package architecture/version mismatch')
           with open('release-notes.md', 'w') as notes:
               notes.write(f"Master snapshot of `{os.environ['GITHUB_SHA']}`.\n\n")
-              notes.write(f"Chezpp version: `{versions.pop()}`.\n\n")
+              notes.write(f"CSPP version: `{versions.pop()}`.\n\n")
               notes.write('Linux packages built on Ubuntu 24.04 for x64, arm64, and riscv64, '
                           'and Loongnix Debian for loongarch64. All non-net tests passed on '
                           'every architecture. RISC-V and LoongArch use QEMU.\n\n')
               for arch in sorted(requirements):
                   notes.write(f"- `{arch}`: {', '.join(requirements[arch])}.\n")
-              notes.write('\nExtract an archive anywhere and run `bin/chez++` on the '
+              notes.write('\nExtract an archive anywhere and run `bin/cspp` on the '
                           'matching CPU architecture. Recursive shared '
                           'library dependencies are bundled, except host glibc and its loader. '
                           'Build metadata is included.\n')
           PY
-          release_title="Chezpp master snapshot (${GITHUB_SHA:0:7})"
-          existing_release=false
-          if gh release view master > /dev/null 2>&1; then
-            existing_release=true
-            # Publication cannot be canceled by a newer build. Hide the release while
-            # replacing the whole set, including obsolete versioned filenames.
-            gh release edit master --draft
-          fi
-          # Move only the rolling tag; versioned tags are untouched.
-          if gh api "repos/$GH_REPO/git/ref/tags/master" > /dev/null 2>&1; then
-            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/master" \
-              -f sha="$GITHUB_SHA" -F force=true
+          release_title="CSPP master snapshot (${GITHUB_SHA:0:7})"
+          release_tag="master-$GITHUB_SHA"
+          if gh api "repos/$GH_REPO/git/ref/tags/$release_tag" > /dev/null 2>&1; then
+            :
           else
             gh api --method POST "repos/$GH_REPO/git/refs" \
-              -f ref=refs/tags/master -f sha="$GITHUB_SHA"
+              -f ref="refs/tags/$release_tag" -f sha="$GITHUB_SHA"
           fi
-          if [ "$existing_release" = true ]; then
-            gh release view master --json assets --jq '.assets[].name' | \
-              while IFS= read -r asset; do
-                gh release delete-asset master "$asset" --yes
-              done
-            gh release upload master ./*.tar.gz
-            gh release edit master --draft=false --prerelease --latest=false \
+          if gh release view "$release_tag" > /dev/null 2>&1; then
+            existing_assets=$(gh release view "$release_tag" --json assets --jq '.assets[].name')
+            for archive in ./*.tar.gz; do
+              archive=${archive#./}
+              asset="$archive"
+              if grep -Fxq "$asset" <<< "$existing_assets"; then
+                echo "Keeping existing release asset: $asset"
+                continue
+              fi
+              gh release upload "$release_tag" "$archive"
+            done
+            gh release edit "$release_tag" --draft=false --prerelease --latest=false \
               --title "$release_title" --notes-file release-notes.md
           else
-            gh release create master ./*.tar.gz --verify-tag \
+            gh release create "$release_tag" ./*.tar.gz --verify-tag \
               --prerelease --latest=false --title "$release_title" \
               --notes-file release-notes.md
           fi

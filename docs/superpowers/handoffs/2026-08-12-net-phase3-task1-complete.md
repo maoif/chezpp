@@ -7,12 +7,12 @@ The next work is Task 3, FTP metadata, FTPS modes, resume policy, and recursion.
 
 ## Completed Contract
 
-`(chezpp net transfer)` exports an immutable `transfer-policy` record. Resume accepts `never`,
+`(cspp net transfer)` exports an immutable `transfer-policy` record. Resume accepts `never`,
 `resume`, or an exact nonnegative offset. Overwrite accepts `error`, `replace`, or `skip`. Chunk
 size must be positive. The optional progress procedure receives protocol, direction, path,
 completed bytes, and total bytes or `#f`.
 
-The aggregate `(chezpp net)` library exports the transfer library, and `tests/net-transfer.ss` is
+The aggregate `(cspp net)` library exports the transfer library, and `tests/net-transfer.ss` is
 wired into the standard network test set.
 
 ## Verification
@@ -22,7 +22,7 @@ The following passed on 2026-08-12:
 ```bash
 make clean && make
 cd tests && make test-some TEST='net-transfer net-ftp net-ssh net-sftp net-scp'
-scheme --script tools/check-scheme-balance.ss chezpp/net/transfer.ss tests/net-transfer.ss
+scheme --script tools/check-scheme-balance.ss src/cspp/net/transfer.ss tests/net-transfer.ss
 git diff --check
 ```
 
@@ -57,4 +57,4 @@ only through the explicit raw-list API required by the plan.
 ## Preserved User-Owned Paths
 
 Do not modify, stage, or revert the paths listed in the Phase 2 completion handoff. In particular,
-`chezpp/parser.ss` and the older untracked handoff documents remain user-owned.
+`src/cspp/parser.ss` and the older untracked handoff documents remain user-owned.

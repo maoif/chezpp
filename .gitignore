@@ -8,14 +8,14 @@
 .worktrees/
 __pycache__/
 /dist/
-chez++
-chez++.ss
-libchezpp.so
+/cspp
+/bin/cspp
+libcspp.so
 test_*
 tests/lws-http2-fixture
-.chezpp-build-options
-.chezpp-native-options.mk
-.chezpp-native-options.mk.tmp.*
+.cspp-build-options
+.cspp-native-options.mk
+.cspp-native-options.mk.tmp.*
 /.chezscheme-build/
 /.chezscheme-install/
 /scheme
@@ -24,5 +24,5 @@ tests/lws-http2-fixture
 /petite.boot
 /scheme.h
 
-chezpp/c/build-config.h
-chezpp/c/build-config.h.tmp.*
+src/cspp/c/build-config.h
+src/cspp/c/build-config.h.tmp.*

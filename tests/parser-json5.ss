@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp parser json5))
+(import (cspp)
+        (cspp parser json5))
 
 (include "parser-external-tools.ss")
 

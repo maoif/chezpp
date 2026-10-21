@@ -1,8 +1,8 @@
 /* Real LWS timer callbacks exercise the adapter's conditional runtime lock.
  * Feature-selection headers used by the runner change only the guard policy,
  * after the dependency has declared its ABI. No LWS functions are mocked. */
-#include "../chezpp/c/net/lws_http.h"
-#include "../chezpp/c/net/lws_loader.h"
+#include "../src/cspp/c/net/lws_http.h"
+#include "../src/cspp/c/net/lws_loader.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -35,14 +35,14 @@ static void timer_callback(lws_sorted_usec_list_t *timer) {
     struct lws_context_creation_info info = {0};
     lws_log_cx_t log_context = {.u.emit = lwsl_emit_stderr};
     struct lws_context *nested;
-    (void)chezpp_lws_http_context_timeout_ms((uintptr_t)&state->adapter, 1);
+    (void)cspp_lws_http_context_timeout_ms((uintptr_t)&state->adapter, 1);
     /* Lifecycle calls and service must share a reentrant gate, too. */
     info.port = CONTEXT_PORT_NO_LISTEN;
     info.log_cx = &log_context;
     info.fd_limit_per_thread = 16;
-    nested = chezpp_lws_create_context(&info);
+    nested = cspp_lws_create_context(&info);
     if (!nested) abort();
-    chezpp_lws_context_destroy(nested);
+    cspp_lws_context_destroy(nested);
 #if LWS_MAX_SMP > 1
     if (log_context.inited == 2) pthread_mutex_destroy(&log_context.refcount_lock);
 #endif
@@ -57,7 +57,7 @@ static void timer_callback(lws_sorted_usec_list_t *timer) {
 static void *service(void *argument) {
   worker *state = argument;
   pthread_barrier_wait(&start);
-  if (chezpp_lws_http_context_service_fd((uintptr_t)&state->adapter, -1, 0) < 0)
+  if (cspp_lws_http_context_service_fd((uintptr_t)&state->adapter, -1, 0) < 0)
     abort();
   return NULL;
 }
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     info.port = CONTEXT_PORT_NO_LISTEN;
     info.log_cx = &states[index].adapter.log_context;
     info.fd_limit_per_thread = 16;
-    states[index].adapter.lws = chezpp_lws_create_context(&info);
+    states[index].adapter.lws = cspp_lws_create_context(&info);
     if (!states[index].adapter.lws) return 2;
     states[index].reenter = 1;
     lws_sul_schedule(states[index].adapter.lws, 0, &states[index].timer, timer_callback, 1);
@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     if (pthread_create(&threads[index], NULL, service, &states[index])) return 2;
   for (int index = 0; index < 2; index++) {
     pthread_join(threads[index], NULL);
-    chezpp_lws_context_destroy(states[index].adapter.lws);
+    cspp_lws_context_destroy(states[index].adapter.lws);
 #if LWS_MAX_SMP > 1
     if (states[index].adapter.log_context.inited == 2)
       pthread_mutex_destroy(&states[index].adapter.log_context.refcount_lock);

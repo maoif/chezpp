@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "net-common.ss")
 (load "net-ftp-common.ss")
@@ -289,7 +289,7 @@
      (mat-requires (curl)
        (let-values ([(root port stop-server) (start-ftp-test-server)])
          (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
-               [download-path "/tmp/chezpp-net-ftp-download.txt"])
+               [download-path "/tmp/cspp-net-ftp-download.txt"])
            (dynamic-wind
              (lambda ()
                (when (file-exists? download-path)
@@ -309,7 +309,7 @@
      (mat-requires (curl)
        (let-values ([(root port stop-server) (start-ftp-test-server)])
          (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
-               [upload-path "/tmp/chezpp-net-ftp-upload.txt"]
+               [upload-path "/tmp/cspp-net-ftp-upload.txt"]
                [uploaded-path (string-append root "/uploaded.txt")])
            (dynamic-wind
              (lambda ()
@@ -566,7 +566,7 @@
      (mat-requires (curl)
        (let-values ([(root port stop-server) (start-ftp-test-server)])
          (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
-               [download-path "/tmp/chezpp-net-ftp-download-nb.txt"])
+               [download-path "/tmp/cspp-net-ftp-download-nb.txt"])
            (dynamic-wind
              (lambda ()
                (when (file-exists? download-path)
@@ -590,7 +590,7 @@
      (mat-requires (curl)
        (let-values ([(root port stop-server) (start-ftp-test-server)])
          (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
-               [upload-path "/tmp/chezpp-net-ftp-upload-nb.txt"]
+               [upload-path "/tmp/cspp-net-ftp-upload-nb.txt"]
                [uploaded-path (string-append root "/uploaded-nb.txt")])
            (dynamic-wind
              (lambda ()
@@ -619,7 +619,7 @@
      (mat-requires (curl)
        (let-values ([(root port stop-server) (start-ftp-test-server)])
          (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
-               [download-path "/tmp/chezpp-net-ftp-cancelled-download.bin"])
+               [download-path "/tmp/cspp-net-ftp-cancelled-download.bin"])
            (dynamic-wind
              (lambda ()
                (when (file-exists? download-path)
@@ -720,8 +720,8 @@
      (mat-requires (curl)
        (let-values ([(root port stop-server) (start-ftp-test-server)])
          (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
-               [download-path "/tmp/chezpp-net-ftp-resume-download.bin"]
-               [upload-path "/tmp/chezpp-net-ftp-resume-upload.bin"]
+               [download-path "/tmp/cspp-net-ftp-resume-download.bin"]
+               [upload-path "/tmp/cspp-net-ftp-resume-upload.bin"]
                [progress '()])
            (dynamic-wind
              (lambda ()
@@ -761,7 +761,7 @@
      (mat-requires (curl)
        (with-test-ftp-session
         (lambda (session)
-          (let ([path "/tmp/chezpp-net-ftp-policy.bin"])
+          (let ([path "/tmp/cspp-net-ftp-policy.bin"])
             (dynamic-wind
               (lambda () (write-bytevector-file path (string->utf8 "keep")))
               (lambda ()
@@ -799,8 +799,8 @@
      (mat-requires (curl)
        (let-values ([(root port stop-server) (start-ftp-test-server)])
          (let ([session (ftp-open (format "ftp://127.0.0.1:~a/" port))]
-               [source "/tmp/chezpp-net-ftp-tree-source"]
-               [dest "/tmp/chezpp-net-ftp-tree-dest"])
+               [source "/tmp/cspp-net-ftp-tree-source"]
+               [dest "/tmp/cspp-net-ftp-tree-dest"])
            (dynamic-wind
              (lambda ()
                (when (file-exists? source) (file-removetree source #f))
@@ -829,7 +829,7 @@
      (mat-requires (curl)
        (with-test-ftp-session
         (lambda (session)
-          (let ([source "/tmp/chezpp-net-ftp-link-source"])
+          (let ([source "/tmp/cspp-net-ftp-link-source"])
             (dynamic-wind
               (lambda ()
                 (when (file-exists? source) (file-removetree source #f))
@@ -845,7 +845,7 @@
      ;; Error case: reading stdin before announcing readiness deadlocks the shared console port.
      (let-values ([(input output errors pid)
                    (open-process-ports
-                    "timeout 5s ../chez++ --script=net-ftp-startup-process.ss /tmp/chezpp-ftp-startup"
+                    "timeout 5s ../cspp --script=net-ftp-startup-process.ss /tmp/cspp-ftp-startup"
                     (buffer-mode block) (native-transcoder))])
        (dynamic-wind
          void

@@ -38,21 +38,21 @@ balance, native linkage audit, local transfer verification, and both pinned exte
 
 ## File Structure
 
-- Modify `chezpp/c/nghttp2_loader.c` to require the remote-settings query symbol.
-- Modify `chezpp/c/net/http2.c` to expose peer stream capacity and settings events.
-- Modify `chezpp/net/ffi.ss` to bind the internal C query.
-- Modify `chezpp/net/http2.ss` to wrap and document the internal settings API.
-- Modify `chezpp/net/http.ss` to own queued request states and cooperative scheduling.
+- Modify `src/cspp/c/nghttp2_loader.c` to require the remote-settings query symbol.
+- Modify `src/cspp/c/net/http2.c` to expose peer stream capacity and settings events.
+- Modify `src/cspp/net/ffi.ss` to bind the internal C query.
+- Modify `src/cspp/net/http2.ss` to wrap and document the internal settings API.
+- Modify `src/cspp/net/http.ss` to own queued request states and cooperative scheduling.
 - Modify `tests/net-loader.ss` to test the adapter query and settings event.
 - Modify `tests/net-http.ss` to test queueing, wait order, cancellation, failure, and parity.
 
 ### Task 1: Expose Peer Concurrent-Stream Settings
 
 **Files:**
-- Modify: `chezpp/c/nghttp2_loader.c`
-- Modify: `chezpp/c/net/http2.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/http2.ss`
+- Modify: `src/cspp/c/nghttp2_loader.c`
+- Modify: `src/cspp/c/net/http2.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/http2.ss`
 - Test: `tests/net-loader.ss`
 
 - [ ] **Step 1: Write the failing adapter test**
@@ -89,12 +89,12 @@ Expected: compilation fails because `http2-peer-max-concurrent-streams` is unbou
 - [ ] **Step 3: Load and query the nghttp2 setting**
 
 Add `nghttp2_session_get_remote_settings` to `required_symbols` in
-`chezpp/c/nghttp2_loader.c`. In `chezpp/c/net/http2.c`, define
+`src/cspp/c/nghttp2_loader.c`. In `src/cspp/c/net/http2.c`, define
 `typedef uint32_t (*remote_settings_fn)(nghttp2_session *, nghttp2_settings_id);`, load the symbol
 into `p_session_get_remote_settings`, and expose:
 
 ```c
-ptr chezpp_net_http2_peer_max_concurrent_streams(uptr handle) {
+ptr cspp_net_http2_peer_max_concurrent_streams(uptr handle) {
   h2_session *state = (h2_session *)TO_VOIDP(handle);
   uint32_t value;
   if (state == NULL) return h2_error("invalid HTTP/2 session");
@@ -110,8 +110,8 @@ Extend `on_frame` to call `push_event(state, 6, 0, frame->hd.flags, NULL, 0)` fo
 
 - [ ] **Step 4: Bind and wrap the query**
 
-Export and define `ffi-net-http2-peer-max-concurrent-streams` in `chezpp/net/ffi.ss`. Export and
-document this procedure in `chezpp/net/http2.ss`:
+Export and define `ffi-net-http2-peer-max-concurrent-streams` in `src/cspp/net/ffi.ss`. Export and
+document this procedure in `src/cspp/net/http2.ss`:
 
 ```scheme
 #|proc:http2-peer-max-concurrent-streams
@@ -135,7 +135,7 @@ Run:
 ```bash
 make clean && make
 make -C tests test-some TEST=net-loader
-python3 ../../check_parentheses.py chezpp/net/ffi.ss chezpp/net/http2.ss tests/net-loader.ss
+python3 ../../check_parentheses.py src/cspp/net/ffi.ss src/cspp/net/http2.ss tests/net-loader.ss
 ```
 
 Expected: build succeeds; test stdout and stderr are empty; balance check succeeds.
@@ -143,8 +143,8 @@ Expected: build succeeds; test stdout and stderr are empty; balance check succee
 - [ ] **Step 6: Commit**
 
 ```bash
-git add chezpp/c/nghttp2_loader.c chezpp/c/net/http2.c chezpp/net/ffi.ss \
-  chezpp/net/http2.ss tests/net-loader.ss
+git add src/cspp/c/nghttp2_loader.c src/cspp/c/net/http2.c src/cspp/net/ffi.ss \
+  src/cspp/net/http2.ss tests/net-loader.ss
 git commit -m "net: expose HTTP/2 peer stream capacity"
 ```
 
@@ -204,7 +204,7 @@ git commit -m "net: reproduce cooperative HTTP/2 scheduling stall"
 ### Task 3: Introduce Request States And The Cooperative Scheduler
 
 **Files:**
-- Modify: `chezpp/net/http.ss`
+- Modify: `src/cspp/net/http.ss`
 - Test: `tests/net-http.ss`
 
 - [ ] **Step 1: Add progress-order and queue-cancellation assertions**
@@ -305,7 +305,7 @@ make -C tests test-some TEST=net-loader
 for run in 1 2 3 4 5; do
   timeout 30s make -C tests test-some TEST=net-http || exit $?
 done
-python3 ../../check_parentheses.py chezpp/net/http.ss tests/net-http.ss
+python3 ../../check_parentheses.py src/cspp/net/http.ss tests/net-http.ss
 ```
 
 Expected: build succeeds and five fresh `net-http` runs exit 0 with empty capture files.
@@ -313,14 +313,14 @@ Expected: build succeeds and five fresh `net-http` runs exit 0 with empty captur
 - [ ] **Step 9: Commit**
 
 ```bash
-git add chezpp/net/http.ss tests/net-http.ss
+git add src/cspp/net/http.ss tests/net-http.ss
 git commit -m "net: drive HTTP/2 requests through one scheduler"
 ```
 
 ### Task 4: Complete Cancellation And Failure Semantics
 
 **Files:**
-- Modify: `chezpp/net/http.ss`
+- Modify: `src/cspp/net/http.ss`
 - Test: `tests/net-http.ss`
 
 - [ ] **Step 1: Add failing lifecycle mats**
@@ -352,7 +352,7 @@ Run:
 ```bash
 make clean && make
 make -C tests test-some TEST='net-operation net-loader net-http'
-python3 ../../check_parentheses.py chezpp/net/http.ss tests/net-http.ss
+python3 ../../check_parentheses.py src/cspp/net/http.ss tests/net-http.ss
 ```
 
 Expected: exit 0 and empty stdout/stderr captures.
@@ -360,7 +360,7 @@ Expected: exit 0 and empty stdout/stderr captures.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add chezpp/net/http.ss tests/net-http.ss
+git add src/cspp/net/http.ss tests/net-http.ss
 git commit -m "net: complete HTTP/2 scheduler lifecycle handling"
 ```
 
@@ -373,8 +373,8 @@ git commit -m "net: complete HTTP/2 scheduler lifecycle handling"
 
 ```bash
 make clean && make
-python3 ../../check_parentheses.py chezpp/net/ffi.ss chezpp/net/http2.ss \
-  chezpp/net/http.ss tests/net-loader.ss tests/net-http.ss
+python3 ../../check_parentheses.py src/cspp/net/ffi.ss src/cspp/net/http2.ss \
+  src/cspp/net/http.ss tests/net-loader.ss tests/net-http.ss
 ```
 
 - [ ] **Step 2: Stress the original failure**

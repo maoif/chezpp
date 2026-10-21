@@ -18,12 +18,12 @@
                       (thunk)))))])
         (parameterize
             ([compile-file-message #t]
-             ;; Chez recursively compiles every library reachable from chezpp.ss.
+             ;; Chez recursively compiles every library reachable from src/cspp.ss.
              [compile-imported-libraries #t])
           (compile-with-options
-           (lambda () (time ((compile-library-handler) "chezpp.ss" "chezpp.so"))))
+           (lambda () (time ((compile-library-handler) "src/cspp.ss" "src/cspp.so"))))
           (compile-with-options
            (lambda ()
-             (let ([dependencies (compile-whole-library "chezpp.wpo" "chezpp.lib")])
+             (let ([dependencies (compile-whole-library "src/cspp.wpo" "cspp.lib")])
                (when (and (equal? wpo "t") (not (null? dependencies)))
-                 (errorf "chezpp.lib" "dependency has to be null"))))))))))
+                 (errorf "cspp.lib" "dependency has to be null"))))))))))

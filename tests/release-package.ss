@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (load "tools/package-release.ss")
 
@@ -29,7 +29,7 @@
 
 (define with-fixture
   (lambda (procedure)
-    (let* ([root (pkg-trim (pkg-command "mktemp" "-d" "/tmp/chezpp-package-test.'XXXXXXXX"))]
+    (let* ([root (pkg-trim (pkg-command "mktemp" "-d" "/tmp/cspp-package-test.'XXXXXXXX"))]
            [prefix (string-append root "/installed")]
            [external (string-append root "/external")])
       (dynamic-wind
@@ -126,10 +126,10 @@
     (file-symlink "../lib/probe" (string-append prefix "/bin/probe"))
     (let ([archive (string-append root "/archive.tar.gz")]
           [destination (string-append root "/extracted")])
-      (pkg-create-archive prefix archive "chezpp-fixture")
+      (pkg-create-archive prefix archive "cspp-fixture")
       (mkdirs destination)
       (pkg-command "tar" "-xzf" archive "-C" destination)
-      (let ([probe (string-append destination "/chezpp-fixture/bin/probe")])
+      (let ([probe (string-append destination "/cspp-fixture/bin/probe")])
         (check (string=? "../lib/probe" (readlink probe)) "archive rewrote symlink target")
         (pkg-command probe)))))
 

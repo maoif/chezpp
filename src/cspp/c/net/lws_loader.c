@@ -1,0 +1,205 @@
+#include "lws_loader.h"
+#include "../common.h"
+#include "../build-config.h"
+#if CSPP_WITH_WEBSOCKETS
+#include <libwebsockets.h>
+#include <pthread.h>
+
+/* Even with a private `log_cx`, LWS 4.5 creates its internal `system` vhost
+ * against the default logging context. With `LWS_MAX_SMP=1`, its refcount is
+ * non-atomic. Share this lock across HTTP, WebSocket, and lifetime contexts;
+ * separate adapter locks cannot protect the dependency's shared counter.
+ * Ordinary configurations use private log contexts during service. Builds with
+ * system networking or JIT trust may bind additional objects to the global log
+ * during connection setup, timer callbacks, reads, or WSI destruction. Their
+ * callback-capable entry points must also acquire this same gate. */
+static pthread_mutex_t lws_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local unsigned lws_runtime_depth;
+static pthread_once_t lws_logging_once = PTHREAD_ONCE_INIT;
+
+static void initialize_lws_logging(void) {
+  /* Legacy `lwsl_*` paths still read the non-atomic global flags even when a
+   * context has private logging. A setter-only mutex cannot protect those reads
+   * during concurrent service. Configure the global log once before the first
+   * context can exist, then keep it immutable. Adapter-specific log levels belong
+   * to private log contexts, including `CSPP_WS_LOGLEVEL` for WebSocket. */
+  lws_set_log_level(0, NULL);
+}
+
+#if LWS_MAX_SMP == 1 && (defined(LWS_WITH_TLS_JIT_TRUST) || \
+    defined(LWS_WITH_SYS_ASYNC_DNS) || defined(LWS_WITH_SYS_DHCP_CLIENT) || \
+    defined(LWS_WITH_SYS_NTPCLIENT))
+#define CSPP_LWS_GUARD_RUNTIME 1
+#else
+#define CSPP_LWS_GUARD_RUNTIME 0
+#endif
+
+static void enter_lws_runtime(void) {
+  /* Native callbacks can reenter an adapter helper on this OS thread. Count
+   * nesting instead of taking the nonrecursive mutex twice. No Scheme code or
+   * continuation runs within these calls. The outer entry always releases it. */
+  if (lws_runtime_depth++ == 0) pthread_mutex_lock(&lws_runtime_mutex);
+}
+
+static void leave_lws_runtime(void) {
+  if (--lws_runtime_depth == 0) pthread_mutex_unlock(&lws_runtime_mutex);
+}
+
+static void enter_lws_service(void) {
+  if (CSPP_LWS_GUARD_RUNTIME) enter_lws_runtime();
+}
+
+static void leave_lws_service(void) {
+  if (CSPP_LWS_GUARD_RUNTIME) leave_lws_runtime();
+}
+
+struct lws_context *cspp_lws_create_context(
+    const struct lws_context_creation_info *information) {
+  struct lws_context *context;
+  /* Both adapters and their lifetime contexts enter here. Complete initialization
+   * before LWS can log or dispatch callbacks; nested creation sees a completed once. */
+  pthread_once(&lws_logging_once, initialize_lws_logging);
+  enter_lws_runtime();
+  context = lws_create_context(information);
+  leave_lws_runtime();
+  return context;
+}
+
+void cspp_lws_context_destroy(struct lws_context *context) {
+  enter_lws_runtime();
+  lws_context_destroy(context);
+  leave_lws_runtime();
+}
+
+/* Do not hold the gate across the adapters' OS poll waits. Every service call
+ * below is bounded by the caller, which uses LWS's nonblocking timeout `-1`.
+ * Keep the wrappers here so HTTP and WebSocket cannot accidentally use separate
+ * locks. The feature-disabled path compiles to a direct dependency call. */
+int cspp_lws_service_tsi(struct lws_context *context, int timeout_ms, int tsi) {
+  int result;
+  enter_lws_service();
+  result = lws_service_tsi(context, timeout_ms, tsi);
+  leave_lws_service();
+  return result;
+}
+
+int cspp_lws_service_fd(struct lws_context *context, struct lws_pollfd *descriptor) {
+  int result;
+  enter_lws_service();
+  result = lws_service_fd(context, descriptor);
+  leave_lws_service();
+  return result;
+}
+
+int cspp_lws_service_adjust_timeout(struct lws_context *context, int timeout_ms, int tsi) {
+  int result;
+  enter_lws_service();
+  /* This also initializes protocols and can dispatch SMD / timer callbacks. */
+  result = lws_service_adjust_timeout(context, timeout_ms, tsi);
+  leave_lws_service();
+  return result;
+}
+
+struct lws *cspp_lws_client_connect_via_info(
+    const struct lws_client_connect_info *information) {
+  struct lws *result;
+  enter_lws_service();
+  result = lws_client_connect_via_info(information);
+  leave_lws_service();
+  return result;
+}
+
+int cspp_lws_http_client_read(struct lws *wsi, char **buffer, int *length) {
+  int result;
+  enter_lws_service();
+  result = lws_http_client_read(wsi, buffer, length);
+  leave_lws_service();
+  return result;
+}
+
+int cspp_lws_rx_flow_control(struct lws *wsi, int enable) {
+  int result;
+  enter_lws_service();
+  result = lws_rx_flow_control(wsi, enable);
+  leave_lws_service();
+  return result;
+}
+
+int cspp_lws_callback_on_writable(struct lws *wsi) {
+  int result;
+  enter_lws_service();
+  result = lws_callback_on_writable(wsi);
+  leave_lws_service();
+  return result;
+}
+
+void cspp_lws_set_timeout(struct lws *wsi, enum pending_timeout reason, int seconds) {
+  enter_lws_service();
+  /* `LWS_TO_KILL_SYNC` can destroy a WSI and invoke close callbacks immediately. */
+  lws_set_timeout(wsi, reason, seconds);
+  leave_lws_service();
+}
+
+void cspp_lws_cancel_service(struct lws_context *context) {
+  enter_lws_service();
+  lws_cancel_service(context);
+  leave_lws_service();
+}
+#endif
+int cspp_lws_available(void) {
+#if CSPP_WITH_WEBSOCKETS
+  unsigned major, minor, patch;
+  const char *version = lws_get_library_version();
+  return version != NULL && sscanf(version, "%u.%u.%u", &major, &minor, &patch) == 3 &&
+         (major > 4 || (major == 4 && minor >= 3));
+#else
+  return 0;
+#endif
+}
+unsigned cspp_lws_capabilities(void) {
+  unsigned capabilities = 0;
+#if CSPP_WITH_WEBSOCKETS
+  if (!cspp_lws_available()) return 0;
+  capabilities = CSPP_LWS_CAP_HTTP1 | CSPP_LWS_CAP_EXTERNAL_POLL;
+#if defined(LWS_ROLE_H2) || defined(LWS_WITH_HTTP2)
+  capabilities |= CSPP_LWS_CAP_HTTP2;
+#endif
+#if defined(LWS_WITH_TLS)
+  capabilities |= CSPP_LWS_CAP_TLS;
+#endif
+#if defined(LWS_WITH_SOCKS5)
+  capabilities |= CSPP_LWS_CAP_SOCKS5;
+#endif
+#endif
+  return capabilities;
+}
+const char *cspp_lws_error(void) {
+#if CSPP_WITH_WEBSOCKETS
+  return cspp_lws_available() ? "" : "libwebsockets HTTP requires version >= 4.3.0";
+#else
+  return "websockets: disabled at build time";
+#endif
+}
+const char *cspp_lws_version(void) {
+#if CSPP_WITH_WEBSOCKETS
+  return lws_get_library_version();
+#else
+  return NULL;
+#endif
+}
+
+ptr cspp_lws_status(void) {
+  ptr result = Smake_vector(4, Sfalse);
+  int available = cspp_lws_available();
+  const char *version = cspp_lws_version();
+  const char *error = cspp_lws_error();
+
+  Svector_set(result, 0, available ? Strue : Sfalse);
+  Svector_set(result, 1, Sfixnum((iptr)cspp_lws_capabilities()));
+  Svector_set(result, 2,
+              version == NULL || version[0] == '\0' ? Sfalse
+                                                      : Sstring(version));
+  Svector_set(result, 3,
+              error == NULL || error[0] == '\0' ? Sfalse : Sstring(error));
+  return result;
+}

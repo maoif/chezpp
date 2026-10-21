@@ -6,9 +6,9 @@ Updated: 2026-05-09
 ## Goal
 
 Rich is a ChezScheme terminal rendering library modeled on Python Rich's core
-features, adapted to Chezpp conventions. It provides styled output, structured
+features, adapted to CSPP conventions. It provides styled output, structured
 renderables, live terminal refresh, progress bars, prompts, and export helpers
-through the public `(chezpp rich)` facade and the aggregate `(chezpp)` import.
+through the public `(cspp rich)` facade and the aggregate `(cspp)` import.
 
 The v1 scope intentionally excludes markup parsing, markdown, syntax
 highlighting, logging, traceback rendering, and concrete `inspect`/`json`
@@ -51,34 +51,34 @@ an identifier. Mutators remain ordinary procedures.
 
 ## Module Map
 
-`(chezpp rich)` is the public Rich facade. `chezpp.ss` imports and exports it so
-users can also import the complete `(chezpp)` surface.
+`(cspp rich)` is the public Rich facade. `src/cspp.ss` imports and exports it so
+users can also import the complete `(cspp)` surface.
 
 Implementation libraries:
 
-- `(chezpp rich style)`: style records, reset objects, ANSI encoding fragments,
+- `(cspp rich style)`: style records, reset objects, ANSI encoding fragments,
   color validation, and themes.
-- `(chezpp rich segment)`: styled text segments, control segments, visible-width
+- `(cspp rich segment)`: styled text segments, control segments, visible-width
   measurement, wrapping, cropping, and ANSI stripping.
-- `(chezpp rich renderable)`: render protocol predicates and custom renderer
+- `(cspp rich renderable)`: render protocol predicates and custom renderer
   registry.
-- `(chezpp rich text)`: mutable styled text spans and rendering to segments.
-- `(chezpp rich pretty)`: Scheme datum rendering for values without custom
+- `(cspp rich text)`: mutable styled text spans and rendering to segments.
+- `(cspp rich pretty)`: Scheme datum rendering for values without custom
   renderers.
-- `(chezpp rich console)`: console records, output targets, printing, export,
+- `(cspp rich console)`: console records, output targets, printing, export,
   color policy, and final ANSI/plain encoding.
-- `(chezpp rich box)`: box-style metadata.
-- `(chezpp rich basic)`: rules, padding, alignment, columns, and layout.
-- `(chezpp rich panel)`: panel records and border rendering.
-- `(chezpp rich tree)`: tree records and guide rendering.
-- `(chezpp rich table)`: table records, rows, columns, measurement, and box
+- `(cspp rich box)`: box-style metadata.
+- `(cspp rich basic)`: rules, padding, alignment, columns, and layout.
+- `(cspp rich panel)`: panel records and border rendering.
+- `(cspp rich tree)`: tree records and guide rendering.
+- `(cspp rich table)`: table records, rows, columns, measurement, and box
   layout.
-- `(chezpp rich live)`: live refresh, status spinners, deterministic time hooks,
+- `(cspp rich live)`: live refresh, status spinners, deterministic time hooks,
   and refresh threads.
-- `(chezpp rich progress)`: progress records, task records, progress columns,
+- `(cspp rich progress)`: progress records, task records, progress columns,
   and progress rendering.
-- `(chezpp rich prompt)`: prompt, confirm, and password helpers.
-- `(chezpp rich private common)`: shared predicates and helpers that are not
+- `(cspp rich prompt)`: prompt, confirm, and password helpers.
+- `(cspp rich private common)`: shared predicates and helpers that are not
   part of the public API.
 
 ## Rendering Model
@@ -313,7 +313,7 @@ Important coverage:
 - Negative tests include comments explaining the expected error case.
 
 Scheme files touched by Rich changes should pass the repository parenthesis
-checker. Examples should run through `./chez++ --script=... --` after a rebuild.
+checker. Examples should run through `./cspp --script=... --` after a rebuild.
 
 Full project validation is:
 
@@ -322,5 +322,5 @@ make clean
 make
 ```
 
-Because tests load `chezpp.lib`, macro changes require a clean rebuild when the
+Because tests load `cspp.lib`, macro changes require a clean rebuild when the
 incremental whole-library step leaves stale compiled libraries.

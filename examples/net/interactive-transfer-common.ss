@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 #|proc:interactive-tokenize
 The `interactive-tokenize` procedure parses a command line into words, honoring single or double

@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (define protobuf-error?
   (lambda (thunk)

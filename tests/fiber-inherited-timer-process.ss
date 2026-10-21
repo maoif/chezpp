@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp concurrency fiber))
+(import (cspp)
+        (cspp concurrency fiber))
 
 ;; An inherited handler can corrupt a foreign scheduler escape. Keep this probe
 ;; in a separate process so the suite can bound that failure independently.

@@ -1,5 +1,5 @@
-(import (chezpp)
-        (chezpp stack))
+(import (cspp)
+        (cspp stack))
 
 (mat stack
 

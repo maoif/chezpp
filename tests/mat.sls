@@ -14,8 +14,8 @@
 ;;; limitations under the License.
 
 ;(eval-when (compile load eval) (current-expand sc-expand))
-(import (only (chezpp optional-library) optional-library-info optional-library-available?)
-        (only (chezpp utils) pcheck natural?))
+(import (only (cspp optional-library) optional-library-info optional-library-available?)
+        (only (cspp utils) pcheck natural?))
 
 (eval-when (load eval)
   (define mat-requires-transform

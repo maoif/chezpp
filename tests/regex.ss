@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (mat regex-basic
      (let* ([rx (string->regex "(ab)+")]

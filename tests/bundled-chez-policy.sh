@@ -6,7 +6,7 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
 cp "$project_root/Makefile" "$project_root/build-options.mk" \
    "$project_root/optional-libraries.mk" "$fixture/"
-mkdir -p "$fixture/tools" "$fixture/chezpp/c" "$fixture/tests"
+mkdir -p "$fixture/tools" "$fixture/src/cspp/c" "$fixture/tests"
 cp "$project_root/tools/probe-optional-libraries.sh" "$fixture/tools/"
 cd "$fixture"
 
@@ -23,7 +23,7 @@ fi
 
 # Use real Git submodules, including a nested dependency with no Chez-specific marker files.
 export GIT_ALLOW_PROTOCOL=file
-export GIT_AUTHOR_NAME=Chezpp-test GIT_COMMITTER_NAME=Chezpp-test
+export GIT_AUTHOR_NAME=CSPP-test GIT_COMMITTER_NAME=CSPP-test
 export GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_EMAIL=test@example.invalid
 git init -q dependency
 printf '%s\n' dependency > dependency/source
@@ -91,14 +91,14 @@ test ! -e .chezscheme-build/configure-called
 
 # A missing generated Makefile must invalidate otherwise complete compiler artifacts.
 rm .chezscheme-build/Makefile
-touch libchezpp.so chezpp.lib chezpp/stale.so chezpp/stale.wpo
+touch libcspp.so cspp.lib src/cspp/stale.so src/cspp/stale.wpo
 if make --no-print-directory bundled-chez PKG_CONFIG=/missing \
     > invalid.stdout 2> invalid.stderr; then
     printf '%s\n' 'missing ChezScheme Makefile did not trigger reconfiguration' >&2
     exit 1
 fi
 test -e .chezscheme-build/configure-called
-test ! -e libchezpp.so
-test ! -e chezpp.lib
-test ! -e chezpp/stale.so
-test ! -e chezpp/stale.wpo
+test ! -e libcspp.so
+test ! -e cspp.lib
+test ! -e src/cspp/stale.so
+test ! -e src/cspp/stale.wpo

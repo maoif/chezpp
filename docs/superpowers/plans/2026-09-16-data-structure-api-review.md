@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make ChezPP custom data structures consistently sized, searchable, documented,
+**Goal:** Make CSPP custom data structures consistently sized, searchable, documented,
 iterable, transducible, and navigable while completing the reviewed string and bit-set APIs.
 
 ## Current Status (2026-09-18)
@@ -19,8 +19,8 @@ The remaining iterator follow-ups are zero/negative-step validation, finalized-i
 guards, the unfinished hashtable path, source-conversion naming, port ownership, adapter
 snapshot semantics, and duplicate-registration policy.
 
-**Architecture:** Expose extension-registration APIs from `(chezpp iter)` and
-`(chezpp navigator)`. Each traversable data-structure library imports those APIs and
+**Architecture:** Expose extension-registration APIs from `(cspp iter)` and
+`(cspp navigator)`. Each traversable data-structure library imports those APIs and
 registers its own iter and navigator adapters during its own library initialization, with a
 distinct navigator set protocol for set-like structures. Transducers consume the same iter
 registry as their fallback path.
@@ -43,7 +43,7 @@ existing public-documentation checker in `tools/check-public-api-docs.ss`.
 - Group each library's executable extension-registration calls under a section comment using
   the `;;;;===----------------------------------------------------------------------===` convention.
 - ChezScheme has no built-in `string-for-each` or `string-map`; provide and export both from
-  `(chezpp string)`.
+  `(cspp string)`.
 - `dset` remains outside navigator traversal because it has no collection-value traversal contract.
 - Use ChezScheme bytevector accessors directly; do not add custom bytevector access helpers.
 - Close every port opened by new code.
@@ -57,16 +57,16 @@ existing public-documentation checker in `tools/check-public-api-docs.ss`.
 ### Task 1: Normalize size, membership, and deletion contracts
 
 **Files:**
-- Modify: `chezpp/array.ss`
-- Modify: `chezpp/dlist.ss`
-- Modify: `chezpp/queue.ss`
-- Modify: `chezpp/heap.ss`
-- Modify: `chezpp/hashset.ss`
-- Modify: `chezpp/treeset.ss`
-- Modify: `chezpp/treemap.ss`
-- Modify: `chezpp/bitvec.ss`
-- Modify: `chezpp/bittree.ss`
-- Modify: `chezpp/concurrency/fiber.ss`
+- Modify: `src/cspp/array.ss`
+- Modify: `src/cspp/dlist.ss`
+- Modify: `src/cspp/queue.ss`
+- Modify: `src/cspp/heap.ss`
+- Modify: `src/cspp/hashset.ss`
+- Modify: `src/cspp/treeset.ss`
+- Modify: `src/cspp/treemap.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/bittree.ss`
+- Modify: `src/cspp/concurrency/fiber.ss`
 - Modify: `tests/array.ss`
 - Modify: `tests/dlist.ss`
 - Modify: `tests/queue.ss`
@@ -106,7 +106,7 @@ existing public-documentation checker in `tools/check-public-api-docs.ss`.
 ```
 
 Update all existing `array-length`/`dlist-length` assertions to the new names in the
-same test files and in `chezpp/concurrency/fiber.ss`.
+same test files and in `src/cspp/concurrency/fiber.ss`.
 
 - [ ] **Step 2: Run the focused tests and verify the old API failures are visible.**
 
@@ -149,31 +149,31 @@ shows no public or implementation references except historical review text.
 - [ ] **Step 8: Commit the independently reviewable API-contract change.**
 
 ```bash
-git add chezpp tests
+git add cspp tests
 git commit -m "data-structure: normalize sizes and membership contracts"
 ```
 
 ### Task 2: Add and consume the iter source-adapter registry
 
 **Files:**
-- Modify: `chezpp/iter.ss`
-- Modify: `chezpp/transducer.ss`
-- Modify: `chezpp/array.ss`
-- Modify: `chezpp/dlist.ss`
-- Modify: `chezpp/queue.ss`
-- Modify: `chezpp/stack.ss`
-- Modify: `chezpp/heap.ss`
-- Modify: `chezpp/hashset.ss`
-- Modify: `chezpp/treeset.ss`
-- Modify: `chezpp/treemap.ss`
-- Modify: `chezpp/bitvec.ss`
-- Modify: `chezpp/bittree.ss`
-- Modify: `chezpp/dset.ss`
+- Modify: `src/cspp/iter.ss`
+- Modify: `src/cspp/transducer.ss`
+- Modify: `src/cspp/array.ss`
+- Modify: `src/cspp/dlist.ss`
+- Modify: `src/cspp/queue.ss`
+- Modify: `src/cspp/stack.ss`
+- Modify: `src/cspp/heap.ss`
+- Modify: `src/cspp/hashset.ss`
+- Modify: `src/cspp/treeset.ss`
+- Modify: `src/cspp/treemap.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/bittree.ss`
+- Modify: `src/cspp/dset.ss`
 - Modify: `tests/iter.ss`
 - Modify: `tests/transducer.ss`
 
 **Interfaces:**
-- Adds exported `(iter-register-source! predicate iterator-maker)` to `(chezpp iter)`.
+- Adds exported `(iter-register-source! predicate iterator-maker)` to `(cspp iter)`.
   `iterator-maker` receives one source and returns an iterator made with `make-iter`.
 - `source->iter` and `transducible?` recognize registered sources after built-ins.
 - Registered sources use their library’s documented traversal order; hashset order is
@@ -205,7 +205,7 @@ Run: `make -C tests test-some TEST='iter transducer'`
 
 Expected: FAIL because `source->iter` and `transducible?` reject custom sources.
 
-- [ ] **Step 3: Implement the registry in `chezpp/iter.ss`.** Store newest registrations
+- [ ] **Step 3: Implement the registry in `src/cspp/iter.ss`.** Store newest registrations
   first, validate both procedures with `pcheck`, provide a private lookup procedure, and
   document the public registration procedure. Keep built-in conversion procedures
   unchanged and make `source->iter` call the registered maker only after built-in cases.
@@ -217,7 +217,7 @@ Expected: FAIL because `source->iter` and `transducible?` reject custom sources.
   `(dset-size dset - 1)`; this does not make `dset` a navigator collection.
   Use existing `X->list`/ordered operations where they preserve the documented order;
   otherwise construct a stateful iterator that avoids mutating the source. Import only the
-  required extension bindings from `(chezpp iter)` in each library and place the executable
+  required extension bindings from `(cspp iter)` in each library and place the executable
   registration call under a `;;;;===----------------------------------------------------------------------===` section heading near the end of
   the library.
 
@@ -246,32 +246,32 @@ Expected: PASS with empty stderr/stdout apart from the test runner’s normal pr
 - [ ] **Step 8: Commit the registry change.**
 
 ```bash
-git add chezpp tests
+git add cspp tests
 git commit -m "iter: register custom data-structure sources"
 ```
 
 ### Task 3: Expose navigator extension APIs and self-register adapters
 
 **Files:**
-- Modify: `chezpp/navigator/private/data.ss`
-- Modify: `chezpp/navigator/private/basic.ss`
-- Modify: `chezpp/navigator.ss`
-- Modify: `chezpp/array.ss`
-- Modify: `chezpp/dlist.ss`
-- Modify: `chezpp/hashset.ss`
-- Modify: `chezpp/treeset.ss`
-- Modify: `chezpp/treemap.ss`
-- Modify: `chezpp/bitvec.ss`
-- Modify: `chezpp/bittree.ss`
+- Modify: `src/cspp/navigator/private/data.ss`
+- Modify: `src/cspp/navigator/private/basic.ss`
+- Modify: `src/cspp/navigator.ss`
+- Modify: `src/cspp/array.ss`
+- Modify: `src/cspp/dlist.ss`
+- Modify: `src/cspp/hashset.ss`
+- Modify: `src/cspp/treeset.ss`
+- Modify: `src/cspp/treemap.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/bittree.ss`
 - Modify: `tests/navigator.ss`
 
 **Interfaces:**
 - Keeps `nav-register-indexed!` and `nav-register-keyed!` public and adds the exported
-  `nav-register-set!` extension API to `(chezpp navigator)`.
+  `nav-register-set!` extension API to `(cspp navigator)`.
 - The set protocol supplies `predicate`, `values-proc`, `replace-proc`, `replace!-proc`,
   `delete-proc`, and `delete!-proc`; it never exposes set members as fake map keys.
 - Each supported data-structure library imports the required extension APIs from
-  `(chezpp navigator)` and registers its own protocol callbacks when that library is
+  `(cspp navigator)` and registers its own protocol callbacks when that library is
   initialized; navigator does not import concrete data-structure libraries.
 - `nav/all` and `nav/values` traverse registered sets; `nav/key`, `nav/nth`, `nav/keys`,
   and `nav/entries` reject them with navigator errors. Set clear/transform operations
@@ -317,7 +317,7 @@ Expected: FAIL because the data structures are not registered and no set protoco
   sets. Ensure `nav-clearval` removes a selected set member through delete callbacks.
 
 - [ ] **Step 5: Register each navigator adapter in its data-structure library.** Import only
-  the required registration procedures from `(chezpp navigator)` in `array.ss`, `dlist.ss`,
+  the required registration procedures from `(cspp navigator)` in `array.ss`, `dlist.ss`,
   `treemap.ss`, `treeset.ss`, `hashset.ss`, `bitvec.ss`, and `bittree.ss`, then register:
 
   - arrays and dlists as indexed containers;
@@ -344,9 +344,9 @@ Expected: FAIL because the data structures are not registered and no set protoco
 
 - [ ] **Step 6: Re-export the navigator registration APIs.** Export
   `nav-register-indexed!`, `nav-register-keyed!`, and `nav-register-set!` from
-  `(chezpp navigator)`. Keep this library independent of concrete data-structure libraries;
+  `(cspp navigator)`. Keep this library independent of concrete data-structure libraries;
   importing a data-structure library installs that type's registrations, including when the
-  umbrella `(chezpp)` library imports both sides.
+  umbrella `(cspp)` library imports both sides.
 
 - [ ] **Step 7: Run navigator tests and the complete build.**
 
@@ -357,15 +357,15 @@ Expected: PASS and no unsupported-operation errors for the registered operations
 - [ ] **Step 8: Commit the navigator protocol and registrations.**
 
 ```bash
-git add chezpp tests
+git add cspp tests
 git commit -m "navigator: register data structures with set protocol"
 ```
 
 ### Task 4: Complete bit-set algebra and bounds APIs
 
 **Files:**
-- Modify: `chezpp/bitvec.ss`
-- Modify: `chezpp/bittree.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/bittree.ss`
 - Modify: `tests/bitvec.ss`
 - Modify: `tests/bittree.ss`
 
@@ -408,19 +408,19 @@ currently exported.
 
 Run: `make -C tests test-some TEST='bitvec bittree navigator' && cd .. && make clean && make`
 
-Expected: PASS and a successful ChezPP build.
+Expected: PASS and a successful CSPP build.
 
 - [ ] **Step 6: Commit the bit-set APIs.**
 
 ```bash
-git add chezpp tests
+git add cspp tests
 git commit -m "bitset: expose bounds and align sparse algebra"
 ```
 
 ### Task 5: Review and complete the string library
 
 **Files:**
-- Modify: `chezpp/string.ss`
+- Modify: `src/cspp/string.ss`
 - Modify: `tests/string.ss`
 
 **Interfaces:**
@@ -438,7 +438,7 @@ git commit -m "bitset: expose bounds and align sparse algebra"
 - Documents all four traversal/mapping procedures, `string-split`, search, containment,
   prefix/suffix, empty, and trim procedures with the repository's required tags and parameter
   meanings.
-- Keeps character operations in ChezScheme; does not create `chezpp/char.ss`.
+- Keeps character operations in ChezScheme; does not create `src/cspp/char.ss`.
 - Preserves current search conventions (`#f` when no match; overlapping matches for
   `string-search-all`) and accepts either a character or non-empty string pattern where
   currently documented.
@@ -502,34 +502,34 @@ the old `#|doc` blocks.
 
 Run: `make -C tests test-some TEST='string'`
 
-Run: `scheme --script tools/check-public-api-docs.ss chezpp/string.ss`
+Run: `scheme --script tools/check-public-api-docs.ss src/cspp/string.ss`
 
 Expected: PASS with no string documentation diagnostics.
 
 - [ ] **Step 6: Commit the string review.**
 
 ```bash
-git add chezpp/string.ss tests/string.ss
+git add src/cspp/string.ss tests/string.ss
 git commit -m "string: complete edit distance and public API docs"
 ```
 
 ### Task 6: Normalize public documentation across the reviewed data structures
 
 **Files:**
-- Modify: `chezpp/array.ss`
-- Modify: `chezpp/bittree.ss`
-- Modify: `chezpp/bitvec.ss`
-- Modify: `chezpp/dlist.ss`
-- Modify: `chezpp/dset.ss`
-- Modify: `chezpp/hashset.ss`
-- Modify: `chezpp/heap.ss`
-- Modify: `chezpp/list.ss`
-- Modify: `chezpp/queue.ss`
-- Modify: `chezpp/stack.ss`
-- Modify: `chezpp/treeset.ss`
-- Modify: `chezpp/treemap.ss`
-- Modify: `chezpp/vector.ss`
-- Modify: `chezpp/string.ss`
+- Modify: `src/cspp/array.ss`
+- Modify: `src/cspp/bittree.ss`
+- Modify: `src/cspp/bitvec.ss`
+- Modify: `src/cspp/dlist.ss`
+- Modify: `src/cspp/dset.ss`
+- Modify: `src/cspp/hashset.ss`
+- Modify: `src/cspp/heap.ss`
+- Modify: `src/cspp/list.ss`
+- Modify: `src/cspp/queue.ss`
+- Modify: `src/cspp/stack.ss`
+- Modify: `src/cspp/treeset.ss`
+- Modify: `src/cspp/treemap.ss`
+- Modify: `src/cspp/vector.ss`
+- Modify: `src/cspp/string.ss`
 - Modify: `tests/net-docs.ss`
 
 **Interfaces:**
@@ -544,10 +544,10 @@ Run:
 
 ```bash
 scheme --script tools/check-public-api-docs.ss \
-  chezpp/array.ss chezpp/bittree.ss chezpp/bitvec.ss chezpp/dlist.ss \
-  chezpp/dset.ss chezpp/hashset.ss chezpp/heap.ss chezpp/list.ss \
-  chezpp/queue.ss chezpp/stack.ss chezpp/treeset.ss chezpp/treemap.ss \
-  chezpp/vector.ss chezpp/string.ss
+  src/cspp/array.ss src/cspp/bittree.ss src/cspp/bitvec.ss src/cspp/dlist.ss \
+  src/cspp/dset.ss src/cspp/hashset.ss src/cspp/heap.ss src/cspp/list.ss \
+  src/cspp/queue.ss src/cspp/stack.ss src/cspp/treeset.ss src/cspp/treemap.ss \
+  src/cspp/vector.ss src/cspp/string.ss
 ```
 
 Save the command output in the terminal only; do not add a generated report file.
@@ -567,10 +567,10 @@ Run:
 
 ```bash
 scheme --script tools/check-public-api-docs.ss \
-  chezpp/array.ss chezpp/bittree.ss chezpp/bitvec.ss chezpp/dlist.ss \
-  chezpp/dset.ss chezpp/hashset.ss chezpp/heap.ss chezpp/list.ss \
-  chezpp/queue.ss chezpp/stack.ss chezpp/treeset.ss chezpp/treemap.ss \
-  chezpp/vector.ss chezpp/string.ss
+  src/cspp/array.ss src/cspp/bittree.ss src/cspp/bitvec.ss src/cspp/dlist.ss \
+  src/cspp/dset.ss src/cspp/hashset.ss src/cspp/heap.ss src/cspp/list.ss \
+  src/cspp/queue.ss src/cspp/stack.ss src/cspp/treeset.ss src/cspp/treemap.ss \
+  src/cspp/vector.ss src/cspp/string.ss
 ```
 
 Run:
@@ -585,14 +585,14 @@ Expected: the checker exits successfully and all selected tests pass.
 - [ ] **Step 5: Commit the documentation normalization.**
 
 ```bash
-git add chezpp tests/net-docs.ss
+git add cspp tests/net-docs.ss
 git commit -m "docs: normalize reviewed data-structure APIs"
 ```
 
 ### Task 7: Final integration verification
 
 **Files:**
-- Verify: `chezpp/c/scheme.h` (copied into this worktree before implementation)
+- Verify: `src/cspp/c/scheme.h` (copied into this worktree before implementation)
 - Verify: `docs/data-structure-api-review.md`
 - Verify: `docs/superpowers/plans/2026-09-16-data-structure-api-review.md`
 
@@ -603,7 +603,7 @@ git commit -m "docs: normalize reviewed data-structure APIs"
 - [ ] **Step 1: Verify the requested header copy.**
 
 ```bash
-cmp -s /home/maoif/SSD/Projects/chezpp/chezpp/c/scheme.h chezpp/c/scheme.h
+cmp -s /home/maoif/SSD/Projects/src/cspp/src/cspp/c/scheme.h src/cspp/c/scheme.h
 ```
 
 Expected: exit status 0.
@@ -631,19 +631,19 @@ Expected: no test errors and no unexpected stdout/stderr diagnostics.
 Run:
 
 ```bash
-python3 check_parentheses.py chezpp/iter.ss chezpp/transducer.ss \
-  chezpp/navigator/private/data.ss \
-  chezpp/navigator/private/basic.ss chezpp/string.ss
+python3 check_parentheses.py src/cspp/iter.ss src/cspp/transducer.ss \
+  src/cspp/navigator/private/data.ss \
+  src/cspp/navigator/private/basic.ss src/cspp/string.ss
 ```
 
 Run: `git status --short --branch`
 
 Expected: balanced Scheme files, only intentional implementation/test/docs changes, and
-the copied `chezpp/c/scheme.h` present in the worktree.
+the copied `src/cspp/c/scheme.h` present in the worktree.
 
 - [ ] **Step 5: Commit the verified integration state.**
 
 ```bash
-git add chezpp tests docs
+git add cspp tests docs
 git commit -m "data-structure: complete API review integration"
 ```

@@ -1,12 +1,12 @@
 # Project Overview
 
-Chezpp is an extension library for ChezScheme and a build system
-and package manager for ChezScheme.
+Chez Scheme Programming Platform (CSPP) provides libraries for Chez Scheme, plus a build system
+and package manager for Chez Scheme.
 The build system and package manager part are not implemented yet.
 
 ## Versioning And Release Policy
 
-chezpp versioning/tagging: major.minor.patch@chezMajor-chezMinor-chezPatch.,
+cspp versioning/tagging: major.minor.patch@chezMajor-chezMinor-chezPatch.,
 or `(major minor patch chez-major chez-minor chez-patch)`.
 Git tags use `major.minor.patch@chezMajor-chezMinor-chezPatch`, such as
 `0.0.0@10-4-1`.
@@ -32,7 +32,7 @@ E.g.,
           (todo)))
 ```
 
-`pcheck` is defined in `(chezpp utils)`.
+`pcheck` is defined in `(cspp utils)`.
 
 Public APIs must have documentation right above the implementation code,
 in this format, for procedures and macros:
@@ -85,17 +85,17 @@ Do not by default add design docs, specs, plans, handoffs to git.
 
 For sub-agent execution, only spwan one agent at a one.
 
-## Build chezpp
+## Build cspp
 
-When a new lib is finished under `chezpp/`, add an import entry
-in `chezpp.ss` so it can be automatically compiled when compiling
-`chezpp.ss`.
+When a new lib is finished under `src/cspp/`, add an import entry
+in `src/cspp.ss` so it can be automatically compiled when compiling
+`src/cspp.ss`.
 
-C code should be put under `chezpp/c/`.
+C code should be put under `src/cspp/c/`.
 
 In project root directory, **always** run `make clean && make` to build project.
-Run `make run` to enter chezpp REPL, or alternatively,
-run `chez++` script.
+Run `make run` to enter the CSPP REPL, or alternatively,
+run the `cspp` script.
 
 By default, `make` is equal to `make release`.
 `make debug` and `make coverage` is also available.
@@ -166,7 +166,7 @@ Fixnum range can be obtained by `(most-positive-fixnum)` and `(most-negative-fix
 
 Prefer preallocating objects (string, vector, bytevector and others) than appending them sequentially.
 
-Prefer `make-list-builder` from `(chezpp list)` to build up a list than `cons` and `reverse`.
+Prefer `make-list-builder` from `(cspp list)` to build up a list than `cons` and `reverse`.
 
 Use `call/cc` and continuation operations carefully, as it has performance overhead.
 Use `call/1cc` if possible.
@@ -175,27 +175,27 @@ Always comment the use of `call/cc` using `;;`.
 
 ## About some files
 
-`chezpp.ss`:
-this is the main file through which users can import the entirety of chezpp and the ChezScheme compiler can
-recursively compile all chezpp libs imported when just compiling this file (when `(compile-imported-libraries #t)`
+`src/cspp.ss`:
+this is the main file through which users can import the entirety of cspp and the ChezScheme compiler can
+recursively compile all cspp libs imported when just compiling this file (when `(compile-imported-libraries #t)`
 is set).
 
-When a new lib is written under `chezpp/`, say, `new-lib`, its import entry can be added in `chezpp.ss` 
-as `(chezpp new-lib)`.
+When a new lib is written under `src/cspp/`, say, `new-lib`, its import entry can be added in `src/cspp.ss`
+as `(cspp new-lib)`.
 
-Specifically, `(chezpp concurrency fiber)` and `(chezpp parser combinator)` are two *experimental* libs that
-are imported but NOT exported, just so they can be compiled when building chezpp. A consequence of this is 
+Specifically, `(cspp concurrency fiber)` and `(cspp parser combinator)` are two *experimental* libs that
+are imported but NOT exported, just so they can be compiled when building cspp. A consequence of this is
 that their wpo (whole program optimization) files have to be seperately fed into `compile-whole-library` in
-`Makefile` and the resulting `fiber.lib` and `combinator.lib` have to be seperately loaded in `chez++.ss` for
+`Makefile` and the resulting `fiber.lib` and `combinator.lib` have to be seperately loaded in `src/cspp.ss` for
 them to be used.
 
-`chez++.ss`:
-this file is convenience wrapper that just loads `chezpp.lib` and other experimental libs for `chez++` to use.
+`src/cspp.ss`:
+this file is convenience wrapper that just loads `cspp.lib` and other experimental libs for `cspp` to use.
 
-`chez++`:
-a shell script that use ssystem ChezScheme executable to load `chez++.ss` and thus making chezpp available to users.
+`cspp`:
+a shell script that uses the system ChezScheme executable to load `src/cspp.ss` and make CSPP available.
 
-You as an agent usually do not have to modify `chez++.ss` and `chez++`.
+You as an agent usually do not have to modify `src/cspp.ss` and `cspp`.
 
 
 ## Bytevector APIs

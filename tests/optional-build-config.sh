@@ -7,10 +7,10 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 # Configuration regressions must not clean or replace the caller's compiled build.
 source_root=$root
 root="$tmp/project"
-mkdir -p "$root/tools" "$root/chezpp" "$root/tests"
+mkdir -p "$root/tools" "$root/cspp" "$root/tests"
 cp "$source_root/Makefile" "$source_root/build-options.mk" "$source_root/optional-libraries.mk" "$root/"
 cp "$source_root/tools/probe-optional-libraries.sh" "$root/tools/"
-cp -R "$source_root/chezpp/c" "$root/chezpp/"
+cp -R "$source_root/src/cspp/c" "$root/src/cspp/"
 find "$root" -name '*.so' -delete
 names='CARES CURL GRPC IDN2 LIBSSH WEBSOCKETS ZLIB OPENSSL UUID XXHASH BLAKE3'
 disabled=''
@@ -48,12 +48,12 @@ result=$(run_make show-optional-config)
 assert_contains "$result" 'CURL=0'
 assert_contains "$result" 'CFLAGS='
 assert_contains "$result" 'LIBS='
-assert_contains "$result" 'chezpp/c/net/ftp_unavailable.c'
-assert_contains "$result" 'chezpp/c/uuid_unavailable.c'
-assert_contains "$result" 'chezpp/c/hash_unavailable.c'
-assert_contains "$result" 'chezpp/c/zlib_unavailable.c'
-assert_contains "$result" 'chezpp/c/crypto_unavailable.c'
-assert_contains "$result" 'chezpp/c/net/tls_unavailable.c'
+assert_contains "$result" 'src/cspp/c/net/ftp_unavailable.c'
+assert_contains "$result" 'src/cspp/c/uuid_unavailable.c'
+assert_contains "$result" 'src/cspp/c/hash_unavailable.c'
+assert_contains "$result" 'src/cspp/c/zlib_unavailable.c'
+assert_contains "$result" 'src/cspp/c/crypto_unavailable.c'
+assert_contains "$result" 'src/cspp/c/net/tls_unavailable.c'
 
 # Supplied flags must enable a dependency without pkg-config, using an actual linker.
 result=$(run_make show-optional-config WITH_CURL=1 \
@@ -61,7 +61,7 @@ result=$(run_make show-optional-config WITH_CURL=1 \
 assert_contains "$result" 'CURL=1'
 assert_contains "$result" "CFLAGS=-nostdinc -I$tmp/include"
 assert_contains "$result" "LIBS=$tmp/libfixture.a"
-assert_contains "$result" 'chezpp/c/net/ftp.c'
+assert_contains "$result" 'src/cspp/c/net/ftp.c'
 
 # Accepted padded switches must retain force-disable and required-enable semantics.
 padding_failures=0
@@ -146,7 +146,7 @@ result=$(run_make show-optional-config WITH_CURL=auto PKG_CONFIG="$tmp/pkg-confi
 assert_contains "$result" 'CURL=1'
 assert_contains "$result" 'VERSION_CURL=8.0.0'
 assert_contains "$result" "LIBS=$tmp/libfixture.a"
-# Auto detection must reject pkg-config metadata below Chezpp's curl minimum.
+# Auto detection must reject pkg-config metadata below CSPP's curl minimum.
 FIXTURE_VERSION=7.99.0
 export FIXTURE_VERSION
 result=$(run_make show-optional-config WITH_CURL=auto PKG_CONFIG="$tmp/pkg-config")
@@ -214,11 +214,11 @@ for name in $names; do
 done
 result=$(run_make show-optional-config "$@")
 assert_contains "$result" 'RESOLVED=CARES=1 CURL=1 GRPC=1 IDN2=1 LIBSSH=1 WEBSOCKETS=1 ZLIB=1 OPENSSL=1 UUID=1 XXHASH=1 BLAKE3=1'
-run_make chezpp/c/build-config.h "$@" > "$tmp/header.log" 2>&1
+run_make src/cspp/c/build-config.h "$@" > "$tmp/header.log" 2>&1
 for name in $names; do
-    grep -F "#define CHEZPP_WITH_${name} 1" "$root/chezpp/c/build-config.h" >/dev/null
+    grep -F "#define CSPP_WITH_${name} 1" "$root/src/cspp/c/build-config.h" >/dev/null
 done
-result=$(run_make -n libchezpp.so "$@")
+result=$(run_make -n libcspp.so "$@")
 assert_contains "$result" "-I$tmp/include"
 assert_contains "$result" "$tmp/libfixture.a"
 
@@ -241,24 +241,24 @@ result=$(run_make show-optional-config "CURL_CFLAGS=-DNAME='flag value'")
 assert_contains "$result" "CURL_CFLAGS=-DNAME='flag value'"
 
 # Generate a complete, parseable header for the resolved all-disabled feature set.
-run_make chezpp/c/build-config.h > "$tmp/header.log" 2>&1
+run_make src/cspp/c/build-config.h > "$tmp/header.log" 2>&1
 for name in $names; do
-    grep -F "#define CHEZPP_WITH_${name} 0" "$root/chezpp/c/build-config.h" >/dev/null
+    grep -F "#define CSPP_WITH_${name} 0" "$root/src/cspp/c/build-config.h" >/dev/null
 done
-before=$(stat -c '%y' "$root/chezpp/c/build-config.h")
-run_make chezpp/c/build-config.h > "$tmp/header.log" 2>&1
-after=$(stat -c '%y' "$root/chezpp/c/build-config.h")
+before=$(stat -c '%y' "$root/src/cspp/c/build-config.h")
+run_make src/cspp/c/build-config.h > "$tmp/header.log" 2>&1
+after=$(stat -c '%y' "$root/src/cspp/c/build-config.h")
 [ "$before" = "$after" ] || {
     printf '%s\n' 'unchanged generated header was rewritten' >&2
     exit 1
 }
-${CC:-cc} -x c -fsyntax-only -include "$root/chezpp/c/build-config.h" /dev/null
+${CC:-cc} -x c -fsyntax-only -include "$root/src/cspp/c/build-config.h" /dev/null
 
 # Disabled dependencies must not appear on the actual native linker command.
 # The native implementation tasks provide these fallbacks after configuration is ready.
-result=$(run_make -n -o chezpp/c/zlib_unavailable.c -o chezpp/c/uuid_unavailable.c \
-    -o chezpp/c/hash_unavailable.c -o chezpp/c/crypto_unavailable.c \
-    -o chezpp/c/net/tls_unavailable.c libchezpp.so)
+result=$(run_make -n -o src/cspp/c/zlib_unavailable.c -o src/cspp/c/uuid_unavailable.c \
+    -o src/cspp/c/hash_unavailable.c -o src/cspp/c/crypto_unavailable.c \
+    -o src/cspp/c/net/tls_unavailable.c libcspp.so)
 if printf '%s\n' "$result" | grep -E -- '-l(uuid|curl|cares|grpc|idn2|ssh|websockets|z|ssl|crypto|xxhash|blake3)( |$)' >/dev/null; then
     printf '%s\n' 'disabled dependency appeared on native link command' >&2
     exit 1

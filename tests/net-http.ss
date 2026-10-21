@@ -1,11 +1,11 @@
-(import (chezpp)
-        (chezpp net)
-        (chezpp net lws http1)
-        (chezpp net lws http2)
-        (chezpp net lws reactor)
-        (chezpp net lws transport)
-        (chezpp net http private)
-        (chezpp net lws ffi))
+(import (cspp)
+        (cspp net)
+        (cspp net lws http1)
+        (cspp net lws http2)
+        (cspp net lws reactor)
+        (cspp net lws transport)
+        (cspp net http private)
+        (cspp net lws ffi))
 
 (load "net-common.ss")
 
@@ -203,7 +203,7 @@
           (guard (condition [else #t]) (http-get client uri) #f)))))
 
 (mat net-http-live-unsupported-trailers
-     ;; Error case: LWS 4.5.8 rejects trailer fields; Chezpp must not reparse failed wire data.
+     ;; Error case: LWS 4.5.8 rejects trailer fields; CSPP must not reparse failed wire data.
      (mat-requires (websockets)
        (call-with-http1-response
         "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\nX-End: yes\r\n\r\n"
@@ -279,7 +279,7 @@
        (call-with-http1-response
         "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ndownload"
         (lambda (client uri)
-          (let ([path (format "/tmp/chezpp-http-download-~a" (get-process-id))])
+          (let ([path (format "/tmp/cspp-http-download-~a" (get-process-id))])
             (dynamic-wind
               void
               (lambda ()

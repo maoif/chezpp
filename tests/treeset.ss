@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 
 (define v100    (fxvshuffle! (fxviota 100)))

@@ -1,7 +1,7 @@
 ;; Shared configuration and helpers for the file-transfer examples.
 
 (load "tests/generated/file-transfer.pb.ss")
-(import (chezpp examples transfer file-transfer protobuf))
+(import (cspp examples transfer file-transfer protobuf))
 
 (define file-transfer-host "127.0.0.1")
 
@@ -19,7 +19,7 @@
 
 (define file-transfer-chunk-size 65536)
 
-(define file-transfer-done-marker-name ".chezpp-upload.done")
+(define file-transfer-done-marker-name ".cspp-upload.done")
 (define write-bytevector-file
   (lambda (path bv)
     (call-with-port
@@ -248,7 +248,7 @@
 
 (define write-transfer-rss-growth-value!
   (lambda (growth-kib)
-    (let ([path (getenv "CHEZPP_TRANSFER_RSS_FILE")])
+    (let ([path (getenv "CSPP_TRANSFER_RSS_FILE")])
       (when (and path (not (string=? path "")))
         (call-with-output-file path
           (lambda (port)

@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (mat net-dns-options
      (let ([options (make-dns-options 'unspecified 'address 2000 #t)])

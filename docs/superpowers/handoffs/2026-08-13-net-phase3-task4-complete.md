@@ -21,7 +21,7 @@ make clean && make
 cd tests && make test-some TEST='net-sftp'
 cd ..
 scheme --script tools/check-scheme-balance.ss \
-  chezpp/net/sftp.ss chezpp/net/ffi.ss tests/net-sftp.ss tests/net-ssh-common.ss
+  src/cspp/net/sftp.ss src/cspp/net/ffi.ss tests/net-sftp.ss tests/net-ssh-common.ss
 git diff --check
 ```
 

@@ -17,7 +17,7 @@ assert entries
 for entry in entries:
     for flag in ("-h", "--help"):
         result = subprocess.run(
-            [str(root / "chez++"), f"--script={entry}", "--", flag],
+            [str(root / "cspp"), f"--script={entry}", "--", flag],
             cwd=root,
             capture_output=True,
             timeout=10,
@@ -30,4 +30,4 @@ for entry in entries:
             result.stderr,
         )
         # Help must come from the example, rather than the outer launcher.
-        assert b"Chezpp REPL and script launcher" not in result.stdout, (entry, flag, result.stdout)
+        assert b"CSPP REPL and script launcher" not in result.stdout, (entry, flag, result.stdout)

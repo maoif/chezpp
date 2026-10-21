@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 ;; Exercise the installed library and optional native dependencies after archive relocation.
 (unless (and (= 32 (bytevector-length (sha256-string "abc")))

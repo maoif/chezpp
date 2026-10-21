@@ -1,6 +1,6 @@
-(import (chezpp)
-        (chezpp crypto)
-        (chezpp crypto encoding))
+(import (cspp)
+        (cspp crypto)
+        (cspp crypto encoding))
 
 (define resolve-test-path
   (lambda (repo-root-path tests-dir-path)

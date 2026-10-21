@@ -30,9 +30,9 @@ with the documented Emacs and Arch SHA-256 values.
 ### Task 1: Protobuf Wire Codec
 
 **Files:**
-- Create: `chezpp/protobuf/wire.ss`
-- Create: `chezpp/protobuf.ss`
-- Modify: `chezpp.ss`
+- Create: `src/cspp/protobuf/wire.ss`
+- Create: `src/cspp/protobuf.ss`
+- Modify: `src/cspp.ss`
 - Create: `tests/protobuf.ss`
 - Modify: `tests/Makefile`
 
@@ -58,7 +58,7 @@ wire type, truncated fixed-width fields, and length beyond remaining input. Comm
 cd tests && make test-some TEST='protobuf'
 ```
 
-Expected: FAIL because `(chezpp protobuf)` does not exist.
+Expected: FAIL because `(cspp protobuf)` does not exist.
 
 - [ ] **Step 3: Implement primitive codecs**
 
@@ -79,16 +79,16 @@ configurable through an explicit constructor arity.
 make clean && make
 cd tests && make test-some TEST='protobuf'
 cd ..
-git add chezpp/protobuf.ss chezpp/protobuf/wire.ss chezpp.ss tests/protobuf.ss tests/Makefile
+git add src/cspp/protobuf.ss src/cspp/protobuf/wire.ss src/cspp.ss tests/protobuf.ss tests/Makefile
 git commit -m "protobuf: add wire codec"
 ```
 
 ### Task 2: Descriptor Decoder And protoc Plugin
 
 **Files:**
-- Create: `chezpp/protobuf/descriptor.ss`
-- Create: `tools/protoc-gen-chezpp.ss`
-- Create: `tools/protoc-gen-chezpp`
+- Create: `src/cspp/protobuf/descriptor.ss`
+- Create: `tools/protoc-gen-cspp.ss`
+- Create: `tools/protoc-gen-cspp`
 - Create: `tests/data/file-transfer.proto`
 - Create (generated): `tests/generated/file-transfer.pb.ss`
 - Create: `tests/protobuf-codegen.ss`
@@ -98,7 +98,7 @@ git commit -m "protobuf: add wire codec"
 
 ```proto
 syntax = "proto3";
-package chezpp.examples.transfer;
+package cspp.examples.transfer;
 
 message FileChunk {
   string name = 1;
@@ -121,12 +121,12 @@ service FileTransfer {
 
 - [ ] **Step 2: Add generation and round-trip tests**
 
-Run `protoc` with `--chezpp_out`, compile the generated library, construct `FileChunk`, encode it,
+Run `protoc` with `--cspp_out`, compile the generated library, construct `FileChunk`, encode it,
 decode it, and assert equality of every field. Assert generated method names are:
 
 ```text
-/chezpp.examples.transfer.FileTransfer/Upload
-/chezpp.examples.transfer.FileTransfer/Download
+/cspp.examples.transfer.FileTransfer/Upload
+/cspp.examples.transfer.FileTransfer/Download
 ```
 
 - [ ] **Step 3: Run and verify failure**
@@ -159,7 +159,7 @@ decode requests before invoking the user handler and encode returned records.
 
 - [ ] **Step 7: Install the plugin launcher**
 
-Make `tools/protoc-gen-chezpp` execute the repository's `chez++` with the Scheme plugin. Add a
+Make `tools/protoc-gen-cspp` execute the repository's `cspp` with the Scheme plugin. Add a
 `protobuf-generate` Make target that regenerates test bindings reproducibly.
 
 - [ ] **Step 8: Build, test, and commit**
@@ -169,7 +169,7 @@ make clean && make
 make protobuf-generate
 cd tests && make test-some TEST='protobuf protobuf-codegen'
 cd ..
-git add chezpp/protobuf/descriptor.ss tools/protoc-gen-chezpp.ss tools/protoc-gen-chezpp \
+git add src/cspp/protobuf/descriptor.ss tools/protoc-gen-cspp.ss tools/protoc-gen-cspp \
   tests/data/file-transfer.proto tests/protobuf-codegen.ss Makefile
 git commit -m "protobuf: generate records and gRPC bindings"
 ```
@@ -177,7 +177,7 @@ git commit -m "protobuf: generate records and gRPC bindings"
 ### Task 3: HTTP Streaming Bodies
 
 **Files:**
-- Modify: `chezpp/net/http.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-http.ss`
 - Modify: `tests/net-common.ss`
 
@@ -234,17 +234,17 @@ blocking versions wait on those operations.
 make clean && make
 cd tests && make test-some TEST='net-http net-operation'
 cd ..
-git add chezpp/net/http.ss tests/net-http.ss tests/net-common.ss
+git add src/cspp/net/http.ss tests/net-http.ss tests/net-common.ss
 git commit -m "net: stream HTTP request and response bodies"
 ```
 
 ### Task 4: HTTP Compression, Cookies, Auth, Proxy, Multipart, And Pool Controls
 
 **Files:**
-- Create: `chezpp/c/zlib_loader.h`
-- Create: `chezpp/c/zlib_loader.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/http.ss`
+- Create: `src/cspp/c/zlib_loader.h`
+- Create: `src/cspp/c/zlib_loader.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-loader.ss`
 - Modify: `tests/net-http.ss`
 
@@ -299,7 +299,7 @@ compression-ratio limits to prevent resource exhaustion.
 make clean && make
 cd tests && make test-some TEST='net-http net-loader'
 cd ..
-git add chezpp/c/zlib_loader.h chezpp/c/zlib_loader.c chezpp/net/ffi.ss chezpp/net/http.ss \
+git add src/cspp/c/zlib_loader.h src/cspp/c/zlib_loader.c src/cspp/net/ffi.ss src/cspp/net/http.ss \
   tests/net-loader.ss tests/net-http.ss
 git commit -m "net: add HTTP client and body features"
 ```
@@ -307,11 +307,11 @@ git commit -m "net: add HTTP client and body features"
 ### Task 5: HTTP/2 Client And Server Adapter
 
 **Files:**
-- Create: `chezpp/c/nghttp2_loader.h`
-- Create: `chezpp/c/nghttp2_loader.c`
-- Create: `chezpp/c/net/http2.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/http.ss`
+- Create: `src/cspp/c/nghttp2_loader.h`
+- Create: `src/cspp/c/nghttp2_loader.c`
+- Create: `src/cspp/c/net/http2.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/http.ss`
 - Modify: `tests/net-loader.ss`
 - Modify: `tests/net-http.ss`
 - Modify: `tests/net-common.ss`
@@ -361,17 +361,17 @@ streams complete.
 make clean && make
 cd tests && make test-some TEST='net-http net-loader net-core'
 cd ..
-git add chezpp/c/nghttp2_loader.h chezpp/c/nghttp2_loader.c chezpp/c/net/http2.c \
-  chezpp/net/ffi.ss chezpp/net/http.ss tests/net-loader.ss tests/net-http.ss tests/net-common.ss
+git add src/cspp/c/nghttp2_loader.h src/cspp/c/nghttp2_loader.c src/cspp/c/net/http2.c \
+  src/cspp/net/ffi.ss src/cspp/net/http.ss tests/net-loader.ss tests/net-http.ss tests/net-common.ss
 git commit -m "net: add HTTP/2 client and server support"
 ```
 
 ### Task 6: WebSocket TLS, Compression, Negotiation, Fragmentation, And Liveness
 
 **Files:**
-- Modify: `chezpp/c/net/websocket.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/websocket.ss`
+- Modify: `src/cspp/c/net/websocket.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/websocket.ss`
 - Modify: `tests/net-websocket.ss`
 - Modify: `tests/net-common.ss`
 
@@ -414,7 +414,7 @@ Copy callback data before returning to libwebsockets. Validate close codes and U
 - [ ] **Step 5: Add permessage-deflate and TLS setup**
 
 Configure libwebsockets extensions only when the runtime capability probe reports support. Server
-TLS loads cert/key from the supplied Chezpp TLS context configuration. Missing compression support
+TLS loads cert/key from the supplied CSPP TLS context configuration. Missing compression support
 raises `unsupported` only when requested.
 
 - [ ] **Step 6: Build, test, and commit**
@@ -423,7 +423,7 @@ raises `unsupported` only when requested.
 make clean && make
 cd tests && make test-some TEST='net-websocket net-loader net-core'
 cd ..
-git add chezpp/c/net/websocket.c chezpp/net/ffi.ss chezpp/net/websocket.ss \
+git add src/cspp/c/net/websocket.c src/cspp/net/ffi.ss src/cspp/net/websocket.ss \
   tests/net-websocket.ss tests/net-common.ss
 git commit -m "net: complete WebSocket negotiation and liveness"
 ```
@@ -431,11 +431,11 @@ git commit -m "net: complete WebSocket negotiation and liveness"
 ### Task 7: gRPC TLS, Compression, Deadlines, Status, Metadata, And Reflection
 
 **Files:**
-- Modify: `chezpp/c/net/grpc.c`
-- Modify: `chezpp/net/ffi.ss`
-- Modify: `chezpp/net/grpc.ss`
-- Create: `chezpp/net/grpc/reflection.ss`
-- Modify: `chezpp/net.ss`
+- Modify: `src/cspp/c/net/grpc.c`
+- Modify: `src/cspp/net/ffi.ss`
+- Modify: `src/cspp/net/grpc.ss`
+- Create: `src/cspp/net/grpc/reflection.ss`
+- Modify: `src/cspp/net.ss`
 - Modify: `tests/net-grpc.ss`
 - Modify: `tests/protobuf-codegen.ss`
 
@@ -488,8 +488,8 @@ Deduplicate transitive descriptor dependencies.
 make clean && make
 cd tests && make test-some TEST='net-grpc protobuf protobuf-codegen net-loader'
 cd ..
-git add chezpp/c/net/grpc.c chezpp/net/ffi.ss chezpp/net/grpc.ss \
-  chezpp/net/grpc/reflection.ss chezpp/net.ss tests/net-grpc.ss tests/protobuf-codegen.ss
+git add src/cspp/c/net/grpc.c src/cspp/net/ffi.ss src/cspp/net/grpc.ss \
+  src/cspp/net/grpc/reflection.ss src/cspp/net.ss tests/net-grpc.ss tests/protobuf-codegen.ss
 git commit -m "net: add secure generated gRPC services"
 ```
 
@@ -571,10 +571,10 @@ Expected: all six protocol variants upload and download with matching hashes.
 - [ ] **Step 4: Audit direct linkage, docs, and parentheses**
 
 ```bash
-readelf -d libchezpp.so | rg 'libnghttp2|libz|libssl|libcrypto|libwebsockets|libgrpc'
-./chez++ --script=tools/check-scheme-balance.ss -- \
-  chezpp/protobuf.ss chezpp/protobuf/*.ss chezpp/net/http.ss \
-  chezpp/net/websocket.ss chezpp/net/grpc.ss chezpp/net/grpc/reflection.ss
+readelf -d libcspp.so | rg 'libnghttp2|libz|libssl|libcrypto|libwebsockets|libgrpc'
+./cspp --script=tools/check-scheme-balance.ss -- \
+  src/cspp/protobuf.ss src/cspp/protobuf/*.ss src/cspp/net/http.ss \
+  src/cspp/net/websocket.ss src/cspp/net/grpc.ss src/cspp/net/grpc/reflection.ss
 git status --short
 ```
 

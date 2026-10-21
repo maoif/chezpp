@@ -1,12 +1,12 @@
-(import (chezpp)
-        (chezpp net))
+(import (cspp)
+        (cspp net))
 
 (load "examples/net/legacy-example-common.ss")
 (net-example-help! 'grpc-echo-client "Echo Scheme values over gRPC. Positional arguments: [HOST PORT].")
 
 (load "examples/net/net-example-common.ss")
 
-(define grpc-echo-method "/chezpp.examples.Echo/Unary")
+(define grpc-echo-method "/cspp.examples.Echo/Unary")
 
 #|proc:grpc-echo-client
 The `grpc-echo-client` procedure sends a fixed set of common Scheme values to a

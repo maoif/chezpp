@@ -110,7 +110,7 @@
     (let* ([port (reserve-loopback-port)]
            [user (or (getenv "USER") (getenv "LOGNAME")
                      (errorf 'start-ssh-test-server "missing USER/LOGNAME environment variable"))]
-           [root (format "/tmp/chezpp-net-ssh-~a" port)]
+           [root (format "/tmp/cspp-net-ssh-~a" port)]
            [home (string-append root "/home")]
            [ssh-dir (string-append home "/.ssh")]
            [host-key (string-append root "/ssh_host_ed25519_key")]
@@ -151,7 +151,7 @@
       (write-bytevector-file
        config-path
        (string->utf8
-        (format "Port ~a\nListenAddress 127.0.0.1\nHostKey ~a\nPidFile ~a\nAuthorizedKeysFile ~a\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nChallengeResponseAuthentication no\nPubkeyAuthentication yes\nUsePAM no\nPermitRootLogin prohibit-password\nStrictModes no\nLogLevel ERROR\nAcceptEnv CHEZPP_TEST_ENV\nSubsystem sftp internal-sftp\nAllowUsers ~a\n"
+        (format "Port ~a\nListenAddress 127.0.0.1\nHostKey ~a\nPidFile ~a\nAuthorizedKeysFile ~a\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nChallengeResponseAuthentication no\nPubkeyAuthentication yes\nUsePAM no\nPermitRootLogin prohibit-password\nStrictModes no\nLogLevel ERROR\nAcceptEnv CSPP_TEST_ENV\nSubsystem sftp internal-sftp\nAllowUsers ~a\n"
                 port
                 host-key
                 pid-path
@@ -732,8 +732,8 @@
      home
      (lambda ()
        (let ([session (ssh-open "127.0.0.1" port user)]
-             [upload-path "/tmp/chezpp-net-sftp-upload.bin"]
-             [download-path "/tmp/chezpp-net-sftp-download.bin"])
+             [upload-path "/tmp/cspp-net-sftp-upload.bin"]
+             [download-path "/tmp/cspp-net-sftp-download.bin"])
          (dynamic-wind
            (lambda ()
              (when (file-exists? upload-path) (delete-file upload-path))

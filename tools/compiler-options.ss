@@ -1,6 +1,6 @@
 (import (chezscheme))
 
-;; Shared by build-only scripts, before the Chezpp libraries are available.
+;; Shared by build-only scripts, before the CSPP libraries are available.
 ;; Options are key=value arguments; filenames follow a -- separator.
 (define read-build-arguments
   (lambda (arguments)

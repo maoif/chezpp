@@ -3,14 +3,14 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
-state_dir=$(mktemp -d /tmp/chezpp-application-transfer.XXXXXX)
+state_dir=$(mktemp -d /tmp/cspp-application-transfer.XXXXXX)
 server_pids=""
 run_count=0
 cleanup() {
   for pid in $server_pids; do
     kill "$pid" 2>/dev/null || true
   done
-  if [ "${CHEZPP_TRANSFER_KEEP_STATE:-0}" != 1 ]; then
+  if [ "${CSPP_TRANSFER_KEEP_STATE:-0}" != 1 ]; then
     rm -rf "$state_dir"
   else
     printf 'transfer verification state preserved at %s\n' "$state_dir" >&2
@@ -19,7 +19,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 source_file=$state_dir/source.bin
-transfer_mib=${CHEZPP_TRANSFER_MIB:-64}
+transfer_mib=${CSPP_TRANSFER_MIB:-64}
 dd if=/dev/zero of="$source_file" bs=1048576 count="$transfer_mib" status=none
 expected=$(sha256sum "$source_file" | awk '{print $1}')
 
@@ -51,30 +51,30 @@ run_variant() {
   client_script=$3
   port=$4
   secure=${5:-0}
-  if [ -n "${CHEZPP_TRANSFER_ONLY:-}" ] && [ "$CHEZPP_TRANSFER_ONLY" != "$name" ]; then
+  if [ -n "${CSPP_TRANSFER_ONLY:-}" ] && [ "$CSPP_TRANSFER_ONLY" != "$name" ]; then
     return 0
   fi
   run_count=$((run_count + 1))
   destination=$state_dir/$name
   download=$state_dir/$name.download
   mkdir -p "$destination"
-  export CHEZPP_TRANSFER_DOWNLOAD=$download
-  export CHEZPP_TRANSFER_REQUESTS=2
-  export CHEZPP_TRANSFER_RSS_FILE=$state_dir/$name.client.rss
+  export CSPP_TRANSFER_DOWNLOAD=$download
+  export CSPP_TRANSFER_REQUESTS=2
+  export CSPP_TRANSFER_RSS_FILE=$state_dir/$name.client.rss
   if [ "$secure" -eq 1 ]; then
-    export CHEZPP_TRANSFER_CERT=$cert
-    export CHEZPP_TRANSFER_KEY=$key
-    export CHEZPP_TRANSFER_ROLE=server
+    export CSPP_TRANSFER_CERT=$cert
+    export CSPP_TRANSFER_KEY=$key
+    export CSPP_TRANSFER_ROLE=server
   fi
-  (cd "$project_root" && ./chez++ --script="$server_script" "$destination") \
+  (cd "$project_root" && ./cspp --script="$server_script" "$destination") \
     >"$state_dir/$name.server.out" 2>"$state_dir/$name.server.err" &
   server_pid=$!
   server_pids="$server_pids $server_pid"
   wait_port "$port"
   if [ "$secure" -eq 1 ]; then
-    export CHEZPP_TRANSFER_ROLE=client
+    export CSPP_TRANSFER_ROLE=client
   fi
-  if ! (cd "$project_root" && ./chez++ --script="$client_script" "$source_file") \
+  if ! (cd "$project_root" && ./cspp --script="$client_script" "$source_file") \
       >"$state_dir/$name.client.out" 2>"$state_dir/$name.client.err"; then
     cat "$state_dir/$name.client.out"
     cat "$state_dir/$name.client.err" >&2

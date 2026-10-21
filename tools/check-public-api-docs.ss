@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 (define string-prefix?
   (lambda (prefix text)

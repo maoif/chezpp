@@ -3,13 +3,13 @@
 
 ROOT_DIR := ..
 
-ROOT_OPTIONS_FILE := $(ROOT_DIR)/.chezpp-build-options
+ROOT_OPTIONS_FILE := $(ROOT_DIR)/.cspp-build-options
 ifeq ($(wildcard $(ROOT_OPTIONS_FILE)),)
 $(error root build options are missing; run make from the repository root first)
 endif
 
 ROOT_OPTIONS := $(shell cat "$(ROOT_OPTIONS_FILE)")
-ROOT_NATIVE_OPTIONS_FILE := $(ROOT_DIR)/.chezpp-native-options.mk
+ROOT_NATIVE_OPTIONS_FILE := $(ROOT_DIR)/.cspp-native-options.mk
 ifeq ($(wildcard $(ROOT_NATIVE_OPTIONS_FILE)),)
 $(error root native build settings are missing; run make from the repository root first)
 endif
@@ -24,10 +24,10 @@ BUILD_d := $(call root_option,d)
 BUILD_c := $(call root_option,c)
 BUILD_wpo := $(call root_option,wpo)
 
-.PHONY: prepare-chezpp
+.PHONY: prepare-cspp
 
-prepare-chezpp:
-	@$(MAKE) --no-print-directory -C $(ROOT_DIR) chez++ \
+prepare-cspp:
+	@$(MAKE) --no-print-directory -C $(ROOT_DIR) cspp \
 		NATIVE_OPTIONS_REPLAY='$(abspath $(ROOT_NATIVE_OPTIONS_FILE))' \
 		VARIANT='$(BUILD_VARIANT)' o='$(BUILD_o)' d='$(BUILD_d)' \
 		i='t' psi='t' c='$(BUILD_c)' wpo='$(BUILD_wpo)' \
@@ -67,32 +67,32 @@ HTTP_ERROR_SOAK_SECONDS ?= 300
 HTTP_ERROR_SOAK_TESTS := net-http net-lws-http2 net-lws-server
 HTTP_ERROR_SOAK_OBJS := $(addsuffix .so,$(HTTP_ERROR_SOAK_TESTS))
 
-WEBSOCKETS_ENABLED := $(shell sed -n 's/^\#define CHEZPP_WITH_WEBSOCKETS //p' \
-                                   $(ROOT_DIR)/chezpp/c/build-config.h)
+WEBSOCKETS_ENABLED := $(shell sed -n 's/^\#define CSPP_WITH_WEBSOCKETS //p' \
+                                   $(ROOT_DIR)/src/cspp/c/build-config.h)
 ifeq ($(WEBSOCKETS_ENABLED),1)
 .SECONDARY: lws-http2-fixture
-lws-http2-fixture: ../chezpp/c/net/lws_http2_fixture.c
+lws-http2-fixture: ../src/cspp/c/net/lws_http2_fixture.c
 	$(CC) $(CPPFLAGS) $(RESOLVED_WEBSOCKETS_CFLAGS) -Wall -Wextra -O2 \
 	  $< -o $@ $(LDFLAGS) $(RESOLVED_WEBSOCKETS_LIBS) -ldl
 
 net-lws-http2.so net-http-fiber.so net-http-stress.so: lws-http2-fixture
 endif
 
-mat.so: mat.sls $(TEST_COMPILER_SCRIPTS) | prepare-chezpp
+mat.so: mat.sls $(TEST_COMPILER_SCRIPTS) | prepare-cspp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
 	printf '%s\n' "== compiling mat.sls =="; \
-	../chez++ --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- mat.sls >"$$stdout" 2>"$$stderr"; \
+	../cspp --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- mat.sls >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 
-$(OBJS_TEST) $(STRESS_TESTS:.ss=.so): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../chezpp.lib \
-	../chez++ $(TEST_COMPILER_SCRIPTS) | prepare-chezpp
+$(OBJS_TEST) $(STRESS_TESTS:.ss=.so): %.so: %.ss mat.so $(NET_TEST_SUPPORT) ../cspp.lib \
+	../cspp $(TEST_COMPILER_SCRIPTS) | prepare-cspp
 	@stdout=$@.build.stdout; stderr=$@.build.stderr; \
 	rm -f "$$stdout" "$$stderr"; \
-	../chez++ --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- \
+	../cspp --script=../tools/compile-test.ss -- $(TEST_COMPILER_ARGUMENTS) -- \
 	  "$(basename $@).ss" mat.so >"$$stdout" 2>"$$stderr"; \
 	status=$$?; \
 	if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
@@ -116,19 +116,19 @@ test-non-net:
 	@$(MAKE) --no-print-directory test $(SRCS_NON_NET_TEST)
 
 .PHONY: test-release-package
-test-release-package: prepare-chezpp
-	@cd .. && ./chez++ --script=tests/release-package.ss
+test-release-package: prepare-cspp
+	@cd .. && ./cspp --script=tests/release-package.ss
 
-test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
+test: prepare-cspp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	@cleanup() { \
 	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr *.covout coverage.covout; \
-	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
-	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
-	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
-	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
-	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
-	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
-	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
+	  rm -f /tmp/cspp-net-test-cert.pem /tmp/cspp-net-test-key.pem \
+	    /tmp/cspp-net-test-san-cert.pem /tmp/cspp-net-test-san-key.pem \
+	    /tmp/cspp-net.sock /tmp/cspp-net-ftp-*.txt /tmp/cspp-net-ftp-*.bin \
+	    /tmp/cspp-net-sftp-*.bin /tmp/cspp-net-scp-*.txt /tmp/cspp-net-ssh-*.txt; \
+	  rm -rf /tmp/cspp-net-ftp-root /tmp/cspp-net-ftp-link-source \
+	    /tmp/cspp-net-ftp-tree-source /tmp/cspp-net-ftp-tree-dest \
+	    /tmp/cspp-example-sftp /tmp/explicit-cspp-sftp-state \
 	    /tmp/upload-root; \
 	}; \
 	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
@@ -138,10 +138,10 @@ test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	  rm -f "$$stdout" "$$stderr"; \
 	  printf '%s\n' "== running $$item =="; \
 	  if [ -n "$(COVERAGE_ENABLED)" ]; then \
-	    covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
-	    ../chez++ --script=coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
+	    covin_files=$$(find ../src/cspp -type f -name '*.covin' -print); \
+	    ../cspp --script=coverage-init.ss "$$item" "$${item%.so}.covout" $$covin_files >"$$stdout" 2>"$$stderr"; \
 	  else \
-	    ../chez++ --script=../tools/run-test.ss "$$item" >"$$stdout" 2>"$$stderr"; \
+	    ../cspp --script=../tools/run-test.ss "$$item" >"$$stdout" 2>"$$stderr"; \
 	  fi; \
 	  code=$$?; \
 	  if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
@@ -150,16 +150,16 @@ test: prepare-chezpp mat.so $(TEST_OBJS) ../tools/run-test.ss
 	  if grep -Eq 'Bug|Error' "$$stdout" "$$stderr"; then status=1; fi; \
 	 done; \
 	 if [ -n "$(COVERAGE_ENABLED)" ]; then \
-	   covin_files=$$(find ../chezpp -type f -name '*.covin' -print); \
+	   covin_files=$$(find ../src/cspp -type f -name '*.covin' -print); \
 	   covout_files=$$(find . -maxdepth 1 -type f -name '*.covout' -print); \
 	   set -- $$covin_files; covin_count=$$#; \
-	   ../chez++ --script=coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
+	   ../cspp --script=coverage-report.ss "$$covin_count" coverage.covout $$covin_files $$covout_files; \
 	   report_code=$$?; if [ $$report_code -ne 0 ]; then status=1; fi; \
 	 fi; \
 	 exit $$status
 
 .PHONY: test-http-error-soak
-test-http-error-soak: prepare-chezpp mat.so $(HTTP_ERROR_SOAK_OBJS) ../tools/run-test.ss
+test-http-error-soak: prepare-cspp mat.so $(HTTP_ERROR_SOAK_OBJS) ../tools/run-test.ss
 	@case "$(HTTP_ERROR_SOAK_SECONDS)" in \
 	  ''|*[!0-9]*) \
 	    printf '%s\n' "HTTP_ERROR_SOAK_SECONDS must be a positive integer" >&2; exit 2 ;; \
@@ -169,13 +169,13 @@ test-http-error-soak: prepare-chezpp mat.so $(HTTP_ERROR_SOAK_OBJS) ../tools/run
 	fi
 	@cleanup() { \
 	  rm -f *.out *.stdout *.stderr *.build.stdout *.build.stderr; \
-	  rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
-	    /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
-	    /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
-	    /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt; \
-	  rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
-	    /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
-	    /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state \
+	  rm -f /tmp/cspp-net-test-cert.pem /tmp/cspp-net-test-key.pem \
+	    /tmp/cspp-net-test-san-cert.pem /tmp/cspp-net-test-san-key.pem \
+	    /tmp/cspp-net.sock /tmp/cspp-net-ftp-*.txt /tmp/cspp-net-ftp-*.bin \
+	    /tmp/cspp-net-sftp-*.bin /tmp/cspp-net-scp-*.txt /tmp/cspp-net-ssh-*.txt; \
+	  rm -rf /tmp/cspp-net-ftp-root /tmp/cspp-net-ftp-link-source \
+	    /tmp/cspp-net-ftp-tree-source /tmp/cspp-net-ftp-tree-dest \
+	    /tmp/cspp-example-sftp /tmp/explicit-cspp-sftp-state \
 	    /tmp/upload-root; \
 	}; \
 	trap 'cleanup; rm -f lws-http2-fixture' EXIT HUP INT TERM; cleanup
@@ -186,7 +186,7 @@ test-http-error-soak: prepare-chezpp mat.so $(HTTP_ERROR_SOAK_OBJS) ../tools/run
 	    stdout="$$base.stdout"; stderr="$$base.stderr"; \
 	    rm -f "$$stdout" "$$stderr"; \
 	    printf '%s\n' "== soak round $$round: $$base.so =="; \
-	    ../chez++ --script=../tools/run-test.ss "$$base.so" >"$$stdout" 2>"$$stderr"; \
+	    ../cspp --script=../tools/run-test.ss "$$base.so" >"$$stdout" 2>"$$stderr"; \
 	    code=$$?; \
 	    if [ -s "$$stdout" ]; then cat "$$stdout"; fi; \
 	    if [ -s "$$stderr" ]; then cat "$$stderr" >&2; fi; \
@@ -224,10 +224,10 @@ test-optional-library-build:
 .PHONY: test-optional-native
 test-optional-native:
 	@python3 ../tools/test-optional-native.py --sentinels
-	@../chez++ --script=optional-library-runtime.ss
+	@../cspp --script=optional-library-runtime.ss
 
 .PHONY: test-lws-runtime-lock
-test-lws-runtime-lock: prepare-chezpp
+test-lws-runtime-lock: prepare-cspp
 ifeq ($(WEBSOCKETS_ENABLED),1)
 	@CC='$(CC)' CPPFLAGS='$(CPPFLAGS)' LDFLAGS='$(LDFLAGS)' \
 	  LWS_CFLAGS='$(RESOLVED_WEBSOCKETS_CFLAGS) $(RESOLVED_OPENSSL_CFLAGS)' \
@@ -239,10 +239,10 @@ endif
 .PHONY: clean
 clean:
 	@rm -f *.so *.out *.stdout *.stderr *.build.stdout *.build.stderr lws-http2-fixture
-	@rm -f /tmp/chezpp-net-test-cert.pem /tmp/chezpp-net-test-key.pem \
-	  /tmp/chezpp-net-test-san-cert.pem /tmp/chezpp-net-test-san-key.pem \
-	  /tmp/chezpp-net.sock /tmp/chezpp-net-ftp-*.txt /tmp/chezpp-net-ftp-*.bin \
-	  /tmp/chezpp-net-sftp-*.bin /tmp/chezpp-net-scp-*.txt /tmp/chezpp-net-ssh-*.txt
-	@rm -rf /tmp/chezpp-net-ftp-root /tmp/chezpp-net-ftp-link-source \
-	  /tmp/chezpp-net-ftp-tree-source /tmp/chezpp-net-ftp-tree-dest \
-	  /tmp/chezpp-example-sftp /tmp/explicit-chezpp-sftp-state /tmp/upload-root
+	@rm -f /tmp/cspp-net-test-cert.pem /tmp/cspp-net-test-key.pem \
+	  /tmp/cspp-net-test-san-cert.pem /tmp/cspp-net-test-san-key.pem \
+	  /tmp/cspp-net.sock /tmp/cspp-net-ftp-*.txt /tmp/cspp-net-ftp-*.bin \
+	  /tmp/cspp-net-sftp-*.bin /tmp/cspp-net-scp-*.txt /tmp/cspp-net-ssh-*.txt
+	@rm -rf /tmp/cspp-net-ftp-root /tmp/cspp-net-ftp-link-source \
+	  /tmp/cspp-net-ftp-tree-source /tmp/cspp-net-ftp-tree-dest \
+	  /tmp/cspp-example-sftp /tmp/explicit-cspp-sftp-state /tmp/upload-root

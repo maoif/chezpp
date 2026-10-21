@@ -1,4 +1,4 @@
-(import (chezpp))
+(import (cspp))
 
 
 
@@ -163,7 +163,7 @@
 
 (mat fs-directory-errors
      ;; Opening a missing directory must raise an error.
-     (error? (fs-open-directory "__chezpp_missing_directory__"))
+     (error? (fs-open-directory "__cspp_missing_directory__"))
 
      ;; The root is opened lazily; removal before the first next raises then.
      (error? ($with-fs-fixture
@@ -1100,7 +1100,7 @@
      ;; dest is symlink to dir
      (error? (file-link (atdir "src/tests") (atdir "tests1")))
 
-     ;; path starting with ~ (test expand_pathname() in libchezpp)
+     ;; path starting with ~ (test expand_pathname() in libcspp)
 
      (file-removetree dir))
 
@@ -1766,7 +1766,7 @@
      (guard (failure [else #f])
        ($with-fs-fixture
         (lambda (root)
-          (let ([result (capture-process "../chez++" "--script=fswatcher-blocking-process.ss"
+          (let ([result (capture-process "../cspp" "--script=fswatcher-blocking-process.ss"
                          (string-append root) "zero-timeout" :timeout 30000 :stdout capture :stderr capture)])
             (and (process-exit-success? (process-result-status result))
                  (string=? "" (process-result-stdout result))
@@ -1810,7 +1810,7 @@
      (guard (failure [else #f])
        ($with-fs-fixture
         (lambda (root)
-          (let ([result (capture-process "../chez++" "--script=fswatcher-blocking-process.ss"
+          (let ([result (capture-process "../cspp" "--script=fswatcher-blocking-process.ss"
                          (string-append root) "finite-timeout"
                          :timeout 30000 :stdout capture :stderr capture)])
             (and (process-exit-success? (process-result-status result))
@@ -1822,7 +1822,7 @@
      (guard (failure [else #f])
        ($with-fs-fixture
         (lambda (root)
-          (let ([result (capture-process "../chez++" "--script=fswatcher-blocking-process.ss"
+          (let ([result (capture-process "../cspp" "--script=fswatcher-blocking-process.ss"
                          (string-append root) :timeout 30000 :stdout capture :stderr capture)])
             (and (process-exit-success? (process-result-status result))
                  (string=? "" (process-result-stdout result))

@@ -1,41 +1,41 @@
 # Logging Library Status
 
-**Original goal:** Build the `(chezpp logging)` library described by
+**Original goal:** Build the `(cspp logging)` library described by
 `docs/superpowers/specs/2026-06-10-logging-design.md`.
 
 **Current status:** Implemented and integrated. The library exists under
-`chezpp/logging/`, is re-exported by `(chezpp logging)`, and is included in the
-aggregate `(chezpp)` library. The focused logging tests are registered in
+`src/cspp/logging/`, is re-exported by `(cspp logging)`, and is included in the
+aggregate `(cspp)` library. The focused logging tests are registered in
 `tests/Makefile` as `logging.ss`.
 
 **Architecture:** Logging is implemented as focused ChezScheme libraries with a
 public facade. The synchronous path passes direct log fields from loggers to
 sinks without exposing public log-record objects.
 
-**Tech stack:** ChezScheme libraries, Chezpp `pcheck`, Chez mutexes/threads,
-existing `(chezpp rich)` console APIs, the existing `tests/mat.sls` harness, and
+**Tech stack:** ChezScheme libraries, CSPP `pcheck`, Chez mutexes/threads,
+existing `(cspp rich)` console APIs, the existing `tests/mat.sls` harness, and
 project build through `make clean && make`.
 
 ---
 
 ## Implemented File Structure
 
-- `chezpp/logging/private/common.ss`: shared predicates, message conversion,
+- `src/cspp/logging/private/common.ss`: shared predicates, message conversion,
   newline normalization, current timestamp, and current Chez thread id lookup.
-- `chezpp/logging/level.ss`: level predicates, conversions, ordering, and
+- `src/cspp/logging/level.ss`: level predicates, conversions, ordering, and
   string parsing.
-- `chezpp/logging/formatter.ss`: formatter records, pattern formatter, rich
+- `src/cspp/logging/formatter.ss`: formatter records, pattern formatter, rich
   formatter, rich palettes, JSON-line formatter, default formatter, and direct
   field formatting.
-- `chezpp/logging/sink.ss`: sink record, sink configuration APIs, port/file/
+- `src/cspp/logging/sink.ss`: sink record, sink configuration APIs, port/file/
   rotating-file/procedure/null/tee/rich-console sink constructors, write, flush,
   close, locking, filtering, and close-state behavior.
-- `chezpp/logging/logger.ss`: logger record, configuration APIs, filtering,
+- `src/cspp/logging/logger.ss`: logger record, configuration APIs, filtering,
   level checks, sink dispatch, current logger parameter, `with-logger`, error
   policies, flush, close, and sink-list snapshotting.
-- `chezpp/logging/macros.ss`: `logger` constructor macro, sink constructor
+- `src/cspp/logging/macros.ss`: `logger` constructor macro, sink constructor
   macros, current-logger logging macros, and explicit-logger logging macros.
-- `chezpp/logging.ss`: facade that re-exports level, formatter, sink, logger,
+- `src/cspp/logging.ss`: facade that re-exports level, formatter, sink, logger,
   and macro APIs.
 - `tests/logging.ss`: regression tests for levels, formatters, sinks, loggers,
   macros, files, rotation, rich console output, error policy, and concurrency.
@@ -99,7 +99,7 @@ project build through `make clean && make`.
 - Sink types:
   - `make-log-port-sink`: writes formatted text to a caller-owned output port;
     closing flushes but does not close the port.
-  - `make-log-rich-console-sink`: writes styled output through `(chezpp rich)`.
+  - `make-log-rich-console-sink`: writes styled output through `(cspp rich)`.
   - `make-log-file-sink`: opens a file for append, owns the port, and closes it.
   - `make-log-rotating-file-sink`: rotates when the next line would exceed
     `max-bytes`, keeping up to `backup-count` backups.
@@ -248,21 +248,21 @@ Parenthesis check for logging-related Scheme files:
 
 ```bash
 python3 check_parentheses.py \
-  chezpp/logging/private/common.ss \
-  chezpp/logging/level.ss \
-  chezpp/logging/formatter.ss \
-  chezpp/logging/sink.ss \
-  chezpp/logging/logger.ss \
-  chezpp/logging/macros.ss \
-  chezpp/logging.ss \
+  src/cspp/logging/private/common.ss \
+  src/cspp/logging/level.ss \
+  src/cspp/logging/formatter.ss \
+  src/cspp/logging/sink.ss \
+  src/cspp/logging/logger.ss \
+  src/cspp/logging/macros.ss \
+  src/cspp/logging.ss \
   tests/logging.ss \
-  chezpp.ss
+  src/cspp.ss
 ```
 
 ## Current Assessment
 
 The synchronous v1 logging library is complete enough for normal use through
-`(chezpp logging)` or aggregate `(chezpp)`. The most important remaining design
+`(cspp logging)` or aggregate `(cspp)`. The most important remaining design
 decisions are whether to add async logging, whether to expose structured log
 records, and how much timestamp metadata customization should become part of the
 public API.

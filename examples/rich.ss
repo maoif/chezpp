@@ -1,5 +1,5 @@
 #!chezscheme
-(import (chezpp))
+(import (cspp))
 
 (define-record-type (example-lines make-example-lines example-lines?)
   (fields (immutable lines example-lines-lines)))
@@ -71,7 +71,7 @@
 
 (rich-print console
             (rich-style 'bold 'green)
-            "Chezpp Rich Terminal Showcase"
+            "CSPP Rich Terminal Showcase"
             (reset-style)
             "\n")
 (rich-print console
@@ -186,7 +186,7 @@
 
 (section console "Tree And Pretty Printing")
 (define project-tree
-  (rich-tree :label (rich-text "chezpp" (rich-style 'bold 'blue))))
+  (rich-tree :label (rich-text "cspp" (rich-style 'bold 'blue))))
 (let ([rich-node (rich-tree-add! project-tree (rich-text "rich/" (rich-style 'cyan)))])
   (rich-tree-add! rich-node "style.ss")
   (rich-tree-add! rich-node "console.ss")

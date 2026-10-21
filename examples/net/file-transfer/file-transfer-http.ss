@@ -48,7 +48,7 @@ streaming GET route for each completed file. It remains active until the optiona
              (lambda ()
                (let loop ()
                  (unless (and uploaded?
-                              (or (not (getenv "CHEZPP_TRANSFER_DOWNLOAD")) downloaded?))
+                              (or (not (getenv "CSPP_TRANSFER_DOWNLOAD")) downloaded?))
                    (guard (c [else
                               (unless (benign-http-eof? c) (raise c))])
                      (http-serve server))
@@ -60,7 +60,7 @@ streaming GET route for each completed file. It remains active until the optiona
 
 #|proc:http-file-client
 The `http-file-client` procedure streams each `path*` through POST FileChunk requests. If
-`CHEZPP_TRANSFER_DOWNLOAD` is set, it then uses GET streaming to download the first file there.
+`CSPP_TRANSFER_DOWNLOAD` is set, it then uses GET streaming to download the first file there.
 |#
 (define http-file-client
   (lambda (path*)
@@ -86,7 +86,7 @@ The `http-file-client` procedure streams each `path*` through POST FileChunk req
               path))
            path*)
           (let ([after-upload (current-peak-rss-kib)]
-                [destination (getenv "CHEZPP_TRANSFER_DOWNLOAD")])
+                [destination (getenv "CSPP_TRANSFER_DOWNLOAD")])
             (when (and destination (not (string=? destination "")))
               ;; Use a fresh TLS client for the download: LWS closes each HTTPS transaction,
               ;; and retaining the completed upload transport can leave the next handshake idle.
